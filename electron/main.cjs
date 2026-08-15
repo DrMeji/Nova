@@ -7,6 +7,7 @@ const arkMedia = require('./arkMedia.cjs');
 const arkProjects = require('./arkProjects.cjs');
 const arkSecrets = require('./arkSecrets.cjs');
 const arkSystem = require('./arkSystem.cjs');
+const arkSetup = require('./arkSetup.cjs');
 
 const DEV_URL = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173';
 const isDev = process.env.ARK_DEV === '1';
@@ -178,6 +179,13 @@ ipcMain.handle('ark:app-meta', async () => ({
   version: app.getVersion(),
   name: app.getName(),
 }));
+
+ipcMain.handle('ark:setup-get', async () => arkSetup.readSetup());
+
+ipcMain.handle('ark:setup-set', async (_event, payload) => {
+  const completed = Boolean(payload?.completed);
+  return arkSetup.writeSetup(completed);
+});
 
 ipcMain.handle('ark:window-minimize', async () => {
   const win = BrowserWindow.getFocusedWindow() || mainWindow;

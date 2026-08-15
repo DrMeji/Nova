@@ -4,13 +4,14 @@ import { supabase } from '@/lib/supabase';
 import type { Profile, UserSettings } from '@/types';
 import {
   clearSetupCompleted,
+  ensureFirstRunGate,
   isSetupCompleted,
   markSetupCompleted,
   prepareLaunchForTesting,
 } from '@/lib/setup';
 import { hydrateProviderApiKeys } from '@/lib/localPrefs';
 
-// Guest identity used when login is bypassed (e.g. desktop quick-launch).
+// Guest identity used when login is bypassed (dev / testing only).
 const BYPASS_KEY = 'ark:bypass-enabled';
 const GUEST_USER = {
   id: 'guest-local',
@@ -63,15 +64,15 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  // Optional test helper — only clears guest when FORCE_AUTH_ON_LAUNCH is true.
   prepareLaunchForTesting();
 
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [settings, setSettings] = useState<UserSettings | null>(null);
-  const [bypass, setBypass] = useState(() => isBypassEnabled());
+  const [bypass, setBypass] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [packaged, setPackaged] = useState(false);
 
   const loadProfileAndSettings = async (userId: string) => {
     const [profileRes, settingsRes] = await Promise.all([
@@ -80,10 +81,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     ]);
     if (profileRes.data) {
       const p = profileRes.data as Profile;
-      // Local first run gate wins until setup is marked complete.
-      setProfile({ ...p, onboarding_completed: isSetupCompleted() && p.onboarding_completed });
+      // Local first-run gate wins until setup is marked complete on this device.
+      setProfile({ ...p, onboarding_completed: isSetupCompleted() });
     } else {
-      // New account with no profile row yet: still run optimize once.
       setProfile({
         id: userId,
         display_name: null,
@@ -97,27 +97,48 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
-    void hydrateProviderApiKeys();
+    let cancelled = false;
 
-    // After prepareLaunchForTesting(), bypass is cleared so we always hit AuthScreen.
-    if (isBypassEnabled()) {
-      setBypass(true);
-      setUser(GUEST_USER);
-      setProfile(guestProfile());
-      setSettings(null);
-      setLoading(false);
-      return;
-    }
+    (async () => {
+      await ensureFirstRunGate();
+      if (cancelled) return;
 
-    supabase.auth.getSession().then(({ data }) => {
+      void hydrateProviderApiKeys();
+
+      let isPackaged = false;
+      try {
+        const meta = await window.arkDesktop?.appMeta?.();
+        isPackaged = Boolean(meta?.isPackaged);
+        if (!cancelled) setPackaged(isPackaged);
+      } catch {
+        /* ignore */
+      }
+
+      // Packaged releases never auto-enter as guest.
+      if (isPackaged) {
+        localStorage.removeItem(BYPASS_KEY);
+      }
+
+      if (!isPackaged && isBypassEnabled()) {
+        setBypass(true);
+        setUser(GUEST_USER);
+        setProfile(guestProfile());
+        setSettings(null);
+        setLoading(false);
+        return;
+      }
+
+      const { data } = await supabase.auth.getSession();
+      if (cancelled) return;
       setSession(data.session);
       setUser(data.session?.user ?? null);
       if (data.session?.user) {
-        loadProfileAndSettings(data.session.user.id).finally(() => setLoading(false));
+        await loadProfileAndSettings(data.session.user.id);
+        if (!cancelled) setLoading(false);
       } else {
         setLoading(false);
       }
-    });
+    })();
 
     const { data: authListener } = supabase.auth.onAuthStateChange((_event, newSession) => {
       setSession(newSession);
@@ -134,7 +155,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     });
 
-    return () => authListener.subscription.unsubscribe();
+    return () => {
+      cancelled = true;
+      authListener.subscription.unsubscribe();
+    };
   }, []);
 
   const signIn = async (email: string, password: string) => {
@@ -159,6 +183,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const bypassLogin = (options?: { skipSetup?: boolean }) => {
+    if (packaged) return;
     localStorage.setItem(BYPASS_KEY, '1');
     localStorage.setItem('ark:last-auth', JSON.stringify({
       method: 'bypass',

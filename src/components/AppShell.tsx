@@ -72,25 +72,45 @@ export function AppShell({ children }: { children: ReactNode }) {
   };
 
   return (
-    <div className="h-screen flex flex-col bg-ark-navy-950 overflow-hidden">
-      <div className="flex flex-1 overflow-hidden">
-        <aside className={`shrink-0 border-r border-surface-border bg-ark-navy-900/40 flex flex-col transition-all duration-300 ${collapsed ? 'w-16' : 'w-64'}`}>
-          <div className={`flex-none ${collapsed ? 'px-2 pt-5 pb-2' : 'px-3 pt-5 pb-3'}`}>
+    <div className="h-full flex bg-ark-navy-950 overflow-hidden">
+      <aside
+        className={`shrink-0 m-2 mr-0 flex flex-col rounded-2xl border border-surface-border bg-ark-navy-900/70 shadow-[0_8px_32px_rgba(0,0,0,0.35)] transition-all duration-300 ${
+          collapsed ? 'w-16' : 'w-64'
+        }`}
+      >
+          <div className={`flex-none ${collapsed ? 'px-2 pt-3 pb-2' : 'px-3 pt-3 pb-3'}`}>
             <div className={`flex items-center gap-2 ${collapsed ? 'flex-col w-full' : 'justify-between'}`}>
               {!collapsed && (
-                <span className="text-lg font-extrabold tracking-[0.28em] text-content-primary whitespace-nowrap pl-[0.08em] select-none">
-                  ARK
-                </span>
+                <div className="flex items-center gap-2 min-w-0 pl-0.5">
+                  <img
+                    src={`${import.meta.env.BASE_URL}ark-icon.png`}
+                    alt="ARK"
+                    className="w-7 h-7 rounded-lg object-cover shrink-0"
+                    onError={e => {
+                      (e.currentTarget as HTMLImageElement).style.display = 'none';
+                    }}
+                  />
+                </div>
               )}
               {collapsed ? (
-                <button
-                  type="button"
-                  onClick={() => setCollapsed(c => !c)}
-                  className="ark-nav-item w-full !justify-center"
-                  title="Toggle sidebar"
-                >
-                  <PanelLeft className="w-4 h-4" />
-                </button>
+                <>
+                  <img
+                    src={`${import.meta.env.BASE_URL}ark-icon.png`}
+                    alt="ARK"
+                    className="w-8 h-8 rounded-lg object-cover"
+                    onError={e => {
+                      (e.currentTarget as HTMLImageElement).style.display = 'none';
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setCollapsed(c => !c)}
+                    className="ark-nav-item w-full !justify-center"
+                    title="Expand sidebar"
+                  >
+                    <PanelLeft className="w-4 h-4" />
+                  </button>
+                </>
               ) : (
                 <div className="flex items-center gap-0.5">
                   <button
@@ -115,7 +135,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             </div>
           </div>
 
-          <nav className={`flex-1 flex flex-col gap-1 overflow-y-auto ${collapsed ? 'px-2 pt-6' : 'px-3 pt-8'}`}>
+          <nav className={`flex-1 min-h-0 flex flex-col gap-1 overflow-y-auto ${collapsed ? 'px-2 pt-4' : 'px-3 pt-4'}`}>
             {NAV_ITEMS.map(item => {
               const active = isActive(item);
               return (
@@ -251,7 +271,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             </div>
           </nav>
 
-          <div className={`mt-auto flex-none ${collapsed ? 'p-2' : 'p-3 pt-2'}`}>
+          <div className={`mt-auto flex-none shrink-0 ${collapsed ? 'p-2 pb-3' : 'p-3 pt-2 pb-3'}`}>
             {collapsed ? (
               <div className="flex flex-col items-center gap-2">
                 <span
@@ -272,7 +292,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 </button>
               </div>
             ) : (
-              <div className="flex items-center gap-2 rounded-xl border border-surface-border bg-ark-navy-900/80 px-2.5 py-2">
+              <div className="flex items-center gap-2 rounded-xl border border-surface-border bg-ark-navy-950/80 px-2.5 py-2">
                 <span
                   className="w-8 h-8 shrink-0 rounded-lg bg-surface-hover border border-surface-border flex items-center justify-center text-sm font-semibold text-content-primary"
                   aria-hidden="true"
@@ -297,12 +317,11 @@ export function AppShell({ children }: { children: ReactNode }) {
               </div>
             )}
           </div>
-        </aside>
+      </aside>
 
-        <main className="flex-1 min-h-0 overflow-hidden">
+        <main className="flex-1 min-h-0 min-w-0 overflow-hidden m-2 ml-2">
           {children}
         </main>
-      </div>
 
       <Modal
         isOpen={searchOpen}

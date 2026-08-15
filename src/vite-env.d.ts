@@ -26,6 +26,8 @@ declare global {
         version?: string;
         name?: string;
       }>;
+      setupGet?: () => Promise<{ ok: boolean; completed?: boolean }>;
+      setupSet?: (completed: boolean) => Promise<{ ok: boolean; completed?: boolean }>;
       systemInfo?: () => Promise<{
         ok: boolean;
         os?: string;

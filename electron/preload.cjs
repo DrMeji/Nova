@@ -14,6 +14,8 @@ contextBridge.exposeInMainWorld('arkDesktop', {
   systemInfo: () => ipcRenderer.invoke('ark:system-info'),
   speedTest: () => ipcRenderer.invoke('ark:speed-test'),
   appMeta: () => ipcRenderer.invoke('ark:app-meta'),
+  setupGet: () => ipcRenderer.invoke('ark:setup-get'),
+  setupSet: (completed) => ipcRenderer.invoke('ark:setup-set', { completed: Boolean(completed) }),
   windowMinimize: () => ipcRenderer.invoke('ark:window-minimize'),
   windowMaximizeToggle: () => ipcRenderer.invoke('ark:window-maximize-toggle'),
   windowIsMaximized: () => ipcRenderer.invoke('ark:window-is-maximized'),

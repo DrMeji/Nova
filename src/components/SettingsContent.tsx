@@ -81,7 +81,7 @@ export function SettingsContent() {
   const [keyDraft, setKeyDraft] = useState('');
   const [checkingUpdates, setCheckingUpdates] = useState(false);
   const [updateMsg, setUpdateMsg] = useState('You are on the latest build for this channel.');
-  const [appVersion, setAppVersion] = useState('0.1.1');
+  const [appVersion, setAppVersion] = useState('0.1.2');
   const [twoFaCode, setTwoFaCode] = useState('');
   const [twoFaSetup, setTwoFaSetup] = useState(false);
   const [savedFlash, setSavedFlash] = useState('');

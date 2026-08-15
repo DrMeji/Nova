@@ -193,6 +193,17 @@ export function hasProviderApiKey(providerId: string) {
 /** App changelog shown in Settings → Updates. */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.2',
+    channel: 'stable' as const,
+    date: 'Aug 15, 2026',
+    title: 'First-run + chrome',
+    notes: [
+      'Sidebar panel chrome and logo mark',
+      'Fixed Guest / Settings clipped at bottom',
+      'Packaged installs always run first-run setup once',
+    ],
+  },
+  {
     version: '0.1.1',
     channel: 'stable' as const,
     date: 'Aug 15, 2026',

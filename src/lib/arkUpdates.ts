@@ -47,7 +47,7 @@ type GhRelease = {
 };
 
 export async function checkArkGitHubUpdate(): Promise<ArkUpdateInfo> {
-  let currentVersion = '0.1.1';
+  let currentVersion = '0.1.2';
   try {
     const meta = await window.arkDesktop?.appMeta?.();
     if (meta?.version) currentVersion = meta.version;
