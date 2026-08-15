@@ -5,11 +5,77 @@
 @layer base {
   :root {
     --ark-font: 'Inter', system-ui, -apple-system, sans-serif;
+
+    /* Dark = pure black / gray (no navy, no blue) â€” RGB channels for Tailwind opacity */
+    --ark-navy-950: 0 0 0;
+    --ark-navy-900: 10 10 10;
+    --ark-navy-800: 23 23 23;
+    --ark-navy-700: 38 38 38;
+    --ark-navy-600: 64 64 64;
+
+    --ark-accent-50: 250 250 250;
+    --ark-accent-100: 245 245 245;
+    --ark-accent-200: 229 229 229;
+    --ark-accent-300: 212 212 212;
+    --ark-accent-400: 163 163 163;
+    --ark-accent-500: 245 245 245;
+    --ark-accent-600: 212 212 212;
+    --ark-accent-700: 163 163 163;
+    --ark-accent-800: 82 82 82;
+    --ark-accent-900: 38 38 38;
+
+    --color-surface: 10 10 10;
+    --color-surface-hover: 23 23 23;
+    --color-surface-active: 38 38 38;
+    --color-surface-panel: 14 14 14;
+    --color-surface-border: 38 38 38;
+    --color-surface-border-light: 64 64 64;
+    --color-content-primary: 245 245 245;
+    --color-content-secondary: 163 163 163;
+    --color-content-tertiary: 115 115 115;
+    --color-bg-primary: 0 0 0;
+    --color-accent: 245 245 245;
+    --color-accent-fg: 0 0 0;
+  }
+
+  .light {
+    /* Light = pure white / gray */
+    --ark-navy-950: 255 255 255;
+    --ark-navy-900: 250 250 250;
+    --ark-navy-800: 245 245 245;
+    --ark-navy-700: 229 229 229;
+    --ark-navy-600: 212 212 212;
+
+    --ark-accent-50: 23 23 23;
+    --ark-accent-100: 38 38 38;
+    --ark-accent-200: 64 64 64;
+    --ark-accent-300: 82 82 82;
+    --ark-accent-400: 64 64 64;
+    --ark-accent-500: 23 23 23;
+    --ark-accent-600: 10 10 10;
+    --ark-accent-700: 0 0 0;
+    --ark-accent-800: 0 0 0;
+    --ark-accent-900: 0 0 0;
+
+    --color-surface: 255 255 255;
+    --color-surface-hover: 245 245 245;
+    --color-surface-active: 229 229 229;
+    --color-surface-panel: 255 255 255;
+    --color-surface-border: 229 229 229;
+    --color-surface-border-light: 212 212 212;
+    --color-content-primary: 10 10 10;
+    --color-content-secondary: 82 82 82;
+    --color-content-tertiary: 163 163 163;
+    --color-bg-primary: 255 255 255;
+    --color-accent: 23 23 23;
+    --color-accent-fg: 255 255 255;
   }
 
   * {
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
   }
 
   html {
@@ -18,92 +84,210 @@
 
   body {
     margin: 0;
-    @apply bg-ark-navy-950 text-content-primary;
+    background-color: rgb(var(--color-bg-primary));
+    color: rgb(var(--color-content-primary));
   }
 
-  /* Custom scrollbar */
   ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+    width: 0;
+    height: 0;
+    display: none;
   }
   ::-webkit-scrollbar-track {
-    @apply bg-transparent;
+    background: transparent;
   }
   ::-webkit-scrollbar-thumb {
-    @apply bg-surface-border-light rounded-full;
-  }
-  ::-webkit-scrollbar-thumb:hover {
-    @apply bg-content-tertiary;
-  }
-
-  /* Light mode scrollbar */
-  .light ::-webkit-scrollbar-thumb {
-    @apply bg-gray-300;
+    background: transparent;
   }
 }
 
 @layer components {
   .ark-input {
-    @apply w-full bg-ark-navy-800 border border-surface-border rounded-lg px-3.5 py-2.5 text-sm text-content-primary placeholder:text-content-tertiary transition-colors focus:outline-none focus:border-ark-blue-400 focus:ring-1 focus:ring-ark-blue-400/30;
+    @apply w-full rounded-lg px-3.5 py-2.5 text-sm placeholder:text-content-tertiary transition-colors focus:outline-none focus:ring-1;
+    background-color: rgb(var(--color-surface-hover));
+    border: 1px solid rgb(var(--color-surface-border));
+    color: rgb(var(--color-content-primary));
   }
-
-  .light .ark-input {
-    @apply bg-white border-gray-200 text-gray-900 placeholder:text-gray-400 focus:border-ark-blue-500;
+  .ark-input:focus {
+    border-color: rgb(var(--color-accent));
+    box-shadow: 0 0 0 1px rgb(var(--color-accent) / 0.35);
   }
 
   .ark-btn-primary {
-    @apply inline-flex items-center justify-center gap-2 bg-ark-blue-500 hover:bg-ark-blue-400 active:bg-ark-blue-600 text-white font-medium text-sm px-4 py-2.5 rounded-lg transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed;
+    @apply inline-flex items-center justify-center gap-2 font-medium text-sm px-4 py-2.5 rounded-lg transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed;
+    background-color: rgb(var(--color-accent));
+    color: rgb(var(--color-accent-fg));
+  }
+  .ark-btn-primary:hover {
+    opacity: 0.9;
+  }
+  .ark-btn-primary:active {
+    opacity: 0.8;
   }
 
   .ark-btn-secondary {
-    @apply inline-flex items-center justify-center gap-2 bg-surface-hover hover:bg-surface-active border border-surface-border text-content-primary font-medium text-sm px-4 py-2.5 rounded-lg transition-all duration-150 disabled:opacity-50;
+    @apply inline-flex items-center justify-center gap-2 font-medium text-sm px-4 py-2.5 rounded-lg transition-all duration-150 disabled:opacity-50;
+    background-color: rgb(var(--color-surface-hover));
+    border: 1px solid rgb(var(--color-surface-border));
+    color: rgb(var(--color-content-primary));
   }
-
-  .light .ark-btn-secondary {
-    @apply bg-gray-100 hover:bg-gray-200 border-gray-200 text-gray-700;
+  .ark-btn-secondary:hover {
+    background-color: rgb(var(--color-surface-active));
   }
 
   .ark-btn-ghost {
-    @apply inline-flex items-center justify-center gap-2 hover:bg-surface-hover text-content-secondary hover:text-content-primary font-medium text-sm px-3 py-2 rounded-lg transition-all duration-150;
+    @apply inline-flex items-center justify-center gap-2 font-medium text-sm px-3 py-2 rounded-lg transition-all duration-150;
+    color: rgb(var(--color-content-secondary));
   }
-
-  .light .ark-btn-ghost {
-    @apply hover:bg-gray-100 text-gray-600 hover:text-gray-900;
+  .ark-btn-ghost:hover {
+    background-color: rgb(var(--color-surface-hover));
+    color: rgb(var(--color-content-primary));
   }
 
   .ark-card {
-    @apply bg-surface-panel border border-surface-border rounded-xl;
-  }
-
-  .light .ark-card {
-    @apply bg-white border-gray-200;
+    @apply rounded-xl;
+    background-color: rgb(var(--color-surface-panel));
+    border: 1px solid rgb(var(--color-surface-border));
   }
 
   .ark-nav-item {
-    @apply flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-all duration-150 cursor-pointer;
+    @apply flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150 cursor-pointer;
+    color: rgb(var(--color-content-secondary));
   }
-
+  .ark-nav-item:hover {
+    color: rgb(var(--color-content-primary));
+    background-color: rgb(var(--color-surface-hover));
+  }
   .ark-nav-item.active {
-    @apply bg-ark-blue-500/10 text-ark-blue-300;
-  }
-
-  .light .ark-nav-item {
-    @apply text-gray-600 hover:text-gray-900 hover:bg-gray-100;
-  }
-
-  .light .ark-nav-item.active {
-    @apply bg-ark-blue-50 text-ark-blue-700;
+    background-color: rgb(var(--color-surface-active));
+    color: rgb(var(--color-content-primary));
   }
 }
 
 @layer utilities {
-  .shimmer-bg {
-    background: linear-gradient(90deg, transparent 0%, rgba(74, 141, 255, 0.1) 50%, transparent 100%);
+  .animate-fade-in {
+    animation: fadeIn 150ms ease-out;
+  }
+  .animate-slide-up {
+    animation: slideUp 200ms ease-out;
+  }
+  .animate-cursor-blink {
+    animation: cursorBlink 1s step-end infinite;
+  }
+  .auth-orb {
+    position: absolute;
+    top: 0;
+    left: 0;
+    border-radius: 9999px;
+    filter: blur(80px);
+    opacity: 0.5;
+    will-change: transform, background-color;
+  }
+  .auth-orb-tone-a {
+    background: rgb(56 189 248 / 0.22);
+    animation: authOrbHueA 28s ease-in-out infinite alternate;
+  }
+  .auth-orb-tone-b {
+    background: rgb(167 139 250 / 0.2);
+    animation: authOrbHueB 32s ease-in-out infinite alternate;
+  }
+  .auth-orb-tone-c {
+    background: rgb(52 211 153 / 0.14);
+    animation: authOrbHueC 30s ease-in-out infinite alternate;
+  }
+  .auth-orb-tone-d {
+    background: rgb(244 114 182 / 0.14);
+    animation: authOrbHueD 26s ease-in-out infinite alternate;
+  }
+  .auth-orb-tone-e {
+    background: rgb(251 191 36 / 0.12);
+    animation: authOrbHueE 34s ease-in-out infinite alternate;
+  }
+  .auth-orb-tone-f {
+    background: rgb(125 211 252 / 0.16);
+    animation: authOrbHueF 24s ease-in-out infinite alternate;
+  }
+  .auth-type-rainbow {
+    background-image: linear-gradient(
+      90deg,
+      #7dd3fc,
+      #a5b4fc,
+      #f9a8d4,
+      #fcd34d,
+      #6ee7b7,
+      #7dd3fc
+    );
+    background-size: 220% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    animation: authTypeRainbow 8s linear infinite;
+  }
+  .media-gen-shimmer {
+    background: linear-gradient(
+      110deg,
+      transparent 20%,
+      rgb(255 255 255 / 0.06) 40%,
+      rgb(255 255 255 / 0.12) 50%,
+      rgb(255 255 255 / 0.06) 60%,
+      transparent 80%
+    );
     background-size: 200% 100%;
-    @apply animate-shimmer;
+    animation: mediaGenShimmer 1.8s ease-in-out infinite;
+  }
+  .media-gen-dots {
+    background-image: radial-gradient(rgb(148 163 184 / 0.35) 1px, transparent 1px);
+    background-size: 14px 14px;
+    mask-image: linear-gradient(90deg, transparent, #000 30%, #000 70%, transparent);
+  }
+  @keyframes mediaGenShimmer {
+    0% { background-position: 120% 0; }
+    100% { background-position: -80% 0; }
+  }
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  @keyframes slideUp {
+    from { opacity: 0; transform: translateY(16px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes cursorBlink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0; }
+  }
+  @keyframes authTypeRainbow {
+    0% { background-position: 0% 50%; }
+    100% { background-position: 220% 50%; }
+  }
+  @keyframes authOrbHueA {
+    0% { background-color: rgb(56 189 248 / 0.22); }
+    100% { background-color: rgb(129 140 248 / 0.18); }
+  }
+  @keyframes authOrbHueB {
+    0% { background-color: rgb(167 139 250 / 0.2); }
+    100% { background-color: rgb(244 114 182 / 0.14); }
+  }
+  @keyframes authOrbHueC {
+    0% { background-color: rgb(52 211 153 / 0.14); }
+    100% { background-color: rgb(251 191 36 / 0.12); }
+  }
+  @keyframes authOrbHueD {
+    0% { background-color: rgb(244 114 182 / 0.14); }
+    100% { background-color: rgb(125 211 252 / 0.16); }
+  }
+  @keyframes authOrbHueE {
+    0% { background-color: rgb(251 191 36 / 0.12); }
+    100% { background-color: rgb(167 139 250 / 0.14); }
+  }
+  @keyframes authOrbHueF {
+    0% { background-color: rgb(125 211 252 / 0.16); }
+    100% { background-color: rgb(45 212 191 / 0.14); }
   }
 
   .text-balance {
     text-wrap: balance;
   }
 }
+
+

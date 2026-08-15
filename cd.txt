@@ -1,3 +1,0 @@
-cd C:\Users\thoma\Desktop\Projects\ARK\project-bolt-sb1-nsn5sq7f\project
-npm install
-npm run dev

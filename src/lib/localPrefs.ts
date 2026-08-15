@@ -1,0 +1,233 @@
+/** Local sticky prefs for guest / offline UI (no cloud required). */
+
+const PREFS_KEY = 'ark:local-prefs';
+const API_KEYS_KEY = 'ark:provider-api-keys';
+
+export type AiModePref = 'automatic' | 'local_only' | 'cloud_when_available' | 'local_fallback';
+export type DensityPref = 'comfortable' | 'compact';
+export type AccentPref = 'sky' | 'emerald' | 'amber' | 'rose';
+export type UpdateChannel = 'stable' | 'beta';
+
+export type LocalPrefs = {
+  displayName: string;
+  defaultModelId: string;
+  aiMode: AiModePref;
+  keepFilesLocal: boolean;
+  allowCloudSync: boolean;
+  sendDiagnostics: boolean;
+  preferredLanguage: string;
+  projectLocation: string;
+  // Appearance
+  density: DensityPref;
+  accent: AccentPref;
+  reduceMotion: boolean;
+  compactSidebar: boolean;
+  showStatusBar: boolean;
+  // AI
+  autoFailover: boolean;
+  streamResponses: boolean;
+  rememberContext: boolean;
+  // Privacy
+  shareUsageStats: boolean;
+  clearClipboardAfterPaste: boolean;
+  // Projects
+  defaultProjectType: 'web' | 'api' | 'desktop';
+  autoSaveProjects: boolean;
+  openLastProjectOnLaunch: boolean;
+  // Security
+  twoFactorEnabled: boolean;
+  requirePinOnLaunch: boolean;
+  autoLockMinutes: number;
+  sandboxAgent: boolean;
+  // Updates
+  updateChannel: UpdateChannel;
+  autoCheckUpdates: boolean;
+  notifyOnUpdate: boolean;
+};
+
+const DEFAULT_PREFS: LocalPrefs = {
+  displayName: 'Guest',
+  defaultModelId: 'ark-auto',
+  aiMode: 'automatic',
+  keepFilesLocal: true,
+  allowCloudSync: false,
+  sendDiagnostics: true,
+  preferredLanguage: 'TypeScript',
+  projectLocation: '~/ARK/Projects',
+  density: 'comfortable',
+  accent: 'sky',
+  reduceMotion: false,
+  compactSidebar: false,
+  showStatusBar: true,
+  autoFailover: true,
+  streamResponses: true,
+  rememberContext: true,
+  shareUsageStats: false,
+  clearClipboardAfterPaste: false,
+  defaultProjectType: 'web',
+  autoSaveProjects: true,
+  openLastProjectOnLaunch: true,
+  twoFactorEnabled: false,
+  requirePinOnLaunch: false,
+  autoLockMinutes: 30,
+  sandboxAgent: true,
+  updateChannel: 'stable',
+  autoCheckUpdates: true,
+  notifyOnUpdate: true,
+};
+
+export function getLocalPrefs(): LocalPrefs {
+  try {
+    const raw = localStorage.getItem(PREFS_KEY);
+    if (!raw) return { ...DEFAULT_PREFS };
+    return { ...DEFAULT_PREFS, ...JSON.parse(raw) as Partial<LocalPrefs> };
+  } catch {
+    return { ...DEFAULT_PREFS };
+  }
+}
+
+export function setLocalPrefs(patch: Partial<LocalPrefs>): LocalPrefs {
+  const next = { ...getLocalPrefs(), ...patch };
+  localStorage.setItem(PREFS_KEY, JSON.stringify(next));
+  return next;
+}
+
+export type ProviderKeyMap = Record<string, string>;
+
+/** In-memory cache — Desktop stores encrypted via OS; browser uses localStorage. */
+let providerKeyCache: ProviderKeyMap | null = null;
+let keysHydrated = false;
+let keysEncrypted = false;
+
+function readLegacyLocalKeys(): ProviderKeyMap {
+  try {
+    const raw = localStorage.getItem(API_KEYS_KEY);
+    if (!raw) return {};
+    return JSON.parse(raw) as ProviderKeyMap;
+  } catch {
+    return {};
+  }
+}
+
+function writeLegacyLocalKeys(map: ProviderKeyMap) {
+  if (Object.keys(map).length === 0) localStorage.removeItem(API_KEYS_KEY);
+  else localStorage.setItem(API_KEYS_KEY, JSON.stringify(map));
+}
+
+async function persistProviderKeys(map: ProviderKeyMap) {
+  if (window.arkDesktop?.secretsSave) {
+    await window.arkDesktop.secretsSave(map);
+    try {
+      localStorage.removeItem(API_KEYS_KEY);
+    } catch {
+      /* ignore */
+    }
+    return;
+  }
+  writeLegacyLocalKeys(map);
+}
+
+/** Load keys from OS-encrypted vault (or migrate legacy localStorage). Call once at app start. */
+export async function hydrateProviderApiKeys(): Promise<{
+  encrypted: boolean;
+  count: number;
+}> {
+  if (window.arkDesktop?.secretsLoad) {
+    const res = await window.arkDesktop.secretsLoad();
+    const fromVault = (res.ok && res.keys) ? res.keys : {};
+    const legacy = readLegacyLocalKeys();
+    const merged = { ...legacy, ...fromVault };
+    providerKeyCache = merged;
+    keysEncrypted = Boolean(res.encrypted);
+    keysHydrated = true;
+    if (Object.keys(legacy).length > 0) {
+      await persistProviderKeys(merged);
+    }
+    return { encrypted: keysEncrypted, count: Object.keys(merged).length };
+  }
+
+  providerKeyCache = readLegacyLocalKeys();
+  keysEncrypted = false;
+  keysHydrated = true;
+  return { encrypted: false, count: Object.keys(providerKeyCache).length };
+}
+
+export function providerKeysAreEncrypted() {
+  return keysEncrypted;
+}
+
+export function getProviderApiKeys(): ProviderKeyMap {
+  if (providerKeyCache) return { ...providerKeyCache };
+  if (!keysHydrated) {
+    return readLegacyLocalKeys();
+  }
+  return {};
+}
+
+export function setProviderApiKey(providerId: string, apiKey: string) {
+  const map = getProviderApiKeys();
+  if (apiKey.trim()) {
+    map[providerId] = apiKey.trim();
+  } else {
+    delete map[providerId];
+  }
+  providerKeyCache = map;
+  void persistProviderKeys(map);
+  return map;
+}
+
+export function setProviderApiKeys(map: ProviderKeyMap) {
+  const clean: ProviderKeyMap = {};
+  for (const [id, value] of Object.entries(map)) {
+    if (typeof value === 'string' && value.trim()) clean[id] = value.trim();
+  }
+  providerKeyCache = clean;
+  void persistProviderKeys(clean);
+  return clean;
+}
+
+export function hasProviderApiKey(providerId: string) {
+  return Boolean(getProviderApiKeys()[providerId]);
+}
+
+/** App changelog shown in Settings → Updates. */
+export const ARK_CHANGELOG = [
+  {
+    version: '0.1.0',
+    channel: 'stable' as const,
+    date: 'Aug 14, 2026',
+    title: 'Studio shell',
+    notes: [
+      'Project workspace with Explorer, Chat, Code, and Preview',
+      'Expanding chat composer with image attach and Changes +/-',
+      'Local AI start/stop, model download, and switch flow',
+      'Cloud provider health board and local API key connect',
+      'Sticky settings prefs saved on this device',
+      'History items open into chat or projects',
+      'Browser chip opens localhost in your system browser',
+      'Explorer new file and folder actions',
+    ],
+  },
+  {
+    version: '0.0.9',
+    channel: 'beta' as const,
+    date: 'Aug 13, 2026',
+    title: 'First run optimize',
+    notes: [
+      'Auth screen with Bypass + Setup and Bypass to App',
+      'Speed test and hardware recommendation onboarding',
+      'Models For your PC / Local / Cloud tabs',
+    ],
+  },
+  {
+    version: '0.0.8',
+    channel: 'stable' as const,
+    date: 'Aug 12, 2026',
+    title: 'Navigation and history',
+    notes: [
+      'History, Projects, Plugins sticky headers',
+      'Capability cards on New Chat home',
+      'Collapsed sidebar profile and settings fix',
+    ],
+  },
+];

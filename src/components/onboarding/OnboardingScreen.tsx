@@ -1,168 +1,638 @@
-import { useState, useEffect } from 'react';
+import { useMemo, useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
-import { ArkLogo } from '@/components/branding/ArkLogo';
-import { completeOnboarding, detectHardware, getRecommendedModel, type HardwareInfo } from '@/lib/api';
-import { Loader2, Cpu, MemoryStick, HardDrive, Zap, CheckCircle2, Download, Monitor, MonitorCog } from 'lucide-react';
+import {
+  completeOnboarding,
+  detectHardwareAsync,
+  getHardwareClass,
+  getRecommendedModel,
+  type HardwareInfo,
+} from '@/lib/api';
+import {
+  formatMBps,
+  runSpeedTest,
+  type SpeedSample,
+} from '@/lib/speedTest';
+import { markSetupCompleted } from '@/lib/setup';
+import {
+  getProviderApiKeys,
+  setLocalPrefs,
+  setProviderApiKey,
+} from '@/lib/localPrefs';
+import { openInSystemBrowser } from '@/lib/openExternal';
+import { AuthAmbientOrbs } from '@/components/auth/AuthAmbientOrbs';
+import {
+  Loader2, Cpu, MemoryStick, HardDrive, Zap, CheckCircle2, Download,
+  Monitor, MonitorCog, Wifi, Check, Gauge, KeyRound, Shield, ExternalLink,
+} from 'lucide-react';
 
-const STEPS = [
-  'Detecting operating system...',
-  'Checking CPU and memory...',
-  'Detecting GPU and acceleration...',
-  'Verifying available storage...',
-  'Selecting optimal AI model...',
+type Phase = 'intro' | 'speed' | 'hardware' | 'models' | 'connect' | 'finishing';
+
+type RecModel = {
+  id: string;
+  name: string;
+  size: string;
+  detail: string;
+  recommended?: boolean;
+};
+
+type ConnectProvider = {
+  id: string;
+  name: string;
+  blurb: string;
+  signupUrl: string;
+  free: boolean;
+};
+
+const CONNECT_PROVIDERS: ConnectProvider[] = [
+  {
+    id: 'groq',
+    name: 'Groq',
+    blurb: 'Fast free Llama chat & coding.',
+    signupUrl: 'https://console.groq.com/keys',
+    free: true,
+  },
+  {
+    id: 'google',
+    name: 'Google AI Studio',
+    blurb: 'Gemini free tier — one key.',
+    signupUrl: 'https://aistudio.google.com/apikey',
+    free: true,
+  },
+  {
+    id: 'openrouter',
+    name: 'OpenRouter',
+    blurb: 'Many free routes · good backup.',
+    signupUrl: 'https://openrouter.ai/keys',
+    free: true,
+  },
+  {
+    id: 'openai',
+    name: 'OpenAI',
+    blurb: 'Optional paid GPT / DALL·E path.',
+    signupUrl: 'https://platform.openai.com/api-keys',
+    free: false,
+  },
 ];
 
+function hardwareLabel(pc: ReturnType<typeof getHardwareClass>) {
+  if (pc === 'strong') return 'High end capable';
+  if (pc === 'standard') return 'Solid mid range';
+  return 'Lightweight profile';
+}
+
+function recommendationsFor(hw: HardwareInfo): RecModel[] {
+  const pc = getHardwareClass(hw);
+  const primary = getRecommendedModel(hw);
+
+  if (pc === 'strong') {
+    return [
+      { id: primary.id, name: primary.name, size: primary.size, detail: 'Best quality for this PC', recommended: true },
+      { id: 'llama32-3b', name: 'Llama 3.2 3B Instruct', size: '2.0 GB', detail: 'Balanced general use' },
+      { id: 'qwen25-15b', name: 'Qwen2.5 1.5B Instruct', size: '1.0 GB', detail: 'Default · fastest install' },
+    ];
+  }
+
+  if (pc === 'standard') {
+    return [
+      { id: primary.id, name: primary.name, size: primary.size, detail: 'Best quality for this PC', recommended: true },
+      { id: 'qwen25-15b', name: 'Qwen2.5 1.5B Instruct', size: '1.0 GB', detail: 'Default · fastest install' },
+      { id: 'qwen25-coder-7b', name: 'Qwen2.5-Coder 7B', size: '4.7 GB', detail: 'Coding · larger download' },
+    ];
+  }
+
+  return [
+    { id: primary.id, name: primary.name, size: primary.size, detail: 'Default local brain for this PC', recommended: true },
+    { id: 'llama32-3b', name: 'Llama 3.2 3B Instruct', size: '2.0 GB', detail: 'Stronger general chat' },
+  ];
+}
+
 export function OnboardingScreen() {
-  const { user, refreshProfile } = useAuth();
-  const [step, setStep] = useState(0);
+  const { refreshProfile } = useAuth();
+  const [phase, setPhase] = useState<Phase>('intro');
+  const [speedSample, setSpeedSample] = useState<SpeedSample | null>(null);
+  const [speedTesting, setSpeedTesting] = useState(false);
   const [hw, setHw] = useState<HardwareInfo | null>(null);
-  const [recommendation, setRecommendation] = useState<{ name: string; size: string } | null>(null);
-  const [downloading, setDownloading] = useState(false);
-  const [downloadProgress, setDownloadProgress] = useState(0);
+  const [hwScanning, setHwScanning] = useState(false);
+  const [hwStep, setHwStep] = useState(0);
+  const [models, setModels] = useState<RecModel[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [progress, setProgress] = useState(0);
+  const [expandedProvider, setExpandedProvider] = useState<string | null>(null);
+  const [keyDrafts, setKeyDrafts] = useState<Record<string, string>>({});
+  const [savedKeys, setSavedKeys] = useState<Record<string, boolean>>(() => {
+    const keys = getProviderApiKeys();
+    const map: Record<string, boolean> = {};
+    for (const p of CONNECT_PROVIDERS) map[p.id] = Boolean(keys[p.id]);
+    return map;
+  });
 
-  useEffect(() => {
-    const timers: ReturnType<typeof setTimeout>[] = [];
-    STEPS.forEach((_, i) => {
-      timers.push(setTimeout(() => setStep(i), i * 700));
-    });
-    timers.push(setTimeout(() => {
-      const detected = detectHardware();
-      setHw(detected);
-      setRecommendation(getRecommendedModel(detected));
-    }, STEPS.length * 700));
-    return () => timers.forEach(clearTimeout);
-  }, []);
+  const pcClass = useMemo(() => (hw ? getHardwareClass(hw) : null), [hw]);
+  const selected = models.find(m => m.id === selectedId) ?? models.find(m => m.recommended) ?? null;
+  const connectedCount = Object.values(savedKeys).filter(Boolean).length;
 
-  const handleContinue = async () => {
-    setDownloading(true);
-    const interval = setInterval(() => {
-      setDownloadProgress(prev => {
-        if (prev >= 100) {
-          clearInterval(interval);
-          (async () => {
-            await completeOnboarding();
-            await refreshProfile();
-          })();
-          return 100;
-        }
-        return prev + 2;
-      });
-    }, 50);
+  const runSpeed = async () => {
+    setPhase('speed');
+    setSpeedTesting(true);
+    const sample = await runSpeedTest();
+    setSpeedSample(sample);
+    setSpeedTesting(false);
   };
 
-  const isDetectionComplete = hw !== null;
+  const runHardware = async () => {
+    setPhase('hardware');
+    setHwScanning(true);
+    setHwStep(0);
+    const labels = 5;
+    for (let i = 0; i < labels; i++) {
+      await new Promise(r => setTimeout(r, 450));
+      setHwStep(i + 1);
+    }
+    const detected = await detectHardwareAsync();
+    const recs = recommendationsFor(detected);
+    setHw(detected);
+    setModels(recs);
+    setSelectedId(recs.find(m => m.recommended)?.id ?? recs[0]?.id ?? null);
+    setHwScanning(false);
+  };
+
+  const finish = async () => {
+    setPhase('finishing');
+    setProgress(0);
+
+    const brainId =
+      selectedId && ['qwen25-15b', 'llama32-3b', 'qwen25-coder-7b'].includes(selectedId)
+        ? selectedId
+        : 'qwen25-15b';
+
+    setLocalPrefs({
+      defaultModelId: 'ark-auto',
+      aiMode: 'automatic',
+      autoFailover: true,
+    });
+
+    // Install default local brain (llama-cli + GGUF) so zero-key chat works.
+    let downloadStarted = false;
+    try {
+      const { downloadEngineModel, engineDownloadProgress, engineDownloadError } = await import('@/lib/arkEngine');
+      await downloadEngineModel(brainId);
+      downloadStarted = true;
+
+      await new Promise<void>((resolve) => {
+        const tick = window.setInterval(async () => {
+          try {
+            const p = await engineDownloadProgress(brainId);
+            setProgress(Math.max(5, Math.min(99, p)));
+            const err = await engineDownloadError(brainId);
+            if (err) {
+              window.clearInterval(tick);
+              setProgress(100);
+              resolve();
+              return;
+            }
+            if (p >= 100) {
+              window.clearInterval(tick);
+              setProgress(100);
+              resolve();
+            }
+          } catch {
+            window.clearInterval(tick);
+            setProgress(100);
+            resolve();
+          }
+        }, 400);
+        // Safety timeout (~20 min for slow links)
+        window.setTimeout(() => {
+          window.clearInterval(tick);
+          setProgress(100);
+          resolve();
+        }, 20 * 60 * 1000);
+      });
+    } catch {
+      // Desktop may be unavailable — still enter the app.
+      if (!downloadStarted) {
+        await new Promise<void>(resolve => {
+          const interval = window.setInterval(() => {
+            setProgress(prev => {
+              const next = prev + 8;
+              if (next >= 100) {
+                window.clearInterval(interval);
+                resolve();
+                return 100;
+              }
+              return next;
+            });
+          }, 60);
+        });
+      }
+    }
+
+    markSetupCompleted();
+    try {
+      await completeOnboarding();
+    } catch {
+      // Guest / offline is fine; local setup flag is enough for now.
+    }
+    await refreshProfile();
+  };
+
+  const saveProviderKey = (providerId: string) => {
+    const draft = (keyDrafts[providerId] || '').trim();
+    if (!draft) return;
+    setProviderApiKey(providerId, draft);
+    setSavedKeys(prev => ({ ...prev, [providerId]: true }));
+    setKeyDrafts(prev => ({ ...prev, [providerId]: '' }));
+    setExpandedProvider(null);
+  };
+
+  const removeProviderKey = (providerId: string) => {
+    setProviderApiKey(providerId, '');
+    setSavedKeys(prev => ({ ...prev, [providerId]: false }));
+  };
+
+  const hwSteps = [
+    'Checking operating system',
+    'Reading CPU and memory',
+    'Detecting GPU and acceleration',
+    'Checking storage headroom',
+    'Matching models to this PC',
+  ];
+
+  const stepLabels = ['Speed', 'Hardware', 'Models', 'Connect'] as const;
 
   return (
-    <div className="min-h-screen bg-ark-navy-950 flex flex-col items-center justify-center px-4 relative overflow-hidden">
-      <div className="absolute inset-0 pointer-events-none">
-        <div className="absolute top-1/4 left-1/3 w-96 h-96 bg-ark-blue-500/8 rounded-full blur-3xl" />
-      </div>
+    <div className="h-full bg-ark-navy-950 flex items-center justify-center px-4 relative overflow-hidden">
+      <AuthAmbientOrbs />
 
-      <div className="relative z-10 w-full max-w-[500px] animate-fade-in">
-        <div className="flex flex-col items-center mb-8">
-          <ArkLogo size={48} />
-          <h1 className="mt-4 text-xl font-bold text-content-primary">Preparing ARK</h1>
-          <p className="mt-1 text-sm text-content-secondary">Setting up for your computer, {user?.email?.split('@')[0]}</p>
+      <div className="relative z-10 w-full max-w-lg animate-fade-in">
+        <div className="text-center mb-8">
+          <p className="text-xs uppercase tracking-[0.2em] text-content-tertiary mb-3">First run setup</p>
+          <h1 className="text-3xl font-semibold text-content-primary tracking-tight">
+            {phase === 'connect' ? 'Connect free capacity' : "Let's optimize your computer"}
+          </h1>
+          <p className="text-sm text-content-secondary mt-2 max-w-md mx-auto">
+            {phase === 'connect'
+              ? 'Link the providers you want once. ARK Auto will fail over between them so chat keeps going.'
+              : 'ARK checks your connection and hardware, then helps you connect capacity before you enter the studio.'}
+          </p>
         </div>
 
-        {!isDetectionComplete ? (
-          <div className="ark-card p-6 animate-slide-up">
-            <div className="space-y-3">
-              {STEPS.map((label, i) => (
-                <div key={i} className="flex items-center gap-3">
-                  {i < step ? (
-                    <CheckCircle2 className="w-5 h-5 text-ark-accent-green shrink-0" />
-                  ) : i === step ? (
-                    <Loader2 className="w-5 h-5 text-ark-blue-400 shrink-0 animate-spin" />
-                  ) : (
-                    <div className="w-5 h-5 rounded-full border-2 border-surface-border-light shrink-0" />
-                  )}
-                  <span className={`text-sm ${i <= step ? 'text-content-primary' : 'text-content-tertiary'}`}>
+        <div className="rounded-2xl border border-surface-border bg-ark-navy-900/90 backdrop-blur-sm p-6 sm:p-7 shadow-2xl animate-slide-up">
+          <div className="flex items-center gap-2 mb-7">
+            {stepLabels.map((label, i) => {
+              const active =
+                (i === 0 && (phase === 'intro' || phase === 'speed'))
+                || (i === 1 && phase === 'hardware')
+                || (i === 2 && phase === 'models')
+                || (i === 3 && (phase === 'connect' || phase === 'finishing'));
+              const done =
+                (i === 0 && Boolean(speedSample) && phase !== 'intro' && phase !== 'speed')
+                || (i === 1 && Boolean(hw) && (phase === 'models' || phase === 'connect' || phase === 'finishing'))
+                || (i === 2 && (phase === 'connect' || phase === 'finishing'))
+                || (i === 3 && phase === 'finishing' && progress >= 100);
+              return (
+                <div key={label} className="flex-1">
+                  <div className={`h-1 rounded-full mb-2 ${
+                    done || active ? 'bg-sky-500/80' : 'bg-surface-hover'
+                  }`} />
+                  <p className={`text-[11px] ${active || done ? 'text-content-primary' : 'text-content-tertiary'}`}>
                     {label}
-                  </span>
+                  </p>
                 </div>
-              ))}
-            </div>
+              );
+            })}
           </div>
-        ) : !downloading ? (
-          <div className="ark-card p-6 animate-slide-up space-y-5">
-            <div className="text-center">
-              <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-ark-accent-green/10 mb-3">
-                <CheckCircle2 className="w-6 h-6 text-ark-accent-green" />
+
+          {phase === 'intro' && (
+            <div className="space-y-5">
+              <div className="space-y-3 text-sm text-content-secondary">
+                <p className="flex items-start gap-2.5">
+                  <Wifi className="w-4 h-4 mt-0.5 shrink-0 text-content-tertiary" />
+                  Measure download speed so ARK knows when to preload the next model.
+                </p>
+                <p className="flex items-start gap-2.5">
+                  <MonitorCog className="w-4 h-4 mt-0.5 shrink-0 text-content-tertiary" />
+                  Scan this PC and match models that fit your hardware.
+                </p>
+                <p className="flex items-start gap-2.5">
+                  <KeyRound className="w-4 h-4 mt-0.5 shrink-0 text-content-tertiary" />
+                  Optionally connect free providers once — keys stay encrypted on this device.
+                </p>
+                <p className="flex items-start gap-2.5">
+                  <Shield className="w-4 h-4 mt-0.5 shrink-0 text-content-tertiary" />
+                  API keys never leave this PC except to the provider you connected.
+                </p>
               </div>
-              <h2 className="text-lg font-semibold text-content-primary">Your computer is ready</h2>
+              <button type="button" onClick={runSpeed} className="ark-btn-primary w-full h-11 rounded-xl">
+                Start optimization
+              </button>
             </div>
+          )}
 
-            {/* Hardware summary */}
-            <div className="grid grid-cols-2 gap-3">
-              <HwCard icon={Monitor} label="OS" value={hw.os} />
-              <HwCard icon={Cpu} label="CPU" value={hw.cpu} />
-              <HwCard icon={MemoryStick} label="RAM" value={hw.ram} />
-              <HwCard icon={MonitorCog} label="GPU" value={hw.gpu.length > 20 ? hw.gpu.slice(0, 20) + '...' : hw.gpu} />
-              <HwCard icon={Zap} label="Acceleration" value={hw.acceleration} />
-              <HwCard icon={HardDrive} label="Storage" value={hw.storage} />
-            </div>
-
-            {/* Recommended model */}
-            {recommendation && (
-              <div className="bg-ark-blue-500/10 border border-ark-blue-500/20 rounded-xl p-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-xs text-content-secondary mb-1">Recommended Local AI</p>
-                    <p className="text-sm font-semibold text-content-primary">{recommendation.name}</p>
-                    <p className="text-xs text-content-tertiary mt-0.5">Model size: {recommendation.size}</p>
-                  </div>
-                  <div className="w-10 h-10 rounded-lg bg-ark-blue-500/20 flex items-center justify-center shrink-0">
-                    <Download className="w-5 h-5 text-ark-blue-300" />
-                  </div>
+          {phase === 'speed' && (
+            <div className="space-y-5">
+              <div className="flex items-center gap-3">
+                <span className="w-10 h-10 rounded-xl bg-surface-hover flex items-center justify-center">
+                  {speedTesting ? (
+                    <Loader2 className="w-5 h-5 text-content-secondary animate-spin" />
+                  ) : (
+                    <Wifi className="w-5 h-5 text-content-secondary" />
+                  )}
+                </span>
+                <div>
+                  <p className="text-sm font-medium text-content-primary">
+                    {speedTesting ? 'Running speed test…' : 'Connection checked'}
+                  </p>
+                  <p className="text-xs text-content-tertiary mt-0.5">
+                    Download and upload awareness for model preloading
+                  </p>
                 </div>
               </div>
-            )}
 
-            <button onClick={handleContinue} className="ark-btn-primary w-full">
-              <Download className="w-4 h-4" />
-              Download & Continue
-            </button>
-          </div>
-        ) : (
-          <div className="ark-card p-6 animate-slide-up space-y-4">
-            <div className="text-center">
-              <h2 className="text-lg font-semibold text-content-primary mb-1">Downloading AI Model</h2>
-              <p className="text-sm text-content-secondary">{recommendation?.name}</p>
+              {speedSample && (
+                <div className="flex flex-col animate-fade-in">
+                  <div className="flex items-center justify-between py-3 border-b border-surface-border">
+                    <span className="text-sm text-content-secondary">Download speed</span>
+                    <span className="text-sm text-content-primary">{formatMBps(speedSample.MBps)}</span>
+                  </div>
+                  <div className="flex items-center justify-between py-3">
+                    <span className="text-sm text-content-secondary">Source</span>
+                    <span className="text-sm text-content-primary capitalize">
+                      {speedSample.source === 'measured' ? 'Live measurement' : speedSample.source === 'browser' ? 'Browser estimate' : 'Fallback estimate'}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {!speedTesting && speedSample && (
+                <button type="button" onClick={runHardware} className="ark-btn-primary w-full h-11 rounded-xl">
+                  Continue to hardware
+                </button>
+              )}
             </div>
+          )}
 
-            <div className="space-y-2">
-              <div className="flex justify-between text-xs text-content-secondary">
-                <span>Downloading model files...</span>
-                <span>{Math.round(downloadProgress)}%</span>
+          {phase === 'hardware' && (
+            <div className="space-y-5">
+              <div className="flex items-center gap-3 mb-1">
+                <span className="w-10 h-10 rounded-xl bg-surface-hover flex items-center justify-center">
+                  {hwScanning ? (
+                    <Loader2 className="w-5 h-5 text-content-secondary animate-spin" />
+                  ) : (
+                    <CheckCircle2 className="w-5 h-5 text-ark-accent-green" />
+                  )}
+                </span>
+                <div>
+                  <p className="text-sm font-medium text-content-primary">
+                    {hwScanning ? 'Scanning your hardware…' : 'Hardware profile ready'}
+                  </p>
+                  <p className="text-xs text-content-tertiary mt-0.5">
+                    {pcClass ? hardwareLabel(pcClass) : 'Figuring out what this PC can run'}
+                  </p>
+                </div>
               </div>
-              <div className="h-2 bg-ark-navy-900 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-gradient-to-r from-ark-blue-500 to-ark-blue-400 rounded-full transition-all duration-75"
-                  style={{ width: `${downloadProgress}%` }}
-                />
-              </div>
+
+              {hwScanning && (
+                <div className="space-y-2.5">
+                  {hwSteps.map((label, i) => (
+                    <div key={label} className="flex items-center gap-2.5">
+                      {i < hwStep ? (
+                        <CheckCircle2 className="w-4 h-4 text-ark-accent-green shrink-0" />
+                      ) : i === hwStep ? (
+                        <Loader2 className="w-4 h-4 text-content-secondary animate-spin shrink-0" />
+                      ) : (
+                        <span className="w-4 h-4 rounded-full border border-surface-border shrink-0" />
+                      )}
+                      <span className={`text-sm ${i <= hwStep ? 'text-content-primary' : 'text-content-tertiary'}`}>
+                        {label}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {!hwScanning && hw && (
+                <>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Spec icon={Monitor} label="OS" value={hw.os} />
+                    <Spec icon={Cpu} label="CPU" value={hw.cpu} />
+                    <Spec icon={MemoryStick} label="RAM" value={hw.ram} />
+                    <Spec icon={MonitorCog} label="GPU" value={hw.gpu} />
+                    <Spec icon={Zap} label="Accel" value={hw.acceleration} />
+                    <Spec icon={HardDrive} label="Storage" value={hw.storage} />
+                  </div>
+                  <button type="button" onClick={() => setPhase('models')} className="ark-btn-primary w-full h-11 rounded-xl">
+                    See recommended models
+                  </button>
+                </>
+              )}
             </div>
+          )}
 
-            {downloadProgress >= 100 && (
-              <div className="flex items-center gap-2 text-sm text-ark-accent-green animate-fade-in">
-                <CheckCircle2 className="w-4 h-4" />
-                Model ready. Launching ARK...
+          {phase === 'models' && (
+            <div className="space-y-5">
+              <div className="flex items-center gap-3">
+                <span className="w-10 h-10 rounded-xl bg-surface-hover flex items-center justify-center">
+                  <Gauge className="w-5 h-5 text-content-secondary" />
+                </span>
+                <div>
+                  <p className="text-sm font-medium text-content-primary">Recommended for this PC</p>
+                  <p className="text-xs text-content-tertiary mt-0.5">
+                    Choose a local preference. Chat still defaults to ARK Auto for failover.
+                  </p>
+                </div>
               </div>
-            )}
-          </div>
-        )}
+
+              <div className="flex flex-col gap-1">
+                {models.map(model => {
+                  const on = selectedId === model.id;
+                  return (
+                    <button
+                      key={model.id}
+                      type="button"
+                      onClick={() => setSelectedId(model.id)}
+                      className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl text-left transition-colors ${
+                        on ? 'bg-surface-hover' : 'hover:bg-surface-hover/50'
+                      }`}
+                    >
+                      <span className="min-w-0 flex-1">
+                        <span className="flex items-center gap-2 flex-wrap">
+                          <span className="text-sm font-medium text-content-primary">{model.name}</span>
+                          {model.recommended && (
+                            <span className="inline-flex items-center rounded-full bg-emerald-500/15 text-emerald-400 px-2 py-0.5 text-[10px] font-medium">
+                              Recommended
+                            </span>
+                          )}
+                        </span>
+                        <span className="block text-xs text-content-tertiary mt-0.5">
+                          {model.detail} · {model.size}
+                        </span>
+                      </span>
+                      <span className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${
+                        on ? 'bg-surface-hover text-ark-accent-green' : 'text-content-tertiary'
+                      }`}>
+                        {on ? <Check className="w-4 h-4" /> : <Download className="w-4 h-4 opacity-50" />}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <button
+                type="button"
+                disabled={!selected}
+                onClick={() => setPhase('connect')}
+                className="ark-btn-primary w-full h-11 rounded-xl"
+              >
+                Continue to connect
+              </button>
+            </div>
+          )}
+
+          {phase === 'connect' && (
+            <div className="space-y-4">
+              <p className="text-sm text-content-secondary">
+                Press Connect to open the provider site, copy your key, then paste it here. Keys stay on this device
+                {window.arkDesktop ? ' (OS encrypted)' : ''}. Skip anytime — local ARK still works.
+              </p>
+
+              <div className="space-y-2 max-h-[min(24rem,48vh)] overflow-y-auto">
+                {CONNECT_PROVIDERS.map(p => {
+                  const open = expandedProvider === p.id;
+                  const saved = savedKeys[p.id];
+                  return (
+                    <div key={p.id} className="rounded-xl border border-surface-border px-3 py-2.5">
+                      <div className="flex items-center gap-3">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2">
+                            <p className="text-sm font-medium text-content-primary">{p.name}</p>
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+                              p.free ? 'bg-emerald-500/15 text-emerald-400' : 'bg-amber-500/15 text-amber-400'
+                            }`}>
+                              {p.free ? 'Free' : 'Optional'}
+                            </span>
+                            {saved && (
+                              <span className="text-[10px] text-sky-400">Saved</span>
+                            )}
+                          </div>
+                          {!open && (
+                            <p className="text-xs text-content-tertiary mt-0.5 truncate">{p.blurb}</p>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!open) void openInSystemBrowser(p.signupUrl);
+                            setExpandedProvider(open ? null : p.id);
+                          }}
+                          className="text-xs font-medium text-sky-400 hover:text-sky-300 shrink-0"
+                        >
+                          {open ? 'Close' : saved ? 'Edit' : 'Connect'}
+                        </button>
+                      </div>
+                      {open && (
+                        <div className="mt-3 space-y-2">
+                          <button
+                            type="button"
+                            onClick={() => void openInSystemBrowser(p.signupUrl)}
+                            className="inline-flex items-center gap-1.5 text-xs text-content-tertiary hover:text-content-secondary"
+                          >
+                            Open {p.name} again
+                            <ExternalLink className="w-3 h-3" />
+                          </button>
+                          <input
+                            type="password"
+                            value={keyDrafts[p.id] || ''}
+                            onChange={e => setKeyDrafts(prev => ({ ...prev, [p.id]: e.target.value }))}
+                            placeholder="Paste API key"
+                            className="ark-input h-10"
+                            autoComplete="off"
+                            spellCheck={false}
+                            autoFocus
+                          />
+                          <div className="flex gap-2">
+                            {saved && (
+                              <button
+                                type="button"
+                                className="ark-btn-secondary flex-1 h-9"
+                                onClick={() => removeProviderKey(p.id)}
+                              >
+                                Remove
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              className="ark-btn-primary flex-1 h-9"
+                              disabled={!(keyDrafts[p.id] || '').trim()}
+                              onClick={() => saveProviderKey(p.id)}
+                            >
+                              Save key
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              <button type="button" onClick={finish} className="ark-btn-primary w-full h-11 rounded-xl">
+                {connectedCount > 0 ? 'Enter ARK' : 'Continue without connecting'}
+              </button>
+            </div>
+          )}
+
+          {phase === 'finishing' && (
+            <div className="space-y-5">
+              <div className="text-center">
+                <p className="text-sm font-medium text-content-primary mb-1">Installing your local brain</p>
+                <p className="text-xs text-content-tertiary">
+                  {selected?.name || 'Qwen2.5 1.5B'} · llama-cli + GGUF into ARK Engine
+                  {connectedCount > 0 ? ` · ${connectedCount} cloud provider${connectedCount === 1 ? '' : 's'}` : ''}
+                </p>
+              </div>
+              <div className="space-y-2">
+                <div className="flex justify-between text-xs text-content-secondary">
+                  <span>{progress < 25 ? 'Installing runtime…' : progress < 100 ? 'Downloading model weights…' : 'Finishing…'}</span>
+                  <span>{Math.min(100, Math.round(progress))}%</span>
+                </div>
+                <div className="h-2 bg-surface-hover rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-sky-500/80 rounded-full transition-all duration-75"
+                    style={{ width: `${Math.min(100, progress)}%` }}
+                  />
+                </div>
+              </div>
+              <p className="text-[11px] text-content-tertiary text-center leading-relaxed">
+                This is a one-time download (~1 GB for the default brain). You can keep working with cloud keys if you connected any.
+              </p>
+              {progress >= 100 && (
+                <div className="flex items-center justify-center gap-2 text-sm text-ark-accent-green animate-fade-in">
+                  <CheckCircle2 className="w-4 h-4" />
+                  Ready. Opening ARK…
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
 }
 
-function HwCard({ icon: Icon, label, value }: { icon: React.ComponentType<{ className?: string }>; label: string; value: string }) {
+function Spec({
+  icon: Icon,
+  label,
+  value,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  value: string;
+}) {
   return (
-    <div className="bg-ark-navy-900 border border-surface-border rounded-lg p-3">
-      <div className="flex items-center gap-2 mb-1">
+    <div className="rounded-xl bg-surface-hover/40 px-3 py-2.5 min-w-0">
+      <div className="flex items-center gap-1.5 mb-1">
         <Icon className="w-3.5 h-3.5 text-content-tertiary" />
-        <span className="text-2xs uppercase tracking-wider text-content-tertiary">{label}</span>
+        <span className="text-[10px] uppercase tracking-wider text-content-tertiary">{label}</span>
       </div>
       <p className="text-sm text-content-primary truncate">{value}</p>
     </div>

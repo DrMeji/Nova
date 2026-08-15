@@ -1,179 +1,366 @@
-import { useState, useEffect } from 'react';
+import { useMemo, useState, useRef, useEffect } from 'react';
 import { useRouter } from '@/context/RouterContext';
-import { useAuth } from '@/context/AuthContext';
-import { fetchProjects, createProject } from '@/lib/api';
-import type { Project } from '@/types';
-import { Sparkles, Plus, ArrowRight, Cpu, Cloud, Clock, CheckCircle2, Loader2 } from 'lucide-react';
+import { useRecentProjects } from '@/context/RecentProjectsContext';
+import {
+  Search, Plus, ImageIcon, FileText, LayoutGrid, List,
+  Filter, Upload, File, Eye, Trash2, Folder, Video, MessageSquare,
+} from 'lucide-react';
 
-interface ProjectData {
+type HistoryKind = 'image' | 'video' | 'chat' | 'document' | 'other';
+type HistorySource = 'uploaded' | 'generated';
+type TabId = 'all' | 'images' | 'documents';
+type ViewMode = 'list' | 'grid';
+
+type HistoryItem = {
   id: string;
   name: string;
-  project_type: string;
-  status: string;
-  build_status: string;
-  updated_at: string;
-  created_at: string;
+  kind: HistoryKind;
+  source: HistorySource;
+  modifiedLabel: string;
+  sizeLabel: string;
+  tone: string;
+  chatId?: string;
+  mode?: 'general' | 'image' | 'video' | 'code';
+  creationId?: string;
+};
+
+const TABS: { id: TabId; label: string }[] = [
+  { id: 'all', label: 'All' },
+  { id: 'images', label: 'Images' },
+  { id: 'documents', label: 'Documents' },
+];
+
+const ADD_OPTIONS = [
+  { id: 'note', label: 'Note', icon: FileText },
+  { id: 'document', label: 'Document', icon: File },
+  { id: 'folder', label: 'Folder', icon: Folder },
+  { id: 'upload', label: 'Upload files', icon: Upload },
+];
+
+function kindIcon(kind: HistoryKind) {
+  switch (kind) {
+    case 'image': return ImageIcon;
+    case 'video': return Video;
+    case 'chat': return MessageSquare;
+    case 'document': return FileText;
+    default: return File;
+  }
 }
 
-type ProjectRow = Project & { updated_at: string; created_at: string };
+function isDocumentLike(kind: HistoryKind) {
+  return kind === 'document' || kind === 'other';
+}
+
+function formatWhen(iso: string) {
+  try {
+    const d = new Date(iso);
+    const now = new Date();
+    const sameDay = d.toDateString() === now.toDateString();
+    if (sameDay) return 'Today';
+    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  } catch {
+    return '—';
+  }
+}
 
 export function Dashboard() {
   const { navigate } = useRouter();
-  const { profile } = useAuth();
-  const [projects, setProjects] = useState<ProjectRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [prompt, setPrompt] = useState('');
-  const [creating, setCreating] = useState(false);
+  const { creations, chats } = useRecentProjects();
+  const [query, setQuery] = useState('');
+  const [tab, setTab] = useState<TabId>('all');
+  const [view, setView] = useState<ViewMode>('list');
+  const [addOpen, setAddOpen] = useState(false);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [sourceFilter, setSourceFilter] = useState<'all' | HistorySource>('all');
+  const addRef = useRef<HTMLDivElement>(null);
+  const filterRef = useRef<HTMLDivElement>(null);
+
+  const historyItems = useMemo(() => {
+    const fromCreations: HistoryItem[] = creations.map(c => ({
+      id: `creation-${c.id}`,
+      name: c.title || c.prompt || 'Creation',
+      kind: c.kind === 'video' ? 'video' : 'image',
+      source: 'generated' as const,
+      modifiedLabel: formatWhen(c.createdAt),
+      sizeLabel: c.real ? 'Generated' : 'Preview',
+      tone: c.kind === 'video' ? 'from-violet-900/70 to-indigo-950' : 'from-sky-900/80 to-blue-950',
+      creationId: c.id,
+      mode: c.kind === 'video' ? 'video' : 'image',
+    }));
+
+    const fromChats: HistoryItem[] = chats
+      .filter(c => !c.creationId || !creations.some(x => x.id === c.creationId))
+      .map(c => ({
+        id: `chat-${c.id}`,
+        name: c.title,
+        kind: c.mode === 'image' ? 'image' : c.mode === 'video' ? 'video' : 'chat',
+        source: 'generated' as const,
+        modifiedLabel: formatWhen(c.updatedAt),
+        sizeLabel: c.mode === 'image' ? 'Image' : c.mode === 'video' ? 'Video' : 'Chat',
+        tone:
+          c.mode === 'video'
+            ? 'from-violet-900/70 to-indigo-950'
+            : c.mode === 'image'
+              ? 'from-sky-900/80 to-blue-950'
+              : 'from-zinc-800 to-zinc-950',
+        chatId: c.id,
+        mode: c.mode,
+        creationId: c.creationId,
+      }));
+
+    return [...fromChats, ...fromCreations].sort((a, b) => {
+      // Rough: Today first already via labels; keep chats list order from context
+      return 0;
+    });
+  }, [creations, chats]);
+
+  const openHistoryItem = (item: HistoryItem) => {
+    if (item.chatId) {
+      navigate({
+        name: 'chat',
+        mode: item.mode === 'general' ? undefined : item.mode,
+        chatId: item.chatId,
+      });
+      return;
+    }
+    if (item.creationId) {
+      navigate({
+        name: 'chat',
+        mode: item.kind === 'video' ? 'video' : 'image',
+        creationId: item.creationId,
+      });
+      return;
+    }
+    navigate({ name: 'chat' });
+  };
 
   useEffect(() => {
-    fetchProjects()
-      .then(data => setProjects(data as ProjectRow[]))
-      .catch(() => {})
-      .finally(() => setLoading(false));
+    const onDoc = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (addRef.current && !addRef.current.contains(target)) setAddOpen(false);
+      if (filterRef.current && !filterRef.current.contains(target)) setFilterOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
   }, []);
 
-  const handleCreate = async () => {
-    if (!prompt.trim()) return;
-    setCreating(true);
-    try {
-      const name = prompt.slice(0, 40).trim() || 'New Project';
-      const project = await createProject(name, prompt, 'web', prompt) as Project & { id: string };
-      navigate({ name: 'project', id: project.id });
-    } catch {
-      setCreating(false);
-    }
-  };
-
-  const greeting = profile?.display_name ?? 'there';
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return historyItems.filter(item => {
+      if (tab === 'images' && item.kind !== 'image' && item.kind !== 'video') return false;
+      if (tab === 'documents' && !isDocumentLike(item.kind)) return false;
+      if (sourceFilter !== 'all' && item.source !== sourceFilter) return false;
+      if (q && !item.name.toLowerCase().includes(q)) return false;
+      return true;
+    });
+  }, [historyItems, query, tab, sourceFilter]);
 
   return (
-    <div className="max-w-5xl mx-auto p-8 animate-fade-in">
-      {/* Hero */}
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold text-content-primary mb-1">Welcome back, {greeting}.</h1>
-        <p className="text-content-secondary text-sm">What would you like to build?</p>
-      </div>
+    <div className="h-full flex flex-col overflow-hidden animate-fade-in bg-ark-navy-950">
+      <div className="shrink-0 px-6 pt-[min(12vh,6rem)] bg-ark-navy-950">
+        <div className="w-full max-w-4xl mx-auto">
+          <div className="flex items-center justify-between gap-4 mb-5">
+            <h1 className="text-3xl font-semibold text-content-primary tracking-tight">History</h1>
+            <div className="flex items-center gap-2 shrink-0">
+              <div className="flex items-center gap-2 rounded-full bg-surface-hover px-3.5 py-2 w-48 sm:w-56">
+                <Search className="w-4 h-4 text-content-tertiary shrink-0" />
+                <input
+                  type="text"
+                  value={query}
+                  onChange={e => setQuery(e.target.value)}
+                  placeholder="Search"
+                  className="flex-1 bg-transparent border-none text-sm text-content-primary placeholder:text-content-tertiary focus:outline-none min-w-0"
+                />
+              </div>
 
-      {/* Prompt field */}
-      <div className="relative mb-8">
-        <div className="ark-card p-1.5 flex items-end gap-2 focus-within:border-ark-blue-400 transition-colors">
-          <textarea
-            value={prompt}
-            onChange={e => setPrompt(e.target.value)}
-            onKeyDown={e => {
-              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleCreate();
-            }}
-            placeholder="Describe your project... e.g. Build a task management web app with dark mode"
-            rows={2}
-            className="flex-1 bg-transparent border-none resize-none px-3 py-2.5 text-sm text-content-primary placeholder:text-content-tertiary focus:outline-none"
-          />
-          <button
-            onClick={handleCreate}
-            disabled={!prompt.trim() || creating}
-            className="ark-btn-primary mb-1 mr-1"
-          >
-            {creating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-            Create Project
-          </button>
-        </div>
-        <p className="text-2xs text-content-tertiary mt-2 px-1">
-          Press Cmd/Ctrl + Enter to create
-        </p>
-      </div>
-
-      {/* AI Network status */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8">
-        <div className="ark-card p-4 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-ark-accent-green/10 flex items-center justify-center shrink-0">
-            <Cpu className="w-5 h-5 text-ark-accent-green" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-content-primary">Local AI</p>
-            <p className="text-xs text-content-secondary">Ready · Qwen2.5 Coder 7B</p>
-          </div>
-          <div className="flex items-center gap-1.5 text-xs text-ark-accent-green">
-            <div className="w-1.5 h-1.5 rounded-full bg-ark-accent-green animate-pulse-soft" />
-            Active
-          </div>
-        </div>
-        <div className="ark-card p-4 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-ark-blue-500/10 flex items-center justify-center shrink-0">
-            <Cloud className="w-5 h-5 text-ark-blue-400" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-content-primary">Cloud Providers</p>
-            <p className="text-xs text-content-secondary">2 connected · 2 available</p>
-          </div>
-          <div className="text-xs text-content-tertiary">Available</div>
-        </div>
-      </div>
-
-      {/* Recent Projects */}
-      <div>
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-sm font-semibold text-content-primary">Recent Projects</h2>
-          <button onClick={() => navigate({ name: 'projects' })} className="ark-btn-ghost text-xs">
-            View all <ArrowRight className="w-3 h-3" />
-          </button>
-        </div>
-
-        {loading ? (
-          <div className="flex items-center justify-center py-12 text-content-tertiary">
-            <Loader2 className="w-5 h-5 animate-spin" />
-          </div>
-        ) : projects.length === 0 ? (
-          <div className="ark-card p-12 text-center">
-            <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-ark-blue-500/10 mb-3">
-              <Plus className="w-6 h-6 text-ark-blue-400" />
+              <div className="relative" ref={addRef}>
+                <button
+                  type="button"
+                  onClick={() => { setAddOpen(o => !o); setFilterOpen(false); }}
+                  className="w-9 h-9 rounded-full flex items-center justify-center"
+                  style={{ backgroundColor: 'rgb(var(--color-accent))', color: 'rgb(var(--color-accent-fg))' }}
+                  title="Add"
+                  aria-label="Add"
+                >
+                  <Plus className="w-4 h-4" strokeWidth={2.5} />
+                </button>
+                {addOpen && (
+                  <div className="absolute right-0 mt-2 w-48 rounded-xl border border-surface-border bg-ark-navy-900 shadow-2xl py-1.5 z-20 animate-fade-in">
+                    {ADD_OPTIONS.map(opt => (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        onClick={() => setAddOpen(false)}
+                        className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-content-primary hover:bg-surface-hover text-left"
+                      >
+                        <opt.icon className="w-4 h-4 text-content-secondary" />
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
-            <p className="text-sm text-content-secondary mb-1">No projects yet</p>
-            <p className="text-xs text-content-tertiary">Describe what you want to build above to get started</p>
           </div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {projects.slice(0, 6).map(project => (
-              <ProjectCard key={project.id} project={project} onClick={() => navigate({ name: 'project', id: project.id })} />
-            ))}
+
+          <div className="flex items-center justify-between gap-3 mb-4">
+            <div className="flex items-center gap-1">
+              {TABS.map(t => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => setTab(t.id)}
+                  className={`rounded-full px-3.5 py-1.5 text-sm transition-colors ${
+                    tab === t.id
+                      ? 'bg-surface-hover text-content-primary'
+                      : 'text-content-secondary hover:text-content-primary'
+                  }`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="flex items-center gap-1">
+              <div className="relative" ref={filterRef}>
+                <button
+                  type="button"
+                  onClick={() => { setFilterOpen(o => !o); setAddOpen(false); }}
+                  className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
+                    filterOpen || sourceFilter !== 'all'
+                      ? 'bg-surface-hover text-content-primary'
+                      : 'text-content-secondary hover:text-content-primary hover:bg-surface-hover'
+                  }`}
+                  title="Filter"
+                  aria-label="Filter"
+                >
+                  <Filter className="w-4 h-4" />
+                </button>
+                {filterOpen && (
+                  <div className="absolute right-0 mt-2 w-52 rounded-xl border border-surface-border bg-ark-navy-900 shadow-2xl py-2 z-20 animate-fade-in">
+                    <p className="px-3 pb-1 text-[10px] uppercase tracking-wider text-content-tertiary font-semibold">Source</p>
+                    {([
+                      { id: 'all' as const, label: 'All sources' },
+                      { id: 'uploaded' as const, label: 'Uploaded' },
+                      { id: 'generated' as const, label: 'Generated' },
+                    ]).map(opt => (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        onClick={() => { setSourceFilter(opt.id); setFilterOpen(false); }}
+                        className={`w-full text-left px-3 py-2 text-sm hover:bg-surface-hover ${
+                          sourceFilter === opt.id ? 'text-content-primary' : 'text-content-secondary'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                    <div className="my-1 border-t border-surface-border" />
+                    <button
+                      type="button"
+                      onClick={() => setFilterOpen(false)}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-sm text-content-secondary hover:bg-surface-hover"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      Recently deleted
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setView('grid')}
+                className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
+                  view === 'grid' ? 'bg-surface-hover text-content-primary' : 'text-content-secondary hover:text-content-primary hover:bg-surface-hover'
+                }`}
+                title="Grid"
+                aria-label="Grid view"
+              >
+                <LayoutGrid className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setView('list')}
+                className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
+                  view === 'list' ? 'bg-surface-hover text-content-primary' : 'text-content-secondary hover:text-content-primary hover:bg-surface-hover'
+                }`}
+                title="List"
+                aria-label="List view"
+              >
+                <List className="w-4 h-4" />
+              </button>
+            </div>
           </div>
-        )}
+
+          {view === 'list' && filtered.length > 0 && (
+            <div className="grid grid-cols-[1fr_6.5rem_5rem] gap-4 px-1 pb-2 text-xs text-content-tertiary">
+              <span>Name</span>
+              <span className="text-right">Modified</span>
+              <span className="text-right">Type</span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="flex-1 min-h-0 overflow-y-auto px-6 pb-10">
+        <div className="w-full max-w-4xl mx-auto">
+          {filtered.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-20 text-center">
+              <div className="w-11 h-11 rounded-xl bg-surface-hover flex items-center justify-center mb-4">
+                <FileText className="w-5 h-5 text-content-secondary" />
+              </div>
+              <p className="text-base font-semibold text-content-primary mb-1">Nothing here yet</p>
+              <p className="text-sm text-content-tertiary">
+                Chats, images, and videos you create will show up here.
+              </p>
+            </div>
+          ) : view === 'list' ? (
+            <div className="flex flex-col">
+              {filtered.map(item => {
+                const Icon = kindIcon(item.kind);
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => openHistoryItem(item)}
+                    className="w-full grid grid-cols-[1fr_6.5rem_5rem] gap-4 items-center px-1 py-3 text-left rounded-xl hover:bg-surface-hover/70 transition-colors"
+                  >
+                    <span className="flex items-center gap-3 min-w-0">
+                      <span className={`w-9 h-9 rounded-lg bg-gradient-to-br ${item.tone} flex items-center justify-center shrink-0`}>
+                        <Icon className="w-4 h-4 text-white/90" strokeWidth={1.75} />
+                      </span>
+                      <span className="text-sm font-medium text-content-primary truncate">{item.name}</span>
+                    </span>
+                    <span className="text-right text-sm text-content-secondary">{item.modifiedLabel}</span>
+                    <span className="text-right text-sm text-content-secondary tabular-nums">{item.sizeLabel}</span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-1">
+              {filtered.map(item => {
+                const Icon = kindIcon(item.kind);
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => openHistoryItem(item)}
+                    className={`aspect-[4/3] rounded-2xl bg-gradient-to-br ${item.tone} border border-surface-border p-3 flex flex-col text-left hover:brightness-110 transition-all`}
+                  >
+                    <span className="text-xs font-medium text-white/95 truncate">{item.name}</span>
+                    <span className="flex-1 flex items-center justify-center">
+                      <Icon className="w-8 h-8 text-white/80" strokeWidth={1.5} />
+                    </span>
+                    <span className="text-[11px] text-white/70">{item.modifiedLabel}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
       </div>
     </div>
-  );
-}
-
-function ProjectCard({ project, onClick }: { project: ProjectData; onClick: () => void }) {
-  const statusColors: Record<string, string> = {
-    idle: 'text-content-tertiary',
-    building: 'text-ark-accent-amber',
-    running: 'text-ark-accent-green',
-    error: 'text-ark-accent-red',
-    complete: 'text-ark-accent-green',
-  };
-
-  const buildSuccess = project.build_status === 'success';
-  const buildFailed = project.build_status === 'failed';
-
-  return (
-    <button onClick={onClick} className="ark-card p-4 text-left hover:border-surface-border-light transition-all group">
-      <div className="flex items-start justify-between mb-3">
-        <div className="w-8 h-8 rounded-lg bg-ark-navy-800 border border-surface-border flex items-center justify-center text-xs font-semibold text-content-secondary">
-          {project.name[0]?.toUpperCase()}
-        </div>
-        {buildSuccess ? (
-          <CheckCircle2 className="w-4 h-4 text-ark-accent-green" />
-        ) : buildFailed ? (
-          <CheckCircle2 className="w-4 h-4 text-ark-accent-red" />
-        ) : (
-          <div className={`w-2 h-2 rounded-full ${project.status === 'building' ? 'bg-ark-accent-amber animate-pulse-soft' : 'bg-content-tertiary'}`} />
-        )}
-      </div>
-      <h3 className="text-sm font-medium text-content-primary mb-1 group-hover:text-ark-blue-300 transition-colors truncate">{project.name}</h3>
-      <p className="text-xs text-content-tertiary capitalize mb-3">{project.project_type}</p>
-      <div className="flex items-center gap-1.5 text-2xs text-content-tertiary">
-        <Clock className="w-3 h-3" />
-        <span>{new Date(project.updated_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>
-        <span className={`ml-auto ${statusColors[project.status] ?? ''}`}>{project.status}</span>
-      </div>
-    </button>
   );
 }

@@ -9,6 +9,7 @@ lerna-debug.log*
 node_modules
 dist
 dist-ssr
+release
 *.local
 
 .vscode/*
@@ -22,3 +23,7 @@ dist-ssr
 *.sw?
 .env
 .aider*
+.clinerules/
+*.bak
+*.ps1
+Modelfile.cline

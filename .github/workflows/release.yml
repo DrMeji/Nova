@@ -1,0 +1,53 @@
+name: Release
+
+# Windows build + GitHub Release for tags like v0.1.0
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  windows-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Windows installer + portable
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run electron:build
+
+      - name: Create GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $ver = $tag.TrimStart("v")
+          $setup = "release/ARK-Setup-$ver.exe"
+          $portable = "release/ARK-Portable-$ver.exe"
+          if (-not (Test-Path $setup)) { throw "Missing $setup" }
+          if (-not (Test-Path $portable)) { throw "Missing $portable" }
+          $body = @"
+          ## ARK $tag
+
+          Windows desktop build.
+
+          - **ARK-Setup-$ver.exe** — installer (recommended)
+          - **ARK-Portable-$ver.exe** — portable (no install)
+
+          After install, use **Settings → Updates** to check for newer releases.
+          "@
+          gh release create $tag $setup $portable --title "ARK $ver" --notes $body

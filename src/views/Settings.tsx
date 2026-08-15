@@ -20,10 +20,10 @@ const SECTIONS = [
 ];
 
 const AI_MODES = [
-  { value: 'automatic', label: 'Automatic', description: 'ARK chooses the best provider for each task' },
+  { value: 'automatic', label: 'Automatic', description: 'ARK Router: local → free keys → paid' },
   { value: 'local_only', label: 'Local Only', description: 'Always use local AI, never use cloud' },
-  { value: 'cloud_when_available', label: 'Cloud When Available', description: 'Prefer cloud, use local as backup' },
-  { value: 'local_fallback', label: 'Local Fallback', description: 'Use cloud first, fall back to local' },
+  { value: 'cloud_when_available', label: 'Cloud When Available', description: 'Prefer free/paid cloud, local as backup' },
+  { value: 'local_fallback', label: 'Local Fallback', description: 'Try cloud first, then ARK Engine' },
 ];
 
 export function Settings() {
@@ -264,7 +264,7 @@ function ToggleRow({ label, description, value, onChange }: { label: string; des
       </div>
       <button
         onClick={() => onChange(!value)}
-        className={`relative w-10 h-5.5 rounded-full transition-colors shrink-0 ${value ? 'bg-ark-blue-500' : 'bg-ark-navy-700'}`}
+        className={`relative w-10 h-5.5 rounded-full transition-colors shrink-0 ${value ? 'bg-content-primary' : 'bg-ark-navy-700'}`}
         style={{ height: '22px', width: '40px' }}
       >
         <div
@@ -280,12 +280,13 @@ function ThemeCard({ label, active, onClick }: { label: string; active: boolean;
   return (
     <button
       onClick={onClick}
-      className={`p-4 rounded-lg border transition-all ${active ? 'border-ark-blue-400 bg-ark-blue-500/10' : 'border-surface-border hover:border-surface-border-light'}`}
+      className={`p-4 rounded-lg border transition-all ${active ? 'border-content-primary bg-surface-hover' : 'border-surface-border hover:border-surface-border-light'}`}
     >
-      <div className={`h-16 rounded-md mb-2 ${label === 'Dark' ? 'bg-ark-navy-900' : 'bg-gray-100'}`}>
-        <div className={`h-3 rounded-t-md ${label === 'Dark' ? 'bg-ark-navy-800' : 'bg-white'}`} />
+      <div className={`h-16 rounded-md mb-2 border border-surface-border ${label === 'Dark' ? 'bg-black' : 'bg-white'}`}>
+        <div className={`h-3 rounded-t-md ${label === 'Dark' ? 'bg-neutral-800' : 'bg-neutral-100'}`} />
       </div>
-      <p className={`text-sm font-medium ${active ? 'text-ark-blue-300' : 'text-content-primary'}`}>{label}</p>
+      <p className={`text-sm font-medium ${active ? 'text-content-primary' : 'text-content-secondary'}`}>{label}</p>
     </button>
   );
 }
+
