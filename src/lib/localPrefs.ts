@@ -193,6 +193,16 @@ export function hasProviderApiKey(providerId: string) {
 /** App changelog shown in Settings → Updates. */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.1',
+    channel: 'stable' as const,
+    date: 'Aug 15, 2026',
+    title: 'App icon',
+    notes: [
+      'White robot app icon on Setup and ARK.exe',
+      'Proper Windows .ico for installer embedding',
+    ],
+  },
+  {
     version: '0.1.0',
     channel: 'stable' as const,
     date: 'Aug 14, 2026',

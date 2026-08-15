@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { useTheme } from '@/context/ThemeContext';
 import { useRouter } from '@/context/RouterContext';
@@ -81,9 +81,18 @@ export function SettingsContent() {
   const [keyDraft, setKeyDraft] = useState('');
   const [checkingUpdates, setCheckingUpdates] = useState(false);
   const [updateMsg, setUpdateMsg] = useState('You are on the latest build for this channel.');
+  const [appVersion, setAppVersion] = useState('0.1.1');
   const [twoFaCode, setTwoFaCode] = useState('');
   const [twoFaSetup, setTwoFaSetup] = useState(false);
   const [savedFlash, setSavedFlash] = useState('');
+
+  useEffect(() => {
+    void window.arkDesktop?.appMeta?.()
+      .then(meta => {
+        if (meta?.version) setAppVersion(meta.version);
+      })
+      .catch(() => {});
+  }, []);
 
   const patchPrefs = (patch: Partial<LocalPrefs>) => {
     const next = setLocalPrefs(patch);
@@ -753,7 +762,7 @@ export function SettingsContent() {
               <div className="space-y-5">
                 <div className="ark-card p-4 flex items-center justify-between gap-3">
                   <div>
-                    <p className="text-sm font-medium text-content-primary">ARK v0.1.0</p>
+                    <p className="text-sm font-medium text-content-primary">ARK v{appVersion}</p>
                     <p className="text-xs text-content-tertiary mt-0.5">{updateMsg}</p>
                   </div>
                   <button

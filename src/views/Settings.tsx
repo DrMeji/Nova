@@ -217,7 +217,7 @@ export function Settings() {
             <SettingsSection title="Updates" description="Keep ARK up to date">
               <div className="ark-card p-4 flex items-center justify-between">
                 <div>
-                  <p className="text-sm font-medium text-content-primary">ARK v0.1.0</p>
+                  <p className="text-sm font-medium text-content-primary">ARK v0.1.1</p>
                   <p className="text-xs text-content-tertiary">Up to date</p>
                 </div>
                 <Check className="w-5 h-5 text-ark-accent-green" />
