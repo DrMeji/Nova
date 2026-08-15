@@ -1,5 +1,5 @@
 @echo off
-title ARK Desktop (Built)
+title ARK Desktop
 cd /d "%~dp0"
 
 echo.
@@ -7,9 +7,11 @@ echo  ========================================
 echo   ARK - Build + Launch
 echo  ========================================
 echo.
-echo  Builds the UI once, then opens Electron.
-echo  For an installable release, use
-echo  Open-ARK-Release.bat instead.
+echo  Builds once, then opens ARK Desktop.
+echo  When ready to ship: commit, push, and
+echo  tag a version (e.g. v0.1.1). GitHub
+echo  Releases will publish the installer.
+echo  Then use Settings - Updates in the app.
 echo.
 
 where node >nul 2>&1
