@@ -7,7 +7,17 @@ export default defineConfig({
   // Relative base so the production bundle loads correctly from
   // the file:// protocol inside the Electron desktop app.
   base: './',
-  plugins: [react()],
+  plugins: [
+    react(),
+    // Electron loads index.html via file:// — crossorigin on module/CSS
+    // tags can leave a blank (black) window in packaged builds.
+    {
+      name: 'ark-strip-crossorigin',
+      transformIndexHtml(html) {
+        return html.replace(/\s+crossorigin(?:="[^"]*")?/gi, '');
+      },
+    },
+  ],
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),

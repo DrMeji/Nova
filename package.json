@@ -1,7 +1,7 @@
 {
   "name": "ark",
   "private": true,
-  "version": "0.1.30",
+  "version": "0.1.31",
   "type": "module",
   "main": "electron/main.cjs",
   "description": "ARK — AI Creation Studio desktop app",
@@ -61,6 +61,8 @@
     "files": [
       "dist/**",
       "electron/**",
+      "build/icon.png",
+      "build/icon.ico",
       "!electron/**/*.md",
       "!**/*.map",
       "!**/._*",

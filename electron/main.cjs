@@ -63,33 +63,38 @@ let mainWindow = null;
 let tray = null;
 let quitting = false;
 
+function resolveAppIcon() {
+  const candidates = [
+    path.join(__dirname, '..', 'build', 'icon.png'),
+    path.join(__dirname, '..', 'dist', 'ark-icon.png'),
+    path.join(process.resourcesPath || '', 'app.asar.unpacked', 'build', 'icon.png'),
+  ];
+  for (const p of candidates) {
+    try {
+      const image = nativeImage.createFromPath(p);
+      if (!image.isEmpty()) return { path: p, image };
+    } catch {
+      /* try next */
+    }
+  }
+  return { path: '', image: nativeImage.createEmpty() };
+}
+
 function createTray() {
   if (tray) return;
-  const iconPath = path.join(__dirname, '..', 'build', 'icon.png');
-  let image = nativeImage.createFromPath(iconPath);
-  if (image.isEmpty()) {
-    image = nativeImage.createEmpty();
-  } else {
-    image = image.resize({ width: 16, height: 16 });
-  }
-  tray = new Tray(image);
-  tray.setToolTip('ARK · brain on :8787');
+  const { image } = resolveAppIcon();
+  const trayImage = image.isEmpty()
+    ? image
+    : image.resize({ width: 16, height: 16 });
+  tray = new Tray(trayImage);
+  tray.setToolTip('ARK');
   const menu = Menu.buildFromTemplate([
     {
       label: 'Show ARK',
       click: () => {
-        if (!mainWindow) createWindow();
-        else {
-          mainWindow.show();
-          mainWindow.focus();
-        }
+        showMainWindow();
       },
     },
-    {
-      label: 'Brain API · 127.0.0.1:8787',
-      enabled: false,
-    },
-    { type: 'separator' },
     {
       label: 'Quit ARK',
       click: () => {
@@ -100,17 +105,28 @@ function createTray() {
   ]);
   tray.setContextMenu(menu);
   tray.on('double-click', () => {
-    if (!mainWindow) createWindow();
-    else {
-      mainWindow.show();
-      mainWindow.focus();
-    }
+    showMainWindow();
   });
 }
 
+function showMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createWindow();
+    return;
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+
 function createWindow() {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    showMainWindow();
+    return;
+  }
+
   const packaged = app.isPackaged;
-  const iconPath = path.join(__dirname, '..', 'build', 'icon.png');
+  const { path: iconPath } = resolveAppIcon();
 
   const win = new BrowserWindow({
     width: 1440,
@@ -118,12 +134,12 @@ function createWindow() {
     minWidth: 940,
     minHeight: 600,
     title: 'ARK',
-    backgroundColor: '#000000',
+    backgroundColor: '#0a0a0b',
     autoHideMenuBar: true,
     show: false,
     frame: false,
     titleBarStyle: 'hidden',
-    icon: iconPath,
+    icon: iconPath || undefined,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
@@ -135,11 +151,25 @@ function createWindow() {
 
   mainWindow = win;
 
-  win.once('ready-to-show', () => {
+  const reveal = () => {
+    if (win.isDestroyed()) return;
     if (packaged || !isDev) {
-      win.maximize();
+      try {
+        win.maximize();
+      } catch {
+        /* ignore */
+      }
     }
-    win.show();
+    if (!win.isVisible()) win.show();
+  };
+
+  win.once('ready-to-show', reveal);
+  // Fallback if ready-to-show never fires (blank/hung renderer).
+  setTimeout(reveal, 4000);
+
+  win.webContents.on('did-fail-load', (_e, code, desc, url) => {
+    console.error('[ark] did-fail-load', code, desc, url);
+    reveal();
   });
 
   if (isDev) {
@@ -150,7 +180,7 @@ function createWindow() {
 
   // Quiet packaged boots — no console spam / clean-boot wipe noise for end users.
   win.webContents.once('did-finish-load', () => {
-    win.setTitle('ARK');
+    if (!win.isDestroyed()) win.setTitle('ARK');
   });
 
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -166,9 +196,14 @@ function createWindow() {
 
   win.on('close', (e) => {
     if (quitting || isUpdaterMode) return;
+    // Hide to tray so brain API can keep running; Quit from tray ends the app.
     e.preventDefault();
     win.hide();
     createTray();
+  });
+
+  win.on('closed', () => {
+    if (mainWindow === win) mainWindow = null;
   });
 }
 
@@ -688,37 +723,51 @@ function startBrainApi() {
   });
 }
 
-app.whenReady().then(() => {
-  if (isUpdaterMode) {
-    return arkUpdater.runStandaloneSplash(process.argv).catch((err) => {
-      console.error('[ark-updater] fatal', err);
-      app.quit();
+// One process only — desktop shortcut / installer must not spawn duplicate trays.
+const gotLock = app.requestSingleInstanceLock();
+if (!gotLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    showMainWindow();
+  });
+
+  app.whenReady().then(() => {
+    if (isUpdaterMode) {
+      return arkUpdater.runStandaloneSplash(process.argv).catch((err) => {
+        console.error('[ark-updater] fatal', err);
+        app.quit();
+      });
+    }
+    arkEngine.start();
+    startBrainApi();
+    createWindow();
+    createTray();
+    app.on('activate', () => {
+      showMainWindow();
     });
-  }
-  arkEngine.start();
-  startBrainApi();
-  createWindow();
-  createTray();
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
-    else if (mainWindow) {
-      mainWindow.show();
-      mainWindow.focus();
+  });
+
+  app.on('before-quit', () => {
+    quitting = true;
+    if (tray) {
+      try {
+        tray.destroy();
+      } catch {
+        /* ignore */
+      }
+      tray = null;
     }
   });
-});
 
-app.on('before-quit', () => {
-  quitting = true;
-});
-
-app.on('window-all-closed', () => {
-  if (isUpdaterMode) return;
-  // With tray, closing the window hides ARK — brain stays on :8787 until Quit.
-  if (tray && !quitting) return;
-  if (brainApi) {
-    void brainApi.close();
-    brainApi = null;
-  }
-  if (process.platform !== 'darwin') app.quit();
-});
+  app.on('window-all-closed', () => {
+    if (isUpdaterMode) return;
+    // With tray, closing the window hides ARK — brain stays on :8787 until Quit.
+    if (tray && !quitting) return;
+    if (brainApi) {
+      void brainApi.close();
+      brainApi = null;
+    }
+    if (process.platform !== 'darwin') app.quit();
+  });
+}

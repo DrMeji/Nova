@@ -218,6 +218,17 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates. */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.31',
+    channel: 'stable' as const,
+    date: 'Aug 16, 2026',
+    title: 'Fix black screen and duplicate tray icons',
+    notes: [
+      'Packaged UI loads correctly (no blank black window from file:// module CORS)',
+      'Single-instance lock — reopening focuses ARK instead of spawning more trays',
+      'Tray shows the ARK icon with tooltip “ARK” (not brain port text)',
+    ],
+  },
+  {
     version: '0.1.30',
     channel: 'stable' as const,
     date: 'Aug 16, 2026',
