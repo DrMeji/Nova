@@ -14,6 +14,7 @@ const arkPaths = require('./arkPaths.cjs');
 
 const DEV_URL = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173';
 const isDev = process.env.ARK_DEV === '1';
+const isUpdaterMode = process.argv.includes('--ark-updater');
 const BRAIN_PORT = 8787;
 
 const ALLOWED_HOSTS = new Set([
@@ -508,8 +509,11 @@ function startBrainApi() {
 }
 
 app.whenReady().then(() => {
-  if (process.argv.includes('--ark-updater')) {
-    return arkUpdater.runStandaloneSplash(process.argv);
+  if (isUpdaterMode) {
+    return arkUpdater.runStandaloneSplash(process.argv).catch((err) => {
+      console.error('[ark-updater] fatal', err);
+      app.quit();
+    });
   }
   arkEngine.start();
   startBrainApi();
@@ -520,6 +524,7 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
+  if (isUpdaterMode) return;
   if (brainServer) {
     try { brainServer.close(); } catch { /* ignore */ }
     brainServer = null;

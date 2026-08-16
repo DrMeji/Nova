@@ -200,6 +200,16 @@ export function hasProviderApiKey(providerId: string) {
 /** App changelog shown in Settings → Updates. */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.18',
+    channel: 'stable' as const,
+    date: 'Aug 15, 2026',
+    title: 'Fix update splash not opening',
+    notes: [
+      'Updater breakaway launch so the Updating window actually appears',
+      'Download finishes in ARK first, then splash installs and reopens',
+    ],
+  },
+  {
     version: '0.1.17',
     channel: 'stable' as const,
     date: 'Aug 15, 2026',
