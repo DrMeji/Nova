@@ -216,6 +216,17 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates. */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.26',
+    channel: 'stable' as const,
+    date: 'Aug 16, 2026',
+    title: 'First-run setup + Recent archive/delete',
+    notes: [
+      'Fresh installs always run Hardware → Models → Connect after sign-in or sign-up (once per install)',
+      'Recent chats: Archive to History, or Delete forever with confirmation (wipes local data)',
+      'Phase 1 honesty: Discover vs Download, Chat capacity CTAs, labeled image/video previews',
+    ],
+  },
+  {
     version: '0.1.25',
     channel: 'stable' as const,
     date: 'Aug 16, 2026',
