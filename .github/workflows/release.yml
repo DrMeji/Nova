@@ -27,29 +27,54 @@ jobs:
       - name: Build Windows installer + portable
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          # Do not let electron-builder publish — GITHUB_TOKEN cannot write to ark-dist.
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npm run electron:build
+        run: npx electron-builder --win --publish never
 
       - name: Create GitHub releases
         shell: pwsh
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Set repo secret ARK_DIST_TOKEN (PAT with write to DrMeji/ark-dist + Ark) for public feed.
+          GH_TOKEN: ${{ secrets.ARK_DIST_TOKEN }}
+          FALLBACK_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          if (-not $env:GH_TOKEN) { $env:GH_TOKEN = $env:FALLBACK_TOKEN }
           $tag = "${{ github.ref_name }}"
           $ver = $tag.TrimStart("v")
           $setup = "release/ARK-Setup.exe"
           $portable = "release/ARK-Portable.exe"
-          if (-not (Test-Path $setup)) { throw "Missing $setup" }
-          if (-not (Test-Path $portable)) { throw "Missing $portable" }
+          if (-not (Test-Path $setup)) {
+            $setupAlt = Get-ChildItem release -Filter "ARK-Setup*.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($setupAlt) { $setup = $setupAlt.FullName } else { throw "Missing ARK-Setup.exe" }
+          }
+          $files = @($setup)
+          if (Test-Path $portable) { $files += $portable }
           $body = @"
           ## ARK $tag
 
           Windows desktop build.
 
           - **ARK-Setup.exe** — installer (recommended)
-          - **ARK-Portable.exe** — portable (no install)
+          - **ARK-Portable.exe** — portable (no install), when present
 
           After install, use **Settings → Updates → Check → Download** for newer builds in-app.
+
+          External brain API: http://127.0.0.1:8787 (docs/ark-brain-api.md)
           "@
-          gh release create $tag $setup $portable --repo DrMeji/Ark --title "ARK $ver" --notes $body
-          gh release create $tag $setup $portable --repo DrMeji/ark-dist --title "ARK $ver" --notes $body
+
+          function Ensure-Release($repo) {
+            $exists = gh release view $tag --repo $repo 2>$null
+            if ($LASTEXITCODE -eq 0) {
+              gh release upload $tag @files --repo $repo --clobber
+            } else {
+              gh release create $tag @files --repo $repo --title "ARK $ver" --notes $body
+            }
+          }
+
+          Ensure-Release "DrMeji/Ark"
+          try {
+            Ensure-Release "DrMeji/ark-dist"
+          } catch {
+            Write-Warning "ark-dist publish failed — set ARK_DIST_TOKEN secret with write access to DrMeji/ark-dist"
+            throw
+          }
