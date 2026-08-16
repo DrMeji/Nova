@@ -608,12 +608,21 @@ export function SettingsContent() {
                 </div>
 
                 <div className="rounded-xl border border-surface-border p-4 space-y-3">
-                  <div>
-                    <p className="text-sm font-medium text-content-primary">Plugin OAuth client IDs</p>
-                    <p className="text-xs text-content-tertiary mt-0.5 leading-relaxed">
-                      Register OAuth apps once, paste the public client ids here, then use one-click sign-in in Build.
-                      Client secrets stay in env only (`ARK_GOOGLE_CLIENT_SECRET`).
-                    </p>
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-medium text-content-primary">Plugin OAuth client IDs</p>
+                      <p className="text-xs text-content-tertiary mt-0.5 leading-relaxed">
+                        Register OAuth apps once, paste the public client ids here, then use one-click sign-in in Build.
+                        Client secrets stay in env only (`ARK_GOOGLE_CLIENT_SECRET`).
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      className="text-[11px] text-sky-400 hover:text-sky-300 shrink-0"
+                      onClick={() => void window.arkDesktop?.openExternal?.('https://github.com/DrMeji/Ark/blob/main/docs/oauth-setup.md')}
+                    >
+                      Setup guide
+                    </button>
                   </div>
                   {(['github', 'google'] as const).map(id => (
                     <OAuthClientRow key={id} pluginId={id} onSaved={(msg) => {
@@ -997,33 +1006,45 @@ export function SettingsContent() {
                 <div className="rounded-xl border border-surface-border p-4 space-y-2">
                   <p className="text-sm font-medium text-content-primary">Install signing</p>
                   <p className="text-xs text-content-tertiary leading-relaxed">
-                    Buy an Authenticode cert (DigiCert, Sectigo, SSL.com), export a .pfx, then before packaging:
+                    ARK cannot buy the certificate for you. After you purchase Authenticode (OV or EV), wire it once:
                   </p>
                   <ol className="text-[11px] text-content-tertiary space-y-1 list-decimal list-inside leading-relaxed">
-                    <li>Buy Authenticode (OV or EV) from DigiCert / Sectigo / SSL.com</li>
-                    <li>Set CSC_LINK to the .pfx path and CSC_KEY_PASSWORD</li>
-                    <li>Optional CI: add CSC_LINK + CSC_KEY_PASSWORD secrets on DrMeji/Ark for signed tag builds</li>
-                    <li>Confirm with “Check this install’s signature” on the packaged app</li>
+                    <li>Buy from DigiCert, Sectigo, or SSL.com and export a .pfx</li>
+                    <li>Local: set CSC_LINK + CSC_KEY_PASSWORD before Open-ARK-Packaged.bat</li>
+                    <li>CI: add the same as secrets on DrMeji/Ark (signed tag builds)</li>
+                    <li>Confirm with “Check this install’s signature” on a packaged install</li>
                   </ol>
-                  <p className="text-[11px] text-content-tertiary leading-relaxed">
-                    SmartScreen reputation builds after signed installs accumulate. EV usually clears “unknown publisher”
-                    faster than OV. Dev builds show n/a — use a packaged install to verify. Notes: build/signing.env.example
-                  </p>
-                  <button
-                    type="button"
-                    className="ark-btn-secondary text-xs"
-                    onClick={() => {
-                      void window.arkDesktop?.signingStatus?.().then((s) => {
-                        setUpdateMsg(
-                          s?.status
-                            ? `Signing status: ${s.status}${s.signed ? ' (trusted)' : ''}${s.packaged === false ? ' · unpackaged/dev' : ''}`
-                            : 'Signing check unavailable in this build.',
-                        );
-                      });
-                    }}
-                  >
-                    Check this install’s signature
-                  </button>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      className="ark-btn-secondary text-xs"
+                      onClick={() => void window.arkDesktop?.openExternal?.('https://www.digicert.com/signing/code-signing-certificates')}
+                    >
+                      DigiCert
+                    </button>
+                    <button
+                      type="button"
+                      className="ark-btn-secondary text-xs"
+                      onClick={() => void window.arkDesktop?.openExternal?.('https://github.com/DrMeji/Ark/blob/main/build/signing.env.example')}
+                    >
+                      Setup notes
+                    </button>
+                    <button
+                      type="button"
+                      className="ark-btn-secondary text-xs"
+                      onClick={() => {
+                        void window.arkDesktop?.signingStatus?.().then((s) => {
+                          setUpdateMsg(
+                            s?.status
+                              ? `Signing status: ${s.status}${s.signed ? ' (trusted)' : ''}${s.packaged === false ? ' · unpackaged/dev' : ''}`
+                              : 'Signing check unavailable in this build.',
+                          );
+                        });
+                      }}
+                    >
+                      Check this install’s signature
+                    </button>
+                  </div>
                 </div>
 
                 <div className="rounded-xl border border-surface-border p-4 space-y-2">

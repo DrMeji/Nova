@@ -33,6 +33,7 @@ export const ENGINE_DOWNLOADABLE_IDS = [
   'deepseek-r1-distill-8b',
   'sd15-local',
   'sdxl-turbo-local',
+  'flux-schnell-local',
 ] as const;
 
 export function isEngineDownloadable(id: string) {

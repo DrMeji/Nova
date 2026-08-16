@@ -66,6 +66,37 @@ const CATALOG = [
     url: 'https://huggingface.co/stabilityai/sdxl-turbo/resolve/main/sd_xl_turbo_1.0_fp16.safetensors',
   },
   {
+    id: 'flux-schnell-local',
+    name: 'FLUX.1 Schnell (Local)',
+    detail: 'On-device FLUX · ~13 GB bundle · sd.cpp · 16 GB+ RAM',
+    sizeGb: 13,
+    status: 'missing',
+    format: 'bundle',
+    runtime: 'flux',
+    bundle: [
+      {
+        file: 'flux-schnell-local.gguf',
+        url: 'https://huggingface.co/leejet/FLUX.1-schnell-gguf/resolve/main/flux1-schnell-q4_0.gguf',
+        role: 'diffusion',
+      },
+      {
+        file: 'flux-vae.safetensors',
+        url: 'https://huggingface.co/black-forest-labs/FLUX.1-dev/resolve/main/ae.safetensors',
+        role: 'vae',
+      },
+      {
+        file: 'flux-clip_l.safetensors',
+        url: 'https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/clip_l.safetensors',
+        role: 'clip_l',
+      },
+      {
+        file: 'flux-t5xxl.safetensors',
+        url: 'https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/t5xxl_fp8_e4m3fn.safetensors',
+        role: 't5xxl',
+      },
+    ],
+  },
+  {
     id: 'qwen25-15b',
     name: 'Qwen2.5 1.5B Instruct',
     detail: 'Default local brain · ~1.0 GB · Q4_K_M',
@@ -195,6 +226,9 @@ function hasRealGguf(id) {
 
 function hasRealWeights(id) {
   const meta = CATALOG.find((m) => m.id === id);
+  if (meta?.runtime === 'flux') {
+    return arkSd.hasFluxBundle();
+  }
   if (meta?.format === 'safetensors' || meta?.runtime === 'sd') {
     const p = arkSd.weightsPathForId(id);
     if (!p) return false;
@@ -241,8 +275,8 @@ function listModels() {
       status: downloading ? 'downloading' : ready ? 'ready' : 'missing',
       progress: downloads[m.id]?.progress,
       downloadPhase: downloads[m.id]?.phase || null,
-      gguf: m.runtime === 'sd' ? false : ready,
-      localImage: m.runtime === 'sd' ? ready : undefined,
+      gguf: m.runtime === 'sd' || m.runtime === 'flux' ? false : ready,
+      localImage: m.runtime === 'sd' || m.runtime === 'flux' ? ready : undefined,
     };
   }).concat(
     ggufs
@@ -344,11 +378,20 @@ function beginDownload(id) {
   const meta = CATALOG.find((m) => m.id === id);
   if (!meta) throw new Error('Unknown model');
   if (meta.builtin) return getStatus();
-  if (!meta.url) throw new Error('No download URL for this model');
+  if (!meta.url && !(meta.bundle && meta.bundle.length)) throw new Error('No download URL for this model');
   if (downloads[id] || downloadQueue.includes(id)) return getStatus();
-  if (hasRealWeights(id) && (meta.runtime === 'sd' ? arkSd.findSdBinary() : arkGguf.findLlamaBinary())) {
+  const runtimeReady =
+    meta.runtime === 'sd' || meta.runtime === 'flux'
+      ? arkSd.findSdBinary()
+      : arkGguf.findLlamaBinary();
+  if (hasRealWeights(id) && runtimeReady) {
     writeMarker(id, meta, {
-      path: meta.runtime === 'sd' ? arkSd.weightsPathForId(id) : arkGguf.findGgufForModel(id),
+      path:
+        meta.runtime === 'flux'
+          ? arkSd.fluxDiffusionPath()
+          : meta.runtime === 'sd'
+            ? arkSd.weightsPathForId(id)
+            : arkGguf.findGgufForModel(id),
     });
     activeModelId = id;
     return getStatus();
@@ -377,7 +420,7 @@ function pumpDownloadQueue() {
   while (activeDownloadCount() < MAX_PARALLEL_DOWNLOADS && downloadQueue.length > 0) {
     const nextId = downloadQueue.shift();
     const meta = CATALOG.find((m) => m.id === nextId);
-    if (!meta || !meta.url) {
+    if (!meta || (!meta.url && !(meta.bundle && meta.bundle.length))) {
       delete downloads[nextId];
       continue;
     }
@@ -390,12 +433,12 @@ function startDownloadJob(id, meta) {
 
   void (async () => {
     try {
-      if (meta.runtime === 'sd') {
+      if (meta.runtime === 'sd' || meta.runtime === 'flux') {
         await arkSd.ensureSdBinary((pct) => {
           if (downloads[id]?.cancel) throw new Error('Download canceled');
           if (downloads[id]) {
             downloads[id].phase = 'runtime';
-            downloads[id].progress = Math.max(1, Math.round(pct * 0.25));
+            downloads[id].progress = Math.max(1, Math.round(pct * 0.2));
           }
         });
       } else {
@@ -412,7 +455,12 @@ function startDownloadJob(id, meta) {
 
       if (hasRealWeights(id)) {
         writeMarker(id, meta, {
-          path: meta.runtime === 'sd' ? arkSd.weightsPathForId(id) : arkGguf.findGgufForModel(id),
+          path:
+            meta.runtime === 'flux'
+              ? arkSd.fluxDiffusionPath()
+              : meta.runtime === 'sd'
+                ? arkSd.weightsPathForId(id)
+                : arkGguf.findGgufForModel(id),
         });
         if (downloads[id]) downloads[id].progress = 100;
         delete downloads[id];
@@ -421,19 +469,43 @@ function startDownloadJob(id, meta) {
         return;
       }
 
-      const ext = meta.format === 'safetensors' ? 'safetensors' : 'gguf';
-      const dest = path.join(modelsDir(), `${id}.${ext}`);
       downloads[id].phase = 'weights';
-      await arkFetch.downloadToFile(meta.url, dest, (pct) => {
-        if (downloads[id]?.cancel) throw new Error('Download canceled');
-        if (downloads[id]) {
-          downloads[id].progress = Math.min(99, 25 + Math.round(pct * 0.75));
+
+      if (meta.runtime === 'flux' && Array.isArray(meta.bundle)) {
+        const parts = meta.bundle;
+        for (let i = 0; i < parts.length; i++) {
+          const part = parts[i];
+          const dest = path.join(modelsDir(), part.file);
+          if (fs.existsSync(dest) && fs.statSync(dest).size > 1024 * 1024) {
+            if (downloads[id]) {
+              downloads[id].progress = Math.min(99, 20 + Math.round(((i + 1) / parts.length) * 80));
+            }
+            continue;
+          }
+          await arkFetch.downloadToFile(part.url, dest, (pct) => {
+            if (downloads[id]?.cancel) throw new Error('Download canceled');
+            if (downloads[id]) {
+              const base = 20 + Math.round((i / parts.length) * 80);
+              const slice = Math.round((pct / 100) * (80 / parts.length));
+              downloads[id].progress = Math.min(99, base + slice);
+            }
+          });
+          if (downloads[id]?.cancel) throw new Error('Download canceled');
         }
-      });
+        writeMarker(id, meta, { path: arkSd.fluxDiffusionPath(), bundle: true });
+      } else {
+        const ext = meta.format === 'safetensors' ? 'safetensors' : 'gguf';
+        const dest = path.join(modelsDir(), `${id}.${ext}`);
+        await arkFetch.downloadToFile(meta.url, dest, (pct) => {
+          if (downloads[id]?.cancel) throw new Error('Download canceled');
+          if (downloads[id]) {
+            downloads[id].progress = Math.min(99, 25 + Math.round(pct * 0.75));
+          }
+        });
+        if (downloads[id]?.cancel) throw new Error('Download canceled');
+        writeMarker(id, meta, { path: dest, bytes: fs.statSync(dest).size });
+      }
 
-      if (downloads[id]?.cancel) throw new Error('Download canceled');
-
-      writeMarker(id, meta, { path: dest, bytes: fs.statSync(dest).size });
       if (downloads[id]) downloads[id].progress = 100;
       delete downloads[id];
       activeModelId = id;
@@ -446,9 +518,16 @@ function startDownloadJob(id, meta) {
         delete downloads[id];
       }, 8000);
       try {
-        const ext = meta.format === 'safetensors' ? 'safetensors' : 'gguf';
-        const partial = path.join(modelsDir(), `${id}.${ext}.partial`);
-        if (fs.existsSync(partial)) fs.unlinkSync(partial);
+        if (meta.bundle) {
+          for (const part of meta.bundle) {
+            const partial = path.join(modelsDir(), `${part.file}.partial`);
+            if (fs.existsSync(partial)) fs.unlinkSync(partial);
+          }
+        } else {
+          const ext = meta.format === 'safetensors' ? 'safetensors' : 'gguf';
+          const partial = path.join(modelsDir(), `${id}.${ext}.partial`);
+          if (fs.existsSync(partial)) fs.unlinkSync(partial);
+        }
       } catch {
         /* ignore */
       }

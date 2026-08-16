@@ -218,6 +218,17 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates. */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.29',
+    channel: 'stable' as const,
+    date: 'Aug 16, 2026',
+    title: 'FLUX local + finishing upgrade list',
+    notes: [
+      'FLUX.1 Schnell (Local) installable from Local AI (~13 GB sd.cpp bundle)',
+      'Clearer Authenticode + OAuth setup links in Settings',
+      'Stronger HF video routes; update feed remains DrMeji/Ark only',
+    ],
+  },
+  {
     version: '0.1.28',
     channel: 'stable' as const,
     date: 'Aug 16, 2026',

@@ -188,7 +188,9 @@ async function fetchHfVideo(prompt) {
 
     const models = [
       'https://router.huggingface.co/hf-inference/models/Wan-AI/Wan2.1-T2V-1.3B',
+      'https://api-inference.huggingface.co/models/Wan-AI/Wan2.1-T2V-1.3B',
       'https://api-inference.huggingface.co/models/ali-vilab/text-to-video-ms-1.7b',
+      'https://router.huggingface.co/hf-inference/models/ali-vilab/text-to-video-ms-1.7b',
     ];
     for (const url of models) {
       try {

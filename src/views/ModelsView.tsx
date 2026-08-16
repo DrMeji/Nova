@@ -99,8 +99,8 @@ const LOCAL_MODELS: LocalModel[] = [
   { id: 'ark-image-core', name: 'ARK Image Core', description: 'Free Pollinations images; uses local SD when installed.', size: 'Cloud / local', category: 'image', tiers: ['free'], recommended: true, tone: 'from-pink-500 to-rose-800', initial: 'AI' },
   { id: 'sd15-local', name: 'Stable Diffusion 1.5 (Local)', description: 'On-device images via ARK Engine (sd.cpp). Download from Local AI.', size: '4.0 GB', category: 'image', tiers: ['free'], recommended: true, tone: 'from-yellow-500 to-amber-700', initial: 'SD' },
   { id: 'sdxl-turbo-local', name: 'SDXL Turbo (Local)', description: 'Fast on-device drafts via ARK Engine. ~6.9 GB.', size: '6.9 GB', category: 'image', tiers: ['free'], recommended: true, tone: 'from-fuchsia-500 to-pink-700', initial: 'ST' },
+  { id: 'flux-schnell-local', name: 'FLUX.1 Schnell (Local)', description: 'On-device FLUX via ARK Engine (~13 GB: model + VAE + CLIP + T5).', size: '13 GB', category: 'image', tiers: ['free'], recommended: true, tone: 'from-violet-500 to-purple-800', initial: 'Fx' },
   { id: 'sdxl-turbo', name: 'SDXL Turbo', description: 'Alias — use SDXL Turbo (Local) in Local AI.', size: '6.9 GB', category: 'image', tiers: ['free'], tone: 'from-fuchsia-500 to-pink-700', initial: 'ST' },
-  { id: 'flux-schnell-local', name: 'FLUX Schnell (Local)', description: 'Heavy local FLUX — Discover only for now.', size: '11 GB', category: 'image', tiers: ['free'], tone: 'from-violet-500 to-purple-800', initial: 'Fx' },
   { id: 'sd-15', name: 'Stable Diffusion 1.5', description: 'Alias — use Stable Diffusion 1.5 (Local) in Local AI.', size: '4.0 GB', category: 'image', tiers: ['free'], tone: 'from-yellow-500 to-amber-700', initial: 'SD' },
   { id: 'playground-v25', name: 'Playground v2.5', description: 'Aesthetic local image generation.', size: '8.2 GB', category: 'image', tiers: ['free'], tone: 'from-rose-400 to-orange-700', initial: 'Pg' },
 

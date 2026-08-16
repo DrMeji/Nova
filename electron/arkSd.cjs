@@ -178,12 +178,41 @@ function weightsPathForId(id) {
   return null;
 }
 
+function fluxPaths() {
+  const dir = modelsDir();
+  return {
+    diffusion: path.join(dir, 'flux-schnell-local.gguf'),
+    vae: path.join(dir, 'flux-vae.safetensors'),
+    clipL: path.join(dir, 'flux-clip_l.safetensors'),
+    t5: path.join(dir, 'flux-t5xxl.safetensors'),
+  };
+}
+
+function fileOk(p, minMb = 1) {
+  try {
+    return fs.existsSync(p) && fs.statSync(p).size > minMb * 1024 * 1024;
+  } catch {
+    return false;
+  }
+}
+
+function hasFluxBundle() {
+  const p = fluxPaths();
+  return fileOk(p.diffusion, 500) && fileOk(p.vae, 50) && fileOk(p.clipL, 50) && fileOk(p.t5, 500);
+}
+
+function fluxDiffusionPath() {
+  return hasFluxBundle() ? fluxPaths().diffusion : null;
+}
+
 function hasLocalImageModel(id = 'sd15-local') {
+  if (id === 'flux-schnell-local') return hasFluxBundle() && Boolean(findSdBinary());
   return Boolean(weightsPathForId(id) && findSdBinary());
 }
 
 function isLocalImageReady() {
   if (!findSdBinary()) return false;
+  if (hasFluxBundle()) return true;
   const ids = ['sdxl-turbo-local', 'sd15-local'];
   for (const id of ids) {
     if (weightsPathForId(id)) return true;
@@ -204,6 +233,7 @@ function isLocalImageReady() {
 }
 
 function resolveAnyImageWeights() {
+  if (hasFluxBundle()) return { path: fluxPaths().diffusion, id: 'flux-schnell-local', flux: true };
   for (const id of ['sdxl-turbo-local', 'sd15-local']) {
     const preferred = weightsPathForId(id);
     if (preferred) return { path: preferred, id };
@@ -232,9 +262,15 @@ function resolveAnyImageWeights() {
  * @param {{ width?: number, height?: number, steps?: number, timeoutMs?: number, modelId?: string }} [opts]
  */
 async function generateLocalImage(prompt, opts = {}) {
-  const resolved = opts.modelId
-    ? (weightsPathForId(opts.modelId) ? { path: weightsPathForId(opts.modelId), id: opts.modelId } : null)
-    : resolveAnyImageWeights();
+  let resolved;
+  if (opts.modelId === 'flux-schnell-local' || (!opts.modelId && hasFluxBundle())) {
+    if (!hasFluxBundle()) return null;
+    resolved = { path: fluxPaths().diffusion, id: 'flux-schnell-local', flux: true };
+  } else {
+    resolved = opts.modelId
+      ? (weightsPathForId(opts.modelId) ? { path: weightsPathForId(opts.modelId), id: opts.modelId } : null)
+      : resolveAnyImageWeights();
+  }
   if (!resolved?.path) return null;
 
   let bin;
@@ -248,25 +284,45 @@ async function generateLocalImage(prompt, opts = {}) {
   fs.mkdirSync(mediaRoot, { recursive: true });
   const outPath = path.join(mediaRoot, `sd-tmp-${Date.now()}.png`);
 
+  const isFlux = Boolean(resolved.flux) || /flux/i.test(resolved.id || '');
   const isTurbo = /turbo|sdxl/i.test(resolved.id || '');
-  const width = opts.width || (isTurbo ? 512 : 512);
-  const height = opts.height || (isTurbo ? 512 : 512);
-  const steps = opts.steps || (isTurbo ? 4 : 20);
-  const timeoutMs = opts.timeoutMs || (isTurbo ? 120_000 : 180_000);
+  const width = opts.width || (isFlux ? 768 : 512);
+  const height = opts.height || (isFlux ? 768 : 512);
+  const steps = opts.steps || (isFlux || isTurbo ? 4 : 20);
+  const timeoutMs = opts.timeoutMs || (isFlux ? 300_000 : isTurbo ? 120_000 : 180_000);
   const text = String(prompt || 'abstract art').slice(0, 450);
 
   await new Promise((resolve, reject) => {
-    const args = [
-      '-m', resolved.path,
-      '-p', text,
-      '-o', outPath,
-      '-W', String(width),
-      '-H', String(height),
-      '--steps', String(steps),
-      '-s', String(-1),
-    ];
-    if (isTurbo) {
-      args.push('--cfg-scale', '1');
+    /** @type {string[]} */
+    let args;
+    if (isFlux) {
+      const p = fluxPaths();
+      args = [
+        '--diffusion-model', p.diffusion,
+        '--vae', p.vae,
+        '--clip_l', p.clipL,
+        '--t5xxl', p.t5,
+        '-p', text,
+        '-o', outPath,
+        '-W', String(width),
+        '-H', String(height),
+        '--steps', String(steps),
+        '--cfg-scale', '1',
+        '--sampling-method', 'euler',
+        '--clip-on-cpu',
+        '-s', String(-1),
+      ];
+    } else {
+      args = [
+        '-m', resolved.path,
+        '-p', text,
+        '-o', outPath,
+        '-W', String(width),
+        '-H', String(height),
+        '--steps', String(steps),
+        '-s', String(-1),
+      ];
+      if (isTurbo) args.push('--cfg-scale', '1');
     }
     const child = spawn(bin, args, {
       windowsHide: true,
@@ -308,7 +364,7 @@ async function generateLocalImage(prompt, opts = {}) {
   return {
     buf,
     ext: 'png',
-    source: isTurbo ? 'ark-sdxl-turbo-local' : 'ark-sd-local',
+    source: isFlux ? 'ark-flux-schnell-local' : isTurbo ? 'ark-sdxl-turbo-local' : 'ark-sd-local',
     modelId: resolved.id,
   };
 }
@@ -320,5 +376,8 @@ module.exports = {
   hasLocalImageModel,
   isLocalImageReady,
   generateLocalImage,
+  hasFluxBundle,
+  fluxDiffusionPath,
+  fluxPaths,
   SD_TAG,
 };

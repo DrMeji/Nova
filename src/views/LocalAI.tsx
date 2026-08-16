@@ -74,6 +74,14 @@ const CATALOG: CatalogModel[] = sortModelsByCategoryThenSizeDesc([
     initial: 'ST',
   },
   {
+    id: 'flux-schnell-local',
+    name: 'FLUX.1 Schnell (Local)',
+    category: 'image',
+    sizeGb: 13,
+    tone: 'from-violet-500 to-purple-800',
+    initial: 'Fx',
+  },
+  {
     id: 'llama32-3b',
     name: 'Llama 3.2 3B Instruct',
     category: 'general',
