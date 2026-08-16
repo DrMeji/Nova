@@ -200,6 +200,17 @@ export function hasProviderApiKey(providerId: string) {
 /** App changelog shown in Settings → Updates. */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.14',
+    channel: 'stable' as const,
+    date: 'Aug 15, 2026',
+    title: 'Cleaner update splash, no terminals',
+    notes: [
+      'Updating box is larger with a dark black background',
+      'No cmd/PowerShell windows during update',
+      'New Chat footer order: capacity, Add plugins, Open a project',
+    ],
+  },
+  {
     version: '0.1.13',
     channel: 'stable' as const,
     date: 'Aug 15, 2026',

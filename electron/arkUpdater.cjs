@@ -1,19 +1,14 @@
 /**
  * In-app updates via public DrMeji/ark-dist Releases.
  *
- * Discord-style flow:
- * 1) User clicks Update → ARK quits immediately
- * 2) Small external splash (logo + bar) downloads + silent-installs
- * 3) Splash verifies the new build, then starts ARK.exe
- *
- * Critical: the splash helper must break away from Electron's job object,
- * otherwise Windows kills it when ARK exits and the update never installs.
+ * Flow: quit ARK → hidden splash downloads/installs → reopen ARK.
+ * Helper is launched via wscript so no cmd/PowerShell windows appear,
+ * and so Electron's job object cannot kill the updater on quit.
  */
 
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
-const http = require('http');
 const { spawn } = require('child_process');
 const { app, BrowserWindow } = require('electron');
 
@@ -71,7 +66,7 @@ function consumePostUpdate() {
   }
 }
 
-function httpsJson(url, headers = {}) {
+function httpsJson(url) {
   return new Promise((resolve, reject) => {
     const req = https.get(
       url,
@@ -79,7 +74,6 @@ function httpsJson(url, headers = {}) {
         headers: {
           'User-Agent': 'ARK-Desktop',
           Accept: 'application/vnd.github+json',
-          ...headers,
         },
       },
       (res) => {
@@ -94,14 +88,12 @@ function httpsJson(url, headers = {}) {
           } catch {
             data = null;
           }
-          resolve({ status: res.statusCode || 0, data, headers: res.headers });
+          resolve({ status: res.statusCode || 0, data });
         });
       },
     );
     req.on('error', reject);
-    req.setTimeout(45_000, () => {
-      req.destroy(new Error('Timeout'));
-    });
+    req.setTimeout(45_000, () => req.destroy(new Error('Timeout')));
   });
 }
 
@@ -154,8 +146,7 @@ function resolveUpdateIcon(tempDir) {
 }
 
 /**
- * Discord-style splash: download (if needed) → silent install → relaunch.
- * Spawned via cmd `start` so Electron quitting cannot kill this helper.
+ * Discord-style splash. Launched with wscript (no console windows).
  */
 function launchUpdateSplash({ setupPath, setupUrl, expectedVersion }) {
   const appExe = process.execPath;
@@ -163,6 +154,7 @@ function launchUpdateSplash({ setupPath, setupUrl, expectedVersion }) {
   const temp = app.getPath('temp');
   const stamp = Date.now();
   const helperPs1 = path.join(temp, `ark-update-${stamp}.ps1`);
+  const helperVbs = path.join(temp, `ark-update-${stamp}.vbs`);
   const logFile = path.join(temp, `ark-update-${stamp}.log`);
   const iconPath = resolveUpdateIcon(temp);
   const dest =
@@ -172,6 +164,7 @@ function launchUpdateSplash({ setupPath, setupUrl, expectedVersion }) {
   const localPrograms = path.join(process.env.LOCALAPPDATA || '', 'Programs', 'ARK', 'ARK.exe');
   const programFiles = path.join(process.env.ProgramFiles || 'C:\\Program Files', 'ARK', 'ARK.exe');
 
+  // ASCII-only labels — avoids mojibake like "Installingâ€¦" in WinForms.
   const ps = `
 $ErrorActionPreference = 'Continue'
 Add-Type -AssemblyName System.Windows.Forms
@@ -182,7 +175,7 @@ $log = ${psSingleQuote(logFile)}
 function Write-Log($m) {
   try { Add-Content -Path $log -Value ("[{0}] {1}" -f (Get-Date -Format o), $m) } catch {}
 }
-Write-Log 'splash helper start (breakaway)'
+Write-Log 'splash helper start'
 
 $setup = ${psSingleQuote(dest)}
 $setupUrl = ${setupUrl ? psSingleQuote(setupUrl) : "''"}
@@ -192,9 +185,11 @@ $installDir = ${psSingleQuote(installDir)}
 $local = ${psSingleQuote(localPrograms)}
 $pf = ${psSingleQuote(programFiles)}
 $icon = ${iconPath ? psSingleQuote(iconPath) : "''"}
+$helperPs1 = ${psSingleQuote(helperPs1)}
+$helperVbs = ${psSingleQuote(helperVbs)}
 
-$boxW = 320
-$boxH = 200
+$boxW = 380
+$boxH = 240
 $form = New-Object System.Windows.Forms.Form
 $form.Text = 'ARK'
 $form.FormBorderStyle = 'None'
@@ -208,7 +203,7 @@ $form.MinimizeBox = $false
 $form.ControlBox = $false
 $form.TopMost = $true
 $form.ShowInTaskbar = $true
-$form.BackColor = [System.Drawing.Color]::FromArgb(35, 36, 40)
+$form.BackColor = [System.Drawing.Color]::FromArgb(10, 10, 12)
 $wa = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
 $form.Location = New-Object System.Drawing.Point(
   [int]($wa.Left + ($wa.Width - $boxW) / 2),
@@ -216,8 +211,8 @@ $form.Location = New-Object System.Drawing.Point(
 )
 
 $pic = New-Object System.Windows.Forms.PictureBox
-$pic.Size = New-Object System.Drawing.Size(52, 64)
-$pic.Location = New-Object System.Drawing.Point([int](($boxW - 52) / 2), 28)
+$pic.Size = New-Object System.Drawing.Size(56, 68)
+$pic.Location = New-Object System.Drawing.Point([int](($boxW - 56) / 2), 36)
 $pic.SizeMode = 'Zoom'
 if ($icon -and (Test-Path -LiteralPath $icon)) {
   try { $pic.Image = [System.Drawing.Image]::FromFile($icon) } catch {}
@@ -225,32 +220,32 @@ if ($icon -and (Test-Path -LiteralPath $icon)) {
 $form.Controls.Add($pic)
 
 $title = New-Object System.Windows.Forms.Label
-$title.Text = 'Updating…'
+$title.Text = 'Updating...'
 $title.ForeColor = [System.Drawing.Color]::White
-$title.Font = New-Object System.Drawing.Font('Segoe UI', 11, [System.Drawing.FontStyle]::Bold)
+$title.Font = New-Object System.Drawing.Font('Segoe UI', 12, [System.Drawing.FontStyle]::Bold)
 $title.AutoSize = $false
-$title.Size = New-Object System.Drawing.Size($boxW, 24)
-$title.Location = New-Object System.Drawing.Point(0, 108)
+$title.Size = New-Object System.Drawing.Size($boxW, 28)
+$title.Location = New-Object System.Drawing.Point(0, 122)
 $title.TextAlign = 'MiddleCenter'
 $form.Controls.Add($title)
 
+$barW = 240
 $track = New-Object System.Windows.Forms.Panel
-$track.Size = New-Object System.Drawing.Size(200, 5)
-$track.Location = New-Object System.Drawing.Point([int](($boxW - 200) / 2), 152)
-$track.BackColor = [System.Drawing.Color]::FromArgb(50, 51, 56)
+$track.Size = New-Object System.Drawing.Size($barW, 6)
+$track.Location = New-Object System.Drawing.Point([int](($boxW - $barW) / 2), 172)
+$track.BackColor = [System.Drawing.Color]::FromArgb(40, 40, 44)
 $form.Controls.Add($track)
 
 $fill = New-Object System.Windows.Forms.Panel
-$fill.Size = New-Object System.Drawing.Size(6, 5)
+$fill.Size = New-Object System.Drawing.Size(8, 6)
 $fill.Location = New-Object System.Drawing.Point(0, 0)
-$fill.BackColor = [System.Drawing.Color]::FromArgb(176, 180, 188)
+$fill.BackColor = [System.Drawing.Color]::FromArgb(210, 214, 220)
 $track.Controls.Add($fill)
 
 function Set-Progress([int]$value, [string]$label) {
   if ($value -lt 0) { $value = 0 }
   if ($value -gt 100) { $value = 100 }
-  $w = [Math]::Max(6, [int](200 * ($value / 100.0)))
-  $fill.Width = $w
+  $fill.Width = [Math]::Max(8, [int]($barW * ($value / 100.0)))
   if ($label) { $title.Text = $label }
   [System.Windows.Forms.Application]::DoEvents()
 }
@@ -262,19 +257,19 @@ function Get-ArkTarget {
   return $null
 }
 
-function Get-FileVersion([string]$path) {
-  try {
-    if (-not (Test-Path -LiteralPath $path)) { return '' }
-    return [string](Get-Item -LiteralPath $path).VersionInfo.FileVersion
-  } catch { return '' }
-}
-
 function Start-ArkNow {
   $target = Get-ArkTarget
-  if (-not $target) { Write-Log 'ARK.exe not found for relaunch'; return $false }
-  for ($i = 0; $i -lt 25; $i++) {
+  if (-not $target) { Write-Log 'ARK.exe not found'; return $false }
+  $dir = Split-Path -Parent $target
+  for ($i = 0; $i -lt 30; $i++) {
     try {
-      Start-Process -FilePath $target -WorkingDirectory (Split-Path -Parent $target) -WindowStyle Normal -ErrorAction Stop
+      # UseShellExecute avoids attaching ARK to any leftover console.
+      $psi = New-Object System.Diagnostics.ProcessStartInfo
+      $psi.FileName = $target
+      $psi.WorkingDirectory = $dir
+      $psi.UseShellExecute = $true
+      $psi.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Normal
+      [void][System.Diagnostics.Process]::Start($psi)
       Write-Log ("started " + $target)
       return $true
     } catch {
@@ -290,18 +285,16 @@ function Wait-ArkExit {
   while ((Get-Date) -lt $deadline) {
     $alive = @(Get-Process -Name 'ARK' -ErrorAction SilentlyContinue)
     if ($alive.Count -eq 0) {
-      # Extra beat so file locks release
-      Start-Sleep -Milliseconds 400
+      Start-Sleep -Milliseconds 350
       $alive = @(Get-Process -Name 'ARK' -ErrorAction SilentlyContinue)
-      if ($alive.Count -eq 0) { return $true }
+      if ($alive.Count -eq 0) { return }
     }
-    Set-Progress 6 'Waiting to update…'
+    Set-Progress 6 'Waiting to update...'
     Start-Sleep -Milliseconds 80
   }
-  Write-Log 'ARK still running after wait; forcing kill'
+  Write-Log 'forcing ARK exit'
   Get-Process -Name 'ARK' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-  Start-Sleep -Milliseconds 500
-  return $true
+  Start-Sleep -Milliseconds 400
 }
 
 function Download-Setup {
@@ -309,11 +302,8 @@ function Download-Setup {
     Write-Log 'setup already on disk'
     return $true
   }
-  if (-not $setupUrl) {
-    Write-Log 'no setup url and no local file'
-    return $false
-  }
-  Set-Progress 8 'Downloading update…'
+  if (-not $setupUrl) { return $false }
+  Set-Progress 8 'Downloading update...'
   Write-Log ("download " + $setupUrl)
   try {
     $tmp = $setup + '.partial'
@@ -332,13 +322,10 @@ function Download-Setup {
       $out.Write($buf, 0, $n)
       $got += $n
       if ($total -gt 0) {
-        $pct = [Math]::Min(55, 8 + [int](47 * ($got / $total)))
-        Set-Progress $pct 'Downloading update…'
+        Set-Progress ([Math]::Min(55, 8 + [int](47 * ($got / $total)))) 'Downloading update...'
       }
     }
-    $out.Close()
-    $stream.Close()
-    $resp.Close()
+    $out.Close(); $stream.Close(); $resp.Close()
     if (Test-Path -LiteralPath $setup) { Remove-Item -LiteralPath $setup -Force -ErrorAction SilentlyContinue }
     Move-Item -LiteralPath $tmp -Destination $setup -Force
     Write-Log ("download ok bytes=" + $got)
@@ -351,67 +338,52 @@ function Download-Setup {
 
 function Install-Setup {
   if (-not (Test-Path -LiteralPath $setup)) { return $false }
-  Set-Progress 60 'Installing…'
-  Write-Log ("running installer " + $setup)
-  # /D= must be last; no quotes
+  Set-Progress 60 'Installing...'
+  Write-Log ("installer " + $setup)
   $args = @('/S', '--updated', ('/D=' + $installDir))
   $p = Start-Process -FilePath $setup -ArgumentList $args -PassThru -WindowStyle Hidden
   $tick = 62
   while ($p -and -not $p.HasExited) {
-    $tick = [Math]::Min(90, $tick + 1)
-    Set-Progress $tick 'Installing…'
+    $tick = [Math]::Min(92, $tick + 1)
+    Set-Progress $tick 'Installing...'
     Start-Sleep -Milliseconds 100
     try { $p.Refresh() } catch { break }
   }
-  $code = if ($p) { $p.ExitCode } else { 'n/a' }
-  Write-Log ("installer exit=" + $code)
+  Write-Log ("installer exit=" + $(if ($p) { $p.ExitCode } else { 'n/a' }))
   return ($p -and $p.ExitCode -eq 0)
 }
 
 $form.Show()
 $form.Activate()
 [System.Windows.Forms.Application]::DoEvents()
-Set-Progress 3 'Updating…'
+Set-Progress 3 'Updating...'
 Write-Log 'splash visible'
 
 try {
-  Wait-ArkExit | Out-Null
-  Set-Progress 10 'Downloading update…'
-
+  Wait-ArkExit
   if (-not (Download-Setup)) {
     Set-Progress 100 'Update failed'
     Start-Sleep -Seconds 2
     throw 'download failed'
   }
-
-  Set-Progress 58 'Installing…'
   $ok = Install-Setup
   if (-not $ok) {
-    Write-Log 'install reported failure; retrying once'
-    Start-Sleep -Milliseconds 800
+    Start-Sleep -Milliseconds 600
     $ok = Install-Setup
   }
+  Write-Log ("post-install ok=" + $ok)
 
-  $target = Get-ArkTarget
-  $ver = Get-FileVersion $target
-  Write-Log ("post-install version=" + $ver + " expected=" + $expected)
-  if ($expected -and $ver -and ($ver -notlike ($expected + '*')) -and ($expected -notlike ($ver + '*'))) {
-    Write-Log 'version mismatch after install'
-  }
-
-  Set-Progress 96 'Opening ARK…'
-  Start-Sleep -Milliseconds 150
-  if (-not (Start-ArkNow)) {
-    Write-Log 'relaunch failed'
-  }
+  # Close splash first, then launch ARK with no console inheritance.
+  try { $form.Hide(); $form.Close(); $form.Dispose() } catch {}
+  Start-Sleep -Milliseconds 100
+  if (-not (Start-ArkNow)) { Write-Log 'relaunch failed' }
 } catch {
   Write-Log ("helper error: " + $_)
   try { Start-ArkNow | Out-Null } catch {}
-} finally {
-  Set-Progress 100 'Done'
-  [System.Windows.Forms.Application]::DoEvents()
   try { $form.Close(); $form.Dispose() } catch {}
-  Remove-Item -LiteralPath ${psSingleQuote(helperPs1)} -Force -ErrorAction SilentlyContinue
+} finally {
+  Remove-Item -LiteralPath $helperPs1 -Force -ErrorAction SilentlyContinue
+  Remove-Item -LiteralPath $helperVbs -Force -ErrorAction SilentlyContinue
   if ($icon) { Remove-Item -LiteralPath $icon -Force -ErrorAction SilentlyContinue }
   Write-Log 'splash helper done'
 }
@@ -427,33 +399,30 @@ try {
     'powershell.exe',
   );
 
-  // Break away from Electron's Windows job object via `start /b`.
-  // A direct spawn() child is killed when ARK exits — that left users stuck on old builds.
-  const helperCmd = path.join(temp, `ark-update-${stamp}.cmd`);
-  fs.writeFileSync(
-    helperCmd,
-    [
-      '@echo off',
-      `start "ARKUpdate" /b "${powershell}" -NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File "${helperPs1}"`,
-      'exit /b 0',
-    ].join('\r\n'),
-    'utf8',
-  );
+  // wscript Run style 0 = fully hidden — no cmd / PowerShell / "ARKUpdate" windows.
+  const vbs = [
+    'Set sh = CreateObject("WScript.Shell")',
+    `sh.Run """${powershell}"" -NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File ""${helperPs1}""", 0, False`,
+  ].join('\r\n');
+  fs.writeFileSync(helperVbs, vbs, 'utf8');
 
-  const child = spawn(helperCmd, [], {
-    detached: true,
-    stdio: 'ignore',
-    windowsHide: true,
-    shell: true,
-    cwd: temp,
-  });
+  const child = spawn(
+    path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'wscript.exe'),
+    [helperVbs],
+    {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+      cwd: temp,
+    },
+  );
   child.unref();
-  return { helperPs1, logFile, helperCmd };
+  return { helperPs1, helperVbs, logFile };
 }
 
 async function checkForUpdate() {
   const currentVersion = app.getVersion();
-  sendProgress({ status: 'checking', percent: 0, message: 'Checking for updates…', version: currentVersion });
+  sendProgress({ status: 'checking', percent: 0, message: 'Checking for updates...', version: currentVersion });
 
   try {
     const res = await httpsJson(`https://api.github.com/repos/${UPDATE_REPO}/releases/latest`);
@@ -539,10 +508,6 @@ async function checkForUpdate() {
   }
 }
 
-/**
- * Quit ARK and let the external splash download + install + relaunch.
- * (Matches Discord: app closes first, small box does the work.)
- */
 async function downloadAndInstall(setupUrl, latestTag) {
   if (!app.isPackaged) {
     return {
@@ -561,17 +526,13 @@ async function downloadAndInstall(setupUrl, latestTag) {
   sendProgress({
     status: 'installing',
     percent: 0,
-    message: 'Closing ARK to update…',
+    message: 'Closing ARK to update...',
     version: expectedVersion,
   });
 
   setTimeout(() => {
     try {
-      launchUpdateSplash({
-        setupPath: dest,
-        setupUrl,
-        expectedVersion,
-      });
+      launchUpdateSplash({ setupPath: dest, setupUrl, expectedVersion });
     } catch (err) {
       console.error('[ark] failed to launch update splash', err);
       sendProgress({
@@ -582,11 +543,10 @@ async function downloadAndInstall(setupUrl, latestTag) {
       });
       return;
     }
-    // Give the breakaway process a moment to start, then quit.
-    setTimeout(() => app.quit(), 400);
+    setTimeout(() => app.quit(), 450);
   }, 200);
 
-  return { ok: true, message: 'Closing ARK to update…' };
+  return { ok: true, message: 'Closing ARK to update...' };
 }
 
 module.exports = {

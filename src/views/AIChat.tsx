@@ -959,6 +959,13 @@ export function AIChat() {
 
       {(mode === 'general' || mode === 'code') && (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 mt-2.5 px-1">
+          {mode === 'general' && (
+            <span className="inline-flex items-center gap-1.5 text-[11px] text-content-tertiary">
+              <span className={`w-1.5 h-1.5 rounded-full ${capacity?.liveChat ? 'bg-emerald-400' : 'bg-content-tertiary'}`} />
+              {capacity?.summary ?? 'Checking capacity...'}
+            </span>
+          )}
+
           <button
             type="button"
             onClick={() => navigate({ name: 'build' })}
@@ -969,20 +976,14 @@ export function AIChat() {
           </button>
 
           {mode === 'general' && (
-            <>
-              <span className="inline-flex items-center gap-1.5 text-[11px] text-content-tertiary">
-                <span className={`w-1.5 h-1.5 rounded-full ${capacity?.liveChat ? 'bg-emerald-400' : 'bg-content-tertiary'}`} />
-                {capacity?.summary ?? 'Checking capacity…'}
-              </span>
-              <button
-                type="button"
-                onClick={() => navigate({ name: 'projects' })}
-                className="inline-flex items-center gap-1.5 text-[11px] text-content-tertiary hover:text-content-secondary transition-colors"
-              >
-                <FolderKanban className="w-3 h-3" />
-                Open a project
-              </button>
-            </>
+            <button
+              type="button"
+              onClick={() => navigate({ name: 'projects' })}
+              className="inline-flex items-center gap-1.5 text-[11px] text-content-tertiary hover:text-content-secondary transition-colors"
+            >
+              <FolderKanban className="w-3 h-3" />
+              Open a project
+            </button>
           )}
 
           {chatPlugins.map(plugin => (

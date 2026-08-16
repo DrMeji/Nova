@@ -89,7 +89,7 @@ export function SettingsContent() {
     latestTag?: string;
   } | null>(null);
   const [updatePercent, setUpdatePercent] = useState(0);
-  const [appVersion, setAppVersion] = useState('0.1.13');
+  const [appVersion, setAppVersion] = useState('0.1.14');
   const [twoFaCode, setTwoFaCode] = useState('');
   const [twoFaSetup, setTwoFaSetup] = useState(false);
   const [savedFlash, setSavedFlash] = useState('');
