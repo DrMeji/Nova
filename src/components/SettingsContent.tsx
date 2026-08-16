@@ -888,7 +888,7 @@ export function SettingsContent() {
           )}
 
           {activeSection === 'updates' && (
-            <SettingsSection title="Updates" description="Download new builds inside ARK — no browser needed">
+            <SettingsSection title="Updates" description="Checks https://github.com/DrMeji/Ark/releases — download inside ARK, no browser">
               <div className="space-y-5">
                 <div className="ark-card p-4 flex flex-col gap-3">
                   <div className="flex items-center justify-between gap-3">

@@ -218,6 +218,17 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates. */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.28',
+    channel: 'stable' as const,
+    date: 'Aug 16, 2026',
+    title: 'One public repo · SDXL Turbo local',
+    notes: [
+      'Installers and in-app updates use DrMeji/Ark only (ark-dist retired)',
+      'SDXL Turbo (Local) downloadable from Local AI alongside SD 1.5',
+      'OAuth setup guide: docs/oauth-setup.md; Authenticode via CSC_* on Ark CI',
+    ],
+  },
+  {
     version: '0.1.27',
     channel: 'stable' as const,
     date: 'Aug 16, 2026',

@@ -183,9 +183,13 @@ function hasLocalImageModel(id = 'sd15-local') {
 }
 
 function isLocalImageReady() {
-  return hasLocalImageModel('sd15-local') || Boolean(
-    findSdBinary()
-    && fs.readdirSync(modelsDir()).some((f) => {
+  if (!findSdBinary()) return false;
+  const ids = ['sdxl-turbo-local', 'sd15-local'];
+  for (const id of ids) {
+    if (weightsPathForId(id)) return true;
+  }
+  try {
+    return fs.readdirSync(modelsDir()).some((f) => {
       const lower = f.toLowerCase();
       if (!/\.(safetensors|ckpt)$/.test(lower)) return false;
       try {
@@ -193,19 +197,25 @@ function isLocalImageReady() {
       } catch {
         return false;
       }
-    }),
-  );
+    });
+  } catch {
+    return false;
+  }
 }
 
 function resolveAnyImageWeights() {
-  const preferred = weightsPathForId('sd15-local');
-  if (preferred) return preferred;
+  for (const id of ['sdxl-turbo-local', 'sd15-local']) {
+    const preferred = weightsPathForId(id);
+    if (preferred) return { path: preferred, id };
+  }
   try {
     const files = fs.readdirSync(modelsDir()).filter((f) => /\.(safetensors|ckpt)$/i.test(f));
     for (const f of files) {
       const full = path.join(modelsDir(), f);
       try {
-        if (fs.statSync(full).size > 50 * 1024 * 1024) return full;
+        if (fs.statSync(full).size > 50 * 1024 * 1024) {
+          return { path: full, id: f.replace(/\.(safetensors|ckpt)$/i, '') };
+        }
       } catch {
         /* ignore */
       }
@@ -219,11 +229,13 @@ function resolveAnyImageWeights() {
 /**
  * Run local txt2img. Returns { buf, ext, source } or null.
  * @param {string} prompt
- * @param {{ width?: number, height?: number, steps?: number, timeoutMs?: number }} [opts]
+ * @param {{ width?: number, height?: number, steps?: number, timeoutMs?: number, modelId?: string }} [opts]
  */
 async function generateLocalImage(prompt, opts = {}) {
-  const weights = resolveAnyImageWeights();
-  if (!weights) return null;
+  const resolved = opts.modelId
+    ? (weightsPathForId(opts.modelId) ? { path: weightsPathForId(opts.modelId), id: opts.modelId } : null)
+    : resolveAnyImageWeights();
+  if (!resolved?.path) return null;
 
   let bin;
   try {
@@ -236,15 +248,16 @@ async function generateLocalImage(prompt, opts = {}) {
   fs.mkdirSync(mediaRoot, { recursive: true });
   const outPath = path.join(mediaRoot, `sd-tmp-${Date.now()}.png`);
 
-  const width = opts.width || 512;
-  const height = opts.height || 512;
-  const steps = opts.steps || 20;
-  const timeoutMs = opts.timeoutMs || 180_000;
+  const isTurbo = /turbo|sdxl/i.test(resolved.id || '');
+  const width = opts.width || (isTurbo ? 512 : 512);
+  const height = opts.height || (isTurbo ? 512 : 512);
+  const steps = opts.steps || (isTurbo ? 4 : 20);
+  const timeoutMs = opts.timeoutMs || (isTurbo ? 120_000 : 180_000);
   const text = String(prompt || 'abstract art').slice(0, 450);
 
   await new Promise((resolve, reject) => {
     const args = [
-      '-m', weights,
+      '-m', resolved.path,
       '-p', text,
       '-o', outPath,
       '-W', String(width),
@@ -252,6 +265,9 @@ async function generateLocalImage(prompt, opts = {}) {
       '--steps', String(steps),
       '-s', String(-1),
     ];
+    if (isTurbo) {
+      args.push('--cfg-scale', '1');
+    }
     const child = spawn(bin, args, {
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -289,7 +305,12 @@ async function generateLocalImage(prompt, opts = {}) {
     /* ignore */
   }
   if (buf.length < 1000) return null;
-  return { buf, ext: 'png', source: 'ark-sd-local' };
+  return {
+    buf,
+    ext: 'png',
+    source: isTurbo ? 'ark-sdxl-turbo-local' : 'ark-sd-local',
+    modelId: resolved.id,
+  };
 }
 
 module.exports = {

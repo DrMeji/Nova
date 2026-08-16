@@ -56,7 +56,7 @@ echo  3^) Confirm black Updating splash, then reopen
 echo.
 echo  To publish + generate delta ^(latest.yml^):
 echo    npm run electron:publish
-echo  ^(needs GitHub auth for DrMeji/ark-dist^)
+echo  ^(needs GitHub auth for DrMeji/Ark^)
 echo.
 pause
 exit /b 0

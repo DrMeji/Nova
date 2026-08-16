@@ -1,7 +1,7 @@
 name: Release
 
 # Windows build + GitHub Release for tags like v0.1.0
-# Publishes to private DrMeji/Ark AND public DrMeji/ark-dist (in-app update feed).
+# Single public repo: DrMeji/Ark (source + installers + in-app update feed).
 on:
   push:
     tags:
@@ -26,23 +26,19 @@ jobs:
 
       - name: Build Windows installer + portable
         env:
-          # Optional Authenticode: set repo secrets CSC_LINK (base64 .pfx or file path on runner) + CSC_KEY_PASSWORD.
+          # Optional Authenticode: set repo secrets CSC_LINK (base64 .pfx) + CSC_KEY_PASSWORD.
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
           WIN_CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
-          # Do not let electron-builder publish — GITHUB_TOKEN cannot write to ark-dist.
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npx electron-builder --win --publish never
 
-      - name: Create GitHub releases
+      - name: Create GitHub release on DrMeji/Ark
         shell: pwsh
         env:
-          # Set repo secret ARK_DIST_TOKEN (PAT with write to DrMeji/ark-dist + Ark) for public feed.
-          GH_TOKEN: ${{ secrets.ARK_DIST_TOKEN }}
-          FALLBACK_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if (-not $env:GH_TOKEN) { $env:GH_TOKEN = $env:FALLBACK_TOKEN }
           $tag = "${{ github.ref_name }}"
           $ver = $tag.TrimStart("v")
           $setup = "release/ARK-Setup.exe"
@@ -71,20 +67,9 @@ jobs:
           External brain API: http://127.0.0.1:8787 (docs/ark-brain-api.md · docs/lindsay-migration.md)
           "@
 
-          function Ensure-Release($repo) {
-            $exists = gh release view $tag --repo $repo 2>$null
-            if ($LASTEXITCODE -eq 0) {
-              gh release upload $tag @files --repo $repo --clobber
-            } else {
-              gh release create $tag @files --repo $repo --title "ARK $ver" --notes $body
-            }
-          }
-
-          Ensure-Release "DrMeji/Ark"
-          try {
-            Ensure-Release "DrMeji/ark-dist"
-          } catch {
-            Write-Warning "ark-dist publish failed — set ARK_DIST_TOKEN secret with write access to DrMeji/ark-dist"
-            Write-Warning $_.Exception.Message
-            # Still succeed so DrMeji/Ark gets the installer; in-app feed needs ark-dist manually or via token.
+          $exists = gh release view $tag --repo DrMeji/Ark 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag @files --repo DrMeji/Ark --clobber
+          } else {
+            gh release create $tag @files --repo DrMeji/Ark --title "ARK $ver" --notes $body
           }

@@ -1,5 +1,5 @@
 /**
- * In-app updates via public DrMeji/ark-dist Releases.
+ * In-app updates via public DrMeji/Ark Releases.
  *
  * 1) Download installer inside the main ARK app
  * 2) Breakaway-launch ARK.exe --ark-updater (survives parent quit; no PowerShell UI)
@@ -13,7 +13,7 @@ const http = require('http');
 const { spawn } = require('child_process');
 const { app, BrowserWindow } = require('electron');
 
-const UPDATE_REPO = 'DrMeji/ark-dist';
+const UPDATE_REPO = 'DrMeji/Ark';
 const POST_UPDATE_FLAG = 'ark-post-update.json';
 
 function tryElectronUpdater() {

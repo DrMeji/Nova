@@ -32,6 +32,7 @@ export const ENGINE_DOWNLOADABLE_IDS = [
   'phi3-mini',
   'deepseek-r1-distill-8b',
   'sd15-local',
+  'sdxl-turbo-local',
 ] as const;
 
 export function isEngineDownloadable(id: string) {

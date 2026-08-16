@@ -66,6 +66,14 @@ const CATALOG: CatalogModel[] = sortModelsByCategoryThenSizeDesc([
     initial: 'SD',
   },
   {
+    id: 'sdxl-turbo-local',
+    name: 'SDXL Turbo (Local)',
+    category: 'image',
+    sizeGb: 6.9,
+    tone: 'from-fuchsia-500 to-pink-700',
+    initial: 'ST',
+  },
+  {
     id: 'llama32-3b',
     name: 'Llama 3.2 3B Instruct',
     category: 'general',
