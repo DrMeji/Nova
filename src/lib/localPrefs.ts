@@ -43,6 +43,7 @@ export type LocalPrefs = {
   updateChannel: UpdateChannel;
   autoCheckUpdates: boolean;
   notifyOnUpdate: boolean;
+  launchOnStartup: boolean;
 };
 
 const DEFAULT_PREFS: LocalPrefs = {
@@ -74,6 +75,7 @@ const DEFAULT_PREFS: LocalPrefs = {
   updateChannel: 'stable',
   autoCheckUpdates: true,
   notifyOnUpdate: true,
+  launchOnStartup: true,
 };
 
 export function getLocalPrefs(): LocalPrefs {
@@ -197,6 +199,18 @@ export function hasProviderApiKey(providerId: string) {
 
 /** App changelog shown in Settings → Updates. */
 export const ARK_CHANGELOG = [
+  {
+    version: '0.1.8',
+    channel: 'stable' as const,
+    date: 'Aug 15, 2026',
+    title: 'Reliable update relaunch + stay signed in',
+    notes: [
+      'Update helper survives app quit and reopens ARK automatically',
+      'Auth session stored in app data so upgrades keep you signed in',
+      'Launch ARK when Windows starts (Settings → Updates)',
+      'Removed page subtitle blurbs on Models, Local AI, Plugins',
+    ],
+  },
   {
     version: '0.1.7',
     channel: 'stable' as const,

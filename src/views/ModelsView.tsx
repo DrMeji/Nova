@@ -562,7 +562,6 @@ export function ModelsView() {
           <div className="flex items-center justify-between gap-4 mb-5">
             <div>
               <h1 className="text-3xl font-semibold text-content-primary tracking-tight">Models</h1>
-              <p className="text-sm text-content-secondary mt-1">Local downloads and cloud providers for ARK.</p>
             </div>
             <div className="flex items-center gap-2 rounded-full bg-surface-hover px-3.5 py-2 w-52 sm:w-64 shrink-0">
               <Search className="w-4 h-4 text-content-tertiary shrink-0" />

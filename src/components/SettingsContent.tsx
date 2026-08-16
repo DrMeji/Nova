@@ -89,7 +89,7 @@ export function SettingsContent() {
     latestTag?: string;
   } | null>(null);
   const [updatePercent, setUpdatePercent] = useState(0);
-  const [appVersion, setAppVersion] = useState('0.1.7');
+  const [appVersion, setAppVersion] = useState('0.1.8');
   const [twoFaCode, setTwoFaCode] = useState('');
   const [twoFaSetup, setTwoFaSetup] = useState(false);
   const [savedFlash, setSavedFlash] = useState('');
@@ -98,6 +98,21 @@ export function SettingsContent() {
     void window.arkDesktop?.appMeta?.()
       .then(meta => {
         if (meta?.version) setAppVersion(meta.version);
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    void window.arkDesktop?.loginItemGet?.()
+      .then((s) => {
+        if (typeof s?.openAtLogin === 'boolean') {
+          setPrefs(prev => {
+            if (prev.launchOnStartup === s.openAtLogin) return prev;
+            return setLocalPrefs({ launchOnStartup: s.openAtLogin });
+          });
+        } else if (getLocalPrefs().launchOnStartup) {
+          void window.arkDesktop?.loginItemSet?.(true);
+        }
       })
       .catch(() => {});
   }, []);
@@ -870,6 +885,15 @@ export function SettingsContent() {
                   </p>
                 </div>
 
+                <ToggleRow
+                  label="Launch ARK when Windows starts"
+                  description="Open ARK automatically after you sign in to this PC"
+                  value={prefs.launchOnStartup}
+                  onChange={v => {
+                    patchPrefs({ launchOnStartup: v });
+                    void window.arkDesktop?.loginItemSet?.(v);
+                  }}
+                />
                 <ToggleRow
                   label="Automatically check for updates"
                   description="Look for new builds when ARK starts"

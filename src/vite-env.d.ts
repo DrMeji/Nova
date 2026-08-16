@@ -57,6 +57,11 @@ declare global {
           error?: string;
         }) => void,
       ) => () => void;
+      authStorageGet?: (key: string) => Promise<string | null>;
+      authStorageSet?: (key: string, value: string) => Promise<boolean>;
+      authStorageRemove?: (key: string) => Promise<boolean>;
+      loginItemGet?: () => Promise<{ ok: boolean; openAtLogin?: boolean; openAsHidden?: boolean }>;
+      loginItemSet?: (openAtLogin: boolean) => Promise<{ ok: boolean; openAtLogin?: boolean }>;
       setupGet?: () => Promise<{ ok: boolean; completed?: boolean }>;
       setupSet?: (completed: boolean) => Promise<{ ok: boolean; completed?: boolean }>;
       systemInfo?: () => Promise<{

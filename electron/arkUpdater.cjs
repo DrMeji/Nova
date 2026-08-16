@@ -1,6 +1,6 @@
 /**
- * In-app updates via public DrMeji/ark-dist Releases (source repo stays private).
- * Check → download ARK-Setup.exe → install → relaunch. Session/userData must survive.
+ * In-app updates via public DrMeji/ark-dist Releases.
+ * Download → install → relaunch. Session/userData must survive upgrades.
  */
 
 const fs = require('fs');
@@ -171,37 +171,80 @@ function isNewer(latest, current) {
   return false;
 }
 
+function escapeForCmd(p) {
+  return String(p).replace(/"/g, '');
+}
+
 /**
- * Write a tiny helper that waits for ARK to exit, runs the installer, then relaunches.
- * Keeps the UI honest: we quit only after the helper is running.
+ * VBS launcher survives Electron quitting (plain detached cmd often dies with the app).
+ * Waits for ARK.exe to exit, runs silent NSIS, then starts ARK again.
  */
 function launchInstallerThenRelaunch(setupPath) {
   const appExe = process.execPath;
-  const helper = path.join(app.getPath('temp'), `ark-update-relaunch-${Date.now()}.cmd`);
-  // Escape for cmd: double quotes inside quoted strings.
-  const q = (p) => `"${String(p).replace(/"/g, '')}"`;
-  const lines = [
-    '@echo off',
-    'setlocal',
-    'REM Wait for ARK.exe to release file locks',
-    'ping -n 4 127.0.0.1 >nul',
-    `echo Installing ARK update...`,
-    `${q(setupPath)} /S`,
-    'if errorlevel 1 (',
-    `  echo Installer reported an error.`,
-    '  ping -n 3 127.0.0.1 >nul',
-    ')',
-    'ping -n 2 127.0.0.1 >nul',
-    `start "" ${q(appExe)}`,
-    `del ${q(helper)}`,
-  ];
-  fs.writeFileSync(helper, `${lines.join('\r\n')}\r\n`, 'utf8');
+  const temp = app.getPath('temp');
+  const stamp = Date.now();
+  const helperCmd = path.join(temp, `ark-update-${stamp}.cmd`);
+  const helperVbs = path.join(temp, `ark-update-${stamp}.vbs`);
+  const logFile = path.join(temp, `ark-update-${stamp}.log`);
 
-  const child = spawn('cmd.exe', ['/c', helper], {
+  const localPrograms = path.join(process.env.LOCALAPPDATA || '', 'Programs', 'ARK', 'ARK.exe');
+  const programFiles = path.join(process.env.ProgramFiles || 'C:\\Program Files', 'ARK', 'ARK.exe');
+
+  const setup = escapeForCmd(setupPath);
+  const exe = escapeForCmd(appExe);
+  const local = escapeForCmd(localPrograms);
+  const pf = escapeForCmd(programFiles);
+  const log = escapeForCmd(logFile);
+
+  const cmd = [
+    '@echo off',
+    'setlocal EnableExtensions',
+    `echo ARK update helper started > "${log}"`,
+    'echo Waiting for ARK.exe to exit...>> "' + log + '"',
+    'set /a _tries=0',
+    ':waitloop',
+    'set /a _tries+=1',
+    'if %_tries% GEQ 90 goto afterwait',
+    'tasklist /FI "IMAGENAME eq ARK.exe" 2>NUL | find /I "ARK.exe" >NUL',
+    'if not errorlevel 1 (',
+    '  ping -n 2 127.0.0.1 >nul',
+    '  goto waitloop',
+    ')',
+    ':afterwait',
+    'ping -n 3 127.0.0.1 >nul',
+    `echo Running installer...>> "${log}"`,
+    `"${setup}" /S`,
+    'set _err=%ERRORLEVEL%',
+    `echo Installer exit=%_err%>> "${log}"`,
+    'ping -n 3 127.0.0.1 >nul',
+    'set "TARGET="',
+    `if exist "${exe}" set "TARGET=${exe}"`,
+    `if not defined TARGET if exist "${local}" set "TARGET=${local}"`,
+    `if not defined TARGET if exist "${pf}" set "TARGET=${pf}"`,
+    'if defined TARGET (',
+    `  echo Starting %TARGET%>> "${log}"`,
+    '  start "" "%TARGET%"',
+    ') else (',
+    `  echo Could not find ARK.exe to relaunch>> "${log}"`,
+    ')',
+    `del /q "${escapeForCmd(helperVbs)}" 2>nul`,
+    `del /q "${escapeForCmd(helperCmd)}" 2>nul`,
+  ].join('\r\n');
+
+  fs.writeFileSync(helperCmd, `${cmd}\r\n`, 'utf8');
+
+  // 0 = hidden window; False = don't wait (returns immediately so VBS exits, cmd keeps running)
+  const vbs = [
+    'Set sh = CreateObject("WScript.Shell")',
+    `sh.Run "cmd /c ""${escapeForCmd(helperCmd)}""", 0, False`,
+  ].join('\r\n');
+  fs.writeFileSync(helperVbs, `${vbs}\r\n`, 'utf8');
+
+  const child = spawn('wscript.exe', [helperVbs], {
     detached: true,
     stdio: 'ignore',
     windowsHide: true,
-    cwd: app.getPath('temp'),
+    cwd: temp,
   });
   child.unref();
 }
@@ -338,11 +381,11 @@ async function downloadAndInstall(setupUrl, latestTag) {
   sendProgress({
     status: 'installing',
     percent: 100,
-    message: 'Download complete. Installing and reopening ARK…',
+    message: 'Download complete. Installing — ARK will reopen automatically…',
     version: normalizeVersion(latestTag || ''),
   });
 
-  // Give the UI a beat to show the installing state, then hand off to the helper.
+  // Let the overlay paint, start the detached helper, then quit so NSIS can replace files.
   setTimeout(() => {
     try {
       launchInstallerThenRelaunch(dest);
@@ -356,10 +399,10 @@ async function downloadAndInstall(setupUrl, latestTag) {
       });
       return;
     }
-    app.quit();
-  }, 1200);
+    setTimeout(() => app.quit(), 600);
+  }, 1500);
 
-  return { ok: true, message: 'Download complete. Installing and reopening ARK…' };
+  return { ok: true, message: 'Download complete. Installing — ARK will reopen automatically…' };
 }
 
 module.exports = {

@@ -16,7 +16,9 @@ import { LocalAI } from '@/views/LocalAI';
 import { CreationViewer } from '@/views/CreationViewer';
 import { Settings } from '@/views/Settings';
 import { runCleanBootIfNeeded } from '@/lib/clearSession';
+import { getLocalPrefs } from '@/lib/localPrefs';
 import { UpdateOverlay } from '@/components/UpdateOverlay';
+import { useEffect } from 'react';
 import { Loader2 } from 'lucide-react';
 
 runCleanBootIfNeeded();
@@ -40,6 +42,13 @@ function AppRoutes() {
 
 function AppContent() {
   const { user, profile, loading } = useAuth();
+
+  useEffect(() => {
+    if (!window.arkDesktop?.loginItemSet) return;
+    if (getLocalPrefs().launchOnStartup) {
+      void window.arkDesktop.loginItemSet(true);
+    }
+  }, []);
 
   if (loading) {
     return (

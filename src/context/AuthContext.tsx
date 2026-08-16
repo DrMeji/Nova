@@ -120,6 +120,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await ensureFirstRunGate();
       if (cancelled) return;
 
+      // Migrate any browser localStorage auth session into Electron userData.
+      try {
+        if (window.arkDesktop?.authStorageSet) {
+          const legacy = Object.keys(localStorage).filter(k => /auth-token/i.test(k));
+          for (const k of legacy) {
+            const v = localStorage.getItem(k);
+            if (!v) continue;
+            const existing = await window.arkDesktop.authStorageGet?.(k);
+            if (!existing) await window.arkDesktop.authStorageSet(k, v);
+            if (k !== 'ark-auth-token') {
+              const primary = await window.arkDesktop.authStorageGet?.('ark-auth-token');
+              if (!primary) await window.arkDesktop.authStorageSet('ark-auth-token', v);
+            }
+          }
+        }
+      } catch {
+        /* ignore */
+      }
+
       void hydrateProviderApiKeys();
 
       let isPackaged = false;

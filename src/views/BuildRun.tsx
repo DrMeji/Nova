@@ -204,9 +204,6 @@ export function BuildRun() {
           <div className="flex items-center justify-between gap-4 mb-6">
             <div>
               <h1 className="text-3xl font-semibold text-content-primary tracking-tight">Plugins</h1>
-              <p className="text-sm text-content-secondary mt-1">
-                Connect tools you use while building — then pull them into chat when you need them.
-              </p>
             </div>
             <div className="flex items-center gap-2 rounded-full bg-surface-hover px-3.5 py-2 w-52 sm:w-64 shrink-0">
               <Search className="w-4 h-4 text-content-tertiary shrink-0" />

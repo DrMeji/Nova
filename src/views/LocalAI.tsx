@@ -320,9 +320,6 @@ export function LocalAI() {
           <div className="flex items-center justify-between gap-4 mb-5">
             <div>
               <h1 className="text-3xl font-semibold text-content-primary tracking-tight">Local AI</h1>
-              <p className="text-sm text-content-secondary mt-1">
-                ARK Engine — ARK’s own local brain on this PC. No third-party local app required.
-              </p>
             </div>
             <button
               type="button"

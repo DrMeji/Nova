@@ -9,6 +9,7 @@ const arkSecrets = require('./arkSecrets.cjs');
 const arkSystem = require('./arkSystem.cjs');
 const arkSetup = require('./arkSetup.cjs');
 const arkUpdater = require('./arkUpdater.cjs');
+const arkAuthStore = require('./arkAuthStore.cjs');
 
 const DEV_URL = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173';
 const isDev = process.env.ARK_DEV === '1';
@@ -180,6 +181,27 @@ ipcMain.handle('ark:update-download', async (_event, payload) =>
 );
 ipcMain.handle('ark:update-state', async () => arkUpdater.getState());
 ipcMain.handle('ark:post-update-consume', async () => arkUpdater.consumePostUpdate());
+
+ipcMain.handle('ark:auth-storage-get', async (_event, key) => arkAuthStore.getItem(key));
+ipcMain.handle('ark:auth-storage-set', async (_event, key, value) => arkAuthStore.setItem(key, value));
+ipcMain.handle('ark:auth-storage-remove', async (_event, key) => arkAuthStore.removeItem(key));
+
+ipcMain.handle('ark:login-item-get', async () => {
+  const s = app.getLoginItemSettings();
+  return { ok: true, openAtLogin: Boolean(s.openAtLogin), openAsHidden: Boolean(s.openAsHidden) };
+});
+
+ipcMain.handle('ark:login-item-set', async (_event, payload) => {
+  const enabled = Boolean(payload?.openAtLogin);
+  app.setLoginItemSettings({
+    openAtLogin: enabled,
+    openAsHidden: false,
+    path: process.execPath,
+    args: [],
+  });
+  const s = app.getLoginItemSettings();
+  return { ok: true, openAtLogin: Boolean(s.openAtLogin) };
+});
 
 ipcMain.handle('ark:app-meta', async () => ({
   ok: true,

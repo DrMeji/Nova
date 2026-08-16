@@ -23,6 +23,11 @@ contextBridge.exposeInMainWorld('arkDesktop', {
     ipcRenderer.on('ark:update-progress', listener);
     return () => ipcRenderer.removeListener('ark:update-progress', listener);
   },
+  authStorageGet: (key) => ipcRenderer.invoke('ark:auth-storage-get', key),
+  authStorageSet: (key, value) => ipcRenderer.invoke('ark:auth-storage-set', key, value),
+  authStorageRemove: (key) => ipcRenderer.invoke('ark:auth-storage-remove', key),
+  loginItemGet: () => ipcRenderer.invoke('ark:login-item-get'),
+  loginItemSet: (openAtLogin) => ipcRenderer.invoke('ark:login-item-set', { openAtLogin: Boolean(openAtLogin) }),
   setupGet: () => ipcRenderer.invoke('ark:setup-get'),
   setupSet: (completed) => ipcRenderer.invoke('ark:setup-set', { completed: Boolean(completed) }),
   windowMinimize: () => ipcRenderer.invoke('ark:window-minimize'),
