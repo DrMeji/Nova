@@ -17,6 +17,8 @@ export type ArkEngineStatus = {
   activeModelId: string;
   activeModelName: string;
   modelsDir: string;
+  modelsDirDefault?: string;
+  modelsDirIsCustom?: boolean;
   models: ArkEngineModel[];
   modelFiles?: Array<{ file: string; path: string; sizeMb: number }>;
   note: string;

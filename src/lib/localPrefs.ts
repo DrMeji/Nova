@@ -200,6 +200,16 @@ export function hasProviderApiKey(providerId: string) {
 /** App changelog shown in Settings → Updates. */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.16',
+    channel: 'stable' as const,
+    date: 'Aug 15, 2026',
+    title: 'ARK update splash + custom models folder',
+    notes: [
+      'Update splash is a real ARK window (no PowerShell in the taskbar)',
+      'Local AI → Advanced: change or reset the models folder path',
+    ],
+  },
+  {
     version: '0.1.15',
     channel: 'stable' as const,
     date: 'Aug 15, 2026',

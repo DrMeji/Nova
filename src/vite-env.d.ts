@@ -125,6 +125,29 @@ declare global {
         source: string;
         media?: { kind: string; dataUrl: string; path?: string; libraryId?: string; real?: boolean };
       }>;
+      modelsDirInfo?: () => Promise<{
+        modelsDir: string;
+        defaultModelsDir: string;
+        isCustom: boolean;
+      }>;
+      modelsDirPick?: () => Promise<{
+        ok: boolean;
+        canceled?: boolean;
+        modelsDir?: string;
+        isCustom?: boolean;
+        error?: string;
+      }>;
+      modelsDirSet?: (folderPath: string) => Promise<{
+        ok: boolean;
+        modelsDir?: string;
+        isCustom?: boolean;
+        error?: string;
+      }>;
+      modelsDirReset?: () => Promise<{
+        ok: boolean;
+        modelsDir: string;
+        isCustom: boolean;
+      }>;
       previewStart?: (payload: {
         projectId: string;
         projectName?: string;

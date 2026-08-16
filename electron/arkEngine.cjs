@@ -11,6 +11,7 @@ const { app } = require('electron');
 const arkMedia = require('./arkMedia.cjs');
 const arkGguf = require('./arkGguf.cjs');
 const arkFetch = require('./arkFetch.cjs');
+const arkPaths = require('./arkPaths.cjs');
 
 /** Default zero-key brain for new installs (~1 GB Q4). */
 const DEFAULT_BRAIN_ID = 'qwen25-15b';
@@ -67,7 +68,7 @@ const CATALOG = [
 ];
 
 function modelsDir() {
-  return path.join(app.getPath('userData'), 'ark-engine', 'models');
+  return arkPaths.modelsDir();
 }
 
 function ensureDirs() {
@@ -149,6 +150,8 @@ function getStatus() {
     activeModelId: active?.id ?? 'ark-core',
     activeModelName: active?.name ?? 'ARK Core',
     modelsDir: modelsDir(),
+    modelsDirDefault: arkPaths.defaultModelsDir(),
+    modelsDirIsCustom: arkPaths.modelsDirInfo().isCustom,
     models,
     modelFiles: arkGguf.listGgufFiles(),
     ggufBinary: Boolean(llamaBin),

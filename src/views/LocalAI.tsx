@@ -831,6 +831,67 @@ export function LocalAI() {
             <div className="space-y-10">
               <section>
                 <div className="flex items-center gap-2 mb-4">
+                  <FolderOpen className="w-4 h-4 text-content-secondary" />
+                  <h2 className="text-base font-semibold text-content-primary">Models folder</h2>
+                </div>
+                <p className="text-xs text-content-tertiary mb-3 leading-relaxed">
+                  GGUF weights download and load from this folder. Change it if you want models on another drive.
+                </p>
+                <p className="text-xs text-content-primary font-mono break-all mb-3 px-1">
+                  {engineMeta?.modelsDir ?? '—'}
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (!window.arkDesktop?.modelsDirPick) return;
+                      const res = await window.arkDesktop.modelsDirPick();
+                      if (res?.ok) {
+                        const next = await getEngineStatus();
+                        setEngineMeta(next);
+                      }
+                    }}
+                    className="inline-flex items-center gap-2 rounded-full bg-surface-hover px-3.5 py-2 text-sm text-content-primary hover:bg-surface-hover/80 transition-colors"
+                  >
+                    <FolderOpen className="w-3.5 h-3.5" />
+                    Change folder
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!engineMeta?.modelsDirIsCustom}
+                    onClick={async () => {
+                      if (!window.arkDesktop?.modelsDirReset) return;
+                      await window.arkDesktop.modelsDirReset();
+                      const next = await getEngineStatus();
+                      setEngineMeta(next);
+                    }}
+                    className="inline-flex items-center gap-2 rounded-full bg-surface-hover px-3.5 py-2 text-sm text-content-primary hover:bg-surface-hover/80 transition-colors disabled:opacity-40 disabled:pointer-events-none"
+                  >
+                    Use default
+                  </button>
+                  {engineMeta?.modelsDir && window.arkDesktop?.openPath && (
+                    <button
+                      type="button"
+                      onClick={() => void window.arkDesktop?.openPath?.(engineMeta.modelsDir)}
+                      className="inline-flex items-center gap-2 rounded-full bg-surface-hover px-3.5 py-2 text-sm text-content-primary hover:bg-surface-hover/80 transition-colors"
+                    >
+                      Open folder
+                    </button>
+                  )}
+                </div>
+                {engineMeta?.modelsDirIsCustom ? (
+                  <p className="text-[11px] text-content-tertiary mt-3">
+                    Custom path. Default is {engineMeta.modelsDirDefault ?? 'the ARK app data folder'}.
+                  </p>
+                ) : (
+                  <p className="text-[11px] text-content-tertiary mt-3">
+                    Using the default ARK Engine models location.
+                  </p>
+                )}
+              </section>
+
+              <section>
+                <div className="flex items-center gap-2 mb-4">
                   <Gauge className="w-4 h-4 text-content-secondary" />
                   <h2 className="text-base font-semibold text-content-primary">Engine parameters</h2>
                 </div>

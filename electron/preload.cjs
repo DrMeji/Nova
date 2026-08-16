@@ -47,6 +47,10 @@ contextBridge.exposeInMainWorld('arkDesktop', {
   engineEnsureRuntime: () => ipcRenderer.invoke('ark:engine-ensure-runtime'),
   engineGenerate: (message, modelId, kind) =>
     ipcRenderer.invoke('ark:engine-generate', { message, modelId, kind }),
+  modelsDirInfo: () => ipcRenderer.invoke('ark:models-dir-info'),
+  modelsDirPick: () => ipcRenderer.invoke('ark:models-dir-pick'),
+  modelsDirSet: (folderPath) => ipcRenderer.invoke('ark:models-dir-set', folderPath),
+  modelsDirReset: () => ipcRenderer.invoke('ark:models-dir-reset'),
   previewStart: (payload) => ipcRenderer.invoke('ark:preview-start', payload),
   previewStop: (projectId) => ipcRenderer.invoke('ark:preview-stop', projectId),
   previewStatus: (projectId) => ipcRenderer.invoke('ark:preview-status', projectId),

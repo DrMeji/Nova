@@ -1,14 +1,14 @@
 /**
  * In-app updates via public DrMeji/ark-dist Releases.
  *
- * Flow: quit ARK → hidden splash downloads/installs → reopen ARK.
- * Helper is launched via wscript so no cmd/PowerShell windows appear,
- * and so Electron's job object cannot kill the updater on quit.
+ * Normal app: spawn a second ARK.exe with --ark-updater (Electron splash — no PowerShell).
+ * Updater process: small black BrowserWindow → download → silent install → relaunch ARK.
  */
 
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
+const http = require('http');
 const { spawn } = require('child_process');
 const { app, BrowserWindow } = require('electron');
 
@@ -120,12 +120,51 @@ function isNewer(latest, current) {
   return false;
 }
 
-function psSingleQuote(p) {
-  return `'${String(p).replace(/'/g, "''")}'`;
+function downloadFile(url, dest, onProgress) {
+  return new Promise((resolve, reject) => {
+    const follow = (currentUrl, redirectsLeft) => {
+      const mod = currentUrl.startsWith('http://') ? http : https;
+      const req = mod.get(
+        currentUrl,
+        { headers: { 'User-Agent': 'ARK-Desktop', Accept: '*/*' } },
+        (res) => {
+          const code = res.statusCode || 0;
+          if ([301, 302, 303, 307, 308].includes(code) && res.headers.location) {
+            if (redirectsLeft <= 0) {
+              reject(new Error('Too many redirects'));
+              return;
+            }
+            res.resume();
+            follow(res.headers.location, redirectsLeft - 1);
+            return;
+          }
+          if (code !== 200) {
+            res.resume();
+            reject(new Error(`Download failed (${code})`));
+            return;
+          }
+          const total = parseInt(res.headers['content-length'] || '0', 10) || 0;
+          let received = 0;
+          const out = fs.createWriteStream(dest);
+          res.on('data', (chunk) => {
+            received += chunk.length;
+            if (total > 0 && onProgress) {
+              onProgress(Math.min(99, Math.round((received / total) * 100)));
+            }
+          });
+          res.pipe(out);
+          out.on('finish', () => out.close(() => resolve({ bytes: received })));
+          out.on('error', reject);
+        },
+      );
+      req.on('error', reject);
+      req.setTimeout(10 * 60_000, () => req.destroy(new Error('Download timeout')));
+    };
+    follow(url, 8);
+  });
 }
 
-function resolveUpdateIcon(tempDir) {
-  const dest = path.join(tempDir, 'ark-update-icon.png');
+function resolveUpdateIcon() {
   const candidates = [
     path.join(app.getAppPath(), 'dist', 'ark-icon.png'),
     path.join(__dirname, '..', 'dist', 'ark-icon.png'),
@@ -134,10 +173,7 @@ function resolveUpdateIcon(tempDir) {
   ];
   for (const src of candidates) {
     try {
-      if (fs.existsSync(src)) {
-        fs.copyFileSync(src, dest);
-        return dest;
-      }
+      if (fs.existsSync(src)) return src;
     } catch {
       /* try next */
     }
@@ -145,279 +181,186 @@ function resolveUpdateIcon(tempDir) {
   return null;
 }
 
-/**
- * Discord-style splash. Launched with wscript (no console windows).
- */
-function launchUpdateSplash({ setupPath, setupUrl, expectedVersion }) {
-  const appExe = process.execPath;
-  const installDir = path.dirname(appExe);
-  const temp = app.getPath('temp');
-  const stamp = Date.now();
-  const helperPs1 = path.join(temp, `ark-update-${stamp}.ps1`);
-  const helperVbs = path.join(temp, `ark-update-${stamp}.vbs`);
-  const logFile = path.join(temp, `ark-update-${stamp}.log`);
-  const iconPath = resolveUpdateIcon(temp);
-  const dest =
-    setupPath ||
-    path.join(temp, `ARK-Setup-${normalizeVersion(expectedVersion || 'update')}.exe`);
-
-  const localPrograms = path.join(process.env.LOCALAPPDATA || '', 'Programs', 'ARK', 'ARK.exe');
-  const programFiles = path.join(process.env.ProgramFiles || 'C:\\Program Files', 'ARK', 'ARK.exe');
-
-  // ASCII-only labels — avoids mojibake like "Installingâ€¦" in WinForms.
-  const ps = `
-$ErrorActionPreference = 'Continue'
-Add-Type -AssemblyName System.Windows.Forms
-Add-Type -AssemblyName System.Drawing
-[System.Windows.Forms.Application]::EnableVisualStyles()
-
-$log = ${psSingleQuote(logFile)}
-function Write-Log($m) {
-  try { Add-Content -Path $log -Value ("[{0}] {1}" -f (Get-Date -Format o), $m) } catch {}
-}
-Write-Log 'splash helper start'
-
-$setup = ${psSingleQuote(dest)}
-$setupUrl = ${setupUrl ? psSingleQuote(setupUrl) : "''"}
-$expected = ${psSingleQuote(normalizeVersion(expectedVersion || ''))}
-$exe = ${psSingleQuote(appExe)}
-$installDir = ${psSingleQuote(installDir)}
-$local = ${psSingleQuote(localPrograms)}
-$pf = ${psSingleQuote(programFiles)}
-$icon = ${iconPath ? psSingleQuote(iconPath) : "''"}
-$helperPs1 = ${psSingleQuote(helperPs1)}
-$helperVbs = ${psSingleQuote(helperVbs)}
-
-$boxW = 380
-$boxH = 240
-$form = New-Object System.Windows.Forms.Form
-$form.Text = 'ARK'
-$form.FormBorderStyle = 'None'
-$form.StartPosition = 'Manual'
-$form.AutoScaleMode = 'None'
-$form.Size = New-Object System.Drawing.Size($boxW, $boxH)
-$form.MinimumSize = $form.Size
-$form.MaximumSize = $form.Size
-$form.MaximizeBox = $false
-$form.MinimizeBox = $false
-$form.ControlBox = $false
-$form.TopMost = $true
-$form.ShowInTaskbar = $true
-$form.BackColor = [System.Drawing.Color]::FromArgb(10, 10, 12)
-$wa = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
-$form.Location = New-Object System.Drawing.Point(
-  [int]($wa.Left + ($wa.Width - $boxW) / 2),
-  [int]($wa.Top + ($wa.Height - $boxH) / 2)
-)
-
-$pic = New-Object System.Windows.Forms.PictureBox
-$pic.Size = New-Object System.Drawing.Size(56, 68)
-$pic.Location = New-Object System.Drawing.Point([int](($boxW - 56) / 2), 36)
-$pic.SizeMode = 'Zoom'
-if ($icon -and (Test-Path -LiteralPath $icon)) {
-  try { $pic.Image = [System.Drawing.Image]::FromFile($icon) } catch {}
-}
-$form.Controls.Add($pic)
-
-$title = New-Object System.Windows.Forms.Label
-$title.Text = 'Updating...'
-$title.ForeColor = [System.Drawing.Color]::White
-$title.Font = New-Object System.Drawing.Font('Segoe UI', 12, [System.Drawing.FontStyle]::Bold)
-$title.AutoSize = $false
-$title.Size = New-Object System.Drawing.Size($boxW, 28)
-$title.Location = New-Object System.Drawing.Point(0, 122)
-$title.TextAlign = 'MiddleCenter'
-$form.Controls.Add($title)
-
-$barW = 240
-$track = New-Object System.Windows.Forms.Panel
-$track.Size = New-Object System.Drawing.Size($barW, 6)
-$track.Location = New-Object System.Drawing.Point([int](($boxW - $barW) / 2), 172)
-$track.BackColor = [System.Drawing.Color]::FromArgb(40, 40, 44)
-$form.Controls.Add($track)
-
-$fill = New-Object System.Windows.Forms.Panel
-$fill.Size = New-Object System.Drawing.Size(8, 6)
-$fill.Location = New-Object System.Drawing.Point(0, 0)
-$fill.BackColor = [System.Drawing.Color]::FromArgb(210, 214, 220)
-$track.Controls.Add($fill)
-
-function Set-Progress([int]$value, [string]$label) {
-  if ($value -lt 0) { $value = 0 }
-  if ($value -gt 100) { $value = 100 }
-  $fill.Width = [Math]::Max(8, [int]($barW * ($value / 100.0)))
-  if ($label) { $title.Text = $label }
-  [System.Windows.Forms.Application]::DoEvents()
-}
-
-function Get-ArkTarget {
-  foreach ($c in @($exe, $local, $pf)) {
-    if ($c -and (Test-Path -LiteralPath $c)) { return $c }
-  }
-  return $null
-}
-
-function Start-ArkNow {
-  $target = Get-ArkTarget
-  if (-not $target) { Write-Log 'ARK.exe not found'; return $false }
-  $dir = Split-Path -Parent $target
-  for ($i = 0; $i -lt 30; $i++) {
-    try {
-      # UseShellExecute avoids attaching ARK to any leftover console.
-      $psi = New-Object System.Diagnostics.ProcessStartInfo
-      $psi.FileName = $target
-      $psi.WorkingDirectory = $dir
-      $psi.UseShellExecute = $true
-      $psi.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Normal
-      [void][System.Diagnostics.Process]::Start($psi)
-      Write-Log ("started " + $target)
-      return $true
-    } catch {
-      Write-Log ("start retry " + $i + ": " + $_.Exception.Message)
-      Start-Sleep -Milliseconds 200
-    }
-  }
-  return $false
-}
-
-function Wait-ArkExit {
-  $deadline = (Get-Date).AddSeconds(45)
-  while ((Get-Date) -lt $deadline) {
-    $alive = @(Get-Process -Name 'ARK' -ErrorAction SilentlyContinue)
-    if ($alive.Count -eq 0) {
-      Start-Sleep -Milliseconds 350
-      $alive = @(Get-Process -Name 'ARK' -ErrorAction SilentlyContinue)
-      if ($alive.Count -eq 0) { return }
-    }
-    Set-Progress 6 'Waiting to update...'
-    Start-Sleep -Milliseconds 80
-  }
-  Write-Log 'forcing ARK exit'
-  Get-Process -Name 'ARK' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-  Start-Sleep -Milliseconds 400
-}
-
-function Download-Setup {
-  if ($setup -and (Test-Path -LiteralPath $setup) -and ((Get-Item -LiteralPath $setup).Length -gt 1000000)) {
-    Write-Log 'setup already on disk'
-    return $true
-  }
-  if (-not $setupUrl) { return $false }
-  Set-Progress 8 'Downloading update...'
-  Write-Log ("download " + $setupUrl)
+function pidAlive(pid) {
+  if (!pid || !Number.isFinite(pid)) return false;
   try {
-    $tmp = $setup + '.partial'
-    if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
-    $req = [System.Net.HttpWebRequest]::Create($setupUrl)
-    $req.UserAgent = 'ARK-Desktop'
-    $req.AllowAutoRedirect = $true
-    $req.Timeout = 600000
-    $resp = $req.GetResponse()
-    $total = [int64]$resp.ContentLength
-    $stream = $resp.GetResponseStream()
-    $out = [System.IO.File]::Open($tmp, 'Create')
-    $buf = New-Object byte[] 65536
-    $got = [int64]0
-    while (($n = $stream.Read($buf, 0, $buf.Length)) -gt 0) {
-      $out.Write($buf, 0, $n)
-      $got += $n
-      if ($total -gt 0) {
-        Set-Progress ([Math]::Min(55, 8 + [int](47 * ($got / $total)))) 'Downloading update...'
-      }
-    }
-    $out.Close(); $stream.Close(); $resp.Close()
-    if (Test-Path -LiteralPath $setup) { Remove-Item -LiteralPath $setup -Force -ErrorAction SilentlyContinue }
-    Move-Item -LiteralPath $tmp -Destination $setup -Force
-    Write-Log ("download ok bytes=" + $got)
-    return $true
+    process.kill(pid, 0);
+    return true;
   } catch {
-    Write-Log ("download failed: " + $_.Exception.Message)
-    return $false
+    return false;
   }
 }
 
-function Install-Setup {
-  if (-not (Test-Path -LiteralPath $setup)) { return $false }
-  Set-Progress 60 'Installing...'
-  Write-Log ("installer " + $setup)
-  $args = @('/S', '--updated', ('/D=' + $installDir))
-  $p = Start-Process -FilePath $setup -ArgumentList $args -PassThru -WindowStyle Hidden
-  $tick = 62
-  while ($p -and -not $p.HasExited) {
-    $tick = [Math]::Min(92, $tick + 1)
-    Set-Progress $tick 'Installing...'
-    Start-Sleep -Milliseconds 100
-    try { $p.Refresh() } catch { break }
-  }
-  Write-Log ("installer exit=" + $(if ($p) { $p.ExitCode } else { 'n/a' }))
-  return ($p -and $p.ExitCode -eq 0)
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
 }
 
-$form.Show()
-$form.Activate()
-[System.Windows.Forms.Application]::DoEvents()
-Set-Progress 3 'Updating...'
-Write-Log 'splash visible'
-
-try {
-  Wait-ArkExit
-  if (-not (Download-Setup)) {
-    Set-Progress 100 'Update failed'
-    Start-Sleep -Seconds 2
-    throw 'download failed'
-  }
-  $ok = Install-Setup
-  if (-not $ok) {
-    Start-Sleep -Milliseconds 600
-    $ok = Install-Setup
-  }
-  Write-Log ("post-install ok=" + $ok)
-
-  # Close splash first, then launch ARK with no console inheritance.
-  try { $form.Hide(); $form.Close(); $form.Dispose() } catch {}
-  Start-Sleep -Milliseconds 100
-  if (-not (Start-ArkNow)) { Write-Log 'relaunch failed' }
-} catch {
-  Write-Log ("helper error: " + $_)
-  try { Start-ArkNow | Out-Null } catch {}
-  try { $form.Close(); $form.Dispose() } catch {}
-} finally {
-  Remove-Item -LiteralPath $helperPs1 -Force -ErrorAction SilentlyContinue
-  Remove-Item -LiteralPath $helperVbs -Force -ErrorAction SilentlyContinue
-  if ($icon) { Remove-Item -LiteralPath $icon -Force -ErrorAction SilentlyContinue }
-  Write-Log 'splash helper done'
+function splashHtml(iconFileUrl) {
+  const icon = iconFileUrl
+    ? `<img src="${iconFileUrl}" alt="ARK" width="56" height="56" style="object-fit:contain;display:block;margin:0 auto 18px;" />`
+    : `<div style="width:56px;height:56px;margin:0 auto 18px;border-radius:12px;background:#1a1a10;"></div>`;
+  return `<!DOCTYPE html>
+<html><head><meta charset="utf-8" />
+<style>
+  html,body{margin:0;height:100%;background:#0a0a0c;color:#fff;font-family:Segoe UI,system-ui,sans-serif;overflow:hidden;user-select:none;}
+  .wrap{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:28px 32px 36px;box-sizing:border-box;}
+  #label{font-size:15px;font-weight:600;letter-spacing:0.01em;margin:0 0 18px;}
+  .track{width:240px;height:6px;border-radius:999px;background:#28282c;overflow:hidden;}
+  #fill{height:100%;width:4%;border-radius:999px;background:#d2d6dc;transition:width 0.15s ease-out;}
+</style></head>
+<body>
+  <div class="wrap">
+    ${icon}
+    <div id="label">Updating...</div>
+    <div class="track"><div id="fill"></div></div>
+  </div>
+  <script>
+    window.__arkSet = function(pct, text) {
+      var f = document.getElementById('fill');
+      var l = document.getElementById('label');
+      if (f) f.style.width = Math.max(4, Math.min(100, pct || 0)) + '%';
+      if (l && text) l.textContent = text;
+    };
+  </script>
+</body></html>`;
 }
-`;
 
-  fs.writeFileSync(helperPs1, ps, 'utf8');
+async function setSplash(win, pct, text) {
+  if (!win || win.isDestroyed()) return;
+  const safe = String(text || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+  try {
+    await win.webContents.executeJavaScript(
+      `window.__arkSet && window.__arkSet(${Number(pct) || 0}, '${safe}')`,
+    );
+  } catch {
+    /* ignore */
+  }
+}
 
-  const powershell = path.join(
-    process.env.SystemRoot || 'C:\\Windows',
-    'System32',
-    'WindowsPowerShell',
-    'v1.0',
-    'powershell.exe',
-  );
-
-  // wscript Run style 0 = fully hidden — no cmd / PowerShell / "ARKUpdate" windows.
-  const vbs = [
-    'Set sh = CreateObject("WScript.Shell")',
-    `sh.Run """${powershell}"" -NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File ""${helperPs1}""", 0, False`,
-  ].join('\r\n');
-  fs.writeFileSync(helperVbs, vbs, 'utf8');
-
-  const child = spawn(
-    path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'wscript.exe'),
-    [helperVbs],
-    {
-      detached: true,
-      stdio: 'ignore',
+function runInstaller(setupPath, installDir) {
+  return new Promise((resolve) => {
+    const args = ['/S', '--updated', `/D=${installDir}`];
+    const child = spawn(setupPath, args, {
       windowsHide: true,
-      cwd: temp,
-    },
-  );
+      stdio: 'ignore',
+      detached: false,
+    });
+    child.on('error', () => resolve(1));
+    child.on('exit', (code) => resolve(code ?? 1));
+  });
+}
+
+function startArk(exePath) {
+  const dir = path.dirname(exePath);
+  const child = spawn(exePath, [], {
+    detached: true,
+    stdio: 'ignore',
+    cwd: dir,
+    windowsHide: false,
+  });
   child.unref();
-  return { helperPs1, helperVbs, logFile };
+}
+
+/**
+ * Standalone updater process entry (ARK.exe --ark-updater <url> <version> <parentPid>).
+ */
+async function runStandaloneSplash(argv) {
+  const idx = argv.indexOf('--ark-updater');
+  const setupUrl = argv[idx + 1];
+  const expectedVersion = normalizeVersion(argv[idx + 2] || '');
+  const parentPid = parseInt(argv[idx + 3] || '', 10);
+
+  if (!setupUrl || !/^https:\/\//i.test(setupUrl)) {
+    app.quit();
+    return;
+  }
+
+  const iconPath = resolveUpdateIcon();
+  const iconUrl = iconPath ? `file://${iconPath.replace(/\\/g, '/')}` : '';
+
+  const win = new BrowserWindow({
+    width: 400,
+    height: 250,
+    frame: false,
+    resizable: false,
+    maximizable: false,
+    minimizable: false,
+    fullscreenable: false,
+    backgroundColor: '#0a0a0c',
+    show: true,
+    alwaysOnTop: true,
+    center: true,
+    autoHideMenuBar: true,
+    title: 'ARK',
+    icon: iconPath || undefined,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  });
+  win.setMenuBarVisibility(false);
+  await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(splashHtml(iconUrl))}`);
+  await setSplash(win, 4, 'Updating...');
+
+  const installDir = path.dirname(process.execPath);
+  const dest = path.join(app.getPath('temp'), `ARK-Setup-${expectedVersion || 'update'}.exe`);
+
+  try {
+    await setSplash(win, 6, 'Waiting to update...');
+    const deadline = Date.now() + 45_000;
+    while (pidAlive(parentPid) && Date.now() < deadline) {
+      await sleep(100);
+    }
+    await sleep(350);
+
+    await setSplash(win, 10, 'Downloading update...');
+    try {
+      if (fs.existsSync(dest)) fs.unlinkSync(dest);
+    } catch {
+      /* ignore */
+    }
+
+    await downloadFile(setupUrl, dest, async (pct) => {
+      const mapped = 10 + Math.round((pct / 100) * 45);
+      await setSplash(win, mapped, 'Downloading update...');
+    });
+
+    await setSplash(win, 60, 'Installing...');
+    let code = await runInstaller(dest, installDir);
+    if (code !== 0) {
+      await sleep(600);
+      code = await runInstaller(dest, installDir);
+    }
+
+    await setSplash(win, 96, 'Opening ARK...');
+    await sleep(150);
+
+    const candidates = [
+      process.execPath,
+      path.join(process.env.LOCALAPPDATA || '', 'Programs', 'ARK', 'ARK.exe'),
+      path.join(process.env.ProgramFiles || 'C:\\Program Files', 'ARK', 'ARK.exe'),
+    ];
+    const target = candidates.find((c) => c && fs.existsSync(c)) || process.execPath;
+
+    try {
+      if (!win.isDestroyed()) win.close();
+    } catch {
+      /* ignore */
+    }
+
+    startArk(target);
+  } catch (err) {
+    console.error('[ark-updater]', err);
+    try {
+      await setSplash(win, 100, 'Update failed');
+      await sleep(2000);
+    } catch {
+      /* ignore */
+    }
+  } finally {
+    app.quit();
+  }
 }
 
 async function checkForUpdate() {
@@ -508,6 +451,9 @@ async function checkForUpdate() {
   }
 }
 
+/**
+ * Quit main ARK and spawn Electron updater splash (same ARK.exe, no PowerShell).
+ */
 async function downloadAndInstall(setupUrl, latestTag) {
   if (!app.isPackaged) {
     return {
@@ -520,8 +466,6 @@ async function downloadAndInstall(setupUrl, latestTag) {
   }
 
   const expectedVersion = normalizeVersion(latestTag || '');
-  const dest = path.join(app.getPath('temp'), `ARK-Setup-${expectedVersion || 'update'}.exe`);
-
   markPostUpdateLandChat();
   sendProgress({
     status: 'installing',
@@ -532,9 +476,18 @@ async function downloadAndInstall(setupUrl, latestTag) {
 
   setTimeout(() => {
     try {
-      launchUpdateSplash({ setupPath: dest, setupUrl, expectedVersion });
+      const child = spawn(
+        process.execPath,
+        ['--ark-updater', setupUrl, expectedVersion, String(process.pid)],
+        {
+          detached: true,
+          stdio: 'ignore',
+          cwd: path.dirname(process.execPath),
+        },
+      );
+      child.unref();
     } catch (err) {
-      console.error('[ark] failed to launch update splash', err);
+      console.error('[ark] failed to launch updater', err);
       sendProgress({
         status: 'error',
         percent: 0,
@@ -543,7 +496,7 @@ async function downloadAndInstall(setupUrl, latestTag) {
       });
       return;
     }
-    setTimeout(() => app.quit(), 450);
+    setTimeout(() => app.quit(), 500);
   }, 200);
 
   return { ok: true, message: 'Closing ARK to update...' };
@@ -554,5 +507,6 @@ module.exports = {
   downloadAndInstall,
   getState,
   consumePostUpdate,
+  runStandaloneSplash,
   UPDATE_REPO,
 };

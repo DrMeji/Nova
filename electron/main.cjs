@@ -1,4 +1,4 @@
-const { app, BrowserWindow, shell, ipcMain } = require('electron');
+const { app, BrowserWindow, shell, ipcMain, dialog } = require('electron');
 const path = require('path');
 const http = require('http');
 const arkEngine = require('./arkEngine.cjs');
@@ -10,6 +10,7 @@ const arkSystem = require('./arkSystem.cjs');
 const arkSetup = require('./arkSetup.cjs');
 const arkUpdater = require('./arkUpdater.cjs');
 const arkAuthStore = require('./arkAuthStore.cjs');
+const arkPaths = require('./arkPaths.cjs');
 
 const DEV_URL = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173';
 const isDev = process.env.ARK_DEV === '1';
@@ -314,6 +315,32 @@ ipcMain.handle('ark:engine-generate', async (_e, payload) =>
   }),
 );
 
+ipcMain.handle('ark:models-dir-info', async () => arkPaths.modelsDirInfo());
+ipcMain.handle('ark:models-dir-pick', async () => {
+  const win = BrowserWindow.getFocusedWindow() || mainWindow;
+  const result = await dialog.showOpenDialog(win || undefined, {
+    title: 'Choose ARK models folder',
+    properties: ['openDirectory', 'createDirectory'],
+    defaultPath: arkPaths.modelsDir(),
+  });
+  if (result.canceled || !result.filePaths?.[0]) {
+    return { ok: false, canceled: true, ...arkPaths.modelsDirInfo() };
+  }
+  return { ...arkPaths.setModelsDir(result.filePaths[0]), canceled: false };
+});
+ipcMain.handle('ark:models-dir-set', async (_e, folderPath) => {
+  try {
+    return arkPaths.setModelsDir(folderPath);
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : 'Could not set folder',
+      ...arkPaths.modelsDirInfo(),
+    };
+  }
+});
+ipcMain.handle('ark:models-dir-reset', async () => arkPaths.resetModelsDir());
+
 ipcMain.handle('ark:preview-start', async (_e, payload) =>
   arkPreview.startPreview(payload || {}),
 );
@@ -481,6 +508,9 @@ function startBrainApi() {
 }
 
 app.whenReady().then(() => {
+  if (process.argv.includes('--ark-updater')) {
+    return arkUpdater.runStandaloneSplash(process.argv);
+  }
   arkEngine.start();
   startBrainApi();
   createWindow();

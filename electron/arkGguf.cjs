@@ -9,16 +9,17 @@ const path = require('path');
 const { spawn, execFile } = require('child_process');
 const { app } = require('electron');
 const arkFetch = require('./arkFetch.cjs');
+const arkPaths = require('./arkPaths.cjs');
 
 /** Pinned llama.cpp release — CPU builds for zero-key local chat. */
 const LLAMA_TAG = 'b9992';
 
 function modelsDir() {
-  return path.join(app.getPath('userData'), 'ark-engine', 'models');
+  return arkPaths.modelsDir();
 }
 
 function binDir() {
-  return path.join(app.getPath('userData'), 'ark-engine', 'bin');
+  return arkPaths.binDir();
 }
 
 function ensureDirs() {
