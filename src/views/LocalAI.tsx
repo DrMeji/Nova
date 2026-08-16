@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from '@/context/RouterContext';
-import { detectHardware, detectHardwareAsync, getHardwareClass, getRecommendedModel, type HardwareInfo } from '@/lib/api';
+import { detectHardware, getAccurateHardware, getHardwareClass, getRecommendedModel, loadHardwareSnapshot, type HardwareInfo } from '@/lib/api';
 import { getLocalPrefs, setLocalPrefs } from '@/lib/localPrefs';
 import {
   downloadEngineModel,
   engineDownloadProgress,
   getEngineStatus,
+  importGgufPick,
   setEngineModel,
   startEngine,
   stopEngine,
@@ -30,33 +31,6 @@ type TabId = 'overview' | 'speed' | 'hardware' | 'storage' | 'advanced';
 
 const NEXT_PRELOAD_MODEL = { name: 'Qwen2.5-Coder 7B', sizeGb: 4.7 };
 
-const INSTALLED = [
-  {
-    id: 'qwen25-15b',
-    name: 'Qwen2.5 1.5B Instruct',
-    detail: 'Default local brain · 1.0 GB · Q4_K_M',
-    tone: 'from-emerald-400 to-green-700',
-    initial: 'Q1',
-    active: true,
-  },
-  {
-    id: 'llama32-3b',
-    name: 'Llama 3.2 3B Instruct',
-    detail: 'General · 2.0 GB · Q4_K_M',
-    tone: 'from-violet-500 to-indigo-700',
-    initial: 'L3',
-    active: false,
-  },
-  {
-    id: 'qwen25-coder-7b',
-    name: 'Qwen2.5-Coder 7B',
-    detail: 'Coding · 4.7 GB · Q4_K_M',
-    tone: 'from-blue-500 to-indigo-700',
-    initial: 'Q7',
-    active: false,
-  },
-];
-
 const CATALOG = [
   {
     id: 'qwen25-15b',
@@ -78,6 +52,76 @@ const CATALOG = [
     detail: 'Coding · ~4.7 GB · Q4_K_M',
     tone: 'from-cyan-500 to-teal-700',
     initial: 'Q7',
+  },
+  {
+    id: 'qwen25-coder-14b',
+    name: 'Qwen2.5-Coder 14B',
+    detail: 'Coding · ~9.0 GB · Q4_K_M · needs ~16 GB+ RAM',
+    tone: 'from-blue-500 to-indigo-700',
+    initial: '14',
+  },
+  {
+    id: 'qwen25-coder-32b',
+    name: 'Qwen2.5-Coder 32B',
+    detail: 'Coding · ~20 GB · Q4_K_M · needs ~32 GB+ RAM',
+    tone: 'from-indigo-500 to-violet-800',
+    initial: '32',
+  },
+  {
+    id: 'deepseek-coder-v2-lite',
+    name: 'DeepSeek Coder V2 Lite',
+    detail: 'Coding · ~8.9 GB · Q4_K_M',
+    tone: 'from-cyan-500 to-teal-700',
+    initial: 'DS',
+  },
+  {
+    id: 'starcoder2-7b',
+    name: 'StarCoder2 7B',
+    detail: 'Coding · ~4.3 GB · Q4_K_M',
+    tone: 'from-amber-500 to-orange-700',
+    initial: 'Sc',
+  },
+  {
+    id: 'qwen25-7b',
+    name: 'Qwen2.5 7B Instruct',
+    detail: 'General · ~4.7 GB · Q4_K_M',
+    tone: 'from-sky-400 to-blue-700',
+    initial: 'Q7',
+  },
+  {
+    id: 'llama31-8b',
+    name: 'Llama 3.1 8B Instruct',
+    detail: 'General · ~4.9 GB · Q4_K_M',
+    tone: 'from-indigo-500 to-blue-800',
+    initial: 'L8',
+  },
+  {
+    id: 'mistral-7b',
+    name: 'Mistral 7B Instruct',
+    detail: 'General · ~4.1 GB · Q4_K_M',
+    tone: 'from-orange-400 to-amber-700',
+    initial: 'Mi',
+  },
+  {
+    id: 'gemma2-2b',
+    name: 'Gemma 2 2B Instruct',
+    detail: 'Fast · ~1.6 GB · Q4_K_M',
+    tone: 'from-teal-400 to-cyan-700',
+    initial: 'G2',
+  },
+  {
+    id: 'phi3-mini',
+    name: 'Phi-3 Mini Instruct',
+    detail: 'Fast · ~2.3 GB · Q4_K_M',
+    tone: 'from-cyan-400 to-sky-700',
+    initial: 'Φ3',
+  },
+  {
+    id: 'deepseek-r1-distill-8b',
+    name: 'DeepSeek-R1 Distill 8B',
+    detail: 'Reasoning · ~5.2 GB · Q4_K_M',
+    tone: 'from-fuchsia-500 to-purple-800',
+    initial: 'R1',
   },
 ];
 
@@ -104,14 +148,21 @@ function StatusDot({ on }: { on: boolean }) {
 export function LocalAI() {
   const { navigate } = useRouter();
   const [tab, setTab] = useState<TabId>('overview');
-  const [hw, setHw] = useState<HardwareInfo>(() => detectHardware());
-  const [recommendation] = useState(() => getRecommendedModel(detectHardware()));
+  const [hw, setHw] = useState<HardwareInfo>(() => loadHardwareSnapshot() || detectHardware());
+  const [recommendation, setRecommendation] = useState(() => getRecommendedModel(loadHardwareSnapshot() || detectHardware()));
   const [engineRunning, setEngineRunning] = useState(false);
   const [enginePhase, setEnginePhase] = useState<'offline' | 'starting' | 'online'>('offline');
-  const [installed, setInstalled] = useState(() => [...INSTALLED]);
+  const [installed, setInstalled] = useState<Array<{
+    id: string;
+    name: string;
+    detail: string;
+    tone: string;
+    initial: string;
+    active: boolean;
+  }>>([]);
   const [activeId, setActiveId] = useState(() => getLocalPrefs().defaultModelId || recommendation.id);
-  const [downloadingId, setDownloadingId] = useState<string | null>(null);
-  const [downloadProgress, setDownloadProgress] = useState(0);
+  const [downloadProgressMap, setDownloadProgressMap] = useState<Record<string, number>>({});
+  const downloadingIds = Object.keys(downloadProgressMap);
   const [statusNote, setStatusNote] = useState('Starting ARK Engine…');
   const [engineMeta, setEngineMeta] = useState<ArkEngineStatus | null>(null);
   const [brainNote, setBrainNote] = useState('Brain API · checking');
@@ -122,8 +173,10 @@ export function LocalAI() {
 
   useEffect(() => {
     let cancelled = false;
-    void detectHardwareAsync().then(info => {
-      if (!cancelled) setHw(info);
+    void getAccurateHardware(true).then(info => {
+      if (cancelled) return;
+      setHw(info);
+      setRecommendation(getRecommendedModel(info));
     });
     return () => {
       cancelled = true;
@@ -136,9 +189,14 @@ export function LocalAI() {
     setEngineRunning(status.phase === 'online');
     setActiveId(status.activeModelId);
     setStatusNote(status.note);
-    setInstalled(prev => {
-      const fromEngine = status.models
-        .filter(m => m.id !== 'ark-core' && m.status === 'ready')
+    setInstalled(
+      status.models
+        .filter(m =>
+          m.status === 'ready'
+          && m.id !== 'ark-core'
+          && m.id !== 'ark-image-core'
+          && m.id !== 'ark-video-core',
+        )
         .map(m => ({
           id: m.id,
           name: m.name,
@@ -146,10 +204,8 @@ export function LocalAI() {
           tone: 'from-emerald-400 to-green-700',
           initial: m.name.slice(0, 2).toUpperCase(),
           active: m.id === status.activeModelId,
-        }));
-      if (fromEngine.length === 0) return prev.map(m => ({ ...m, active: m.id === status.activeModelId }));
-      return fromEngine;
-    });
+        })),
+    );
   };
 
   useEffect(() => {
@@ -212,20 +268,22 @@ export function LocalAI() {
   };
 
   const downloadModel = (model: typeof CATALOG[number]) => {
-    if (downloadingId) return;
-    setDownloadingId(model.id);
-    setDownloadProgress(0);
+    if (downloadProgressMap[model.id] != null && downloadProgressMap[model.id] < 100) return;
+    setDownloadProgressMap(prev => ({ ...prev, [model.id]: 1 }));
     void downloadEngineModel(model.id).then(async () => {
       const tick = window.setInterval(async () => {
         const p = await engineDownloadProgress(model.id);
-        setDownloadProgress(p);
+        setDownloadProgressMap(prev => ({ ...prev, [model.id]: p }));
         try {
           const { engineDownloadError } = await import('@/lib/arkEngine');
           const err = await engineDownloadError(model.id);
           if (err) {
             window.clearInterval(tick);
-            setDownloadingId(null);
-            setDownloadProgress(0);
+            setDownloadProgressMap(prev => {
+              const next = { ...prev };
+              delete next[model.id];
+              return next;
+            });
             setStatusNote(err);
             return;
           }
@@ -234,15 +292,22 @@ export function LocalAI() {
         }
         if (p >= 100) {
           window.clearInterval(tick);
-          setDownloadingId(null);
-          setDownloadProgress(0);
+          setDownloadProgressMap(prev => {
+            const next = { ...prev };
+            delete next[model.id];
+            return next;
+          });
           const status = await getEngineStatus();
           applyEngine(status);
-          setStatusNote(`${model.name} ready in ARK Engine`);
+          setStatusNote(`${model.name} ready in ARK Engine — pick it in Chat`);
         }
       }, 350);
     }).catch(err => {
-      setDownloadingId(null);
+      setDownloadProgressMap(prev => {
+        const next = { ...prev };
+        delete next[model.id];
+        return next;
+      });
       setStatusNote(err instanceof Error ? err.message : 'Download failed');
     });
   };
@@ -452,15 +517,19 @@ export function LocalAI() {
                   </button>
                 </div>
                 <p className="text-xs text-content-tertiary mb-4">{statusNote}</p>
-                {downloadingId && (
-                  <div className="mb-4 rounded-xl border border-surface-border bg-ark-navy-900/40 px-3 py-2.5">
-                    <div className="flex items-center justify-between text-xs mb-1.5">
-                      <span className="text-content-secondary">Downloading model…</span>
-                      <span className="text-content-tertiary tabular-nums">{downloadProgress}%</span>
-                    </div>
-                    <div className="h-1 bg-surface-hover rounded-full overflow-hidden">
-                      <div className="h-full bg-emerald-400/80 transition-all" style={{ width: `${downloadProgress}%` }} />
-                    </div>
+                {downloadingIds.length > 0 && (
+                  <div className="mb-4 space-y-2">
+                    {downloadingIds.map(id => (
+                      <div key={id} className="rounded-xl border border-surface-border bg-ark-navy-900/40 px-3 py-2.5">
+                        <div className="flex items-center justify-between text-xs mb-1.5">
+                          <span className="text-content-secondary truncate">Downloading {id}…</span>
+                          <span className="text-content-tertiary tabular-nums">{Math.round(downloadProgressMap[id] || 0)}%</span>
+                        </div>
+                        <div className="h-1 bg-surface-hover rounded-full overflow-hidden">
+                          <div className="h-full bg-emerald-400/80 transition-all" style={{ width: `${downloadProgressMap[id] || 0}%` }} />
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 )}
                 <div className="flex flex-col">
@@ -510,7 +579,7 @@ export function LocalAI() {
                       key={model.id}
                       type="button"
                       onClick={() => downloadModel(model)}
-                      disabled={Boolean(downloadingId)}
+                      disabled={downloadProgressMap[model.id] != null && downloadProgressMap[model.id] < 100}
                       className="w-full flex items-center gap-3 py-3 px-1 rounded-xl text-left hover:bg-surface-hover/50 transition-colors disabled:opacity-50"
                     >
                       <span className={`w-10 h-10 rounded-xl bg-gradient-to-br ${model.tone} flex items-center justify-center text-[10px] font-bold text-white shrink-0`}>
@@ -518,10 +587,16 @@ export function LocalAI() {
                       </span>
                       <span className="min-w-0 flex-1">
                         <span className="text-sm font-medium text-content-primary truncate block">{model.name}</span>
-                        <span className="block text-xs text-content-tertiary truncate mt-0.5">{model.detail}</span>
+                        <span className="block text-xs text-content-tertiary truncate mt-0.5">
+                          {downloadProgressMap[model.id] != null && downloadProgressMap[model.id] < 100
+                            ? `Downloading… ${Math.round(downloadProgressMap[model.id])}%`
+                            : model.detail}
+                        </span>
                       </span>
                       <span className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 text-content-secondary hover:text-content-primary">
-                        {downloadingId === model.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                        {downloadProgressMap[model.id] != null && downloadProgressMap[model.id] < 100
+                          ? <Loader2 className="w-4 h-4 animate-spin" />
+                          : <Download className="w-4 h-4" />}
                       </span>
                     </button>
                   ))}
@@ -749,22 +824,22 @@ export function LocalAI() {
                     </p>
                     <button
                       type="button"
-                      disabled={Boolean(downloadingId)}
+                      disabled={downloadProgressMap[recommendation.id] != null && downloadProgressMap[recommendation.id] < 100}
                       onClick={() => {
                         const hit = CATALOG.find(m => m.id === recommendation.id) || CATALOG[0];
                         downloadModel(hit);
                       }}
                       className="mt-3 inline-flex items-center gap-2 rounded-full bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25 px-3.5 py-1.5 text-xs font-medium transition-colors disabled:opacity-50"
                     >
-                      {downloadingId === recommendation.id
-                        ? `Installing… ${Math.round(downloadProgress)}%`
+                      {downloadProgressMap[recommendation.id] != null && downloadProgressMap[recommendation.id] < 100
+                        ? `Installing… ${Math.round(downloadProgressMap[recommendation.id])}%`
                         : `Install recommended (${recommendation.size})`}
                     </button>
-                    {downloadingId === recommendation.id && (
+                    {downloadProgressMap[recommendation.id] != null && downloadProgressMap[recommendation.id] < 100 && (
                       <div className="mt-2 h-1.5 bg-surface-hover rounded-full overflow-hidden max-w-xs">
                         <div
                           className="h-full bg-emerald-500/80 rounded-full transition-all"
-                          style={{ width: `${Math.min(100, downloadProgress)}%` }}
+                          style={{ width: `${Math.min(100, downloadProgressMap[recommendation.id])}%` }}
                         />
                       </div>
                     )}
@@ -796,20 +871,73 @@ export function LocalAI() {
                     <FolderOpen className="w-4 h-4 text-content-secondary" />
                     <h2 className="text-base font-semibold text-content-primary">Downloaded models</h2>
                   </div>
-                  {engineMeta?.modelsDir && window.arkDesktop?.openPath && (
+                  <div className="flex items-center gap-2">
                     <button
                       type="button"
-                      onClick={() => void window.arkDesktop?.openPath?.(engineMeta.modelsDir)}
-                      className="inline-flex items-center gap-2 rounded-full bg-surface-hover px-3 py-1.5 text-xs text-content-primary hover:bg-surface-hover/80"
+                      onClick={() => {
+                        void importGgufPick()
+                          .then(res => {
+                            if (res.canceled || !res.ok) return;
+                            if (res.status) applyEngine(res.status);
+                            else void getEngineStatus().then(applyEngine);
+                            setStatusNote(`Imported ${res.count || 1} GGUF file(s)`);
+                          })
+                          .catch(err => {
+                            setStatusNote(err instanceof Error ? err.message : 'Import failed');
+                          });
+                      }}
+                      className="inline-flex items-center gap-2 rounded-full bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25 px-3 py-1.5 text-xs font-medium"
                     >
-                      <FolderOpen className="w-3.5 h-3.5" />
-                      Open folder
+                      <Download className="w-3.5 h-3.5" />
+                      Import GGUF
                     </button>
-                  )}
+                    {engineMeta?.modelsDir && window.arkDesktop?.openPath && (
+                      <button
+                        type="button"
+                        onClick={() => void window.arkDesktop?.openPath?.(engineMeta.modelsDir)}
+                        className="inline-flex items-center gap-2 rounded-full bg-surface-hover px-3 py-1.5 text-xs text-content-primary hover:bg-surface-hover/80"
+                      >
+                        <FolderOpen className="w-3.5 h-3.5" />
+                        Open folder
+                      </button>
+                    )}
+                  </div>
                 </div>
                 <p className="text-xs text-content-tertiary mb-3 font-mono break-all">
                   {engineMeta?.modelsDir ?? 'Open ARK Desktop to see the models folder on this PC.'}
                 </p>
+                <div
+                  className="mb-4 rounded-xl border border-dashed border-surface-border px-4 py-6 text-center text-xs text-content-tertiary"
+                  onDragOver={e => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                  }}
+                  onDrop={e => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const files = [...e.dataTransfer.files].filter(f => f.name.toLowerCase().endsWith('.gguf'));
+                    if (!files.length) {
+                      setStatusNote('Drop .gguf files only');
+                      return;
+                    }
+                    void (async () => {
+                      for (const f of files) {
+                        const p = (f as File & { path?: string }).path;
+                        if (!p || !window.arkDesktop?.engineImportGguf) {
+                          setStatusNote('Drag-drop import needs the desktop app');
+                          return;
+                        }
+                        const status = await window.arkDesktop.engineImportGguf(p);
+                        applyEngine(status);
+                      }
+                      setStatusNote(`Imported ${files.length} GGUF file(s)`);
+                    })().catch(err => {
+                      setStatusNote(err instanceof Error ? err.message : 'Import failed');
+                    });
+                  }}
+                >
+                  Drop .gguf files here, or use Import GGUF — they appear in Chat as soon as they’re ready.
+                </div>
                 {(engineMeta?.modelFiles?.length ?? 0) === 0 ? (
                   <p className="text-sm text-content-tertiary">
                     No GGUF files yet. Download a brain from Overview or finish first-run setup.

@@ -65,6 +65,86 @@ const CATALOG = [
     status: 'missing',
     url: 'https://huggingface.co/Qwen/Qwen2.5-Coder-7B-Instruct-GGUF/resolve/main/qwen2.5-coder-7b-instruct-q4_k_m.gguf',
   },
+  {
+    id: 'qwen25-coder-14b',
+    name: 'Qwen2.5-Coder 14B Instruct',
+    detail: 'Coding · ~9.0 GB · Q4_K_M · 16 GB+ RAM',
+    sizeGb: 9.0,
+    status: 'missing',
+    url: 'https://huggingface.co/bartowski/Qwen2.5-Coder-14B-Instruct-GGUF/resolve/main/Qwen2.5-Coder-14B-Instruct-Q4_K_M.gguf',
+  },
+  {
+    id: 'qwen25-coder-32b',
+    name: 'Qwen2.5-Coder 32B Instruct',
+    detail: 'Coding · ~20 GB · Q4_K_M · 32 GB+ RAM',
+    sizeGb: 20,
+    status: 'missing',
+    url: 'https://huggingface.co/bartowski/Qwen2.5-Coder-32B-Instruct-GGUF/resolve/main/Qwen2.5-Coder-32B-Instruct-Q4_K_M.gguf',
+  },
+  {
+    id: 'deepseek-coder-v2-lite',
+    name: 'DeepSeek Coder V2 Lite',
+    detail: 'Coding · ~8.9 GB · Q4_K_M',
+    sizeGb: 8.9,
+    status: 'missing',
+    url: 'https://huggingface.co/bartowski/DeepSeek-Coder-V2-Lite-Instruct-GGUF/resolve/main/DeepSeek-Coder-V2-Lite-Instruct-Q4_K_M.gguf',
+  },
+  {
+    id: 'starcoder2-7b',
+    name: 'StarCoder2 7B',
+    detail: 'Coding · ~4.3 GB · Q4_K_M',
+    sizeGb: 4.3,
+    status: 'missing',
+    url: 'https://huggingface.co/bartowski/StarCoder2-7B-GGUF/resolve/main/StarCoder2-7B-Q4_K_M.gguf',
+  },
+  {
+    id: 'qwen25-7b',
+    name: 'Qwen2.5 7B Instruct',
+    detail: 'General · ~4.7 GB · Q4_K_M',
+    sizeGb: 4.7,
+    status: 'missing',
+    url: 'https://huggingface.co/bartowski/Qwen2.5-7B-Instruct-GGUF/resolve/main/Qwen2.5-7B-Instruct-Q4_K_M.gguf',
+  },
+  {
+    id: 'llama31-8b',
+    name: 'Llama 3.1 8B Instruct',
+    detail: 'General · ~4.9 GB · Q4_K_M',
+    sizeGb: 4.9,
+    status: 'missing',
+    url: 'https://huggingface.co/bartowski/Meta-Llama-3.1-8B-Instruct-GGUF/resolve/main/Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf',
+  },
+  {
+    id: 'mistral-7b',
+    name: 'Mistral 7B Instruct',
+    detail: 'General · ~4.1 GB · Q4_K_M',
+    sizeGb: 4.1,
+    status: 'missing',
+    url: 'https://huggingface.co/bartowski/Mistral-7B-Instruct-v0.3-GGUF/resolve/main/Mistral-7B-Instruct-v0.3-Q4_K_M.gguf',
+  },
+  {
+    id: 'gemma2-2b',
+    name: 'Gemma 2 2B Instruct',
+    detail: 'Fast · ~1.6 GB · Q4_K_M',
+    sizeGb: 1.6,
+    status: 'missing',
+    url: 'https://huggingface.co/bartowski/gemma-2-2b-it-GGUF/resolve/main/gemma-2-2b-it-Q4_K_M.gguf',
+  },
+  {
+    id: 'phi3-mini',
+    name: 'Phi-3 Mini Instruct',
+    detail: 'Fast · ~2.3 GB · Q4_K_M',
+    sizeGb: 2.3,
+    status: 'missing',
+    url: 'https://huggingface.co/bartowski/Phi-3-mini-4k-instruct-GGUF/resolve/main/Phi-3-mini-4k-instruct-Q4_K_M.gguf',
+  },
+  {
+    id: 'deepseek-r1-distill-8b',
+    name: 'DeepSeek-R1 Distill 8B',
+    detail: 'Reasoning · ~5.2 GB · Q4_K_M',
+    sizeGb: 5.2,
+    status: 'missing',
+    url: 'https://huggingface.co/bartowski/DeepSeek-R1-Distill-Llama-8B-GGUF/resolve/main/DeepSeek-R1-Distill-Llama-8B-Q4_K_M.gguf',
+  },
 ];
 
 function modelsDir() {
@@ -104,8 +184,11 @@ function writeMarker(id, meta, extra = {}) {
 
 let phase = 'online';
 let activeModelId = 'ark-core';
-/** @type {Record<string, { progress: number, error?: string, phase?: string }>} */
+/** @type {Record<string, { progress: number, error?: string, phase?: string, cancel?: boolean }>} */
 const downloads = {};
+/** @type {string[]} */
+const downloadQueue = [];
+const MAX_PARALLEL_DOWNLOADS = 2;
 
 function listModels() {
   const ggufs = arkGguf.listGgufFiles();
@@ -191,45 +274,109 @@ function setActiveModel(id) {
   return getStatus();
 }
 
+function activeDownloadCount() {
+  return Object.values(downloads).filter((d) => d && !d.error && (d.progress || 0) < 100).length;
+}
+
+function diskSpaceForModels() {
+  try {
+    const dir = modelsDir();
+    ensureDirs();
+    if (typeof fs.statfsSync === 'function') {
+      const s = fs.statfsSync(dir);
+      const free = Number(s.bavail) * Number(s.bsize);
+      const total = Number(s.blocks) * Number(s.bsize);
+      return {
+        ok: true,
+        freeBytes: free,
+        totalBytes: total,
+        freeGb: Math.round((free / (1024 ** 3)) * 10) / 10,
+        path: dir,
+      };
+    }
+  } catch {
+    /* ignore */
+  }
+  return { ok: false, freeBytes: null, totalBytes: null, freeGb: null, path: modelsDir() };
+}
+
 function beginDownload(id) {
   const meta = CATALOG.find((m) => m.id === id);
   if (!meta) throw new Error('Unknown model');
   if (meta.builtin) return getStatus();
   if (!meta.url) throw new Error('No download URL for this model');
-  if (downloads[id]) return getStatus();
+  if (downloads[id] || downloadQueue.includes(id)) return getStatus();
   if (hasRealGguf(id) && arkGguf.findLlamaBinary()) {
     writeMarker(id, meta, { path: arkGguf.findGgufForModel(id) });
     activeModelId = id;
     return getStatus();
   }
 
+  const needBytes = Math.ceil((meta.sizeGb || 1) * 1024 ** 3 * 1.15);
+  const disk = diskSpaceForModels();
+  if (disk.ok && typeof disk.freeBytes === 'number' && disk.freeBytes < needBytes) {
+    throw new Error(
+      `Not enough disk space for ${meta.name} (need ~${meta.sizeGb} GB, free ${disk.freeGb ?? '?'} GB)`,
+    );
+  }
+
   ensureDirs();
-  downloads[id] = { progress: 1, phase: 'runtime' };
+  if (activeDownloadCount() >= MAX_PARALLEL_DOWNLOADS) {
+    downloadQueue.push(id);
+    downloads[id] = { progress: 0, phase: 'queued' };
+    return getStatus();
+  }
+
+  startDownloadJob(id, meta);
+  return getStatus();
+}
+
+function pumpDownloadQueue() {
+  while (activeDownloadCount() < MAX_PARALLEL_DOWNLOADS && downloadQueue.length > 0) {
+    const nextId = downloadQueue.shift();
+    const meta = CATALOG.find((m) => m.id === nextId);
+    if (!meta || !meta.url) {
+      delete downloads[nextId];
+      continue;
+    }
+    startDownloadJob(nextId, meta);
+  }
+}
+
+function startDownloadJob(id, meta) {
+  downloads[id] = { progress: 1, phase: 'runtime', cancel: false };
 
   void (async () => {
     try {
       await arkGguf.ensureLlamaBinary((pct) => {
+        if (downloads[id]?.cancel) throw new Error('Download canceled');
         if (downloads[id]) {
           downloads[id].phase = 'runtime';
           downloads[id].progress = Math.max(1, Math.round(pct * 0.25));
         }
       });
 
+      if (downloads[id]?.cancel) throw new Error('Download canceled');
+
       if (hasRealGguf(id)) {
         writeMarker(id, meta, { path: arkGguf.findGgufForModel(id) });
         if (downloads[id]) downloads[id].progress = 100;
         delete downloads[id];
         activeModelId = id;
+        pumpDownloadQueue();
         return;
       }
 
       const dest = path.join(modelsDir(), `${id}.gguf`);
       downloads[id].phase = 'weights';
       await arkFetch.downloadToFile(meta.url, dest, (pct) => {
+        if (downloads[id]?.cancel) throw new Error('Download canceled');
         if (downloads[id]) {
           downloads[id].progress = Math.min(99, 25 + Math.round(pct * 0.75));
         }
       });
+
+      if (downloads[id]?.cancel) throw new Error('Download canceled');
 
       writeMarker(id, meta, { path: dest, bytes: fs.statSync(dest).size });
       if (downloads[id]) downloads[id].progress = 100;
@@ -249,14 +396,48 @@ function beginDownload(id) {
       } catch {
         /* ignore */
       }
+    } finally {
+      pumpDownloadQueue();
     }
   })();
+}
 
+function cancelDownload(id) {
+  const qi = downloadQueue.indexOf(id);
+  if (qi >= 0) {
+    downloadQueue.splice(qi, 1);
+    delete downloads[id];
+    return { ok: true, canceled: true };
+  }
+  if (downloads[id]) {
+    downloads[id].cancel = true;
+    downloads[id].error = 'Download canceled';
+    return { ok: true, canceling: true };
+  }
+  return { ok: false, error: 'No active download' };
+}
+
+function importGgufFile(filePath) {
+  if (!filePath || typeof filePath !== 'string') throw new Error('No file path');
+  const src = path.resolve(filePath);
+  if (!fs.existsSync(src)) throw new Error('File not found');
+  if (!src.toLowerCase().endsWith('.gguf')) throw new Error('Only .gguf files can be imported');
+  ensureDirs();
+  const base = path.basename(src);
+  const dest = path.join(modelsDir(), base);
+  if (path.resolve(dest) !== src) {
+    fs.copyFileSync(src, dest);
+  }
+  const id = `gguf:${base}`;
+  activeModelId = id;
   return getStatus();
 }
 
 function downloadProgress(id) {
-  if (downloads[id]) return downloads[id].progress ?? 0;
+  if (downloads[id]) {
+    if (downloads[id].phase === 'queued') return 0;
+    return downloads[id].progress ?? 0;
+  }
   if (hasRealGguf(id)) return 100;
   return 0;
 }
@@ -430,6 +611,9 @@ module.exports = {
   beginDownload,
   downloadProgress,
   downloadError,
+  cancelDownload,
+  importGgufFile,
+  diskSpaceForModels,
   ensureRuntime,
   generate,
   listModels,

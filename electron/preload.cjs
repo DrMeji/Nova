@@ -68,6 +68,10 @@ contextBridge.exposeInMainWorld('arkDesktop', {
   engineDownload: (id) => ipcRenderer.invoke('ark:engine-download', id),
   engineDownloadProgress: (id) => ipcRenderer.invoke('ark:engine-download-progress', id),
   engineDownloadError: (id) => ipcRenderer.invoke('ark:engine-download-error', id),
+  engineDownloadCancel: (id) => ipcRenderer.invoke('ark:engine-download-cancel', id),
+  engineImportGguf: (filePath) => ipcRenderer.invoke('ark:engine-import-gguf', filePath),
+  engineImportGgufPick: () => ipcRenderer.invoke('ark:engine-import-gguf-pick'),
+  engineDiskSpace: () => ipcRenderer.invoke('ark:engine-disk-space'),
   engineEnsureRuntime: () => ipcRenderer.invoke('ark:engine-ensure-runtime'),
   engineGenerate: (message, modelId, kind) =>
     ipcRenderer.invoke('ark:engine-generate', { message, modelId, kind }),

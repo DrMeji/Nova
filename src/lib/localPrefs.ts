@@ -216,6 +216,18 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates. */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.25',
+    channel: 'stable' as const,
+    date: 'Aug 16, 2026',
+    title: 'Accurate hardware + ARK as external brain',
+    notes: [
+      'One PC scan saved everywhere — Models / Local AI / onboarding show real specs and fit lists',
+      'Brain API 0.4: Ollama-shaped /api/* + OpenAI chat completions so Lindsay (and any app) can use ARK instead of Ollama',
+      'More Engine downloads (Coder 14B/32B, DeepSeek, StarCoder, Llama 8B, …), multi-download queue + disk check, Import/drop GGUF',
+      'Chat failover “Switched to…” chip + capacity meter; Calendar create + Notion update; video catalog honesty',
+    ],
+  },
+  {
     version: '0.1.24',
     channel: 'stable' as const,
     date: 'Aug 16, 2026',

@@ -158,6 +158,21 @@ declare global {
       engineDownload?: (id: string) => Promise<import('@/lib/arkEngine').ArkEngineStatus>;
       engineDownloadProgress?: (id: string) => Promise<number>;
       engineDownloadError?: (id: string) => Promise<string | null>;
+      engineDownloadCancel?: (id: string) => Promise<{ ok: boolean; canceled?: boolean; canceling?: boolean; error?: string }>;
+      engineImportGguf?: (filePath: string) => Promise<import('@/lib/arkEngine').ArkEngineStatus>;
+      engineImportGgufPick?: () => Promise<{
+        ok: boolean;
+        canceled?: boolean;
+        count?: number;
+        status?: import('@/lib/arkEngine').ArkEngineStatus;
+      }>;
+      engineDiskSpace?: () => Promise<{
+        ok: boolean;
+        freeBytes?: number | null;
+        totalBytes?: number | null;
+        freeGb?: number | null;
+        path?: string;
+      }>;
       engineEnsureRuntime?: () => Promise<import('@/lib/arkEngine').ArkEngineStatus>;
       engineGenerate?: (
         message: string,

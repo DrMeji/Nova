@@ -1,6 +1,5 @@
 const { app, BrowserWindow, shell, ipcMain, dialog } = require('electron');
 const path = require('path');
-const http = require('http');
 const arkEngine = require('./arkEngine.cjs');
 const arkPreview = require('./arkPreview.cjs');
 const arkMedia = require('./arkMedia.cjs');
@@ -14,6 +13,7 @@ const arkPaths = require('./arkPaths.cjs');
 const arkOAuth = require('./arkOAuth.cjs');
 const arkCrashLog = require('./arkCrashLog.cjs');
 const arkGguf = require('./arkGguf.cjs');
+const arkBrainApi = require('./arkBrainApi.cjs');
 
 const DEV_URL = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173';
 const isDev = process.env.ARK_DEV === '1';
@@ -408,6 +408,26 @@ ipcMain.handle('ark:engine-set-model', async (_e, id) => arkEngine.setActiveMode
 ipcMain.handle('ark:engine-download', async (_e, id) => arkEngine.beginDownload(id));
 ipcMain.handle('ark:engine-download-progress', async (_e, id) => arkEngine.downloadProgress(id));
 ipcMain.handle('ark:engine-download-error', async (_e, id) => arkEngine.downloadError?.(id) ?? null);
+ipcMain.handle('ark:engine-download-cancel', async (_e, id) => arkEngine.cancelDownload?.(id) ?? { ok: false });
+ipcMain.handle('ark:engine-import-gguf', async (_e, filePath) => arkEngine.importGgufFile?.(filePath));
+ipcMain.handle('ark:engine-import-gguf-pick', async () => {
+  const win = BrowserWindow.getFocusedWindow() || mainWindow;
+  const result = await dialog.showOpenDialog(win || undefined, {
+    title: 'Import GGUF into ARK Engine',
+    properties: ['openFile', 'multiSelections'],
+    filters: [{ name: 'GGUF models', extensions: ['gguf'] }],
+    defaultPath: arkPaths.modelsDir(),
+  });
+  if (result.canceled || !result.filePaths?.length) {
+    return { ok: false, canceled: true };
+  }
+  const imported = [];
+  for (const fp of result.filePaths) {
+    imported.push(arkEngine.importGgufFile(fp));
+  }
+  return { ok: true, count: imported.length, status: imported[imported.length - 1] };
+});
+ipcMain.handle('ark:engine-disk-space', async () => arkEngine.diskSpaceForModels?.());
 ipcMain.handle('ark:engine-ensure-runtime', async () => arkEngine.ensureRuntime());
 ipcMain.handle('ark:engine-generate', async (_e, payload) =>
   arkEngine.generate(payload?.message ?? '', {
@@ -578,196 +598,27 @@ ipcMain.handle('ark:signing-status', async () => {
 });
 
 ipcMain.handle('ark:brain-status', async () => ({
-  ok: Boolean(brainServerListening),
+  ok: Boolean(brainApi?.isListening?.()),
   url: `http://127.0.0.1:${BRAIN_PORT}`,
+  contractVersion: arkBrainApi.CONTRACT_VERSION,
   engine: arkEngine.getStatus(),
 }));
 
-let brainServer = null;
-let brainServerListening = false;
-
-function readBody(req) {
-  return new Promise((resolve, reject) => {
-    const chunks = [];
-    req.on('data', (c) => chunks.push(c));
-    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
-    req.on('error', reject);
-  });
-}
-
-function json(res, status, payload) {
-  res.writeHead(status, { 'Content-Type': 'application/json' });
-  res.end(JSON.stringify(payload));
-}
+let brainApi = null;
 
 function startBrainApi() {
-  if (brainServer) return;
-  const brainToken = (process.env.ARK_BRAIN_TOKEN || '').trim();
-
-  brainServer = http.createServer(async (req, res) => {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-    if (req.method === 'OPTIONS') {
-      res.writeHead(204);
-      res.end();
-      return;
-    }
-
-    // Optional bearer for loopback brain API clients.
-    if (brainToken) {
-      const auth = String(req.headers.authorization || '');
-      const ok = auth === `Bearer ${brainToken}` || auth === `bearer ${brainToken}`;
-      if (!ok && req.url !== '/health' && req.url !== '/' && req.url !== '/v1/contract') {
-        return json(res, 401, { ok: false, error: 'Unauthorized — set Authorization: Bearer <ARK_BRAIN_TOKEN>' });
-      }
-    }
-
-    const url = (req.url || '/').split('?')[0];
-
-    if ((url === '/' || url === '/health') && req.method === 'GET') {
-      const engine = arkEngine.getStatus();
-      return json(res, 200, {
-        ok: true,
-        service: 'ark-brain',
-        version: '0.3.0',
-        contractVersion: '0.3.0',
-        engine: {
-          phase: engine.phase,
-          activeModelId: engine.activeModelId,
-          activeModelName: engine.activeModelName,
-        },
-        note: 'ARK brain API — powered by ARK Engine on this device (not a third-party local app)',
-      });
-    }
-
-    if (url === '/v1/contract' && req.method === 'GET') {
-      return json(res, 200, {
-        ok: true,
-        contractVersion: '0.3.0',
-        baseUrl: `http://127.0.0.1:${BRAIN_PORT}`,
-        endpoints: [
-          'GET /health',
-          'GET /v1/contract',
-          'GET /v1/models',
-          'GET /v1/engine',
-          'POST /v1/chat',
-          'POST /v1/chat/stream',
-        ],
-        auth: brainToken ? 'bearer' : 'none (localhost)',
-        kinds: ['chat', 'image', 'video'],
-      });
-    }
-
-    if (url === '/v1/models' && req.method === 'GET') {
-      const engine = arkEngine.getStatus();
-      return json(res, 200, {
-        ok: true,
-        models: engine.models.filter((m) => m.status === 'ready'),
-        activeModelId: engine.activeModelId,
-      });
-    }
-
-    if (url === '/v1/engine' && req.method === 'GET') {
-      return json(res, 200, { ok: true, ...arkEngine.getStatus() });
-    }
-
-    if (url === '/v1/chat' && req.method === 'POST') {
-      try {
-        const raw = await readBody(req);
-        const parsed = raw ? JSON.parse(raw) : {};
-        const message = typeof parsed.message === 'string' ? parsed.message : '';
-        const modelId = typeof parsed.model === 'string' ? parsed.model : undefined;
-        const kind = parsed.kind === 'image' || parsed.kind === 'video' ? parsed.kind : undefined;
-        if (arkEngine.getStatus().phase !== 'online') {
-          arkEngine.start();
-        }
-        const result = await arkEngine.generate(message, { modelId, kind });
-        return json(res, 200, {
-          ok: true,
-          reply: result.reply,
-          modelName: result.modelName,
-          model: result.modelName,
-          modelId: result.modelId,
-          source: result.source || 'ark-engine',
-          media: result.media,
-        });
-      } catch (err) {
-        return json(res, 400, {
-          ok: false,
-          error: err instanceof Error ? err.message : 'Bad request',
-        });
-      }
-    }
-
-    // SSE-style stream: status / delta / done / error events.
-    if (url === '/v1/chat/stream' && req.method === 'POST') {
-      try {
-        const raw = await readBody(req);
-        const parsed = raw ? JSON.parse(raw) : {};
-        const message = typeof parsed.message === 'string' ? parsed.message : '';
-        const modelId = typeof parsed.model === 'string' ? parsed.model : undefined;
-        const kind = parsed.kind === 'image' || parsed.kind === 'video' ? parsed.kind : undefined;
-        if (arkEngine.getStatus().phase !== 'online') {
-          arkEngine.start();
-        }
-        res.writeHead(200, {
-          'Content-Type': 'text/event-stream',
-          'Cache-Control': 'no-cache',
-          Connection: 'keep-alive',
-          'Access-Control-Allow-Origin': '*',
-        });
-        res.write(`event: status\ndata: ${JSON.stringify({ ok: true, phase: 'generating' })}\n\n`);
-        const result = await arkEngine.generate(message, {
-          modelId,
-          kind,
-          onChunk: (text) => {
-            try {
-              res.write(`event: delta\ndata: ${JSON.stringify({ text: String(text || '') })}\n\n`);
-            } catch {
-              /* ignore */
-            }
-          },
-        });
-        res.write(`event: done\ndata: ${JSON.stringify({
-          ok: true,
-          reply: result.reply,
-          modelName: result.modelName,
-          modelId: result.modelId,
-          source: result.source || 'ark-engine',
-          media: result.media,
-          streamed: Boolean(result.streamed),
-        })}\n\n`);
-        res.end();
-        return;
-      } catch (err) {
-        if (!res.headersSent) {
-          return json(res, 400, {
-            ok: false,
-            error: err instanceof Error ? err.message : 'Bad request',
-          });
-        }
-        res.write(`event: error\ndata: ${JSON.stringify({
-          ok: false,
-          error: err instanceof Error ? err.message : 'Bad request',
-        })}\n\n`);
-        res.end();
-        return;
-      }
-    }
-
-    return json(res, 404, { ok: false, error: 'Not found' });
+  if (brainApi) return;
+  brainApi = arkBrainApi.createBrainServer({
+    arkEngine,
+    port: BRAIN_PORT,
+    token: process.env.ARK_BRAIN_TOKEN || '',
   });
-
-  brainServer.listen(BRAIN_PORT, '127.0.0.1', () => {
-    brainServerListening = true;
+  brainApi.listen('127.0.0.1').then(() => {
     if (!app.isPackaged) {
-      console.log(`[ark-brain] http://127.0.0.1:${BRAIN_PORT}`);
+      console.log(`[ark-brain] http://127.0.0.1:${BRAIN_PORT} (contract ${arkBrainApi.CONTRACT_VERSION})`);
       console.log('[ark-engine] ready (ARK-owned local runtime)');
     }
-  });
-  brainServer.on('error', (err) => {
-    brainServerListening = false;
+  }).catch((err) => {
     if (!app.isPackaged) {
       console.log(`[ark-brain] failed: ${err.message}`);
     }
@@ -791,10 +642,11 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   if (isUpdaterMode) return;
-  if (brainServer) {
-    try { brainServer.close(); } catch { /* ignore */ }
-    brainServer = null;
-    brainServerListening = false;
+  // Keep brain alive briefly is not enough for external apps — document that
+  // ARK desktop must stay running. Close brain with the app.
+  if (brainApi) {
+    void brainApi.close();
+    brainApi = null;
   }
   if (process.platform !== 'darwin') app.quit();
 });

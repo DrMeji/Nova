@@ -28,6 +28,7 @@ import {
   ollamaChat,
   probeOllamaOptional,
 } from '@/lib/ollamaOptional';
+import { getEngineStatus } from '@/lib/arkEngine';
 
 export type RouterKind = 'chat' | 'image' | 'video' | 'coding';
 
@@ -101,29 +102,56 @@ async function tryLocalChat(
   modelId: string | undefined,
   attempted: string[],
   onChunk?: (text: string) => void,
+  failover = true,
 ): Promise<ArkRouterResult | null> {
-  attempted.push('ARK Engine');
-  try {
-    const brain = await probeBrain();
-    if (!brain.ok && !window.arkDesktop?.engineGenerate) {
+  const runOne = async (id: string | undefined): Promise<ArkRouterResult | null> => {
+    attempted.push(id ? `ARK Engine · ${id}` : 'ARK Engine');
+    try {
+      const brain = await probeBrain();
+      if (!brain.ok && !window.arkDesktop?.engineGenerate) {
+        return null;
+      }
+      const prompt = packHistoryPrompt(history, message);
+      const result = onChunk
+        ? await brainGenerateStream(prompt, id, onChunk, 'chat')
+        : await brainGenerate(prompt, id, 'chat');
+      return {
+        reply: result.reply,
+        media: result.media,
+        modelName: result.modelName || 'ARK Engine',
+        source: result.source || 'ark-engine',
+        tier: 'local-free',
+        attempted,
+        continued: hasContinuity(history),
+      };
+    } catch {
       return null;
     }
-    const prompt = packHistoryPrompt(history, message);
-    const result = onChunk
-      ? await brainGenerateStream(prompt, modelId, onChunk, 'chat')
-      : await brainGenerate(prompt, modelId, 'chat');
-    return {
-      reply: result.reply,
-      media: result.media,
-      modelName: result.modelName || 'ARK Engine',
-      source: result.source || 'ark-engine',
-      tier: isStrongLocal(result.source) ? 'local-free' : 'local-free',
-      attempted,
-      continued: hasContinuity(history),
-    };
+  };
+
+  const first = await runOne(modelId);
+  if (first && isStrongLocal(first.source)) return first;
+
+  if (!failover) return null;
+
+  try {
+    const status = await getEngineStatus();
+    const ready = status.models.filter(m =>
+      m.status === 'ready'
+      && m.id !== modelId
+      && m.id !== 'ark-core'
+      && m.id !== 'ark-image-core'
+      && m.id !== 'ark-video-core',
+    );
+    for (const m of ready) {
+      const hit = await runOne(m.id);
+      if (hit && isStrongLocal(hit.source)) return hit;
+    }
   } catch {
-    return null;
+    /* ignore */
   }
+
+  return null;
 }
 
 async function tryOllama(
@@ -170,6 +198,13 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
     || opts.preferredSource === 'auto';
   const pinnedCloud = opts.preferredSource === 'cloud' && !isAuto;
   const pinnedOllama = Boolean(preferredId?.startsWith('ollama:')) && !isAuto;
+  const pinnedLocalEngine =
+    !isAuto
+    && !pinnedCloud
+    && !pinnedOllama
+    && Boolean(preferredId)
+    && preferredId !== 'ark-auto'
+    && opts.preferredSource === 'local';
   const history = historyFor(opts);
 
   // ── Pinned cloud model (skipped for ARK Auto) ──────────────────────
@@ -218,6 +253,28 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
     }
   }
 
+  // ── Pinned ARK Engine GGUF ─────────────────────────────────────────
+  if (pinnedLocalEngine) {
+    const localPinned = await tryLocalChat(
+      history,
+      opts.message,
+      preferredId,
+      attempted,
+      opts.onChunk,
+      failover,
+    );
+    if (localPinned && isStrongLocal(localPinned.source)) return localPinned;
+    if (!failover) {
+      return {
+        reply: 'That local brain isn’t ready. Install it from Local AI / Models, or enable Auto failover in Settings.',
+        modelName: preferredName || 'ARK Engine',
+        source: 'none',
+        tier: 'local-free',
+        attempted,
+      };
+    }
+  }
+
   // ── Cloud-preferring modes ─────────────────────────────────────────
   if (modePrefersCloud(mode) && modeAllowsCloud(mode) && hasAnyCloudChatKey()) {
     const free = await cloudChatFreeKeys(opts.message, attempted, history, opts.onChunk);
@@ -246,9 +303,10 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
   const local = await tryLocalChat(
     history,
     opts.message,
-    isAuto || pinnedCloud || pinnedOllama ? undefined : preferredId,
+    isAuto || pinnedCloud || pinnedOllama || pinnedLocalEngine ? undefined : preferredId,
     attempted,
     opts.onChunk,
+    failover,
   );
 
   if (local && isStrongLocal(local.source)) {

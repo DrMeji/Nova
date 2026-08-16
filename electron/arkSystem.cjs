@@ -102,9 +102,18 @@ async function probeSystemInfo() {
   let physicalCores = 0;
 
   let osLabel = os.platform();
-  if (process.platform === 'win32') osLabel = await windowsOsCaption() || `Windows ${os.release()}`;
-  else if (process.platform === 'darwin') osLabel = `macOS ${os.release()}`;
-  else if (process.platform === 'linux') osLabel = `Linux ${os.release()}`;
+  if (process.platform === 'win32') {
+    osLabel = await windowsOsCaption();
+    if (!osLabel) {
+      const parts = String(os.release() || '').split('.');
+      const build = parseInt(parts[2] || '0', 10);
+      osLabel = Number.isFinite(build) && build >= 22000 ? 'Windows 11' : 'Windows 10';
+    }
+  } else if (process.platform === 'darwin') {
+    osLabel = `macOS ${os.release()}`;
+  } else if (process.platform === 'linux') {
+    osLabel = `Linux ${os.release()}`;
+  }
 
   let gpu = '';
   let motherboard = '';

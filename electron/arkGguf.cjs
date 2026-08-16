@@ -30,13 +30,26 @@ function ensureDirs() {
 function findGgufForModel(modelId) {
   const dir = modelsDir();
   if (!fs.existsSync(dir)) return null;
-  const exact = path.join(dir, `${modelId}.gguf`);
+  const rawId = String(modelId).replace(/^gguf:/, '');
+  const exact = path.join(dir, `${rawId}.gguf`);
   if (fs.existsSync(exact)) return exact;
   const files = fs.readdirSync(dir).filter((f) => f.toLowerCase().endsWith('.gguf'));
   if (!files.length) return null;
-  const needle = String(modelId).replace(/^gguf:/, '').replace(/-/g, '').toLowerCase().slice(0, 8);
-  const match = files.find((f) => f.toLowerCase().replace(/-/g, '').includes(needle));
-  return path.join(dir, match || files[0]);
+  const idNorm = rawId.toLowerCase();
+  const compact = idNorm.replace(/-/g, '');
+  // Prefer full-id match so 7b / 14b / 32b never collide.
+  const full = files.find((f) => f.toLowerCase().replace(/-/g, '').includes(compact));
+  if (full) return path.join(dir, full);
+  const size = idNorm.match(/(\d+(?:\.\d+)?)b/)?.[1];
+  const family = compact.replace(/\d+(?:\.\d+)?b.*$/, '').slice(0, 8);
+  if (size && family) {
+    const sized = files.find((f) => {
+      const fn = f.toLowerCase().replace(/-/g, '');
+      return fn.includes(family) && fn.includes(size);
+    });
+    if (sized) return path.join(dir, sized);
+  }
+  return null;
 }
 
 function findLlamaBinary() {

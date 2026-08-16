@@ -90,6 +90,27 @@ export async function engineDownloadError(id: string) {
   return null;
 }
 
+export async function engineDownloadCancel(id: string) {
+  if (window.arkDesktop?.engineDownloadCancel) {
+    return window.arkDesktop.engineDownloadCancel(id);
+  }
+  return { ok: false, error: 'Desktop only' };
+}
+
+export async function importGgufPick() {
+  if (window.arkDesktop?.engineImportGgufPick) {
+    return window.arkDesktop.engineImportGgufPick();
+  }
+  throw new Error('Import needs the desktop app');
+}
+
+export async function engineDiskSpace() {
+  if (window.arkDesktop?.engineDiskSpace) {
+    return window.arkDesktop.engineDiskSpace();
+  }
+  return { ok: false, freeBytes: null, totalBytes: null, freeGb: null };
+}
+
 export async function ensureEngineRuntime() {
   if (window.arkDesktop?.engineEnsureRuntime) {
     return window.arkDesktop.engineEnsureRuntime();

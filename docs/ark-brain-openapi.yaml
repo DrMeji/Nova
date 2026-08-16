@@ -1,0 +1,153 @@
+openapi: 3.0.3
+info:
+  title: ARK Brain API
+  description: |
+    External clients talk to ARK Engine on localhost — never to a third-party local runtime.
+    Cookbook: docs/ark-brain-api.md · sample: examples/external-brain-client/
+    Compat: Ollama /api/* and OpenAI /v1/chat/completions on the same port.
+  version: 0.4.0
+servers:
+  - url: http://127.0.0.1:8787
+paths:
+  /health:
+    get:
+      summary: Health + engine phase
+      responses:
+        '200':
+          description: OK
+  /v1/contract:
+    get:
+      summary: Machine-readable contract
+      responses:
+        '200':
+          description: Contract document
+  /v1/models:
+    get:
+      summary: Ready ARK Engine models
+      responses:
+        '200':
+          description: Models
+  /v1/engine:
+    get:
+      summary: Full engine status
+      responses:
+        '200':
+          description: Engine status
+  /v1/chat:
+    post:
+      summary: Non-streaming chat / media
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BrainChatRequest'
+      responses:
+        '200':
+          description: Reply
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrainChatResponse'
+  /v1/chat/stream:
+    post:
+      summary: SSE chat stream
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BrainChatRequest'
+      responses:
+        '200':
+          description: text/event-stream
+  /v1/chat/completions:
+    post:
+      summary: OpenAI-compatible chat completions
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                model: { type: string }
+                messages:
+                  type: array
+                  items:
+                    type: object
+                stream: { type: boolean }
+      responses:
+        '200':
+          description: Chat completion or SSE stream
+  /api/tags:
+    get:
+      summary: Ollama-compatible model list
+      responses:
+        '200':
+          description: '{ models: [...] }'
+  /api/chat:
+    post:
+      summary: Ollama-compatible chat
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: JSON or NDJSON stream
+  /api/generate:
+    post:
+      summary: Ollama-compatible generate
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: JSON or NDJSON stream
+  /api/version:
+    get:
+      summary: Ollama-compatible version string
+      responses:
+        '200':
+          description: '{ version }'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Optional. Set ARK_BRAIN_TOKEN on the desktop process.
+  schemas:
+    BrainChatRequest:
+      type: object
+      properties:
+        message: { type: string }
+        messages:
+          type: array
+          items:
+            type: object
+            properties:
+              role: { type: string }
+              content: { type: string }
+        model: { type: string }
+        kind:
+          type: string
+          enum: [chat, image, video]
+    BrainChatResponse:
+      type: object
+      properties:
+        ok: { type: boolean }
+        reply: { type: string }
+        modelName: { type: string }
+        modelId: { type: string }
+        source: { type: string }
+        media:
+          type: object
+          properties:
+            kind: { type: string }
+            dataUrl: { type: string }
+            libraryId: { type: string }
+            real: { type: boolean }

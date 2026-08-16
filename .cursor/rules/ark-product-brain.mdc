@@ -40,5 +40,7 @@ ARK should **find and lock in free coding / creation capacity** so users are not
 
 ## Lindsay / brain API
 
-- External clients talk to **ARK’s** brain API / engine.
-- Optional bridges (Ollama, HF, …) are add-ons behind ARK, never the core dependency.
+- External clients (Lindsay, other assistants, agents) talk to **ARK’s** brain API / engine on `127.0.0.1:8787`.
+- Ollama-shaped `/api/*` and OpenAI-shaped `/v1/chat/completions` exist so apps that used Ollama can point at ARK instead.
+- Optional bridges (Ollama, HF, …) are add-ons *into* ARK — never the core dependency.
+- Cookbook: `docs/ark-brain-api.md` · sample: `examples/external-brain-client/`.

@@ -5,6 +5,7 @@ import {
   detectHardwareAsync,
   getHardwareClass,
   getRecommendedModel,
+  saveHardwareSnapshot,
   type HardwareInfo,
 } from '@/lib/api';
 import { markSetupCompleted } from '@/lib/setup';
@@ -148,6 +149,7 @@ export function OnboardingScreen() {
       setHwStep(i + 1);
     }
     const detected = await detectHardwareAsync();
+    saveHardwareSnapshot(detected);
     const recs = recommendationsFor(detected);
     setHw(detected);
     setModels(recs);

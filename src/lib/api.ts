@@ -9,13 +9,40 @@ export interface HardwareInfo {
   storage: string;
   acceleration: string;
   motherboard?: string;
+  /** Parsed installed RAM for tiering (avoids "32 GB (12 GB free)" parse bugs). */
+  ramGb?: number;
+  /** True when values came from Electron OS probe (not browser guess). */
+  accurate?: boolean;
+  scannedAt?: string;
+}
+
+/** Models ARK Engine can actually download today (keep in sync with electron/arkEngine.cjs). */
+export const ENGINE_DOWNLOADABLE_IDS = [
+  'qwen25-15b',
+  'llama32-3b',
+  'qwen25-coder-7b',
+  'qwen25-coder-14b',
+  'qwen25-coder-32b',
+  'deepseek-coder-v2-lite',
+  'starcoder2-7b',
+  'qwen25-7b',
+  'llama31-8b',
+  'mistral-7b',
+  'gemma2-2b',
+  'phi3-mini',
+  'deepseek-r1-distill-8b',
+] as const;
+
+export function isEngineDownloadable(id: string) {
+  return (ENGINE_DOWNLOADABLE_IDS as readonly string[]).includes(id);
 }
 
 export function detectHardware(): HardwareInfo {
   const nav = navigator as Navigator & { deviceMemory?: number; userAgentData?: { platform?: string } };
   const platform = nav.userAgentData?.platform ?? navigator.platform ?? 'Unknown';
   const cores = navigator.hardwareConcurrency ?? 4;
-  const memory = nav.deviceMemory ? `${nav.deviceMemory} GB` : 'Unknown';
+  const memoryGb = nav.deviceMemory;
+  const memory = memoryGb ? `${memoryGb} GB (browser estimate)` : 'Unknown (scanning…)';
 
   let os = 'Unknown OS';
   if (platform.toLowerCase().includes('win')) os = 'Windows';
@@ -24,8 +51,8 @@ export function detectHardware(): HardwareInfo {
 
   const canvas = document.createElement('canvas');
   const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl') as WebGLRenderingContext | null;
-  let gpu = 'Integrated Graphics';
-  let vram = 'Shared';
+  let gpu = 'Scanning GPU…';
+  let vram = 'Unknown';
   let gpuRaw = '';
   if (gl) {
     const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
@@ -33,11 +60,11 @@ export function detectHardware(): HardwareInfo {
       const renderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) as string;
       if (renderer) {
         gpuRaw = renderer;
-        if (renderer.toLowerCase().includes('nvidia')) gpu = 'NVIDIA GPU';
-        else if (renderer.toLowerCase().includes('amd') || renderer.toLowerCase().includes('radeon')) gpu = 'AMD GPU';
-        else if (renderer.toLowerCase().includes('apple') || renderer.toLowerCase().includes('m1') || renderer.toLowerCase().includes('m2') || renderer.toLowerCase().includes('m3')) gpu = 'Apple Silicon GPU';
-        else if (renderer.toLowerCase().includes('intel')) gpu = 'Intel Graphics';
-        gpu = renderer.length < 48 ? renderer : gpu;
+        if (renderer.toLowerCase().includes('nvidia')) gpu = 'NVIDIA GPU (preview)';
+        else if (renderer.toLowerCase().includes('amd') || renderer.toLowerCase().includes('radeon')) gpu = 'AMD GPU (preview)';
+        else if (renderer.toLowerCase().includes('apple') || renderer.toLowerCase().includes('m1') || renderer.toLowerCase().includes('m2') || renderer.toLowerCase().includes('m3')) gpu = 'Apple Silicon GPU (preview)';
+        else if (renderer.toLowerCase().includes('intel')) gpu = 'Intel Graphics (preview)';
+        else gpu = renderer.length < 48 ? `${renderer} (preview)` : 'GPU (preview)';
       }
     }
   }
@@ -57,12 +84,14 @@ export function detectHardware(): HardwareInfo {
 
   return {
     os,
-    cpu: `${cores} logical cores`,
+    cpu: `${cores} threads (browser estimate)`,
     ram: memory,
     gpu,
     vram,
-    storage: 'See Local AI → Hardware after probe',
+    storage: 'See Local AI after desktop probe',
     acceleration,
+    ramGb: memoryGb,
+    accurate: false,
   };
 }
 
@@ -86,9 +115,11 @@ export async function detectHardwareAsync(): Promise<HardwareInfo> {
       vram = 'Dedicated';
     } else if (info.acceleration === 'Metal') {
       vram = 'Unified Memory';
+    } else if (info.acceleration === 'CPU+iGPU') {
+      vram = 'Shared (iGPU)';
     }
 
-    return {
+    const hw: HardwareInfo = {
       os: info.os || base.os,
       cpu: info.cpu
         ? `${info.cpu}${corePart ? ` · ${corePart}` : ''}`
@@ -101,24 +132,76 @@ export async function detectHardwareAsync(): Promise<HardwareInfo> {
       storage: info.hostname ? `Host · ${info.hostname}` : base.storage,
       acceleration: info.acceleration || base.acceleration,
       motherboard: info.motherboard || undefined,
+      ramGb: typeof info.ramGb === 'number' ? info.ramGb : base.ramGb,
+      accurate: true,
+      scannedAt: new Date().toISOString(),
     };
+    saveHardwareSnapshot(hw);
+    return hw;
   } catch {
     return base;
   }
 }
 
+const HW_SNAPSHOT_KEY = 'ark:hardware-snapshot';
+
+export function saveHardwareSnapshot(hw: HardwareInfo) {
+  try {
+    localStorage.setItem(HW_SNAPSHOT_KEY, JSON.stringify(hw));
+  } catch {
+    /* ignore */
+  }
+}
+
+export function loadHardwareSnapshot(): HardwareInfo | null {
+  try {
+    const raw = localStorage.getItem(HW_SNAPSHOT_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as HardwareInfo;
+    if (!parsed?.os || !parsed?.cpu) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+/** Cached accurate probe, or refresh from Electron. */
+export async function getAccurateHardware(force = false): Promise<HardwareInfo> {
+  if (!force) {
+    const cached = loadHardwareSnapshot();
+    if (cached?.accurate) return cached;
+  }
+  return detectHardwareAsync();
+}
+
+export function parseRamGb(hw: HardwareInfo): number {
+  if (typeof hw.ramGb === 'number' && hw.ramGb > 0) return hw.ramGb;
+  const m = String(hw.ram || '').match(/(\d+(?:\.\d+)?)\s*GB/i);
+  if (m) return parseFloat(m[1]);
+  const n = parseFloat(hw.ram);
+  return Number.isFinite(n) ? n : 8;
+}
+
 export type HardwareClass = 'light' | 'standard' | 'strong';
 
 export function getHardwareClass(hw: HardwareInfo): HardwareClass {
-  const ramGb = parseFloat(hw.ram) || 8;
-  const hasAccel = hw.acceleration !== 'CPU';
-  if (hasAccel && ramGb >= 16) return 'strong';
-  if (hasAccel || ramGb >= 16) return 'standard';
+  const ramGb = parseRamGb(hw);
+  // Only dedicated GPU accel counts — Intel iGPU (CPU+iGPU) is not "strong".
+  const hasDedicatedAccel =
+    hw.acceleration === 'CUDA'
+    || hw.acceleration === 'Vulkan'
+    || hw.acceleration === 'Metal';
+  if (hasDedicatedAccel && ramGb >= 16) return 'strong';
+  if (hasDedicatedAccel || ramGb >= 16) return 'standard';
   return 'light';
 }
 
 export function getRecommendedModel(hw: HardwareInfo): { name: string; size: string; id: string } {
   const tier = getHardwareClass(hw);
+  const ramGb = parseRamGb(hw);
+  if (tier === 'strong' && ramGb >= 28) {
+    return { name: 'Qwen2.5-Coder 14B Instruct', size: '9.0 GB', id: 'qwen25-coder-14b' };
+  }
   if (tier === 'strong') {
     return { name: 'Qwen2.5-Coder 7B Instruct', size: '4.7 GB', id: 'qwen25-coder-7b' };
   }
@@ -126,6 +209,27 @@ export function getRecommendedModel(hw: HardwareInfo): { name: string; size: str
     return { name: 'Llama 3.2 3B Instruct', size: '2.0 GB', id: 'llama32-3b' };
   }
   return { name: 'Qwen2.5 1.5B Instruct', size: '1.0 GB', id: 'qwen25-15b' };
+}
+
+/** Free-key providers that work well as first hops for this PC (always useful; heavier local needs RAM). */
+export function suggestedKeysForHardware(hw: HardwareInfo): { id: string; name: string; why: string }[] {
+  const tier = getHardwareClass(hw);
+  const base = [
+    { id: 'groq', name: 'Groq', why: 'Fast free chat — best first key on any PC' },
+    { id: 'google', name: 'Google AI Studio', why: 'Gemini free tier — solid coding backup' },
+    { id: 'openrouter', name: 'OpenRouter', why: 'Many free routes when others rate-limit' },
+  ];
+  if (tier === 'light') {
+    return [
+      ...base,
+      { id: 'cerebras', name: 'Cerebras', why: 'Ultra-fast cloud when local models stay small' },
+    ];
+  }
+  return [
+    ...base,
+    { id: 'huggingface', name: 'Hugging Face', why: 'Free chat + FLUX images' },
+    { id: 'together', name: 'Together AI', why: 'Open models when you outgrow free tiers' },
+  ];
 }
 
 export async function fetchProjects() {

@@ -19,8 +19,9 @@ import {
   rewriteImagePrompt,
   rewriteVideoPrompt,
 } from '@/lib/mediaPrompt';
-import { arkRoute, routerProviderLabel } from '@/lib/arkRouter';
+import { arkRoute, routerProviderLabel, type ArkRouterResult } from '@/lib/arkRouter';
 import { FreeKeyWizard } from '@/components/FreeKeyWizard';
+import { CapacityMeter } from '@/components/CapacityMeter';
 import { buildRouterHistory } from '@/lib/chatHistory';
 import { MessageContent } from '@/components/MediaMessage';
 import {
@@ -34,9 +35,9 @@ import {
 import type { ChatMessage } from '@/types';
 import {
   Bot, User as UserIcon, Loader2, Plus, Mic, ImageIcon, Video, Code2,
-  Upload, Cpu, Cloud, ChevronDown, Check, Blocks, FolderKanban, Zap, Square,
+  Upload, Cpu, Cloud, ChevronDown, Check, Blocks, FolderKanban, Zap, Square, X,
 } from 'lucide-react';
-import { engineGenerateCancel } from '@/lib/arkEngine';
+import { engineGenerateCancel, getEngineStatus, setEngineModel } from '@/lib/arkEngine';
 
 type ModelSource = 'local' | 'cloud' | 'auto';
 
@@ -89,6 +90,27 @@ function defaultModelForKind(kind: ModelKind): ChatModelOption {
   }
   const local = CHAT_MODELS.find(m => m.kind === kind && m.source === 'local');
   return local ?? CHAT_MODELS.find(m => m.kind === kind) ?? CHAT_MODELS[0];
+}
+
+/** Show a small chip when Auto hopped or a pinned model was overridden. */
+function failoverChipText(routed: ArkRouterResult, pinned: ChatModelOption): string | null {
+  const hops = routed.attempted?.length ?? 0;
+  const name = (routed.modelName || '').trim();
+  if (!name) return null;
+
+  if (pinned.id === 'ark-auto' || pinned.source === 'auto') {
+    return hops > 1 ? `Switched to ${name}` : null;
+  }
+
+  const pinnedName = (pinned.name || '').toLowerCase();
+  const pinnedId = (pinned.id || '').toLowerCase();
+  const resolved = name.toLowerCase();
+  const same =
+    resolved.includes(pinnedName)
+    || pinnedName.includes(resolved)
+    || (pinnedId && resolved.includes(pinnedId.replace(/^(ollama|ark)-?/, '')));
+  if (hops > 1 || !same) return `Switched to ${name}`;
+  return null;
 }
 
 const PLACEHOLDERS: Record<ChatMode, string[]> = {
@@ -255,10 +277,12 @@ export function AIChat() {
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [chatPlugins, setChatPlugins] = useState<PluginDef[]>(() => getChatEnabledPlugins(loadPluginState()));
   const [ollamaModels, setOllamaModels] = useState<ChatModelOption[]>([]);
+  const [engineLocalModels, setEngineLocalModels] = useState<ChatModelOption[]>([]);
   const [capacity, setCapacity] = useState<LiveCapacity | null>(null);
   const [generating, setGenerating] = useState(false);
   const stopRequestedRef = useRef(false);
   const [freeKeyOpen, setFreeKeyOpen] = useState(false);
+  const [failoverNote, setFailoverNote] = useState<string | null>(null);
   const [setupNote, setSetupNote] = useState<string | null>(() => {
     try {
       return localStorage.getItem('ark:setup-brain-note');
@@ -468,6 +492,38 @@ export function AIChat() {
   }, []);
 
   useEffect(() => {
+    const loadEngine = () => {
+      void getEngineStatus()
+        .then(status => {
+          const ready = status.models
+            .filter(m =>
+              m.status === 'ready'
+              && m.id !== 'ark-core'
+              && m.id !== 'ark-image-core'
+              && m.id !== 'ark-video-core',
+            )
+            .map(m => ({
+              id: m.id,
+              name: m.name,
+              source: 'local' as const,
+              detail: 'ARK Engine · ready',
+              kind: 'chat' as const,
+            }));
+          setEngineLocalModels(ready);
+          const savedId = getLocalPrefs().defaultModelId;
+          if (savedId && savedId !== 'ark-auto') {
+            const hit = ready.find(m => m.id === savedId);
+            if (hit) setActiveModel(prev => (prev.id === hit.id ? prev : hit));
+          }
+        })
+        .catch(() => setEngineLocalModels([]));
+    };
+    loadEngine();
+    window.addEventListener('focus', loadEngine);
+    return () => window.removeEventListener('focus', loadEngine);
+  }, []);
+
+  useEffect(() => {
     refreshChatPlugins();
     const onFocus = () => refreshChatPlugins();
     const onPlugins = () => refreshChatPlugins();
@@ -542,6 +598,7 @@ export function AIChat() {
     if (!input.trim() || !user || generating) return;
     const content = input.trim();
     stopRequestedRef.current = false;
+    setFailoverNote(null);
 
     // Move this conversation into Recent (ChatGPT-style) on first send.
     let activeChatId = route.name === 'chat' ? route.chatId : undefined;
@@ -671,6 +728,8 @@ export function AIChat() {
           const [routed] = await Promise.all([routePromise, waitPromise]);
 
           resolvedProvider = routerProviderLabel(routed, providerLabel);
+          const hopNote = failoverChipText(routed, activeModel);
+          if (hopNote) setFailoverNote(hopNote);
           const libraryId = routed.media?.libraryId || `local-${Date.now()}`;
           lastLibraryId = libraryId;
           if (routed.media?.dataUrl) {
@@ -731,6 +790,8 @@ export function AIChat() {
             ? streamedPartial
             : routed.reply;
           resolvedProvider = routerProviderLabel(routed, providerLabel);
+          const hopNote = failoverChipText(routed, activeModel);
+          if (hopNote) setFailoverNote(hopNote);
           usedPlugin = true;
         } catch (err) {
           response = stopRequestedRef.current && streamedPartial
@@ -803,6 +864,7 @@ export function AIChat() {
   const modelsForTab: ChatModelOption[] = kind === 'chat'
     ? [
         ...CHAT_MODELS.filter(m => m.kind === 'chat'),
+        ...engineLocalModels,
         ...keyedCloud,
         ...ollamaModels,
       ]
@@ -870,7 +932,12 @@ export function AIChat() {
                 type="button"
                 onClick={() => {
                   setActiveModel(model);
-                  if (model.kind === 'chat') setLocalPrefs({ defaultModelId: model.id });
+                  if (model.kind === 'chat') {
+                    setLocalPrefs({ defaultModelId: model.id });
+                    if (!model.id.startsWith('ollama:')) {
+                      void setEngineModel(model.id).catch(() => undefined);
+                    }
+                  }
                   setModelMenuOpen(false);
                 }}
                 className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-surface-hover"
@@ -916,9 +983,9 @@ export function AIChat() {
             ))}
           </>
         )}
-        {kind === 'chat' && keyedCloud.length === 0 && ollamaModels.length === 0 && (
+        {kind === 'chat' && keyedCloud.length === 0 && ollamaModels.length === 0 && engineLocalModels.length === 0 && (
           <p className="px-3 py-2 text-[11px] text-content-tertiary leading-relaxed">
-            Connect a free key in Settings to unlock cloud models here. ARK Auto will use them automatically.
+            Install a local brain in Local AI / Models, or connect a free key in Settings. ARK Auto will use whatever is ready.
           </p>
         )}
       </div>,
@@ -926,8 +993,26 @@ export function AIChat() {
     )
     : null;
 
+  const failoverChip = failoverNote ? (
+    <div className="mb-2 flex justify-center">
+      <span className="inline-flex items-center gap-1.5 rounded-full border border-sky-500/30 bg-sky-500/10 pl-2.5 pr-1 py-0.5 text-[11px] text-sky-300/95">
+        {failoverNote}
+        <button
+          type="button"
+          onClick={() => setFailoverNote(null)}
+          className="w-5 h-5 rounded-full flex items-center justify-center text-sky-400/80 hover:text-sky-200 hover:bg-sky-500/20 transition-colors"
+          aria-label="Dismiss"
+          title="Dismiss"
+        >
+          <X className="w-3 h-3" />
+        </button>
+      </span>
+    </div>
+  ) : null;
+
   const composer = (
     <div className="w-full max-w-2xl mx-auto">
+      {failoverChip}
       <div className="flex items-center gap-2">
         <div className="flex flex-1 items-center gap-1 rounded-full border border-surface-border bg-ark-navy-900/90 pl-1.5 pr-1.5 py-1.5 shadow-lg shadow-black/20 min-w-0">
           <button
@@ -1014,83 +1099,78 @@ export function AIChat() {
         )}
       </div>
 
-      {(mode === 'general' || mode === 'code') && (
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 mt-2.5 px-1">
-          {mode === 'general' && (
-            <>
-              <span className="inline-flex items-center gap-1.5 text-[11px] text-content-tertiary">
-                <span className={`w-1.5 h-1.5 rounded-full ${capacity?.liveChat ? 'bg-emerald-400' : 'bg-content-tertiary'}`} />
-                {capacity?.summary ?? 'Checking capacity...'}
-              </span>
-              {capacity && !capacity.liveChat && (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => setFreeKeyOpen(true)}
-                    className="inline-flex items-center gap-1 text-[11px] text-sky-400 hover:text-sky-300 transition-colors"
-                    title={
-                      capacity.suggestedFreeKeys.length
-                        ? `Try ${capacity.suggestedFreeKeys.map(k => k.name).join(', ')}`
-                        : 'Connect a free key'
-                    }
-                  >
-                    Connect free key
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => navigate({ name: 'local-ai' })}
-                    className="inline-flex items-center gap-1 text-[11px] text-emerald-400 hover:text-emerald-300 transition-colors"
-                    title="Install a local GGUF brain"
-                  >
-                    Install local brain
-                  </button>
-                </>
-              )}
-            </>
-          )}
-
-          <button
-            type="button"
-            onClick={() => navigate({ name: 'build' })}
-            className="inline-flex items-center gap-1 text-[11px] text-content-tertiary hover:text-content-secondary transition-colors"
-          >
-            <Blocks className="w-3 h-3" />
-            {chatPlugins.length ? 'Manage plugins' : 'Add plugins'}
-          </button>
-
-          {mode === 'general' && (
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 mt-2.5 px-1">
+        <CapacityMeter capacity={capacity} />
+        {capacity && !capacity.liveChat && (mode === 'general' || mode === 'code') && (
+          <>
             <button
               type="button"
-              onClick={() => navigate({ name: 'projects' })}
-              className="inline-flex items-center gap-1.5 text-[11px] text-content-tertiary hover:text-content-secondary transition-colors"
+              onClick={() => setFreeKeyOpen(true)}
+              className="inline-flex items-center gap-1 text-[11px] text-sky-400 hover:text-sky-300 transition-colors"
+              title={
+                capacity.suggestedFreeKeys.length
+                  ? `Try ${capacity.suggestedFreeKeys.map(k => k.name).join(', ')}`
+                  : 'Connect a free key'
+              }
             >
-              <FolderKanban className="w-3 h-3" />
-              Open a project
+              Connect free key
             </button>
-          )}
-
-          {chatPlugins.map(plugin => (
             <button
-              key={plugin.id}
               type="button"
-              onClick={() => {
-                const first = plugin.actions[0]?.prompt;
-                if (first) {
-                  setInput(first);
-                  textareaRef.current?.focus();
-                }
-              }}
-              className="inline-flex items-center gap-1.5 rounded-full border border-surface-border bg-ark-navy-900/80 px-2 py-0.5 text-[11px] text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors"
-              title={plugin.actions[0]?.label ?? plugin.name}
+              onClick={() => navigate({ name: 'local-ai' })}
+              className="inline-flex items-center gap-1 text-[11px] text-emerald-400 hover:text-emerald-300 transition-colors"
+              title="Install a local GGUF brain"
             >
-              <span className={`w-3.5 h-3.5 rounded bg-gradient-to-br ${plugin.tone} flex items-center justify-center text-[7px] font-bold text-white`}>
-                {plugin.initial}
-              </span>
-              {plugin.name}
+              Install local brain
             </button>
-          ))}
-        </div>
-      )}
+          </>
+        )}
+
+        {(mode === 'general' || mode === 'code') && (
+          <>
+            <button
+              type="button"
+              onClick={() => navigate({ name: 'build' })}
+              className="inline-flex items-center gap-1 text-[11px] text-content-tertiary hover:text-content-secondary transition-colors"
+            >
+              <Blocks className="w-3 h-3" />
+              {chatPlugins.length ? 'Manage plugins' : 'Add plugins'}
+            </button>
+
+            {mode === 'general' && (
+              <button
+                type="button"
+                onClick={() => navigate({ name: 'projects' })}
+                className="inline-flex items-center gap-1.5 text-[11px] text-content-tertiary hover:text-content-secondary transition-colors"
+              >
+                <FolderKanban className="w-3 h-3" />
+                Open a project
+              </button>
+            )}
+
+            {chatPlugins.map(plugin => (
+              <button
+                key={plugin.id}
+                type="button"
+                onClick={() => {
+                  const first = plugin.actions[0]?.prompt;
+                  if (first) {
+                    setInput(first);
+                    textareaRef.current?.focus();
+                  }
+                }}
+                className="inline-flex items-center gap-1.5 rounded-full border border-surface-border bg-ark-navy-900/80 px-2 py-0.5 text-[11px] text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors"
+                title={plugin.actions[0]?.label ?? plugin.name}
+              >
+                <span className={`w-3.5 h-3.5 rounded bg-gradient-to-br ${plugin.tone} flex items-center justify-center text-[7px] font-bold text-white`}>
+                  {plugin.initial}
+                </span>
+                {plugin.name}
+              </button>
+            ))}
+          </>
+        )}
+      </div>
     </div>
   );
 

@@ -149,6 +149,20 @@ export async function createNotionPage(
   return created;
 }
 
+/** Rename / retitle an existing page via PATCH properties. */
+export async function updateNotionPageTitle(token: string, pageId: string, title: string) {
+  return notionRequest<{ id: string; url?: string }>(token, `/pages/${pageId}`, {
+    method: 'PATCH',
+    body: {
+      properties: {
+        title: {
+          title: [{ type: 'text', text: { content: title.slice(0, 200) } }],
+        },
+      },
+    },
+  });
+}
+
 /** Pull plain text from a Notion page for briefs/specs. */
 export async function fetchNotionPageText(token: string, pageId: string, maxChars = 3500) {
   const result = await notionRequest<{ results: NotionBlock[] }>(
@@ -173,7 +187,47 @@ export async function runNotionLive(
   const lower = userText.toLowerCase();
   const perms = opts?.permissions || [];
 
-  if (/\b(create|update|write|add)\b/.test(lower) && /page|note|doc/.test(lower)) {
+  // Update / rename — only when title search + new title are clear.
+  if (/\b(update|rename|edit)\b/.test(lower) && /page|note|doc/.test(lower)) {
+    if (perms.length > 0 && !perms.includes('write')) {
+      return [
+        'Notion · permission needed',
+        '',
+        'Creating or updating pages needs Write. Enable it under Plugins → Notion → Permissions.',
+      ].join('\n');
+    }
+    const renameMatch = userText.match(
+      /(?:update|rename|edit)\s+(?:(?:the|a)\s+)?(?:page|note|doc)\s+(?:titled|called|named)?\s*[\"“]?(.+?)[\"”]?\s+(?:to|as|:)\s*[\"“]?(.+?)[\"”]?\s*$/i,
+    );
+    if (renameMatch?.[1] && renameMatch?.[2]) {
+      const searchTitle = renameMatch[1].replace(/[?.!]+$/, '').trim().slice(0, 120);
+      const newTitle = renameMatch[2].replace(/[?.!]+$/, '').trim().slice(0, 120);
+      if (searchTitle && newTitle) {
+        const account = await verifyNotionToken(token);
+        const hits = await searchNotion(token, searchTitle);
+        const page = hits.find(h => h.object === 'page');
+        if (!page) {
+          return [
+            `Notion · update (@${account.label})`,
+            '',
+            `No page found matching “${searchTitle}”. Share it with the integration, then try again.`,
+          ].join('\n');
+        }
+        const updated = await updateNotionPageTitle(token, page.id, newTitle);
+        return [
+          `Notion · updated (@${account.label})`,
+          '',
+          `${titleFromResult(page)} → ${newTitle}`,
+          updated.url || page.url || page.id,
+          '',
+          'Live write via Notion pages API.',
+        ].join('\n');
+      }
+    }
+    // Unclear update phrasing — fall through to search rather than guess.
+  }
+
+  if (/\b(create|write|add)\b/.test(lower) && /page|note|doc/.test(lower)) {
     if (perms.length > 0 && !perms.includes('write')) {
       return [
         'Notion · permission needed',
@@ -197,7 +251,7 @@ export async function runNotionLive(
     ].join('\n');
   }
 
-  if (/\b(create|update|write|add)\b/.test(lower) && perms.length > 0 && !perms.includes('write')) {
+  if (/\b(create|update|write|add|rename|edit)\b/.test(lower) && perms.length > 0 && !perms.includes('write')) {
     return [
       'Notion · permission needed',
       '',
@@ -263,6 +317,6 @@ export async function runNotionLive(
     '',
     ...lines,
     '',
-    'Ask to “read” or “open” a page for full text, or “create page Meeting notes”. Live data from your Notion workspace.',
+    'Ask to “read” or “open” a page for full text, “create page Meeting notes”, or “update page Old to New”. Live data from your Notion workspace.',
   ].join('\n');
 }

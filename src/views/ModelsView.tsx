@@ -3,7 +3,8 @@ import {
   Search, Plus, Check, Download, Loader2, Cpu, Cloud, Monitor,
   Code, Boxes, Brain, Eye, Zap, Image as ImageIcon, Video, Gauge, Sparkles, Rocket, X, KeyRound,
 } from 'lucide-react';
-import { detectHardware, getHardwareClass, type HardwareClass } from '@/lib/api';
+import { detectHardware, getAccurateHardware, getHardwareClass, isEngineDownloadable, loadHardwareSnapshot, parseRamGb, suggestedKeysForHardware, type HardwareClass } from '@/lib/api';
+import { downloadEngineModel, engineDownloadProgress, engineDownloadError, getEngineStatus } from '@/lib/arkEngine';
 import {
   getProviderApiKeys,
   hasProviderApiKey,
@@ -98,9 +99,9 @@ const LOCAL_MODELS: LocalModel[] = [
 
   // Video generation (Video tab)
   { id: 'ark-video-core', name: 'ARK Video Core', description: 'Built-in ARK video model for the Video tab.', size: '3.2 GB', category: 'video', tiers: ['free'], recommended: true, tone: 'from-sky-500 to-indigo-800', initial: 'AV' },
-  { id: 'cogvideox-2b', name: 'CogVideoX 2B', description: 'Local short clip generation.', size: '5.5 GB', category: 'video', tiers: ['free'], recommended: true, tone: 'from-cyan-500 to-blue-800', initial: 'Cv' },
-  { id: 'wan-14b', name: 'Wan 2.1 14B', description: 'Higher quality local video when hardware allows.', size: '18 GB', category: 'video', tiers: ['free'], tone: 'from-indigo-500 to-violet-900', initial: 'Wn' },
-  { id: 'ltx-video', name: 'LTX Video', description: 'Fast local video drafts.', size: '7.1 GB', category: 'video', tiers: ['free'], tone: 'from-emerald-400 to-teal-800', initial: 'LT' },
+  { id: 'cogvideox-2b', name: 'CogVideoX 2B', description: 'Short clips via ARK Engine free/cloud video path (not on-device weights yet).', size: '5.5 GB', category: 'video', tiers: ['free'], recommended: true, tone: 'from-cyan-500 to-blue-800', initial: 'Cv' },
+  { id: 'wan-14b', name: 'Wan 2.1 14B', description: 'Higher quality video via Engine free/cloud routes when available.', size: '18 GB', category: 'video', tiers: ['free'], tone: 'from-indigo-500 to-violet-900', initial: 'Wn' },
+  { id: 'ltx-video', name: 'LTX Video', description: 'Fast video drafts via Engine free video providers.', size: '7.1 GB', category: 'video', tiers: ['free'], tone: 'from-emerald-400 to-teal-800', initial: 'LT' },
 
   // Fast
   { id: 'qwen25-15b', name: 'Qwen2.5 1.5B', description: 'Very fast replies on modest hardware.', size: '1.0 GB', category: 'fast', tiers: ['free'], recommended: true, tone: 'from-emerald-400 to-green-700', initial: 'Q1' },
@@ -288,14 +289,20 @@ function modelHwNeed(model: LocalModel): HardwareClass {
   return 'light';
 }
 
-function canRunOnPc(model: LocalModel, pc: HardwareClass) {
+function canRunOnPc(model: LocalModel, pc: HardwareClass, ramGb = 8) {
   const rank: Record<HardwareClass, number> = { light: 0, standard: 1, strong: 2 };
-  return rank[modelHwNeed(model)] <= rank[pc];
+  if (rank[modelHwNeed(model)] > rank[pc]) return false;
+  // GGUF needs headroom beyond file size (context + OS).
+  const needRam = modelSizeGb(model) * 1.35 + 4;
+  return ramGb >= needRam || modelSizeGb(model) < 2;
 }
 
-function buildFitLists(pc: HardwareClass) {
-  const compatible = LOCAL_MODELS
-    .filter(m => canRunOnPc(m, pc))
+function buildFitLists(pc: HardwareClass, ramGb = 8) {
+  // Prefer models ARK can actually install; keep others discoverable via Search.
+  const installable = LOCAL_MODELS.filter(m => isEngineDownloadable(m.id));
+  const pool = installable.length ? installable : LOCAL_MODELS;
+  const compatible = pool
+    .filter(m => canRunOnPc(m, pc, ramGb))
     .sort((a, b) => modelSizeGb(b) - modelSizeGb(a));
 
   const quality = compatible.slice(0, 8);
@@ -305,7 +312,7 @@ function buildFitLists(pc: HardwareClass) {
   const balanced = compatible
     .filter(m => {
       const gb = modelSizeGb(m);
-      return gb >= 2 && gb < 12;
+      return gb >= 1 && gb < 12;
     })
     .slice(0, 8);
 
@@ -357,15 +364,17 @@ function HealthBadge({ health }: { health: CloudProvider['health'] }) {
 export function ModelsView() {
   const [tab, setTab] = useState<TabId>('for-pc');
   const [query, setQuery] = useState('');
-  const [installed, setInstalled] = useState<Set<string>>(() => new Set(['qwen25-coder-7b', 'llama32-3b']));
+  const [installed, setInstalled] = useState<Set<string>>(() => new Set());
   const [installing, setInstalling] = useState<Set<string>>(new Set());
+  const [installProgress, setInstallProgress] = useState<Record<string, number>>({});
   const [connected, setConnected] = useState<Set<string>>(() => {
-    const s = new Set<string>(['github-models']);
+    const s = new Set<string>();
     if (isOllamaEnabled()) s.add('ollama');
     return s;
   });
   const [enabledCloud, setEnabledCloud] = useState<Set<string>>(new Set());
-  const [hw] = useState(() => detectHardware());
+  const [hw, setHw] = useState(() => loadHardwareSnapshot() || detectHardware());
+  const [hwNote, setHwNote] = useState(() => (loadHardwareSnapshot()?.accurate ? '' : 'Scanning this PC…'));
   const [connectTarget, setConnectTarget] = useState<CloudProvider | null>(null);
   const [apiKeyDraft, setApiKeyDraft] = useState('');
   const [keyedProviders, setKeyedProviders] = useState<Set<string>>(
@@ -376,7 +385,33 @@ export function ModelsView() {
   const [ollamaModels, setOllamaModels] = useState<OllamaModel[]>([]);
   const [ollamaNote, setOllamaNote] = useState('');
   const pcClass = useMemo(() => getHardwareClass(hw), [hw]);
-  const fitLists = useMemo(() => buildFitLists(pcClass), [pcClass]);
+  const ramGb = useMemo(() => parseRamGb(hw), [hw]);
+  const fitLists = useMemo(() => buildFitLists(pcClass, ramGb), [pcClass, ramGb]);
+  const keyTips = useMemo(() => suggestedKeysForHardware(hw), [hw]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void getAccurateHardware(true).then(info => {
+      if (cancelled) return;
+      setHw(info);
+      setHwNote(info.accurate ? 'Hardware from this PC' : 'Approximate — open ARK Desktop for exact specs');
+    });
+    void getEngineStatus().then(status => {
+      if (cancelled) return;
+      const ready = new Set(
+        status.models
+          .filter(m =>
+            m.status === 'ready'
+            && m.id !== 'ark-core'
+            && m.id !== 'ark-image-core'
+            && m.id !== 'ark-video-core',
+          )
+          .map(m => m.id),
+      );
+      setInstalled(ready);
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     if (!ollamaOn) {
@@ -464,8 +499,8 @@ export function ModelsView() {
     // Default: only hardware-fit models. Searching also surfaces out-of-spec matches.
     if (q) {
       const hits = LOCAL_MODELS.filter(match);
-      const fit = hits.filter(m => canRunOnPc(m, pcClass));
-      const stretch = hits.filter(m => !canRunOnPc(m, pcClass));
+      const fit = hits.filter(m => canRunOnPc(m, pcClass, ramGb));
+      const stretch = hits.filter(m => !canRunOnPc(m, pcClass, ramGb));
       return {
         quality: [...fit.filter(m => m.category !== 'fast').slice(0, 10), ...stretch.slice(0, 6)],
         balanced: fit.filter(m => {
@@ -481,7 +516,7 @@ export function ModelsView() {
       balanced: fitLists.balanced.filter(match),
       performance: fitLists.performance.filter(match),
     };
-  }, [fitLists, q, pcClass]);
+  }, [fitLists, q, pcClass, ramGb]);
 
   const localCategories = useMemo(() => {
     return LOCAL_CATEGORIES.map(cat => ({
@@ -537,24 +572,47 @@ export function ModelsView() {
   }, [q]);
 
   const toggleInstall = (id: string) => {
-    if (installed.has(id)) {
-      setInstalled(prev => {
-        const next = new Set(prev);
-        next.delete(id);
-        return next;
-      });
+    if (!isEngineDownloadable(id)) {
+      setOllamaNote('That model isn’t in the ARK Engine install list yet. Use Local AI for the recommended brains, or Search for discovery only.');
       return;
     }
-    if (installing.has(id)) return;
+    if (installed.has(id) || installing.has(id)) return;
     setInstalling(prev => new Set(prev).add(id));
-    window.setTimeout(() => {
+    setInstallProgress(prev => ({ ...prev, [id]: 1 }));
+    void downloadEngineModel(id).then(() => {
+      const tick = window.setInterval(async () => {
+        const p = await engineDownloadProgress(id);
+        setInstallProgress(prev => ({ ...prev, [id]: p }));
+        const err = await engineDownloadError(id);
+        if (err) {
+          window.clearInterval(tick);
+          setInstalling(prev => {
+            const next = new Set(prev);
+            next.delete(id);
+            return next;
+          });
+          setOllamaNote(err);
+          return;
+        }
+        if (p >= 100) {
+          window.clearInterval(tick);
+          setInstalling(prev => {
+            const next = new Set(prev);
+            next.delete(id);
+            return next;
+          });
+          setInstalled(prev => new Set(prev).add(id));
+          setOllamaNote(`${id} ready — pick it in Chat → model menu`);
+        }
+      }, 400);
+    }).catch(err => {
       setInstalling(prev => {
         const next = new Set(prev);
         next.delete(id);
         return next;
       });
-      setInstalled(prev => new Set(prev).add(id));
-    }, 1200);
+      setOllamaNote(err instanceof Error ? err.message : 'Download failed');
+    });
   };
 
   const toggleCloudModel = (id: string) => {
@@ -619,16 +677,34 @@ export function ModelsView() {
                   <span className="w-10 h-10 rounded-xl bg-surface-hover flex items-center justify-center shrink-0">
                     <Monitor className="w-5 h-5 text-content-secondary" />
                   </span>
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex-1">
                     <p className="text-xs text-content-tertiary leading-relaxed">
                       {hw.os} · {hw.cpu} · {hw.ram} RAM · {hw.gpu} · {hw.acceleration}
                     </p>
                     <p className="text-xs text-content-secondary mt-1">
-                      Profile: {hardwareLabel(pcClass)}.
+                      {hwNote || (hw.accurate ? 'Hardware from this PC' : 'Scanning…')} · Profile: {hardwareLabel(pcClass)}.
                       {q
                         ? ' Search shows matching models, including ones that may be heavy for this PC.'
-                        : ' Only models that fit this hardware are listed below. Search to find others.'}
+                        : ' Installable brains below match this hardware. Search to discover others.'}
                     </p>
+                    <p className="text-[11px] text-content-tertiary mt-2 leading-relaxed">
+                      Suggested free keys for this PC:{' '}
+                      {keyTips.map(k => k.name).join(' · ')}
+                      {' — '}add them in Cloud / Settings → Providers.
+                    </p>
+                    <button
+                      type="button"
+                      className="mt-2 text-[11px] text-sky-400 hover:text-sky-300"
+                      onClick={() => {
+                        setHwNote('Refreshing…');
+                        void getAccurateHardware(true).then(info => {
+                          setHw(info);
+                          setHwNote(info.accurate ? 'Hardware refreshed from this PC' : 'Still approximate');
+                        });
+                      }}
+                    >
+                      Rescan hardware
+                    </button>
                   </div>
                 </div>
               </section>
@@ -672,14 +748,22 @@ export function ModelsView() {
                                 <button
                                   type="button"
                                   onClick={() => toggleInstall(model.id)}
-                                  disabled={isBusy}
+                                  disabled={isBusy || isOn}
                                   className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 transition-colors ${
                                     isOn
                                       ? 'bg-surface-hover text-ark-accent-green'
-                                      : 'text-content-secondary hover:text-content-primary hover:bg-surface-hover'
+                                      : isEngineDownloadable(model.id)
+                                        ? 'text-content-secondary hover:text-content-primary hover:bg-surface-hover'
+                                        : 'text-content-tertiary hover:text-content-secondary hover:bg-surface-hover'
                                   }`}
-                                  title={isOn ? 'Installed' : 'Download'}
-                                  aria-label={isOn ? `Remove ${model.name}` : `Download ${model.name}`}
+                                  title={
+                                    isOn
+                                      ? 'Installed'
+                                      : isEngineDownloadable(model.id)
+                                        ? 'Download into ARK Engine'
+                                        : 'Discovery only — not in Engine install list yet'
+                                  }
+                                  aria-label={isOn ? `Installed ${model.name}` : `Download ${model.name}`}
                                 >
                                   {isBusy ? (
                                     <Loader2 className="w-4 h-4 animate-spin" />
@@ -752,7 +836,7 @@ export function ModelsView() {
                       {cat.models.map(model => {
                         const isOn = installed.has(model.id);
                         const isBusy = installing.has(model.id);
-                        const fits = canRunOnPc(model, pcClass);
+                        const fits = canRunOnPc(model, pcClass, ramGb);
                         return (
                           <div
                             key={model.id}
@@ -782,14 +866,22 @@ export function ModelsView() {
                             <button
                               type="button"
                               onClick={() => toggleInstall(model.id)}
-                              disabled={isBusy}
+                              disabled={isBusy || isOn}
                               className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 transition-colors ${
                                 isOn
                                   ? 'bg-surface-hover text-ark-accent-green'
-                                  : 'text-content-secondary hover:text-content-primary hover:bg-surface-hover'
+                                  : isEngineDownloadable(model.id)
+                                    ? 'text-content-secondary hover:text-content-primary hover:bg-surface-hover'
+                                    : 'text-content-tertiary hover:text-content-secondary hover:bg-surface-hover'
                               }`}
-                              title={isOn ? 'Installed' : 'Download'}
-                              aria-label={isOn ? `Remove ${model.name}` : `Download ${model.name}`}
+                              title={
+                                isOn
+                                  ? 'Installed'
+                                  : isEngineDownloadable(model.id)
+                                    ? 'Download into ARK Engine'
+                                    : 'Discovery only — not in Engine install list yet'
+                              }
+                              aria-label={isOn ? `Installed ${model.name}` : `Download ${model.name}`}
                             >
                               {isBusy ? (
                                 <Loader2 className="w-4 h-4 animate-spin" />
