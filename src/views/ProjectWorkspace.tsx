@@ -322,7 +322,12 @@ export function ProjectWorkspace() {
       try {
         if (pluginId) {
           const runtime = getPluginRuntime(pluginId, pluginState);
-          const pluginReply = await runPluginAction(pluginId, content, runtime.token);
+          const pluginReply = await runPluginAction(
+            pluginId,
+            content,
+            runtime.token,
+            runtime.permissions,
+          );
           if (pluginReply) {
             replyText = pluginReply;
             provider = `${enabled.find(p => p.id === pluginId)?.name ?? 'Plugin'}${runtime.accountLabel ? ` · ${runtime.accountLabel}` : ''}`;

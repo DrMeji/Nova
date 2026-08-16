@@ -23,6 +23,7 @@ import { verifySlackToken } from '@/lib/slack';
 import { verifyLinearToken } from '@/lib/linear';
 import { verifyFigmaToken } from '@/lib/figma';
 import { openInSystemBrowser } from '@/lib/openExternal';
+import { getPluginAuthLink } from '@/lib/pluginAuth';
 
 export function BuildRun() {
   const [query, setQuery] = useState('');
@@ -125,14 +126,13 @@ export function BuildRun() {
       connected: true,
       enabledInChat: true,
       permissions: granted,
-      token: ['github', 'notion', 'gmail', 'slack', 'linear', 'figma'].includes(selected.id)
-        ? tokenDraft.trim()
-        : selected.authKind === 'token'
-          ? tokenDraft.trim() || 'demo-token'
-          : selectedRuntime?.token,
-      accountLabel: ['github', 'notion', 'gmail', 'slack', 'linear', 'figma'].includes(selected.id)
-          ? verifiedLogin || selectedRuntime?.accountLabel
-          : selectedRuntime?.accountLabel,
+      token: tokenDraft.trim()
+        || (['github', 'notion', 'gmail', 'slack', 'linear', 'figma'].includes(selected.id)
+          ? undefined
+          : selected.authKind === 'token'
+            ? 'demo-token'
+            : selectedRuntime?.token),
+      accountLabel: verifiedLogin || selectedRuntime?.accountLabel,
       connectedAt: new Date().toISOString(),
     });
     setConnectStep('idle');
@@ -469,107 +469,107 @@ export function BuildRun() {
                     <KeyRound className="w-4 h-4 text-sky-400" />
                     Connect with {selected.authKind === 'oauth' ? 'account' : 'token'}
                   </div>
-                  {selected.authKind === 'oauth' ? (
+                  {selected.authKind === 'oauth' || selected.authKind === 'token' ? (
                     <>
-                      <p className="text-xs text-content-tertiary leading-relaxed">
-                        Real browser OAuth comes next. For now, continue to grant permissions and enable a demo connection on this device.
-                      </p>
-                      <button type="button" className="ark-btn-primary w-full" onClick={() => setConnectStep('permissions')}>
-                        Continue (demo OAuth)
-                        <ChevronRight className="w-4 h-4" />
-                      </button>
-                    </>
-                  ) : ['github', 'notion', 'gmail', 'slack', 'linear', 'figma'].includes(selected.id) ? (
-                    <>
-                      <p className="text-xs text-content-tertiary leading-relaxed">
-                        {selected.id === 'github' && 'Paste a GitHub personal access token. ARK verifies it live, then stores it only on this device.'}
-                        {selected.id === 'notion' && 'Paste a Notion internal integration secret. Share pages with that integration in Notion first.'}
-                        {selected.id === 'gmail' && 'Paste a Google OAuth access token with gmail.readonly + userinfo.email. Use Google’s OAuth Playground (opens below), authorize Gmail, then copy the access token. Stored on this device only.'}
-                        {selected.id === 'slack' && 'Paste a Slack bot token (xoxb-…). Invite the bot to channels you want ARK to see.'}
-                        {selected.id === 'linear' && 'Paste a Linear personal API key. ARK verifies it live against Linear GraphQL.'}
-                        {selected.id === 'figma' && 'Paste a Figma personal access token. ARK verifies it against the Figma API.'}
-                      </p>
-                      {selected.id === 'github' && (
-                        <p className="text-[11px] text-content-tertiary leading-relaxed">
-                          Classic token: enable <span className="text-content-secondary">repo</span> and <span className="text-content-secondary">read:user</span>.
-                        </p>
+                      {(() => {
+                        const link = getPluginAuthLink(selected.id);
+                        return (
+                          <>
+                            <p className="text-xs text-content-tertiary leading-relaxed">
+                              {selected.authKind === 'oauth'
+                                ? `Browser-assisted connect: open ${selected.name}, sign in / authorize, then paste the access token below. ARK stores it in the OS vault.`
+                                : link.hint}
+                            </p>
+                            <button
+                              type="button"
+                              className="inline-flex items-center gap-1.5 text-xs text-sky-400 hover:text-sky-300"
+                              onClick={() => void openInSystemBrowser(link.url)}
+                            >
+                              <ExternalLink className="w-3.5 h-3.5" />
+                              {selected.authKind === 'oauth' ? `Open ${selected.name} in browser` : link.label}
+                            </button>
+                          </>
+                        );
+                      })()}
+                      {['github', 'notion', 'gmail', 'slack', 'linear', 'figma'].includes(selected.id) ? (
+                        <>
+                          {selected.id === 'github' && (
+                            <p className="text-[11px] text-content-tertiary leading-relaxed">
+                              Classic token: enable <span className="text-content-secondary">repo</span> and <span className="text-content-secondary">read:user</span>.
+                            </p>
+                          )}
+                          <input
+                            type="password"
+                            value={tokenDraft}
+                            onChange={e => setTokenDraft(e.target.value)}
+                            placeholder={
+                              selected.id === 'github'
+                                ? 'ghp_… or github_pat_…'
+                                : selected.id === 'notion'
+                                  ? 'secret_… or ntn_…'
+                                  : selected.id === 'gmail'
+                                    ? 'ya29.… access token'
+                                    : selected.id === 'slack'
+                                      ? 'xoxb-…'
+                                      : selected.id === 'linear'
+                                        ? 'lin_api_…'
+                                        : selected.authKind === 'oauth'
+                                          ? 'access token from browser'
+                                          : 'figd_…'
+                            }
+                            className="ark-input"
+                            autoFocus
+                          />
+                          {authError && (
+                            <p className="text-xs text-ark-accent-red leading-relaxed">{authError}</p>
+                          )}
+                          {verifiedLogin && !authError && (
+                            <p className="text-xs text-emerald-400">
+                              Verified as {selected.id === 'gmail' ? verifiedLogin : `@${verifiedLogin}`}
+                            </p>
+                          )}
+                          <button
+                            type="button"
+                            className="ark-btn-primary w-full"
+                            disabled={authBusy || !tokenDraft.trim()}
+                            onClick={() => void continueFromAuth()}
+                          >
+                            {authBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                            {authBusy
+                              ? `Checking with ${selected.name}…`
+                              : selected.authKind === 'oauth'
+                                ? 'Verify & continue'
+                                : 'Verify token'}
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <input
+                            type="password"
+                            value={tokenDraft}
+                            onChange={e => setTokenDraft(e.target.value)}
+                            placeholder={selected.authKind === 'oauth' ? 'access token from browser' : 'token'}
+                            className="ark-input"
+                            autoFocus
+                          />
+                          <button
+                            type="button"
+                            className="ark-btn-primary w-full"
+                            disabled={!tokenDraft.trim()}
+                            onClick={() => void continueFromAuth()}
+                          >
+                            Continue
+                            <ChevronRight className="w-4 h-4" />
+                          </button>
+                        </>
                       )}
-                      <button
-                        type="button"
-                        className="inline-flex items-center gap-1.5 text-xs text-sky-400 hover:text-sky-300"
-                        onClick={() => void openInSystemBrowser(
-                          selected.id === 'github'
-                            ? 'https://github.com/settings/tokens'
-                            : selected.id === 'notion'
-                              ? 'https://www.notion.so/my-integrations'
-                              : selected.id === 'gmail'
-                                ? 'https://developers.google.com/oauthplayground/'
-                                : selected.id === 'slack'
-                                  ? 'https://api.slack.com/apps'
-                                  : selected.id === 'linear'
-                                    ? 'https://linear.app/settings/api'
-                                    : 'https://www.figma.com/developers/api#access-tokens',
-                        )}
-                      >
-                        <ExternalLink className="w-3.5 h-3.5" />
-                        Open {selected.name} token settings
-                      </button>
-                      <input
-                        type="password"
-                        value={tokenDraft}
-                        onChange={e => setTokenDraft(e.target.value)}
-                        placeholder={
-                          selected.id === 'github'
-                            ? 'ghp_… or github_pat_…'
-                            : selected.id === 'notion'
-                              ? 'secret_… or ntn_…'
-                              : selected.id === 'gmail'
-                                ? 'ya29.… access token'
-                                : selected.id === 'slack'
-                                  ? 'xoxb-…'
-                                  : selected.id === 'linear'
-                                    ? 'lin_api_…'
-                                    : 'figd_…'
-                        }
-                        className="ark-input"
-                        autoFocus
-                      />
-                      {authError && (
-                        <p className="text-xs text-ark-accent-red leading-relaxed">{authError}</p>
-                      )}
-                      {verifiedLogin && !authError && (
-                        <p className="text-xs text-emerald-400">
-                          Verified as {selected.id === 'gmail' ? verifiedLogin : `@${verifiedLogin}`}
-                        </p>
-                      )}
-                      <button
-                        type="button"
-                        className="ark-btn-primary w-full"
-                        disabled={authBusy || !tokenDraft.trim()}
-                        onClick={() => void continueFromAuth()}
-                      >
-                        {authBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-                        {authBusy ? `Checking with ${selected.name}…` : 'Verify token'}
-                      </button>
                     </>
                   ) : (
                     <>
                       <p className="text-xs text-content-tertiary leading-relaxed">
-                        Paste a personal access token. It stays on this device only.
+                        No account needed — continue to grant permissions.
                       </p>
-                      <input
-                        type="password"
-                        value={tokenDraft}
-                        onChange={e => setTokenDraft(e.target.value)}
-                        placeholder="token"
-                        className="ark-input"
-                        autoFocus
-                      />
-                      <button
-                        type="button"
-                        className="ark-btn-primary w-full"
-                        onClick={() => void continueFromAuth()}
-                      >
+                      <button type="button" className="ark-btn-primary w-full" onClick={() => setConnectStep('permissions')}>
                         Continue
                         <ChevronRight className="w-4 h-4" />
                       </button>

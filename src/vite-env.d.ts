@@ -6,6 +6,7 @@ declare global {
   interface Window {
     arkDesktop?: {
       isElectron: boolean;
+      isPackaged?: boolean;
       platform: string;
       versions: {
         electron: string;

@@ -128,12 +128,12 @@ const CLOUD_PROVIDERS: CloudProvider[] = [
   { id: 'groq', name: 'Groq', description: 'Fast Llama free tier — wired into ARK Router.', tiers: ['free', 'pro'], tone: 'from-orange-500 to-red-700', initial: 'Gq', health: 'available', availability: 'live' },
   { id: 'openai', name: 'OpenAI', description: 'GPT models for chat, code, and DALL·E.', tiers: ['pro'], tone: 'from-emerald-400 to-green-800', initial: 'OA', health: 'available', availability: 'live' },
   { id: 'anthropic', name: 'Anthropic', description: 'Claude models for long context work.', tiers: ['pro'], tone: 'from-amber-500 to-orange-800', initial: 'An', health: 'available', availability: 'live' },
-  { id: 'huggingface', name: 'Hugging Face', description: 'Open models and Inference providers.', tiers: ['free', 'pro'], tone: 'from-yellow-500 to-amber-700', initial: 'HF', health: 'limited', availability: 'coming_soon' },
-  { id: 'nvidia', name: 'NVIDIA NIM', description: 'NVIDIA hosted inference endpoints.', tiers: ['free', 'pro'], tone: 'from-lime-500 to-green-800', initial: 'NV', health: 'limited', availability: 'coming_soon' },
-  { id: 'together', name: 'Together AI', description: 'Open model hosting and inference.', tiers: ['free', 'pro'], tone: 'from-indigo-500 to-blue-800', initial: 'To', health: 'limited', availability: 'coming_soon' },
-  { id: 'fireworks', name: 'Fireworks AI', description: 'Fast serverless inference for open models.', tiers: ['free', 'pro'], tone: 'from-rose-500 to-orange-700', initial: 'Fw', health: 'limited', availability: 'coming_soon' },
-  { id: 'deepseek', name: 'DeepSeek', description: 'Coding and reasoning models via API.', tiers: ['free', 'pro'], tone: 'from-blue-400 to-indigo-700', initial: 'DS', health: 'limited', availability: 'coming_soon' },
-  { id: 'mistral', name: 'Mistral', description: 'Mistral and Codestral cloud models.', tiers: ['free', 'pro'], tone: 'from-orange-400 to-amber-700', initial: 'Mi', health: 'limited', availability: 'coming_soon' },
+  { id: 'huggingface', name: 'Hugging Face', description: 'Chat + FLUX images via Inference — wired into ARK Router.', tiers: ['free', 'pro'], tone: 'from-yellow-500 to-amber-700', initial: 'HF', health: 'available', availability: 'live' },
+  { id: 'nvidia', name: 'NVIDIA NIM', description: 'NVIDIA hosted inference — free-key hop in ARK Router.', tiers: ['free', 'pro'], tone: 'from-lime-500 to-green-800', initial: 'NV', health: 'available', availability: 'live' },
+  { id: 'together', name: 'Together AI', description: 'Open model hosting — wired into ARK Router.', tiers: ['free', 'pro'], tone: 'from-indigo-500 to-blue-800', initial: 'To', health: 'available', availability: 'live' },
+  { id: 'fireworks', name: 'Fireworks AI', description: 'Fast serverless inference — wired into ARK Router.', tiers: ['free', 'pro'], tone: 'from-rose-500 to-orange-700', initial: 'Fw', health: 'available', availability: 'live' },
+  { id: 'deepseek', name: 'DeepSeek', description: 'Coding and reasoning via API — wired into ARK Router.', tiers: ['free', 'pro'], tone: 'from-blue-400 to-indigo-700', initial: 'DS', health: 'available', availability: 'live' },
+  { id: 'mistral', name: 'Mistral', description: 'Mistral and Codestral — wired into ARK Router.', tiers: ['free', 'pro'], tone: 'from-orange-400 to-amber-700', initial: 'Mi', health: 'available', availability: 'live' },
   { id: 'github-models', name: 'GitHub Models', description: 'Retired by GitHub (July 2026).', tiers: ['free'], tone: 'from-zinc-500 to-zinc-900', initial: 'GH', health: 'offline', availability: 'retired' },
 ];
 
@@ -149,6 +149,9 @@ const CLOUD_MODELS: CloudModel[] = [
   { id: 'mistral-large', name: 'Mistral Large', description: 'High quality Mistral chat model.', provider: 'Mistral', category: 'chat', tiers: ['pro'], tone: 'from-orange-500 to-red-700', initial: 'ML' },
   { id: 'command-r-plus', name: 'Command R+', description: 'Cohere chat model with strong tools support.', provider: 'Cohere', category: 'chat', tiers: ['pro'], tone: 'from-emerald-500 to-teal-800', initial: 'CR' },
   { id: 'grok-2', name: 'Grok 2', description: 'xAI chat model for general work.', provider: 'xAI', category: 'chat', tiers: ['free', 'pro'], tone: 'from-zinc-400 to-black', initial: 'Gx' },
+  { id: 'hf-llama-31', name: 'Llama 3.1 8B (HF)', description: 'Open chat via Hugging Face Inference.', provider: 'Hugging Face', category: 'chat', tiers: ['free', 'pro'], tone: 'from-yellow-500 to-amber-700', initial: 'HF' },
+  { id: 'nvidia-llama-31', name: 'Llama 3.1 8B (NIM)', description: 'NVIDIA NIM hosted Llama for coding and chat.', provider: 'NVIDIA', category: 'chat', tiers: ['free', 'pro'], tone: 'from-lime-500 to-green-800', initial: 'NV' },
+  { id: 'hf-flux-schnell', name: 'FLUX.1 schnell (HF)', description: 'Fast free-key images via Hugging Face.', provider: 'Hugging Face', category: 'image', tiers: ['free', 'pro'], tone: 'from-yellow-400 to-orange-700', initial: 'FX' },
 
   // Coding
   { id: 'claude-sonnet-code', name: 'Claude Sonnet (Coding)', description: 'Excellent for code edits and agent work.', provider: 'Anthropic', category: 'coding', tiers: ['pro'], tone: 'from-amber-500 to-orange-800', initial: 'CC' },
@@ -221,6 +224,12 @@ const LIVE_MODEL_PROVIDERS = new Set([
   'Groq',
   'OpenRouter',
   'Pollinations',
+  'Hugging Face',
+  'NVIDIA',
+  'Together',
+  'Fireworks',
+  'DeepSeek',
+  'Mistral',
 ]);
 
 function cloudModelAvailability(model: CloudModel): 'live' | 'coming_soon' | 'retired' {

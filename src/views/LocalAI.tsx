@@ -187,10 +187,7 @@ export function LocalAI() {
     }
   };
 
-  // Speed tab is blanked for now (inaccurate) — bounce away if selected.
-  useEffect(() => {
-    if (tab === 'speed') setTab('overview');
-  }, [tab]);
+  // Speed tab is available for download/preload estimates (not AI token speed).
 
   const toggleEngine = () => {
     if (engineRunning) {
@@ -337,26 +334,19 @@ export function LocalAI() {
           <div className="flex items-center gap-1 mb-4 flex-wrap">
             {([
               { id: 'overview' as const, label: 'Overview' },
-              { id: 'speed' as const, label: 'Speed', disabled: true },
+              { id: 'speed' as const, label: 'Speed' },
               { id: 'hardware' as const, label: 'Hardware' },
               { id: 'storage' as const, label: 'Storage' },
               { id: 'advanced' as const, label: 'Advanced' },
-            ]).map(t => (
+            ] as const).map(t => (
               <button
                 key={t.id}
                 type="button"
-                disabled={'disabled' in t && t.disabled}
-                onClick={() => {
-                  if ('disabled' in t && t.disabled) return;
-                  setTab(t.id);
-                }}
-                title={'disabled' in t && t.disabled ? 'Coming later' : undefined}
+                onClick={() => setTab(t.id)}
                 className={`rounded-full px-3.5 py-1.5 text-sm transition-colors ${
-                  'disabled' in t && t.disabled
-                    ? 'opacity-40 cursor-not-allowed text-content-tertiary pointer-events-none'
-                    : tab === t.id
-                      ? 'bg-surface-hover text-content-primary'
-                      : 'text-content-secondary hover:text-content-primary'
+                  tab === t.id
+                    ? 'bg-surface-hover text-content-primary'
+                    : 'text-content-secondary hover:text-content-primary'
                 }`}
               >
                 {t.label}
@@ -554,17 +544,22 @@ export function LocalAI() {
                 </div>
               </section>
 
-              {/* Speed / preload — blanked while Speed tab is disabled */}
-              <section className="opacity-40 pointer-events-none select-none">
+              <section>
                 <div className="flex items-center justify-between gap-3 mb-4">
                   <div className="flex items-center gap-2">
                     <Wifi className="w-4 h-4 text-content-secondary" />
                     <h2 className="text-base font-semibold text-content-primary">Connection & preload</h2>
                   </div>
-                  <span className="text-xs text-content-tertiary">Coming later</span>
+                  <button
+                    type="button"
+                    onClick={() => setTab('speed')}
+                    className="text-xs text-content-secondary hover:text-content-primary transition-colors"
+                  >
+                    Open Speed
+                  </button>
                 </div>
                 <p className="text-sm text-content-tertiary px-1">
-                  Speed test is paused for now. Local models and hardware tools still work as usual.
+                  Measure download speed so ARK can estimate model install times and preload the next brain while you work.
                 </p>
               </section>
 
@@ -578,18 +573,26 @@ export function LocalAI() {
           )}
 
           {tab === 'speed' && (
-            <div className="space-y-10 opacity-40 pointer-events-none select-none">
+            <div className="space-y-10">
               <section>
                 <div className="flex items-center justify-between gap-3 mb-4">
                   <div className="flex items-center gap-2">
                     <Wifi className="w-4 h-4 text-content-secondary" />
-                    <h2 className="text-base font-semibold text-content-primary">Speed test</h2>
+                    <h2 className="text-base font-semibold text-content-primary">Download speed</h2>
                   </div>
-                  <span className="text-xs text-content-tertiary">Coming later</span>
+                  <button
+                    type="button"
+                    onClick={() => void handleSpeedTest()}
+                    disabled={speedTesting}
+                    className="inline-flex items-center gap-2 rounded-full bg-surface-hover px-3.5 py-2 text-sm text-content-primary hover:bg-surface-hover/80 transition-colors disabled:opacity-50"
+                  >
+                    {speedTesting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
+                    {speedTesting ? 'Measuring…' : 'Run speed test'}
+                  </button>
                 </div>
-                <p className="text-xs text-content-tertiary mb-4 px-1">
-                  ARK measures download speed so it can start the next model early enough, especially on slow connections,
-                  that switching never waits on a half finished download.
+                <p className="text-xs text-content-tertiary mb-4 px-1 leading-relaxed">
+                  This measures <span className="text-content-secondary">download throughput</span> for model installs —
+                  not how fast the AI replies. Use it to plan when to preload the next GGUF.
                 </p>
                 <div className="flex flex-col">
                   <div className="flex items-center gap-3 py-3 px-1">
@@ -845,10 +848,18 @@ export function LocalAI() {
                     type="button"
                     onClick={async () => {
                       if (!window.arkDesktop?.modelsDirPick) return;
-                      const res = await window.arkDesktop.modelsDirPick();
-                      if (res?.ok) {
+                      try {
+                        const res = await window.arkDesktop.modelsDirPick();
+                        if (res?.canceled) return;
+                        if (res?.ok === false && res.error) {
+                          setStatusNote(res.error);
+                          return;
+                        }
                         const next = await getEngineStatus();
-                        setEngineMeta(next);
+                        applyEngine(next);
+                        setStatusNote(`Models folder set · ${next.modelsDir}`);
+                      } catch (err) {
+                        setStatusNote(err instanceof Error ? err.message : 'Could not change folder');
                       }
                     }}
                     className="inline-flex items-center gap-2 rounded-full bg-surface-hover px-3.5 py-2 text-sm text-content-primary hover:bg-surface-hover/80 transition-colors"
@@ -863,7 +874,8 @@ export function LocalAI() {
                       if (!window.arkDesktop?.modelsDirReset) return;
                       await window.arkDesktop.modelsDirReset();
                       const next = await getEngineStatus();
-                      setEngineMeta(next);
+                      applyEngine(next);
+                      setStatusNote('Models folder reset to default');
                     }}
                     className="inline-flex items-center gap-2 rounded-full bg-surface-hover px-3.5 py-2 text-sm text-content-primary hover:bg-surface-hover/80 transition-colors disabled:opacity-40 disabled:pointer-events-none"
                   >
@@ -879,15 +891,12 @@ export function LocalAI() {
                     </button>
                   )}
                 </div>
-                {engineMeta?.modelsDirIsCustom ? (
-                  <p className="text-[11px] text-content-tertiary mt-3">
-                    Custom path. Default is {engineMeta.modelsDirDefault ?? 'the ARK app data folder'}.
-                  </p>
-                ) : (
-                  <p className="text-[11px] text-content-tertiary mt-3">
-                    Using the default ARK Engine models location.
-                  </p>
-                )}
+                <p className="text-[11px] text-content-tertiary mt-3 leading-relaxed">
+                  Existing downloads stay where they are. New GGUF installs go to the folder above.
+                  {engineMeta?.modelsDirIsCustom
+                    ? ` Default was ${engineMeta.modelsDirDefault ?? 'app data'}.`
+                    : ' Using the default ARK Engine location.'}
+                </p>
               </section>
 
               <section>

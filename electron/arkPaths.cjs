@@ -51,6 +51,14 @@ function setModelsDir(nextPath) {
   }
   const resolved = path.resolve(nextPath.trim());
   fs.mkdirSync(resolved, { recursive: true });
+  // Prove the folder is writable before we commit the preference.
+  const probe = path.join(resolved, `.ark-write-test-${Date.now()}`);
+  try {
+    fs.writeFileSync(probe, 'ok', 'utf8');
+    fs.unlinkSync(probe);
+  } catch {
+    throw new Error('That folder is not writable. Pick another location.');
+  }
   writeConfig({ modelsDir: resolved });
   return { ok: true, modelsDir: resolved, isCustom: true };
 }

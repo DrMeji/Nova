@@ -115,8 +115,21 @@ function formatDate(iso: string) {
 }
 
 /** Build a chat reply from live GitHub data based on the user prompt. */
-export async function runGitHubLive(token: string, userText: string): Promise<string> {
+export async function runGitHubLive(
+  token: string,
+  userText: string,
+  opts?: { permissions?: string[] },
+): Promise<string> {
   const lower = userText.toLowerCase();
+  const perms = opts?.permissions || [];
+
+  if (/\b(comment|post|create|write|close)\b/.test(lower) && perms.length > 0 && !perms.includes('write')) {
+    return [
+      'GitHub · permission needed',
+      '',
+      'Write actions need the Write permission. Enable it under Plugins → GitHub → Permissions.',
+    ].join('\n');
+  }
 
   if (/pull|\bpr\b/.test(lower)) {
     const [user, prs] = await Promise.all([

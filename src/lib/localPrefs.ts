@@ -197,8 +197,35 @@ export function hasProviderApiKey(providerId: string) {
   return Boolean(getProviderApiKeys()[providerId]);
 }
 
+const PLUGIN_KEY_PREFIX = 'plugin:';
+
+/** Store plugin tokens in the same OS-encrypted vault as provider keys. */
+export function setPluginToken(pluginId: string, token: string) {
+  return setProviderApiKey(`${PLUGIN_KEY_PREFIX}${pluginId}`, token);
+}
+
+export function getPluginToken(pluginId: string): string | undefined {
+  const value = getProviderApiKeys()[`${PLUGIN_KEY_PREFIX}${pluginId}`];
+  return value || undefined;
+}
+
+export function clearPluginToken(pluginId: string) {
+  return setPluginToken(pluginId, '');
+}
+
 /** App changelog shown in Settings → Updates. */
 export const ARK_CHANGELOG = [
+  {
+    version: '0.1.20',
+    channel: 'stable' as const,
+    date: 'Aug 16, 2026',
+    title: 'More free capacity plugged in',
+    notes: [
+      'Hugging Face + NVIDIA NIM + Together / Fireworks / DeepSeek / Mistral in ARK Router',
+      'Video tries Pollinations + HF MP4 hosts; browser-assisted plugin connect; permission checks',
+      'electron-updater delta path when latest.yml is published; code-signing via CSC_LINK',
+    ],
+  },
   {
     version: '0.1.19',
     channel: 'stable' as const,

@@ -1,4 +1,8 @@
-/** ARK plugin catalog + local install/connect state (UI-first; real OAuth later). */
+/** ARK plugin catalog + local install/connect state.
+ * Token plugins (GitHub, Notion, …) verify live and store secrets in the OS vault.
+ */
+
+import { clearPluginToken, getPluginToken, setPluginToken } from '@/lib/localPrefs';
 
 const STATE_KEY = 'ark:plugin-state';
 
@@ -34,7 +38,7 @@ export type PluginRuntimeState = {
   enabledInChat: boolean;
   /** Granted permission ids */
   permissions: PluginPermission[];
-  /** Placeholder credential (token) stored locally only */
+  /** Token may be mirrored briefly; prefer OS vault via getPluginToken */
   token?: string;
   /** Connected account label (e.g. GitHub username) */
   accountLabel?: string;
@@ -202,7 +206,16 @@ export function loadPluginState(): PluginStateMap {
 }
 
 export function savePluginState(map: PluginStateMap) {
-  localStorage.setItem(STATE_KEY, JSON.stringify(map));
+  // Never persist raw tokens in localStorage — vault holds them.
+  const scrubbed: PluginStateMap = {};
+  for (const [id, state] of Object.entries(map)) {
+    const { token: legacyToken, ...rest } = state;
+    if (legacyToken && legacyToken !== 'demo-token') {
+      setPluginToken(id, legacyToken);
+    }
+    scrubbed[id] = rest;
+  }
+  localStorage.setItem(STATE_KEY, JSON.stringify(scrubbed));
   window.dispatchEvent(new Event('ark:plugins-changed'));
 }
 
@@ -211,7 +224,12 @@ export function getPluginRuntime(id: string, map: PluginStateMap): PluginRuntime
   if (!plugin) {
     return { installed: false, connected: false, enabledInChat: false, permissions: [] };
   }
-  return map[id] ?? defaultState(plugin);
+  const base = map[id] ?? defaultState(plugin);
+  const vault = getPluginToken(id);
+  return {
+    ...base,
+    token: vault || base.token,
+  };
 }
 
 export function upsertPluginRuntime(
@@ -220,7 +238,15 @@ export function upsertPluginRuntime(
   patch: Partial<PluginRuntimeState>,
 ): PluginStateMap {
   const current = getPluginRuntime(id, map);
-  const next = { ...map, [id]: { ...current, ...patch } };
+  if ('token' in patch) {
+    const nextToken = patch.token?.trim() || '';
+    if (nextToken) setPluginToken(id, nextToken);
+    else clearPluginToken(id);
+  }
+  const { token: _drop, ...safePatch } = patch;
+  const nextState: PluginRuntimeState = { ...current, ...safePatch };
+  delete nextState.token;
+  const next = { ...map, [id]: nextState };
   savePluginState(next);
   return next;
 }
@@ -237,7 +263,12 @@ export function getChatEnabledPlugins(map: PluginStateMap) {
 }
 
 /** Stub / live plugin replies for chat. */
-export async function runPluginAction(pluginId: string, userText: string, token?: string): Promise<string | null> {
+export async function runPluginAction(
+  pluginId: string,
+  userText: string,
+  token?: string,
+  permissions?: PluginPermission[],
+): Promise<string | null> {
   const lower = userText.toLowerCase();
   const mentions =
     lower.includes(pluginId) ||
@@ -250,11 +281,29 @@ export async function runPluginAction(pluginId: string, userText: string, token?
 
   if (!mentions) return null;
 
+  const { intentPermission, requirePluginPermission, hasPluginPermission } = await import('@/lib/pluginPermissions');
+  const needed = intentPermission(pluginId, userText);
+  if (permissions && permissions.length > 0) {
+    // Always need read for live calls
+    if (!hasPluginPermission(permissions, 'read') && needed === 'read') {
+      return requirePluginPermission(permissions, 'read', pluginId);
+    }
+    if (needed === 'write' && !hasPluginPermission(permissions, 'write')) {
+      return requirePluginPermission(permissions, 'write', pluginId);
+    }
+    if (needed === 'search' && !hasPluginPermission(permissions, 'search') && !hasPluginPermission(permissions, 'read')) {
+      return requirePluginPermission(permissions, 'search', pluginId);
+    }
+    if (needed === 'write' && hasPluginPermission(permissions, 'write') === false) {
+      return requirePluginPermission(permissions, 'write', pluginId);
+    }
+  }
+
   if (pluginId === 'github') {
     if (token) {
       try {
         const { runGitHubLive } = await import('@/lib/github');
-        return await runGitHubLive(token, userText);
+        return await runGitHubLive(token, userText, { permissions });
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'GitHub request failed';
         return [
@@ -273,7 +322,7 @@ export async function runPluginAction(pluginId: string, userText: string, token?
     if (token) {
       try {
         const { runNotionLive } = await import('@/lib/notion');
-        return await runNotionLive(token, userText);
+        return await runNotionLive(token, userText, { permissions });
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Notion request failed';
         return [

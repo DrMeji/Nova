@@ -16,6 +16,23 @@ export type NotionSearchResult = {
   properties?: Record<string, unknown>;
 };
 
+type NotionRichText = { plain_text?: string };
+type NotionBlock = {
+  id: string;
+  type: string;
+  has_children?: boolean;
+  paragraph?: { rich_text?: NotionRichText[] };
+  heading_1?: { rich_text?: NotionRichText[] };
+  heading_2?: { rich_text?: NotionRichText[] };
+  heading_3?: { rich_text?: NotionRichText[] };
+  bulleted_list_item?: { rich_text?: NotionRichText[] };
+  numbered_list_item?: { rich_text?: NotionRichText[] };
+  to_do?: { rich_text?: NotionRichText[]; checked?: boolean };
+  quote?: { rich_text?: NotionRichText[] };
+  code?: { rich_text?: NotionRichText[] };
+  callout?: { rich_text?: NotionRichText[] };
+};
+
 async function notionRequest<T>(token: string, path: string, init?: { method?: string; body?: unknown }) {
   const url = path.startsWith('http') ? path : `https://api.notion.com/v1${path}`;
   const res = await desktopRequest(url, {
@@ -63,9 +80,70 @@ function titleFromResult(item: NotionSearchResult) {
   return 'Untitled';
 }
 
-export async function runNotionLive(token: string, userText: string): Promise<string> {
+function richTextToPlain(parts?: NotionRichText[]) {
+  if (!Array.isArray(parts)) return '';
+  return parts.map(p => p.plain_text || '').join('');
+}
+
+function blockToLine(block: NotionBlock): string | null {
+  const type = block.type;
+  const rich =
+    block.paragraph?.rich_text
+    || block.heading_1?.rich_text
+    || block.heading_2?.rich_text
+    || block.heading_3?.rich_text
+    || block.bulleted_list_item?.rich_text
+    || block.numbered_list_item?.rich_text
+    || block.to_do?.rich_text
+    || block.quote?.rich_text
+    || block.code?.rich_text
+    || block.callout?.rich_text;
+  const text = richTextToPlain(rich).trim();
+  if (!text) return null;
+  if (type === 'heading_1') return `# ${text}`;
+  if (type === 'heading_2') return `## ${text}`;
+  if (type === 'heading_3') return `### ${text}`;
+  if (type === 'bulleted_list_item') return `• ${text}`;
+  if (type === 'numbered_list_item') return `- ${text}`;
+  if (type === 'to_do') return `${block.to_do?.checked ? '☑' : '☐'} ${text}`;
+  if (type === 'quote') return `> ${text}`;
+  if (type === 'code') return `\`\`\`\n${text}\n\`\`\``;
+  return text;
+}
+
+/** Pull plain text from a Notion page for briefs/specs. */
+export async function fetchNotionPageText(token: string, pageId: string, maxChars = 3500) {
+  const result = await notionRequest<{ results: NotionBlock[] }>(
+    token,
+    `/blocks/${pageId}/children?page_size=50`,
+  );
+  const lines: string[] = [];
+  for (const block of result.results || []) {
+    const line = blockToLine(block);
+    if (line) lines.push(line);
+  }
+  const joined = lines.join('\n').trim();
+  if (!joined) return '';
+  return joined.length > maxChars ? `${joined.slice(0, maxChars)}…` : joined;
+}
+
+export async function runNotionLive(
+  token: string,
+  userText: string,
+  opts?: { permissions?: string[] },
+): Promise<string> {
   const lower = userText.toLowerCase();
-  const queryMatch = lower.match(/(?:search|find|look up)\s+(.+)$/);
+  const perms = opts?.permissions || [];
+
+  if (/\b(create|update|write|add)\b/.test(lower) && perms.length > 0 && !perms.includes('write')) {
+    return [
+      'Notion · permission needed',
+      '',
+      'Creating or updating pages needs Write. Enable it under Plugins → Notion → Permissions.',
+    ].join('\n');
+  }
+
+  const queryMatch = lower.match(/(?:search|find|look up|open|read)\s+(.+)$/);
   const query = queryMatch?.[1]?.replace(/[?.!]+$/, '').trim()
     || (/(brief|spec)/.test(lower) ? 'brief' : 'ARK');
 
@@ -88,17 +166,34 @@ export async function runNotionLive(token: string, userText: string): Promise<st
     return `${i + 1}. ${title} · ${kind}`;
   });
 
-  if (/(brief|spec)/.test(lower) && results[0]) {
-    return [
-      `Notion · brief (@${account.label})`,
-      '',
-      `Top match: ${titleFromResult(results[0])}`,
-      '',
-      'Related:',
-      ...lines,
-      '',
-      'Live data from your Notion workspace.',
-    ].join('\n');
+  const wantBody = /(brief|spec|read|open|content|summar)/.test(lower);
+  const top = results.find(r => r.object === 'page') || results[0];
+
+  if (wantBody && top?.object === 'page') {
+    try {
+      const body = await fetchNotionPageText(token, top.id);
+      return [
+        `Notion · ${/(brief|spec)/.test(lower) ? 'brief' : 'page'} (@${account.label})`,
+        '',
+        `Page: ${titleFromResult(top)}`,
+        top.url ? top.url : '',
+        '',
+        body || '(Page has no readable text blocks yet — check sharing permissions.)',
+        '',
+        'Related:',
+        ...lines,
+      ].filter(Boolean).join('\n');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Could not read page';
+      return [
+        `Notion · page (@${account.label})`,
+        '',
+        `Found “${titleFromResult(top)}” but could not read blocks: ${msg}`,
+        '',
+        'Related:',
+        ...lines,
+      ].join('\n');
+    }
   }
 
   return [
@@ -106,6 +201,6 @@ export async function runNotionLive(token: string, userText: string): Promise<st
     '',
     ...lines,
     '',
-    'Live data from your Notion workspace.',
+    'Ask to “read” or “open” a page for full text. Live data from your Notion workspace.',
   ].join('\n');
 }

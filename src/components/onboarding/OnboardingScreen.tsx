@@ -61,6 +61,20 @@ const CONNECT_PROVIDERS: ConnectProvider[] = [
     free: true,
   },
   {
+    id: 'huggingface',
+    name: 'Hugging Face',
+    blurb: 'Free chat + FLUX images.',
+    signupUrl: 'https://huggingface.co/settings/tokens',
+    free: true,
+  },
+  {
+    id: 'nvidia',
+    name: 'NVIDIA NIM',
+    blurb: 'Free NIM endpoints for chat.',
+    signupUrl: 'https://build.nvidia.com/',
+    free: true,
+  },
+  {
     id: 'openai',
     name: 'OpenAI',
     blurb: 'Optional paid GPT / DALL·E path.',
@@ -256,8 +270,8 @@ export function OnboardingScreen() {
           </h1>
           <p className="text-sm text-content-secondary mt-2 max-w-md mx-auto">
             {phase === 'connect'
-              ? 'Link the providers you want once. ARK Auto will fail over between them so chat keeps going.'
-              : 'ARK checks your hardware, installs a fitting local brain, then helps you connect capacity.'}
+              ? 'Add free keys once (Groq, Google, OpenRouter). ARK Auto fails over between them and your local brain so chat keeps going.'
+              : 'ARK checks your hardware, installs a fitting local brain, then helps you connect free cloud capacity.'}
           </p>
         </div>
 
@@ -427,8 +441,9 @@ export function OnboardingScreen() {
           {phase === 'connect' && (
             <div className="space-y-4">
               <p className="text-sm text-content-secondary">
-                Press Connect to open the provider site, copy your key, then paste it here. Keys stay on this device
-                {window.arkDesktop ? ' (OS encrypted)' : ''}. Skip anytime — local ARK still works.
+                Press Connect to open the provider site, create a free key, then paste it here.
+                Keys stay on this device{window.arkDesktop ? ' (OS-encrypted)' : ''} and power ARK Auto
+                with your local GGUF. Skip anytime — local ARK still works.
               </p>
 
               <div className="space-y-2 max-h-[min(24rem,48vh)] overflow-y-auto">

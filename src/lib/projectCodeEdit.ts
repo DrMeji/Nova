@@ -39,6 +39,8 @@ When the user asks you to build, create, fix, or change code, respond with FULL 
 ...entire file contents here...
 \`\`\`
 
+Prefer small, correct diffs as full-file rewrites. If the user mentions GitHub or a remote repo, still write real files into this local project first — cloning/PRs can come after the files exist on disk.
+
 Rules:
 - Use paths like src/App.tsx, package.json, README.md (forward slashes).
 - Prefer a small, working set of files over huge scaffolds.

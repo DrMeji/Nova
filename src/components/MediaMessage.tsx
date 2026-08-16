@@ -32,6 +32,7 @@ export function GeneratingPlaceholder({
 
 function MediaActions({ src, alt }: { src: string; alt: string }) {
   const [copied, setCopied] = useState(false);
+  const isVideo = src.startsWith('data:video/') || /\.mp4(\?|$)/i.test(src);
 
   const onCopy = async () => {
     try {
@@ -58,7 +59,13 @@ function MediaActions({ src, alt }: { src: string; alt: string }) {
   const onDownload = () => {
     const a = document.createElement('a');
     a.href = src;
-    const ext = src.includes('svg') ? 'svg' : src.includes('png') ? 'png' : 'jpg';
+    const ext = isVideo
+      ? 'mp4'
+      : src.includes('svg')
+        ? 'svg'
+        : src.includes('png')
+          ? 'png'
+          : 'jpg';
     a.download = `${(alt || 'ark-creation').slice(0, 40).replace(/\s+/g, '-')}.${ext}`;
     a.click();
   };
@@ -88,13 +95,24 @@ function MediaActions({ src, alt }: { src: string; alt: string }) {
 }
 
 function ResolvedMedia({ src, alt }: { src: string; alt: string }) {
+  const isVideo = src.startsWith('data:video/') || /\.mp4(\?|$)/i.test(src);
   return (
     <div className="max-w-md">
-      <img
-        src={src}
-        alt={alt || 'ARK generation'}
-        className="w-full rounded-2xl object-cover bg-ark-navy-950"
-      />
+      {isVideo ? (
+        <video
+          src={src}
+          controls
+          playsInline
+          className="w-full rounded-2xl object-cover bg-ark-navy-950 aspect-video"
+          aria-label={alt || 'ARK video'}
+        />
+      ) : (
+        <img
+          src={src}
+          alt={alt || 'ARK generation'}
+          className="w-full rounded-2xl object-cover bg-ark-navy-950"
+        />
+      )}
       <MediaActions src={src} alt={alt} />
     </div>
   );
@@ -164,7 +182,12 @@ export function MessageContent({ content }: { content: string }) {
         if (chunk.type === 'media') {
           const src = chunk.value;
           const alt = chunk.alt || 'ARK generation';
-          if (src.startsWith('data:image/') || src.startsWith('http://') || src.startsWith('https://')) {
+          if (
+            src.startsWith('data:image/')
+            || src.startsWith('data:video/')
+            || src.startsWith('http://')
+            || src.startsWith('https://')
+          ) {
             return <ResolvedMedia key={i} src={src} alt={alt} />;
           }
           if (src.startsWith('ark-media:')) {

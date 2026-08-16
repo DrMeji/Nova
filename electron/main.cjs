@@ -36,6 +36,12 @@ const ALLOWED_HOSTS = new Set([
   'huggingface.co',
   'api-inference.huggingface.co',
   'router.huggingface.co',
+  'integrate.api.nvidia.com',
+  'api.nvcf.nvidia.com',
+  'api.together.xyz',
+  'api.fireworks.ai',
+  'api.deepseek.com',
+  'api.mistral.ai',
   'speed.cloudflare.com',
   'github.com',
   'objects.githubusercontent.com',
@@ -68,6 +74,7 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      additionalArguments: [`--ark-packaged=${packaged ? '1' : '0'}`],
     },
   });
 
@@ -86,34 +93,9 @@ function createWindow() {
     win.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
   }
 
-  // One-shot wipe of chat/recent localStorage so this reopen starts empty.
+  // Quiet packaged boots — no console spam / clean-boot wipe noise for end users.
   win.webContents.once('did-finish-load', () => {
     win.setTitle('ARK');
-    win.webContents
-      .executeJavaScript(`(() => {
-        try {
-          const token = 'clean-2026-08-15-d';
-          if (localStorage.getItem('ark:clean-boot-token') === token) return 'skip';
-          const drop = [];
-          for (let i = 0; i < localStorage.length; i++) {
-            const k = localStorage.key(i);
-            if (!k) continue;
-            if (k.startsWith('ark:chat-thread:') || k.startsWith('ark:chat-draft:')
-              || k === 'ark:recent-creations' || k === 'ark:recent-projects') drop.push(k);
-          }
-          drop.forEach((k) => localStorage.removeItem(k));
-          localStorage.setItem('ark:skip-library-sync', '1');
-          localStorage.setItem('ark:clean-boot-token', token);
-          return 'cleared';
-        } catch (e) { return String(e); }
-      })()`)
-      .then((r) => console.log('[ark] clean boot:', r))
-      .catch(() => {});
-    try {
-      arkMedia.clearLibrary();
-    } catch {
-      /* ignore */
-    }
   });
 
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -121,9 +103,11 @@ function createWindow() {
     return { action: 'deny' };
   });
 
-  win.webContents.on('console-message', (_event, level, message, line, sourceId) => {
-    console.log(`[renderer:${level}] ${message} (${sourceId}:${line})`);
-  });
+  if (!app.isPackaged) {
+    win.webContents.on('console-message', (_event, level, message, line, sourceId) => {
+      console.log(`[renderer:${level}] ${message} (${sourceId}:${line})`);
+    });
+  }
 }
 
 function assertAllowedUrl(url) {
@@ -162,7 +146,27 @@ async function handleHttpRequest(_event, payload) {
     body: method === 'GET' || method === 'HEAD' ? undefined : body,
   });
 
-  const text = await res.text();
+  const buf = Buffer.from(await res.arrayBuffer());
+  const ctype = (res.headers.get('content-type') || '').toLowerCase();
+  if (
+    ctype.includes('image/')
+    || ctype.includes('video/')
+    || ctype.includes('audio/')
+    || ctype.includes('octet-stream')
+    || ctype.includes('application/pdf')
+  ) {
+    return {
+      ok: res.ok,
+      status: res.status,
+      data: {
+        __binary: true,
+        mime: ctype.split(';')[0] || 'application/octet-stream',
+        base64: buf.toString('base64'),
+      },
+    };
+  }
+
+  const text = buf.toString('utf8');
   let data = null;
   try {
     data = text ? JSON.parse(text) : null;
@@ -499,12 +503,16 @@ function startBrainApi() {
 
   brainServer.listen(BRAIN_PORT, '127.0.0.1', () => {
     brainServerListening = true;
-    console.log(`[ark-brain] http://127.0.0.1:${BRAIN_PORT}`);
-    console.log('[ark-engine] ready (ARK-owned local runtime)');
+    if (!app.isPackaged) {
+      console.log(`[ark-brain] http://127.0.0.1:${BRAIN_PORT}`);
+      console.log('[ark-engine] ready (ARK-owned local runtime)');
+    }
   });
   brainServer.on('error', (err) => {
     brainServerListening = false;
-    console.log(`[ark-brain] failed: ${err.message}`);
+    if (!app.isPackaged) {
+      console.log(`[ark-brain] failed: ${err.message}`);
+    }
   });
 }
 

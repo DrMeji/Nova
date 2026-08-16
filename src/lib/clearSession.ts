@@ -54,14 +54,16 @@ export function clearArkSessionHistory() {
   window.dispatchEvent(new Event('ark:chats-changed'));
 }
 
-/** Run once per token so reopen is empty for testing. */
+/** Run once per token so reopen is empty for testing. Skip in packaged installs. */
 export function runCleanBootIfNeeded() {
   try {
+    if (window.arkDesktop?.isPackaged) return false;
     if (localStorage.getItem('ark:clean-boot-token') === CLEAN_BOOT_TOKEN) return false;
     clearArkSessionHistory();
     localStorage.setItem('ark:clean-boot-token', CLEAN_BOOT_TOKEN);
     return true;
   } catch {
+    if (window.arkDesktop?.isPackaged) return false;
     clearArkSessionHistory();
     return true;
   }

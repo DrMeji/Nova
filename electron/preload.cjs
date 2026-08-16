@@ -2,6 +2,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('arkDesktop', {
   isElectron: true,
+  isPackaged: process.argv.includes('--ark-packaged=1'),
   platform: process.platform,
   versions: {
     electron: process.versions.electron,

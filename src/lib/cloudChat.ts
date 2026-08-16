@@ -128,6 +128,47 @@ async function chatGoogle(key: string, history: RouterChatTurn[], model: string)
   return text.trim() || null;
 }
 
+/** Hugging Face Inference Providers (OpenAI-compatible router). */
+async function chatHuggingFace(key: string, history: RouterChatTurn[], model: string) {
+  return openaiCompatible(
+    'https://router.huggingface.co/v1/chat/completions',
+    key,
+    model,
+    history,
+  );
+}
+
+/** NVIDIA NIM / build.nvidia.com OpenAI-compatible endpoints. */
+async function chatNvidia(key: string, history: RouterChatTurn[], model: string) {
+  return openaiCompatible(
+    'https://integrate.api.nvidia.com/v1/chat/completions',
+    key,
+    model,
+    history,
+  );
+}
+
+async function chatTogether(key: string, history: RouterChatTurn[], model: string) {
+  return openaiCompatible('https://api.together.xyz/v1/chat/completions', key, model, history);
+}
+
+async function chatFireworks(key: string, history: RouterChatTurn[], model: string) {
+  return openaiCompatible(
+    'https://api.fireworks.ai/inference/v1/chat/completions',
+    key,
+    model,
+    history,
+  );
+}
+
+async function chatDeepSeek(key: string, history: RouterChatTurn[], model: string) {
+  return openaiCompatible('https://api.deepseek.com/chat/completions', key, model, history);
+}
+
+async function chatMistral(key: string, history: RouterChatTurn[], model: string) {
+  return openaiCompatible('https://api.mistral.ai/v1/chat/completions', key, model, history);
+}
+
 /** Free-key providers first, then paid — only entries with a stored key are attempted. */
 const FREE_KEY_PROVIDERS: ProviderAttempt[] = [
   {
@@ -150,6 +191,48 @@ const FREE_KEY_PROVIDERS: ProviderAttempt[] = [
     cost: 'free-key',
     model: 'meta-llama/llama-3.3-70b-instruct:free',
     run: chatOpenRouter,
+  },
+  {
+    id: 'huggingface',
+    label: 'Hugging Face',
+    cost: 'free-key',
+    model: 'meta-llama/Llama-3.1-8B-Instruct',
+    run: chatHuggingFace,
+  },
+  {
+    id: 'nvidia',
+    label: 'NVIDIA NIM',
+    cost: 'free-key',
+    model: 'meta/llama-3.1-8b-instruct',
+    run: chatNvidia,
+  },
+  {
+    id: 'together',
+    label: 'Together AI',
+    cost: 'free-key',
+    model: 'meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo',
+    run: chatTogether,
+  },
+  {
+    id: 'fireworks',
+    label: 'Fireworks',
+    cost: 'free-key',
+    model: 'accounts/fireworks/models/llama-v3p1-8b-instruct',
+    run: chatFireworks,
+  },
+  {
+    id: 'deepseek',
+    label: 'DeepSeek',
+    cost: 'free-key',
+    model: 'deepseek-chat',
+    run: chatDeepSeek,
+  },
+  {
+    id: 'mistral',
+    label: 'Mistral',
+    cost: 'free-key',
+    model: 'mistral-small-latest',
+    run: chatMistral,
   },
 ];
 
@@ -224,6 +307,60 @@ function mapPreferred(modelId: string, modelName: string): ProviderAttempt | nul
       cost: 'paid',
       model: id.includes('haiku') ? 'claude-3-5-haiku-latest' : 'claude-3-5-sonnet-latest',
       run: chatAnthropic,
+    };
+  }
+  if (id.includes('huggingface') || id.includes('hf-') || name.includes('hugging face') || name.includes('huggingface')) {
+    return {
+      id: 'huggingface',
+      label: 'Hugging Face',
+      cost: 'free-key',
+      model: 'meta-llama/Llama-3.1-8B-Instruct',
+      run: chatHuggingFace,
+    };
+  }
+  if (id.includes('nvidia') || id.includes('nim') || name.includes('nvidia') || name.includes('nim')) {
+    return {
+      id: 'nvidia',
+      label: 'NVIDIA NIM',
+      cost: 'free-key',
+      model: 'meta/llama-3.1-8b-instruct',
+      run: chatNvidia,
+    };
+  }
+  if (id.includes('together') || name.includes('together')) {
+    return {
+      id: 'together',
+      label: 'Together AI',
+      cost: 'free-key',
+      model: 'meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo',
+      run: chatTogether,
+    };
+  }
+  if (id.includes('fireworks') || name.includes('fireworks')) {
+    return {
+      id: 'fireworks',
+      label: 'Fireworks',
+      cost: 'free-key',
+      model: 'accounts/fireworks/models/llama-v3p1-8b-instruct',
+      run: chatFireworks,
+    };
+  }
+  if (id.includes('deepseek') || name.includes('deepseek')) {
+    return {
+      id: 'deepseek',
+      label: 'DeepSeek',
+      cost: 'free-key',
+      model: 'deepseek-chat',
+      run: chatDeepSeek,
+    };
+  }
+  if (id.includes('mistral') || id.includes('codestral') || name.includes('mistral') || name.includes('codestral')) {
+    return {
+      id: 'mistral',
+      label: 'Mistral',
+      cost: 'free-key',
+      model: id.includes('codestral') ? 'codestral-latest' : 'mistral-small-latest',
+      run: chatMistral,
     };
   }
   return null;
@@ -325,7 +462,19 @@ export async function cloudChatPreferredThenCascade(opts: {
 
 export function hasAnyCloudChatKey() {
   const keys = getProviderApiKeys();
-  return Boolean(keys.groq || keys.google || keys.openrouter || keys.openai || keys.anthropic);
+  return Boolean(
+    keys.groq
+    || keys.google
+    || keys.openrouter
+    || keys.huggingface
+    || keys.nvidia
+    || keys.together
+    || keys.fireworks
+    || keys.deepseek
+    || keys.mistral
+    || keys.openai
+    || keys.anthropic,
+  );
 }
 
 /** Exported for callers that only have a single string today. */

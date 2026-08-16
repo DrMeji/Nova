@@ -55,7 +55,7 @@ const CHAT_MODELS: ChatModelOption[] = [
   { id: 'ark-image-core', name: 'ARK Image Core', source: 'local', detail: 'Free · Pollinations via Engine', kind: 'image' },
   { id: 'dall-e-3', name: 'DALL·E 3', source: 'cloud', detail: 'Cloud image · OpenAI key', kind: 'image' },
   // Video — Engine path until real MP4 ships
-  { id: 'ark-video-core', name: 'ARK Video Core', source: 'local', detail: 'Motion preview · ARK Engine', kind: 'video' },
+  { id: 'ark-video-core', name: 'ARK Video Core', source: 'local', detail: 'MP4 when free · motion fallback', kind: 'video' },
 ];
 
 /** Cloud chat options — only shown in the picker when that provider key exists. */
@@ -63,6 +63,12 @@ const CLOUD_CHAT_WHEN_KEYED: (ChatModelOption & { keyId: string })[] = [
   { id: 'groq-llama', name: 'Llama 3.3 (Groq)', source: 'cloud', detail: 'Free-key · fast', kind: 'chat', keyId: 'groq' },
   { id: 'gemini-flash', name: 'Gemini 2.0 Flash', source: 'cloud', detail: 'Free-key · Google', kind: 'chat', keyId: 'google' },
   { id: 'openrouter-free', name: 'OpenRouter Free', source: 'cloud', detail: 'Free routes', kind: 'chat', keyId: 'openrouter' },
+  { id: 'hf-llama', name: 'Llama 3.1 (HF)', source: 'cloud', detail: 'Free-key · Hugging Face', kind: 'chat', keyId: 'huggingface' },
+  { id: 'nvidia-llama', name: 'Llama 3.1 (NIM)', source: 'cloud', detail: 'Free-key · NVIDIA', kind: 'chat', keyId: 'nvidia' },
+  { id: 'together-llama', name: 'Llama 3.1 (Together)', source: 'cloud', detail: 'Free-key · Together', kind: 'chat', keyId: 'together' },
+  { id: 'fireworks-llama', name: 'Llama 3.1 (Fireworks)', source: 'cloud', detail: 'Free-key · Fireworks', kind: 'chat', keyId: 'fireworks' },
+  { id: 'deepseek-chat', name: 'DeepSeek Chat', source: 'cloud', detail: 'Free-key · DeepSeek', kind: 'chat', keyId: 'deepseek' },
+  { id: 'mistral-small', name: 'Mistral Small', source: 'cloud', detail: 'Free-key · Mistral', kind: 'chat', keyId: 'mistral' },
   { id: 'gpt-4o', name: 'GPT-4o', source: 'cloud', detail: 'Cloud chat and code', kind: 'chat', keyId: 'openai' },
   { id: 'claude-sonnet', name: 'Claude Sonnet', source: 'cloud', detail: 'Cloud long context', kind: 'chat', keyId: 'anthropic' },
 ];
@@ -598,7 +604,12 @@ export function AIChat() {
       let resolvedProvider = providerLabel;
 
       if (pluginId) {
-        const pluginReply = await runPluginAction(pluginId, content, pluginState?.token);
+        const pluginReply = await runPluginAction(
+          pluginId,
+          content,
+          pluginState?.token,
+          pluginState?.permissions,
+        );
         if (pluginReply) {
           response = pluginReply;
           usedPlugin = true;
@@ -930,6 +941,9 @@ export function AIChat() {
             <span className="font-medium truncate">
               {activeModel.source === 'auto' ? 'Auto' : activeModel.name}
             </span>
+            {activeModel.source === 'auto' && (
+              <span className="text-[10px] text-sky-400/90 font-medium hidden sm:inline">ARK</span>
+            )}
             <ChevronDown className={`w-3.5 h-3.5 text-content-tertiary transition-transform shrink-0 ${modelMenuOpen ? 'rotate-180' : ''}`} />
           </button>
           {modelMenu}

@@ -58,6 +58,12 @@ const PROVIDER_ROWS = [
   { id: 'google', name: 'Google AI Studio', hint: 'Gemini models' },
   { id: 'groq', name: 'Groq', hint: 'Fast inference' },
   { id: 'openrouter', name: 'OpenRouter', hint: 'Many models, one key' },
+  { id: 'huggingface', name: 'Hugging Face', hint: 'Chat + FLUX images' },
+  { id: 'nvidia', name: 'NVIDIA NIM', hint: 'Free NIM endpoints' },
+  { id: 'together', name: 'Together AI', hint: 'Open model hosting' },
+  { id: 'fireworks', name: 'Fireworks', hint: 'Fast serverless open models' },
+  { id: 'deepseek', name: 'DeepSeek', hint: 'Coding + chat API' },
+  { id: 'mistral', name: 'Mistral', hint: 'Mistral + Codestral' },
   { id: 'github-models', name: 'GitHub Models', hint: 'Retired — use Groq / Google / OpenRouter' },
 ];
 
@@ -89,7 +95,7 @@ export function SettingsContent() {
     latestTag?: string;
   } | null>(null);
   const [updatePercent, setUpdatePercent] = useState(0);
-  const [appVersion, setAppVersion] = useState('0.1.19');
+  const [appVersion, setAppVersion] = useState('0.1.20');
   const [twoFaCode, setTwoFaCode] = useState('');
   const [twoFaSetup, setTwoFaSetup] = useState(false);
   const [savedFlash, setSavedFlash] = useState('');
@@ -881,7 +887,7 @@ export function SettingsContent() {
                     </div>
                   </div>
                   <p className="text-[11px] text-content-tertiary leading-relaxed">
-                    Check → Update downloads in ARK, then a small Updating window finishes install and reopens the app.
+                    Download finishes in ARK, then a black Updating window installs and reopens the app (no PowerShell).
                   </p>
                 </div>
 

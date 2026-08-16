@@ -315,11 +315,13 @@ async function routeImage(opts: ArkRouteOpts): Promise<ArkRouterResult> {
   const wantsCloud =
     opts.preferredSource === 'cloud'
     || Boolean(opts.preferredModelId?.includes('dall'))
+    || Boolean(opts.preferredModelId?.includes('hf-flux'))
+    || Boolean(opts.preferredModelId?.includes('flux'))
     || modePrefersCloud(mode);
 
   const tryCloud = async (): Promise<ArkRouterResult | null> => {
     if (!modeAllowsCloud(mode)) return null;
-    attempted.push('OpenAI DALL·E');
+    attempted.push('Cloud image (HF / OpenAI)');
     try {
       const cloud = await cloudGenerateImage(opts.message);
       if (!cloud?.dataUrl && !cloud?.url) return null;
@@ -334,8 +336,8 @@ async function routeImage(opts: ArkRouteOpts): Promise<ArkRouterResult> {
           real: true,
         },
         modelName: cloud.provider,
-        source: 'cloud-openai',
-        tier: 'paid',
+        source: hitSource(cloud.provider),
+        tier: cloud.tier === 'free-key' ? 'free-key' : 'paid',
         attempted,
       };
     } catch {
@@ -374,7 +376,7 @@ async function routeImage(opts: ArkRouteOpts): Promise<ArkRouterResult> {
     if (cloud) return cloud;
     if (!failover && opts.preferredSource === 'cloud') {
       return {
-        reply: 'Cloud image failed. Add an OpenAI key in Models → Cloud, or switch to ARK Image Core.',
+        reply: 'Cloud image failed. Add a Hugging Face or OpenAI key in Models → Cloud, or switch to ARK Image Core.',
         modelName: opts.preferredModelName || 'Cloud image',
         source: 'none',
         tier: 'paid',
@@ -394,7 +396,7 @@ async function routeImage(opts: ArkRouteOpts): Promise<ArkRouterResult> {
   if (local) return local;
 
   return {
-    reply: 'Image generation failed. Check ARK Engine / network, or add an OpenAI key for DALL·E.',
+    reply: 'Image generation failed. Check ARK Engine / network, or add a Hugging Face / OpenAI key.',
     modelName: 'ARK Router',
     source: 'none',
     tier: 'no-key-free',

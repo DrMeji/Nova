@@ -4,14 +4,15 @@ cd /d "%~dp0"
 
 echo.
 echo  ========================================
-echo   ARK - Build + Launch
+echo   ARK - building your latest changes
 echo  ========================================
 echo.
-echo  Builds once, then opens ARK Desktop.
-echo  When ready to ship: commit, push, and
-echo  tag a version (e.g. v0.1.1). GitHub
-echo  Releases will publish the installer.
-echo  Then use Settings - Updates in the app.
+echo  No menu. Compiles the repo as it is now,
+echo  then opens ARK so you can try it.
+echo  Push to GitHub only when you like it.
+echo.
+echo  For Check-Update testing, run Open-ARK-Packaged.bat
+echo  then install release\ARK-Setup.exe.
 echo.
 
 where node >nul 2>&1
@@ -31,18 +32,20 @@ if not exist "node_modules\" (
   )
 )
 
+echo Stopping any old Electron window...
 taskkill /F /IM electron.exe >nul 2>&1
 
 echo Building...
 call npm run build
 if errorlevel 1 (
-  echo.
   echo ERROR: Build failed.
   pause
   exit /b 1
 )
 
-echo Launching...
+echo.
+echo  Build OK - launching ARK with your current code.
+echo  Close the app window when you are done testing.
+echo.
 call npx --yes electron .
-set EXITCODE=%ERRORLEVEL%
-exit /b %EXITCODE%
+exit /b %ERRORLEVEL%

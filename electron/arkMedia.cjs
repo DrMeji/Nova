@@ -84,7 +84,9 @@ function fileToDataUrl(filePath) {
     ext === 'png' ? 'image/png'
       : ext === 'webp' ? 'image/webp'
         : ext === 'gif' ? 'image/gif'
-          : 'image/jpeg';
+          : ext === 'mp4' ? 'video/mp4'
+            : ext === 'webm' ? 'video/webm'
+              : 'image/jpeg';
   return `data:${mime};base64,${buf.toString('base64')}`;
 }
 
@@ -118,6 +120,84 @@ async function fetchRealImage(prompt, opts = {}) {
     } catch {
       /* try next */
     }
+  }
+  return null;
+}
+
+/** Try free Pollinations MP4 endpoints; fall back to motion still if blocked/paid. */
+async function fetchRealVideo(prompt) {
+  const encoded = encodeURIComponent(String(prompt || 'cinematic motion').slice(0, 400));
+  const urls = [
+    `https://gen.pollinations.ai/video/${encoded}?model=wan-fast&duration=4&aspectRatio=16:9`,
+    `https://gen.pollinations.ai/video/${encoded}?model=wan&duration=4&aspectRatio=16:9`,
+    `https://gen.pollinations.ai/video/${encoded}?model=ltx-2&duration=4&aspectRatio=16:9`,
+    // Second host family (same network, alternate models)
+    `https://gen.pollinations.ai/video/${encoded}?model=seedance&duration=4&aspectRatio=16:9`,
+    `https://gen.pollinations.ai/video/${encoded}?model=p-video-720p&duration=4&aspectRatio=16:9`,
+  ];
+
+  for (const url of urls) {
+    try {
+      const res = await fetch(url, {
+        method: 'GET',
+        headers: { 'User-Agent': 'ARK-Desktop' },
+        redirect: 'follow',
+      });
+      if (!res.ok) continue;
+      const ctype = res.headers.get('content-type') || '';
+      if (
+        !ctype.includes('video')
+        && !ctype.includes('mp4')
+        && !ctype.includes('octet-stream')
+      ) continue;
+      const buf = Buffer.from(await res.arrayBuffer());
+      if (buf.length < 8000) continue;
+      const head = buf.slice(0, 16).toString('utf8');
+      if (head.startsWith('<') || head.startsWith('{') || head.startsWith('[')) continue;
+      return { buf, ext: 'mp4', source: 'pollinations-mp4' };
+    } catch {
+      /* try next */
+    }
+  }
+  return null;
+}
+
+/** Second path: Hugging Face text-to-video when a token is present in the vault file. */
+async function fetchHfVideo(prompt) {
+  try {
+    const arkSecrets = require('./arkSecrets.cjs');
+    const keys = arkSecrets.loadMap() || {};
+    const token = keys.huggingface;
+    if (!token) return null;
+
+    const models = [
+      'https://router.huggingface.co/hf-inference/models/Wan-AI/Wan2.1-T2V-1.3B',
+      'https://api-inference.huggingface.co/models/ali-vilab/text-to-video-ms-1.7b',
+    ];
+    for (const url of models) {
+      try {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+            Accept: 'video/mp4',
+            'User-Agent': 'ARK-Desktop',
+          },
+          body: JSON.stringify({ inputs: String(prompt || '').slice(0, 400) }),
+        });
+        if (!res.ok) continue;
+        const ctype = res.headers.get('content-type') || '';
+        const buf = Buffer.from(await res.arrayBuffer());
+        if (buf.length < 8000) continue;
+        if (ctype.includes('json') || buf.slice(0, 1).toString() === '{') continue;
+        return { buf, ext: 'mp4', source: 'huggingface-video' };
+      } catch {
+        /* try next model */
+      }
+    }
+  } catch {
+    /* no HF vault */
   }
   return null;
 }
@@ -304,6 +384,40 @@ async function generateImage(prompt, modelName) {
 
 async function generateVideo(prompt, modelName) {
   const id = `vid-${Date.now()}-${hashPrompt(prompt).toString(16)}`;
+
+  // Prefer real MP4 when a free Pollinations video route answers.
+  const mp4 = (await fetchRealVideo(prompt)) || (await fetchHfVideo(prompt));
+  if (mp4) {
+    const file = path.join(mediaDir(), `${id}.mp4`);
+    fs.writeFileSync(file, mp4.buf);
+    const dataUrl = `data:video/mp4;base64,${mp4.buf.toString('base64')}`;
+    const entry = {
+      id,
+      kind: 'video',
+      title: String(prompt).slice(0, 80),
+      prompt: String(prompt),
+      modelName: modelName || 'ARK Video Core',
+      path: file,
+      createdAt: new Date().toISOString(),
+      source: mp4.source,
+      real: true,
+      format: 'mp4',
+    };
+    writeLibraryEntry(entry);
+    return {
+      ok: true,
+      kind: 'video',
+      modelName: entry.modelName,
+      path: file,
+      dataUrl,
+      libraryId: id,
+      real: true,
+      source: mp4.source,
+      reply: shortVideoReply(prompt, dataUrl, true),
+    };
+  }
+
+  // Honest fallback: cinematic still + Ken Burns motion SVG (not MP4).
   const stillPrompt = rewriteImagePrompt(
     `${prompt}, cinematic film still for a short motion clip, shallow depth of field, dramatic lighting`,
   );
@@ -321,7 +435,7 @@ async function generateVideo(prompt, modelName) {
     fs.writeFileSync(file, motion, 'utf8');
     dataUrl = toDataUrl(motion);
     realFlag = true;
-    source = 'motion-from-flux';
+    source = 'motion-still-fallback';
   } else {
     const svg = buildFallbackSvg(prompt, modelName, 'video');
     file = path.join(mediaDir(), `${id}.svg`);
@@ -339,6 +453,7 @@ async function generateVideo(prompt, modelName) {
     createdAt: new Date().toISOString(),
     source,
     real: realFlag,
+    format: 'svg-motion',
   };
   writeLibraryEntry(entry);
 
