@@ -614,7 +614,7 @@ function startBrainApi() {
       return;
     }
 
-    // Optional bearer for Lindsay / external clients (loopback only).
+    // Optional bearer for loopback brain API clients.
     if (brainToken) {
       const auth = String(req.headers.authorization || '');
       const ok = auth === `Bearer ${brainToken}` || auth === `bearer ${brainToken}`;
@@ -700,7 +700,7 @@ function startBrainApi() {
       }
     }
 
-    // SSE-style stream: one event with the full reply (chunked for Lindsay clients).
+    // SSE-style stream: status / delta / done / error events.
     if (url === '/v1/chat/stream' && req.method === 'POST') {
       try {
         const raw = await readBody(req);

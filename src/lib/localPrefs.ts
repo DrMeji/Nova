@@ -216,13 +216,24 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates. */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.24',
+    channel: 'stable' as const,
+    date: 'Aug 16, 2026',
+    title: 'Tester-ready first chat path',
+    notes: [
+      'Honest chat thinking state; Install local brain CTA beside free keys',
+      'Onboarding no longer pretends a failed brain install succeeded; Local AI one-click recommended install',
+      'Video motion-still marked as preview; Settings → Testers how-to + feedback link',
+    ],
+  },
+  {
     version: '0.1.23',
     channel: 'stable' as const,
     date: 'Aug 16, 2026',
     title: 'Real cloud SSE + Drive/Calendar/Figma',
     notes: [
       'OpenAI-compatible cloud providers stream true SSE into chat',
-      'Google Drive + Calendar live; Figma file comments; Lindsay OpenAPI + sample client',
+      'Google Drive + Calendar live; Figma file comments',
       'Clearer SmartScreen / Authenticode reputation guidance',
     ],
   },

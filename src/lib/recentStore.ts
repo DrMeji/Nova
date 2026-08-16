@@ -168,10 +168,15 @@ export async function resolveMediaRef(id: string): Promise<string | null> {
 
 /** Strip huge data URLs from chat threads before localStorage. Prefer library ids. */
 export function slimChatContent(content: string, libraryId?: string): string {
-  return content.replace(/!\[([^\]]*)\]\((data:image\/[^)]+)\)/g, (_m, alt) => {
-    const id = libraryId || 'inline';
-    return `![${alt || 'ARK generation'}](ark-media:${id})`;
-  });
+  return content
+    .replace(/!\[([^\]]*)\]\((data:image\/[^)]+)\)/g, (_m, alt) => {
+      const id = libraryId || 'inline';
+      return `![${alt || 'ARK generation'}](ark-media:${id})`;
+    })
+    .replace(/!\[([^\]]*)\]\((data:video\/[^)]+)\)/g, (_m, alt) => {
+      const id = libraryId || 'inline';
+      return `![${alt || 'ARK generation'}](ark-media:${id})`;
+    });
 }
 
 export function mediaMessageMarkdown(alt: string, libraryId: string, dataUrl?: string): string {

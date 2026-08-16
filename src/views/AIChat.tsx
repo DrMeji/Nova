@@ -259,6 +259,13 @@ export function AIChat() {
   const [generating, setGenerating] = useState(false);
   const stopRequestedRef = useRef(false);
   const [freeKeyOpen, setFreeKeyOpen] = useState(false);
+  const [setupNote, setSetupNote] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem('ark:setup-brain-note');
+    } catch {
+      return null;
+    }
+  });
   const [menuPos, setMenuPos] = useState<{ left: number; top?: number; bottom?: number } | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -587,7 +594,7 @@ export function AIChat() {
       role: 'assistant',
       content: isMediaMode
         ? `__generating__:${mode}:${MEDIA_GEN_STAGES[mode][0].label}`
-        : '',
+        : '__generating__:chat:Thinking…',
       provider_used: providerLabel,
       created_at: new Date().toISOString(),
     };
@@ -1016,18 +1023,28 @@ export function AIChat() {
                 {capacity?.summary ?? 'Checking capacity...'}
               </span>
               {capacity && !capacity.liveChat && (
-                <button
-                  type="button"
-                  onClick={() => setFreeKeyOpen(true)}
-                  className="inline-flex items-center gap-1 text-[11px] text-sky-400 hover:text-sky-300 transition-colors"
-                  title={
-                    capacity.suggestedFreeKeys.length
-                      ? `Try ${capacity.suggestedFreeKeys.map(k => k.name).join(', ')}`
-                      : 'Connect a free key'
-                  }
-                >
-                  Connect free key
-                </button>
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setFreeKeyOpen(true)}
+                    className="inline-flex items-center gap-1 text-[11px] text-sky-400 hover:text-sky-300 transition-colors"
+                    title={
+                      capacity.suggestedFreeKeys.length
+                        ? `Try ${capacity.suggestedFreeKeys.map(k => k.name).join(', ')}`
+                        : 'Connect a free key'
+                    }
+                  >
+                    Connect free key
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => navigate({ name: 'local-ai' })}
+                    className="inline-flex items-center gap-1 text-[11px] text-emerald-400 hover:text-emerald-300 transition-colors"
+                    title="Install a local GGUF brain"
+                  >
+                    Install local brain
+                  </button>
+                </>
               )}
             </>
           )}
@@ -1125,9 +1142,12 @@ export function AIChat() {
       ) : showEmpty ? (
         mode === 'general' ? (
           <div className="flex-1 flex flex-col items-center justify-center px-6 pb-16">
-            <h1 className="text-2xl sm:text-3xl font-semibold text-content-primary tracking-tight mb-8 text-center">
+            <h1 className="text-2xl sm:text-3xl font-semibold text-content-primary tracking-tight mb-3 text-center">
               {greeting}
             </h1>
+            <p className="text-xs text-content-tertiary mb-8 text-center max-w-md">
+              Try “Hello” with ARK Auto — or connect a free key / install a local brain if capacity shows offline.
+            </p>
             {composer}
           </div>
         ) : (
@@ -1180,7 +1200,28 @@ export function AIChat() {
               <div ref={messagesEndRef} />
             </div>
           </div>
-          <div className="shrink-0 px-6 pb-6 pt-2">
+          <div className="shrink-0 px-6 pb-6 pt-2 space-y-2">
+            {setupNote && (
+              <div className="max-w-2xl mx-auto rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-200/90 leading-relaxed flex items-start justify-between gap-3">
+                <p>
+                  Local brain install had an issue during setup. Use{' '}
+                  <button type="button" className="underline hover:text-amber-100" onClick={() => navigate({ name: 'local-ai' })}>
+                    Local AI
+                  </button>
+                  {' '}to retry, or connect a free key.
+                </p>
+                <button
+                  type="button"
+                  className="shrink-0 text-amber-300/80 hover:text-amber-100"
+                  onClick={() => {
+                    try { localStorage.removeItem('ark:setup-brain-note'); } catch { /* ignore */ }
+                    setSetupNote(null);
+                  }}
+                >
+                  Dismiss
+                </button>
+              </div>
+            )}
             {composer}
           </div>
         </>

@@ -322,9 +322,15 @@ function shortImageReply(prompt, dataUrl, _ok) {
   return `![${alt}](${dataUrl})`;
 }
 
-function shortVideoReply(prompt, dataUrl, _ok) {
+function shortVideoReply(prompt, dataUrl, ok) {
   const alt = String(prompt).slice(0, 80).replace(/[\[\]]/g, '');
-  return `![${alt}](${dataUrl})`;
+  const media = `![${alt}](${dataUrl})`;
+  if (ok) return media;
+  return [
+    'Video preview · motion still (not a real MP4 yet)',
+    '',
+    media,
+  ].join('\n');
 }
 
 async function generateImage(prompt, modelName) {
@@ -442,13 +448,14 @@ async function generateVideo(prompt, modelName) {
     file = path.join(mediaDir(), `${id}.svg`);
     fs.writeFileSync(file, motion, 'utf8');
     dataUrl = toDataUrl(motion);
-    realFlag = true;
+    realFlag = false;
     source = 'motion-still-fallback';
   } else {
     const svg = buildFallbackSvg(prompt, modelName, 'video');
     file = path.join(mediaDir(), `${id}.svg`);
     fs.writeFileSync(file, svg, 'utf8');
     dataUrl = toDataUrl(svg);
+    realFlag = false;
   }
 
   const entry = {

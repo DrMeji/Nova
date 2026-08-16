@@ -747,6 +747,27 @@ export function LocalAI() {
                     <p className="text-xs text-content-tertiary mt-1">
                       {recommendation.name} · {recommendation.size}, best fit from the current scan.
                     </p>
+                    <button
+                      type="button"
+                      disabled={Boolean(downloadingId)}
+                      onClick={() => {
+                        const hit = CATALOG.find(m => m.id === recommendation.id) || CATALOG[0];
+                        downloadModel(hit);
+                      }}
+                      className="mt-3 inline-flex items-center gap-2 rounded-full bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25 px-3.5 py-1.5 text-xs font-medium transition-colors disabled:opacity-50"
+                    >
+                      {downloadingId === recommendation.id
+                        ? `Installing… ${Math.round(downloadProgress)}%`
+                        : `Install recommended (${recommendation.size})`}
+                    </button>
+                    {downloadingId === recommendation.id && (
+                      <div className="mt-2 h-1.5 bg-surface-hover rounded-full overflow-hidden max-w-xs">
+                        <div
+                          className="h-full bg-emerald-500/80 rounded-full transition-all"
+                          style={{ width: `${Math.min(100, downloadProgress)}%` }}
+                        />
+                      </div>
+                    )}
                   </div>
                   <div className="py-3 px-1">
                     <p className="text-content-primary font-medium">Acceleration</p>

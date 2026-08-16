@@ -6,9 +6,21 @@ export function GeneratingPlaceholder({
   kind,
   label,
 }: {
-  kind: 'image' | 'video';
+  kind: 'image' | 'video' | 'chat';
   label?: string;
 }) {
+  if (kind === 'chat') {
+    return (
+      <div className="flex items-center gap-2 py-1 text-sm text-content-secondary" aria-label={label || 'Thinking'}>
+        <span className="inline-flex gap-1">
+          <span className="w-1.5 h-1.5 rounded-full bg-content-tertiary animate-pulse" />
+          <span className="w-1.5 h-1.5 rounded-full bg-content-tertiary animate-pulse [animation-delay:120ms]" />
+          <span className="w-1.5 h-1.5 rounded-full bg-content-tertiary animate-pulse [animation-delay:240ms]" />
+        </span>
+        <span className="text-content-tertiary text-xs">{label || 'Thinking…'}</span>
+      </div>
+    );
+  }
   return (
     <div
       className={`relative w-full max-w-md overflow-hidden rounded-2xl bg-[#1a1d24] border border-surface-border/80 ${
@@ -146,18 +158,18 @@ function ArkMediaImage({ id, alt }: { id: string; alt: string }) {
 
 export function MessageContent({ content }: { content: string }) {
   if (!content) {
-    return <GeneratingPlaceholder kind="image" label="Working…" />;
+    return <GeneratingPlaceholder kind="chat" label="Thinking…" />;
   }
 
   if (content.startsWith('__generating__:')) {
     const parts = content.split(':');
-    const kind = parts[1] === 'video' ? 'video' : 'image';
+    const kind = parts[1] === 'video' ? 'video' : parts[1] === 'chat' ? 'chat' : 'image';
     const label = parts.slice(2).join(':') || undefined;
     return <GeneratingPlaceholder kind={kind} label={label} />;
   }
 
   if (content.startsWith('__progress__:')) {
-    return <GeneratingPlaceholder kind="image" label="Working…" />;
+    return <GeneratingPlaceholder kind="chat" label="Working…" />;
   }
 
   const mediaRe = /!\[([^\]]*)\]\(([^)]+)\)/g;

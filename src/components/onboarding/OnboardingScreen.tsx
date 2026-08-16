@@ -124,6 +124,7 @@ export function OnboardingScreen() {
   const [models, setModels] = useState<RecModel[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
+  const [finishError, setFinishError] = useState<string | null>(null);
   const [expandedProvider, setExpandedProvider] = useState<string | null>(null);
   const [keyDrafts, setKeyDrafts] = useState<Record<string, string>>({});
   const [savedKeys, setSavedKeys] = useState<Record<string, boolean>>(() => {
@@ -157,6 +158,7 @@ export function OnboardingScreen() {
   const finish = async () => {
     setPhase('finishing');
     setProgress(0);
+    setFinishError(null);
 
     const brainId =
       selectedId && ['qwen25-15b', 'llama32-3b', 'qwen25-coder-7b'].includes(selectedId)
@@ -171,6 +173,7 @@ export function OnboardingScreen() {
 
     // Install default local brain (llama-cli + GGUF) so zero-key chat works.
     let downloadStarted = false;
+    let downloadError: string | null = null;
     try {
       const { downloadEngineModel, engineDownloadProgress, engineDownloadError } = await import('@/lib/arkEngine');
       await downloadEngineModel(brainId);
@@ -183,6 +186,8 @@ export function OnboardingScreen() {
             setProgress(Math.max(5, Math.min(99, p)));
             const err = await engineDownloadError(brainId);
             if (err) {
+              downloadError = err;
+              setFinishError(err);
               window.clearInterval(tick);
               setProgress(100);
               resolve();
@@ -199,29 +204,31 @@ export function OnboardingScreen() {
             resolve();
           }
         }, 400);
-        // Safety timeout (~20 min for slow links)
         window.setTimeout(() => {
           window.clearInterval(tick);
           setProgress(100);
           resolve();
         }, 20 * 60 * 1000);
       });
-    } catch {
-      // Desktop may be unavailable — still enter the app.
+    } catch (err) {
+      downloadError = err instanceof Error ? err.message : 'Could not start local brain download';
+      setFinishError(downloadError);
       if (!downloadStarted) {
-        await new Promise<void>(resolve => {
-          const interval = window.setInterval(() => {
-            setProgress(prev => {
-              const next = prev + 8;
-              if (next >= 100) {
-                window.clearInterval(interval);
-                resolve();
-                return 100;
-              }
-              return next;
-            });
-          }, 60);
-        });
+        setProgress(100);
+      }
+    }
+
+    if (downloadError) {
+      try {
+        localStorage.setItem('ark:setup-brain-note', downloadError);
+      } catch {
+        /* ignore */
+      }
+    } else {
+      try {
+        localStorage.removeItem('ark:setup-brain-note');
+      } catch {
+        /* ignore */
       }
     }
 
@@ -557,9 +564,13 @@ export function OnboardingScreen() {
                 This is a one-time download (~1 GB for the default brain). You can keep working with cloud keys if you connected any.
               </p>
               {progress >= 100 && (
-                <div className="flex items-center justify-center gap-2 text-sm text-ark-accent-green animate-fade-in">
+                <div className={`flex items-center justify-center gap-2 text-sm animate-fade-in ${
+                  finishError ? 'text-amber-400' : 'text-ark-accent-green'
+                }`}>
                   <CheckCircle2 className="w-4 h-4" />
-                  Ready. Opening ARK…
+                  {finishError
+                    ? 'Opening ARK — local brain needs a retry in Local AI'
+                    : 'Ready. Opening ARK…'}
                 </div>
               )}
             </div>

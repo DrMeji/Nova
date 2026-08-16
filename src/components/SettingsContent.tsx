@@ -14,6 +14,7 @@ import {
   type LocalPrefs,
   type UpdateChannel,
 } from '@/lib/localPrefs';
+import { clearSetupCompleted } from '@/lib/setup';
 import {
   User, Palette, Zap, Boxes, Cloud, Shield, HardDrive,
   FolderKanban, Lock, RefreshCw, Check, Cpu, KeyRound,
@@ -21,7 +22,7 @@ import {
   Camera, Mail, BadgeCheck, Trash2, Download, Info,
 } from 'lucide-react';
 
-const SECTIONS = [
+const SECTIONS: { id: string; label: string; icon: typeof User; disabled?: boolean }[] = [
   { id: 'account', label: 'Account', icon: User },
   { id: 'appearance', label: 'Appearance', icon: Palette },
   { id: 'ai', label: 'AI', icon: Zap },
@@ -32,7 +33,7 @@ const SECTIONS = [
   { id: 'projects', label: 'Projects', icon: FolderKanban },
   { id: 'security', label: 'Security', icon: Lock },
   { id: 'updates', label: 'Updates', icon: RefreshCw },
-  { id: 'beta', label: 'Beta', icon: FlaskConical, disabled: true },
+  { id: 'testers', label: 'Testers', icon: FlaskConical },
 ];
 
 const AI_MODES = [
@@ -97,7 +98,7 @@ export function SettingsContent() {
     latestTag?: string;
   } | null>(null);
   const [updatePercent, setUpdatePercent] = useState(0);
-  const [appVersion, setAppVersion] = useState('0.1.23');
+  const [appVersion, setAppVersion] = useState('0.1.24');
   const [twoFaCode, setTwoFaCode] = useState('');
   const [twoFaSetup, setTwoFaSetup] = useState(false);
   const [savedFlash, setSavedFlash] = useState('');
@@ -176,19 +177,29 @@ export function SettingsContent() {
     setUpdateMsg('Checking for updates…');
     setUpdateInfo(null);
     void (async () => {
-      const { checkArkGitHubUpdate } = await import('@/lib/arkUpdates');
-      const info = await checkArkGitHubUpdate();
-      setUpdateMsg(info.message);
-      setUpdateInfo(
-        info.newerAvailable
-          ? {
-              newerAvailable: true,
-              setupAssetUrl: info.setupAssetUrl,
-              latestTag: info.latestTag,
-            }
-          : { newerAvailable: false },
-      );
-      setCheckingUpdates(false);
+      try {
+        const { checkArkGitHubUpdate } = await import('@/lib/arkUpdates');
+        const info = await checkArkGitHubUpdate();
+        setUpdateMsg(
+          info.newerAvailable && !info.setupAssetUrl
+            ? `${info.message} (installer file not published yet — try again later)`
+            : info.message,
+        );
+        setUpdateInfo(
+          info.newerAvailable
+            ? {
+                newerAvailable: true,
+                setupAssetUrl: info.setupAssetUrl,
+                latestTag: info.latestTag,
+              }
+            : { newerAvailable: false },
+        );
+      } catch (err) {
+        setUpdateMsg(err instanceof Error ? err.message : 'Update check failed');
+        setUpdateInfo(null);
+      } finally {
+        setCheckingUpdates(false);
+      }
     })();
   };
 
@@ -222,15 +233,15 @@ export function SettingsContent() {
             <button
               key={section.id}
               type="button"
-              disabled={'disabled' in section && section.disabled}
+              disabled={Boolean(section.disabled)}
               onClick={() => {
-                if ('disabled' in section && section.disabled) return;
+                if (section.disabled) return;
                 setActiveSection(section.id);
               }}
               className={`ark-nav-item ${activeSection === section.id ? 'active' : ''} ${
-                'disabled' in section && section.disabled ? 'opacity-40 cursor-not-allowed pointer-events-none' : ''
+                section.disabled ? 'opacity-40 cursor-not-allowed pointer-events-none' : ''
               }`}
-              title={'disabled' in section && section.disabled ? 'Coming later' : undefined}
+              title={section.disabled ? 'Coming later' : undefined}
             >
               <section.icon className="w-4 h-4 shrink-0" />
               <span>{section.label}</span>
@@ -1033,27 +1044,61 @@ export function SettingsContent() {
             </SettingsSection>
           )}
 
-          {activeSection === 'beta' && (
-            <SettingsSection title="Beta" description="Experimental channel (coming later)">
-              <div className="ark-card p-4 opacity-50 pointer-events-none select-none">
-                <div className="flex items-start gap-3">
-                  <div className="w-10 h-10 rounded-lg bg-amber-500/10 flex items-center justify-center shrink-0">
-                    <FlaskConical className="w-5 h-5 text-amber-400" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-content-primary">Beta channel</p>
-                    <p className="text-xs text-content-tertiary mt-0.5">
-                      Early experimental builds will live here. Not available yet.
-                    </p>
-                    <div className="mt-3 flex items-center gap-2">
-                      <span className="rounded-full px-3.5 py-1.5 text-xs font-medium bg-surface-hover text-content-tertiary">
-                        Stable
-                      </span>
-                      <span className="rounded-full px-3.5 py-1.5 text-xs font-medium text-content-tertiary">
-                        Beta
-                      </span>
-                    </div>
-                  </div>
+          {activeSection === 'testers' && (
+            <SettingsSection
+              title="For testers"
+              description="Quick path to a first real reply, then tell us what to improve"
+            >
+              <div className="space-y-3">
+                <div className="rounded-xl border border-surface-border p-4 space-y-2">
+                  <p className="text-sm font-medium text-content-primary">First successful chat</p>
+                  <ol className="text-xs text-content-tertiary space-y-1.5 list-decimal list-inside leading-relaxed">
+                    <li>Connect a free key (Settings → Providers or the Chat “Connect free key” link), or</li>
+                    <li>Open Local AI → Install recommended (~1 GB) → wait until it says ready</li>
+                    <li>Chat with ARK Auto selected — try “Hello”</li>
+                  </ol>
+                </div>
+                <div className="rounded-xl border border-surface-border p-4 space-y-2">
+                  <p className="text-sm font-medium text-content-primary">Image &amp; video</p>
+                  <p className="text-xs text-content-tertiary leading-relaxed">
+                    Expect real images when a free path works. Video may show a labeled motion-still preview when MP4 hosts need credits — reopen creations from Recent.
+                  </p>
+                </div>
+                <div className="rounded-xl border border-surface-border p-4 space-y-2">
+                  <p className="text-sm font-medium text-content-primary">Updates</p>
+                  <p className="text-xs text-content-tertiary leading-relaxed">
+                    Use a packaged install (not the build bat). Settings → Updates → Check, then Update when offered.
+                  </p>
+                </div>
+                <div className="rounded-xl border border-surface-border p-4 space-y-2">
+                  <p className="text-sm font-medium text-content-primary">Feedback</p>
+                  <p className="text-xs text-content-tertiary leading-relaxed">
+                    Open a GitHub issue on the ARK repo with what worked, what confused you, and what you’d change.
+                  </p>
+                  <button
+                    type="button"
+                    className="ark-btn-secondary text-xs"
+                    onClick={() => void window.arkDesktop?.openExternal?.('https://github.com/DrMeji/Ark/issues/new')}
+                  >
+                    Open feedback issue
+                  </button>
+                </div>
+                <div className="rounded-xl border border-surface-border p-4 space-y-2">
+                  <p className="text-sm font-medium text-content-primary">Re-run first-time setup</p>
+                  <p className="text-xs text-content-tertiary leading-relaxed">
+                    Clears the setup flag so onboarding shows again on next launch (keys and models stay).
+                  </p>
+                  <button
+                    type="button"
+                    className="ark-btn-secondary text-xs"
+                    onClick={() => {
+                      clearSetupCompleted();
+                      setSavedFlash('Setup cleared — restart ARK to see onboarding');
+                      window.setTimeout(() => setSavedFlash(''), 2500);
+                    }}
+                  >
+                    Reset setup flag
+                  </button>
                 </div>
               </div>
             </SettingsSection>
