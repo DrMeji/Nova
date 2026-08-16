@@ -5,7 +5,7 @@ import { useRouter, type ChatMode } from '@/context/RouterContext';
 import { useRecentProjects } from '@/context/RecentProjectsContext';
 import { saveChatMessage } from '@/lib/api';
 import { getLocalPrefs, hasProviderApiKey, setLocalPrefs } from '@/lib/localPrefs';
-import { probeLiveCapacity, type LiveCapacity } from '@/lib/arkCapacity';
+import { honestNoLiveChatReply, probeLiveCapacity, type LiveCapacity } from '@/lib/arkCapacity';
 import {
   chatThreadKey,
   mediaMessageMarkdown,
@@ -674,6 +674,27 @@ export function AIChat() {
       });
     }
 
+    // First-run guarantee: no live chat path → honest CTA reply (no fake ARK Core answer).
+    if (
+      !pluginId
+      && (mode === 'general' || mode === 'code')
+      && capacity
+      && !capacity.liveChat
+    ) {
+      const honest = honestNoLiveChatReply();
+      setMessages(prev => {
+        const next = prev.map(m =>
+          m.id === assistantId
+            ? { ...m, content: honest, provider_used: 'ARK · setup needed' }
+            : m,
+        );
+        persistModeThread(mode, next, { chatId: activeChatId });
+        return next;
+      });
+      setGenerating(false);
+      return;
+    }
+
     void (async () => {
       let response = 'ARK Router could not complete this request.';
       let usedPlugin = false;
@@ -733,19 +754,30 @@ export function AIChat() {
           const libraryId = routed.media?.libraryId || `local-${Date.now()}`;
           lastLibraryId = libraryId;
           if (routed.media?.dataUrl) {
+            const isReal = Boolean(routed.media.real);
             rememberThumb(libraryId, routed.media.dataUrl);
             addCreation({
               id: libraryId,
               kind,
-              title: content.slice(0, 80),
+              title: isReal ? content.slice(0, 80) : `Preview · ${content.slice(0, 70)}`,
               prompt: content,
               modelName: routed.modelName || activeModel.name,
               dataUrl: routed.media.dataUrl,
               createdAt: new Date().toISOString(),
-              real: Boolean(routed.media.real),
+              real: isReal,
               source: routed.source,
             });
-            response = mediaMessageMarkdown(content, libraryId, routed.media.dataUrl);
+            // Keep honest preview text when not a finished generation.
+            if (!isReal && routed.reply) {
+              response = routed.reply.includes('![')
+                ? routed.reply
+                : `${routed.reply}\n\n${mediaMessageMarkdown(content, libraryId, routed.media.dataUrl, { real: false, kind })}`;
+            } else {
+              response = mediaMessageMarkdown(content, libraryId, routed.media.dataUrl, {
+                real: isReal,
+                kind,
+              });
+            }
             addChat({
               id: activeChatId!,
               mode,
@@ -1100,7 +1132,10 @@ export function AIChat() {
       </div>
 
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 mt-2.5 px-1">
-        <CapacityMeter capacity={capacity} />
+        <CapacityMeter
+          capacity={capacity}
+          kind={mode === 'image' ? 'image' : mode === 'video' ? 'video' : 'chat'}
+        />
         {capacity && !capacity.liveChat && (mode === 'general' || mode === 'code') && (
           <>
             <button
@@ -1124,6 +1159,20 @@ export function AIChat() {
               Install local brain
             </button>
           </>
+        )}
+        {capacity && mode === 'image' && !capacity.imageFree && !capacity.openaiImage && (
+          <button
+            type="button"
+            onClick={() => setFreeKeyOpen(true)}
+            className="inline-flex items-center gap-1 text-[11px] text-sky-400 hover:text-sky-300 transition-colors"
+          >
+            Add image key (HF / OpenAI)
+          </button>
+        )}
+        {capacity && mode === 'video' && !capacity.videoFree && (
+          <span className="text-[11px] text-amber-400/90">
+            Open desktop ARK Engine for free video routes
+          </span>
         )}
 
         {(mode === 'general' || mode === 'code') && (
@@ -1225,9 +1274,29 @@ export function AIChat() {
             <h1 className="text-2xl sm:text-3xl font-semibold text-content-primary tracking-tight mb-3 text-center">
               {greeting}
             </h1>
-            <p className="text-xs text-content-tertiary mb-8 text-center max-w-md">
-              Try “Hello” with ARK Auto — or connect a free key / install a local brain if capacity shows offline.
+            <p className="text-xs text-content-tertiary mb-4 text-center max-w-md">
+              {capacity && !capacity.liveChat
+                ? 'No live model yet — connect a free key or install the local brain, then send a message.'
+                : 'Try “Hello” with ARK Auto — it uses local brains and free keys with automatic failover.'}
             </p>
+            {capacity && !capacity.liveChat && (
+              <div className="flex flex-wrap items-center justify-center gap-2 mb-8">
+                <button
+                  type="button"
+                  onClick={() => setFreeKeyOpen(true)}
+                  className="rounded-full bg-sky-500/15 text-sky-300 hover:bg-sky-500/25 px-3.5 py-1.5 text-xs font-medium transition-colors"
+                >
+                  Connect free key
+                </button>
+                <button
+                  type="button"
+                  onClick={() => navigate({ name: 'local-ai' })}
+                  className="rounded-full bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25 px-3.5 py-1.5 text-xs font-medium transition-colors"
+                >
+                  Install local brain
+                </button>
+              </div>
+            )}
             {composer}
           </div>
         ) : (

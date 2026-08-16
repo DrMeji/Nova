@@ -451,11 +451,28 @@ async function routeImage(opts: ArkRouteOpts): Promise<ArkRouterResult> {
   }
 
   const local = await tryLocalMedia();
-  if (local?.media?.dataUrl) return local;
+  // Prefer real cloud images over local SVG fallback when failover is on.
+  if (local?.media?.dataUrl && local.media.real) return local;
 
-  if (!wantsCloud && failover && modeAllowsCloud(mode)) {
+  if ((!wantsCloud || !local?.media?.real) && failover && modeAllowsCloud(mode)) {
     const cloud = await tryCloud();
     if (cloud) return cloud;
+  }
+
+  if (local?.media?.dataUrl && local.media.real) return local;
+
+  // Last resort: labeled preview only — never treat SVG fallback as finished art.
+  if (local?.media?.dataUrl && !local.media.real) {
+    return {
+      ...local,
+      reply: [
+        'Image preview · offline fallback (not a finished generation).',
+        '',
+        'Add a Hugging Face or OpenAI key in Models → Cloud, or retry when the free image host is online.',
+        '',
+        local.reply,
+      ].join('\n'),
+    };
   }
 
   if (local) return local;

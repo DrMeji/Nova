@@ -179,10 +179,21 @@ export function slimChatContent(content: string, libraryId?: string): string {
     });
 }
 
-export function mediaMessageMarkdown(alt: string, libraryId: string, dataUrl?: string): string {
+export function mediaMessageMarkdown(
+  alt: string,
+  libraryId: string,
+  dataUrl?: string,
+  opts?: { real?: boolean; kind?: 'image' | 'video' },
+): string {
   const safe = (alt || 'ARK generation').slice(0, 80).replace(/[\[\]]/g, '');
-  if (dataUrl) return `![${safe}](${dataUrl})`;
-  return `![${safe}](ark-media:${libraryId})`;
+  const body = dataUrl ? `![${safe}](${dataUrl})` : `![${safe}](ark-media:${libraryId})`;
+  if (opts?.real === false) {
+    const label = opts.kind === 'video'
+      ? 'Video preview · not a finished MP4'
+      : 'Image preview · not a finished generation';
+    return `${label}\n\n${body}`;
+  }
+  return body;
 }
 
 export function feedbackKey(id: string) {

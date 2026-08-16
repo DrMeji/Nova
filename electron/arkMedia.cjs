@@ -101,6 +101,8 @@ async function fetchRealImage(prompt, opts = {}) {
     `https://image.pollinations.ai/prompt/${encoded}?width=${w}&height=${h}&nologo=true&model=flux-realism&enhance=true&seed=${seed}`,
     `https://gen.pollinations.ai/image/${encoded}?model=flux&width=${w}&height=${h}&nologo=true&seed=${seed}`,
     `https://image.pollinations.ai/prompt/${encoded}?width=${w}&height=${h}&nologo=true&model=turbo&seed=${seed}`,
+    `https://image.pollinations.ai/prompt/${encoded}?width=${w}&height=${h}&nologo=true&seed=${seed + 1}`,
+    `https://pollinations.ai/p/${encoded}?width=${w}&height=${h}&nologo=true&model=flux&seed=${seed}`,
   ];
 
   for (const url of urls) {
@@ -135,9 +137,10 @@ async function fetchRealVideo(prompt) {
     `https://gen.pollinations.ai/video/${encoded}?model=wan-fast&duration=4&aspectRatio=16:9`,
     `https://gen.pollinations.ai/video/${encoded}?model=wan&duration=4&aspectRatio=16:9`,
     `https://gen.pollinations.ai/video/${encoded}?model=ltx-2&duration=4&aspectRatio=16:9`,
-    // Second host family (same network, alternate models)
     `https://gen.pollinations.ai/video/${encoded}?model=seedance&duration=4&aspectRatio=16:9`,
     `https://gen.pollinations.ai/video/${encoded}?model=p-video-720p&duration=4&aspectRatio=16:9`,
+    `https://gen.pollinations.ai/video/${encoded}?model=wan-fast&duration=5&aspectRatio=16:9&audio=false`,
+    `https://gen.pollinations.ai/video/${encoded}?model=ltx-2&duration=3&aspectRatio=16:9`,
   ];
 
   for (const url of urls) {
@@ -317,9 +320,17 @@ function getLibraryItem(id) {
   return { ...item, dataUrl };
 }
 
-function shortImageReply(prompt, dataUrl, _ok) {
+function shortImageReply(prompt, dataUrl, ok) {
   const alt = String(prompt).slice(0, 80).replace(/[\[\]]/g, '');
-  return `![${alt}](${dataUrl})`;
+  const media = `![${alt}](${dataUrl})`;
+  if (ok) return media;
+  return [
+    'Image preview · offline fallback (not a finished generation)',
+    '',
+    'Connect Hugging Face / OpenAI in Models, or retry when the free image host is online.',
+    '',
+    media,
+  ].join('\n');
 }
 
 function shortVideoReply(prompt, dataUrl, ok) {

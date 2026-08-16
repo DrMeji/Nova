@@ -323,6 +323,55 @@ function buildFitLists(pc: HardwareClass, ramGb = 8) {
   };
 }
 
+function ModelInstallControl({
+  modelId,
+  name,
+  isOn,
+  isBusy,
+  onInstall,
+}: {
+  modelId: string;
+  name: string;
+  isOn: boolean;
+  isBusy: boolean;
+  onInstall: () => void;
+}) {
+  const canInstall = isEngineDownloadable(modelId);
+  if (isOn) {
+    return (
+      <span
+        className="w-8 h-8 rounded-full bg-surface-hover text-ark-accent-green flex items-center justify-center shrink-0"
+        title="Installed in ARK Engine"
+        aria-label={`Installed ${name}`}
+      >
+        <Check className="w-4 h-4" />
+      </span>
+    );
+  }
+  if (!canInstall) {
+    return (
+      <span
+        className="inline-flex items-center rounded-full bg-surface-hover/80 px-2 py-1 text-[10px] font-medium text-content-tertiary shrink-0"
+        title="Listed for discovery — not downloadable in ARK Engine yet"
+      >
+        Discover
+      </span>
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={onInstall}
+      disabled={isBusy}
+      className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors"
+      title="Download into ARK Engine"
+      aria-label={`Download ${name}`}
+    >
+      {isBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+    </button>
+  );
+}
+
 function hardwareLabel(pc: HardwareClass) {
   if (pc === 'strong') return 'High end capable';
   if (pc === 'standard') return 'Solid mid range';
@@ -496,13 +545,19 @@ export function ModelsView() {
       CATEGORY_LABEL[m.category]?.toLowerCase().includes(q) ||
       m.tiers.some(t => t.includes(q));
 
-    // Default: only hardware-fit models. Searching also surfaces out-of-spec matches.
+    // Default: only hardware-fit installable models. Searching also surfaces discovery-only.
     if (q) {
       const hits = LOCAL_MODELS.filter(match);
-      const fit = hits.filter(m => canRunOnPc(m, pcClass, ramGb));
-      const stretch = hits.filter(m => !canRunOnPc(m, pcClass, ramGb));
+      const installable = hits.filter(m => isEngineDownloadable(m.id));
+      const discovery = hits.filter(m => !isEngineDownloadable(m.id));
+      const fit = installable.filter(m => canRunOnPc(m, pcClass, ramGb));
+      const stretch = installable.filter(m => !canRunOnPc(m, pcClass, ramGb));
       return {
-        quality: [...fit.filter(m => m.category !== 'fast').slice(0, 10), ...stretch.slice(0, 6)],
+        quality: [
+          ...fit.filter(m => m.category !== 'fast').slice(0, 8),
+          ...stretch.slice(0, 4),
+          ...discovery.slice(0, 6),
+        ],
         balanced: fit.filter(m => {
           const gb = modelSizeGb(m);
           return gb >= 2 && gb < 12;
@@ -742,37 +797,19 @@ export function ModelsView() {
                                     <TierBadges tiers={model.tiers} />
                                   </span>
                                   <span className="block text-xs text-content-tertiary truncate mt-0.5">
-                                    {CATEGORY_LABEL[model.category]} · {model.size} · Fits this PC
+                                    {CATEGORY_LABEL[model.category]} · {model.size}
+                                    {isEngineDownloadable(model.id)
+                                      ? ' · Fits this PC'
+                                      : ' · Discovery only'}
                                   </span>
                                 </span>
-                                <button
-                                  type="button"
-                                  onClick={() => toggleInstall(model.id)}
-                                  disabled={isBusy || isOn}
-                                  className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 transition-colors ${
-                                    isOn
-                                      ? 'bg-surface-hover text-ark-accent-green'
-                                      : isEngineDownloadable(model.id)
-                                        ? 'text-content-secondary hover:text-content-primary hover:bg-surface-hover'
-                                        : 'text-content-tertiary hover:text-content-secondary hover:bg-surface-hover'
-                                  }`}
-                                  title={
-                                    isOn
-                                      ? 'Installed'
-                                      : isEngineDownloadable(model.id)
-                                        ? 'Download into ARK Engine'
-                                        : 'Discovery only — not in Engine install list yet'
-                                  }
-                                  aria-label={isOn ? `Installed ${model.name}` : `Download ${model.name}`}
-                                >
-                                  {isBusy ? (
-                                    <Loader2 className="w-4 h-4 animate-spin" />
-                                  ) : isOn ? (
-                                    <Check className="w-4 h-4" />
-                                  ) : (
-                                    <Download className="w-4 h-4" />
-                                  )}
-                                </button>
+                                <ModelInstallControl
+                                  modelId={model.id}
+                                  name={model.name}
+                                  isOn={isOn}
+                                  isBusy={isBusy}
+                                  onInstall={() => toggleInstall(model.id)}
+                                />
                               </div>
                             );
                           })}
@@ -863,34 +900,13 @@ export function ModelsView() {
                                 {model.description} · {model.size}
                               </span>
                             </span>
-                            <button
-                              type="button"
-                              onClick={() => toggleInstall(model.id)}
-                              disabled={isBusy || isOn}
-                              className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 transition-colors ${
-                                isOn
-                                  ? 'bg-surface-hover text-ark-accent-green'
-                                  : isEngineDownloadable(model.id)
-                                    ? 'text-content-secondary hover:text-content-primary hover:bg-surface-hover'
-                                    : 'text-content-tertiary hover:text-content-secondary hover:bg-surface-hover'
-                              }`}
-                              title={
-                                isOn
-                                  ? 'Installed'
-                                  : isEngineDownloadable(model.id)
-                                    ? 'Download into ARK Engine'
-                                    : 'Discovery only — not in Engine install list yet'
-                              }
-                              aria-label={isOn ? `Installed ${model.name}` : `Download ${model.name}`}
-                            >
-                              {isBusy ? (
-                                <Loader2 className="w-4 h-4 animate-spin" />
-                              ) : isOn ? (
-                                <Check className="w-4 h-4" />
-                              ) : (
-                                <Download className="w-4 h-4" />
-                              )}
-                            </button>
+                            <ModelInstallControl
+                              modelId={model.id}
+                              name={model.name}
+                              isOn={isOn}
+                              isBusy={isBusy}
+                              onInstall={() => toggleInstall(model.id)}
+                            />
                           </div>
                         );
                       })}

@@ -106,10 +106,25 @@ function MediaActions({ src, alt }: { src: string; alt: string }) {
   );
 }
 
-function ResolvedMedia({ src, alt }: { src: string; alt: string }) {
+function ResolvedMedia({
+  src,
+  alt,
+  preview,
+}: {
+  src: string;
+  alt: string;
+  preview?: boolean;
+}) {
   const isVideo = src.startsWith('data:video/') || /\.mp4(\?|$)/i.test(src);
+  const isSvg = src.startsWith('data:image/svg');
+  const showPreview = Boolean(preview || (!isVideo && isSvg));
   return (
     <div className="max-w-md">
+      {showPreview && (
+        <p className="mb-1.5 text-[10px] uppercase tracking-wider text-amber-400/90 font-semibold">
+          Preview · not finished
+        </p>
+      )}
       {isVideo ? (
         <video
           src={src}
@@ -122,7 +137,7 @@ function ResolvedMedia({ src, alt }: { src: string; alt: string }) {
         <img
           src={src}
           alt={alt || 'ARK generation'}
-          className="w-full rounded-2xl object-cover bg-ark-navy-950"
+          className={`w-full rounded-2xl object-cover bg-ark-navy-950 ${showPreview ? 'ring-1 ring-amber-400/30' : ''}`}
         />
       )}
       <MediaActions src={src} alt={alt} />
@@ -130,7 +145,7 @@ function ResolvedMedia({ src, alt }: { src: string; alt: string }) {
   );
 }
 
-function ArkMediaImage({ id, alt }: { id: string; alt: string }) {
+function ArkMediaImage({ id, alt, preview }: { id: string; alt: string; preview?: boolean }) {
   const [src, setSrc] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
 
@@ -153,7 +168,7 @@ function ArkMediaImage({ id, alt }: { id: string; alt: string }) {
   if (!src) {
     return <GeneratingPlaceholder kind="image" label="Loading…" />;
   }
-  return <ResolvedMedia src={src} alt={alt} />;
+  return <ResolvedMedia src={src} alt={alt} preview={preview} />;
 }
 
 export function MessageContent({ content }: { content: string }) {
@@ -187,6 +202,7 @@ export function MessageContent({ content }: { content: string }) {
   if (chunks.length === 0) chunks.push({ type: 'text', value: content });
 
   const onlyMedia = chunks.every(c => c.type === 'media' || !c.value.trim());
+  const previewHint = /preview|not a finished|motion still|offline fallback/i.test(content);
 
   return (
     <div className={onlyMedia ? 'space-y-2' : 'space-y-3'}>
@@ -200,29 +216,32 @@ export function MessageContent({ content }: { content: string }) {
             || src.startsWith('http://')
             || src.startsWith('https://')
           ) {
-            return <ResolvedMedia key={i} src={src} alt={alt} />;
+            return <ResolvedMedia key={i} src={src} alt={alt} preview={previewHint} />;
           }
           if (src.startsWith('ark-media:')) {
             const id = src.slice('ark-media:'.length);
-            if (id && id !== 'inline') {
-              return <ArkMediaImage key={i} id={id} alt={alt} />;
-            }
-            return (
-              <p key={i} className="text-xs text-content-tertiary">
-                Media unavailable — open from Recent.
-              </p>
-            );
+            return <ArkMediaImage key={i} id={id} alt={alt} preview={previewHint} />;
           }
-          return null;
+          return (
+            <p key={i} className="text-xs text-content-tertiary break-all">
+              {src}
+            </p>
+          );
         }
         const text = chunk.value.trim();
         if (!text) return null;
-        if (onlyMedia) return null;
-        if (/^Generated (image|video|fallback|motion|cinematic)/i.test(text)) return null;
+        // Keep preview lines visible; soft-style them
+        if (/preview|not a finished|motion still|offline fallback/i.test(text) && text.length < 200) {
+          return (
+            <p key={i} className="text-xs text-amber-400/90 whitespace-pre-wrap">
+              {text}
+            </p>
+          );
+        }
         return (
-          <div key={i} className="whitespace-pre-wrap">
+          <p key={i} className="whitespace-pre-wrap leading-relaxed">
             {text}
-          </div>
+          </p>
         );
       })}
     </div>

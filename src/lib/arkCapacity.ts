@@ -17,6 +17,8 @@ export type LiveCapacity = {
   localGguf: boolean;
   /** Free image path (Pollinations via Engine) is available in desktop */
   imageFree: boolean;
+  /** Video can attempt free/cloud MP4 (desktop Engine) */
+  videoFree: boolean;
   openaiImage: boolean;
   summary: string;
   /** Free-key providers still missing — for in-chat CTA */
@@ -54,16 +56,19 @@ export async function probeLiveCapacity(): Promise<LiveCapacity> {
 
   let localGguf = false;
   let imageFree = Boolean(window.arkDesktop?.engineGenerate);
+  let videoFree = Boolean(window.arkDesktop?.engineGenerate);
   try {
     const status = await getEngineStatus();
     localGguf = Boolean(status.ggufBinary && (status.ggufCount || 0) > 0);
     imageFree = status.phase === 'online' || Boolean(window.arkDesktop?.engineGenerate);
+    videoFree = imageFree;
   } catch {
     /* keep defaults */
   }
 
   const liveChat = cloudKeys || ollama || localGguf;
   const openaiImage = Boolean(keys.openai);
+  const hfImage = Boolean(keys.huggingface);
   const suggestedFreeKeys = FREE_KEY_SUGGESTIONS
     .filter(p => !keys[p.id])
     .map(p => ({ id: p.id, name: p.name }))
@@ -86,7 +91,8 @@ export async function probeLiveCapacity(): Promise<LiveCapacity> {
     keyCount,
     ollama,
     localGguf,
-    imageFree,
+    imageFree: imageFree || hfImage || openaiImage,
+    videoFree,
     openaiImage,
     summary,
     suggestedFreeKeys,
