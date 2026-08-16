@@ -85,5 +85,6 @@ jobs:
             Ensure-Release "DrMeji/ark-dist"
           } catch {
             Write-Warning "ark-dist publish failed — set ARK_DIST_TOKEN secret with write access to DrMeji/ark-dist"
-            throw
+            Write-Warning $_.Exception.Message
+            # Still succeed so DrMeji/Ark gets the installer; in-app feed needs ark-dist manually or via token.
           }
