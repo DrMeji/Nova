@@ -200,6 +200,15 @@ export function hasProviderApiKey(providerId: string) {
 /** App changelog shown in Settings → Updates. */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.15',
+    channel: 'stable' as const,
+    date: 'Aug 15, 2026',
+    title: 'Update polish verification',
+    notes: [
+      'Use Check → Update from 0.1.14 to verify the black splash with no terminals',
+    ],
+  },
+  {
     version: '0.1.14',
     channel: 'stable' as const,
     date: 'Aug 15, 2026',
