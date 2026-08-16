@@ -185,6 +185,30 @@ export function deleteRecentChatPermanently(chatId: string) {
   return nextChats;
 }
 
+export function deleteCreationPermanently(creationId: string) {
+  if (!creationId) return loadRecentCreations();
+  memoryThumbs.delete(creationId);
+  const nextCreations = loadRecentCreations().filter(c => c.id !== creationId);
+  saveRecentCreations(nextCreations);
+  try {
+    localStorage.removeItem(`ark:chat-thread:creation:${creationId}`);
+    localStorage.removeItem(`ark:media-feedback:${creationId}`);
+  } catch {
+    /* ignore */
+  }
+  void window.arkDesktop?.mediaRemove?.(creationId)?.catch?.(() => undefined);
+
+  // Detach chats that pointed at this creation
+  const nextChats = loadRecentChats().map(c =>
+    c.creationId === creationId ? { ...c, creationId: undefined } : c,
+  );
+  saveRecentChats(nextChats);
+
+  window.dispatchEvent(new Event('ark:creations-changed'));
+  window.dispatchEvent(new Event('ark:chats-changed'));
+  return nextCreations;
+}
+
 export function titleFromPrompt(prompt: string): string {
   const cleaned = prompt.trim().replace(/\s+/g, ' ');
   if (!cleaned) return 'New chat';

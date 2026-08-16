@@ -2,7 +2,9 @@
 
 ARK owns this loopback API. External apps (personal assistants like Lindsay, agents, IDEs, custom tools) talk to **ARK Engine** on this PC — not to Ollama or any third-party local runtime.
 
-Base URL: `http://127.0.0.1:8787` (desktop ARK must be running)
+Base URL: `http://127.0.0.1:8787` (desktop ARK must be running — minimize to tray keeps the brain up)
+
+Lindsay migration: [lindsay-migration.md](./lindsay-migration.md)
 
 Optional auth: set `ARK_BRAIN_TOKEN` and send `Authorization: Bearer <token>`.
 

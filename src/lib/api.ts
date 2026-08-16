@@ -31,6 +31,7 @@ export const ENGINE_DOWNLOADABLE_IDS = [
   'gemma2-2b',
   'phi3-mini',
   'deepseek-r1-distill-8b',
+  'sd15-local',
 ] as const;
 
 export function isEngineDownloadable(id: string) {

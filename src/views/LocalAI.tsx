@@ -4,7 +4,9 @@ import { detectHardware, getAccurateHardware, getHardwareClass, getRecommendedMo
 import { getLocalPrefs, setLocalPrefs } from '@/lib/localPrefs';
 import {
   downloadEngineModel,
+  engineDownloadCancel,
   engineDownloadProgress,
+  engineDiskSpace,
   getEngineStatus,
   importGgufPick,
   setEngineModel,
@@ -27,108 +29,148 @@ import {
   Gauge, Boxes, Wifi, Loader2, FolderOpen, FileBox,
 } from 'lucide-react';
 
+import {
+  categoryDisplayLabel,
+  DEFAULT_ENGINE_MODEL_ID,
+  sortModelsByCategoryThenSizeDesc,
+} from '@/lib/modelSort';
+
 type TabId = 'overview' | 'speed' | 'hardware' | 'storage' | 'advanced';
 
 const NEXT_PRELOAD_MODEL = { name: 'Qwen2.5-Coder 7B', sizeGb: 4.7 };
 
-const CATALOG = [
+type CatalogModel = {
+  id: string;
+  name: string;
+  category: 'general' | 'coding' | 'reasoning' | 'fast' | 'image';
+  sizeGb: number;
+  tone: string;
+  initial: string;
+};
+
+const CATALOG: CatalogModel[] = sortModelsByCategoryThenSizeDesc([
   {
-    id: 'qwen25-15b',
+    id: DEFAULT_ENGINE_MODEL_ID,
     name: 'Qwen2.5 1.5B Instruct',
-    detail: 'Default local brain · ~1.0 GB · Q4_K_M',
+    category: 'general',
+    sizeGb: 1.0,
     tone: 'from-emerald-400 to-green-700',
     initial: 'Q1',
   },
   {
+    id: 'sd15-local',
+    name: 'Stable Diffusion 1.5 (Local)',
+    category: 'image',
+    sizeGb: 4.0,
+    tone: 'from-yellow-500 to-amber-700',
+    initial: 'SD',
+  },
+  {
     id: 'llama32-3b',
     name: 'Llama 3.2 3B Instruct',
-    detail: 'General · ~2.0 GB · Q4_K_M',
+    category: 'general',
+    sizeGb: 2.0,
     tone: 'from-violet-500 to-indigo-700',
     initial: 'L3',
   },
   {
     id: 'qwen25-coder-7b',
     name: 'Qwen2.5-Coder 7B',
-    detail: 'Coding · ~4.7 GB · Q4_K_M',
+    category: 'coding',
+    sizeGb: 4.7,
     tone: 'from-cyan-500 to-teal-700',
     initial: 'Q7',
   },
   {
     id: 'qwen25-coder-14b',
     name: 'Qwen2.5-Coder 14B',
-    detail: 'Coding · ~9.0 GB · Q4_K_M · needs ~16 GB+ RAM',
+    category: 'coding',
+    sizeGb: 9.0,
     tone: 'from-blue-500 to-indigo-700',
     initial: '14',
   },
   {
     id: 'qwen25-coder-32b',
     name: 'Qwen2.5-Coder 32B',
-    detail: 'Coding · ~20 GB · Q4_K_M · needs ~32 GB+ RAM',
+    category: 'coding',
+    sizeGb: 20,
     tone: 'from-indigo-500 to-violet-800',
     initial: '32',
   },
   {
     id: 'deepseek-coder-v2-lite',
     name: 'DeepSeek Coder V2 Lite',
-    detail: 'Coding · ~8.9 GB · Q4_K_M',
+    category: 'coding',
+    sizeGb: 8.9,
     tone: 'from-cyan-500 to-teal-700',
     initial: 'DS',
   },
   {
     id: 'starcoder2-7b',
     name: 'StarCoder2 7B',
-    detail: 'Coding · ~4.3 GB · Q4_K_M',
+    category: 'coding',
+    sizeGb: 4.3,
     tone: 'from-amber-500 to-orange-700',
     initial: 'Sc',
   },
   {
     id: 'qwen25-7b',
     name: 'Qwen2.5 7B Instruct',
-    detail: 'General · ~4.7 GB · Q4_K_M',
+    category: 'general',
+    sizeGb: 4.7,
     tone: 'from-sky-400 to-blue-700',
     initial: 'Q7',
   },
   {
     id: 'llama31-8b',
     name: 'Llama 3.1 8B Instruct',
-    detail: 'General · ~4.9 GB · Q4_K_M',
+    category: 'general',
+    sizeGb: 4.9,
     tone: 'from-indigo-500 to-blue-800',
     initial: 'L8',
   },
   {
     id: 'mistral-7b',
     name: 'Mistral 7B Instruct',
-    detail: 'General · ~4.1 GB · Q4_K_M',
+    category: 'general',
+    sizeGb: 4.1,
     tone: 'from-orange-400 to-amber-700',
     initial: 'Mi',
   },
   {
     id: 'gemma2-2b',
     name: 'Gemma 2 2B Instruct',
-    detail: 'Fast · ~1.6 GB · Q4_K_M',
+    category: 'fast',
+    sizeGb: 1.6,
     tone: 'from-teal-400 to-cyan-700',
     initial: 'G2',
   },
   {
     id: 'phi3-mini',
     name: 'Phi-3 Mini Instruct',
-    detail: 'Fast · ~2.3 GB · Q4_K_M',
+    category: 'fast',
+    sizeGb: 2.3,
     tone: 'from-cyan-400 to-sky-700',
     initial: 'Φ3',
   },
   {
     id: 'deepseek-r1-distill-8b',
     name: 'DeepSeek-R1 Distill 8B',
-    detail: 'Reasoning · ~5.2 GB · Q4_K_M',
+    category: 'reasoning',
+    sizeGb: 5.2,
     tone: 'from-fuchsia-500 to-purple-800',
     initial: 'R1',
   },
-];
+]);
+
+function catalogLine(model: CatalogModel) {
+  return `${categoryDisplayLabel(model.category, model.id)} · ${model.sizeGb.toFixed(1)} GB`;
+}
 
 function hardwareLabel(pc: ReturnType<typeof getHardwareClass>) {
-  if (pc === 'strong') return 'High end capable';
-  if (pc === 'standard') return 'Solid mid range';
-  return 'Lightweight profile';
+  if (pc === 'strong') return 'High end';
+  if (pc === 'standard') return 'Mid range';
+  return 'Light';
 }
 
 function FreeBadge() {
@@ -162,6 +204,8 @@ export function LocalAI() {
   }>>([]);
   const [activeId, setActiveId] = useState(() => getLocalPrefs().defaultModelId || recommendation.id);
   const [downloadProgressMap, setDownloadProgressMap] = useState<Record<string, number>>({});
+  const [downloadPhaseMap, setDownloadPhaseMap] = useState<Record<string, string>>({});
+  const [diskNote, setDiskNote] = useState('');
   const downloadingIds = Object.keys(downloadProgressMap);
   const [statusNote, setStatusNote] = useState('Starting ARK Engine…');
   const [engineMeta, setEngineMeta] = useState<ArkEngineStatus | null>(null);
@@ -190,21 +234,28 @@ export function LocalAI() {
     setActiveId(status.activeModelId);
     setStatusNote(status.note);
     setInstalled(
-      status.models
-        .filter(m =>
-          m.status === 'ready'
-          && m.id !== 'ark-core'
-          && m.id !== 'ark-image-core'
-          && m.id !== 'ark-video-core',
-        )
-        .map(m => ({
-          id: m.id,
-          name: m.name,
-          detail: m.detail,
-          tone: 'from-emerald-400 to-green-700',
-          initial: m.name.slice(0, 2).toUpperCase(),
-          active: m.id === status.activeModelId,
-        })),
+      sortModelsByCategoryThenSizeDesc(
+        status.models
+          .filter(m =>
+            m.status === 'ready'
+            && m.id !== 'ark-core'
+            && m.id !== 'ark-image-core'
+            && m.id !== 'ark-video-core',
+          )
+          .map(m => {
+            const cat = CATALOG.find(c => c.id === m.id);
+            return {
+              id: m.id,
+              name: m.name,
+              category: cat?.category,
+              sizeGb: cat?.sizeGb ?? 0,
+              detail: cat ? catalogLine(cat) : (m.detail || ''),
+              tone: cat?.tone || 'from-emerald-400 to-green-700',
+              initial: cat?.initial || m.name.slice(0, 2).toUpperCase(),
+              active: m.id === status.activeModelId,
+            };
+          }),
+      ),
     );
   };
 
@@ -269,57 +320,107 @@ export function LocalAI() {
 
   const downloadModel = (model: typeof CATALOG[number]) => {
     if (downloadProgressMap[model.id] != null && downloadProgressMap[model.id] < 100) return;
-    setDownloadProgressMap(prev => ({ ...prev, [model.id]: 1 }));
-    void downloadEngineModel(model.id).then(async () => {
-      const tick = window.setInterval(async () => {
-        const p = await engineDownloadProgress(model.id);
-        setDownloadProgressMap(prev => ({ ...prev, [model.id]: p }));
-        try {
-          const { engineDownloadError } = await import('@/lib/arkEngine');
-          const err = await engineDownloadError(model.id);
-          if (err) {
+    void engineDiskSpace().then(disk => {
+      const needGb = model.sizeGb * 1.15;
+      if (disk?.freeGb != null && disk.freeGb < needGb) {
+        setDiskNote(`Need ~${needGb.toFixed(1)} GB free (have ${disk.freeGb.toFixed(1)} GB)`);
+        setStatusNote(`Not enough disk for ${model.name}`);
+        return;
+      }
+      setDiskNote(disk?.freeGb != null ? `${disk.freeGb.toFixed(0)} GB free` : '');
+      setDownloadProgressMap(prev => ({ ...prev, [model.id]: 1 }));
+      setDownloadPhaseMap(prev => ({ ...prev, [model.id]: 'queued' }));
+      void downloadEngineModel(model.id).then(async () => {
+        const tick = window.setInterval(async () => {
+          const p = await engineDownloadProgress(model.id);
+          setDownloadProgressMap(prev => ({ ...prev, [model.id]: p }));
+          const status = await getEngineStatus();
+          const row = status.models.find(m => m.id === model.id) as { downloadPhase?: string } | undefined;
+          if (row?.downloadPhase) {
+            setDownloadPhaseMap(prev => ({ ...prev, [model.id]: row.downloadPhase || '' }));
+          }
+          try {
+            const { engineDownloadError } = await import('@/lib/arkEngine');
+            const err = await engineDownloadError(model.id);
+            if (err) {
+              window.clearInterval(tick);
+              setDownloadProgressMap(prev => {
+                const next = { ...prev };
+                delete next[model.id];
+                return next;
+              });
+              setDownloadPhaseMap(prev => {
+                const next = { ...prev };
+                delete next[model.id];
+                return next;
+              });
+              setStatusNote(err);
+              return;
+            }
+          } catch {
+            /* ignore */
+          }
+          if (p >= 100) {
             window.clearInterval(tick);
             setDownloadProgressMap(prev => {
               const next = { ...prev };
               delete next[model.id];
               return next;
             });
-            setStatusNote(err);
-            return;
+            setDownloadPhaseMap(prev => {
+              const next = { ...prev };
+              delete next[model.id];
+              return next;
+            });
+            const st = await getEngineStatus();
+            applyEngine(st);
+            setStatusNote(`${model.name} ready`);
           }
-        } catch {
-          /* ignore */
-        }
-        if (p >= 100) {
-          window.clearInterval(tick);
-          setDownloadProgressMap(prev => {
-            const next = { ...prev };
-            delete next[model.id];
-            return next;
-          });
-          const status = await getEngineStatus();
-          applyEngine(status);
-          setStatusNote(`${model.name} ready in ARK Engine — pick it in Chat`);
-        }
-      }, 350);
-    }).catch(err => {
-      setDownloadProgressMap(prev => {
-        const next = { ...prev };
-        delete next[model.id];
-        return next;
+        }, 350);
+      }).catch(err => {
+        setDownloadProgressMap(prev => {
+          const next = { ...prev };
+          delete next[model.id];
+          return next;
+        });
+        setDownloadPhaseMap(prev => {
+          const next = { ...prev };
+          delete next[model.id];
+          return next;
+        });
+        setStatusNote(err instanceof Error ? err.message : 'Download failed');
       });
-      setStatusNote(err instanceof Error ? err.message : 'Download failed');
     });
   };
 
-  const activeModel = installed.find(m => m.id === activeId) ?? {
-    id: recommendation.id,
-    name: recommendation.name,
-    detail: `${recommendation.size} · Q4_K_M`,
-    tone: 'from-sky-500 to-blue-700',
-    initial: 'AI',
-    active: true,
+  const cancelModelDownload = (id: string) => {
+    void engineDownloadCancel(id).then(() => {
+      setDownloadProgressMap(prev => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+      setDownloadPhaseMap(prev => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+      setStatusNote('Download canceled');
+      void getEngineStatus().then(applyEngine);
+    });
   };
+
+  const activeModel = installed.find(m => m.id === activeId) ?? (() => {
+    const hit = CATALOG.find(m => m.id === recommendation.id) || CATALOG[0];
+    return {
+      id: hit.id,
+      name: hit.name,
+      detail: catalogLine(hit),
+      tone: hit.tone,
+      initial: hit.initial,
+      active: true,
+    };
+  })();
 
   const specs = [
     { icon: Monitor, label: 'Operating system', value: hw.os },
@@ -424,17 +525,17 @@ export function LocalAI() {
       <div className="flex-1 min-h-0 overflow-y-auto px-6 pb-10">
         <div className="w-full max-w-4xl mx-auto">
           {/* Hardware strip always visible */}
-          <section className="mb-8 rounded-2xl border border-surface-border bg-surface-hover/30 px-4 py-4">
+          <section className="mb-8 rounded-2xl border border-surface-border bg-surface-hover/30 px-4 py-3.5">
             <div className="flex items-center gap-3">
               <span className="w-10 h-10 rounded-xl bg-surface-hover flex items-center justify-center shrink-0">
                 <Monitor className="w-5 h-5 text-content-secondary" />
               </span>
               <div className="min-w-0">
-                <p className="text-xs text-content-tertiary leading-relaxed">
-                  {hw.os} · {hw.cpu} · {hw.ram} RAM · {hw.gpu} · {hw.acceleration}
+                <p className="text-sm text-content-primary truncate">
+                  {hw.cpu} · {hw.ram} · {hw.gpu}
                 </p>
-                <p className="text-xs text-content-secondary mt-1">
-                  Profile: {hardwareLabel(pcClass)} · Local models stay on this machine
+                <p className="text-xs text-content-tertiary mt-0.5 truncate">
+                  {hw.os} · {hw.acceleration}
                 </p>
               </div>
             </div>
@@ -489,7 +590,7 @@ export function LocalAI() {
                       <FreeBadge />
                     </span>
                     <span className="block text-xs text-content-tertiary truncate mt-0.5">
-                      {activeModel.detail} · {hw.acceleration}
+                      {activeModel.detail}
                     </span>
                   </span>
                   <span className={`inline-flex items-center gap-1.5 text-xs shrink-0 ${
@@ -503,7 +604,7 @@ export function LocalAI() {
 
               {/* Installed */}
               <section>
-                <div className="flex items-center justify-between gap-3 mb-2">
+                <div className="flex items-center justify-between gap-3 mb-4">
                   <div className="flex items-center gap-2">
                     <Boxes className="w-4 h-4 text-content-secondary" />
                     <h2 className="text-base font-semibold text-content-primary">Installed</h2>
@@ -516,20 +617,42 @@ export function LocalAI() {
                     Use in chat
                   </button>
                 </div>
-                <p className="text-xs text-content-tertiary mb-4">{statusNote}</p>
                 {downloadingIds.length > 0 && (
                   <div className="mb-4 space-y-2">
-                    {downloadingIds.map(id => (
-                      <div key={id} className="rounded-xl border border-surface-border bg-ark-navy-900/40 px-3 py-2.5">
-                        <div className="flex items-center justify-between text-xs mb-1.5">
-                          <span className="text-content-secondary truncate">Downloading {id}…</span>
-                          <span className="text-content-tertiary tabular-nums">{Math.round(downloadProgressMap[id] || 0)}%</span>
+                    {diskNote && (
+                      <p className="text-[11px] text-content-tertiary px-1">{diskNote}</p>
+                    )}
+                    {downloadingIds.map(id => {
+                      const phase = downloadPhaseMap[id] || 'downloading';
+                      const pct = Math.round(downloadProgressMap[id] || 0);
+                      const label = phase === 'queued'
+                        ? 'Queued'
+                        : phase === 'runtime'
+                          ? 'Installing runtime…'
+                          : phase === 'weights'
+                            ? `Downloading… ${pct}%`
+                            : `Downloading… ${pct}%`;
+                      return (
+                        <div key={id} className="rounded-xl border border-surface-border bg-ark-navy-900/40 px-3 py-2.5">
+                          <div className="flex items-center justify-between text-xs mb-1.5 gap-2">
+                            <span className="text-content-secondary truncate">{id}</span>
+                            <span className="flex items-center gap-2 shrink-0">
+                              <span className="text-content-tertiary tabular-nums">{label}</span>
+                              <button
+                                type="button"
+                                className="text-rose-400 hover:text-rose-300"
+                                onClick={() => cancelModelDownload(id)}
+                              >
+                                Cancel
+                              </button>
+                            </span>
+                          </div>
+                          <div className="h-1 bg-surface-hover rounded-full overflow-hidden">
+                            <div className="h-full bg-emerald-400/80 transition-all" style={{ width: `${pct}%` }} />
+                          </div>
                         </div>
-                        <div className="h-1 bg-surface-hover rounded-full overflow-hidden">
-                          <div className="h-full bg-emerald-400/80 transition-all" style={{ width: `${downloadProgressMap[id] || 0}%` }} />
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
                 <div className="flex flex-col">
@@ -590,7 +713,7 @@ export function LocalAI() {
                         <span className="block text-xs text-content-tertiary truncate mt-0.5">
                           {downloadProgressMap[model.id] != null && downloadProgressMap[model.id] < 100
                             ? `Downloading… ${Math.round(downloadProgressMap[model.id])}%`
-                            : model.detail}
+                            : catalogLine(model)}
                         </span>
                       </span>
                       <span className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 text-content-secondary hover:text-content-primary">
@@ -634,7 +757,7 @@ export function LocalAI() {
                   </button>
                 </div>
                 <p className="text-sm text-content-tertiary px-1">
-                  Measure download speed so ARK can estimate model install times and preload the next brain while you work.
+                  Open Speed to measure download rate before large installs.
                 </p>
               </section>
 
@@ -820,7 +943,7 @@ export function LocalAI() {
                   <div className="py-3 px-1">
                     <p className="text-content-primary font-medium">Recommended model</p>
                     <p className="text-xs text-content-tertiary mt-1">
-                      {recommendation.name} · {recommendation.size}, best fit from the current scan.
+                      {recommendation.name} · {recommendation.size}
                     </p>
                     <button
                       type="button"

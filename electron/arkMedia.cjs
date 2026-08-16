@@ -1,10 +1,12 @@
 /**
- * ARK media generation — real free images + motion clips, library on disk (paths only).
+ * ARK media generation — local SD when installed, free hosts, real MP4 fallbacks.
  */
 
 const fs = require('fs');
 const path = require('path');
 const { app } = require('electron');
+const arkSd = require('./arkSd.cjs');
+const arkFfmpeg = require('./arkFfmpeg.cjs');
 
 function mediaDir() {
   const dir = path.join(app.getPath('userData'), 'ark-engine', 'media');
@@ -141,12 +143,15 @@ async function fetchRealVideo(prompt) {
     `https://gen.pollinations.ai/video/${encoded}?model=p-video-720p&duration=4&aspectRatio=16:9`,
     `https://gen.pollinations.ai/video/${encoded}?model=wan-fast&duration=5&aspectRatio=16:9&audio=false`,
     `https://gen.pollinations.ai/video/${encoded}?model=ltx-2&duration=3&aspectRatio=16:9`,
+    `https://gen.pollinations.ai/video/${encoded}?model=wan&duration=3&aspectRatio=16:9`,
+    `https://image.pollinations.ai/prompt/${encoded}?width=1280&height=720&nologo=true&model=flux`, // not video — skip below
   ];
 
   for (const url of urls) {
+    if (url.includes('image.pollinations.ai')) continue;
     try {
       const ac = new AbortController();
-      const timer = setTimeout(() => ac.abort(), 90_000);
+      const timer = setTimeout(() => ac.abort(), 120_000);
       const res = await fetch(url, {
         method: 'GET',
         headers: { 'User-Agent': 'ARK-Desktop' },
@@ -333,9 +338,16 @@ function shortImageReply(prompt, dataUrl, ok) {
   ].join('\n');
 }
 
-function shortVideoReply(prompt, dataUrl, ok) {
+function shortVideoReply(prompt, dataUrl, ok, opts = {}) {
   const alt = String(prompt).slice(0, 80).replace(/[\[\]]/g, '');
   const media = `![${alt}](${dataUrl})`;
+  if (ok && opts.motionStill) {
+    return [
+      'Short motion clip · real MP4 from a still (not generative video)',
+      '',
+      media,
+    ].join('\n');
+  }
   if (ok) return media;
   return [
     'Video preview · motion still (not a real MP4 yet)',
@@ -347,6 +359,44 @@ function shortVideoReply(prompt, dataUrl, ok) {
 async function generateImage(prompt, modelName) {
   const id = `img-${Date.now()}-${hashPrompt(prompt).toString(16)}`;
   const enhanced = rewriteImagePrompt(prompt);
+
+  // Prefer on-device SD when the user installed local image weights.
+  if (arkSd.isLocalImageReady()) {
+    try {
+      const local = await arkSd.generateLocalImage(enhanced, { width: 512, height: 512, steps: 20 });
+      if (local) {
+        const file = path.join(mediaDir(), `${id}.${local.ext}`);
+        fs.writeFileSync(file, local.buf);
+        const dataUrl = `data:image/${local.ext};base64,${local.buf.toString('base64')}`;
+        const entry = {
+          id,
+          kind: 'image',
+          title: String(prompt).slice(0, 80),
+          prompt: String(prompt),
+          modelName: modelName || 'Stable Diffusion 1.5 (Local)',
+          path: file,
+          createdAt: new Date().toISOString(),
+          source: local.source,
+          real: true,
+        };
+        writeLibraryEntry(entry);
+        return {
+          ok: true,
+          kind: 'image',
+          modelName: entry.modelName,
+          path: file,
+          dataUrl,
+          libraryId: id,
+          real: true,
+          source: local.source,
+          reply: shortImageReply(prompt, dataUrl, true),
+        };
+      }
+    } catch {
+      /* fall through to cloud */
+    }
+  }
+
   const real = await fetchRealImage(enhanced, { width: 1280, height: 1280 });
 
   if (real) {
@@ -410,7 +460,7 @@ async function generateImage(prompt, modelName) {
 async function generateVideo(prompt, modelName) {
   const id = `vid-${Date.now()}-${hashPrompt(prompt).toString(16)}`;
 
-  // Prefer real MP4 when a free Pollinations video route answers.
+  // Prefer real generative MP4 when a free Pollinations / HF route answers.
   const mp4 = (await fetchRealVideo(prompt)) || (await fetchHfVideo(prompt));
   if (mp4) {
     const file = path.join(mediaDir(), `${id}.mp4`);
@@ -442,33 +492,110 @@ async function generateVideo(prompt, modelName) {
     };
   }
 
-  // Honest fallback: cinematic still + Ken Burns motion SVG (not MP4).
+  // Real MP4 fallback: Ken Burns motion from a still (honest label, playable file).
   const stillPrompt = rewriteImagePrompt(
     `${prompt}, cinematic film still for a short motion clip, shallow depth of field, dramatic lighting`,
   );
-  const real = await fetchRealImage(stillPrompt, { width: 1280, height: 720 });
+  let stillBuf = null;
+  let stillExt = 'jpg';
 
-  let dataUrl;
-  let file;
-  let realFlag = false;
-  let source = 'fallback-svg';
-
-  if (real) {
-    const stillData = `data:image/${real.ext === 'jpg' ? 'jpeg' : real.ext};base64,${real.buf.toString('base64')}`;
-    const motion = buildMotionSvg(prompt, modelName || 'ARK Video Core', stillData);
-    file = path.join(mediaDir(), `${id}.svg`);
-    fs.writeFileSync(file, motion, 'utf8');
-    dataUrl = toDataUrl(motion);
-    realFlag = false;
-    source = 'motion-still-fallback';
-  } else {
-    const svg = buildFallbackSvg(prompt, modelName, 'video');
-    file = path.join(mediaDir(), `${id}.svg`);
-    fs.writeFileSync(file, svg, 'utf8');
-    dataUrl = toDataUrl(svg);
-    realFlag = false;
+  if (arkSd.isLocalImageReady()) {
+    try {
+      const local = await arkSd.generateLocalImage(stillPrompt, { width: 768, height: 432, steps: 16 });
+      if (local) {
+        stillBuf = local.buf;
+        stillExt = local.ext;
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  if (!stillBuf) {
+    const real = await fetchRealImage(stillPrompt, { width: 1280, height: 720 });
+    if (real) {
+      stillBuf = real.buf;
+      stillExt = real.ext;
+    }
   }
 
+  if (stillBuf) {
+    const stillFile = path.join(mediaDir(), `${id}-still.${stillExt}`);
+    fs.writeFileSync(stillFile, stillBuf);
+    try {
+      const motionBuf = await arkFfmpeg.stillToMp4(stillFile, { duration: 4 });
+      if (motionBuf) {
+        const file = path.join(mediaDir(), `${id}.mp4`);
+        fs.writeFileSync(file, motionBuf);
+        try {
+          fs.unlinkSync(stillFile);
+        } catch {
+          /* ignore */
+        }
+        const dataUrl = `data:video/mp4;base64,${motionBuf.toString('base64')}`;
+        const entry = {
+          id,
+          kind: 'video',
+          title: String(prompt).slice(0, 80),
+          prompt: String(prompt),
+          modelName: modelName || 'ARK Video Core',
+          path: file,
+          createdAt: new Date().toISOString(),
+          source: 'motion-still-mp4',
+          real: true,
+          format: 'mp4',
+        };
+        writeLibraryEntry(entry);
+        return {
+          ok: true,
+          kind: 'video',
+          modelName: entry.modelName,
+          path: file,
+          dataUrl,
+          libraryId: id,
+          real: true,
+          source: 'motion-still-mp4',
+          reply: shortVideoReply(prompt, dataUrl, true, { motionStill: true }),
+        };
+      }
+    } catch {
+      /* SVG fallback below */
+    }
+
+    const stillData = `data:image/${stillExt === 'jpg' ? 'jpeg' : stillExt};base64,${stillBuf.toString('base64')}`;
+    const motion = buildMotionSvg(prompt, modelName || 'ARK Video Core', stillData);
+    const file = path.join(mediaDir(), `${id}.svg`);
+    fs.writeFileSync(file, motion, 'utf8');
+    const dataUrl = toDataUrl(motion);
+    const entry = {
+      id,
+      kind: 'video',
+      title: String(prompt).slice(0, 80),
+      prompt: String(prompt),
+      modelName: modelName || 'ARK Video Core',
+      path: file,
+      createdAt: new Date().toISOString(),
+      source: 'motion-still-fallback',
+      real: false,
+      format: 'svg-motion',
+    };
+    writeLibraryEntry(entry);
+    return {
+      ok: true,
+      kind: 'video',
+      modelName: entry.modelName,
+      path: file,
+      dataUrl,
+      libraryId: id,
+      real: false,
+      source: 'motion-still-fallback',
+      reply: shortVideoReply(prompt, dataUrl, false),
+    };
+  }
+
+  const svg = buildFallbackSvg(prompt, modelName, 'video');
+  const file = path.join(mediaDir(), `${id}.svg`);
+  fs.writeFileSync(file, svg, 'utf8');
+  const dataUrl = toDataUrl(svg);
   const entry = {
     id,
     kind: 'video',
@@ -477,8 +604,8 @@ async function generateVideo(prompt, modelName) {
     modelName: modelName || 'ARK Video Core',
     path: file,
     createdAt: new Date().toISOString(),
-    source,
-    real: realFlag,
+    source: 'fallback-svg',
+    real: false,
     format: 'svg-motion',
   };
   writeLibraryEntry(entry);
@@ -490,9 +617,9 @@ async function generateVideo(prompt, modelName) {
     path: file,
     dataUrl,
     libraryId: id,
-    real: realFlag,
-    source,
-    reply: shortVideoReply(prompt, dataUrl, realFlag),
+    real: false,
+    source: 'fallback-svg',
+    reply: shortVideoReply(prompt, dataUrl, false),
   };
 }
 

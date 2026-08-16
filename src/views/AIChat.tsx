@@ -34,7 +34,7 @@ import {
 } from '@/lib/plugins';
 import type { ChatMessage } from '@/types';
 import {
-  Bot, User as UserIcon, Loader2, Plus, Mic, ImageIcon, Video, Code2,
+  Bot, User as UserIcon, Loader2, Plus, ImageIcon, Video, Code2,
   Upload, Cpu, Cloud, ChevronDown, Check, Blocks, FolderKanban, Zap, Square, X,
 } from 'lucide-react';
 import { engineGenerateCancel, getEngineStatus, setEngineModel } from '@/lib/arkEngine';
@@ -55,7 +55,8 @@ const CHAT_MODELS: ChatModelOption[] = [
   // Chat — only Auto by default; keyed clouds + Ollama added at runtime
   { id: 'ark-auto', name: 'ARK Auto', source: 'auto', detail: 'Free-first · silent failover', kind: 'chat' },
   // Image — paths that generate today
-  { id: 'ark-image-core', name: 'ARK Image Core', source: 'local', detail: 'Free · Pollinations via Engine', kind: 'image' },
+  { id: 'ark-image-core', name: 'ARK Image Core', source: 'local', detail: 'Free · Pollinations · local SD when installed', kind: 'image' },
+  { id: 'sd15-local', name: 'SD 1.5 Local', source: 'local', detail: 'On-device · install from Local AI', kind: 'image' },
   { id: 'dall-e-3', name: 'DALL·E 3', source: 'cloud', detail: 'Cloud image · OpenAI key', kind: 'image' },
   // Video — Engine path until real MP4 ships
   { id: 'ark-video-core', name: 'ARK Video Core', source: 'local', detail: 'MP4 when free · motion fallback', kind: 'video' },
@@ -278,6 +279,7 @@ export function AIChat() {
   const [chatPlugins, setChatPlugins] = useState<PluginDef[]>(() => getChatEnabledPlugins(loadPluginState()));
   const [ollamaModels, setOllamaModels] = useState<ChatModelOption[]>([]);
   const [engineLocalModels, setEngineLocalModels] = useState<ChatModelOption[]>([]);
+  const [engineInstallingModels, setEngineInstallingModels] = useState<ChatModelOption[]>([]);
   const [capacity, setCapacity] = useState<LiveCapacity | null>(null);
   const [generating, setGenerating] = useState(false);
   const stopRequestedRef = useRef(false);
@@ -506,21 +508,39 @@ export function AIChat() {
               id: m.id,
               name: m.name,
               source: 'local' as const,
-              detail: 'ARK Engine · ready',
+              detail: 'Ready',
+              kind: 'chat' as const,
+            }));
+          const installing = status.models
+            .filter(m => m.status === 'downloading')
+            .map(m => ({
+              id: m.id,
+              name: m.name,
+              source: 'local' as const,
+              detail: m.progress != null ? `Installing… ${Math.round(m.progress)}%` : 'Installing…',
               kind: 'chat' as const,
             }));
           setEngineLocalModels(ready);
-          const savedId = getLocalPrefs().defaultModelId;
-          if (savedId && savedId !== 'ark-auto') {
-            const hit = ready.find(m => m.id === savedId);
+          setEngineInstallingModels(installing);
+          const prefs = getLocalPrefs();
+          const prefer = prefs.lastChatModelId || prefs.defaultModelId;
+          if (prefer && prefer !== 'ark-auto') {
+            const hit = ready.find(m => m.id === prefer);
             if (hit) setActiveModel(prev => (prev.id === hit.id ? prev : hit));
           }
         })
-        .catch(() => setEngineLocalModels([]));
+        .catch(() => {
+          setEngineLocalModels([]);
+          setEngineInstallingModels([]);
+        });
     };
     loadEngine();
+    const t = window.setInterval(loadEngine, 2500);
     window.addEventListener('focus', loadEngine);
-    return () => window.removeEventListener('focus', loadEngine);
+    return () => {
+      window.clearInterval(t);
+      window.removeEventListener('focus', loadEngine);
+    };
   }, []);
 
   useEffect(() => {
@@ -824,6 +844,9 @@ export function AIChat() {
           resolvedProvider = routerProviderLabel(routed, providerLabel);
           const hopNote = failoverChipText(routed, activeModel);
           if (hopNote) setFailoverNote(hopNote);
+          if (routed.modelId || routed.modelName) {
+            setLocalPrefs({ lastChatModelId: routed.modelId || activeModel.id });
+          }
           usedPlugin = true;
         } catch (err) {
           response = stopRequestedRef.current && streamedPartial
@@ -908,7 +931,8 @@ export function AIChat() {
         })
       : CHAT_MODELS.filter(m => m.kind === 'video');
   const autoModels = modelsForTab.filter(m => m.source === 'auto');
-  const localModels = modelsForTab.filter(m => m.source === 'local');
+  const localModels = modelsForTab.filter(m => m.source === 'local' && !engineInstallingModels.some(i => i.id === m.id));
+  const installingModels = kind === 'chat' ? engineInstallingModels : [];
   const cloudModels = modelsForTab.filter(m => m.source === 'cloud');
 
   const modelMenu = modelMenuOpen && menuPos
@@ -956,7 +980,7 @@ export function AIChat() {
         {localModels.length > 0 && (
           <>
             <p className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-content-tertiary font-semibold">
-              {mode === 'image' ? 'Image models' : mode === 'video' ? 'Video models' : 'Local'}
+              {mode === 'image' ? 'Image models' : mode === 'video' ? 'Video models' : 'Ready'}
             </p>
             {localModels.map(model => (
               <button
@@ -965,7 +989,7 @@ export function AIChat() {
                 onClick={() => {
                   setActiveModel(model);
                   if (model.kind === 'chat') {
-                    setLocalPrefs({ defaultModelId: model.id });
+                    setLocalPrefs({ defaultModelId: model.id, lastChatModelId: model.id });
                     if (!model.id.startsWith('ollama:')) {
                       void setEngineModel(model.id).catch(() => undefined);
                     }
@@ -986,9 +1010,31 @@ export function AIChat() {
             ))}
           </>
         )}
+        {installingModels.length > 0 && (
+          <>
+            <div className="my-1.5 border-t border-surface-border" />
+            <p className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-content-tertiary font-semibold">
+              Installing
+            </p>
+            {installingModels.map(model => (
+              <div
+                key={model.id}
+                className="w-full flex items-center gap-2.5 px-3 py-2 text-left opacity-80"
+              >
+                <span className="w-7 h-7 rounded-lg bg-amber-500/15 text-amber-400 flex items-center justify-center shrink-0">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm text-content-primary truncate">{model.name}</span>
+                  <span className="block text-[11px] text-content-tertiary truncate">{model.detail}</span>
+                </span>
+              </div>
+            ))}
+          </>
+        )}
         {cloudModels.length > 0 && (
           <>
-            {(autoModels.length > 0 || localModels.length > 0) && (
+            {(autoModels.length > 0 || localModels.length > 0 || installingModels.length > 0) && (
               <div className="my-1.5 border-t border-surface-border" />
             )}
             <p className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-content-tertiary font-semibold">Cloud</p>
@@ -998,7 +1044,7 @@ export function AIChat() {
                 type="button"
                 onClick={() => {
                   setActiveModel(model);
-                  if (model.kind === 'chat') setLocalPrefs({ defaultModelId: model.id });
+                  if (model.kind === 'chat') setLocalPrefs({ defaultModelId: model.id, lastChatModelId: model.id });
                   setModelMenuOpen(false);
                 }}
                 className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-surface-hover"
@@ -1017,7 +1063,7 @@ export function AIChat() {
         )}
         {kind === 'chat' && keyedCloud.length === 0 && ollamaModels.length === 0 && engineLocalModels.length === 0 && (
           <p className="px-3 py-2 text-[11px] text-content-tertiary leading-relaxed">
-            Install a local brain in Local AI / Models, or connect a free key in Settings. ARK Auto will use whatever is ready.
+            Install a local brain in Local AI / Models, or connect a free key in Settings.
           </p>
         )}
       </div>,
@@ -1103,19 +1149,17 @@ export function AIChat() {
           </button>
           {modelMenu}
 
-          <button
-            type="button"
-            onClick={() => (generating ? handleStop() : undefined)}
-            className={`w-9 h-9 rounded-full flex items-center justify-center transition-colors shrink-0 ${
-              generating
-                ? 'bg-rose-500/20 text-rose-300 hover:bg-rose-500/30'
-                : 'text-content-secondary hover:text-content-primary hover:bg-surface-hover'
-            }`}
-            title={generating ? 'Stop generating' : 'Voice input'}
-            aria-label={generating ? 'Stop generating' : 'Voice input'}
-          >
-            {generating ? <Square className="w-3.5 h-3.5 fill-current" /> : <Mic className="w-4 h-4" />}
-          </button>
+          {generating && (
+            <button
+              type="button"
+              onClick={handleStop}
+              className="w-9 h-9 rounded-full flex items-center justify-center transition-colors shrink-0 bg-rose-500/20 text-rose-300 hover:bg-rose-500/30"
+              title="Stop generating"
+              aria-label="Stop generating"
+            >
+              <Square className="w-3.5 h-3.5 fill-current" />
+            </button>
+          )}
         </div>
 
         {ModeIcon && (

@@ -3,8 +3,13 @@ import {
   Search, Plus, Check, Download, Loader2, Cpu, Cloud, Monitor,
   Code, Boxes, Brain, Eye, Zap, Image as ImageIcon, Video, Gauge, Sparkles, Rocket, X, KeyRound,
 } from 'lucide-react';
-import { detectHardware, getAccurateHardware, getHardwareClass, isEngineDownloadable, loadHardwareSnapshot, parseRamGb, suggestedKeysForHardware, type HardwareClass } from '@/lib/api';
-import { downloadEngineModel, engineDownloadProgress, engineDownloadError, getEngineStatus } from '@/lib/arkEngine';
+import { detectHardware, getAccurateHardware, getHardwareClass, isEngineDownloadable, loadHardwareSnapshot, parseRamGb, type HardwareClass } from '@/lib/api';
+import {
+  categoryDisplayLabel,
+  LOCAL_CATEGORY_ORDER,
+  sortModelsByCategoryThenSizeDesc,
+} from '@/lib/modelSort';
+import { downloadEngineModel, engineDownloadProgress, engineDownloadError, engineDownloadCancel, engineDiskSpace, getEngineStatus } from '@/lib/arkEngine';
 import {
   getProviderApiKeys,
   hasProviderApiKey,
@@ -91,10 +96,11 @@ const LOCAL_MODELS: LocalModel[] = [
   { id: 'moondream2', name: 'Moondream 2', description: 'Tiny vision model for quick image captions.', size: '1.7 GB', category: 'vision', tiers: ['free'], tone: 'from-yellow-500 to-amber-700', initial: 'Md' },
 
   // Image generation (Image tab)
-  { id: 'ark-image-core', name: 'ARK Image Core', description: 'Built-in ARK image model for the Image tab.', size: '2.4 GB', category: 'image', tiers: ['free'], recommended: true, tone: 'from-pink-500 to-rose-800', initial: 'AI' },
-  { id: 'sdxl-turbo', name: 'SDXL Turbo', description: 'Fast local image drafts.', size: '6.9 GB', category: 'image', tiers: ['free'], recommended: true, tone: 'from-fuchsia-500 to-pink-700', initial: 'ST' },
-  { id: 'flux-schnell-local', name: 'FLUX Schnell (Local)', description: 'High quality local image generation.', size: '11 GB', category: 'image', tiers: ['free'], tone: 'from-violet-500 to-purple-800', initial: 'Fx' },
-  { id: 'sd-15', name: 'Stable Diffusion 1.5', description: 'Classic local image model, lighter footprint.', size: '4.0 GB', category: 'image', tiers: ['free'], tone: 'from-yellow-500 to-amber-700', initial: 'SD' },
+  { id: 'ark-image-core', name: 'ARK Image Core', description: 'Free Pollinations images; uses local SD 1.5 when installed.', size: 'Cloud / local', category: 'image', tiers: ['free'], recommended: true, tone: 'from-pink-500 to-rose-800', initial: 'AI' },
+  { id: 'sd15-local', name: 'Stable Diffusion 1.5 (Local)', description: 'On-device images via ARK Engine (sd.cpp). Download from Local AI.', size: '4.0 GB', category: 'image', tiers: ['free'], recommended: true, tone: 'from-yellow-500 to-amber-700', initial: 'SD' },
+  { id: 'sdxl-turbo', name: 'SDXL Turbo', description: 'Fast local image drafts — Discover until Engine build ships.', size: '6.9 GB', category: 'image', tiers: ['free'], tone: 'from-fuchsia-500 to-pink-700', initial: 'ST' },
+  { id: 'flux-schnell-local', name: 'FLUX Schnell (Local)', description: 'Heavy local FLUX — Discover only for now.', size: '11 GB', category: 'image', tiers: ['free'], tone: 'from-violet-500 to-purple-800', initial: 'Fx' },
+  { id: 'sd-15', name: 'Stable Diffusion 1.5', description: 'Alias — use Stable Diffusion 1.5 (Local) in Local AI.', size: '4.0 GB', category: 'image', tiers: ['free'], tone: 'from-yellow-500 to-amber-700', initial: 'SD' },
   { id: 'playground-v25', name: 'Playground v2.5', description: 'Aesthetic local image generation.', size: '8.2 GB', category: 'image', tiers: ['free'], tone: 'from-rose-400 to-orange-700', initial: 'Pg' },
 
   // Video generation (Video tab)
@@ -111,15 +117,22 @@ const LOCAL_MODELS: LocalModel[] = [
   { id: 'tinyllama', name: 'TinyLlama 1.1B', description: 'Minimal footprint for testing and demos.', size: '0.7 GB', category: 'fast', tiers: ['free'], tone: 'from-zinc-500 to-zinc-800', initial: 'TL' },
 ];
 
-const LOCAL_CATEGORIES: { id: LocalModel['category']; title: string; icon: typeof Code }[] = [
-  { id: 'coding', title: 'Coding', icon: Code },
-  { id: 'general', title: 'General', icon: Boxes },
-  { id: 'reasoning', title: 'Reasoning', icon: Brain },
-  { id: 'vision', title: 'Vision', icon: Eye },
-  { id: 'image', title: 'Image Generation', icon: ImageIcon },
-  { id: 'video', title: 'Video Generation', icon: Video },
-  { id: 'fast', title: 'Fast', icon: Zap },
-];
+const LOCAL_CATEGORY_META: Record<LocalModel['category'], { title: string; icon: typeof Code }> = {
+  general: { title: 'General', icon: Boxes },
+  coding: { title: 'Coding', icon: Code },
+  reasoning: { title: 'Reasoning', icon: Brain },
+  fast: { title: 'Fast', icon: Zap },
+  vision: { title: 'Vision', icon: Eye },
+  image: { title: 'Image', icon: ImageIcon },
+  video: { title: 'Video', icon: Video },
+};
+
+const LOCAL_CATEGORIES: { id: LocalModel['category']; title: string; icon: typeof Code }[] =
+  LOCAL_CATEGORY_ORDER.map(id => ({
+    id: id as LocalModel['category'],
+    title: LOCAL_CATEGORY_META[id as LocalModel['category']].title,
+    icon: LOCAL_CATEGORY_META[id as LocalModel['category']].icon,
+  }));
 
 const CLOUD_PROVIDERS: CloudProvider[] = [
   { id: 'ollama', name: 'Ollama', description: 'Optional plug-in. Connect any Ollama models the same way you connect other sources — ARK never requires it.', tiers: ['free'], tone: 'from-zinc-400 to-zinc-700', initial: 'Ol', health: 'available', availability: 'live' },
@@ -213,10 +226,10 @@ const CLOUD_MODEL_CATEGORIES: { id: CloudModel['category']; title: string; icon:
   { id: 'chat', title: 'Chat', icon: Boxes },
   { id: 'coding', title: 'Coding', icon: Code },
   { id: 'reasoning', title: 'Reasoning', icon: Brain },
-  { id: 'vision', title: 'Vision', icon: Eye },
-  { id: 'image', title: 'Image Generation', icon: ImageIcon },
-  { id: 'video', title: 'Video Generation', icon: Video },
   { id: 'fast', title: 'Fast', icon: Zap },
+  { id: 'vision', title: 'Vision', icon: Eye },
+  { id: 'image', title: 'Image', icon: ImageIcon },
+  { id: 'video', title: 'Video', icon: Video },
 ];
 
 /** Providers ARK Router / media can actually call today. */
@@ -255,27 +268,11 @@ const CATEGORY_LABEL: Record<string, string> = {
 const FIT_SECTIONS: {
   id: FitKind;
   title: string;
-  subtitle: string;
   icon: typeof Sparkles;
 }[] = [
-  {
-    id: 'quality',
-    title: 'Best quality',
-    subtitle: 'Strongest models your PC can run comfortably.',
-    icon: Sparkles,
-  },
-  {
-    id: 'balanced',
-    title: 'Balanced',
-    subtitle: 'Good answers without pushing your hardware too hard.',
-    icon: Gauge,
-  },
-  {
-    id: 'performance',
-    title: 'Best performance',
-    subtitle: 'Fastest models that still work well on this machine.',
-    icon: Rocket,
-  },
+  { id: 'quality', title: 'Best quality', icon: Sparkles },
+  { id: 'balanced', title: 'Balanced', icon: Gauge },
+  { id: 'performance', title: 'Best performance', icon: Rocket },
 ];
 
 function modelSizeGb(model: LocalModel) {
@@ -301,20 +298,21 @@ function buildFitLists(pc: HardwareClass, ramGb = 8) {
   // Prefer models ARK can actually install; keep others discoverable via Search.
   const installable = LOCAL_MODELS.filter(m => isEngineDownloadable(m.id));
   const pool = installable.length ? installable : LOCAL_MODELS;
-  const compatible = pool
-    .filter(m => canRunOnPc(m, pc, ramGb))
-    .sort((a, b) => modelSizeGb(b) - modelSizeGb(a));
+  const compatible = sortModelsByCategoryThenSizeDesc(
+    pool.filter(m => canRunOnPc(m, pc, ramGb)),
+  );
 
-  const quality = compatible.slice(0, 8);
-  const performance = [...compatible]
-    .sort((a, b) => modelSizeGb(a) - modelSizeGb(b))
-    .slice(0, 8);
-  const balanced = compatible
-    .filter(m => {
+  const bySizeDesc = [...compatible].sort((a, b) => modelSizeGb(b) - modelSizeGb(a));
+  const quality = sortModelsByCategoryThenSizeDesc(bySizeDesc.slice(0, 8));
+  const performance = sortModelsByCategoryThenSizeDesc(
+    [...bySizeDesc].reverse().slice(0, 8),
+  );
+  const balanced = sortModelsByCategoryThenSizeDesc(
+    compatible.filter(m => {
       const gb = modelSizeGb(m);
       return gb >= 1 && gb < 12;
-    })
-    .slice(0, 8);
+    }).slice(0, 8),
+  );
 
   return {
     quality: quality.length ? quality : compatible.slice(0, 6),
@@ -328,13 +326,17 @@ function ModelInstallControl({
   name,
   isOn,
   isBusy,
+  progress,
   onInstall,
+  onCancel,
 }: {
   modelId: string;
   name: string;
   isOn: boolean;
   isBusy: boolean;
+  progress?: number;
   onInstall: () => void;
+  onCancel?: () => void;
 }) {
   const canInstall = isEngineDownloadable(modelId);
   if (isOn) {
@@ -358,24 +360,31 @@ function ModelInstallControl({
       </span>
     );
   }
+  if (isBusy) {
+    return (
+      <button
+        type="button"
+        onClick={onCancel}
+        className="inline-flex items-center gap-1 rounded-full bg-rose-500/15 px-2 py-1 text-[10px] font-medium text-rose-300 shrink-0 hover:bg-rose-500/25"
+        title="Cancel download"
+        aria-label={`Cancel ${name}`}
+      >
+        <Loader2 className="w-3 h-3 animate-spin" />
+        {progress != null ? `${Math.round(progress)}%` : '…'}
+      </button>
+    );
+  }
   return (
     <button
       type="button"
       onClick={onInstall}
-      disabled={isBusy}
       className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors"
       title="Download into ARK Engine"
       aria-label={`Download ${name}`}
     >
-      {isBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+      <Download className="w-4 h-4" />
     </button>
   );
-}
-
-function hardwareLabel(pc: HardwareClass) {
-  if (pc === 'strong') return 'High end capable';
-  if (pc === 'standard') return 'Solid mid range';
-  return 'Lightweight profile';
 }
 
 function TierBadges({ tiers }: { tiers: Tier[] }) {
@@ -395,21 +404,6 @@ function TierBadges({ tiers }: { tiers: Tier[] }) {
   );
 }
 
-function HealthBadge({ health }: { health: CloudProvider['health'] }) {
-  const styles =
-    health === 'available'
-      ? 'bg-emerald-500/15 text-emerald-400'
-      : health === 'limited'
-        ? 'bg-amber-500/15 text-amber-400'
-        : 'bg-zinc-500/20 text-zinc-400';
-  const label = health === 'available' ? 'Available' : health === 'limited' ? 'Limited' : 'Offline';
-  return (
-    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium leading-none ${styles}`}>
-      {label}
-    </span>
-  );
-}
-
 export function ModelsView() {
   const [tab, setTab] = useState<TabId>('for-pc');
   const [query, setQuery] = useState('');
@@ -423,7 +417,7 @@ export function ModelsView() {
   });
   const [enabledCloud, setEnabledCloud] = useState<Set<string>>(new Set());
   const [hw, setHw] = useState(() => loadHardwareSnapshot() || detectHardware());
-  const [hwNote, setHwNote] = useState(() => (loadHardwareSnapshot()?.accurate ? '' : 'Scanning this PC…'));
+  const [hwNote, setHwNote] = useState(() => (loadHardwareSnapshot()?.accurate ? '' : 'Scanning…'));
   const [connectTarget, setConnectTarget] = useState<CloudProvider | null>(null);
   const [apiKeyDraft, setApiKeyDraft] = useState('');
   const [keyedProviders, setKeyedProviders] = useState<Set<string>>(
@@ -436,14 +430,13 @@ export function ModelsView() {
   const pcClass = useMemo(() => getHardwareClass(hw), [hw]);
   const ramGb = useMemo(() => parseRamGb(hw), [hw]);
   const fitLists = useMemo(() => buildFitLists(pcClass, ramGb), [pcClass, ramGb]);
-  const keyTips = useMemo(() => suggestedKeysForHardware(hw), [hw]);
 
   useEffect(() => {
     let cancelled = false;
     void getAccurateHardware(true).then(info => {
       if (cancelled) return;
       setHw(info);
-      setHwNote(info.accurate ? 'Hardware from this PC' : 'Approximate — open ARK Desktop for exact specs');
+      setHwNote(info.accurate ? '' : 'Approximate');
     });
     void getEngineStatus().then(status => {
       if (cancelled) return;
@@ -553,44 +546,52 @@ export function ModelsView() {
       const fit = installable.filter(m => canRunOnPc(m, pcClass, ramGb));
       const stretch = installable.filter(m => !canRunOnPc(m, pcClass, ramGb));
       return {
-        quality: [
+        quality: sortModelsByCategoryThenSizeDesc([
           ...fit.filter(m => m.category !== 'fast').slice(0, 8),
           ...stretch.slice(0, 4),
           ...discovery.slice(0, 6),
-        ],
-        balanced: fit.filter(m => {
-          const gb = modelSizeGb(m);
-          return gb >= 2 && gb < 12;
-        }).slice(0, 10),
-        performance: [...fit].sort((a, b) => modelSizeGb(a) - modelSizeGb(b)).slice(0, 10),
+        ]),
+        balanced: sortModelsByCategoryThenSizeDesc(
+          fit.filter(m => {
+            const gb = modelSizeGb(m);
+            return gb >= 2 && gb < 12;
+          }).slice(0, 10),
+        ),
+        performance: sortModelsByCategoryThenSizeDesc(
+          [...fit].sort((a, b) => modelSizeGb(a) - modelSizeGb(b)).slice(0, 10),
+        ),
       };
     }
 
     return {
-      quality: fitLists.quality.filter(match),
-      balanced: fitLists.balanced.filter(match),
-      performance: fitLists.performance.filter(match),
+      quality: sortModelsByCategoryThenSizeDesc(fitLists.quality.filter(match)),
+      balanced: sortModelsByCategoryThenSizeDesc(fitLists.balanced.filter(match)),
+      performance: sortModelsByCategoryThenSizeDesc(fitLists.performance.filter(match)),
     };
   }, [fitLists, q, pcClass, ramGb]);
 
   const localCategories = useMemo(() => {
     return LOCAL_CATEGORIES.map(cat => ({
       ...cat,
-      models: LOCAL_MODELS.filter(m => {
-        if (m.category !== cat.id) return false;
-        if (!q) return true;
-        return (
-          m.name.toLowerCase().includes(q) ||
-          m.description.toLowerCase().includes(q) ||
-          cat.title.toLowerCase().includes(q) ||
-          m.tiers.some(t => t.includes(q))
-        );
-      }),
+      models: sortModelsByCategoryThenSizeDesc(
+        LOCAL_MODELS.filter(m => {
+          if (m.category !== cat.id) return false;
+          // Default list: only real Engine downloads. Search surfaces discovery-only.
+          if (!q && !isEngineDownloadable(m.id)) return false;
+          if (!q) return true;
+          return (
+            m.name.toLowerCase().includes(q) ||
+            m.description.toLowerCase().includes(q) ||
+            cat.title.toLowerCase().includes(q) ||
+            m.tiers.some(t => t.includes(q))
+          );
+        }),
+      ),
     })).filter(cat => cat.models.length > 0);
   }, [q]);
 
   const installedModels = useMemo(
-    () => LOCAL_MODELS.filter(m => installed.has(m.id)),
+    () => sortModelsByCategoryThenSizeDesc(LOCAL_MODELS.filter(m => installed.has(m.id))),
     [installed],
   );
 
@@ -628,45 +629,69 @@ export function ModelsView() {
 
   const toggleInstall = (id: string) => {
     if (!isEngineDownloadable(id)) {
-      setOllamaNote('That model isn’t in the ARK Engine install list yet. Use Local AI for the recommended brains, or Search for discovery only.');
+      setOllamaNote('Not downloadable in ARK Engine yet — search shows discovery only.');
       return;
     }
     if (installed.has(id) || installing.has(id)) return;
-    setInstalling(prev => new Set(prev).add(id));
-    setInstallProgress(prev => ({ ...prev, [id]: 1 }));
-    void downloadEngineModel(id).then(() => {
-      const tick = window.setInterval(async () => {
-        const p = await engineDownloadProgress(id);
-        setInstallProgress(prev => ({ ...prev, [id]: p }));
-        const err = await engineDownloadError(id);
-        if (err) {
-          window.clearInterval(tick);
-          setInstalling(prev => {
-            const next = new Set(prev);
-            next.delete(id);
-            return next;
-          });
-          setOllamaNote(err);
-          return;
-        }
-        if (p >= 100) {
-          window.clearInterval(tick);
-          setInstalling(prev => {
-            const next = new Set(prev);
-            next.delete(id);
-            return next;
-          });
-          setInstalled(prev => new Set(prev).add(id));
-          setOllamaNote(`${id} ready — pick it in Chat → model menu`);
-        }
-      }, 400);
-    }).catch(err => {
+    const model = LOCAL_MODELS.find(m => m.id === id);
+    const needGb = modelSizeGb(model || { size: '0' }) * 1.15;
+    void engineDiskSpace().then(disk => {
+      if (disk?.freeGb != null && needGb > 0 && disk.freeGb < needGb) {
+        setOllamaNote(`Need ~${needGb.toFixed(1)} GB free (have ${disk.freeGb.toFixed(1)} GB)`);
+        return;
+      }
+      setInstalling(prev => new Set(prev).add(id));
+      setInstallProgress(prev => ({ ...prev, [id]: 1 }));
+      void downloadEngineModel(id).then(() => {
+        const tick = window.setInterval(async () => {
+          const p = await engineDownloadProgress(id);
+          setInstallProgress(prev => ({ ...prev, [id]: p }));
+          const err = await engineDownloadError(id);
+          if (err) {
+            window.clearInterval(tick);
+            setInstalling(prev => {
+              const next = new Set(prev);
+              next.delete(id);
+              return next;
+            });
+            setOllamaNote(err);
+            return;
+          }
+          if (p >= 100) {
+            window.clearInterval(tick);
+            setInstalling(prev => {
+              const next = new Set(prev);
+              next.delete(id);
+              return next;
+            });
+            setInstalled(prev => new Set(prev).add(id));
+            setOllamaNote(`${id} ready`);
+          }
+        }, 400);
+      }).catch(err => {
+        setInstalling(prev => {
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
+        setOllamaNote(err instanceof Error ? err.message : 'Download failed');
+      });
+    });
+  };
+
+  const cancelInstall = (id: string) => {
+    void engineDownloadCancel(id).then(() => {
       setInstalling(prev => {
         const next = new Set(prev);
         next.delete(id);
         return next;
       });
-      setOllamaNote(err instanceof Error ? err.message : 'Download failed');
+      setInstallProgress(prev => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+      setOllamaNote('Download canceled');
     });
   };
 
@@ -727,39 +752,19 @@ export function ModelsView() {
         <div className="w-full max-w-4xl mx-auto">
           {tab === 'for-pc' ? (
             <>
-              <section className="mb-8 rounded-2xl border border-surface-border bg-surface-hover/30 px-4 py-4">
+              <section className="mb-8 rounded-2xl border border-surface-border bg-surface-hover/30 px-4 py-3.5">
                 <div className="flex items-center gap-3">
                   <span className="w-10 h-10 rounded-xl bg-surface-hover flex items-center justify-center shrink-0">
                     <Monitor className="w-5 h-5 text-content-secondary" />
                   </span>
                   <div className="min-w-0 flex-1">
-                    <p className="text-xs text-content-tertiary leading-relaxed">
-                      {hw.os} · {hw.cpu} · {hw.ram} RAM · {hw.gpu} · {hw.acceleration}
+                    <p className="text-sm text-content-primary truncate">
+                      {hw.cpu} · {hw.ram} · {hw.gpu}
                     </p>
-                    <p className="text-xs text-content-secondary mt-1">
-                      {hwNote || (hw.accurate ? 'Hardware from this PC' : 'Scanning…')} · Profile: {hardwareLabel(pcClass)}.
-                      {q
-                        ? ' Search shows matching models, including ones that may be heavy for this PC.'
-                        : ' Installable brains below match this hardware. Search to discover others.'}
+                    <p className="text-xs text-content-tertiary mt-0.5 truncate">
+                      {hw.os} · {hw.acceleration}
+                      {hwNote ? ` · ${hwNote}` : ''}
                     </p>
-                    <p className="text-[11px] text-content-tertiary mt-2 leading-relaxed">
-                      Suggested free keys for this PC:{' '}
-                      {keyTips.map(k => k.name).join(' · ')}
-                      {' — '}add them in Cloud / Settings → Providers.
-                    </p>
-                    <button
-                      type="button"
-                      className="mt-2 text-[11px] text-sky-400 hover:text-sky-300"
-                      onClick={() => {
-                        setHwNote('Refreshing…');
-                        void getAccurateHardware(true).then(info => {
-                          setHw(info);
-                          setHwNote(info.accurate ? 'Hardware refreshed from this PC' : 'Still approximate');
-                        });
-                      }}
-                    >
-                      Rescan hardware
-                    </button>
                   </div>
                 </div>
               </section>
@@ -769,15 +774,12 @@ export function ModelsView() {
                   const models = filteredFit[section.id];
                   return (
                     <section key={section.id}>
-                      <div className="mb-4">
-                        <div className="flex items-center gap-2">
-                          <section.icon className="w-4 h-4 text-content-secondary" />
-                          <h2 className="text-base font-semibold text-content-primary">{section.title}</h2>
-                        </div>
-                        <p className="text-xs text-content-tertiary mt-1 ml-6">{section.subtitle}</p>
+                      <div className="flex items-center gap-2 mb-4">
+                        <section.icon className="w-4 h-4 text-content-secondary" />
+                        <h2 className="text-base font-semibold text-content-primary">{section.title}</h2>
                       </div>
                       {models.length === 0 ? (
-                        <p className="text-sm text-content-tertiary ml-6">No matches in this group.</p>
+                        <p className="text-sm text-content-tertiary">No matches.</p>
                       ) : (
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1">
                           {models.map(model => {
@@ -797,10 +799,7 @@ export function ModelsView() {
                                     <TierBadges tiers={model.tiers} />
                                   </span>
                                   <span className="block text-xs text-content-tertiary truncate mt-0.5">
-                                    {CATEGORY_LABEL[model.category]} · {model.size}
-                                    {isEngineDownloadable(model.id)
-                                      ? ' · Fits this PC'
-                                      : ' · Discovery only'}
+                                    {categoryDisplayLabel(model.category, model.id)} · {model.size}
                                   </span>
                                 </span>
                                 <ModelInstallControl
@@ -808,7 +807,9 @@ export function ModelsView() {
                                   name={model.name}
                                   isOn={isOn}
                                   isBusy={isBusy}
+                                  progress={installProgress[model.id]}
                                   onInstall={() => toggleInstall(model.id)}
+                                  onCancel={() => cancelInstall(model.id)}
                                 />
                               </div>
                             );
@@ -849,7 +850,7 @@ export function ModelsView() {
                               <TierBadges tiers={model.tiers} />
                             </span>
                             <span className="block text-xs text-content-tertiary truncate mt-0.5">
-                              {CATEGORY_LABEL[model.category]} · {model.size} · Local
+                              {categoryDisplayLabel(model.category, model.id)} · {model.size}
                             </span>
                           </span>
                           <span className="w-8 h-8 rounded-full bg-surface-hover text-ark-accent-green flex items-center justify-center shrink-0">
@@ -873,7 +874,6 @@ export function ModelsView() {
                       {cat.models.map(model => {
                         const isOn = installed.has(model.id);
                         const isBusy = installing.has(model.id);
-                        const fits = canRunOnPc(model, pcClass, ramGb);
                         return (
                           <div
                             key={model.id}
@@ -886,18 +886,11 @@ export function ModelsView() {
                               <span className="flex items-center gap-2 min-w-0 flex-wrap">
                                 <span className="text-sm font-medium text-content-primary truncate">{model.name}</span>
                                 <TierBadges tiers={model.tiers} />
-                                {fits ? (
-                                  <span className="inline-flex items-center rounded-full bg-emerald-500/10 text-emerald-400/90 px-2 py-0.5 text-[10px] font-medium leading-none">
-                                    Fits PC
-                                  </span>
-                                ) : (
-                                  <span className="inline-flex items-center rounded-full bg-amber-500/10 text-amber-400/90 px-2 py-0.5 text-[10px] font-medium leading-none">
-                                    Heavy
-                                  </span>
-                                )}
                               </span>
                               <span className="block text-xs text-content-tertiary truncate mt-0.5">
-                                {model.description} · {model.size}
+                                {isEngineDownloadable(model.id)
+                                  ? `${categoryDisplayLabel(model.category, model.id)} · ${model.size}`
+                                  : `${categoryDisplayLabel(model.category, model.id)} · Discovery`}
                               </span>
                             </span>
                             <ModelInstallControl
@@ -905,7 +898,9 @@ export function ModelsView() {
                               name={model.name}
                               isOn={isOn}
                               isBusy={isBusy}
+                              progress={installProgress[model.id]}
                               onInstall={() => toggleInstall(model.id)}
+                              onCancel={() => cancelInstall(model.id)}
                             />
                           </div>
                         );
@@ -919,52 +914,6 @@ export function ModelsView() {
             </>
           ) : (
             <>
-              {!q && (
-                <section className="mb-10">
-                  <div className="mb-4">
-                    <h2 className="text-base font-semibold text-content-primary">Provider health</h2>
-                    <p className="text-xs text-content-tertiary mt-1">
-                      Placeholder status. Later ARK will watch usage and fail over before a source runs out.
-                    </p>
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-6">
-                    {([
-                      { id: 'available' as const, label: 'Available', hint: 'Ready to use' },
-                      { id: 'limited' as const, label: 'Limited', hint: 'Quota warming up' },
-                      { id: 'offline' as const, label: 'Offline', hint: 'Not usable right now' },
-                    ]).map(bucket => {
-                      const count = CLOUD_PROVIDERS.filter(p => p.health === bucket.id).length;
-                      return (
-                        <div
-                          key={bucket.id}
-                          className="rounded-2xl border border-surface-border bg-ark-navy-900/40 px-3.5 py-3"
-                        >
-                          <div className="flex items-center justify-between gap-2 mb-1">
-                            <HealthBadge health={bucket.id} />
-                            <span className="text-sm font-medium text-content-primary tabular-nums">{count}</span>
-                          </div>
-                          <p className="text-[11px] text-content-tertiary">{bucket.hint}</p>
-                        </div>
-                      );
-                    })}
-                  </div>
-                  <div className="flex flex-col">
-                    {CLOUD_PROVIDERS.slice(0, 6).map(provider => (
-                      <div
-                        key={`health-${provider.id}`}
-                        className="flex items-center gap-3 py-2.5 px-1"
-                      >
-                        <span className={`w-8 h-8 rounded-lg bg-gradient-to-br ${provider.tone} flex items-center justify-center text-[9px] font-bold text-white shrink-0`}>
-                          {provider.initial}
-                        </span>
-                        <span className="min-w-0 flex-1 text-sm text-content-primary truncate">{provider.name}</span>
-                        <HealthBadge health={provider.health} />
-                      </div>
-                    ))}
-                  </div>
-                </section>
-              )}
-
               {!q && (
                 <section className="mb-10">
                   <h2 className="text-base font-semibold text-content-primary mb-4">Connected</h2>
@@ -986,10 +935,24 @@ export function ModelsView() {
                             <span className="flex items-center gap-2 min-w-0 flex-wrap">
                               <span className="text-sm font-medium text-content-primary truncate">{provider.name}</span>
                               <TierBadges tiers={provider.tiers} />
-                              <HealthBadge health={provider.id === 'ollama' ? (ollamaOnline ? 'available' : 'offline') : provider.health} />
+                              {provider.id === 'ollama' && (
+                                <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium leading-none ${
+                                  ollamaOnline
+                                    ? 'bg-emerald-500/15 text-emerald-400'
+                                    : 'bg-zinc-500/20 text-zinc-400'
+                                }`}>
+                                  {ollamaOnline ? 'Online' : 'Offline'}
+                                </span>
+                              )}
+                              {keyedProviders.has(provider.id) && (
+                                <span className="inline-flex items-center gap-1 rounded-full bg-sky-500/15 text-sky-400 px-2 py-0.5 text-[10px] font-medium leading-none">
+                                  <KeyRound className="w-2.5 h-2.5" />
+                                  Key
+                                </span>
+                              )}
                             </span>
                             <span className="block text-xs text-content-tertiary truncate mt-0.5">
-                              {provider.id === 'ollama' ? (ollamaNote || provider.description) : provider.description}
+                              {provider.id === 'ollama' ? (ollamaNote || provider.name) : provider.name}
                             </span>
                           </span>
                           <span className="w-8 h-8 rounded-full bg-surface-hover text-ark-accent-green flex items-center justify-center shrink-0">
@@ -1001,7 +964,7 @@ export function ModelsView() {
                   )}
                   {ollamaOn && ollamaModels.length > 0 && (
                     <div className="mt-4 rounded-2xl border border-surface-border bg-ark-navy-900/40 px-4 py-3">
-                      <p className="text-xs font-semibold text-content-secondary mb-2">Ollama models (optional)</p>
+                      <p className="text-xs font-semibold text-content-secondary mb-2">Ollama models</p>
                       <div className="flex flex-wrap gap-1.5">
                         {ollamaModels.slice(0, 12).map(m => (
                           <span key={m.name} className="rounded-full border border-surface-border px-2.5 py-1 text-[11px] text-content-tertiary">
@@ -1015,10 +978,7 @@ export function ModelsView() {
               )}
 
               <section className="mb-10">
-                <h2 className="text-base font-semibold text-content-primary mb-1">Free capacity ARK locks in</h2>
-                <p className="text-xs text-content-tertiary mb-4">
-                  Ollama is just another plug-in. ARK also hunts free keys, free routes, and no-key hosts so you can keep coding without hunting APIs.
-                </p>
+                <h2 className="text-base font-semibold text-content-primary mb-4">Free sources</h2>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   {FREE_SOURCES.filter(s => !q || s.name.toLowerCase().includes(q) || s.detail.toLowerCase().includes(q)).map(src => (
                     <div
@@ -1031,7 +991,6 @@ export function ModelsView() {
                           {src.wired ? 'wired' : 'next'}
                         </span>
                       </div>
-                      <p className="text-[11px] text-content-tertiary mt-1 leading-snug">{src.detail}</p>
                     </div>
                   ))}
                 </div>
@@ -1059,7 +1018,7 @@ export function ModelsView() {
                               <TierBadges tiers={provider.tiers} />
                               {provider.availability === 'live' ? (
                                 <span className="inline-flex items-center rounded-full bg-emerald-500/15 text-emerald-400 px-2 py-0.5 text-[10px] font-medium leading-none">
-                                  Live in ARK
+                                  Live
                                 </span>
                               ) : provider.availability === 'retired' ? (
                                 <span className="inline-flex items-center rounded-full bg-zinc-500/20 text-content-tertiary px-2 py-0.5 text-[10px] font-medium leading-none">
@@ -1070,7 +1029,15 @@ export function ModelsView() {
                                   Coming soon
                                 </span>
                               )}
-                              <HealthBadge health={provider.health} />
+                              {provider.id === 'ollama' && (
+                                <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium leading-none ${
+                                  ollamaOnline
+                                    ? 'bg-emerald-500/15 text-emerald-400'
+                                    : 'bg-zinc-500/20 text-zinc-400'
+                                }`}>
+                                  {ollamaOnline ? 'Online' : 'Offline'}
+                                </span>
+                              )}
                               {keyedProviders.has(provider.id) && (
                                 <span className="inline-flex items-center gap-1 rounded-full bg-sky-500/15 text-sky-400 px-2 py-0.5 text-[10px] font-medium leading-none">
                                   <KeyRound className="w-2.5 h-2.5" />
@@ -1078,17 +1045,25 @@ export function ModelsView() {
                                 </span>
                               )}
                             </span>
-                            <span className="block text-xs text-content-tertiary truncate mt-0.5">{provider.description}</span>
                           </span>
                           <button
                             type="button"
                             onClick={() => toggleConnected(provider.id)}
+                            disabled={provider.availability !== 'live' && provider.id !== 'ollama'}
                             className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 transition-colors ${
-                              isOn
-                                ? 'bg-surface-hover text-ark-accent-green'
-                                : 'text-content-secondary hover:text-content-primary hover:bg-surface-hover'
+                              provider.availability !== 'live' && provider.id !== 'ollama'
+                                ? 'text-content-tertiary cursor-not-allowed'
+                                : isOn
+                                  ? 'bg-surface-hover text-ark-accent-green'
+                                  : 'text-content-secondary hover:text-content-primary hover:bg-surface-hover'
                             }`}
-                            title={isOn ? 'Connected' : 'Connect'}
+                            title={
+                              provider.availability !== 'live' && provider.id !== 'ollama'
+                                ? 'Coming soon'
+                                : isOn
+                                  ? 'Connected'
+                                  : 'Connect'
+                            }
                             aria-label={isOn ? `Disconnect ${provider.name}` : `Connect ${provider.name}`}
                           >
                             {isOn ? <Check className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
@@ -1140,7 +1115,7 @@ export function ModelsView() {
                                 )}
                               </span>
                               <span className="block text-xs text-content-tertiary truncate mt-0.5">
-                                {model.description} · {model.provider}
+                                {categoryDisplayLabel(model.category)} · {model.provider}
                               </span>
                             </span>
                             <button

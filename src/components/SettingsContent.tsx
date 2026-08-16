@@ -16,10 +16,17 @@ import {
 } from '@/lib/localPrefs';
 import { clearSetupCompleted } from '@/lib/setup';
 import {
+  detectHardware,
+  getAccurateHardware,
+  getHardwareClass,
+  loadHardwareSnapshot,
+  type HardwareInfo,
+} from '@/lib/api';
+import {
   User, Palette, Zap, Boxes, Cloud, Shield, HardDrive,
   FolderKanban, Lock, RefreshCw, Check, Cpu, KeyRound,
-  Smartphone, ShieldCheck, Bell, Sparkles, FlaskConical,
-  Camera, Mail, BadgeCheck, Trash2, Download, Info,
+  Smartphone, Bell, Sparkles, FlaskConical,
+  Mail, BadgeCheck, Trash2, Download, Info, Monitor,
 } from 'lucide-react';
 
 const SECTIONS: { id: string; label: string; icon: typeof User; disabled?: boolean }[] = [
@@ -30,6 +37,7 @@ const SECTIONS: { id: string; label: string; icon: typeof User; disabled?: boole
   { id: 'providers', label: 'Providers', icon: Cloud },
   { id: 'privacy', label: 'Privacy', icon: Shield },
   { id: 'storage', label: 'Storage', icon: HardDrive },
+  { id: 'hardware', label: 'Hardware', icon: Monitor },
   { id: 'projects', label: 'Projects', icon: FolderKanban },
   { id: 'security', label: 'Security', icon: Lock },
   { id: 'updates', label: 'Updates', icon: RefreshCw },
@@ -99,9 +107,10 @@ export function SettingsContent() {
   } | null>(null);
   const [updatePercent, setUpdatePercent] = useState(0);
   const [appVersion, setAppVersion] = useState('0.1.24');
-  const [twoFaCode, setTwoFaCode] = useState('');
-  const [twoFaSetup, setTwoFaSetup] = useState(false);
   const [savedFlash, setSavedFlash] = useState('');
+  const [hw, setHw] = useState<HardwareInfo>(() => loadHardwareSnapshot() || detectHardware());
+  const [hwScanning, setHwScanning] = useState(false);
+  const [hwFlash, setHwFlash] = useState('');
 
   useEffect(() => {
     void window.arkDesktop?.appMeta?.()
@@ -109,6 +118,10 @@ export function SettingsContent() {
         if (meta?.version) setAppVersion(meta.version);
       })
       .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    void getAccurateHardware().then(info => setHw(info));
   }, []);
 
   useEffect(() => {
@@ -263,17 +276,8 @@ export function SettingsContent() {
             <SettingsSection title="Account" description="Profile, sign in, and session controls">
               <div className="space-y-5">
                 <div className="flex items-center gap-4">
-                  <div className="relative">
-                    <div className="w-16 h-16 rounded-full bg-ark-blue-500/20 border border-ark-blue-500/30 flex items-center justify-center text-xl font-bold text-ark-blue-300">
-                      {(displayName || profile?.display_name || user?.email || '?')[0].toUpperCase()}
-                    </div>
-                    <button
-                      type="button"
-                      className="absolute -bottom-1 -right-1 w-7 h-7 rounded-full bg-surface-hover border border-surface-border flex items-center justify-center text-content-secondary hover:text-content-primary"
-                      title="Change photo (coming soon)"
-                    >
-                      <Camera className="w-3.5 h-3.5" />
-                    </button>
+                  <div className="w-16 h-16 rounded-full bg-ark-blue-500/20 border border-ark-blue-500/30 flex items-center justify-center text-xl font-bold text-ark-blue-300">
+                    {(displayName || profile?.display_name || user?.email || '?')[0].toUpperCase()}
                   </div>
                   <div className="min-w-0">
                     <p className="text-sm font-medium text-content-primary truncate">{displayName || 'Guest'}</p>
@@ -708,6 +712,64 @@ export function SettingsContent() {
             </SettingsSection>
           )}
 
+          {activeSection === 'hardware' && (
+            <SettingsSection title="Hardware" description="Detected on this PC">
+              <div className="space-y-4">
+                <div className="rounded-xl border border-surface-border px-4 py-3 space-y-2">
+                  <div className="flex justify-between gap-3 text-sm">
+                    <span className="text-content-secondary">OS</span>
+                    <span className="text-content-primary text-right">{hw.os}</span>
+                  </div>
+                  <div className="flex justify-between gap-3 text-sm">
+                    <span className="text-content-secondary">CPU</span>
+                    <span className="text-content-primary text-right">{hw.cpu}</span>
+                  </div>
+                  <div className="flex justify-between gap-3 text-sm">
+                    <span className="text-content-secondary">RAM</span>
+                    <span className="text-content-primary text-right">{hw.ram}</span>
+                  </div>
+                  <div className="flex justify-between gap-3 text-sm">
+                    <span className="text-content-secondary">GPU</span>
+                    <span className="text-content-primary text-right">{hw.gpu}</span>
+                  </div>
+                  <div className="flex justify-between gap-3 text-sm">
+                    <span className="text-content-secondary">Acceleration</span>
+                    <span className="text-content-primary text-right">{hw.acceleration}</span>
+                  </div>
+                  <div className="flex justify-between gap-3 text-sm">
+                    <span className="text-content-secondary">Profile</span>
+                    <span className="text-content-primary text-right">
+                      {getHardwareClass(hw) === 'strong'
+                        ? 'High end'
+                        : getHardwareClass(hw) === 'standard'
+                          ? 'Mid range'
+                          : 'Light'}
+                    </span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="ark-btn-secondary"
+                  disabled={hwScanning}
+                  onClick={() => {
+                    setHwScanning(true);
+                    setHwFlash('');
+                    void getAccurateHardware(true).then(info => {
+                      setHw(info);
+                      setHwScanning(false);
+                      setHwFlash(info.accurate ? 'Updated' : 'Approximate scan');
+                      window.setTimeout(() => setHwFlash(''), 2000);
+                    });
+                  }}
+                >
+                  <RefreshCw className={`w-4 h-4 ${hwScanning ? 'animate-spin' : ''}`} />
+                  {hwScanning ? 'Scanning…' : 'Rescan hardware'}
+                </button>
+                {hwFlash && <p className="text-xs text-emerald-400">{hwFlash}</p>}
+              </div>
+            </SettingsSection>
+          )}
+
           {activeSection === 'projects' && (
             <SettingsSection title="Projects" description="Defaults for new builds and folders">
               <div className="space-y-4">
@@ -765,64 +827,14 @@ export function SettingsContent() {
           {activeSection === 'security' && (
             <SettingsSection title="Security" description="Protect this account and keep agent work sandboxed">
               <div className="space-y-4">
-                <div className="ark-card p-4">
+                <div className="rounded-xl border border-surface-border p-4">
                   <div className="flex items-start gap-3">
                     <div className="w-10 h-10 rounded-lg bg-sky-500/10 flex items-center justify-center shrink-0">
                       <Smartphone className="w-5 h-5 text-sky-400" />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-content-primary">Two factor authentication (2FA)</p>
-                      <p className="text-xs text-content-tertiary mt-0.5">
-                        Add an authenticator app step when signing in. UI ready now; real enrollment ships with account backend.
-                      </p>
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        <button
-                          type="button"
-                          className={prefs.twoFactorEnabled ? 'ark-btn-secondary' : 'ark-btn-primary'}
-                          onClick={() => {
-                            if (prefs.twoFactorEnabled) {
-                              patchPrefs({ twoFactorEnabled: false });
-                              setTwoFaSetup(false);
-                              return;
-                            }
-                            setTwoFaSetup(true);
-                          }}
-                        >
-                          {prefs.twoFactorEnabled ? 'Disable 2FA' : 'Set up 2FA'}
-                        </button>
-                        {prefs.twoFactorEnabled && (
-                          <span className="inline-flex items-center gap-1.5 text-xs text-emerald-400 px-2">
-                            <ShieldCheck className="w-3.5 h-3.5" />
-                            Enabled
-                          </span>
-                        )}
-                      </div>
-                      {twoFaSetup && !prefs.twoFactorEnabled && (
-                        <div className="mt-3 rounded-xl border border-surface-border bg-ark-navy-950/50 p-3 space-y-2">
-                          <p className="text-xs text-content-secondary">
-                            Scan this placeholder secret in your authenticator, then enter a 6 digit code.
-                          </p>
-                          <p className="font-mono text-sm text-content-primary tracking-widest">ARK-DEMO-2FA-SECRET</p>
-                          <input
-                            value={twoFaCode}
-                            onChange={e => setTwoFaCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                            placeholder="123456"
-                            className="ark-input"
-                          />
-                          <button
-                            type="button"
-                            className="ark-btn-primary w-full"
-                            disabled={twoFaCode.length !== 6}
-                            onClick={() => {
-                              patchPrefs({ twoFactorEnabled: true });
-                              setTwoFaSetup(false);
-                              setTwoFaCode('');
-                            }}
-                          >
-                            Verify and enable
-                          </button>
-                        </div>
-                      )}
+                      <p className="text-sm font-medium text-content-primary">Two-factor authentication</p>
+                      <p className="text-xs text-content-tertiary mt-0.5">Not available yet.</p>
                     </div>
                   </div>
                 </div>
@@ -990,7 +1002,7 @@ export function SettingsContent() {
                   <ol className="text-[11px] text-content-tertiary space-y-1 list-decimal list-inside leading-relaxed">
                     <li>Buy Authenticode (OV or EV) from DigiCert / Sectigo / SSL.com</li>
                     <li>Set CSC_LINK to the .pfx path and CSC_KEY_PASSWORD</li>
-                    <li>Run Open-ARK-Packaged.bat or npm run electron:build</li>
+                    <li>Optional CI: add CSC_LINK + CSC_KEY_PASSWORD secrets on DrMeji/Ark for signed tag builds</li>
                     <li>Confirm with “Check this install’s signature” on the packaged app</li>
                   </ol>
                   <p className="text-[11px] text-content-tertiary leading-relaxed">

@@ -68,28 +68,6 @@ function TypewriterHero() {
   );
 }
 
-function SocialIconButton({
-  label,
-  children,
-  onClick,
-}: {
-  label: string;
-  children: React.ReactNode;
-  onClick?: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      title={label}
-      aria-label={label}
-      onClick={onClick}
-      className="w-11 h-11 rounded-xl border border-surface-border bg-ark-navy-900/80 flex items-center justify-center hover:bg-surface-hover transition-colors"
-    >
-      {children}
-    </button>
-  );
-}
-
 export function AuthScreen() {
   const { signIn, signUp, resetPassword, bypassLogin } = useAuth();
   const [mode, setMode] = useState<AuthMode>('signin');
@@ -183,10 +161,6 @@ export function AuthScreen() {
     }
   };
 
-  const socialStub = (name: string) => {
-    setError(`${name} ${mode === 'signup' ? 'sign up' : 'sign in'} is coming soon. Use email for now.`);
-  };
-
   return (
     <div className="h-full min-h-0 bg-ark-navy-950 flex relative overflow-hidden">
       <AuthAmbientOrbs />
@@ -232,48 +206,6 @@ export function AuthScreen() {
               <p className="text-center text-sm text-content-secondary mt-4">
                 {mode === 'signin' ? 'Welcome back to ARK' : 'Create your ARK account'}
               </p>
-            </div>
-
-            <div className="flex items-center justify-center gap-2.5 mb-6">
-              <SocialIconButton label="Google" onClick={() => socialStub('Google')}>
-                <svg viewBox="0 0 24 24" className="w-5 h-5" aria-hidden>
-                  <path fill="#EA4335" d="M12 10.2v3.6h5.1c-.2 1.2-.9 2.3-1.9 3l3.1 2.4c1.8-1.7 2.9-4.1 2.9-7 0-.7-.1-1.3-.2-1.9H12z" />
-                  <path fill="#34A853" d="M6.6 14.3l-.7.5-2.3 1.8C5.3 19.5 8.4 21.5 12 21.5c2.4 0 4.4-.8 5.9-2.1l-3.1-2.4c-.8.6-1.9.9-2.8.9-2.2 0-4-1.5-4.7-3.5z" />
-                  <path fill="#4A90E2" d="M3.6 7.4C3 8.6 2.7 9.9 2.7 11.3c0 1.4.3 2.7.9 3.9l3-2.3c-.2-.5-.3-1.1-.3-1.6 0-.6.1-1.1.3-1.6L3.6 7.4z" />
-                  <path fill="#FBBC05" d="M12 5.1c1.3 0 2.5.5 3.4 1.3l2.6-2.6C16.4 2.3 14.4 1.5 12 1.5 8.4 1.5 5.3 3.5 3.6 6.6l3 2.3C7.9 6.6 9.8 5.1 12 5.1z" />
-                </svg>
-              </SocialIconButton>
-              <SocialIconButton label="Apple" onClick={() => socialStub('Apple')}>
-                <svg viewBox="0 0 24 24" className="w-5 h-5 fill-content-primary" aria-hidden>
-                  <path d="M16.7 12.6c0-2.1 1.7-3.1 1.8-3.2-1-1.4-2.5-1.6-3-1.7-1.3-.1-2.5.8-3.1.8-.7 0-1.7-.7-2.8-.7-1.4 0-2.7.8-3.5 2.1-1.5 2.6-.4 6.4 1.1 8.5.7 1 1.6 2.2 2.7 2.1 1.1 0 1.5-.7 2.8-.7s1.7.7 2.8.7c1.2 0 1.9-1 2.6-2 .8-1.2 1.1-2.3 1.1-2.4-.1 0-2.2-.8-2.2-3.5zM14.5 5.8c.6-.7 1-1.7.9-2.7-.9 0-1.9.6-2.5 1.3-.6.6-1.1 1.7-.9 2.6 1 .1 1.9-.5 2.5-1.2z" />
-                </svg>
-              </SocialIconButton>
-              <SocialIconButton label="Microsoft" onClick={() => socialStub('Microsoft')}>
-                <svg viewBox="0 0 24 24" className="w-5 h-5" aria-hidden>
-                  <path fill="#F25022" d="M3 3h8.5v8.5H3z" />
-                  <path fill="#7FBA00" d="M12.5 3H21v8.5h-8.5z" />
-                  <path fill="#00A4EF" d="M3 12.5h8.5V21H3z" />
-                  <path fill="#FFB900" d="M12.5 12.5H21V21h-8.5z" />
-                </svg>
-              </SocialIconButton>
-              <SocialIconButton label="GitHub" onClick={() => socialStub('GitHub')}>
-                <svg viewBox="0 0 24 24" className="w-5 h-5 fill-content-primary" aria-hidden>
-                  <path d="M12 2C6.5 2 2 6.6 2 12.2c0 4.5 2.9 8.3 6.9 9.6.5.1.7-.2.7-.5v-1.8c-2.8.6-3.4-1.4-3.4-1.4-.4-1.1-1.1-1.4-1.1-1.4-.9-.6.1-.6.1-.6 1 .1 1.5 1 1.5 1 .9 1.5 2.3 1.1 2.9.8.1-.7.4-1.1.6-1.4-2.2-.3-4.6-1.1-4.6-5 0-1.1.4-2 1-2.7-.1-.3-.4-1.3.1-2.7 0 0 .8-.3 2.8 1 .7-.2 1.5-.3 2.3-.3s1.6.1 2.3.3c1.9-1.3 2.7-1 2.7-1 .5 1.4.2 2.4.1 2.7.6.7 1 1.6 1 2.7 0 3.9-2.3 4.7-4.6 5 .4.3.7.9.7 1.9v2.8c0 .3.2.6.7.5 4-1.3 6.9-5.1 6.9-9.6C22 6.6 17.5 2 12 2z" />
-                </svg>
-              </SocialIconButton>
-              <SocialIconButton label="Twitter" onClick={() => socialStub('Twitter')}>
-                <svg viewBox="0 0 24 24" className="w-5 h-5" aria-hidden>
-                  <path fill="#1DA1F2" d="M22 5.8c-.7.3-1.4.5-2.2.6.8-.5 1.4-1.2 1.7-2.1-.7.5-1.6.8-2.4 1-1.4-1.5-3.8-1.6-5.3-.2-1 1-1.3 2.4-.8 3.7-3.1-.2-5.9-1.6-7.8-4-.9 1.6-.5 3.6 1.1 4.6-.6 0-1.2-.2-1.7-.5 0 1.8 1.3 3.4 3.1 3.7-.6.1-1.1.1-1.7 0 .5 1.5 1.9 2.6 3.6 2.6-1.5 1.2-3.4 1.8-5.3 1.6 1.8 1.1 3.9 1.7 6 1.7 7.2 0 11.2-6.1 11-11.5.7-.5 1.4-1.2 1.9-2z" />
-                </svg>
-              </SocialIconButton>
-            </div>
-
-            <div className="flex items-center gap-3 mb-6">
-              <div className="flex-1 h-px bg-surface-border" />
-              <span className="text-[10px] uppercase tracking-[0.16em] text-content-tertiary whitespace-nowrap">
-                Or continue with email
-              </span>
-              <div className="flex-1 h-px bg-surface-border" />
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-3">

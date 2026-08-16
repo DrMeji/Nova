@@ -1,4 +1,4 @@
-const { app, BrowserWindow, shell, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, shell, ipcMain, dialog, Tray, Menu, nativeImage } = require('electron');
 const path = require('path');
 const arkEngine = require('./arkEngine.cjs');
 const arkPreview = require('./arkPreview.cjs');
@@ -59,6 +59,54 @@ const ALLOWED_HOSTS = new Set([
 
 /** @type {BrowserWindow | null} */
 let mainWindow = null;
+/** @type {Tray | null} */
+let tray = null;
+let quitting = false;
+
+function createTray() {
+  if (tray) return;
+  const iconPath = path.join(__dirname, '..', 'build', 'icon.png');
+  let image = nativeImage.createFromPath(iconPath);
+  if (image.isEmpty()) {
+    image = nativeImage.createEmpty();
+  } else {
+    image = image.resize({ width: 16, height: 16 });
+  }
+  tray = new Tray(image);
+  tray.setToolTip('ARK · brain on :8787');
+  const menu = Menu.buildFromTemplate([
+    {
+      label: 'Show ARK',
+      click: () => {
+        if (!mainWindow) createWindow();
+        else {
+          mainWindow.show();
+          mainWindow.focus();
+        }
+      },
+    },
+    {
+      label: 'Brain API · 127.0.0.1:8787',
+      enabled: false,
+    },
+    { type: 'separator' },
+    {
+      label: 'Quit ARK',
+      click: () => {
+        quitting = true;
+        app.quit();
+      },
+    },
+  ]);
+  tray.setContextMenu(menu);
+  tray.on('double-click', () => {
+    if (!mainWindow) createWindow();
+    else {
+      mainWindow.show();
+      mainWindow.focus();
+    }
+  });
+}
 
 function createWindow() {
   const packaged = app.isPackaged;
@@ -115,6 +163,13 @@ function createWindow() {
       console.log(`[renderer:${level}] ${message} (${sourceId}:${line})`);
     });
   }
+
+  win.on('close', (e) => {
+    if (quitting || isUpdaterMode) return;
+    e.preventDefault();
+    win.hide();
+    createTray();
+  });
 }
 
 function assertAllowedUrl(url) {
@@ -643,15 +698,24 @@ app.whenReady().then(() => {
   arkEngine.start();
   startBrainApi();
   createWindow();
+  createTray();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    else if (mainWindow) {
+      mainWindow.show();
+      mainWindow.focus();
+    }
   });
+});
+
+app.on('before-quit', () => {
+  quitting = true;
 });
 
 app.on('window-all-closed', () => {
   if (isUpdaterMode) return;
-  // Keep brain alive briefly is not enough for external apps — document that
-  // ARK desktop must stay running. Close brain with the app.
+  // With tray, closing the window hides ARK — brain stays on :8787 until Quit.
+  if (tray && !quitting) return;
   if (brainApi) {
     void brainApi.close();
     brainApi = null;

@@ -11,6 +11,8 @@ export type UpdateChannel = 'stable' | 'beta';
 export type LocalPrefs = {
   displayName: string;
   defaultModelId: string;
+  /** Last model that successfully answered in Chat (for picker restore). */
+  lastChatModelId?: string;
   aiMode: AiModePref;
   keepFilesLocal: boolean;
   allowCloudSync: boolean;
@@ -215,6 +217,19 @@ export function clearPluginToken(pluginId: string) {
 
 /** App changelog shown in Settings → Updates. */
 export const ARK_CHANGELOG = [
+  {
+    version: '0.1.27',
+    channel: 'stable' as const,
+    date: 'Aug 16, 2026',
+    title: 'Local image + real MP4 + brain polish',
+    notes: [
+      'On-device Stable Diffusion 1.5 via ARK Engine (sd.cpp) — install from Local AI',
+      'Video: stronger free MP4 hosts + Ken Burns real MP4 when generative video is offline',
+      'Download cancel/disk checks, chat Ready/Installing/Cloud picker, tray keep-alive, Lindsay aliases',
+      'Live plugin depth (GitHub issues, Linear close, Discord #channel, Drive upload); Creations delete',
+      'CI uploads latest.yml/blockmap; optional CSC_* secrets for Authenticode',
+    ],
+  },
   {
     version: '0.1.26',
     channel: 'stable' as const,

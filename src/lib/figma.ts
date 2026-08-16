@@ -36,7 +36,8 @@ export async function postFigmaComment(token: string, fileKey: string, message: 
   return res.data as { id?: string; message?: string };
 }
 
-export async function listFigmaTeamProjects(_token: string) {
+export async function listFigmaTeamProjects(_token: string, _teamId?: string) {
+  // Figma requires a team id (`GET /v1/teams/:team_id/projects`). ARK opens files by URL instead.
   return [] as { id: string; name: string }[];
 }
 

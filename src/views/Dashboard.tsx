@@ -3,7 +3,7 @@ import { useRouter } from '@/context/RouterContext';
 import { useRecentProjects } from '@/context/RecentProjectsContext';
 import {
   Search, Plus, ImageIcon, FileText, LayoutGrid, List,
-  Filter, Upload, File, Eye, Trash2, Folder, Video, MessageSquare,
+  Filter, Upload, File, Eye, Folder, Video, MessageSquare, Trash2,
 } from 'lucide-react';
 
 type HistoryKind = 'image' | 'video' | 'chat' | 'document' | 'other';
@@ -65,7 +65,7 @@ function formatWhen(iso: string) {
 
 export function Dashboard() {
   const { navigate } = useRouter();
-  const { creations, chats } = useRecentProjects();
+  const { creations, chats, deleteCreationForever } = useRecentProjects();
   const [query, setQuery] = useState('');
   const [tab, setTab] = useState<TabId>('all');
   const [view, setView] = useState<ViewMode>('list');
@@ -261,15 +261,6 @@ export function Dashboard() {
                         {opt.label}
                       </button>
                     ))}
-                    <div className="my-1 border-t border-surface-border" />
-                    <button
-                      type="button"
-                      onClick={() => setFilterOpen(false)}
-                      className="w-full flex items-center gap-2 px-3 py-2 text-sm text-content-secondary hover:bg-surface-hover"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                      Recently deleted
-                    </button>
                   </div>
                 )}
               </div>
@@ -300,10 +291,11 @@ export function Dashboard() {
           </div>
 
           {view === 'list' && filtered.length > 0 && (
-            <div className="grid grid-cols-[1fr_6.5rem_5rem] gap-4 px-1 pb-2 text-xs text-content-tertiary">
+            <div className="grid grid-cols-[1fr_6.5rem_5rem_2rem] gap-2 px-1 pb-2 text-xs text-content-tertiary">
               <span>Name</span>
               <span className="text-right">Modified</span>
               <span className="text-right">Type</span>
+              <span />
             </div>
           )}
         </div>
@@ -326,21 +318,41 @@ export function Dashboard() {
               {filtered.map(item => {
                 const Icon = kindIcon(item.kind);
                 return (
-                  <button
+                  <div
                     key={item.id}
-                    type="button"
-                    onClick={() => openHistoryItem(item)}
-                    className="w-full grid grid-cols-[1fr_6.5rem_5rem] gap-4 items-center px-1 py-3 text-left rounded-xl hover:bg-surface-hover/70 transition-colors"
+                    className="group w-full grid grid-cols-[1fr_6.5rem_5rem_2rem] gap-2 items-center px-1 py-3 text-left rounded-xl hover:bg-surface-hover/70 transition-colors"
                   >
-                    <span className="flex items-center gap-3 min-w-0">
+                    <button
+                      type="button"
+                      onClick={() => openHistoryItem(item)}
+                      className="flex items-center gap-3 min-w-0 text-left"
+                    >
                       <span className={`w-9 h-9 rounded-lg bg-gradient-to-br ${item.tone} flex items-center justify-center shrink-0`}>
                         <Icon className="w-4 h-4 text-white/90" strokeWidth={1.75} />
                       </span>
                       <span className="text-sm font-medium text-content-primary truncate">{item.name}</span>
-                    </span>
+                    </button>
                     <span className="text-right text-sm text-content-secondary">{item.modifiedLabel}</span>
                     <span className="text-right text-sm text-content-secondary tabular-nums">{item.sizeLabel}</span>
-                  </button>
+                    {item.creationId ? (
+                      <button
+                        type="button"
+                        className="opacity-0 group-hover:opacity-100 w-8 h-8 rounded-lg flex items-center justify-center text-content-tertiary hover:text-rose-400 hover:bg-rose-500/10 transition-opacity"
+                        title="Delete forever"
+                        aria-label="Delete creation"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (window.confirm('Delete this creation forever?')) {
+                            deleteCreationForever(item.creationId!);
+                          }
+                        }}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    ) : (
+                      <span />
+                    )}
+                  </div>
                 );
               })}
             </div>
@@ -349,18 +361,35 @@ export function Dashboard() {
               {filtered.map(item => {
                 const Icon = kindIcon(item.kind);
                 return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => openHistoryItem(item)}
-                    className={`aspect-[4/3] rounded-2xl bg-gradient-to-br ${item.tone} border border-surface-border p-3 flex flex-col text-left hover:brightness-110 transition-all`}
-                  >
-                    <span className="text-xs font-medium text-white/95 truncate">{item.name}</span>
-                    <span className="flex-1 flex items-center justify-center">
-                      <Icon className="w-8 h-8 text-white/80" strokeWidth={1.5} />
-                    </span>
-                    <span className="text-[11px] text-white/70">{item.modifiedLabel}</span>
-                  </button>
+                  <div key={item.id} className="group relative">
+                    <button
+                      type="button"
+                      onClick={() => openHistoryItem(item)}
+                      className={`w-full aspect-[4/3] rounded-2xl bg-gradient-to-br ${item.tone} border border-surface-border p-3 flex flex-col text-left hover:brightness-110 transition-all`}
+                    >
+                      <span className="text-xs font-medium text-white/95 truncate">{item.name}</span>
+                      <span className="flex-1 flex items-center justify-center">
+                        <Icon className="w-8 h-8 text-white/80" strokeWidth={1.5} />
+                      </span>
+                      <span className="text-[11px] text-white/70">{item.modifiedLabel}</span>
+                    </button>
+                    {item.creationId ? (
+                      <button
+                        type="button"
+                        className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 w-8 h-8 rounded-lg flex items-center justify-center bg-black/40 text-white/90 hover:bg-rose-500/80 transition-opacity"
+                        title="Delete forever"
+                        aria-label="Delete creation"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (window.confirm('Delete this creation forever?')) {
+                            deleteCreationForever(item.creationId!);
+                          }
+                        }}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    ) : null}
+                  </div>
                 );
               })}
             </div>

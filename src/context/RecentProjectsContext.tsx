@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useCallback, useEffect, useMemo, type ReactNode } from 'react';
 import {
   archiveRecentChat,
+  deleteCreationPermanently,
   deleteRecentChatPermanently,
   loadRecentChats,
   loadRecentCreations,
@@ -26,6 +27,7 @@ interface RecentProjectsContextValue {
   addChat: (entry: RecentChat) => void;
   archiveChat: (chatId: string) => void;
   deleteChatForever: (chatId: string) => void;
+  deleteCreationForever: (creationId: string) => void;
   refreshCreations: () => void;
   refreshChats: () => void;
 }
@@ -146,6 +148,12 @@ export function RecentProjectsProvider({ children }: { children: ReactNode }) {
     setCreations(loadRecentCreations());
   }, []);
 
+  const deleteCreationForever = useCallback((creationId: string) => {
+    deleteCreationPermanently(creationId);
+    setCreations(loadRecentCreations());
+    setChats(loadRecentChats());
+  }, []);
+
   return (
     <RecentProjectsContext.Provider
       value={{
@@ -158,6 +166,7 @@ export function RecentProjectsProvider({ children }: { children: ReactNode }) {
         addChat,
         archiveChat,
         deleteChatForever,
+        deleteCreationForever,
         refreshCreations,
         refreshChats,
       }}

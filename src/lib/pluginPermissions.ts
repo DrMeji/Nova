@@ -43,7 +43,12 @@ export function intentPermission(pluginId: string, userText: string): PluginPerm
     if (/\b(search|find|look up)\b/.test(lower)) return 'search';
     return 'read';
   }
-  if (pluginId === 'gmail' || pluginId === 'slack') {
+  if (pluginId === 'gmail') {
+    if (/\b(send|reply)\b/.test(lower)) return 'send';
+    if (/\b(search|find)\b/.test(lower)) return 'search';
+    return 'read';
+  }
+  if (pluginId === 'slack') {
     if (/\b(send|reply|post|write)\b/.test(lower)) return 'write';
     if (/\b(search|find)\b/.test(lower)) return 'search';
     return 'read';

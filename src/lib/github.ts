@@ -126,6 +126,23 @@ export async function commentOnIssue(
   );
 }
 
+export async function createGitHubIssue(
+  token: string,
+  owner: string,
+  repo: string,
+  title: string,
+  body?: string,
+) {
+  return githubPost<{ html_url?: string; number?: number; title?: string }>(
+    token,
+    `/repos/${owner}/${repo}/issues`,
+    {
+      title: title.slice(0, 256),
+      body: body?.slice(0, 65000) || undefined,
+    },
+  );
+}
+
 export async function verifyGitHubToken(token: string): Promise<GitHubUser> {
   const trimmed = token.trim();
   if (!trimmed) throw new Error('Paste a GitHub personal access token');
@@ -238,6 +255,35 @@ export async function runGitHubLive(
       '',
       'Live data from your GitHub account. Open a link above in your browser.',
     ].join('\n');
+  }
+
+  // create issue in owner/repo: title  |  create issue owner/repo title
+  const createIssueMatch = userText.match(
+    /create\s+(?:an?\s+)?issue\s+(?:in\s+)?([\w.-]+)\/([\w.-]+)\s*[:\-]?\s*(.+)/i,
+  );
+  if (createIssueMatch) {
+    if (perms.length > 0 && !perms.includes('write')) {
+      return [
+        'GitHub · permission needed',
+        '',
+        'Creating issues needs Write. Enable it under Plugins → GitHub → Permissions.',
+      ].join('\n');
+    }
+    const [, owner, repo, rest] = createIssueMatch;
+    const titleBody = rest.trim();
+    const split = titleBody.split(/\n+/);
+    const title = (split[0] || 'New issue from ARK').slice(0, 256);
+    const body = split.slice(1).join('\n').trim() || undefined;
+    const user = await verifyGitHubToken(token);
+    const created = await createGitHubIssue(token, owner, repo, title, body);
+    return [
+      `GitHub · created issue (@${user.login})`,
+      '',
+      `${owner}/${repo}#${created.number ?? '?'} “${created.title || title}”`,
+      created.html_url || '',
+      '',
+      'Live write via GitHub issues API.',
+    ].filter(Boolean).join('\n');
   }
 
   if (/issue/.test(lower)) {

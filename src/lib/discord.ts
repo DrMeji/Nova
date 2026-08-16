@@ -34,6 +34,49 @@ export async function verifyDiscordToken(token: string): Promise<{ label: string
 }
 
 type DiscordGuild = { id: string; name?: string; approximate_member_count?: number };
+type DiscordChannel = { id: string; name?: string; type?: number };
+
+async function discordGet(token: string, path: string) {
+  const trimmed = token.trim();
+  const url = path.startsWith('http') ? path : `https://discord.com/api/v10${path}`;
+  let res = await desktopRequest(url, { method: 'GET', headers: authHeaders(trimmed, true) });
+  if (!res.ok) {
+    res = await desktopRequest(url, { method: 'GET', headers: authHeaders(trimmed, false) });
+  }
+  return res;
+}
+
+async function listDiscordGuilds(token: string): Promise<DiscordGuild[]> {
+  const res = await discordGet(token, '/users/@me/guilds');
+  if (!res.ok) throw new Error(apiErrorMessage(res, 'Could not list Discord servers'));
+  return (Array.isArray(res.data) ? res.data : []) as DiscordGuild[];
+}
+
+async function listGuildChannels(token: string, guildId: string): Promise<DiscordChannel[]> {
+  const res = await discordGet(token, `/guilds/${guildId}/channels`);
+  if (!res.ok) throw new Error(apiErrorMessage(res, 'Could not list Discord channels'));
+  return (Array.isArray(res.data) ? res.data : []) as DiscordChannel[];
+}
+
+/** Resolve a snowflake id or #channel-name (searches first guild, then others). */
+export async function resolveDiscordChannel(
+  token: string,
+  ref: string,
+): Promise<{ id: string; name?: string }> {
+  const trimmed = ref.trim().replace(/^#/, '');
+  if (/^\d{17,20}$/.test(trimmed)) return { id: trimmed };
+
+  const want = trimmed.toLowerCase();
+  const guilds = await listDiscordGuilds(token);
+  if (guilds.length === 0) throw new Error('No Discord servers visible to resolve channel name');
+
+  for (const guild of guilds) {
+    const channels = await listGuildChannels(token, guild.id);
+    const match = channels.find(c => (c.name || '').toLowerCase() === want);
+    if (match) return { id: match.id, name: match.name || trimmed };
+  }
+  throw new Error(`No channel named #${trimmed} found in your Discord servers`);
+}
 
 export async function postDiscordMessage(token: string, channelId: string, content: string) {
   const trimmed = token.trim();
@@ -77,25 +120,29 @@ export async function runDiscordLive(
         'Posting needs Write. Enable it under Plugins → Discord → Permissions.',
       ].join('\n');
     }
-    const idMatch = userText.match(/\b(\d{17,20})\b/);
-    const channelId = idMatch?.[1];
-    const bodyMatch = userText.match(
-      /(?:post|send|message|write)\s+(?:to\s+)?(?:channel\s+)?\d{17,20}\s*[:\-]?\s*(.+)$/i,
+    const snowflakeMatch = userText.match(
+      /(?:post|send|message|write)\s+(?:to\s+)?(?:channel\s+)?(\d{17,20})\s*[:\-]?\s*(.+)$/i,
     );
-    const body = (bodyMatch?.[1] || '').trim();
-    if (!channelId || !body) {
+    const nameMatch = userText.match(
+      /(?:post|send|message|write)\s+(?:to\s+)?#([\w-]+)\s*[:\-]?\s*(.+)$/i,
+    );
+    const channelRef = snowflakeMatch?.[1] || nameMatch?.[1];
+    const body = (snowflakeMatch?.[2] || nameMatch?.[2] || '').trim();
+    if (!channelRef || !body) {
       return [
         'Discord · post',
         '',
-        'Try: post to channel 123456789012345678 Hello from ARK',
-        '(Use a channel snowflake id the bot can see.)',
+        'Try: post to #general Hello from ARK',
+        'Or: post to channel 123456789012345678 Hello from ARK',
       ].join('\n');
     }
-    const posted = await postDiscordMessage(trimmed, channelId, body);
+    const channel = await resolveDiscordChannel(trimmed, channelRef);
+    const posted = await postDiscordMessage(trimmed, channel.id, body);
+    const label = channel.name ? `#${channel.name}` : `Channel ${channel.id}`;
     return [
       `Discord · posted (@${account.label})`,
       '',
-      `Channel ${channelId}`,
+      label,
       body.slice(0, 200),
       posted.id ? `Message id: ${posted.id}` : '',
       '',
@@ -103,19 +150,7 @@ export async function runDiscordLive(
     ].filter(Boolean).join('\n');
   }
 
-  let res = await desktopRequest('https://discord.com/api/v10/users/@me/guilds', {
-    method: 'GET',
-    headers: authHeaders(trimmed, true),
-  });
-  if (!res.ok) {
-    res = await desktopRequest('https://discord.com/api/v10/users/@me/guilds', {
-      method: 'GET',
-      headers: authHeaders(trimmed, false),
-    });
-  }
-  if (!res.ok) throw new Error(apiErrorMessage(res, 'Could not list Discord servers'));
-
-  const guilds = (Array.isArray(res.data) ? res.data : []) as DiscordGuild[];
+  const guilds = await listDiscordGuilds(trimmed);
   if (guilds.length === 0) {
     return [
       `Discord · servers (@${account.label})`,
@@ -132,6 +167,6 @@ export async function runDiscordLive(
       return `${i + 1}. ${g.name || g.id}${members}`;
     }),
     '',
-    'Live data from Discord. Post with: post to channel <id> Hello',
+    'Live data from Discord. Post with: post to #general Hello',
   ].join('\n');
 }

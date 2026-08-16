@@ -10,6 +10,7 @@ import {
   getInstalledPlugins,
   getPluginById,
   getPluginRuntime,
+  isPluginLive,
   loadPluginState,
   upsertPluginRuntime,
   type PluginDef,
@@ -24,6 +25,8 @@ import { verifyLinearToken } from '@/lib/linear';
 import { verifyFigmaToken } from '@/lib/figma';
 import { verifyVercelToken } from '@/lib/vercel';
 import { verifyDiscordToken } from '@/lib/discord';
+import { verifyDriveToken } from '@/lib/gdrive';
+import { verifyCalendarToken } from '@/lib/gcal';
 import { openInSystemBrowser } from '@/lib/openExternal';
 import { getPluginAuthLink } from '@/lib/pluginAuth';
 
@@ -107,6 +110,10 @@ export function BuildRun() {
 
   const startConnect = () => {
     if (!selected) return;
+    if (!isPluginLive(selected.id)) {
+      setAuthError('Coming soon — not connected to a live API yet.');
+      return;
+    }
     setPermDraft(
       selectedRuntime?.permissions?.length
         ? selectedRuntime.permissions
@@ -121,6 +128,15 @@ export function BuildRun() {
 
   const finishConnect = () => {
     if (!selected) return;
+    if (!isPluginLive(selected.id)) {
+      setAuthError('Coming soon — not connected to a live API yet.');
+      return;
+    }
+    if (selected.authKind !== 'none' && !tokenDraft.trim() && !selectedRuntime?.token) {
+      setAuthError('Paste a valid token, then continue.');
+      setConnectStep('auth');
+      return;
+    }
     const required = selected.permissions.filter(p => p.required).map(p => p.id);
     const granted = Array.from(new Set([...required, ...permDraft]));
     patch(selected.id, {
@@ -128,12 +144,7 @@ export function BuildRun() {
       connected: true,
       enabledInChat: true,
       permissions: granted,
-      token: tokenDraft.trim()
-        || (['github', 'notion', 'gmail', 'slack', 'linear', 'figma'].includes(selected.id)
-          ? undefined
-          : selected.authKind === 'token'
-            ? 'demo-token'
-            : selectedRuntime?.token),
+      token: tokenDraft.trim() || selectedRuntime?.token,
       accountLabel: verifiedLogin || selectedRuntime?.accountLabel,
       connectedAt: new Date().toISOString(),
     });
@@ -146,45 +157,58 @@ export function BuildRun() {
     if (!selected) return;
     setAuthError('');
 
-    const liveIds = ['github', 'notion', 'gmail', 'slack', 'linear', 'figma', 'vercel', 'discord'] as const;
-    if ((liveIds as readonly string[]).includes(selected.id)) {
-      setAuthBusy(true);
-      try {
-        if (selected.id === 'github') {
-          const user = await verifyGitHubToken(tokenDraft);
-          setVerifiedLogin(user.login);
-        } else if (selected.id === 'notion') {
-          const user = await verifyNotionToken(tokenDraft);
-          setVerifiedLogin(user.label);
-        } else if (selected.id === 'gmail') {
-          const user = await verifyGmailToken(tokenDraft);
-          setVerifiedLogin(user.label);
-        } else if (selected.id === 'slack') {
-          const user = await verifySlackToken(tokenDraft);
-          setVerifiedLogin(user.label);
-        } else if (selected.id === 'linear') {
-          const user = await verifyLinearToken(tokenDraft);
-          setVerifiedLogin(user.label);
-        } else if (selected.id === 'vercel') {
-          const user = await verifyVercelToken(tokenDraft);
-          setVerifiedLogin(user.label);
-        } else if (selected.id === 'discord') {
-          const user = await verifyDiscordToken(tokenDraft);
-          setVerifiedLogin(user.label);
-        } else {
-          const user = await verifyFigmaToken(tokenDraft);
-          setVerifiedLogin(user.label);
-        }
-        setConnectStep('permissions');
-      } catch (err) {
-        setAuthError(err instanceof Error ? err.message : `Could not verify ${selected.name} token`);
-      } finally {
-        setAuthBusy(false);
-      }
+    if (!isPluginLive(selected.id)) {
+      setAuthError('Coming soon — not connected to a live API yet.');
       return;
     }
 
-    setConnectStep('permissions');
+    if (!tokenDraft.trim()) {
+      setAuthError('Paste a token to verify.');
+      return;
+    }
+
+    setAuthBusy(true);
+    try {
+      if (selected.id === 'github') {
+        const user = await verifyGitHubToken(tokenDraft);
+        setVerifiedLogin(user.login);
+      } else if (selected.id === 'notion') {
+        const user = await verifyNotionToken(tokenDraft);
+        setVerifiedLogin(user.label);
+      } else if (selected.id === 'gmail') {
+        const user = await verifyGmailToken(tokenDraft);
+        setVerifiedLogin(user.label);
+      } else if (selected.id === 'slack') {
+        const user = await verifySlackToken(tokenDraft);
+        setVerifiedLogin(user.label);
+      } else if (selected.id === 'linear') {
+        const user = await verifyLinearToken(tokenDraft);
+        setVerifiedLogin(user.label);
+      } else if (selected.id === 'vercel') {
+        const user = await verifyVercelToken(tokenDraft);
+        setVerifiedLogin(user.label);
+      } else if (selected.id === 'discord') {
+        const user = await verifyDiscordToken(tokenDraft);
+        setVerifiedLogin(user.label);
+      } else if (selected.id === 'figma') {
+        const user = await verifyFigmaToken(tokenDraft);
+        setVerifiedLogin(user.label);
+      } else if (selected.id === 'gdrive') {
+        const user = await verifyDriveToken(tokenDraft);
+        setVerifiedLogin(user.label);
+      } else if (selected.id === 'gcal') {
+        const user = await verifyCalendarToken(tokenDraft);
+        setVerifiedLogin(user.label);
+      } else {
+        setAuthError('Coming soon — not connected to a live API yet.');
+        return;
+      }
+      setConnectStep('permissions');
+    } catch (err) {
+      setAuthError(err instanceof Error ? err.message : `Could not verify ${selected.name} token`);
+    } finally {
+      setAuthBusy(false);
+    }
   };
 
   const startBrowserOAuth = async () => {
@@ -273,13 +297,15 @@ export function BuildRun() {
                           <span className="min-w-0">
                             <span className="block text-sm font-medium text-content-primary">{plugin.name}</span>
                             <span className="block text-[11px] text-content-tertiary truncate">
-                              {!runtime.installed
-                                ? 'Not added yet'
-                                : !runtime.connected
-                                  ? 'Added · connect account'
-                                  : runtime.enabledInChat
-                                    ? 'Connected · in chat'
-                                    : 'Connected'}
+                              {!isPluginLive(plugin.id)
+                                ? 'Coming soon'
+                                : !runtime.installed
+                                  ? 'Not added yet'
+                                  : !runtime.connected
+                                    ? 'Added · connect account'
+                                    : runtime.enabledInChat
+                                      ? 'Connected · in chat'
+                                      : 'Connected'}
                             </span>
                           </span>
                         </span>
@@ -343,9 +369,13 @@ export function BuildRun() {
                         <span className="min-w-0 flex-1">
                           <span className="flex items-center gap-2 min-w-0">
                             <span className="text-sm font-medium text-content-primary truncate">{plugin.name}</span>
-                            {plugin.hero && (
-                              <span className="text-[10px] rounded-full bg-sky-500/15 text-sky-400 px-1.5 py-0.5 shrink-0">
-                                Hero
+                            {isPluginLive(plugin.id) ? (
+                              <span className="text-[10px] rounded-full bg-emerald-500/15 text-emerald-400 px-1.5 py-0.5 shrink-0">
+                                Live
+                              </span>
+                            ) : (
+                              <span className="text-[10px] rounded-full bg-amber-500/15 text-amber-400/90 px-1.5 py-0.5 shrink-0">
+                                Coming soon
                               </span>
                             )}
                           </span>
@@ -455,7 +485,11 @@ export function BuildRun() {
                   )}
 
                   <div className="flex flex-col gap-2 pt-1">
-                    {!selectedRuntime.installed ? (
+                    {!isPluginLive(selected.id) ? (
+                      <p className="text-sm text-content-tertiary rounded-xl border border-surface-border px-3 py-3">
+                        Coming soon — listed for discovery only. Not connected to a live API yet.
+                      </p>
+                    ) : !selectedRuntime.installed ? (
                       <button type="button" className="ark-btn-primary w-full" onClick={() => install(selected.id)}>
                         <Plus className="w-4 h-4" />
                         Add to ARK
@@ -481,7 +515,7 @@ export function BuildRun() {
                         </button>
                       </>
                     )}
-                    {selectedRuntime.installed && (
+                    {selectedRuntime.installed && isPluginLive(selected.id) && (
                       <button
                         type="button"
                         className="ark-btn-secondary w-full !text-ark-accent-red"
@@ -489,6 +523,9 @@ export function BuildRun() {
                       >
                         Remove from ARK
                       </button>
+                    )}
+                    {authError && connectStep === 'idle' && (
+                      <p className="text-xs text-ark-accent-red">{authError}</p>
                     )}
                   </div>
                 </>
