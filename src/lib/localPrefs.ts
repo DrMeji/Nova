@@ -200,6 +200,16 @@ export function hasProviderApiKey(providerId: string) {
 /** App changelog shown in Settings → Updates. */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.11',
+    channel: 'stable' as const,
+    date: 'Aug 15, 2026',
+    title: 'Discord-style update box + faster reopen',
+    notes: [
+      'Updating splash is a small centered box (not fullscreen)',
+      'ARK relaunches as soon as install finishes',
+    ],
+  },
+  {
     version: '0.1.10',
     channel: 'stable' as const,
     date: 'Aug 15, 2026',

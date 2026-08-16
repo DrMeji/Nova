@@ -202,8 +202,8 @@ function resolveUpdateIcon(tempDir) {
 }
 
 /**
- * Spawns a small WinForms "Updating" splash (separate from ARK), waits for ARK
- * to quit, silently installs, then relaunches ARK and closes the splash.
+ * Spawns a small Discord-style Updating splash (compact box, not fullscreen).
+ * Waits for ARK to quit, silently installs, relaunches ARK immediately, closes splash.
  */
 function launchInstallerThenRelaunch(setupPath) {
   const appExe = process.execPath;
@@ -220,6 +220,7 @@ function launchInstallerThenRelaunch(setupPath) {
 $ErrorActionPreference = 'SilentlyContinue'
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
+[System.Windows.Forms.Application]::EnableVisualStyles()
 
 $log = ${psSingleQuote(logFile)}
 function Write-Log($m) { Add-Content -Path $log -Value ("[{0}] {1}" -f (Get-Date -Format o), $m) }
@@ -231,24 +232,32 @@ $local = ${psSingleQuote(localPrograms)}
 $pf = ${psSingleQuote(programFiles)}
 $icon = ${iconPath ? psSingleQuote(iconPath) : "''"}
 
+# Compact Discord-style box — locked pixel size (no DPI stretch to fullscreen)
+$boxW = 320
+$boxH = 200
 $form = New-Object System.Windows.Forms.Form
 $form.Text = 'ARK'
-$form.Width = 380
-$form.Height = 300
-$form.StartPosition = 'CenterScreen'
-$form.FormBorderStyle = 'FixedDialog'
+$form.FormBorderStyle = 'None'
+$form.StartPosition = 'Manual'
+$form.AutoScaleMode = 'None'
+$form.Size = New-Object System.Drawing.Size($boxW, $boxH)
+$form.MinimumSize = $form.Size
+$form.MaximumSize = $form.Size
 $form.MaximizeBox = $false
 $form.MinimizeBox = $false
 $form.ControlBox = $false
 $form.TopMost = $true
-$form.BackColor = [System.Drawing.Color]::FromArgb(12, 12, 12)
 $form.ShowInTaskbar = $true
+$form.BackColor = [System.Drawing.Color]::FromArgb(35, 36, 40)
+$wa = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
+$form.Location = New-Object System.Drawing.Point(
+  [int]($wa.Left + ($wa.Width - $boxW) / 2),
+  [int]($wa.Top + ($wa.Height - $boxH) / 2)
+)
 
 $pic = New-Object System.Windows.Forms.PictureBox
-$pic.Width = 72
-$pic.Height = 72
-$pic.Left = [int](($form.ClientSize.Width - 72) / 2)
-$pic.Top = 36
+$pic.Size = New-Object System.Drawing.Size(52, 64)
+$pic.Location = New-Object System.Drawing.Point([int](($boxW - 52) / 2), 28)
 $pic.SizeMode = 'Zoom'
 if ($icon -and (Test-Path -LiteralPath $icon)) {
   try { $pic.Image = [System.Drawing.Image]::FromFile($icon) } catch {}
@@ -256,100 +265,105 @@ if ($icon -and (Test-Path -LiteralPath $icon)) {
 $form.Controls.Add($pic)
 
 $title = New-Object System.Windows.Forms.Label
-$title.Text = 'Updating'
-$title.ForeColor = [System.Drawing.Color]::FromArgb(245, 245, 245)
-$title.Font = New-Object System.Drawing.Font('Segoe UI', 12, [System.Drawing.FontStyle]::Bold)
+$title.Text = 'Updating…'
+$title.ForeColor = [System.Drawing.Color]::White
+$title.Font = New-Object System.Drawing.Font('Segoe UI', 11, [System.Drawing.FontStyle]::Bold)
 $title.AutoSize = $false
-$title.Width = $form.ClientSize.Width
-$title.Height = 28
-$title.Top = 122
-$title.Left = 0
+$title.Size = New-Object System.Drawing.Size($boxW, 24)
+$title.Location = New-Object System.Drawing.Point(0, 108)
 $title.TextAlign = 'MiddleCenter'
 $form.Controls.Add($title)
 
-$pct = New-Object System.Windows.Forms.Label
-$pct.Text = '0%'
-$pct.ForeColor = [System.Drawing.Color]::FromArgb(160, 160, 160)
-$pct.Font = New-Object System.Drawing.Font('Segoe UI', 10)
-$pct.AutoSize = $false
-$pct.Width = $form.ClientSize.Width
-$pct.Height = 22
-$pct.Top = 150
-$pct.Left = 0
-$pct.TextAlign = 'MiddleCenter'
-$form.Controls.Add($pct)
+$track = New-Object System.Windows.Forms.Panel
+$track.Size = New-Object System.Drawing.Size(200, 5)
+$track.Location = New-Object System.Drawing.Point([int](($boxW - 200) / 2), 152)
+$track.BackColor = [System.Drawing.Color]::FromArgb(50, 51, 56)
+$form.Controls.Add($track)
 
-$bar = New-Object System.Windows.Forms.ProgressBar
-$bar.Minimum = 0
-$bar.Maximum = 100
-$bar.Value = 0
-$bar.Width = 260
-$bar.Height = 12
-$bar.Left = [int](($form.ClientSize.Width - 260) / 2)
-$bar.Top = 186
-$bar.Style = 'Continuous'
-$form.Controls.Add($bar)
+$fill = New-Object System.Windows.Forms.Panel
+$fill.Size = New-Object System.Drawing.Size(6, 5)
+$fill.Location = New-Object System.Drawing.Point(0, 0)
+$fill.BackColor = [System.Drawing.Color]::FromArgb(176, 180, 188)
+$track.Controls.Add($fill)
 
 function Set-Progress([int]$value) {
   if ($value -lt 0) { $value = 0 }
   if ($value -gt 100) { $value = 100 }
-  $bar.Value = $value
-  $pct.Text = ("{0}%" -f $value)
+  $w = [Math]::Max(6, [int](200 * ($value / 100.0)))
+  $fill.Width = $w
   [System.Windows.Forms.Application]::DoEvents()
+}
+
+function Get-ArkTarget {
+  foreach ($c in @($exe, $local, $pf)) {
+    if ($c -and (Test-Path -LiteralPath $c)) { return $c }
+  }
+  return $null
+}
+
+function Start-ArkNow {
+  $target = Get-ArkTarget
+  if (-not $target) { Write-Log 'ARK.exe not found for relaunch'; return $false }
+  for ($i = 0; $i -lt 20; $i++) {
+    try {
+      Start-Process -FilePath $target -WindowStyle Normal -ErrorAction Stop
+      Write-Log ("started " + $target)
+      return $true
+    } catch {
+      Start-Sleep -Milliseconds 100
+    }
+  }
+  Write-Log 'Start-Process retries exhausted'
+  return $false
 }
 
 $form.Show()
 $form.Activate()
 [System.Windows.Forms.Application]::DoEvents()
-Set-Progress 5
+Set-Progress 4
 Write-Log 'splash visible; waiting for ARK exit'
 
-$tries = 0
-while ($tries -lt 120) {
-  $alive = Get-Process -Name 'ARK' -ErrorAction SilentlyContinue
-  if (-not $alive) { break }
-  $v = [Math]::Min(18, 5 + [int]($tries / 4))
-  Set-Progress $v
-  Start-Sleep -Milliseconds 250
-  $tries++
+# Fast poll until ARK.exe is gone (ignore this helper — we are powershell)
+$deadline = (Get-Date).AddSeconds(20)
+while ((Get-Date) -lt $deadline) {
+  $alive = @(Get-Process -Name 'ARK' -ErrorAction SilentlyContinue | Where-Object { $_.Id -ne $PID })
+  if ($alive.Count -eq 0) { break }
+  Set-Progress 8
+  [System.Windows.Forms.Application]::DoEvents()
+  Start-Sleep -Milliseconds 50
 }
-Start-Sleep -Milliseconds 800
-Set-Progress 22
+Set-Progress 12
 Write-Log 'ARK exited; starting silent install'
 
+$launched = $false
 if (Test-Path -LiteralPath $setup) {
   $p = Start-Process -FilePath $setup -ArgumentList @('/S','--updated') -PassThru -WindowStyle Hidden
-  $tick = 22
+  $tick = 15
   while ($p -and -not $p.HasExited) {
-    $tick = [Math]::Min(90, $tick + 1)
+    # If NSIS already opened ARK, close splash immediately — do not wait for installer cleanup
+    $running = @(Get-Process -Name 'ARK' -ErrorAction SilentlyContinue)
+    if ($running.Count -gt 0) {
+      Write-Log 'ARK process appeared during install; closing splash'
+      $launched = $true
+      break
+    }
+    $tick = [Math]::Min(90, $tick + 3)
     Set-Progress $tick
-    Start-Sleep -Milliseconds 350
+    Start-Sleep -Milliseconds 60
     try { $p.Refresh() } catch { break }
   }
-  Write-Log ("installer exit=" + $(if ($p) { $p.ExitCode } else { 'n/a' }))
+  Write-Log ("installer exit=" + $(if ($p -and $p.HasExited) { $p.ExitCode } else { 'still-running-or-n/a' }))
 } else {
   Write-Log 'setup missing'
-  Set-Progress 90
 }
 
-Start-Sleep -Milliseconds 600
-Set-Progress 96
-
-$target = $null
-foreach ($c in @($exe, $local, $pf)) {
-  if ($c -and (Test-Path -LiteralPath $c)) { $target = $c; break }
-}
-if ($target) {
-  Write-Log ("starting " + $target)
-  Start-Process -FilePath $target -WindowStyle Normal
-} else {
-  Write-Log 'ARK.exe not found for relaunch'
+if (-not $launched) {
+  Set-Progress 96
+  $launched = Start-ArkNow
 }
 
 Set-Progress 100
-$title.Text = 'Done'
 [System.Windows.Forms.Application]::DoEvents()
-Start-Sleep -Milliseconds 700
 $form.Close()
 $form.Dispose()
 
@@ -368,7 +382,6 @@ Write-Log 'splash helper done'
     'powershell.exe',
   );
 
-  // -STA required for WinForms. Console stays hidden; only the splash form is visible.
   const child = spawn(
     powershell,
     [
@@ -538,8 +551,8 @@ async function downloadAndInstall(setupUrl, latestTag) {
       });
       return;
     }
-    setTimeout(() => app.quit(), 500);
-  }, 900);
+    setTimeout(() => app.quit(), 150);
+  }, 350);
 
   return { ok: true, message: 'Download complete. Closing ARK to finish updating…' };
 }

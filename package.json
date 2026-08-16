@@ -1,7 +1,7 @@
 {
   "name": "ark",
   "private": true,
-  "version": "0.1.10",
+  "version": "0.1.11",
   "type": "module",
   "main": "electron/main.cjs",
   "description": "ARK — AI Creation Studio desktop app",
@@ -72,7 +72,7 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "deleteAppDataOnUninstall": true,
-      "runAfterFinish": true,
+      "runAfterFinish": false,
       "shortcutName": "ARK",
       "uninstallDisplayName": "ARK",
       "artifactName": "ARK-Setup.${ext}",
