@@ -1,6 +1,11 @@
 /**
  * In-app updates via public DrMeji/ark-dist Releases.
- * Fully silent helper (no terminals). Download + install UI stays inside ARK.
+ *
+ * Flow:
+ * 1) Download inside ARK (progress in Settings / overlay)
+ * 2) Main app closes
+ * 3) Small external Updating splash (logo + bar + %) opens
+ * 4) Silent install finishes → splash closes → ARK reopens
  */
 
 const fs = require('fs');
@@ -175,9 +180,30 @@ function psSingleQuote(p) {
   return `'${String(p).replace(/'/g, "''")}'`;
 }
 
+function resolveUpdateIcon(tempDir) {
+  const dest = path.join(tempDir, 'ark-update-icon.png');
+  const candidates = [
+    path.join(app.getAppPath(), 'dist', 'ark-icon.png'),
+    path.join(__dirname, '..', 'dist', 'ark-icon.png'),
+    path.join(__dirname, '..', 'public', 'ark-icon.png'),
+    path.join(__dirname, '..', 'build', 'icon.png'),
+  ];
+  for (const src of candidates) {
+    try {
+      if (fs.existsSync(src)) {
+        fs.copyFileSync(src, dest);
+        return dest;
+      }
+    } catch {
+      /* try next */
+    }
+  }
+  return null;
+}
+
 /**
- * Fully hidden PowerShell helper — no cmd, no ping, no visible terminals.
- * Waits for ARK to exit, runs silent NSIS, relaunches ARK.
+ * Spawns a small WinForms "Updating" splash (separate from ARK), waits for ARK
+ * to quit, silently installs, then relaunches ARK and closes the splash.
  */
 function launchInstallerThenRelaunch(setupPath) {
   const appExe = process.execPath;
@@ -185,40 +211,129 @@ function launchInstallerThenRelaunch(setupPath) {
   const stamp = Date.now();
   const helperPs1 = path.join(temp, `ark-update-${stamp}.ps1`);
   const logFile = path.join(temp, `ark-update-${stamp}.log`);
+  const iconPath = resolveUpdateIcon(temp);
 
   const localPrograms = path.join(process.env.LOCALAPPDATA || '', 'Programs', 'ARK', 'ARK.exe');
   const programFiles = path.join(process.env.ProgramFiles || 'C:\\Program Files', 'ARK', 'ARK.exe');
 
   const ps = `
 $ErrorActionPreference = 'SilentlyContinue'
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+
 $log = ${psSingleQuote(logFile)}
 function Write-Log($m) { Add-Content -Path $log -Value ("[{0}] {1}" -f (Get-Date -Format o), $m) }
-Write-Log 'helper start'
+Write-Log 'splash helper start'
+
 $setup = ${psSingleQuote(setupPath)}
 $exe = ${psSingleQuote(appExe)}
 $local = ${psSingleQuote(localPrograms)}
 $pf = ${psSingleQuote(programFiles)}
+$icon = ${iconPath ? psSingleQuote(iconPath) : "''"}
 
-# Wait until ARK.exe is gone (file locks released)
+$form = New-Object System.Windows.Forms.Form
+$form.Text = 'ARK'
+$form.Width = 380
+$form.Height = 300
+$form.StartPosition = 'CenterScreen'
+$form.FormBorderStyle = 'FixedDialog'
+$form.MaximizeBox = $false
+$form.MinimizeBox = $false
+$form.ControlBox = $false
+$form.TopMost = $true
+$form.BackColor = [System.Drawing.Color]::FromArgb(12, 12, 12)
+$form.ShowInTaskbar = $true
+
+$pic = New-Object System.Windows.Forms.PictureBox
+$pic.Width = 72
+$pic.Height = 72
+$pic.Left = [int](($form.ClientSize.Width - 72) / 2)
+$pic.Top = 36
+$pic.SizeMode = 'Zoom'
+if ($icon -and (Test-Path -LiteralPath $icon)) {
+  try { $pic.Image = [System.Drawing.Image]::FromFile($icon) } catch {}
+}
+$form.Controls.Add($pic)
+
+$title = New-Object System.Windows.Forms.Label
+$title.Text = 'Updating'
+$title.ForeColor = [System.Drawing.Color]::FromArgb(245, 245, 245)
+$title.Font = New-Object System.Drawing.Font('Segoe UI', 12, [System.Drawing.FontStyle]::Bold)
+$title.AutoSize = $false
+$title.Width = $form.ClientSize.Width
+$title.Height = 28
+$title.Top = 122
+$title.Left = 0
+$title.TextAlign = 'MiddleCenter'
+$form.Controls.Add($title)
+
+$pct = New-Object System.Windows.Forms.Label
+$pct.Text = '0%'
+$pct.ForeColor = [System.Drawing.Color]::FromArgb(160, 160, 160)
+$pct.Font = New-Object System.Drawing.Font('Segoe UI', 10)
+$pct.AutoSize = $false
+$pct.Width = $form.ClientSize.Width
+$pct.Height = 22
+$pct.Top = 150
+$pct.Left = 0
+$pct.TextAlign = 'MiddleCenter'
+$form.Controls.Add($pct)
+
+$bar = New-Object System.Windows.Forms.ProgressBar
+$bar.Minimum = 0
+$bar.Maximum = 100
+$bar.Value = 0
+$bar.Width = 260
+$bar.Height = 12
+$bar.Left = [int](($form.ClientSize.Width - 260) / 2)
+$bar.Top = 186
+$bar.Style = 'Continuous'
+$form.Controls.Add($bar)
+
+function Set-Progress([int]$value) {
+  if ($value -lt 0) { $value = 0 }
+  if ($value -gt 100) { $value = 100 }
+  $bar.Value = $value
+  $pct.Text = ("{0}%" -f $value)
+  [System.Windows.Forms.Application]::DoEvents()
+}
+
+$form.Show()
+$form.Activate()
+[System.Windows.Forms.Application]::DoEvents()
+Set-Progress 5
+Write-Log 'splash visible; waiting for ARK exit'
+
 $tries = 0
-while ($tries -lt 90) {
-  $proc = Get-Process -Name 'ARK' -ErrorAction SilentlyContinue
-  if (-not $proc) { break }
-  Start-Sleep -Seconds 1
+while ($tries -lt 120) {
+  $alive = Get-Process -Name 'ARK' -ErrorAction SilentlyContinue
+  if (-not $alive) { break }
+  $v = [Math]::Min(18, 5 + [int]($tries / 4))
+  Set-Progress $v
+  Start-Sleep -Milliseconds 250
   $tries++
 }
-Start-Sleep -Seconds 2
+Start-Sleep -Milliseconds 800
+Set-Progress 22
 Write-Log 'ARK exited; starting silent install'
 
 if (Test-Path -LiteralPath $setup) {
-  # /S = silent NSIS; --updated marks upgrade so app data is preserved
-  $p = Start-Process -FilePath $setup -ArgumentList @('/S','--updated') -Wait -PassThru -WindowStyle Hidden
-  Write-Log ("installer exit=" + $p.ExitCode)
+  $p = Start-Process -FilePath $setup -ArgumentList @('/S','--updated') -PassThru -WindowStyle Hidden
+  $tick = 22
+  while ($p -and -not $p.HasExited) {
+    $tick = [Math]::Min(90, $tick + 1)
+    Set-Progress $tick
+    Start-Sleep -Milliseconds 350
+    try { $p.Refresh() } catch { break }
+  }
+  Write-Log ("installer exit=" + $(if ($p) { $p.ExitCode } else { 'n/a' }))
 } else {
   Write-Log 'setup missing'
+  Set-Progress 90
 }
 
-Start-Sleep -Seconds 2
+Start-Sleep -Milliseconds 600
+Set-Progress 96
 
 $target = $null
 foreach ($c in @($exe, $local, $pf)) {
@@ -231,18 +346,34 @@ if ($target) {
   Write-Log 'ARK.exe not found for relaunch'
 }
 
-Start-Sleep -Seconds 1
+Set-Progress 100
+$title.Text = 'Done'
+[System.Windows.Forms.Application]::DoEvents()
+Start-Sleep -Milliseconds 700
+$form.Close()
+$form.Dispose()
+
 Remove-Item -LiteralPath ${psSingleQuote(helperPs1)} -Force -ErrorAction SilentlyContinue
+if ($icon) { Remove-Item -LiteralPath $icon -Force -ErrorAction SilentlyContinue }
+Write-Log 'splash helper done'
 `;
 
   fs.writeFileSync(helperPs1, ps, 'utf8');
 
-  // Spawn PowerShell completely hidden. Do NOT use cmd/ping.
+  const powershell = path.join(
+    process.env.SystemRoot || 'C:\\Windows',
+    'System32',
+    'WindowsPowerShell',
+    'v1.0',
+    'powershell.exe',
+  );
+
+  // -STA required for WinForms. Console stays hidden; only the splash form is visible.
   const child = spawn(
-    path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
+    powershell,
     [
       '-NoProfile',
-      '-NonInteractive',
+      '-STA',
       '-ExecutionPolicy', 'Bypass',
       '-WindowStyle', 'Hidden',
       '-File', helperPs1,
@@ -366,7 +497,7 @@ async function downloadAndInstall(setupUrl, latestTag) {
   sendProgress({
     status: 'downloading',
     percent: 0,
-    message: 'Updating…',
+    message: 'Downloading update…',
     version: normalizeVersion(latestTag || ''),
   });
 
@@ -375,7 +506,7 @@ async function downloadAndInstall(setupUrl, latestTag) {
       sendProgress({
         status: 'downloading',
         percent,
-        message: 'Updating…',
+        message: `Downloading update… ${percent}%`,
         version: normalizeVersion(latestTag || ''),
       });
     });
@@ -389,27 +520,28 @@ async function downloadAndInstall(setupUrl, latestTag) {
   sendProgress({
     status: 'installing',
     percent: 100,
-    message: 'Updating…',
+    message: 'Download complete. Closing ARK to finish updating…',
     version: normalizeVersion(latestTag || ''),
   });
 
+  // Start the external Updating splash, then quit so the installer can replace files.
   setTimeout(() => {
     try {
       launchInstallerThenRelaunch(dest);
     } catch (err) {
-      console.error('[ark] failed to launch installer helper', err);
+      console.error('[ark] failed to launch update splash', err);
       sendProgress({
         status: 'error',
         percent: 100,
-        message: 'Could not start the installer. Try again.',
+        message: 'Could not start the updater. Try again.',
         error: err instanceof Error ? err.message : 'spawn failed',
       });
       return;
     }
-    setTimeout(() => app.quit(), 800);
-  }, 1800);
+    setTimeout(() => app.quit(), 500);
+  }, 900);
 
-  return { ok: true, message: 'Updating…' };
+  return { ok: true, message: 'Download complete. Closing ARK to finish updating…' };
 }
 
 module.exports = {

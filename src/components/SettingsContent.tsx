@@ -89,7 +89,7 @@ export function SettingsContent() {
     latestTag?: string;
   } | null>(null);
   const [updatePercent, setUpdatePercent] = useState(0);
-  const [appVersion, setAppVersion] = useState('0.1.9');
+  const [appVersion, setAppVersion] = useState('0.1.10');
   const [twoFaCode, setTwoFaCode] = useState('');
   const [twoFaSetup, setTwoFaSetup] = useState(false);
   const [savedFlash, setSavedFlash] = useState('');
@@ -881,7 +881,7 @@ export function SettingsContent() {
                     </div>
                   </div>
                   <p className="text-[11px] text-content-tertiary leading-relaxed">
-                    Check finds a new build, then Update installs it inside ARK and reopens on New Chat — no browser, no terminals.
+                    Check → Update downloads in ARK, then a small Updating window finishes install and reopens the app.
                   </p>
                 </div>
 
