@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { useAuth } from '@/context/AuthContext';
-import { Loader2, Mail, Lock, AlertCircle, ArrowRight, Zap, Eye, EyeOff } from 'lucide-react';
+import { Loader2, Mail, Lock, AlertCircle, Zap, Eye, EyeOff } from 'lucide-react';
 import { AuthAmbientOrbs } from '@/components/auth/AuthAmbientOrbs';
 
 const TYPE_PHRASES = [
@@ -15,6 +15,8 @@ const TYPE_PHRASES = [
   'Your studio',
   'Code and ship',
 ];
+
+type AuthMode = 'signin' | 'signup';
 
 function TypewriterHero() {
   const [phraseIndex, setPhraseIndex] = useState(0);
@@ -90,25 +92,14 @@ function SocialIconButton({
 
 export function AuthScreen() {
   const { signIn, signUp, bypassLogin } = useAuth();
-  // Bypass is for local testing only — hidden in packaged release builds.
+  const [mode, setMode] = useState<AuthMode>('signin');
   const [showBypass, setShowBypass] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [showPasswordStep, setShowPasswordStep] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const passwordRef = useRef<HTMLInputElement>(null);
-
-  const lastAuth = (() => {
-    try {
-      const raw = localStorage.getItem('ark:last-auth');
-      if (!raw) return null;
-      return JSON.parse(raw) as { method?: string; email?: string; at?: string };
-    } catch {
-      return null;
-    }
-  })();
 
   useEffect(() => {
     void window.arkDesktop?.appMeta?.()
@@ -118,56 +109,50 @@ export function AuthScreen() {
       .catch(() => {});
   }, []);
 
-  useEffect(() => {
-    if (showPasswordStep) passwordRef.current?.focus();
-  }, [showPasswordStep]);
-
-  const advanceFromEmail = () => {
-    if (!email.trim() || !email.includes('@')) {
-      setError('Enter a valid email to continue.');
-      return;
-    }
+  const switchMode = (next: AuthMode) => {
+    setMode(next);
     setError(null);
-    setShowPasswordStep(true);
-  };
-
-  const handleEmailKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      advanceFromEmail();
-    }
+    setPassword('');
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!showPasswordStep) {
-      advanceFromEmail();
+    if (!email.trim() || !email.includes('@')) {
+      setError('Enter a valid email to continue.');
       return;
     }
+    if (password.length < 6) {
+      setError('Password must be at least 6 characters.');
+      return;
+    }
+
     setError(null);
     setLoading(true);
 
-    // One email flow for both returning and new users
-    const signedIn = await signIn(email.trim(), password);
-    if (!signedIn.error) {
+    if (mode === 'signin') {
+      const signedIn = await signIn(email.trim(), password);
       setLoading(false);
+      if (signedIn.error) setError(signedIn.error);
       return;
     }
 
     const created = await signUp(email.trim(), password);
-    if (!created.error) {
-      // After signup, try sign in so they land in the app
-      await signIn(email.trim(), password);
+    if (created.error) {
       setLoading(false);
+      setError(created.error);
       return;
     }
 
+    const signedIn = await signIn(email.trim(), password);
     setLoading(false);
-    setError(signedIn.error || created.error);
+    if (signedIn.error) {
+      setError('Account created. If email confirmation is required, check your inbox, then sign in.');
+      setMode('signin');
+    }
   };
 
   const socialStub = (name: string) => {
-    setError(`${name} sign in is coming soon. Use email or Bypass Login for now.`);
+    setError(`${name} ${mode === 'signup' ? 'sign up' : 'sign in'} is coming soon. Use email for now.`);
   };
 
   return (
@@ -179,14 +164,42 @@ export function AuthScreen() {
       <div className="relative z-10 flex-1 flex items-center justify-center px-4 py-10">
         <div className="w-full max-w-[420px] animate-fade-in">
           <div className="lg:hidden text-center mb-8">
-            <h1 className="text-2xl font-semibold tracking-[0.2em] text-content-primary">ARK</h1>
+            <img
+              src={`${import.meta.env.BASE_URL}ark-icon.png`}
+              alt="ARK"
+              className="w-10 h-10 rounded-xl object-cover mx-auto"
+            />
           </div>
 
           <div className="rounded-2xl border border-surface-border bg-ark-navy-900/90 p-7 sm:p-8 shadow-2xl animate-slide-up backdrop-blur-sm">
-            <div className="text-center mb-7">
-              <h2 className="text-2xl font-semibold text-content-primary tracking-tight">
-                Sign into your account
-              </h2>
+            <div className="mb-6">
+              <div className="grid grid-cols-2 gap-1 rounded-xl border border-surface-border bg-ark-navy-950/80 p-1">
+                <button
+                  type="button"
+                  onClick={() => switchMode('signin')}
+                  className={`h-10 rounded-lg text-sm font-medium transition-colors ${
+                    mode === 'signin'
+                      ? 'bg-surface-hover text-content-primary'
+                      : 'text-content-tertiary hover:text-content-secondary'
+                  }`}
+                >
+                  Sign in
+                </button>
+                <button
+                  type="button"
+                  onClick={() => switchMode('signup')}
+                  className={`h-10 rounded-lg text-sm font-medium transition-colors ${
+                    mode === 'signup'
+                      ? 'bg-surface-hover text-content-primary'
+                      : 'text-content-tertiary hover:text-content-secondary'
+                  }`}
+                >
+                  Sign up
+                </button>
+              </div>
+              <p className="text-center text-sm text-content-secondary mt-4">
+                {mode === 'signin' ? 'Welcome back to ARK' : 'Create your ARK account'}
+              </p>
             </div>
 
             <div className="flex items-center justify-center gap-2.5 mb-6">
@@ -238,51 +251,35 @@ export function AuthScreen() {
                   type="email"
                   required
                   value={email}
-                  onChange={e => {
-                    setEmail(e.target.value);
-                    if (showPasswordStep) setShowPasswordStep(false);
-                  }}
-                  onKeyDown={handleEmailKeyDown}
+                  onChange={e => setEmail(e.target.value)}
                   placeholder="name@example.com"
-                  className="ark-input pl-10 pr-12 h-12 rounded-xl"
+                  className="ark-input pl-10 h-12 rounded-xl"
                   autoComplete="email"
                 />
-                {!showPasswordStep && (
-                  <button
-                    type="button"
-                    onClick={advanceFromEmail}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-content-primary text-ark-navy-950 flex items-center justify-center hover:opacity-90 transition-opacity"
-                    aria-label="Continue"
-                  >
-                    <ArrowRight className="w-4 h-4" />
-                  </button>
-                )}
               </div>
 
-              {showPasswordStep && (
-                <div className="relative animate-fade-in">
-                  <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-content-tertiary" />
-                  <input
-                    ref={passwordRef}
-                    type={showPassword ? 'text' : 'password'}
-                    required
-                    minLength={6}
-                    value={password}
-                    onChange={e => setPassword(e.target.value)}
-                    placeholder="Your password"
-                    className="ark-input pl-10 pr-12 h-12 rounded-xl"
-                    autoComplete="current-password"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(v => !v)}
-                    className="absolute right-3.5 top-1/2 -translate-y-1/2 text-content-tertiary hover:text-content-secondary"
-                    aria-label={showPassword ? 'Hide password' : 'Show password'}
-                  >
-                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
-                </div>
-              )}
+              <div className="relative">
+                <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-content-tertiary" />
+                <input
+                  ref={passwordRef}
+                  type={showPassword ? 'text' : 'password'}
+                  required
+                  minLength={6}
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  placeholder={mode === 'signup' ? 'Create a password' : 'Your password'}
+                  className="ark-input pl-10 pr-12 h-12 rounded-xl"
+                  autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(v => !v)}
+                  className="absolute right-3.5 top-1/2 -translate-y-1/2 text-content-tertiary hover:text-content-secondary"
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                >
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
 
               {error && (
                 <div className="flex items-start gap-2 text-sm text-ark-accent-red bg-ark-accent-red/10 border border-ark-accent-red/20 rounded-xl px-3 py-2.5 animate-fade-in">
@@ -291,12 +288,10 @@ export function AuthScreen() {
                 </div>
               )}
 
-              {showPasswordStep && (
-                <button type="submit" disabled={loading} className="ark-btn-primary w-full h-11 rounded-xl">
-                  {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                  Continue
-                </button>
-              )}
+              <button type="submit" disabled={loading} className="ark-btn-primary w-full h-11 rounded-xl">
+                {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                {mode === 'signin' ? 'Sign in' : 'Create account'}
+              </button>
             </form>
 
             {showBypass && (
@@ -330,12 +325,6 @@ export function AuthScreen() {
                   </button>
                 </div>
               </>
-            )}
-            {lastAuth && (
-              <p className="text-[11px] text-content-tertiary text-center mt-3 leading-relaxed">
-                Last time: {lastAuth.method === 'bypass' ? 'Guest on this device' : lastAuth.email || 'account'}
-                {lastAuth.at ? ` · ${new Date(lastAuth.at).toLocaleDateString()}` : ''}.
-              </p>
             )}
 
             <p className="text-center text-[11px] text-content-tertiary mt-5 leading-relaxed">

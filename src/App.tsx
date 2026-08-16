@@ -44,7 +44,7 @@ function AppContent() {
   if (loading) {
     return (
       <div className="h-full bg-ark-navy-950 flex items-center justify-center">
-        <Loader2 className="w-6 h-6 text-ark-blue-400 animate-spin" />
+        <Loader2 className="w-6 h-6 text-content-secondary animate-spin" />
       </div>
     );
   }

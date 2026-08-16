@@ -53,7 +53,7 @@ function createWindow() {
     minWidth: 940,
     minHeight: 600,
     title: 'ARK',
-    backgroundColor: '#0a0e1a',
+    backgroundColor: '#000000',
     autoHideMenuBar: true,
     show: false,
     frame: false,
@@ -84,6 +84,7 @@ function createWindow() {
 
   // One-shot wipe of chat/recent localStorage so this reopen starts empty.
   win.webContents.once('did-finish-load', () => {
+    win.setTitle('ARK');
     win.webContents
       .executeJavaScript(`(() => {
         try {
