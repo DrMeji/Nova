@@ -48,7 +48,10 @@ declare global {
       speedTest?: () => Promise<{
         ok: boolean;
         MBps: number;
+        downMBps?: number;
+        upMBps?: number;
         source?: string;
+        samples?: number;
         bytes?: number;
         ms?: number;
         error?: string;

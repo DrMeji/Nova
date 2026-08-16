@@ -3,7 +3,10 @@
 export type SpeedSample = {
   /** Download throughput in megabytes per second */
   MBps: number;
+  /** Upload throughput when measured */
+  upMBps?: number;
   source: 'measured' | 'browser' | 'estimate';
+  samples?: number;
 };
 
 export type PreloadPlan = {
@@ -106,19 +109,25 @@ export function computePreloadPlan(
   };
 }
 
-/** Best-effort download speed sample. Desktop uses a 25 MB Cloudflare probe in main. */
+/** Best-effort speed sample. Desktop: warmup + 3×40MB download median + upload. */
 export async function runSpeedTest(): Promise<SpeedSample> {
   try {
     const desktop = await window.arkDesktop?.speedTest?.();
-    if (desktop?.ok && desktop.MBps > 0) {
-      return { MBps: desktop.MBps, source: 'measured' };
+    if (desktop?.ok && (desktop.MBps > 0 || (desktop.downMBps ?? 0) > 0)) {
+      const down = desktop.downMBps ?? desktop.MBps;
+      return {
+        MBps: down,
+        upMBps: desktop.upMBps,
+        source: 'measured',
+        samples: desktop.samples,
+      };
     }
   } catch {
     /* fall through to browser probe */
   }
 
   try {
-    const bytes = 10_000_000;
+    const bytes = 25_000_000;
     const url = `https://speed.cloudflare.com/__down?bytes=${bytes}&measId=${Date.now()}`;
     const t0 = performance.now();
     const res = await fetch(url, { cache: 'no-store', mode: 'cors' });
@@ -130,7 +139,6 @@ export async function runSpeedTest(): Promise<SpeedSample> {
   } catch {
     const conn = (navigator as Navigator & { connection?: { downlink?: number } }).connection;
     if (conn?.downlink && conn.downlink > 0) {
-      // downlink is megabits/sec → megabytes/sec
       return { MBps: conn.downlink / 8, source: 'browser' };
     }
     return { MBps: 8, source: 'estimate' };

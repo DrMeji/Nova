@@ -141,53 +141,109 @@ async function probeSystemInfo() {
 }
 
 /**
- * Measure download throughput via Cloudflare (larger sample = more accurate).
- * @returns {{ ok: boolean, MBps: number, source: string, bytes?: number, ms?: number, error?: string }}
+ * Measure download + upload via Cloudflare Speed endpoints (warmup + median of 3 downs).
+ * Same public measurement approach many tools use — Ookla Speedtest.net is proprietary
+ * and cannot be embedded; this is the accurate open alternative.
+ * @returns {{ ok: boolean, MBps: number, downMBps?: number, upMBps?: number, source: string, samples?: number, error?: string }}
  */
 async function probeSpeedTest() {
   const https = require('https');
-  const bytes = 25_000_000; // 25 MB
-  const url = `https://speed.cloudflare.com/__down?bytes=${bytes}&measId=${Date.now()}`;
 
-  return new Promise((resolve) => {
-    const t0 = Date.now();
-    let received = 0;
-    const req = https.get(url, { headers: { 'User-Agent': 'ARK-Engine/0.4' } }, (res) => {
-      if ((res.statusCode || 0) >= 300 && (res.statusCode || 0) < 400 && res.headers.location) {
-        res.resume();
-        // follow one redirect manually via recursive call not needed — CF usually 200
-      }
-      if ((res.statusCode || 0) < 200 || (res.statusCode || 0) >= 300) {
-        res.resume();
-        resolve({ ok: false, MBps: 0, source: 'failed', error: `HTTP ${res.statusCode}` });
-        return;
-      }
-      res.on('data', (chunk) => {
-        received += chunk.length;
-      });
-      res.on('end', () => {
-        const ms = Math.max(Date.now() - t0, 1);
-        const MBps = received / (1024 * 1024) / (ms / 1000);
-        resolve({
-          ok: true,
-          MBps: Math.round(MBps * 100) / 100,
-          source: 'measured',
-          bytes: received,
-          ms,
+  function downloadOnce(bytes, timeoutMs = 90_000) {
+    const url = `https://speed.cloudflare.com/__down?bytes=${bytes}&measId=${Date.now()}-${Math.random()}`;
+    return new Promise((resolve) => {
+      const t0 = Date.now();
+      let received = 0;
+      const req = https.get(url, { headers: { 'User-Agent': 'ARK-Engine/0.4' } }, (res) => {
+        if ((res.statusCode || 0) < 200 || (res.statusCode || 0) >= 300) {
+          res.resume();
+          resolve({ ok: false, MBps: 0 });
+          return;
+        }
+        res.on('data', (chunk) => { received += chunk.length; });
+        res.on('end', () => {
+          const ms = Math.max(Date.now() - t0, 1);
+          resolve({ ok: true, MBps: received / (1024 * 1024) / (ms / 1000) });
         });
+        res.on('error', () => resolve({ ok: false, MBps: 0 }));
       });
-      res.on('error', (err) => {
-        resolve({ ok: false, MBps: 0, source: 'failed', error: err.message });
+      req.on('error', () => resolve({ ok: false, MBps: 0 }));
+      req.setTimeout(timeoutMs, () => {
+        req.destroy();
+        resolve({ ok: false, MBps: 0 });
       });
     });
-    req.on('error', (err) => {
-      resolve({ ok: false, MBps: 0, source: 'failed', error: err.message });
+  }
+
+  function uploadOnce(bytes, timeoutMs = 90_000) {
+    const payload = Buffer.alloc(bytes, 0x61);
+    return new Promise((resolve) => {
+      const t0 = Date.now();
+      const req = https.request(
+        {
+          hostname: 'speed.cloudflare.com',
+          path: `/__up?measId=${Date.now()}`,
+          method: 'POST',
+          headers: {
+            'User-Agent': 'ARK-Engine/0.4',
+            'Content-Type': 'application/octet-stream',
+            'Content-Length': payload.length,
+          },
+        },
+        (res) => {
+          res.resume();
+          res.on('end', () => {
+            const ms = Math.max(Date.now() - t0, 1);
+            if ((res.statusCode || 0) < 200 || (res.statusCode || 0) >= 300) {
+              resolve({ ok: false, MBps: 0 });
+              return;
+            }
+            resolve({ ok: true, MBps: bytes / (1024 * 1024) / (ms / 1000) });
+          });
+          res.on('error', () => resolve({ ok: false, MBps: 0 }));
+        },
+      );
+      req.on('error', () => resolve({ ok: false, MBps: 0 }));
+      req.setTimeout(timeoutMs, () => {
+        req.destroy();
+        resolve({ ok: false, MBps: 0 });
+      });
+      req.write(payload);
+      req.end();
     });
-    req.setTimeout(60_000, () => {
-      req.destroy();
-      resolve({ ok: false, MBps: 0, source: 'failed', error: 'Speed test timed out' });
-    });
-  });
+  }
+
+  function median(values) {
+    const sorted = values.filter((n) => Number.isFinite(n) && n > 0).sort((a, b) => a - b);
+    if (!sorted.length) return 0;
+    const mid = Math.floor(sorted.length / 2);
+    return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+  }
+
+  await downloadOnce(2_000_000, 30_000);
+
+  const downSamples = [];
+  for (let i = 0; i < 3; i++) {
+    const sample = await downloadOnce(40_000_000, 90_000);
+    if (sample.ok) downSamples.push(sample.MBps);
+  }
+
+  const upSample = await uploadOnce(15_000_000, 90_000);
+  const downMBps = median(downSamples);
+  const upMBps = upSample.ok ? upSample.MBps : 0;
+
+  if (downMBps <= 0 && upMBps <= 0) {
+    return { ok: false, MBps: 0, downMBps: 0, upMBps: 0, source: 'failed', error: 'Speed test failed' };
+  }
+
+  return {
+    ok: true,
+    MBps: Math.round(downMBps * 100) / 100,
+    downMBps: Math.round(downMBps * 100) / 100,
+    upMBps: Math.round(upMBps * 100) / 100,
+    source: 'measured',
+    samples: downSamples.length,
+  };
 }
 
 module.exports = {

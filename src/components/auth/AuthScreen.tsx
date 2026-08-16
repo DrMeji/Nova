@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { useAuth } from '@/context/AuthContext';
-import { Loader2, Mail, Lock, AlertCircle, Zap, Eye, EyeOff } from 'lucide-react';
+import { Loader2, Mail, Lock, AlertCircle, Zap, Eye, EyeOff, User } from 'lucide-react';
 import { AuthAmbientOrbs } from '@/components/auth/AuthAmbientOrbs';
 
 const TYPE_PHRASES = [
@@ -91,13 +91,15 @@ function SocialIconButton({
 }
 
 export function AuthScreen() {
-  const { signIn, signUp, bypassLogin } = useAuth();
+  const { signIn, signUp, resetPassword, bypassLogin } = useAuth();
   const [mode, setMode] = useState<AuthMode>('signin');
   const [showBypass, setShowBypass] = useState(true);
   const [email, setEmail] = useState('');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const passwordRef = useRef<HTMLInputElement>(null);
 
@@ -112,7 +114,25 @@ export function AuthScreen() {
   const switchMode = (next: AuthMode) => {
     setMode(next);
     setError(null);
+    setInfo(null);
     setPassword('');
+  };
+
+  const handleForgotPassword = async () => {
+    if (!email.trim() || !email.includes('@')) {
+      setError('Enter your email above, then click Forgot password.');
+      return;
+    }
+    setError(null);
+    setInfo(null);
+    setLoading(true);
+    const result = await resetPassword(email.trim());
+    setLoading(false);
+    if (result.error) {
+      setError(result.error);
+      return;
+    }
+    setInfo('Password reset email sent. Check your inbox for the link.');
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -121,12 +141,24 @@ export function AuthScreen() {
       setError('Enter a valid email to continue.');
       return;
     }
+    if (mode === 'signup') {
+      const name = username.trim();
+      if (name.length < 2) {
+        setError('Pick a username (at least 2 characters).');
+        return;
+      }
+      if (!/^[a-zA-Z0-9_\-. ]{2,32}$/.test(name)) {
+        setError('Username can use letters, numbers, spaces, _ . - (2–32 chars).');
+        return;
+      }
+    }
     if (password.length < 6) {
       setError('Password must be at least 6 characters.');
       return;
     }
 
     setError(null);
+    setInfo(null);
     setLoading(true);
 
     if (mode === 'signin') {
@@ -136,7 +168,7 @@ export function AuthScreen() {
       return;
     }
 
-    const created = await signUp(email.trim(), password);
+    const created = await signUp(email.trim(), password, username.trim());
     if (created.error) {
       setLoading(false);
       setError(created.error);
@@ -258,6 +290,22 @@ export function AuthScreen() {
                 />
               </div>
 
+              {mode === 'signup' && (
+                <div className="relative animate-fade-in">
+                  <User className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-content-tertiary" />
+                  <input
+                    type="text"
+                    required
+                    value={username}
+                    onChange={e => setUsername(e.target.value)}
+                    placeholder="Choose a username"
+                    className="ark-input pl-10 h-12 rounded-xl"
+                    autoComplete="username"
+                    maxLength={32}
+                  />
+                </div>
+              )}
+
               <div className="relative">
                 <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-content-tertiary" />
                 <input
@@ -281,10 +329,29 @@ export function AuthScreen() {
                 </button>
               </div>
 
+              {mode === 'signin' && (
+                <div className="flex justify-end -mt-1">
+                  <button
+                    type="button"
+                    onClick={() => void handleForgotPassword()}
+                    disabled={loading}
+                    className="text-xs text-content-tertiary hover:text-content-secondary"
+                  >
+                    Forgot password?
+                  </button>
+                </div>
+              )}
+
               {error && (
                 <div className="flex items-start gap-2 text-sm text-ark-accent-red bg-ark-accent-red/10 border border-ark-accent-red/20 rounded-xl px-3 py-2.5 animate-fade-in">
                   <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
                   <span>{error}</span>
+                </div>
+              )}
+
+              {info && (
+                <div className="flex items-start gap-2 text-sm text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-3 py-2.5 animate-fade-in">
+                  <span>{info}</span>
                 </div>
               )}
 

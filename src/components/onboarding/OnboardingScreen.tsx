@@ -351,13 +351,23 @@ export function OnboardingScreen() {
               {speedSample && (
                 <div className="flex flex-col animate-fade-in">
                   <div className="flex items-center justify-between py-3 border-b border-surface-border">
-                    <span className="text-sm text-content-secondary">Download speed</span>
+                    <span className="text-sm text-content-secondary">Download</span>
                     <span className="text-sm text-content-primary">{formatMBps(speedSample.MBps)}</span>
                   </div>
+                  {speedSample.upMBps != null && speedSample.upMBps > 0 && (
+                    <div className="flex items-center justify-between py-3 border-b border-surface-border">
+                      <span className="text-sm text-content-secondary">Upload</span>
+                      <span className="text-sm text-content-primary">{formatMBps(speedSample.upMBps)}</span>
+                    </div>
+                  )}
                   <div className="flex items-center justify-between py-3">
                     <span className="text-sm text-content-secondary">Source</span>
-                    <span className="text-sm text-content-primary capitalize">
-                      {speedSample.source === 'measured' ? 'Live measurement' : speedSample.source === 'browser' ? 'Browser estimate' : 'Fallback estimate'}
+                    <span className="text-sm text-content-primary">
+                      {speedSample.source === 'measured'
+                        ? `Live · ${speedSample.samples ? `${speedSample.samples} samples` : 'measured'}`
+                        : speedSample.source === 'browser'
+                          ? 'Browser estimate'
+                          : 'Fallback estimate'}
                     </span>
                   </div>
                 </div>

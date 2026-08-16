@@ -54,6 +54,7 @@ interface AuthContextValue {
   bypass: boolean;
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
   signUp: (email: string, password: string, displayName?: string) => Promise<{ error: string | null }>;
+  resetPassword: (email: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
   /** Guest login. skipSetup: true jumps straight into the app; false runs first-run optimize. */
   bypassLogin: (options?: { skipSetup?: boolean }) => void;
@@ -81,8 +82,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     ]);
     if (profileRes.data) {
       const p = profileRes.data as Profile;
-      // Local first-run gate wins until setup is marked complete on this device.
-      setProfile({ ...p, onboarding_completed: isSetupCompleted() });
+      const metaName = (await supabase.auth.getUser()).data.user?.user_metadata?.display_name as string | undefined;
+      const display = p.display_name || metaName || null;
+      setProfile({
+        ...p,
+        display_name: display,
+        onboarding_completed: isSetupCompleted(),
+      });
+      if (display) {
+        try {
+          const { getLocalPrefs, setLocalPrefs } = await import('@/lib/localPrefs');
+          const prefs = getLocalPrefs();
+          if (!prefs.displayName || prefs.displayName === 'Guest') {
+            setLocalPrefs({ displayName: display });
+          }
+        } catch {
+          /* ignore */
+        }
+      }
     } else {
       setProfile({
         id: userId,
@@ -174,10 +191,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signUp = async (email: string, password: string, displayName?: string) => {
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
-      options: { data: { display_name: displayName } },
+      options: { data: { display_name: displayName?.trim() || undefined } },
+    });
+    if (!error && data.user && displayName?.trim()) {
+      try {
+        await supabase.from('profiles').upsert({
+          id: data.user.id,
+          display_name: displayName.trim(),
+          onboarding_completed: false,
+        });
+      } catch {
+        /* profile row may be created by trigger */
+      }
+      try {
+        const { setLocalPrefs } = await import('@/lib/localPrefs');
+        setLocalPrefs({ displayName: displayName.trim() });
+      } catch {
+        /* ignore */
+      }
+    }
+    return { error: error?.message ?? null };
+  };
+
+  const resetPassword = async (email: string) => {
+    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+      redirectTo: 'https://github.com/DrMeji/Ark',
     });
     return { error: error?.message ?? null };
   };
@@ -236,7 +277,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ session, user, profile, settings, loading, bypass, signIn, signUp, signOut, bypassLogin, refreshProfile, updateSettings }}>
+    <AuthContext.Provider value={{ session, user, profile, settings, loading, bypass, signIn, signUp, resetPassword, signOut, bypassLogin, refreshProfile, updateSettings }}>
       {children}
     </AuthContext.Provider>
   );

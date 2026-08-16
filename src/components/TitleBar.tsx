@@ -1,10 +1,7 @@
 import { Minus, Square, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
-/**
- * Frameless window chrome only — no brand text (sidebar owns branding).
- * Drag the empty area to move; controls stay on the right.
- */
+/** Overlay window chrome — does not push layout down (even sidebar padding). */
 export function TitleBar() {
   const desktop = typeof window !== 'undefined' ? window.arkDesktop : undefined;
   const [visible, setVisible] = useState(Boolean(desktop?.windowControls));
@@ -23,7 +20,7 @@ export function TitleBar() {
 
   return (
     <div
-      className="ark-titlebar shrink-0 h-8 flex items-stretch select-none bg-ark-navy-950"
+      className="ark-titlebar absolute top-0 inset-x-0 z-50 h-8 flex items-stretch select-none bg-transparent"
       style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
     >
       <div className="flex-1 min-w-0" />

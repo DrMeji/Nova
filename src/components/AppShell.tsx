@@ -1,6 +1,7 @@
-﻿import { useState, type ReactNode } from 'react';
+﻿import { useEffect, useState, type ReactNode } from 'react';
 import { useRouter, type Route } from '@/context/RouterContext';
 import { useAuth } from '@/context/AuthContext';
+import { getLocalPrefs } from '@/lib/localPrefs';
 import {
   SquarePen, Briefcase, Blocks, Database, Bot,
   Settings, Search, PanelLeft, ChevronDown, Folder, History, Clock3,
@@ -22,6 +23,17 @@ const NAV_ITEMS: { label: string; icon: React.ComponentType<{ className?: string
   { label: 'Local AI', icon: Bot, route: { name: 'local-ai' } },
 ];
 
+function resolveDisplayName(
+  prefsName: string | undefined,
+  profileName: string | null | undefined,
+  email: string | undefined,
+) {
+  const fromPrefs = prefsName?.trim();
+  if (fromPrefs && fromPrefs !== 'Guest') return fromPrefs;
+  if (profileName?.trim()) return profileName.trim();
+  return email?.split('@')[0] || 'Guest';
+}
+
 export function AppShell({ children }: { children: ReactNode }) {
   const { route, navigate } = useRouter();
   const { user, profile } = useAuth();
@@ -30,9 +42,20 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [recentOpen, setRecentOpen] = useState(true);
+  const [prefsName, setPrefsName] = useState(() => getLocalPrefs().displayName);
 
-  const displayName = profile?.display_name ?? user?.email?.split('@')[0] ?? 'Guest';
-  const initial = (profile?.display_name ?? user?.email ?? '?')[0].toUpperCase();
+  useEffect(() => {
+    const onPrefs = () => setPrefsName(getLocalPrefs().displayName);
+    window.addEventListener('ark:prefs-changed', onPrefs);
+    return () => window.removeEventListener('ark:prefs-changed', onPrefs);
+  }, []);
+
+  useEffect(() => {
+    if (!settingsOpen) setPrefsName(getLocalPrefs().displayName);
+  }, [settingsOpen]);
+
+  const displayName = resolveDisplayName(prefsName, profile?.display_name, user?.email);
+  const initial = displayName[0]?.toUpperCase() || '?';
 
   const inRecentChat = route.name === 'chat' && Boolean(route.chatId);
 

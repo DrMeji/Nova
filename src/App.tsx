@@ -18,7 +18,6 @@ import { Settings } from '@/views/Settings';
 import { runCleanBootIfNeeded } from '@/lib/clearSession';
 import { Loader2 } from 'lucide-react';
 
-// Wipe chat + Recent history once for this clean-boot token (fresh test slate).
 runCleanBootIfNeeded();
 
 function AppRoutes() {
@@ -53,7 +52,6 @@ function AppContent() {
     return <AuthScreen />;
   }
 
-  // First run only: optimize connection + hardware before the main app.
   if (!profile?.onboarding_completed) {
     return <OnboardingScreen />;
   }
@@ -70,9 +68,10 @@ function AppContent() {
 function App() {
   return (
     <ThemeProvider>
-      <div className="h-screen flex flex-col overflow-hidden bg-ark-navy-950">
+      {/* Full-bleed shell; title controls overlay so sidebar padding is even top/bottom */}
+      <div className="h-screen relative overflow-hidden bg-ark-navy-950">
         <TitleBar />
-        <div className="flex-1 min-h-0 overflow-hidden">
+        <div className="h-full overflow-hidden">
           <AuthProvider>
             <RouterProvider>
               <AppContent />

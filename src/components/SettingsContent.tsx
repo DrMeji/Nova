@@ -32,6 +32,7 @@ const SECTIONS = [
   { id: 'projects', label: 'Projects', icon: FolderKanban },
   { id: 'security', label: 'Security', icon: Lock },
   { id: 'updates', label: 'Updates', icon: RefreshCw },
+  { id: 'beta', label: 'Beta', icon: FlaskConical, disabled: true },
 ];
 
 const AI_MODES = [
@@ -68,7 +69,7 @@ const ACCENTS: { id: AccentPref; label: string; swatch: string }[] = [
 ];
 
 export function SettingsContent() {
-  const { user, profile, settings, updateSettings, signOut } = useAuth();
+  const { user, profile, settings, updateSettings, signOut, refreshProfile } = useAuth();
   const { theme, setTheme } = useTheme();
   const { navigate } = useRouter();
   const [activeSection, setActiveSection] = useState('account');
@@ -81,7 +82,7 @@ export function SettingsContent() {
   const [keyDraft, setKeyDraft] = useState('');
   const [checkingUpdates, setCheckingUpdates] = useState(false);
   const [updateMsg, setUpdateMsg] = useState('You are on the latest build for this channel.');
-  const [appVersion, setAppVersion] = useState('0.1.2');
+  const [appVersion, setAppVersion] = useState('0.1.4');
   const [twoFaCode, setTwoFaCode] = useState('');
   const [twoFaSetup, setTwoFaSetup] = useState(false);
   const [savedFlash, setSavedFlash] = useState('');
@@ -108,8 +109,21 @@ export function SettingsContent() {
 
   const keyedCount = useMemo(() => Object.keys(providerKeys).length, [providerKeys]);
 
-  const saveDisplayName = () => {
-    patchPrefs({ displayName: displayName.trim() || 'Guest' });
+  const saveDisplayName = async () => {
+    const name = displayName.trim() || 'Guest';
+    patchPrefs({ displayName: name });
+    if (user && user.id !== 'guest-local') {
+      try {
+        const { supabase } = await import('@/lib/supabase');
+        await supabase.from('profiles').upsert({
+          id: user.id,
+          display_name: name,
+        });
+        await refreshProfile();
+      } catch {
+        /* local prefs still saved */
+      }
+    }
   };
 
   const checkForUpdates = () => {
@@ -138,8 +152,15 @@ export function SettingsContent() {
             <button
               key={section.id}
               type="button"
-              onClick={() => setActiveSection(section.id)}
-              className={`ark-nav-item ${activeSection === section.id ? 'active' : ''}`}
+              disabled={'disabled' in section && section.disabled}
+              onClick={() => {
+                if ('disabled' in section && section.disabled) return;
+                setActiveSection(section.id);
+              }}
+              className={`ark-nav-item ${activeSection === section.id ? 'active' : ''} ${
+                'disabled' in section && section.disabled ? 'opacity-40 cursor-not-allowed pointer-events-none' : ''
+              }`}
+              title={'disabled' in section && section.disabled ? 'Coming later' : undefined}
             >
               <section.icon className="w-4 h-4 shrink-0" />
               <span>{section.label}</span>
@@ -776,48 +797,6 @@ export function SettingsContent() {
                   </button>
                 </div>
 
-                <div className="ark-card p-4">
-                  <div className="flex items-start gap-3">
-                    <div className="w-10 h-10 rounded-lg bg-amber-500/10 flex items-center justify-center shrink-0">
-                      <FlaskConical className="w-5 h-5 text-amber-400" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-content-primary">Beta channel</p>
-                      <p className="text-xs text-content-tertiary mt-0.5">
-                        Get experimental builds earlier. Beta can be less stable than Stable.
-                      </p>
-                      <div className="mt-3 flex items-center gap-2">
-                        {([
-                          { id: 'stable' as UpdateChannel, label: 'Stable' },
-                          { id: 'beta' as UpdateChannel, label: 'Beta' },
-                        ]).map(ch => (
-                          <button
-                            key={ch.id}
-                            type="button"
-                            onClick={() => {
-                              patchPrefs({ updateChannel: ch.id });
-                              setUpdateMsg(
-                                ch.id === 'beta'
-                                  ? 'Switched to Beta. New experimental builds will show in What’s new.'
-                                  : 'Switched to Stable. Only released versions will show.',
-                              );
-                            }}
-                            className={`rounded-full px-3.5 py-1.5 text-xs font-medium transition-colors ${
-                              prefs.updateChannel === ch.id
-                                ? ch.id === 'beta'
-                                  ? 'bg-amber-500/20 text-amber-300'
-                                  : 'bg-surface-hover text-content-primary'
-                                : 'text-content-tertiary hover:text-content-secondary'
-                            }`}
-                          >
-                            {ch.label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
                 <ToggleRow
                   label="Automatically check for updates"
                   description="Look for new builds when ARK starts"
@@ -867,9 +846,34 @@ export function SettingsContent() {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2 text-[11px] text-content-tertiary">
-                  <Bell className="w-3.5 h-3.5" />
+                <p className="text-[11px] text-content-tertiary leading-relaxed">
                   Changelog updates here whenever we ship meaningful product changes.
+                </p>
+              </div>
+            </SettingsSection>
+          )}
+
+          {activeSection === 'beta' && (
+            <SettingsSection title="Beta" description="Experimental channel (coming later)">
+              <div className="ark-card p-4 opacity-50 pointer-events-none select-none">
+                <div className="flex items-start gap-3">
+                  <div className="w-10 h-10 rounded-lg bg-amber-500/10 flex items-center justify-center shrink-0">
+                    <FlaskConical className="w-5 h-5 text-amber-400" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-content-primary">Beta channel</p>
+                    <p className="text-xs text-content-tertiary mt-0.5">
+                      Early experimental builds will live here. Not available yet.
+                    </p>
+                    <div className="mt-3 flex items-center gap-2">
+                      <span className="rounded-full px-3.5 py-1.5 text-xs font-medium bg-surface-hover text-content-tertiary">
+                        Stable
+                      </span>
+                      <span className="rounded-full px-3.5 py-1.5 text-xs font-medium text-content-tertiary">
+                        Beta
+                      </span>
+                    </div>
+                  </div>
                 </div>
               </div>
             </SettingsSection>

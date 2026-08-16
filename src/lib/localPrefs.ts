@@ -89,6 +89,11 @@ export function getLocalPrefs(): LocalPrefs {
 export function setLocalPrefs(patch: Partial<LocalPrefs>): LocalPrefs {
   const next = { ...getLocalPrefs(), ...patch };
   localStorage.setItem(PREFS_KEY, JSON.stringify(next));
+  try {
+    window.dispatchEvent(new CustomEvent('ark:prefs-changed', { detail: next }));
+  } catch {
+    /* ignore */
+  }
   return next;
 }
 
@@ -192,6 +197,18 @@ export function hasProviderApiKey(providerId: string) {
 
 /** App changelog shown in Settings → Updates. */
 export const ARK_CHANGELOG = [
+  {
+    version: '0.1.4',
+    channel: 'stable' as const,
+    date: 'Aug 15, 2026',
+    title: 'Auth, speed, and chrome',
+    notes: [
+      'Forgot password + username on sign up',
+      'Faster/more accurate speed test (multi-sample + upload)',
+      'Sidebar top spacing aligned; display name syncs to sidebar',
+      'Beta settings category (disabled for now)',
+    ],
+  },
   {
     version: '0.1.2',
     channel: 'stable' as const,
