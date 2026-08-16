@@ -33,8 +33,7 @@ import {
 import type { ChatMessage } from '@/types';
 import {
   Bot, User as UserIcon, Loader2, Plus, Mic, ImageIcon, Video, Code2,
-  Upload, Cpu, Cloud, ChevronDown, Check, MessageSquare, Blocks, FolderKanban, Zap,
-  KeyRound, HardDrive,
+  Upload, Cpu, Cloud, ChevronDown, Check, Blocks, FolderKanban, Zap,
 } from 'lucide-react';
 
 type ModelSource = 'local' | 'cloud' | 'auto';
@@ -108,57 +107,6 @@ const GREETINGS = [
   'Welcome back.',
   'Ready when you are.',
   'What would you like to explore?',
-];
-
-const CAPABILITY_CARDS = [
-  {
-    id: 'chat',
-    label: 'Ask anything',
-    detail: 'General chat and ideas',
-    icon: MessageSquare,
-    action: 'mode' as const,
-    mode: 'general' as ChatMode,
-  },
-  {
-    id: 'image',
-    label: 'Make an image',
-    detail: 'Generate visuals from a prompt',
-    icon: ImageIcon,
-    action: 'mode' as const,
-    mode: 'image' as ChatMode,
-  },
-  {
-    id: 'video',
-    label: 'Make a video',
-    detail: 'Short clips and motion ideas',
-    icon: Video,
-    action: 'mode' as const,
-    mode: 'video' as ChatMode,
-  },
-  {
-    id: 'code',
-    label: 'Write code',
-    detail: 'Apps, fixes, and explanations',
-    icon: Code2,
-    action: 'mode' as const,
-    mode: 'code' as ChatMode,
-  },
-  {
-    id: 'local-ai',
-    label: 'Local AI',
-    detail: 'Models running on this PC',
-    icon: Cpu,
-    action: 'route' as const,
-    route: { name: 'local-ai' as const },
-  },
-  {
-    id: 'plugins',
-    label: 'Plugins',
-    detail: 'Tools that extend ARK',
-    icon: Blocks,
-    action: 'route' as const,
-    route: { name: 'build' as const },
-  },
 ];
 
 const IMAGE_IDEAS = [
@@ -931,75 +879,8 @@ export function AIChat() {
 
   const composer = (
     <div className="w-full max-w-2xl mx-auto">
-      <div className="flex justify-center mb-3">
-        <button
-          ref={modelButtonRef}
-          type="button"
-          onClick={() => setModelMenuOpen(o => !o)}
-          className="inline-flex items-center gap-2 rounded-full border border-surface-border bg-ark-navy-900/90 px-3 py-1.5 text-xs text-content-primary hover:bg-surface-hover transition-colors"
-          title={`Active model · ${activeModel.source === 'auto' ? 'Auto' : activeModel.source === 'local' ? 'Local' : 'Cloud'}`}
-          aria-label="Select model"
-          aria-expanded={modelMenuOpen}
-        >
-          <span className={`w-5 h-5 rounded-md flex items-center justify-center shrink-0 ${
-            activeModel.source === 'auto'
-              ? 'bg-sky-500/15 text-sky-400'
-              : activeModel.source === 'local'
-                ? 'bg-emerald-500/15 text-emerald-400'
-                : 'bg-sky-500/15 text-sky-400'
-          }`}>
-            {mode === 'image' ? <ImageIcon className="w-3.5 h-3.5" />
-              : mode === 'video' ? <Video className="w-3.5 h-3.5" />
-                : activeModel.source === 'auto' ? <Zap className="w-3.5 h-3.5" />
-                  : <ModelSourceIcon className="w-3.5 h-3.5" />}
-          </span>
-          <span className="font-medium truncate max-w-[14rem]">{activeModel.name}</span>
-          <span className={`text-[10px] font-medium ${
-            activeModel.source === 'auto' ? 'text-sky-400/90'
-              : activeModel.source === 'local' ? 'text-emerald-400/90' : 'text-sky-400/90'
-          }`}>
-            {activeModel.source === 'auto' ? 'Auto' : activeModel.source === 'local' ? 'Local' : 'Cloud'}
-          </span>
-          <ChevronDown className={`w-3.5 h-3.5 text-content-tertiary transition-transform ${modelMenuOpen ? 'rotate-180' : ''}`} />
-        </button>
-        {modelMenu}
-      </div>
-
-      {mode === 'general' || mode === 'code' ? (
-      <div className="flex flex-wrap items-center justify-center gap-1.5 mb-3">
-          {chatPlugins.map(plugin => (
-            <button
-              key={plugin.id}
-              type="button"
-              onClick={() => {
-                const first = plugin.actions[0]?.prompt;
-                if (first) {
-                  setInput(first);
-                  textareaRef.current?.focus();
-                }
-              }}
-              className="inline-flex items-center gap-1.5 rounded-full border border-surface-border bg-ark-navy-900/80 px-2.5 py-1 text-[11px] text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors"
-              title={plugin.actions[0]?.label ?? plugin.name}
-            >
-              <span className={`w-4 h-4 rounded-md bg-gradient-to-br ${plugin.tone} flex items-center justify-center text-[8px] font-bold text-white`}>
-                {plugin.initial}
-              </span>
-              {plugin.name}
-            </button>
-          ))}
-          <button
-            type="button"
-            onClick={() => navigate({ name: 'build' })}
-            className="inline-flex items-center gap-1 rounded-full border border-dashed border-surface-border px-2.5 py-1 text-[11px] text-content-tertiary hover:text-content-secondary transition-colors"
-          >
-            <Blocks className="w-3 h-3" />
-            {chatPlugins.length ? 'Manage' : 'Add plugins'}
-          </button>
-        </div>
-      ) : null}
-
       <div className="flex items-center gap-2">
-        <div className="flex flex-1 items-center gap-1.5 rounded-full border border-surface-border bg-ark-navy-900/90 px-2 py-1.5 shadow-lg shadow-black/20 min-w-0">
+        <div className="flex flex-1 items-center gap-1 rounded-full border border-surface-border bg-ark-navy-900/90 pl-1.5 pr-1.5 py-1.5 shadow-lg shadow-black/20 min-w-0">
           <button
             type="button"
             className="w-9 h-9 rounded-full flex items-center justify-center text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors shrink-0"
@@ -1024,6 +905,35 @@ export function AIChat() {
             disabled={generating}
             className="flex-1 bg-transparent border-none resize-none px-1 py-2 text-sm text-content-primary placeholder:text-content-tertiary focus:outline-none max-h-32 leading-5 min-w-0 disabled:opacity-60"
           />
+
+          <button
+            ref={modelButtonRef}
+            type="button"
+            onClick={() => setModelMenuOpen(o => !o)}
+            className="inline-flex items-center gap-1 rounded-full border border-surface-border/80 bg-surface-hover/60 hover:bg-surface-hover px-2 py-1.5 text-xs text-content-primary transition-colors shrink-0 max-w-[9.5rem]"
+            title={`Active model · ${activeModel.source === 'auto' ? 'Auto' : activeModel.source === 'local' ? 'Local' : 'Cloud'}`}
+            aria-label="Select model"
+            aria-expanded={modelMenuOpen}
+          >
+            <span className={`w-4 h-4 rounded flex items-center justify-center shrink-0 ${
+              activeModel.source === 'auto'
+                ? 'text-sky-400'
+                : activeModel.source === 'local'
+                  ? 'text-emerald-400'
+                  : 'text-sky-400'
+            }`}>
+              {mode === 'image' ? <ImageIcon className="w-3.5 h-3.5" />
+                : mode === 'video' ? <Video className="w-3.5 h-3.5" />
+                  : activeModel.source === 'auto' ? <Zap className="w-3.5 h-3.5" />
+                    : <ModelSourceIcon className="w-3.5 h-3.5" />}
+            </span>
+            <span className="font-medium truncate">
+              {activeModel.source === 'auto' ? 'Auto' : activeModel.name}
+            </span>
+            <ChevronDown className={`w-3.5 h-3.5 text-content-tertiary transition-transform shrink-0 ${modelMenuOpen ? 'rotate-180' : ''}`} />
+          </button>
+          {modelMenu}
+
           <button
             type="button"
             className="w-9 h-9 rounded-full flex items-center justify-center text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors shrink-0"
@@ -1047,79 +957,54 @@ export function AIChat() {
         )}
       </div>
 
-      {showEmpty && mode === 'general' && (
-        <div className="w-full max-w-2xl mx-auto mt-8">
-          <p className="text-xs text-content-tertiary text-center mb-3">What can ARK do?</p>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-            {CAPABILITY_CARDS.map(card => (
-              <button
-                key={card.id}
-                type="button"
-                onClick={() => {
-                  if (card.action === 'mode') {
-                    setModeAndFocus(card.mode);
-                    return;
-                  }
-                  navigate(card.route);
-                }}
-                className="text-left rounded-2xl border border-surface-border bg-ark-navy-900/40 hover:bg-surface-hover/80 px-3.5 py-3 transition-colors group"
-              >
-                <card.icon className="w-4 h-4 text-content-secondary group-hover:text-content-primary mb-2" />
-                <span className="block text-sm font-medium text-content-primary">{card.label}</span>
-                <span className="block text-[11px] text-content-tertiary mt-0.5 leading-snug">{card.detail}</span>
-              </button>
-            ))}
-          </div>
+      {(mode === 'general' || mode === 'code') && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 mt-2.5 px-1">
+          <button
+            type="button"
+            onClick={() => navigate({ name: 'build' })}
+            className="inline-flex items-center gap-1 text-[11px] text-content-tertiary hover:text-content-secondary transition-colors"
+          >
+            <Blocks className="w-3 h-3" />
+            {chatPlugins.length ? 'Manage plugins' : 'Add plugins'}
+          </button>
 
-          {capacity && !capacity.liveChat ? (
-            <div className="mt-5 rounded-2xl border border-amber-500/25 bg-amber-500/5 px-4 py-3.5 space-y-3">
-              <p className="text-sm font-medium text-content-primary">Connect capacity to get live answers</p>
-              <p className="text-xs text-content-secondary leading-relaxed">
-                ARK Auto is ready, but no free key or local brain is connected yet. Without that, chat can’t produce real replies.
-              </p>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => navigate({ name: 'settings' })}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-sky-500/15 text-sky-300 hover:bg-sky-500/25 px-3 py-1.5 text-xs font-medium"
-                >
-                  <KeyRound className="w-3.5 h-3.5" />
-                  Connect free providers
-                </button>
-                <button
-                  type="button"
-                  onClick={() => navigate({ name: 'local-ai' })}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-surface-hover text-content-secondary hover:text-content-primary px-3 py-1.5 text-xs font-medium"
-                >
-                  <HardDrive className="w-3.5 h-3.5" />
-                  Get local brain
-                </button>
-                <button
-                  type="button"
-                  onClick={() => navigate({ name: 'models' })}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-surface-hover text-content-secondary hover:text-content-primary px-3 py-1.5 text-xs font-medium"
-                >
-                  <Cpu className="w-3.5 h-3.5" />
-                  Models
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div className="flex items-center justify-center gap-3 mt-5 text-[11px] text-content-tertiary">
-              <span className="inline-flex items-center gap-1.5">
+          {mode === 'general' && (
+            <>
+              <span className="inline-flex items-center gap-1.5 text-[11px] text-content-tertiary">
                 <span className={`w-1.5 h-1.5 rounded-full ${capacity?.liveChat ? 'bg-emerald-400' : 'bg-content-tertiary'}`} />
                 {capacity?.summary ?? 'Checking capacity…'}
               </span>
               <button
                 type="button"
                 onClick={() => navigate({ name: 'projects' })}
-                className="inline-flex items-center gap-1.5 hover:text-content-secondary transition-colors"
+                className="inline-flex items-center gap-1.5 text-[11px] text-content-tertiary hover:text-content-secondary transition-colors"
               >
                 <FolderKanban className="w-3 h-3" />
                 Open a project
               </button>
-            </div>
+            </>
           )}
+
+          {chatPlugins.map(plugin => (
+            <button
+              key={plugin.id}
+              type="button"
+              onClick={() => {
+                const first = plugin.actions[0]?.prompt;
+                if (first) {
+                  setInput(first);
+                  textareaRef.current?.focus();
+                }
+              }}
+              className="inline-flex items-center gap-1.5 rounded-full border border-surface-border bg-ark-navy-900/80 px-2 py-0.5 text-[11px] text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors"
+              title={plugin.actions[0]?.label ?? plugin.name}
+            >
+              <span className={`w-3.5 h-3.5 rounded bg-gradient-to-br ${plugin.tone} flex items-center justify-center text-[7px] font-bold text-white`}>
+                {plugin.initial}
+              </span>
+              {plugin.name}
+            </button>
+          ))}
         </div>
       )}
     </div>

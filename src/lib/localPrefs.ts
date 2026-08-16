@@ -200,6 +200,17 @@ export function hasProviderApiKey(providerId: string) {
 /** App changelog shown in Settings → Updates. */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.13',
+    channel: 'stable' as const,
+    date: 'Aug 15, 2026',
+    title: 'New Chat composer cleanup',
+    notes: [
+      'Auto model picker sits inside the chat bar next to the mic',
+      'Add plugins, capacity, and Open a project sit under the composer',
+      'Removed What can ARK do capability tiles',
+    ],
+  },
+  {
     version: '0.1.12',
     channel: 'stable' as const,
     date: 'Aug 15, 2026',
