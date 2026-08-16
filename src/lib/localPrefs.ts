@@ -218,6 +218,16 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates. */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.30',
+    channel: 'stable' as const,
+    date: 'Aug 16, 2026',
+    title: 'Fix installer launch crash',
+    notes: [
+      'Fix startup crash (invalid model alias syntax in brain API)',
+      'Installer now launches ARK after Setup finishes',
+    ],
+  },
+  {
     version: '0.1.29',
     channel: 'stable' as const,
     date: 'Aug 16, 2026',
