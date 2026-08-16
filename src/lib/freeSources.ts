@@ -38,7 +38,7 @@ export const FREE_SOURCES: FreeSource[] = [
     name: 'Pollinations (video)',
     kind: 'no-key',
     use: 'video',
-    detail: 'Tries free MP4 routes first; falls back to a motion still if video hosts require credits.',
+    detail: 'Tries Pollinations + Hugging Face MP4 routes; honest motion-still fallback if hosts need credits.',
     wired: true,
   },
   {

@@ -199,6 +199,14 @@ async function ensureLlamaBinary(onProgress) {
 }
 
 function runGguf(modelId, prompt, timeoutMs = 90000) {
+  return runGgufStream(modelId, prompt, null, timeoutMs);
+}
+
+/**
+ * Stream llama-cli stdout as it arrives.
+ * onChunk(textDelta) may be called many times; final resolve still returns full reply.
+ */
+function runGgufStream(modelId, prompt, onChunk, timeoutMs = 120000) {
   return new Promise((resolve, reject) => {
     const gguf = findGgufForModel(modelId);
     const bin = findLlamaBinary();
@@ -228,7 +236,13 @@ function runGguf(modelId, prompt, timeoutMs = 90000) {
       reject(new Error('GGUF generation timed out'));
     }, timeoutMs);
 
-    child.stdout.on('data', (d) => { out += d.toString(); });
+    child.stdout.on('data', (d) => {
+      const piece = d.toString();
+      out += piece;
+      if (typeof onChunk === 'function' && piece) {
+        try { onChunk(piece); } catch { /* ignore */ }
+      }
+    });
     child.stderr.on('data', (d) => { err += d.toString(); });
     child.on('error', (e) => {
       clearTimeout(timer);
@@ -246,6 +260,7 @@ function runGguf(modelId, prompt, timeoutMs = 90000) {
         reply: text.slice(-6000),
         modelFile: path.basename(gguf),
         source: 'ark-gguf',
+        streamed: Boolean(onChunk),
       });
     });
   });
@@ -256,6 +271,7 @@ module.exports = {
   findLlamaBinary,
   listGgufFiles,
   runGguf,
+  runGgufStream,
   ensureLlamaBinary,
   modelsDir,
   binDir,

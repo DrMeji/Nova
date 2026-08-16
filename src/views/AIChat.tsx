@@ -20,6 +20,7 @@ import {
   rewriteVideoPrompt,
 } from '@/lib/mediaPrompt';
 import { arkRoute, routerProviderLabel } from '@/lib/arkRouter';
+import { FreeKeyWizard } from '@/components/FreeKeyWizard';
 import { buildRouterHistory } from '@/lib/chatHistory';
 import { MessageContent } from '@/components/MediaMessage';
 import {
@@ -253,6 +254,7 @@ export function AIChat() {
   const [ollamaModels, setOllamaModels] = useState<ChatModelOption[]>([]);
   const [capacity, setCapacity] = useState<LiveCapacity | null>(null);
   const [generating, setGenerating] = useState(false);
+  const [freeKeyOpen, setFreeKeyOpen] = useState(false);
   const [menuPos, setMenuPos] = useState<{ left: number; top?: number; bottom?: number } | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -695,6 +697,15 @@ export function AIChat() {
             preferredModelName: activeModel.name,
             preferredSource: activeModel.source,
             history,
+            onChunk: (piece) => {
+              setMessages(prev => prev.map(m => {
+                if (m.id !== assistantId) return m;
+                const base = (m.content.startsWith('__generating__:') || m.content.startsWith('__progress__:'))
+                  ? ''
+                  : m.content;
+                return { ...m, content: base + piece };
+              }));
+            },
           });
           response = routed.reply;
           resolvedProvider = routerProviderLabel(routed, providerLabel);
@@ -974,10 +985,26 @@ export function AIChat() {
       {(mode === 'general' || mode === 'code') && (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 mt-2.5 px-1">
           {mode === 'general' && (
-            <span className="inline-flex items-center gap-1.5 text-[11px] text-content-tertiary">
-              <span className={`w-1.5 h-1.5 rounded-full ${capacity?.liveChat ? 'bg-emerald-400' : 'bg-content-tertiary'}`} />
-              {capacity?.summary ?? 'Checking capacity...'}
-            </span>
+            <>
+              <span className="inline-flex items-center gap-1.5 text-[11px] text-content-tertiary">
+                <span className={`w-1.5 h-1.5 rounded-full ${capacity?.liveChat ? 'bg-emerald-400' : 'bg-content-tertiary'}`} />
+                {capacity?.summary ?? 'Checking capacity...'}
+              </span>
+              {capacity && !capacity.liveChat && (
+                <button
+                  type="button"
+                  onClick={() => setFreeKeyOpen(true)}
+                  className="inline-flex items-center gap-1 text-[11px] text-sky-400 hover:text-sky-300 transition-colors"
+                  title={
+                    capacity.suggestedFreeKeys.length
+                      ? `Try ${capacity.suggestedFreeKeys.map(k => k.name).join(', ')}`
+                      : 'Connect a free key'
+                  }
+                >
+                  Connect free key
+                </button>
+              )}
+            </>
           )}
 
           <button
@@ -1133,6 +1160,14 @@ export function AIChat() {
           </div>
         </>
       )}
+      <FreeKeyWizard
+        open={freeKeyOpen}
+        onClose={() => {
+          setFreeKeyOpen(false);
+          void probeLiveCapacity().then(setCapacity).catch(() => undefined);
+        }}
+        preferIds={capacity?.suggestedFreeKeys.map(k => k.id)}
+      />
     </div>
   );
 }

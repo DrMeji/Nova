@@ -22,6 +22,8 @@ import { verifyGmailToken } from '@/lib/gmail';
 import { verifySlackToken } from '@/lib/slack';
 import { verifyLinearToken } from '@/lib/linear';
 import { verifyFigmaToken } from '@/lib/figma';
+import { verifyVercelToken } from '@/lib/vercel';
+import { verifyDiscordToken } from '@/lib/discord';
 import { openInSystemBrowser } from '@/lib/openExternal';
 import { getPluginAuthLink } from '@/lib/pluginAuth';
 
@@ -144,7 +146,7 @@ export function BuildRun() {
     if (!selected) return;
     setAuthError('');
 
-    const liveIds = ['github', 'notion', 'gmail', 'slack', 'linear', 'figma'] as const;
+    const liveIds = ['github', 'notion', 'gmail', 'slack', 'linear', 'figma', 'vercel', 'discord'] as const;
     if ((liveIds as readonly string[]).includes(selected.id)) {
       setAuthBusy(true);
       try {
@@ -163,6 +165,12 @@ export function BuildRun() {
         } else if (selected.id === 'linear') {
           const user = await verifyLinearToken(tokenDraft);
           setVerifiedLogin(user.label);
+        } else if (selected.id === 'vercel') {
+          const user = await verifyVercelToken(tokenDraft);
+          setVerifiedLogin(user.label);
+        } else if (selected.id === 'discord') {
+          const user = await verifyDiscordToken(tokenDraft);
+          setVerifiedLogin(user.label);
         } else {
           const user = await verifyFigmaToken(tokenDraft);
           setVerifiedLogin(user.label);
@@ -177,6 +185,29 @@ export function BuildRun() {
     }
 
     setConnectStep('permissions');
+  };
+
+  const startBrowserOAuth = async () => {
+    if (!selected || !window.arkDesktop?.pluginOAuthStart) {
+      setAuthError('Browser OAuth needs the desktop app.');
+      return;
+    }
+    setAuthBusy(true);
+    setAuthError('');
+    try {
+      const result = await window.arkDesktop.pluginOAuthStart(selected.id);
+      if (result?.ok && result.accessToken) {
+        setTokenDraft(result.accessToken);
+        setVerifiedLogin(result.accountLabel || selected.name);
+        setConnectStep('permissions');
+        return;
+      }
+      setAuthError(result?.message || 'OAuth did not complete. Paste a token instead.');
+    } catch (err) {
+      setAuthError(err instanceof Error ? err.message : 'OAuth failed');
+    } finally {
+      setAuthBusy(false);
+    }
   };
 
   const disconnect = () => {
@@ -488,6 +519,19 @@ export function BuildRun() {
                               <ExternalLink className="w-3.5 h-3.5" />
                               {selected.authKind === 'oauth' ? `Open ${selected.name} in browser` : link.label}
                             </button>
+                            {(selected.id === 'github' || selected.id === 'gmail' || selected.authKind === 'oauth') && window.arkDesktop?.pluginOAuthStart && (
+                              <button
+                                type="button"
+                                className="ark-btn-secondary w-full"
+                                disabled={authBusy}
+                                onClick={() => void startBrowserOAuth()}
+                              >
+                                {authBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Link2 className="w-4 h-4" />}
+                                {selected.id === 'github'
+                                  ? 'Sign in with GitHub (device)'
+                                  : `Continue with ${selected.name} OAuth`}
+                              </button>
+                            )}
                           </>
                         );
                       })()}
@@ -513,9 +557,13 @@ export function BuildRun() {
                                       ? 'xoxb-…'
                                       : selected.id === 'linear'
                                         ? 'lin_api_…'
-                                        : selected.authKind === 'oauth'
-                                          ? 'access token from browser'
-                                          : 'figd_…'
+                                        : selected.id === 'vercel'
+                                          ? 'vercel token'
+                                          : selected.id === 'discord'
+                                            ? 'bot token'
+                                            : selected.authKind === 'oauth'
+                                              ? 'access token from browser'
+                                              : 'figd_…'
                             }
                             className="ark-input"
                             autoFocus

@@ -38,6 +38,21 @@ contextBridge.exposeInMainWorld('arkDesktop', {
   httpGet: (url, headers) => ipcRenderer.invoke('ark:http-get', { url, headers }),
   httpRequest: (url, options) => ipcRenderer.invoke('ark:http-request', { url, ...(options || {}) }),
   brainStatus: () => ipcRenderer.invoke('ark:brain-status'),
+  engineGenerateStream: (message, modelId, kind) =>
+    ipcRenderer.invoke('ark:engine-generate-stream', { message, modelId, kind }),
+  onEngineChunk: (handler) => {
+    const listener = (_event, payload) => handler?.(payload);
+    ipcRenderer.on('ark:engine-chunk', listener);
+    return () => ipcRenderer.removeListener('ark:engine-chunk', listener);
+  },
+  pluginOAuthStart: (pluginId) => ipcRenderer.invoke('ark:plugin-oauth-start', pluginId),
+  pluginOAuthStatus: () => ipcRenderer.invoke('ark:plugin-oauth-status'),
+  pluginOAuthSetClient: (pluginId, clientId) =>
+    ipcRenderer.invoke('ark:plugin-oauth-set-client', { pluginId, clientId }),
+  localReportsList: () => ipcRenderer.invoke('ark:local-reports-list'),
+  localReportsClear: () => ipcRenderer.invoke('ark:local-reports-clear'),
+  localReportsOpen: () => ipcRenderer.invoke('ark:local-reports-open'),
+  signingStatus: () => ipcRenderer.invoke('ark:signing-status'),
   engineStatus: () => ipcRenderer.invoke('ark:engine-status'),
   engineStart: () => ipcRenderer.invoke('ark:engine-start'),
   engineStop: () => ipcRenderer.invoke('ark:engine-stop'),

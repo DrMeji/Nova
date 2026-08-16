@@ -216,6 +216,17 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates. */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.21',
+    channel: 'stable' as const,
+    date: 'Aug 16, 2026',
+    title: 'Streaming local brain + free-key wizard',
+    notes: [
+      'Local GGUF streams tokens live into chat',
+      'Connect free key wizard from capacity CTA; OAuth client ids in Settings',
+      'Linear write, Slack search, Figma file open; local update failure reports',
+    ],
+  },
+  {
     version: '0.1.20',
     channel: 'stable' as const,
     date: 'Aug 16, 2026',

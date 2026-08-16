@@ -11,6 +11,8 @@ const arkSetup = require('./arkSetup.cjs');
 const arkUpdater = require('./arkUpdater.cjs');
 const arkAuthStore = require('./arkAuthStore.cjs');
 const arkPaths = require('./arkPaths.cjs');
+const arkOAuth = require('./arkOAuth.cjs');
+const arkCrashLog = require('./arkCrashLog.cjs');
 
 const DEV_URL = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173';
 const isDev = process.env.ARK_DEV === '1';
@@ -42,10 +44,12 @@ const ALLOWED_HOSTS = new Set([
   'api.fireworks.ai',
   'api.deepseek.com',
   'api.mistral.ai',
-  'speed.cloudflare.com',
+  'api.vercel.com',
+  'discord.com',
   'github.com',
   'objects.githubusercontent.com',
   'release-assets.githubusercontent.com',
+  'speed.cloudflare.com',
   '127.0.0.1',
   'localhost',
 ]);
@@ -320,6 +324,21 @@ ipcMain.handle('ark:engine-generate', async (_e, payload) =>
   }),
 );
 
+ipcMain.handle('ark:engine-generate-stream', async (event, payload) => {
+  const webContentsId = event.sender.id;
+  return arkEngine.generate(payload?.message ?? '', {
+    modelId: payload?.modelId,
+    kind: payload?.kind,
+    onChunk: (text) => {
+      try {
+        event.sender.send('ark:engine-chunk', { webContentsId, text: String(text || '') });
+      } catch {
+        /* ignore */
+      }
+    },
+  });
+});
+
 ipcMain.handle('ark:models-dir-info', async () => arkPaths.modelsDirInfo());
 ipcMain.handle('ark:models-dir-pick', async () => {
   const win = BrowserWindow.getFocusedWindow() || mainWindow;
@@ -406,6 +425,58 @@ ipcMain.handle('ark:project-path', async (_e, projectId) => {
   }
 });
 
+ipcMain.handle('ark:plugin-oauth-start', async (_e, pluginId) => arkOAuth.startPluginOAuth(pluginId));
+ipcMain.handle('ark:plugin-oauth-status', async () => ({ ok: true, ...arkOAuth.oauthConfigStatus() }));
+ipcMain.handle('ark:plugin-oauth-set-client', async (_e, payload) => {
+  const id = payload?.pluginId;
+  const clientId = payload?.clientId;
+  if (!id) return { ok: false, error: 'Missing pluginId' };
+  const stored = arkOAuth.setClientId(String(id), clientId == null ? '' : String(clientId));
+  return { ok: true, stored, ...arkOAuth.oauthConfigStatus() };
+});
+
+ipcMain.handle('ark:local-reports-list', async () => arkCrashLog.listReports());
+ipcMain.handle('ark:local-reports-clear', async () => arkCrashLog.clearReports());
+ipcMain.handle('ark:local-reports-open', async () => {
+  const dir = arkCrashLog.logDir();
+  await shell.openPath(dir);
+  return { ok: true, path: dir };
+});
+ipcMain.handle('ark:signing-status', async () => {
+  if (process.platform !== 'win32' || !app.isPackaged) {
+    return { ok: true, packaged: app.isPackaged, signed: null, status: 'n/a' };
+  }
+  try {
+    const exe = process.execPath;
+    const { execFile } = require('child_process');
+    const ps = await new Promise((resolve) => {
+      execFile(
+        'powershell.exe',
+        ['-NoProfile', '-Command', `(Get-AuthenticodeSignature -FilePath '${exe.replace(/'/g, "''")}').Status`],
+        { windowsHide: true, timeout: 8000 },
+        (err, stdout) => {
+          if (err) resolve('Unknown');
+          else resolve(String(stdout || '').trim() || 'Unknown');
+        },
+      );
+    });
+    return {
+      ok: true,
+      packaged: true,
+      signed: ps === 'Valid',
+      status: ps,
+      path: exe,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      packaged: true,
+      signed: null,
+      status: err instanceof Error ? err.message : 'check failed',
+    };
+  }
+});
+
 ipcMain.handle('ark:brain-status', async () => ({
   ok: Boolean(brainServerListening),
   url: `http://127.0.0.1:${BRAIN_PORT}`,
@@ -431,6 +502,8 @@ function json(res, status, payload) {
 
 function startBrainApi() {
   if (brainServer) return;
+  const brainToken = (process.env.ARK_BRAIN_TOKEN || '').trim();
+
   brainServer = http.createServer(async (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
@@ -441,20 +514,48 @@ function startBrainApi() {
       return;
     }
 
-    const url = req.url || '/';
+    // Optional bearer for Lindsay / external clients (loopback only).
+    if (brainToken) {
+      const auth = String(req.headers.authorization || '');
+      const ok = auth === `Bearer ${brainToken}` || auth === `bearer ${brainToken}`;
+      if (!ok && req.url !== '/health' && req.url !== '/' && req.url !== '/v1/contract') {
+        return json(res, 401, { ok: false, error: 'Unauthorized — set Authorization: Bearer <ARK_BRAIN_TOKEN>' });
+      }
+    }
+
+    const url = (req.url || '/').split('?')[0];
 
     if ((url === '/' || url === '/health') && req.method === 'GET') {
       const engine = arkEngine.getStatus();
       return json(res, 200, {
         ok: true,
         service: 'ark-brain',
-        version: '0.2.0',
+        version: '0.3.0',
+        contractVersion: '0.3.0',
         engine: {
           phase: engine.phase,
           activeModelId: engine.activeModelId,
           activeModelName: engine.activeModelName,
         },
         note: 'ARK brain API — powered by ARK Engine on this device (not a third-party local app)',
+      });
+    }
+
+    if (url === '/v1/contract' && req.method === 'GET') {
+      return json(res, 200, {
+        ok: true,
+        contractVersion: '0.3.0',
+        baseUrl: `http://127.0.0.1:${BRAIN_PORT}`,
+        endpoints: [
+          'GET /health',
+          'GET /v1/contract',
+          'GET /v1/models',
+          'GET /v1/engine',
+          'POST /v1/chat',
+          'POST /v1/chat/stream',
+        ],
+        auth: brainToken ? 'bearer' : 'none (localhost)',
+        kinds: ['chat', 'image', 'video'],
       });
     }
 
@@ -485,6 +586,7 @@ function startBrainApi() {
         return json(res, 200, {
           ok: true,
           reply: result.reply,
+          modelName: result.modelName,
           model: result.modelName,
           modelId: result.modelId,
           source: result.source || 'ark-engine',
@@ -495,6 +597,62 @@ function startBrainApi() {
           ok: false,
           error: err instanceof Error ? err.message : 'Bad request',
         });
+      }
+    }
+
+    // SSE-style stream: one event with the full reply (chunked for Lindsay clients).
+    if (url === '/v1/chat/stream' && req.method === 'POST') {
+      try {
+        const raw = await readBody(req);
+        const parsed = raw ? JSON.parse(raw) : {};
+        const message = typeof parsed.message === 'string' ? parsed.message : '';
+        const modelId = typeof parsed.model === 'string' ? parsed.model : undefined;
+        const kind = parsed.kind === 'image' || parsed.kind === 'video' ? parsed.kind : undefined;
+        if (arkEngine.getStatus().phase !== 'online') {
+          arkEngine.start();
+        }
+        res.writeHead(200, {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          Connection: 'keep-alive',
+          'Access-Control-Allow-Origin': '*',
+        });
+        res.write(`event: status\ndata: ${JSON.stringify({ ok: true, phase: 'generating' })}\n\n`);
+        const result = await arkEngine.generate(message, {
+          modelId,
+          kind,
+          onChunk: (text) => {
+            try {
+              res.write(`event: delta\ndata: ${JSON.stringify({ text: String(text || '') })}\n\n`);
+            } catch {
+              /* ignore */
+            }
+          },
+        });
+        res.write(`event: done\ndata: ${JSON.stringify({
+          ok: true,
+          reply: result.reply,
+          modelName: result.modelName,
+          modelId: result.modelId,
+          source: result.source || 'ark-engine',
+          media: result.media,
+          streamed: Boolean(result.streamed),
+        })}\n\n`);
+        res.end();
+        return;
+      } catch (err) {
+        if (!res.headersSent) {
+          return json(res, 400, {
+            ok: false,
+            error: err instanceof Error ? err.message : 'Bad request',
+          });
+        }
+        res.write(`event: error\ndata: ${JSON.stringify({
+          ok: false,
+          error: err instanceof Error ? err.message : 'Bad request',
+        })}\n\n`);
+        res.end();
+        return;
       }
     }
 

@@ -277,7 +277,9 @@ export async function runPluginAction(
     (pluginId === 'gmail' && /gmail|inbox|email|mail|unread/.test(lower)) ||
     (pluginId === 'slack' && /slack|channel|dm/.test(lower)) ||
     (pluginId === 'linear' && /linear|ticket|issue/.test(lower)) ||
-    (pluginId === 'figma' && /figma|design file|frame/.test(lower));
+    (pluginId === 'figma' && /figma|design file|frame/.test(lower)) ||
+    (pluginId === 'vercel' && /vercel|deploy/.test(lower)) ||
+    (pluginId === 'discord' && /discord|server|guild/.test(lower));
 
   if (!mentions) return null;
 
@@ -360,7 +362,7 @@ export async function runPluginAction(
     if (token) {
       try {
         const { runSlackLive } = await import('@/lib/slack');
-        return await runSlackLive(token, userText);
+        return await runSlackLive(token, userText, { permissions });
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Slack request failed';
         return ['Slack · error', '', msg].join('\n');
@@ -373,7 +375,7 @@ export async function runPluginAction(
     if (token) {
       try {
         const { runLinearLive } = await import('@/lib/linear');
-        return await runLinearLive(token, userText);
+        return await runLinearLive(token, userText, { permissions });
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Linear request failed';
         return ['Linear · error', '', msg].join('\n');
@@ -407,6 +409,32 @@ export async function runPluginAction(
     return runPluginStub(pluginId, userText);
   }
 
+  if (pluginId === 'vercel') {
+    if (token) {
+      try {
+        const { runVercelLive } = await import('@/lib/vercel');
+        return await runVercelLive(token, userText);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Vercel request failed';
+        return ['Vercel · error', '', msg].join('\n');
+      }
+    }
+    return runPluginStub(pluginId, userText);
+  }
+
+  if (pluginId === 'discord') {
+    if (token) {
+      try {
+        const { runDiscordLive } = await import('@/lib/discord');
+        return await runDiscordLive(token, userText);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Discord request failed';
+        return ['Discord · error', '', msg].join('\n');
+      }
+    }
+    return runPluginStub(pluginId, userText);
+  }
+
   return runPluginStub(pluginId, userText);
 }
 
@@ -420,7 +448,9 @@ export function runPluginStub(pluginId: string, userText: string): string | null
     (pluginId === 'gmail' && /gmail|inbox|email|mail|unread/.test(lower)) ||
     (pluginId === 'slack' && /slack|channel|dm/.test(lower)) ||
     (pluginId === 'linear' && /linear|ticket|issue/.test(lower)) ||
-    (pluginId === 'figma' && /figma|design file|frame/.test(lower));
+    (pluginId === 'figma' && /figma|design file|frame/.test(lower)) ||
+    (pluginId === 'vercel' && /vercel|deploy/.test(lower)) ||
+    (pluginId === 'discord' && /discord|server|guild/.test(lower));
 
   if (!mentions) return null;
 

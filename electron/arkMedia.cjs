@@ -105,11 +105,15 @@ async function fetchRealImage(prompt, opts = {}) {
 
   for (const url of urls) {
     try {
+      const ac = new AbortController();
+      const timer = setTimeout(() => ac.abort(), 45_000);
       const res = await fetch(url, {
         method: 'GET',
         headers: { 'User-Agent': 'ARK-Desktop' },
         redirect: 'follow',
+        signal: ac.signal,
       });
+      clearTimeout(timer);
       if (!res.ok) continue;
       const ctype = res.headers.get('content-type') || '';
       if (!ctype.includes('image') && !ctype.includes('octet-stream')) continue;
@@ -138,11 +142,15 @@ async function fetchRealVideo(prompt) {
 
   for (const url of urls) {
     try {
+      const ac = new AbortController();
+      const timer = setTimeout(() => ac.abort(), 90_000);
       const res = await fetch(url, {
         method: 'GET',
         headers: { 'User-Agent': 'ARK-Desktop' },
         redirect: 'follow',
+        signal: ac.signal,
       });
+      clearTimeout(timer);
       if (!res.ok) continue;
       const ctype = res.headers.get('content-type') || '';
       if (

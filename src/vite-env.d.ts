@@ -106,6 +106,31 @@ declare global {
         },
       ) => Promise<{ ok: boolean; status: number; data: unknown }>;
       brainStatus?: () => Promise<{ ok: boolean; url: string; engine?: unknown }>;
+      pluginOAuthStart?: (pluginId: string) => Promise<{
+        ok: boolean;
+        accessToken?: string;
+        accountLabel?: string;
+        message?: string;
+        needsConfig?: boolean;
+      }>;
+      pluginOAuthStatus?: () => Promise<{ ok: boolean; github?: boolean; google?: boolean; notion?: boolean; stored?: Record<string, string> }>;
+      pluginOAuthSetClient?: (pluginId: string, clientId: string) => Promise<{ ok: boolean }>;
+      localReportsList?: () => Promise<{ ok: boolean; items?: unknown[]; path?: string }>;
+      localReportsClear?: () => Promise<{ ok: boolean }>;
+      localReportsOpen?: () => Promise<{ ok: boolean; path?: string }>;
+      signingStatus?: () => Promise<{ ok: boolean; packaged?: boolean; signed?: boolean | null; status?: string }>;
+      engineGenerateStream?: (
+        message: string,
+        modelId?: string,
+        kind?: string,
+      ) => Promise<{
+        ok?: boolean;
+        reply: string;
+        modelName?: string;
+        source?: string;
+        media?: { kind: string; dataUrl: string; path?: string; libraryId?: string; real?: boolean };
+      }>;
+      onEngineChunk?: (handler: (payload: { text?: string }) => void) => () => void;
       engineStatus?: () => Promise<import('@/lib/arkEngine').ArkEngineStatus>;
       engineStart?: () => Promise<import('@/lib/arkEngine').ArkEngineStatus>;
       engineStop?: () => Promise<import('@/lib/arkEngine').ArkEngineStatus>;

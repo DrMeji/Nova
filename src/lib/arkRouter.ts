@@ -14,7 +14,7 @@ import {
   type RouterChatTurn,
 } from '@/lib/chatHistory';
 import { honestNoLiveChatReply } from '@/lib/arkCapacity';
-import { brainGenerate, probeBrain } from '@/lib/brain';
+import { brainGenerate, brainGenerateStream, probeBrain } from '@/lib/brain';
 import {
   cloudChatFreeKeys,
   cloudChatPaidKeys,
@@ -63,6 +63,8 @@ export type ArkRouteOpts = {
   preferredSource?: 'local' | 'cloud' | 'auto';
   /** Prior + current user turns owned by ARK (not the provider). */
   history?: RouterChatTurn[];
+  /** When set, local GGUF tokens stream into this callback. */
+  onChunk?: (text: string) => void;
 };
 
 function modeAllowsCloud(mode: AiModePref) {
@@ -98,6 +100,7 @@ async function tryLocalChat(
   message: string,
   modelId: string | undefined,
   attempted: string[],
+  onChunk?: (text: string) => void,
 ): Promise<ArkRouterResult | null> {
   attempted.push('ARK Engine');
   try {
@@ -106,13 +109,15 @@ async function tryLocalChat(
       return null;
     }
     const prompt = packHistoryPrompt(history, message);
-    const result = await brainGenerate(prompt, modelId, 'chat');
+    const result = onChunk
+      ? await brainGenerateStream(prompt, modelId, onChunk, 'chat')
+      : await brainGenerate(prompt, modelId, 'chat');
     return {
       reply: result.reply,
       media: result.media,
       modelName: result.modelName || 'ARK Engine',
       source: result.source || 'ark-engine',
-      tier: 'local-free',
+      tier: isStrongLocal(result.source) ? 'local-free' : 'local-free',
       attempted,
       continued: hasContinuity(history),
     };
@@ -242,6 +247,7 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
     opts.message,
     isAuto || pinnedCloud || pinnedOllama ? undefined : preferredId,
     attempted,
+    opts.onChunk,
   );
 
   if (local && isStrongLocal(local.source)) {
@@ -409,12 +415,31 @@ async function routeVideo(opts: ArkRouteOpts): Promise<ArkRouterResult> {
   attempted.push('ARK Video Core');
   try {
     const result = await brainGenerate(opts.message, opts.preferredModelId || 'ark-video-core', 'video');
+    const source = result.source || 'ark-media';
+    const isMp4 = Boolean(
+      result.media?.dataUrl?.startsWith('data:video/')
+      || source.includes('mp4')
+      || source.includes('huggingface-video'),
+    );
+    const isFallback = Boolean(
+      result.source?.includes('motion-still')
+      || result.source?.includes('fallback')
+      || (!isMp4 && result.media?.dataUrl?.startsWith('data:image/svg')),
+    );
+    let reply = result.reply;
+    if (isFallback && result.media?.dataUrl) {
+      reply = [
+        'Video preview · motion still (MP4 hosts were busy or need credits).',
+        '',
+        result.reply,
+      ].join('\n');
+    }
     return {
-      reply: result.reply,
+      reply,
       media: result.media,
       modelName: result.modelName || 'ARK Video Core',
-      source: result.source || 'ark-media',
-      tier: result.media?.real ? 'no-key-free' : 'local-free',
+      source,
+      tier: isMp4 ? 'no-key-free' : isFallback ? 'local-free' : (result.media?.real ? 'no-key-free' : 'local-free'),
       attempted,
     };
   } catch (err) {

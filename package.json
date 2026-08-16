@@ -1,7 +1,7 @@
 {
   "name": "ark",
   "private": true,
-  "version": "0.1.20",
+  "version": "0.1.21",
   "type": "module",
   "main": "electron/main.cjs",
   "description": "ARK — AI Creation Studio desktop app",
@@ -61,14 +61,19 @@
     "files": [
       "dist/**",
       "electron/**",
+      "!electron/**/*.md",
+      "!**/*.map",
+      "!**/._*",
       "package.json"
     ],
+    "asar": true,
+    "compression": "maximum",
     "win": {
       "target": [
-        "nsis",
-        "portable"
+        "nsis"
       ],
-      "icon": "build/icon.ico"
+      "icon": "build/icon.ico",
+      "signAndEditExecutable": true
     },
     "nsis": {
       "oneClick": false,
@@ -83,9 +88,6 @@
       "uninstallerIcon": "build/icon.ico",
       "installerHeaderIcon": "build/icon.ico",
       "include": "build/installer.nsh"
-    },
-    "portable": {
-      "artifactName": "ARK-Portable.${ext}"
     },
     "publish": [
       {

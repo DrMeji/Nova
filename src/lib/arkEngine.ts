@@ -119,3 +119,23 @@ export async function engineGenerate(
     source: 'ark-engine',
   };
 }
+
+/** Stream local GGUF tokens into onChunk as llama-cli prints them. */
+export async function engineGenerateStream(
+  message: string,
+  modelId: string | undefined,
+  onChunk: (text: string) => void,
+  kind?: 'image' | 'video' | 'chat',
+) {
+  if (window.arkDesktop?.engineGenerateStream) {
+    const stop = window.arkDesktop.onEngineChunk?.((payload) => {
+      if (payload?.text) onChunk(payload.text);
+    });
+    try {
+      return await window.arkDesktop.engineGenerateStream(message, modelId, kind);
+    } finally {
+      stop?.();
+    }
+  }
+  return engineGenerate(message, modelId, kind);
+}

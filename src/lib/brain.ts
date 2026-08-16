@@ -39,6 +39,7 @@ export async function brainGenerate(
   media?: { kind: string; dataUrl: string; path?: string; libraryId?: string; real?: boolean };
   modelName?: string;
   source?: string;
+  streamed?: boolean;
 }> {
   try {
     if (window.arkDesktop?.engineGenerate) {
@@ -72,6 +73,31 @@ export async function brainGenerate(
     modelName: data.modelName,
     source: data.source,
   };
+}
+
+/** Stream GGUF tokens when desktop IPC is available. */
+export async function brainGenerateStream(
+  message: string,
+  modelId: string | undefined,
+  onChunk: (text: string) => void,
+  kind?: 'image' | 'video' | 'chat',
+) {
+  try {
+    if (window.arkDesktop?.engineGenerateStream) {
+      const { engineGenerateStream } = await import('@/lib/arkEngine');
+      const result = await engineGenerateStream(message, modelId, onChunk, kind);
+      return {
+        reply: result.reply,
+        media: result.media,
+        modelName: result.modelName,
+        source: result.source || 'ark-gguf',
+        streamed: true,
+      };
+    }
+  } catch {
+    /* fall back */
+  }
+  return brainGenerate(message, modelId, kind);
 }
 
 export async function brainChat(

@@ -95,7 +95,7 @@ export function SettingsContent() {
     latestTag?: string;
   } | null>(null);
   const [updatePercent, setUpdatePercent] = useState(0);
-  const [appVersion, setAppVersion] = useState('0.1.20');
+  const [appVersion, setAppVersion] = useState('0.1.21');
   const [twoFaCode, setTwoFaCode] = useState('');
   const [twoFaSetup, setTwoFaSetup] = useState(false);
   const [savedFlash, setSavedFlash] = useState('');
@@ -589,6 +589,22 @@ export function SettingsContent() {
                     );
                   })}
                 </div>
+
+                <div className="rounded-xl border border-surface-border p-4 space-y-3">
+                  <div>
+                    <p className="text-sm font-medium text-content-primary">Plugin OAuth client IDs</p>
+                    <p className="text-xs text-content-tertiary mt-0.5 leading-relaxed">
+                      Optional public client ids for one-click GitHub device login / Google browser OAuth.
+                      Create an OAuth App, paste the client id here (or set ARK_GITHUB_CLIENT_ID). Secrets stay in env only.
+                    </p>
+                  </div>
+                  {(['github', 'google'] as const).map(id => (
+                    <OAuthClientRow key={id} pluginId={id} onSaved={(msg) => {
+                      setSavedFlash(msg);
+                      window.setTimeout(() => setSavedFlash(''), 1600);
+                    }} />
+                  ))}
+                </div>
               </div>
             </SettingsSection>
           )}
@@ -952,6 +968,55 @@ export function SettingsContent() {
                 <p className="text-[11px] text-content-tertiary leading-relaxed">
                   Changelog updates here whenever we ship meaningful product changes.
                 </p>
+
+                <div className="rounded-xl border border-surface-border p-4 space-y-2">
+                  <p className="text-sm font-medium text-content-primary">Install signing</p>
+                  <p className="text-xs text-content-tertiary leading-relaxed">
+                    A paid Authenticode certificate (CSC_LINK) removes SmartScreen warnings. See build/signing.env.example.
+                  </p>
+                  <button
+                    type="button"
+                    className="ark-btn-secondary text-xs"
+                    onClick={() => {
+                      void window.arkDesktop?.signingStatus?.().then((s) => {
+                        setUpdateMsg(
+                          s?.status
+                            ? `Signing status: ${s.status}${s.signed ? ' (trusted)' : ''}`
+                            : 'Signing check unavailable in this build.',
+                        );
+                      });
+                    }}
+                  >
+                    Check this install’s signature
+                  </button>
+                </div>
+
+                <div className="rounded-xl border border-surface-border p-4 space-y-2">
+                  <p className="text-sm font-medium text-content-primary">Local failure reports</p>
+                  <p className="text-xs text-content-tertiary leading-relaxed">
+                    Update/install errors are saved only on this PC — never uploaded.
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      className="ark-btn-secondary text-xs"
+                      onClick={() => void window.arkDesktop?.localReportsOpen?.()}
+                    >
+                      Open reports folder
+                    </button>
+                    <button
+                      type="button"
+                      className="ark-btn-secondary text-xs"
+                      onClick={() => {
+                        void window.arkDesktop?.localReportsClear?.().then(() => {
+                          setUpdateMsg('Local reports cleared.');
+                        });
+                      }}
+                    >
+                      Clear reports
+                    </button>
+                  </div>
+                </div>
               </div>
             </SettingsSection>
           )}
@@ -993,6 +1058,47 @@ function SettingsSection({ title, description, children }: { title: string; desc
       <h1 className="text-xl font-bold text-content-primary mb-1">{title}</h1>
       <p className="text-sm text-content-secondary mb-6">{description}</p>
       {children}
+    </div>
+  );
+}
+
+function OAuthClientRow({
+  pluginId,
+  onSaved,
+}: {
+  pluginId: string;
+  onSaved: (msg: string) => void;
+}) {
+  const [value, setValue] = useState('');
+
+  useEffect(() => {
+    void window.arkDesktop?.pluginOAuthStatus?.().then((s) => {
+      const stored = s?.stored?.[pluginId];
+      if (stored) setValue(stored);
+    });
+  }, [pluginId]);
+
+  return (
+    <div className="flex gap-2 items-center">
+      <span className="text-xs text-content-secondary w-16 shrink-0 capitalize">{pluginId}</span>
+      <input
+        type="text"
+        value={value}
+        onChange={e => setValue(e.target.value)}
+        placeholder={`${pluginId} client id`}
+        className="ark-input flex-1 text-sm"
+      />
+      <button
+        type="button"
+        className="ark-btn-secondary shrink-0 text-xs"
+        onClick={() => {
+          void window.arkDesktop?.pluginOAuthSetClient?.(pluginId, value).then(() => {
+            onSaved(`${pluginId} client id saved`);
+          });
+        }}
+      >
+        Save
+      </button>
     </div>
   );
 }

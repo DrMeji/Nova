@@ -19,13 +19,25 @@ export type LiveCapacity = {
   imageFree: boolean;
   openaiImage: boolean;
   summary: string;
+  /** Free-key providers still missing — for in-chat CTA */
+  suggestedFreeKeys: { id: string; name: string }[];
 };
+
+const FREE_KEY_SUGGESTIONS = [
+  { id: 'groq', name: 'Groq' },
+  { id: 'google', name: 'Google AI Studio' },
+  { id: 'openrouter', name: 'OpenRouter' },
+  { id: 'huggingface', name: 'Hugging Face' },
+  { id: 'together', name: 'Together AI' },
+] as const;
 
 export async function probeLiveCapacity(): Promise<LiveCapacity> {
   const keys = getProviderApiKeys();
   const cloudKeys = hasAnyCloudChatKey();
-  const keyCount = ['groq', 'google', 'openrouter', 'openai', 'anthropic']
-    .filter(id => Boolean(keys[id])).length;
+  const keyCount = [
+    'groq', 'google', 'openrouter', 'huggingface', 'nvidia',
+    'together', 'fireworks', 'deepseek', 'mistral', 'openai', 'anthropic',
+  ].filter(id => Boolean(keys[id])).length;
 
   let ollama = false;
   if (isOllamaEnabled()) {
@@ -41,12 +53,6 @@ export async function probeLiveCapacity(): Promise<LiveCapacity> {
   let imageFree = Boolean(window.arkDesktop?.engineGenerate);
   try {
     const status = await getEngineStatus();
-    localGguf = Boolean(
-      status.ggufBinary
-      && (status.ggufCount || 0) > 0
-      && status.models.some(m => m.status === 'ready' && (m.id.startsWith('gguf:') || status.ggufCount)),
-    );
-    // Narrower: need binary + at least one gguf file
     localGguf = Boolean(status.ggufBinary && (status.ggufCount || 0) > 0);
     imageFree = status.phase === 'online' || Boolean(window.arkDesktop?.engineGenerate);
   } catch {
@@ -55,6 +61,10 @@ export async function probeLiveCapacity(): Promise<LiveCapacity> {
 
   const liveChat = cloudKeys || ollama || localGguf;
   const openaiImage = Boolean(keys.openai);
+  const suggestedFreeKeys = FREE_KEY_SUGGESTIONS
+    .filter(p => !keys[p.id])
+    .map(p => ({ id: p.id, name: p.name }))
+    .slice(0, 3);
 
   let summary: string;
   if (liveChat) {
@@ -76,6 +86,7 @@ export async function probeLiveCapacity(): Promise<LiveCapacity> {
     imageFree,
     openaiImage,
     summary,
+    suggestedFreeKeys,
   };
 }
 
@@ -86,7 +97,7 @@ export function honestNoLiveChatReply(): string {
     '',
     'To start getting real answers:',
     '1. Open Local AI and install the default local brain (Qwen2.5 1.5B) — ARK downloads llama-cli + weights for you.',
-    '2. Or connect free capacity — Groq, Google AI Studio, or OpenRouter (Settings → Providers).',
+    '2. Or connect free capacity — Groq, Google AI Studio, OpenRouter, Hugging Face, or Together (Settings → Providers / Models).',
     '',
     'Once something is connected, leave the picker on ARK Auto — it will fail over for you and keep this thread’s context.',
   ].join('\n');

@@ -35,6 +35,18 @@ let state = null;
 
 function sendProgress(payload) {
   state = { ...(state || {}), ...payload };
+  if (payload?.status === 'error') {
+    try {
+      const arkCrashLog = require('./arkCrashLog.cjs');
+      arkCrashLog.appendReport('update-error', {
+        message: payload.message,
+        error: payload.error,
+        version: payload.version,
+      });
+    } catch {
+      /* ignore */
+    }
+  }
   for (const win of BrowserWindow.getAllWindows()) {
     try {
       win.webContents.send('ark:update-progress', state);

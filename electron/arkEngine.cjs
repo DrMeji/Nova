@@ -370,13 +370,15 @@ async function generate(message, opts = {}) {
 
   if (arkGguf.findGgufForModel(ggufId) && arkGguf.findLlamaBinary()) {
     try {
-      const gguf = await arkGguf.runGguf(ggufId, message);
+      const onChunk = typeof opts.onChunk === 'function' ? opts.onChunk : null;
+      const gguf = await arkGguf.runGgufStream(ggufId, message, onChunk);
       return {
         ok: true,
         reply: gguf.reply,
         modelId: model.id,
         modelName: model.name,
         source: 'ark-gguf',
+        streamed: Boolean(gguf.streamed),
       };
     } catch (err) {
       return {

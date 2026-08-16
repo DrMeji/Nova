@@ -87,6 +87,11 @@ const AUTH_LINKS: Record<string, PluginAuthLink> = {
     url: 'https://help.salesforce.com/s/articleView?id=sf.connected_app_create.htm',
     hint: 'Create a connected app, then paste an access token.',
   },
+  vercel: {
+    label: 'Vercel tokens',
+    url: 'https://vercel.com/account/tokens',
+    hint: 'Create a Vercel access token and paste it below. ARK verifies it live.',
+  },
   discord: {
     label: 'Discord developer portal',
     url: 'https://discord.com/developers/applications',
