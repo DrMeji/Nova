@@ -5,7 +5,7 @@ import { getLocalPrefs } from '@/lib/localPrefs';
 import {
   SquarePen, Briefcase, Blocks, Database, Bot,
   Settings, Search, PanelLeft, ChevronDown, Folder, History, Clock3,
-  ImageIcon, Video, MessageSquare,
+  ImageIcon, Video, MessageSquare, Archive, Trash2,
 } from 'lucide-react';
 import { Modal } from './Modal';
 import { SettingsContent } from './SettingsContent';
@@ -37,12 +37,13 @@ function resolveDisplayName(
 export function AppShell({ children }: { children: ReactNode }) {
   const { route, navigate } = useRouter();
   const { user, profile } = useAuth();
-  const { recent, chats } = useRecentProjects();
+  const { recent, activeChats, archiveChat, deleteChatForever } = useRecentProjects();
   const [collapsed, setCollapsed] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [recentOpen, setRecentOpen] = useState(true);
   const [prefsName, setPrefsName] = useState(() => getLocalPrefs().displayName);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string } | null>(null);
 
   useEffect(() => {
     const onPrefs = () => setPrefsName(getLocalPrefs().displayName);
@@ -209,31 +210,60 @@ export function AppShell({ children }: { children: ReactNode }) {
 
               {recentOpen && !collapsed && (
                 <div className="mt-1 flex flex-col gap-0.5 pl-1">
-                  {chats.length === 0 && recent.length === 0 ? (
+                  {activeChats.length === 0 && recent.length === 0 ? (
                     <p className="px-3 py-2 text-[11px] text-content-tertiary leading-snug">
                       Conversations you start will show up here.
                     </p>
                   ) : null}
-                  {chats.slice(0, 20).map(item => {
+                  {activeChats.slice(0, 20).map(item => {
                     const active = activeChatId === item.id;
                     const Icon = chatIcon(item.mode);
                     return (
-                      <button
+                      <div
                         key={item.id}
-                        type="button"
-                        onClick={() =>
-                          navigate({
-                            name: 'chat',
-                            mode: item.mode === 'general' ? undefined : item.mode,
-                            chatId: item.id,
-                          })
-                        }
-                        className={`ark-nav-item !py-1.5 !gap-2.5 ${active ? 'active' : ''}`}
-                        title={item.title}
+                        className={`group flex items-center gap-0.5 rounded-lg ${active ? 'bg-surface-hover' : ''}`}
                       >
-                        <Icon className="w-3.5 h-3.5 shrink-0 text-content-tertiary" strokeWidth={1.75} />
-                        <span className="truncate">{item.title}</span>
-                      </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            navigate({
+                              name: 'chat',
+                              mode: item.mode === 'general' ? undefined : item.mode,
+                              chatId: item.id,
+                            })
+                          }
+                          className={`ark-nav-item !py-1.5 !gap-2.5 flex-1 min-w-0 ${active ? 'active' : ''}`}
+                          title={item.title}
+                        >
+                          <Icon className="w-3.5 h-3.5 shrink-0 text-content-tertiary" strokeWidth={1.75} />
+                          <span className="truncate">{item.title}</span>
+                        </button>
+                        <button
+                          type="button"
+                          title="Archive to History"
+                          aria-label={`Archive ${item.title}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            archiveChat(item.id);
+                            if (activeChatId === item.id) navigate({ name: 'chat' });
+                          }}
+                          className="opacity-0 group-hover:opacity-100 focus:opacity-100 w-7 h-7 rounded-md flex items-center justify-center text-content-tertiary hover:text-sky-300 hover:bg-surface-hover shrink-0 transition-opacity"
+                        >
+                          <Archive className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          title="Delete forever"
+                          aria-label={`Delete ${item.title}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDeleteTarget({ id: item.id, title: item.title });
+                          }}
+                          className="opacity-0 group-hover:opacity-100 focus:opacity-100 w-7 h-7 rounded-md flex items-center justify-center text-content-tertiary hover:text-rose-400 hover:bg-surface-hover shrink-0 transition-opacity mr-0.5"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     );
                   })}
                   {recent.length > 0 ? (
@@ -263,7 +293,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
               {collapsed && recentOpen && (
                 <div className="mt-1 flex flex-col gap-0.5">
-                  {chats.slice(0, 8).map(item => {
+                  {activeChats.slice(0, 8).map(item => {
                     const active = activeChatId === item.id;
                     const Icon = chatIcon(item.mode);
                     return (
@@ -277,7 +307,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                             chatId: item.id,
                           })
                         }
-                        className={`ark-nav-item w-full !justify-center ${active ? 'active' : ''}`}
+                        className={`ark-nav-item !justify-center ${active ? 'active' : ''}`}
                         title={item.title}
                       >
                         <Icon className="w-3.5 h-3.5" strokeWidth={1.75} />
@@ -375,6 +405,48 @@ export function AppShell({ children }: { children: ReactNode }) {
         size="settings"
       >
         <SettingsContent />
+      </Modal>
+
+      <Modal
+        isOpen={Boolean(deleteTarget)}
+        onClose={() => setDeleteTarget(null)}
+        title="Delete chat?"
+        size="sm"
+      >
+        <div className="px-1 pb-1">
+          <p className="text-sm text-content-secondary leading-relaxed">
+            You’re about to permanently delete
+            {deleteTarget ? (
+              <>
+                {' '}
+                <span className="text-content-primary font-medium">“{deleteTarget.title}”</span>
+              </>
+            ) : null}
+            . This removes the conversation and linked local data from this PC. This can’t be undone.
+          </p>
+          <div className="flex items-center justify-end gap-2 mt-6">
+            <button
+              type="button"
+              onClick={() => setDeleteTarget(null)}
+              className="rounded-full px-3.5 py-1.5 text-xs font-medium text-content-secondary hover:bg-surface-hover transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (!deleteTarget) return;
+                const id = deleteTarget.id;
+                deleteChatForever(id);
+                setDeleteTarget(null);
+                if (activeChatId === id) navigate({ name: 'chat' });
+              }}
+              className="rounded-full px-3.5 py-1.5 text-xs font-medium bg-rose-500/20 text-rose-300 hover:bg-rose-500/30 transition-colors"
+            >
+              Yes, delete forever
+            </button>
+          </div>
+        </div>
       </Modal>
     </div>
   );

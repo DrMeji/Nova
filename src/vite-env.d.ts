@@ -253,6 +253,7 @@ declare global {
         };
         error?: string;
       }>;
+      mediaRemove?: (id: string) => Promise<{ ok: boolean; removed?: boolean; error?: string }>;
       projectWrite?: (payload: {
         projectId: string;
         projectName?: string;

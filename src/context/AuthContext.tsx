@@ -76,6 +76,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [packaged, setPackaged] = useState(false);
 
   const loadProfileAndSettings = async (userId: string) => {
+    await ensureFirstRunGate();
+    const setupDone = isSetupCompleted();
     const [profileRes, settingsRes] = await Promise.all([
       supabase.from('profiles').select('*').eq('id', userId).maybeSingle(),
       supabase.from('user_settings').select('*').eq('user_id', userId).maybeSingle(),
@@ -87,7 +89,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setProfile({
         ...p,
         display_name: display,
-        onboarding_completed: isSetupCompleted(),
+        // Machine install flag wins — never skip first-run because of a cloud profile.
+        onboarding_completed: setupDone,
       });
       if (display) {
         try {
@@ -105,7 +108,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         id: userId,
         display_name: null,
         avatar_url: null,
-        onboarding_completed: isSetupCompleted(),
+        onboarding_completed: setupDone,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       });
@@ -117,6 +120,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
 
     (async () => {
+      // Must finish before any auth profile load — otherwise signup can skip setup.
       await ensureFirstRunGate();
       if (cancelled) return;
 
@@ -181,8 +185,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(newSession?.user ?? null);
       if (newSession?.user) {
         (async () => {
+          await ensureFirstRunGate();
+          if (cancelled) return;
           await loadProfileAndSettings(newSession.user.id);
-          setLoading(false);
+          if (!cancelled) setLoading(false);
         })();
       } else {
         setProfile(null);
@@ -198,6 +204,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signIn = async (email: string, password: string) => {
+    await ensureFirstRunGate();
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (!error) {
       localStorage.setItem('ark:last-auth', JSON.stringify({
@@ -210,26 +217,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signUp = async (email: string, password: string, displayName?: string) => {
+    await ensureFirstRunGate();
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: { data: { display_name: displayName?.trim() || undefined } },
     });
-    if (!error && data.user && displayName?.trim()) {
+    if (!error && data.user) {
       try {
         await supabase.from('profiles').upsert({
           id: data.user.id,
-          display_name: displayName.trim(),
-          onboarding_completed: false,
+          display_name: displayName?.trim() || null,
+          // Cloud flag is informational; local install setup still gates the UI.
+          onboarding_completed: isSetupCompleted(),
         });
       } catch {
         /* profile row may be created by trigger */
       }
-      try {
-        const { setLocalPrefs } = await import('@/lib/localPrefs');
-        setLocalPrefs({ displayName: displayName.trim() });
-      } catch {
-        /* ignore */
+      if (displayName?.trim()) {
+        try {
+          const { setLocalPrefs } = await import('@/lib/localPrefs');
+          setLocalPrefs({ displayName: displayName.trim() });
+        } catch {
+          /* ignore */
+        }
       }
     }
     return { error: error?.message ?? null };

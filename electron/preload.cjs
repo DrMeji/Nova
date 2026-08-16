@@ -85,6 +85,7 @@ contextBridge.exposeInMainWorld('arkDesktop', {
   mediaLibrary: () => ipcRenderer.invoke('ark:media-library'),
   mediaClear: () => ipcRenderer.invoke('ark:media-clear'),
   mediaGet: (id) => ipcRenderer.invoke('ark:media-get', id),
+  mediaRemove: (id) => ipcRenderer.invoke('ark:media-remove', id),
   projectWrite: (payload) => ipcRenderer.invoke('ark:project-write', payload),
   projectRead: (projectId) => ipcRenderer.invoke('ark:project-read', projectId),
   projectPath: (projectId) => ipcRenderer.invoke('ark:project-path', projectId),

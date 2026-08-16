@@ -6,55 +6,69 @@ const BYPASS_KEY = 'ark:bypass-enabled';
 export const FORCE_AUTH_ON_LAUNCH = false;
 
 let launchPrepared = false;
-let desktopSynced = false;
+let gatePromise: Promise<void> | null = null;
 
 export function isSetupCompleted() {
   return localStorage.getItem(SETUP_KEY) === '1';
 }
 
+/** True until this install finishes Hardware → Models → Connect once. */
+export function needsFirstRunSetup() {
+  return !isSetupCompleted();
+}
+
 export function markSetupCompleted() {
   localStorage.setItem(SETUP_KEY, '1');
   void window.arkDesktop?.setupSet?.(true)?.catch?.(() => {});
+  window.dispatchEvent(new Event('ark:setup-changed'));
 }
 
 export function clearSetupCompleted() {
   localStorage.removeItem(SETUP_KEY);
   void window.arkDesktop?.setupSet?.(false)?.catch?.(() => {});
+  window.dispatchEvent(new Event('ark:setup-changed'));
 }
 
 /**
- * Packaged installs: never keep a leftover guest bypass, and sync setup from
- * Electron userData so a real first install always runs Hardware → Models → Connect.
+ * Packaged / desktop installs: sync setup from Electron userData so a real
+ * first install always runs Hardware → Models → Connect (sign-in and sign-up).
+ * Cleared when the app is uninstalled (deleteAppDataOnUninstall).
  */
 export async function ensureFirstRunGate(): Promise<void> {
-  if (desktopSynced) return;
-  desktopSynced = true;
+  if (!gatePromise) {
+    gatePromise = (async () => {
+      try {
+        const meta = await window.arkDesktop?.appMeta?.();
+        if (meta?.isPackaged) {
+          localStorage.removeItem(BYPASS_KEY);
+        }
+      } catch {
+        /* ignore */
+      }
 
-  try {
-    const meta = await window.arkDesktop?.appMeta?.();
-    if (meta?.isPackaged) {
-      localStorage.removeItem(BYPASS_KEY);
-    }
-  } catch {
-    /* ignore */
-  }
+      try {
+        const state = await window.arkDesktop?.setupGet?.();
+        if (state && typeof state.completed === 'boolean') {
+          if (state.completed) localStorage.setItem(SETUP_KEY, '1');
+          else localStorage.removeItem(SETUP_KEY);
+          return;
+        }
+      } catch {
+        /* ignore */
+      }
 
-  try {
-    const state = await window.arkDesktop?.setupGet?.();
-    if (state && typeof state.completed === 'boolean') {
-      if (state.completed) localStorage.setItem(SETUP_KEY, '1');
-      else localStorage.removeItem(SETUP_KEY);
-      return;
-    }
-  } catch {
-    /* ignore */
+      // No desktop file yet — treat as not completed until onboarding finishes.
+      if (window.arkDesktop?.setupGet) {
+        localStorage.removeItem(SETUP_KEY);
+        await window.arkDesktop.setupSet?.(false)?.catch?.(() => {});
+      }
+    })();
   }
+  await gatePromise;
+}
 
-  // No desktop file yet — treat as not completed until onboarding finishes.
-  if (window.arkDesktop?.setupGet) {
-    localStorage.removeItem(SETUP_KEY);
-    await window.arkDesktop.setupSet?.(false)?.catch?.(() => {});
-  }
+export function waitForFirstRunGate() {
+  return ensureFirstRunGate();
 }
 
 export function prepareLaunchForTesting() {

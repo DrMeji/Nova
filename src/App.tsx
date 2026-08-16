@@ -17,8 +17,9 @@ import { CreationViewer } from '@/views/CreationViewer';
 import { Settings } from '@/views/Settings';
 import { runCleanBootIfNeeded } from '@/lib/clearSession';
 import { getLocalPrefs } from '@/lib/localPrefs';
+import { needsFirstRunSetup } from '@/lib/setup';
 import { UpdateOverlay } from '@/components/UpdateOverlay';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 
 runCleanBootIfNeeded();
@@ -42,12 +43,19 @@ function AppRoutes() {
 
 function AppContent() {
   const { user, profile, loading } = useAuth();
+  const [setupTick, setSetupTick] = useState(0);
 
   useEffect(() => {
     if (!window.arkDesktop?.loginItemSet) return;
     if (getLocalPrefs().launchOnStartup) {
       void window.arkDesktop.loginItemSet(true);
     }
+  }, []);
+
+  useEffect(() => {
+    const onSetup = () => setSetupTick(t => t + 1);
+    window.addEventListener('ark:setup-changed', onSetup);
+    return () => window.removeEventListener('ark:setup-changed', onSetup);
   }, []);
 
   if (loading) {
@@ -62,7 +70,10 @@ function AppContent() {
     return <AuthScreen />;
   }
 
-  if (!profile?.onboarding_completed) {
+  // Machine install flag is source of truth (sign-in and sign-up).
+  // setupTick forces re-check after onboarding marks complete.
+  void setupTick;
+  if (needsFirstRunSetup() || !profile?.onboarding_completed) {
     return <OnboardingScreen />;
   }
 

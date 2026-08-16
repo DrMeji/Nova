@@ -1,5 +1,7 @@
-import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, useEffect, useMemo, type ReactNode } from 'react';
 import {
+  archiveRecentChat,
+  deleteRecentChatPermanently,
   loadRecentChats,
   loadRecentCreations,
   loadRecentProjects,
@@ -15,10 +17,15 @@ import {
 interface RecentProjectsContextValue {
   recent: RecentProject[];
   creations: RecentCreation[];
+  /** All chats including archived (History). */
   chats: RecentChat[];
+  /** Sidebar Recent — excludes archived. */
+  activeChats: RecentChat[];
   addRecent: (name: string) => RecentProject;
   addCreation: (entry: RecentCreation) => void;
   addChat: (entry: RecentChat) => void;
+  archiveChat: (chatId: string) => void;
+  deleteChatForever: (chatId: string) => void;
   refreshCreations: () => void;
   refreshChats: () => void;
 }
@@ -29,6 +36,8 @@ export function RecentProjectsProvider({ children }: { children: ReactNode }) {
   const [recent, setRecent] = useState<RecentProject[]>(() => loadRecentProjects());
   const [creations, setCreations] = useState<RecentCreation[]>(() => loadRecentCreations());
   const [chats, setChats] = useState<RecentChat[]>(() => loadRecentChats());
+
+  const activeChats = useMemo(() => chats.filter(c => !c.archivedAt), [chats]);
 
   const refreshCreations = useCallback(() => {
     setCreations(loadRecentCreations());
@@ -117,13 +126,41 @@ export function RecentProjectsProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const addChat = useCallback((entry: RecentChat) => {
-    upsertRecentChat(entry);
+    // Keep archived status if re-upserting the same id without clearing it.
+    const prev = loadRecentChats().find(c => c.id === entry.id);
+    upsertRecentChat({
+      ...entry,
+      archivedAt: entry.archivedAt ?? prev?.archivedAt,
+    });
     setChats(loadRecentChats());
+  }, []);
+
+  const archiveChat = useCallback((chatId: string) => {
+    archiveRecentChat(chatId);
+    setChats(loadRecentChats());
+  }, []);
+
+  const deleteChatForever = useCallback((chatId: string) => {
+    deleteRecentChatPermanently(chatId);
+    setChats(loadRecentChats());
+    setCreations(loadRecentCreations());
   }, []);
 
   return (
     <RecentProjectsContext.Provider
-      value={{ recent, creations, chats, addRecent, addCreation, addChat, refreshCreations, refreshChats }}
+      value={{
+        recent,
+        creations,
+        chats,
+        activeChats,
+        addRecent,
+        addCreation,
+        addChat,
+        archiveChat,
+        deleteChatForever,
+        refreshCreations,
+        refreshChats,
+      }}
     >
       {children}
     </RecentProjectsContext.Provider>

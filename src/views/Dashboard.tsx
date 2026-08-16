@@ -96,7 +96,13 @@ export function Dashboard() {
         kind: c.mode === 'image' ? 'image' : c.mode === 'video' ? 'video' : 'chat',
         source: 'generated' as const,
         modifiedLabel: formatWhen(c.updatedAt),
-        sizeLabel: c.mode === 'image' ? 'Image' : c.mode === 'video' ? 'Video' : 'Chat',
+        sizeLabel: c.archivedAt
+          ? 'Archived'
+          : c.mode === 'image'
+            ? 'Image'
+            : c.mode === 'video'
+              ? 'Video'
+              : 'Chat',
         tone:
           c.mode === 'video'
             ? 'from-violet-900/70 to-indigo-950'

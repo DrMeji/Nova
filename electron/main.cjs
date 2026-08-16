@@ -517,6 +517,14 @@ ipcMain.handle('ark:media-get', async (_e, id) => {
   }
 });
 
+ipcMain.handle('ark:media-remove', async (_e, id) => {
+  try {
+    return arkMedia.removeLibraryItem(id);
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'media remove error' };
+  }
+});
+
 ipcMain.handle('ark:project-write', async (_e, payload) => {
   try {
     return arkProjects.writeProjectFiles(

@@ -23,6 +23,8 @@ export type RecentChat = {
   updatedAt: string;
   /** Optional link to media library item for image/video threads */
   creationId?: string;
+  /** When set, chat left Recent and lives in History only */
+  archivedAt?: string;
 };
 
 const PROJECTS_KEY = 'ark:recent-projects';
@@ -115,6 +117,72 @@ export function upsertRecentChat(entry: RecentChat) {
   saveRecentChats(list);
   window.dispatchEvent(new Event('ark:chats-changed'));
   return list;
+}
+
+/** Active Recent sidebar list (excludes archived). */
+export function loadActiveRecentChats(): RecentChat[] {
+  return loadRecentChats().filter(c => !c.archivedAt);
+}
+
+/** Move chat out of Recent into History. */
+export function archiveRecentChat(chatId: string) {
+  const list = loadRecentChats().map(c =>
+    c.id === chatId
+      ? { ...c, archivedAt: c.archivedAt || new Date().toISOString(), updatedAt: new Date().toISOString() }
+      : c,
+  );
+  saveRecentChats(list);
+  window.dispatchEvent(new Event('ark:chats-changed'));
+  return list;
+}
+
+/**
+ * Permanently wipe a chat and linked local data (thread, creation meta, thumbs).
+ * Does not leave a recoverable copy on this PC.
+ */
+export function deleteRecentChatPermanently(chatId: string) {
+  const existing = loadRecentChats().find(c => c.id === chatId);
+  const creationId = existing?.creationId;
+
+  const nextChats = loadRecentChats().filter(c => c.id !== chatId);
+  saveRecentChats(nextChats);
+
+  try {
+    localStorage.removeItem(chatThreadKey(chatId));
+  } catch {
+    /* ignore */
+  }
+
+  // Clear any draft/thread keys that reference this id
+  try {
+    const keys: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k) keys.push(k);
+    }
+    for (const k of keys) {
+      if (k.includes(chatId)) localStorage.removeItem(k);
+    }
+  } catch {
+    /* ignore */
+  }
+
+  if (creationId) {
+    memoryThumbs.delete(creationId);
+    const nextCreations = loadRecentCreations().filter(c => c.id !== creationId);
+    saveRecentCreations(nextCreations);
+    try {
+      localStorage.removeItem(`ark:chat-thread:creation:${creationId}`);
+      localStorage.removeItem(`ark:media-feedback:${creationId}`);
+    } catch {
+      /* ignore */
+    }
+    void window.arkDesktop?.mediaRemove?.(creationId)?.catch?.(() => undefined);
+  }
+
+  window.dispatchEvent(new Event('ark:chats-changed'));
+  window.dispatchEvent(new Event('ark:creations-changed'));
+  return nextChats;
 }
 
 export function titleFromPrompt(prompt: string): string {

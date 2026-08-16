@@ -507,6 +507,31 @@ function clearLibrary() {
   return { ok: true };
 }
 
+function removeLibraryItem(id) {
+  const libPath = path.join(mediaDir(), 'library.json');
+  let list = [];
+  try {
+    if (fs.existsSync(libPath)) list = JSON.parse(fs.readFileSync(libPath, 'utf8'));
+  } catch {
+    list = [];
+  }
+  const hit = list.find((i) => i.id === id);
+  const next = list.filter((i) => i.id !== id);
+  try {
+    fs.writeFileSync(libPath, JSON.stringify(next, null, 2), 'utf8');
+  } catch {
+    /* ignore */
+  }
+  if (hit?.path) {
+    try {
+      if (fs.existsSync(hit.path)) fs.unlinkSync(hit.path);
+    } catch {
+      /* ignore */
+    }
+  }
+  return { ok: true, removed: Boolean(hit) };
+}
+
 module.exports = {
   generateImage,
   generateVideo,
@@ -515,4 +540,5 @@ module.exports = {
   getLibraryItem,
   writeLibraryEntry,
   clearLibrary,
+  removeLibraryItem,
 };
