@@ -1,7 +1,7 @@
 /** Cloud chat completions using keys stored in local prefs. */
 
 import { getProviderApiKeys } from '@/lib/localPrefs';
-import { apiErrorMessage, desktopRequest } from '@/lib/httpDesktop';
+import { apiErrorMessage, desktopRequest, desktopStreamRequest } from '@/lib/httpDesktop';
 import {
   latestUserMessage,
   routerSystemPrompt,
@@ -21,7 +21,12 @@ type ProviderAttempt = {
   label: string;
   cost: 'free-key' | 'paid';
   model: string;
-  run: (key: string, history: RouterChatTurn[], model: string) => Promise<string | null>;
+  run: (
+    key: string,
+    history: RouterChatTurn[],
+    model: string,
+    onChunk?: (text: string) => void,
+  ) => Promise<string | null>;
 };
 
 function isRateLimited(err: unknown) {
@@ -40,8 +45,37 @@ async function openaiCompatible(
   model: string,
   history: RouterChatTurn[],
   extraHeaders?: Record<string, string>,
+  onChunk?: (text: string) => void,
 ): Promise<string | null> {
   const system = routerSystemPrompt(history);
+  const messages = [
+    { role: 'system', content: system },
+    ...history.map(t => ({ role: t.role, content: t.content })),
+  ];
+
+  if (onChunk) {
+    const streamed = await desktopStreamRequest(
+      url,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${key}`,
+          'Content-Type': 'application/json',
+          ...extraHeaders,
+        },
+        body: JSON.stringify({
+          model,
+          messages,
+          temperature: 0.7,
+          stream: true,
+        }),
+      },
+      onChunk,
+    );
+    if (!streamed.ok) throw new Error(streamed.error || 'Cloud stream error');
+    return streamed.text.trim() || null;
+  }
+
   const res = await desktopRequest(url, {
     method: 'POST',
     headers: {
@@ -51,10 +85,7 @@ async function openaiCompatible(
     },
     body: JSON.stringify({
       model,
-      messages: [
-        { role: 'system', content: system },
-        ...history.map(t => ({ role: t.role, content: t.content })),
-      ],
+      messages,
       temperature: 0.7,
     }),
   });
@@ -63,13 +94,22 @@ async function openaiCompatible(
   return data.choices?.[0]?.message?.content?.trim() || null;
 }
 
-async function chatOpenAI(key: string, history: RouterChatTurn[], model: string) {
-  return openaiCompatible('https://api.openai.com/v1/chat/completions', key, model, history);
+async function chatOpenAI(
+  key: string,
+  history: RouterChatTurn[],
+  model: string,
+  onChunk?: (text: string) => void,
+) {
+  return openaiCompatible('https://api.openai.com/v1/chat/completions', key, model, history, undefined, onChunk);
 }
 
-async function chatAnthropic(key: string, history: RouterChatTurn[], model: string) {
+async function chatAnthropic(
+  key: string,
+  history: RouterChatTurn[],
+  model: string,
+  onChunk?: (text: string) => void,
+) {
   const system = routerSystemPrompt(history);
-  // Anthropic requires alternating user/assistant and must start with user.
   const messages = history.map(t => ({
     role: t.role === 'assistant' ? 'assistant' : 'user',
     content: t.content,
@@ -90,21 +130,38 @@ async function chatAnthropic(key: string, history: RouterChatTurn[], model: stri
   });
   if (!res.ok) throw new Error(apiErrorMessage(res, 'Anthropic error'));
   const data = res.data as { content?: { type: string; text?: string }[] };
-  return data.content?.find(c => c.type === 'text')?.text?.trim() || null;
+  const text = data.content?.find(c => c.type === 'text')?.text?.trim() || null;
+  if (text && onChunk) await revealCloudReply(text, onChunk);
+  return text;
 }
 
-async function chatOpenRouter(key: string, history: RouterChatTurn[], model: string) {
+async function chatOpenRouter(
+  key: string,
+  history: RouterChatTurn[],
+  model: string,
+  onChunk?: (text: string) => void,
+) {
   return openaiCompatible('https://openrouter.ai/api/v1/chat/completions', key, model, history, {
     'HTTP-Referer': 'https://ark.local',
     'X-Title': 'ARK',
-  });
+  }, onChunk);
 }
 
-async function chatGroq(key: string, history: RouterChatTurn[], model: string) {
-  return openaiCompatible('https://api.groq.com/openai/v1/chat/completions', key, model, history);
+async function chatGroq(
+  key: string,
+  history: RouterChatTurn[],
+  model: string,
+  onChunk?: (text: string) => void,
+) {
+  return openaiCompatible('https://api.groq.com/openai/v1/chat/completions', key, model, history, undefined, onChunk);
 }
 
-async function chatGoogle(key: string, history: RouterChatTurn[], model: string) {
+async function chatGoogle(
+  key: string,
+  history: RouterChatTurn[],
+  model: string,
+  onChunk?: (text: string) => void,
+) {
   const url =
     `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`
     + `?key=${encodeURIComponent(key)}`;
@@ -125,59 +182,107 @@ async function chatGoogle(key: string, history: RouterChatTurn[], model: string)
     candidates?: { content?: { parts?: { text?: string }[] } }[];
   };
   const text = data.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('') || '';
-  return text.trim() || null;
+  const trimmed = text.trim() || null;
+  if (trimmed && onChunk) await revealCloudReply(trimmed, onChunk);
+  return trimmed;
 }
 
 /** Hugging Face Inference Providers (OpenAI-compatible router). */
-async function chatHuggingFace(key: string, history: RouterChatTurn[], model: string) {
+async function chatHuggingFace(
+  key: string,
+  history: RouterChatTurn[],
+  model: string,
+  onChunk?: (text: string) => void,
+) {
   return openaiCompatible(
     'https://router.huggingface.co/v1/chat/completions',
     key,
     model,
     history,
+    undefined,
+    onChunk,
   );
 }
 
 /** NVIDIA NIM / build.nvidia.com OpenAI-compatible endpoints. */
-async function chatNvidia(key: string, history: RouterChatTurn[], model: string) {
+async function chatNvidia(
+  key: string,
+  history: RouterChatTurn[],
+  model: string,
+  onChunk?: (text: string) => void,
+) {
   return openaiCompatible(
     'https://integrate.api.nvidia.com/v1/chat/completions',
     key,
     model,
     history,
+    undefined,
+    onChunk,
   );
 }
 
-async function chatTogether(key: string, history: RouterChatTurn[], model: string) {
-  return openaiCompatible('https://api.together.xyz/v1/chat/completions', key, model, history);
+async function chatTogether(
+  key: string,
+  history: RouterChatTurn[],
+  model: string,
+  onChunk?: (text: string) => void,
+) {
+  return openaiCompatible('https://api.together.xyz/v1/chat/completions', key, model, history, undefined, onChunk);
 }
 
-async function chatFireworks(key: string, history: RouterChatTurn[], model: string) {
+async function chatFireworks(
+  key: string,
+  history: RouterChatTurn[],
+  model: string,
+  onChunk?: (text: string) => void,
+) {
   return openaiCompatible(
     'https://api.fireworks.ai/inference/v1/chat/completions',
     key,
     model,
     history,
+    undefined,
+    onChunk,
   );
 }
 
-async function chatDeepSeek(key: string, history: RouterChatTurn[], model: string) {
-  return openaiCompatible('https://api.deepseek.com/chat/completions', key, model, history);
+async function chatDeepSeek(
+  key: string,
+  history: RouterChatTurn[],
+  model: string,
+  onChunk?: (text: string) => void,
+) {
+  return openaiCompatible('https://api.deepseek.com/chat/completions', key, model, history, undefined, onChunk);
 }
 
-async function chatMistral(key: string, history: RouterChatTurn[], model: string) {
-  return openaiCompatible('https://api.mistral.ai/v1/chat/completions', key, model, history);
+async function chatMistral(
+  key: string,
+  history: RouterChatTurn[],
+  model: string,
+  onChunk?: (text: string) => void,
+) {
+  return openaiCompatible('https://api.mistral.ai/v1/chat/completions', key, model, history, undefined, onChunk);
 }
 
-async function chatCerebras(key: string, history: RouterChatTurn[], model: string) {
-  return openaiCompatible('https://api.cerebras.ai/v1/chat/completions', key, model, history);
+async function chatCerebras(
+  key: string,
+  history: RouterChatTurn[],
+  model: string,
+  onChunk?: (text: string) => void,
+) {
+  return openaiCompatible('https://api.cerebras.ai/v1/chat/completions', key, model, history, undefined, onChunk);
 }
 
-async function chatSambaNova(key: string, history: RouterChatTurn[], model: string) {
-  return openaiCompatible('https://api.sambanova.ai/v1/chat/completions', key, model, history);
+async function chatSambaNova(
+  key: string,
+  history: RouterChatTurn[],
+  model: string,
+  onChunk?: (text: string) => void,
+) {
+  return openaiCompatible('https://api.sambanova.ai/v1/chat/completions', key, model, history, undefined, onChunk);
 }
 
-/** Progressive word reveal for cloud replies (providers return full text). */
+/** Progressive word reveal — fallback when a provider has no SSE path (Google/Anthropic). */
 export async function revealCloudReply(
   reply: string,
   onChunk?: (text: string) => void,
@@ -425,11 +530,12 @@ async function runAttempt(
   attempt: ProviderAttempt,
   history: RouterChatTurn[],
   keys: Record<string, string>,
+  onChunk?: (text: string) => void,
 ): Promise<CloudChatHit | null> {
   const key = keys[attempt.id];
   if (!key) return null;
   try {
-    const reply = await attempt.run(key, history, attempt.model);
+    const reply = await attempt.run(key, history, attempt.model, onChunk);
     if (!reply) return null;
     return {
       reply,
@@ -469,11 +575,8 @@ export async function cloudChatFreeKeys(
   const turns = ensureHistory(history, message);
   for (const attempt of FREE_KEY_PROVIDERS) {
     attempted.push(attempt.label);
-    const hit = await runAttempt(attempt, turns, keys);
-    if (hit) {
-      await revealCloudReply(hit.reply, onChunk);
-      return hit;
-    }
+    const hit = await runAttempt(attempt, turns, keys, onChunk);
+    if (hit) return hit;
   }
   return null;
 }
@@ -489,11 +592,8 @@ export async function cloudChatPaidKeys(
   const turns = ensureHistory(history, message);
   for (const attempt of PAID_PROVIDERS) {
     attempted.push(attempt.label);
-    const hit = await runAttempt(attempt, turns, keys);
-    if (hit) {
-      await revealCloudReply(hit.reply, onChunk);
-      return hit;
-    }
+    const hit = await runAttempt(attempt, turns, keys, onChunk);
+    if (hit) return hit;
   }
   return null;
 }
@@ -513,11 +613,8 @@ export async function cloudChatPreferredThenCascade(opts: {
   const history = ensureHistory(opts.history, opts.message);
   if (mapped) {
     opts.attempted.push(mapped.label);
-    const hit = await runAttempt(mapped, history, keys);
-    if (hit) {
-      await revealCloudReply(hit.reply, opts.onChunk);
-      return hit;
-    }
+    const hit = await runAttempt(mapped, history, keys, opts.onChunk);
+    if (hit) return hit;
     if (!opts.cascade) return null;
   }
   if (!opts.cascade) return null;

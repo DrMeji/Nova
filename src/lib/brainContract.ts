@@ -24,7 +24,7 @@
  *
  * Optional: set ARK_BRAIN_TOKEN and send Authorization: Bearer <token>
  *
- * Cookbook: docs/lindsay-brain-api.md
+ * Cookbook: docs/lindsay-brain-api.md · OpenAPI: docs/lindsay-openapi.yaml · sample: examples/lindsay-client/
  *
  * Optional bridges (Ollama, HF, …) stay behind ARK — clients only see this API.
  */

@@ -184,6 +184,94 @@ async function handleHttpRequest(_event, payload) {
   return { ok: res.ok, status: res.status, data };
 }
 
+/** Stream OpenAI-style SSE (or raw text) and push text deltas to the renderer. */
+async function handleHttpStream(event, payload) {
+  const url = payload?.url;
+  const method = (payload?.method || 'POST').toUpperCase();
+  const headers = payload?.headers && typeof payload.headers === 'object' ? payload.headers : {};
+  const body = typeof payload?.body === 'string' ? payload.body : undefined;
+  const streamId = payload?.streamId || `s-${Date.now()}`;
+  assertAllowedUrl(url);
+
+  const send = (msg) => {
+    try {
+      event.sender.send('ark:http-stream-chunk', { streamId, ...msg });
+    } catch {
+      /* ignore */
+    }
+  };
+
+  try {
+    const res = await fetch(url, {
+      method,
+      headers: {
+        'User-Agent': 'ARK-Desktop',
+        Accept: 'text/event-stream',
+        ...headers,
+      },
+      body: method === 'GET' || method === 'HEAD' ? undefined : body,
+    });
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      let errMsg = `HTTP ${res.status}`;
+      try {
+        const j = JSON.parse(errText);
+        errMsg = j?.error?.message || j?.message || errMsg;
+      } catch {
+        if (errText) errMsg = errText.slice(0, 240);
+      }
+      send({ type: 'error', error: errMsg, status: res.status });
+      return { ok: false, status: res.status, streamId, error: errMsg };
+    }
+
+    if (!res.body) {
+      send({ type: 'error', error: 'No response body' });
+      return { ok: false, status: res.status, streamId, error: 'No response body' };
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    let full = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const parts = buf.split('\n');
+      buf = parts.pop() || '';
+      for (const line of parts) {
+        const trimmed = line.trimEnd();
+        if (!trimmed.startsWith('data:')) continue;
+        const data = trimmed.slice(5).trim();
+        if (!data || data === '[DONE]') continue;
+        try {
+          const json = JSON.parse(data);
+          const delta =
+            json?.choices?.[0]?.delta?.content
+            ?? json?.choices?.[0]?.message?.content
+            ?? json?.delta?.text
+            ?? '';
+          if (typeof delta === 'string' && delta) {
+            full += delta;
+            send({ type: 'delta', text: delta });
+          }
+        } catch {
+          /* ignore non-JSON SSE lines */
+        }
+      }
+    }
+
+    send({ type: 'done', text: full });
+    return { ok: true, status: res.status, streamId, text: full };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Stream failed';
+    send({ type: 'error', error: msg });
+    return { ok: false, streamId, error: msg };
+  }
+}
+
 ipcMain.handle('ark:system-info', async () => arkSystem.probeSystemInfo());
 
 ipcMain.handle('ark:speed-test', async () => arkSystem.probeSpeedTest());
@@ -311,6 +399,7 @@ ipcMain.handle('ark:http-get', async (event, payload) =>
   handleHttpRequest(event, { ...payload, method: 'GET' }),
 );
 ipcMain.handle('ark:http-request', handleHttpRequest);
+ipcMain.handle('ark:http-stream', handleHttpStream);
 
 ipcMain.handle('ark:engine-status', async () => arkEngine.getStatus());
 ipcMain.handle('ark:engine-start', async () => arkEngine.start());

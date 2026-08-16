@@ -97,7 +97,7 @@ export function SettingsContent() {
     latestTag?: string;
   } | null>(null);
   const [updatePercent, setUpdatePercent] = useState(0);
-  const [appVersion, setAppVersion] = useState('0.1.22');
+  const [appVersion, setAppVersion] = useState('0.1.23');
   const [twoFaCode, setTwoFaCode] = useState('');
   const [twoFaSetup, setTwoFaSetup] = useState(false);
   const [savedFlash, setSavedFlash] = useState('');
@@ -977,12 +977,14 @@ export function SettingsContent() {
                     Buy an Authenticode cert (DigiCert, Sectigo, SSL.com), export a .pfx, then before packaging:
                   </p>
                   <ol className="text-[11px] text-content-tertiary space-y-1 list-decimal list-inside leading-relaxed">
+                    <li>Buy Authenticode (OV or EV) from DigiCert / Sectigo / SSL.com</li>
                     <li>Set CSC_LINK to the .pfx path and CSC_KEY_PASSWORD</li>
                     <li>Run Open-ARK-Packaged.bat or npm run electron:build</li>
                     <li>Confirm with “Check this install’s signature” on the packaged app</li>
                   </ol>
                   <p className="text-[11px] text-content-tertiary leading-relaxed">
-                    Dev builds show n/a until you install a packaged build. Full notes: build/signing.env.example
+                    SmartScreen reputation builds after signed installs accumulate. EV usually clears “unknown publisher”
+                    faster than OV. Dev builds show n/a — use a packaged install to verify. Notes: build/signing.env.example
                   </p>
                   <button
                     type="button"

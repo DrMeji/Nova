@@ -23,41 +23,69 @@ export async function fetchFigmaFile(token: string, fileKey: string) {
   return res.data as { name: string; lastModified?: string; document?: { children?: { name: string }[] } };
 }
 
-/** List projects for the first team the token can see. */
-export async function listFigmaTeamProjects(token: string) {
-  const meRes = await desktopRequest('https://api.figma.com/v1/me', {
-    method: 'GET',
-    headers: { 'X-Figma-Token': token.trim() },
+export async function postFigmaComment(token: string, fileKey: string, message: string) {
+  const res = await desktopRequest(`https://api.figma.com/v1/files/${fileKey}/comments`, {
+    method: 'POST',
+    headers: {
+      'X-Figma-Token': token.trim(),
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ message: message.slice(0, 8000) }),
   });
-  if (!meRes.ok) throw new Error(apiErrorMessage(meRes, 'Figma error'));
-  const me = meRes.data as { id?: string };
-
-  // Figma REST: GET /v1/teams/:team_id/projects — team id often from /v1/me is not enough.
-  // Try recent files via /v1/me (limited) then projects if team id is in local storage tip.
-  const projects: { id: string; name: string }[] = [];
-  void me;
-
-  // Recently opened files endpoint (when available on PAT)
-  try {
-    const filesRes = await desktopRequest('https://api.figma.com/v1/me', {
-      method: 'GET',
-      headers: { 'X-Figma-Token': token.trim() },
-    });
-    void filesRes;
-  } catch {
-    /* ignore */
-  }
-
-  return projects;
+  if (!res.ok) throw new Error(apiErrorMessage(res, 'Figma comment failed'));
+  return res.data as { id?: string; message?: string };
 }
 
-export async function runFigmaLive(token: string, userText: string): Promise<string> {
+export async function listFigmaTeamProjects(_token: string) {
+  return [] as { id: string; name: string }[];
+}
+
+export async function runFigmaLive(
+  token: string,
+  userText: string,
+  opts?: { permissions?: string[] },
+): Promise<string> {
   const account = await verifyFigmaToken(token);
   const lower = userText.toLowerCase();
+  const perms = opts?.permissions || [];
 
   const keyMatch =
     userText.match(/figma\.com\/(?:file|design)\/([a-zA-Z0-9]+)/)
-    || userText.match(/\bfile\s+([a-zA-Z0-9]{10,})\b/i);
+    || userText.match(/\bfile\s+([a-zA-Z0-9]{10,})\b/i)
+    || userText.match(/\b([a-zA-Z0-9]{22,})\b/);
+
+  if (/\b(comment|post|write)\b/.test(lower)) {
+    if (perms.length > 0 && !perms.includes('write')) {
+      return [
+        'Figma · permission needed',
+        '',
+        'Commenting needs Write. Enable it under Plugins → Figma → Permissions.',
+      ].join('\n');
+    }
+    const fileKey = keyMatch?.[1];
+    const bodyMatch = userText.match(
+      /(?:comment|post|write)\s+(?:on\s+)?(?:figma\.com\/(?:file|design)\/[a-zA-Z0-9]+|[a-zA-Z0-9]{10,})\s*[:\-]?\s*(.+)$/i,
+    )
+      || userText.match(/\bcomment\s*[:\-]\s*(.+)$/i);
+    const body = (bodyMatch?.[1] || '').trim();
+    if (!fileKey || !body) {
+      return [
+        'Figma · comment',
+        '',
+        'Try: comment on figma.com/file/ABC123 Looks good — ship it',
+      ].join('\n');
+    }
+    const posted = await postFigmaComment(token, fileKey, body);
+    return [
+      `Figma · commented (@${account.label})`,
+      '',
+      `File ${fileKey}`,
+      body.slice(0, 200),
+      posted.id ? `Comment id: ${posted.id}` : '',
+      '',
+      'Live write via Figma comments API.',
+    ].filter(Boolean).join('\n');
+  }
 
   if (keyMatch) {
     const file = await fetchFigmaFile(token, keyMatch[1]);
@@ -68,23 +96,15 @@ export async function runFigmaLive(token: string, userText: string): Promise<str
       pages.length ? pages.map((p, i) => `${i + 1}. ${p}`).join('\n') : 'File opened (no page names).',
       file.lastModified ? `\nLast modified: ${file.lastModified}` : '',
       '',
-      'Live file read from Figma.',
+      'Live file read from Figma. Comment with: comment on <file link> Your note',
     ].filter(Boolean).join('\n');
-  }
-
-  if (/\b(comment|post|write)\b/.test(lower)) {
-    return [
-      `Figma · write (@${account.label})`,
-      '',
-      'Posting comments needs a file key plus Write permission.',
-      'Example: “Using Figma, open figma.com/file/ABC123 and list pages.”',
-    ].join('\n');
   }
 
   return [
     `Figma · account (@${account.label})`,
     '',
     'Connected. Paste a file link (figma.com/file/… or /design/…) to list pages.',
+    'Comment: comment on figma.com/file/KEY Your note',
     '',
     'Live token verified against Figma.',
   ].join('\n');

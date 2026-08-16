@@ -37,6 +37,13 @@ contextBridge.exposeInMainWorld('arkDesktop', {
   windowClose: () => ipcRenderer.invoke('ark:window-close'),
   httpGet: (url, headers) => ipcRenderer.invoke('ark:http-get', { url, headers }),
   httpRequest: (url, options) => ipcRenderer.invoke('ark:http-request', { url, ...(options || {}) }),
+  httpStream: (url, options) =>
+    ipcRenderer.invoke('ark:http-stream', { url, ...(options || {}) }),
+  onHttpStreamChunk: (handler) => {
+    const listener = (_event, payload) => handler?.(payload);
+    ipcRenderer.on('ark:http-stream-chunk', listener);
+    return () => ipcRenderer.removeListener('ark:http-stream-chunk', listener);
+  },
   brainStatus: () => ipcRenderer.invoke('ark:brain-status'),
   engineGenerateStream: (message, modelId, kind) =>
     ipcRenderer.invoke('ark:engine-generate-stream', { message, modelId, kind }),

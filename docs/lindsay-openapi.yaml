@@ -1,0 +1,107 @@
+openapi: 3.0.3
+info:
+  title: ARK Brain API (Lindsay)
+  description: |
+    External clients talk to ARK Engine on localhost — never to a third-party local runtime.
+    Cookbook: docs/lindsay-brain-api.md · sample: examples/lindsay-client/
+  version: 0.3.0
+servers:
+  - url: http://127.0.0.1:8787
+paths:
+  /health:
+    get:
+      summary: Health + engine phase
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  version: { type: string }
+                  contractVersion: { type: string }
+  /v1/contract:
+    get:
+      summary: Machine-readable contract
+      responses:
+        '200':
+          description: Contract document
+  /v1/models:
+    get:
+      summary: ARK Engine model list
+      responses:
+        '200':
+          description: Models
+  /v1/engine:
+    get:
+      summary: Full engine status
+      responses:
+        '200':
+          description: Engine status
+  /v1/chat:
+    post:
+      summary: Non-streaming chat / media
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BrainChatRequest'
+      responses:
+        '200':
+          description: Reply
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrainChatResponse'
+  /v1/chat/stream:
+    post:
+      summary: SSE chat stream
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BrainChatRequest'
+      responses:
+        '200':
+          description: text/event-stream (status | delta | done | error)
+          content:
+            text/event-stream:
+              schema:
+                type: string
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Optional. Set ARK_BRAIN_TOKEN on the desktop process.
+  schemas:
+    BrainChatRequest:
+      type: object
+      required: [message]
+      properties:
+        message: { type: string }
+        model: { type: string }
+        kind:
+          type: string
+          enum: [chat, image, video]
+    BrainChatResponse:
+      type: object
+      properties:
+        ok: { type: boolean }
+        reply: { type: string }
+        modelName: { type: string }
+        media:
+          type: object
+          properties:
+            kind: { type: string }
+            dataUrl: { type: string }
+            libraryId: { type: string }
+            real: { type: boolean }

@@ -2,6 +2,9 @@
 
 ARK owns this API. Clients talk to ARK Engine on localhost — not to Ollama or any third-party local app.
 
+- OpenAPI: [`docs/lindsay-openapi.yaml`](./lindsay-openapi.yaml)
+- Sample client: [`examples/lindsay-client/`](../examples/lindsay-client/)
+
 ## Base URL
 
 `http://127.0.0.1:8787` (desktop app must be running)

@@ -105,6 +105,24 @@ declare global {
           body?: string;
         },
       ) => Promise<{ ok: boolean; status: number; data: unknown }>;
+      httpStream?: (
+        url: string,
+        options?: {
+          method?: string;
+          headers?: Record<string, string>;
+          body?: string;
+          streamId?: string;
+        },
+      ) => Promise<{ ok: boolean; status?: number; streamId?: string; text?: string; error?: string }>;
+      onHttpStreamChunk?: (
+        handler: (payload: {
+          streamId?: string;
+          type?: string;
+          text?: string;
+          error?: string;
+          status?: number;
+        }) => void,
+      ) => () => void;
       brainStatus?: () => Promise<{ ok: boolean; url: string; engine?: unknown }>;
       pluginOAuthStart?: (pluginId: string) => Promise<{
         ok: boolean;

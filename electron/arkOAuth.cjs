@@ -231,11 +231,26 @@ async function startPluginOAuth(pluginId) {
           'Set ARK_GOOGLE_CLIENT_ID for browser OAuth. Until then, use Google OAuth Playground and paste the access token.',
       };
     }
+    const scopes = [
+      'openid',
+      'email',
+      'https://www.googleapis.com/auth/gmail.readonly',
+    ];
+    if (id === 'gdrive' || id === 'google') {
+      scopes.push('https://www.googleapis.com/auth/drive.readonly');
+    }
+    if (id === 'gcal' || id === 'google') {
+      scopes.push('https://www.googleapis.com/auth/calendar.readonly');
+    }
+    if (id === 'gmail' || id === 'google') {
+      // already has gmail.readonly
+    }
+    const scopeParam = encodeURIComponent(scopes.join(' '));
     return startLocalCallback({
       authorizeUrl:
         `https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(clientId)}`
         + '&response_type=code&redirect_uri=http%3A%2F%2F127.0.0.1%3A{PORT}%2Fcallback'
-        + '&scope=openid%20email%20https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fgmail.readonly'
+        + `&scope=${scopeParam}`
         + '&access_type=offline&prompt=consent',
       exchange: async (code, redirectUri) => {
         // Public clients still need a client secret for some Google setups;

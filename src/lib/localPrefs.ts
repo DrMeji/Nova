@@ -216,6 +216,17 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates. */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.23',
+    channel: 'stable' as const,
+    date: 'Aug 16, 2026',
+    title: 'Real cloud SSE + Drive/Calendar/Figma',
+    notes: [
+      'OpenAI-compatible cloud providers stream true SSE into chat',
+      'Google Drive + Calendar live; Figma file comments; Lindsay OpenAPI + sample client',
+      'Clearer SmartScreen / Authenticode reputation guidance',
+    ],
+  },
+  {
     version: '0.1.22',
     channel: 'stable' as const,
     date: 'Aug 16, 2026',

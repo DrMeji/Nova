@@ -126,8 +126,8 @@ export const PLUGIN_CATALOG: PluginDef[] = [
   },
 
   // —— Rest of catalog (installable; connect later) ——
-  { id: 'gdrive', name: 'Google Drive', description: 'Work across Drive, Docs, Sheets, and slides.', longDescription: 'Browse and open Drive files from ARK.', tone: 'from-yellow-500 to-blue-600', initial: 'D', category: 'featured', authKind: 'oauth', permissions: [{ id: 'read', label: 'Read files', detail: 'Open Drive files', required: true }], actions: [] },
-  { id: 'gcal', name: 'Google Calendar', description: 'Manage calendar events and schedules.', longDescription: 'See and create calendar events.', tone: 'from-blue-500 to-blue-700', initial: 'C', category: 'featured', authKind: 'oauth', permissions: [{ id: 'read', label: 'Read events', detail: 'View schedule', required: true }], actions: [] },
+  { id: 'gdrive', name: 'Google Drive', description: 'Work across Drive, Docs, Sheets, and slides.', longDescription: 'Browse and open Drive files from ARK.', tone: 'from-yellow-500 to-blue-600', initial: 'D', category: 'featured', hero: true, authKind: 'token', permissions: [{ id: 'read', label: 'Read files', detail: 'Open Drive files', required: true }], actions: [{ id: 'recent', label: 'Recent files', prompt: 'Using Google Drive, list my recent files.' }] },
+  { id: 'gcal', name: 'Google Calendar', description: 'Manage calendar events and schedules.', longDescription: 'See and create calendar events.', tone: 'from-blue-500 to-blue-700', initial: 'C', category: 'featured', hero: true, authKind: 'token', permissions: [{ id: 'read', label: 'Read events', detail: 'View schedule', required: true }, { id: 'write', label: 'Create events', detail: 'Add calendar events', required: false }], actions: [{ id: 'upcoming', label: 'Upcoming', prompt: 'Using Google Calendar, list my upcoming events.' }] },
   { id: 'slack', name: 'Slack', description: 'Read and manage Slack conversations.', longDescription: 'Bring Slack threads into ARK chat.', tone: 'from-purple-500 to-pink-600', initial: 'S', category: 'featured', hero: true, authKind: 'token', permissions: [{ id: 'read', label: 'Read channels', detail: 'Read messages', required: true }, { id: 'search', label: 'Search', detail: 'Search messages', required: false }, { id: 'write', label: 'Post messages', detail: 'Post to channels the bot can see', required: false }], actions: [{ id: 'unread', label: 'Unread channels', prompt: 'Using Slack, summarize unread channels.' }] },
   { id: 'outlook-mail', name: 'Outlook Email', description: 'Read and send Outlook mail.', longDescription: 'Outlook mail in ARK.', tone: 'from-sky-500 to-blue-700', initial: 'Oe', category: 'featured', authKind: 'oauth', permissions: [{ id: 'read', label: 'Read mail', detail: 'Open Outlook mail', required: true }], actions: [] },
   { id: 'granola', name: 'Granola', description: 'Add your meeting context.', longDescription: 'Meeting notes context for ARK.', tone: 'from-emerald-500 to-teal-700', initial: 'Gr', category: 'featured', authKind: 'token', permissions: [{ id: 'read', label: 'Read notes', detail: 'Access meeting notes', required: true }], actions: [] },
@@ -143,7 +143,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
   { id: 'canva', name: 'Canva', description: 'Create, review, and edit designs.', longDescription: 'Canva designs in ARK.', tone: 'from-cyan-400 to-blue-600', initial: 'Ca', category: 'creativity', authKind: 'oauth', permissions: [{ id: 'read', label: 'Read designs', detail: 'Open designs', required: true }], actions: [] },
   { id: 'higgsfield', name: 'Higgsfield', description: 'Every image and video model.', longDescription: 'Image and video models.', tone: 'from-fuchsia-500 to-purple-700', initial: 'H', category: 'creativity', authKind: 'token', permissions: [{ id: 'write', label: 'Generate', detail: 'Create media', required: true }], actions: [] },
   { id: 'product-design', name: 'Product Design', description: 'Explore and prototype ideas.', longDescription: 'Product design tools.', tone: 'from-rose-500 to-pink-700', initial: 'PD', category: 'creativity', authKind: 'none', permissions: [{ id: 'read', label: 'Browse', detail: 'Browse patterns', required: true }], actions: [] },
-  { id: 'figma', name: 'Figma', description: 'Design to code workflows.', longDescription: 'Bring Figma frames into builds.', tone: 'from-orange-400 to-purple-600', initial: 'Fi', category: 'creativity', hero: true, authKind: 'token', permissions: [{ id: 'read', label: 'Read files', detail: 'Open Figma files', required: true }], actions: [{ id: 'frames', label: 'Recent files', prompt: 'Using Figma, list my recent design files.' }] },
+  { id: 'figma', name: 'Figma', description: 'Design to code workflows.', longDescription: 'Bring Figma frames into builds.', tone: 'from-orange-400 to-purple-600', initial: 'Fi', category: 'creativity', hero: true, authKind: 'token', permissions: [{ id: 'read', label: 'Read files', detail: 'Open Figma files', required: true }, { id: 'write', label: 'Comment', detail: 'Post file comments', required: false }], actions: [{ id: 'frames', label: 'Recent files', prompt: 'Using Figma, list my recent design files.' }] },
   { id: 'magnific', name: 'Magnific', description: 'Create images, video, designs.', longDescription: 'Creative generation.', tone: 'from-lime-500 to-emerald-700', initial: 'M', category: 'creativity', authKind: 'token', permissions: [{ id: 'write', label: 'Generate', detail: 'Create assets', required: true }], actions: [] },
   { id: 'heygen', name: 'HeyGen', description: 'Create AI videos.', longDescription: 'AI video creation.', tone: 'from-indigo-500 to-blue-700', initial: 'Hy', category: 'creativity', authKind: 'token', permissions: [{ id: 'write', label: 'Generate video', detail: 'Create videos', required: true }], actions: [] },
   { id: 'mobbin', name: 'Mobbin', description: 'Browse mobile and web UI patterns.', longDescription: 'UI pattern library.', tone: 'from-zinc-500 to-zinc-800', initial: 'Mb', category: 'creativity', authKind: 'token', permissions: [{ id: 'read', label: 'Browse', detail: 'Browse patterns', required: true }], actions: [] },
@@ -278,6 +278,8 @@ export async function runPluginAction(
     (pluginId === 'slack' && /slack|channel|dm/.test(lower)) ||
     (pluginId === 'linear' && /linear|ticket|issue/.test(lower)) ||
     (pluginId === 'figma' && /figma|design file|frame/.test(lower)) ||
+    (pluginId === 'gdrive' && /drive|google drive|docs|sheets|slides/.test(lower)) ||
+    (pluginId === 'gcal' && /calendar|schedule|meeting|agenda|gcal/.test(lower)) ||
     (pluginId === 'vercel' && /vercel|deploy/.test(lower)) ||
     (pluginId === 'discord' && /discord|server|guild/.test(lower));
 
@@ -387,23 +389,49 @@ export async function runPluginAction(
   if (pluginId === 'figma') {
     if (token) {
       try {
-        const { runFigmaLive, fetchFigmaFile } = await import('@/lib/figma');
-        const keyMatch = userText.match(/figma\.com\/(?:file|design)\/([a-zA-Z0-9]+)/) || userText.match(/\b([a-zA-Z0-9]{10,})\b/);
-        if (keyMatch && /file|figma|design/.test(userText.toLowerCase())) {
-          const file = await fetchFigmaFile(token, keyMatch[1]);
-          const pages = file.document?.children?.map(c => c.name).slice(0, 8) ?? [];
-          return [
-            `Figma · ${file.name}`,
-            '',
-            pages.length ? pages.map((p, i) => `${i + 1}. ${p}`).join('\n') : 'File opened (no page names returned).',
-            '',
-            'Live data from Figma.',
-          ].join('\n');
-        }
-        return await runFigmaLive(token, userText);
+        const { runFigmaLive } = await import('@/lib/figma');
+        return await runFigmaLive(token, userText, { permissions });
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Figma request failed';
         return ['Figma · error', '', msg].join('\n');
+      }
+    }
+    return runPluginStub(pluginId, userText);
+  }
+
+  if (pluginId === 'gdrive') {
+    if (token) {
+      try {
+        const { runDriveLive } = await import('@/lib/gdrive');
+        return await runDriveLive(token, userText, { permissions });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Drive request failed';
+        return [
+          'Drive · error',
+          '',
+          msg,
+          '',
+          'Paste a Google OAuth token with drive.readonly scope.',
+        ].join('\n');
+      }
+    }
+    return runPluginStub(pluginId, userText);
+  }
+
+  if (pluginId === 'gcal') {
+    if (token) {
+      try {
+        const { runCalendarLive } = await import('@/lib/gcal');
+        return await runCalendarLive(token, userText, { permissions });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Calendar request failed';
+        return [
+          'Calendar · error',
+          '',
+          msg,
+          '',
+          'Paste a Google OAuth token with calendar.readonly scope.',
+        ].join('\n');
       }
     }
     return runPluginStub(pluginId, userText);
@@ -449,6 +477,8 @@ export function runPluginStub(pluginId: string, userText: string): string | null
     (pluginId === 'slack' && /slack|channel|dm/.test(lower)) ||
     (pluginId === 'linear' && /linear|ticket|issue/.test(lower)) ||
     (pluginId === 'figma' && /figma|design file|frame/.test(lower)) ||
+    (pluginId === 'gdrive' && /drive|google drive|docs|sheets|slides/.test(lower)) ||
+    (pluginId === 'gcal' && /calendar|schedule|meeting|agenda|gcal/.test(lower)) ||
     (pluginId === 'vercel' && /vercel|deploy/.test(lower)) ||
     (pluginId === 'discord' && /discord|server|guild/.test(lower));
 
