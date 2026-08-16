@@ -181,6 +181,7 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
       cascade: failover,
       attempted,
       history,
+      onChunk: opts.onChunk,
     });
     if (hit) {
       return withContinued({
@@ -219,7 +220,7 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
 
   // ── Cloud-preferring modes ─────────────────────────────────────────
   if (modePrefersCloud(mode) && modeAllowsCloud(mode) && hasAnyCloudChatKey()) {
-    const free = await cloudChatFreeKeys(opts.message, attempted, history);
+    const free = await cloudChatFreeKeys(opts.message, attempted, history, opts.onChunk);
     if (free) {
       return withContinued({
         reply: free.reply,
@@ -229,7 +230,7 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
         attempted,
       }, history);
     }
-    const paid = await cloudChatPaidKeys(opts.message, attempted, history);
+    const paid = await cloudChatPaidKeys(opts.message, attempted, history, opts.onChunk);
     if (paid) {
       return withContinued({
         reply: paid.reply,
@@ -277,7 +278,7 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
 
   // ── Free-key → paid (automatic / after soft local) ─────────────────
   if (modeAllowsCloud(mode)) {
-    const free = await cloudChatFreeKeys(opts.message, attempted, history);
+    const free = await cloudChatFreeKeys(opts.message, attempted, history, opts.onChunk);
     if (free) {
       return withContinued({
         reply: free.reply,
@@ -287,7 +288,7 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
         attempted,
       }, history);
     }
-    const paid = await cloudChatPaidKeys(opts.message, attempted, history);
+    const paid = await cloudChatPaidKeys(opts.message, attempted, history, opts.onChunk);
     if (paid) {
       return withContinued({
         reply: paid.reply,

@@ -34,7 +34,21 @@ async function githubGet<T>(token: string, path: string): Promise<T> {
   const url = path.startsWith('http') ? path : `https://api.github.com${path}`;
   const headers = {
     Authorization: `Bearer ${token}`,
+    Accept: 'application/vnd.github+json',
+    'X-GitHub-Api-Version': '2022-11-28',
   };
+
+  if (window.arkDesktop?.httpRequest) {
+    const res = await window.arkDesktop.httpRequest(url, { method: 'GET', headers });
+    if (!res.ok) {
+      const msg =
+        typeof res.data === 'object' && res.data && 'message' in res.data
+          ? String((res.data as { message: string }).message)
+          : `GitHub error ${res.status}`;
+      throw new Error(msg);
+    }
+    return res.data as T;
+  }
 
   if (window.arkDesktop?.httpGet) {
     const res = await window.arkDesktop.httpGet(url, headers);
@@ -61,6 +75,55 @@ async function githubGet<T>(token: string, path: string): Promise<T> {
     throw new Error((data as { message?: string }).message || `GitHub error ${res.status}`);
   }
   return data as T;
+}
+
+async function githubPost<T>(token: string, path: string, body: unknown): Promise<T> {
+  const url = path.startsWith('http') ? path : `https://api.github.com${path}`;
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    Accept: 'application/vnd.github+json',
+    'Content-Type': 'application/json',
+    'X-GitHub-Api-Version': '2022-11-28',
+  };
+  if (window.arkDesktop?.httpRequest) {
+    const res = await window.arkDesktop.httpRequest(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const msg =
+        typeof res.data === 'object' && res.data && 'message' in res.data
+          ? String((res.data as { message: string }).message)
+          : `GitHub error ${res.status}`;
+      throw new Error(msg);
+    }
+    return res.data as T;
+  }
+  const res = await fetch(url, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error((data as { message?: string }).message || `GitHub error ${res.status}`);
+  }
+  return data as T;
+}
+
+export async function commentOnIssue(
+  token: string,
+  owner: string,
+  repo: string,
+  number: number,
+  body: string,
+) {
+  return githubPost<{ html_url?: string; id?: number }>(
+    token,
+    `/repos/${owner}/${repo}/issues/${number}/comments`,
+    { body: body.slice(0, 65000) },
+  );
 }
 
 export async function verifyGitHubToken(token: string): Promise<GitHubUser> {
@@ -129,6 +192,31 @@ export async function runGitHubLive(
       '',
       'Write actions need the Write permission. Enable it under Plugins → GitHub → Permissions.',
     ].join('\n');
+  }
+
+  // comment on owner/repo#123: hello
+  const commentMatch = userText.match(
+    /(?:comment|post)\s+on\s+([\w.-]+)\/([\w.-]+)#(\d+)\s*[:\-]?\s*(.+)$/i,
+  );
+  if (commentMatch) {
+    if (perms.length > 0 && !perms.includes('write')) {
+      return [
+        'GitHub · permission needed',
+        '',
+        'Commenting needs Write. Enable it under Plugins → GitHub → Permissions.',
+      ].join('\n');
+    }
+    const [, owner, repo, num, body] = commentMatch;
+    const user = await verifyGitHubToken(token);
+    const posted = await commentOnIssue(token, owner, repo, Number(num), body.trim());
+    return [
+      `GitHub · commented (@${user.login})`,
+      '',
+      `${owner}/${repo}#${num}`,
+      posted.html_url || '',
+      '',
+      'Live write via GitHub issues comments API.',
+    ].filter(Boolean).join('\n');
   }
 
   if (/pull|\bpr\b/.test(lower)) {

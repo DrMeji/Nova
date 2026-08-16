@@ -29,6 +29,8 @@ const FREE_KEY_SUGGESTIONS = [
   { id: 'openrouter', name: 'OpenRouter' },
   { id: 'huggingface', name: 'Hugging Face' },
   { id: 'together', name: 'Together AI' },
+  { id: 'cerebras', name: 'Cerebras' },
+  { id: 'sambanova', name: 'SambaNova' },
 ] as const;
 
 export async function probeLiveCapacity(): Promise<LiveCapacity> {
@@ -36,7 +38,8 @@ export async function probeLiveCapacity(): Promise<LiveCapacity> {
   const cloudKeys = hasAnyCloudChatKey();
   const keyCount = [
     'groq', 'google', 'openrouter', 'huggingface', 'nvidia',
-    'together', 'fireworks', 'deepseek', 'mistral', 'openai', 'anthropic',
+    'together', 'fireworks', 'deepseek', 'mistral', 'cerebras', 'sambanova',
+    'openai', 'anthropic',
   ].filter(id => Boolean(keys[id])).length;
 
   let ollama = false;

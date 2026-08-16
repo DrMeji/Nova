@@ -202,6 +202,48 @@ function runGguf(modelId, prompt, timeoutMs = 90000) {
   return runGgufStream(modelId, prompt, null, timeoutMs);
 }
 
+/** Active llama-cli child — cancelled via cancelGguf(). */
+let activeChild = null;
+let cancelRequested = false;
+
+function cancelGguf() {
+  cancelRequested = true;
+  if (activeChild) {
+    try { activeChild.kill(); } catch { /* ignore */ }
+    activeChild = null;
+  }
+  return { ok: true };
+}
+
+/**
+ * Strip prompt echo that some llama-cli builds print before the completion.
+ */
+function stripPromptEcho(prompt, text) {
+  const raw = String(text || '');
+  const p = String(prompt || '').trim();
+  if (!p || !raw) return raw.trim();
+  let out = raw.trim();
+  if (out.startsWith(p)) {
+    out = out.slice(p.length).replace(/^\s+/, '');
+  } else {
+    // Partial / whitespace-normalized echo
+    const compactP = p.replace(/\s+/g, ' ').trim();
+    const compactO = out.replace(/\s+/g, ' ').trim();
+    if (compactO.startsWith(compactP)) {
+      const idx = out.toLowerCase().indexOf(p.slice(0, Math.min(40, p.length)).toLowerCase());
+      if (idx === 0) {
+        // fall through — already handled
+      }
+      // Drop leading overlap of first line of prompt
+      const firstLine = p.split(/\r?\n/)[0]?.trim();
+      if (firstLine && out.startsWith(firstLine)) {
+        out = out.slice(firstLine.length).replace(/^\s+/, '');
+      }
+    }
+  }
+  return out.trim() || raw.trim();
+}
+
 /**
  * Stream llama-cli stdout as it arrives.
  * onChunk(textDelta) may be called many times; final resolve still returns full reply.
@@ -221,16 +263,26 @@ function runGgufStream(modelId, prompt, onChunk, timeoutMs = 120000) {
       return;
     }
 
+    cancelRequested = false;
+    if (activeChild) {
+      try { activeChild.kill(); } catch { /* ignore */ }
+      activeChild = null;
+    }
+
+    const promptStr = String(prompt || '');
     const args = [
       '-m', gguf,
-      '-p', String(prompt || ''),
+      '-p', promptStr,
       '-n', '384',
       '--temp', '0.7',
       '-no-cnv',
     ];
     const child = spawn(bin, args, { windowsHide: true });
+    activeChild = child;
     let out = '';
     let err = '';
+    let emitted = '';
+    let echoSkipped = false;
     const timer = setTimeout(() => {
       try { child.kill(); } catch { /* ignore */ }
       reject(new Error('GGUF generation timed out'));
@@ -239,18 +291,50 @@ function runGgufStream(modelId, prompt, onChunk, timeoutMs = 120000) {
     child.stdout.on('data', (d) => {
       const piece = d.toString();
       out += piece;
-      if (typeof onChunk === 'function' && piece) {
-        try { onChunk(piece); } catch { /* ignore */ }
+      if (typeof onChunk !== 'function') return;
+      // Hold early output until we can strip a leading prompt echo.
+      if (!echoSkipped) {
+        const cleaned = stripPromptEcho(promptStr, out);
+        if (cleaned.length < out.trim().length || out.length > promptStr.length + 16) {
+          echoSkipped = true;
+          emitted = cleaned;
+          if (cleaned) {
+            try { onChunk(cleaned); } catch { /* ignore */ }
+          }
+        }
+        return;
+      }
+      const cleaned = stripPromptEcho(promptStr, out);
+      if (cleaned.length > emitted.length) {
+        const delta = cleaned.slice(emitted.length);
+        emitted = cleaned;
+        if (delta) {
+          try { onChunk(delta); } catch { /* ignore */ }
+        }
       }
     });
     child.stderr.on('data', (d) => { err += d.toString(); });
     child.on('error', (e) => {
       clearTimeout(timer);
+      if (activeChild === child) activeChild = null;
       reject(e);
     });
     child.on('close', (code) => {
       clearTimeout(timer);
-      const text = out.trim() || err.trim();
+      if (activeChild === child) activeChild = null;
+      if (cancelRequested) {
+        const partial = stripPromptEcho(promptStr, out).slice(-6000);
+        resolve({
+          ok: true,
+          reply: partial || '(stopped)',
+          modelFile: path.basename(gguf),
+          source: 'ark-gguf',
+          streamed: Boolean(onChunk),
+          cancelled: true,
+        });
+        return;
+      }
+      const text = stripPromptEcho(promptStr, out.trim() || err.trim());
       if (!text) {
         reject(new Error(code ? `llama-cli exited ${code}` : 'Empty GGUF response'));
         return;
@@ -272,6 +356,7 @@ module.exports = {
   listGgufFiles,
   runGguf,
   runGgufStream,
+  cancelGguf,
   ensureLlamaBinary,
   modelsDir,
   binDir,

@@ -169,6 +169,29 @@ async function chatMistral(key: string, history: RouterChatTurn[], model: string
   return openaiCompatible('https://api.mistral.ai/v1/chat/completions', key, model, history);
 }
 
+async function chatCerebras(key: string, history: RouterChatTurn[], model: string) {
+  return openaiCompatible('https://api.cerebras.ai/v1/chat/completions', key, model, history);
+}
+
+async function chatSambaNova(key: string, history: RouterChatTurn[], model: string) {
+  return openaiCompatible('https://api.sambanova.ai/v1/chat/completions', key, model, history);
+}
+
+/** Progressive word reveal for cloud replies (providers return full text). */
+export async function revealCloudReply(
+  reply: string,
+  onChunk?: (text: string) => void,
+  signal?: { cancelled: boolean },
+) {
+  if (!onChunk || !reply) return;
+  const parts = reply.match(/\S+\s*/g) || [reply];
+  for (const part of parts) {
+    if (signal?.cancelled) return;
+    onChunk(part);
+    await new Promise(r => setTimeout(r, 6));
+  }
+}
+
 /** Free-key providers first, then paid — only entries with a stored key are attempted. */
 const FREE_KEY_PROVIDERS: ProviderAttempt[] = [
   {
@@ -233,6 +256,20 @@ const FREE_KEY_PROVIDERS: ProviderAttempt[] = [
     cost: 'free-key',
     model: 'mistral-small-latest',
     run: chatMistral,
+  },
+  {
+    id: 'cerebras',
+    label: 'Cerebras',
+    cost: 'free-key',
+    model: 'llama3.1-8b',
+    run: chatCerebras,
+  },
+  {
+    id: 'sambanova',
+    label: 'SambaNova',
+    cost: 'free-key',
+    model: 'Meta-Llama-3.1-8B-Instruct',
+    run: chatSambaNova,
   },
 ];
 
@@ -363,6 +400,24 @@ function mapPreferred(modelId: string, modelName: string): ProviderAttempt | nul
       run: chatMistral,
     };
   }
+  if (id.includes('cerebras') || name.includes('cerebras')) {
+    return {
+      id: 'cerebras',
+      label: 'Cerebras',
+      cost: 'free-key',
+      model: 'llama3.1-8b',
+      run: chatCerebras,
+    };
+  }
+  if (id.includes('sambanova') || name.includes('sambanova') || name.includes('samba')) {
+    return {
+      id: 'sambanova',
+      label: 'SambaNova',
+      cost: 'free-key',
+      model: 'Meta-Llama-3.1-8B-Instruct',
+      run: chatSambaNova,
+    };
+  }
   return null;
 }
 
@@ -408,13 +463,17 @@ export async function cloudChatFreeKeys(
   message: string,
   attempted: string[],
   history?: RouterChatTurn[],
+  onChunk?: (text: string) => void,
 ): Promise<CloudChatHit | null> {
   const keys = getProviderApiKeys();
   const turns = ensureHistory(history, message);
   for (const attempt of FREE_KEY_PROVIDERS) {
     attempted.push(attempt.label);
     const hit = await runAttempt(attempt, turns, keys);
-    if (hit) return hit;
+    if (hit) {
+      await revealCloudReply(hit.reply, onChunk);
+      return hit;
+    }
   }
   return null;
 }
@@ -424,13 +483,17 @@ export async function cloudChatPaidKeys(
   message: string,
   attempted: string[],
   history?: RouterChatTurn[],
+  onChunk?: (text: string) => void,
 ): Promise<CloudChatHit | null> {
   const keys = getProviderApiKeys();
   const turns = ensureHistory(history, message);
   for (const attempt of PAID_PROVIDERS) {
     attempted.push(attempt.label);
     const hit = await runAttempt(attempt, turns, keys);
-    if (hit) return hit;
+    if (hit) {
+      await revealCloudReply(hit.reply, onChunk);
+      return hit;
+    }
   }
   return null;
 }
@@ -443,6 +506,7 @@ export async function cloudChatPreferredThenCascade(opts: {
   cascade: boolean;
   attempted: string[];
   history?: RouterChatTurn[];
+  onChunk?: (text: string) => void;
 }): Promise<CloudChatHit | null> {
   const mapped = mapPreferred(opts.modelId, opts.modelName);
   const keys = getProviderApiKeys();
@@ -450,13 +514,16 @@ export async function cloudChatPreferredThenCascade(opts: {
   if (mapped) {
     opts.attempted.push(mapped.label);
     const hit = await runAttempt(mapped, history, keys);
-    if (hit) return hit;
+    if (hit) {
+      await revealCloudReply(hit.reply, opts.onChunk);
+      return hit;
+    }
     if (!opts.cascade) return null;
   }
   if (!opts.cascade) return null;
   return (
-    (await cloudChatFreeKeys(opts.message, opts.attempted, history))
-    || (await cloudChatPaidKeys(opts.message, opts.attempted, history))
+    (await cloudChatFreeKeys(opts.message, opts.attempted, history, opts.onChunk))
+    || (await cloudChatPaidKeys(opts.message, opts.attempted, history, opts.onChunk))
   );
 }
 
@@ -472,6 +539,8 @@ export function hasAnyCloudChatKey() {
     || keys.fireworks
     || keys.deepseek
     || keys.mistral
+    || keys.cerebras
+    || keys.sambanova
     || keys.openai
     || keys.anthropic,
   );

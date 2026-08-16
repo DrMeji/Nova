@@ -63,15 +63,89 @@ export async function listUnread(token: string, limit = 5) {
   return { estimate: list.resultSizeEstimate ?? messages.length, messages };
 }
 
-export async function runGmailLive(token: string, userText: string): Promise<string> {
+function buildMime({ to, subject, body }: { to: string; subject: string; body: string }) {
+  const lines = [
+    `To: ${to}`,
+    `Subject: ${subject}`,
+    'Content-Type: text/plain; charset="UTF-8"',
+    'MIME-Version: 1.0',
+    '',
+    body,
+  ];
+  const raw = lines.join('\r\n');
+  // URL-safe base64 without padding
+  const b64 = btoa(unescape(encodeURIComponent(raw)))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+  return b64;
+}
+
+export async function sendGmail(
+  token: string,
+  opts: { to: string; subject: string; body: string },
+) {
+  const res = await desktopRequest('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token.trim()}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ raw: buildMime(opts) }),
+  });
+  if (!res.ok) throw new Error(apiErrorMessage(res, 'Gmail send failed (needs gmail.send)'));
+  return res.data as { id?: string };
+}
+
+export async function runGmailLive(
+  token: string,
+  userText: string,
+  opts?: { permissions?: string[] },
+): Promise<string> {
   const lower = userText.toLowerCase();
   const account = await verifyGmailToken(token);
+  const perms = opts?.permissions || [];
   const { estimate, messages } = await listUnread(token);
+
+  // Confirm send: "confirm send to alice@x.com subject Hello body Thanks"
+  if (/\bconfirm\s+send\b/.test(lower)) {
+    if (perms.length > 0 && !perms.includes('send')) {
+      return [
+        'Gmail · permission needed',
+        '',
+        'Sending needs Send. Enable it under Plugins → Gmail → Permissions.',
+      ].join('\n');
+    }
+    const toMatch = userText.match(/\bto\s+([^\s]+@[^\s]+)/i);
+    const subMatch = userText.match(/\bsubject\s+(.+?)(?:\s+body\s+|$)/i);
+    const bodyMatch = userText.match(/\bbody\s+(.+)$/i);
+    const to = toMatch?.[1]?.replace(/[>,]+$/, '') || '';
+    const subject = (subMatch?.[1] || 'Hello from ARK').trim();
+    const body = (bodyMatch?.[1] || 'Sent from ARK.').trim();
+    if (!to) {
+      return [
+        'Gmail · send',
+        '',
+        'Try: confirm send to you@example.com subject Hello body Thanks for your note',
+      ].join('\n');
+    }
+    const sent = await sendGmail(token, { to, subject, body });
+    return [
+      `Gmail · sent (@${account.label})`,
+      '',
+      `To: ${to}`,
+      `Subject: ${subject}`,
+      sent.id ? `Message id: ${sent.id}` : '',
+      '',
+      'Live send via Gmail API.',
+    ].filter(Boolean).join('\n');
+  }
 
   if (/(draft|reply)/.test(lower)) {
     const top = messages[0];
     const subject = top ? header(top, 'Subject') || '(no subject)' : '(no unread mail)';
     const from = top ? header(top, 'From') : '';
+    const toAddr = from.match(/<([^>]+)>/)?.[1] || from;
     return [
       `Gmail · draft reply (@${account.label})`,
       '',
@@ -85,8 +159,12 @@ export async function runGmailLive(token: string, userText: string): Promise<str
       'Best,',
       'You',
       '',
-      'Draft only. Send permission is not used yet.',
-      'Live metadata from Gmail.',
+      toAddr
+        ? `To send for real (needs Send permission + gmail.send scope):`
+        : 'Draft only until you confirm send.',
+      toAddr
+        ? `confirm send to ${toAddr} subject Re: ${subject} body Thanks for your note — following up from ARK.`
+        : '',
     ].filter(Boolean).join('\n');
   }
 
@@ -110,6 +188,6 @@ export async function runGmailLive(token: string, userText: string): Promise<str
       return `${i + 1}. ${from} — “${subject}”${snip}`;
     }),
     '',
-    'Ask me to draft a reply. Live data from Gmail.',
+    'Ask me to draft a reply, or “confirm send to …” when Send is enabled.',
   ].join('\n');
 }

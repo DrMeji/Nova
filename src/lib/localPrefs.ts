@@ -216,6 +216,17 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates. */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.22',
+    channel: 'stable' as const,
+    date: 'Aug 16, 2026',
+    title: 'Deeper plugins, stop streaming, more free keys',
+    notes: [
+      'Slack/Discord post, Gmail confirm-send, Notion create page, Vercel redeploy, GitHub comments',
+      'Stop button + GGUF prompt-echo strip; cloud replies reveal progressively',
+      'Cerebras + SambaNova free-key routes; Lindsay brain API cookbook; OAuth/signing setup guides',
+    ],
+  },
+  {
     version: '0.1.21',
     channel: 'stable' as const,
     date: 'Aug 16, 2026',

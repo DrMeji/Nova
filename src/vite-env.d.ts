@@ -128,8 +128,10 @@ declare global {
         reply: string;
         modelName?: string;
         source?: string;
+        cancelled?: boolean;
         media?: { kind: string; dataUrl: string; path?: string; libraryId?: string; real?: boolean };
       }>;
+      engineGenerateCancel?: () => Promise<{ ok: boolean; error?: string }>;
       onEngineChunk?: (handler: (payload: { text?: string }) => void) => () => void;
       engineStatus?: () => Promise<import('@/lib/arkEngine').ArkEngineStatus>;
       engineStart?: () => Promise<import('@/lib/arkEngine').ArkEngineStatus>;

@@ -13,6 +13,7 @@ const arkAuthStore = require('./arkAuthStore.cjs');
 const arkPaths = require('./arkPaths.cjs');
 const arkOAuth = require('./arkOAuth.cjs');
 const arkCrashLog = require('./arkCrashLog.cjs');
+const arkGguf = require('./arkGguf.cjs');
 
 const DEV_URL = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173';
 const isDev = process.env.ARK_DEV === '1';
@@ -44,6 +45,8 @@ const ALLOWED_HOSTS = new Set([
   'api.fireworks.ai',
   'api.deepseek.com',
   'api.mistral.ai',
+  'api.cerebras.ai',
+  'api.sambanova.ai',
   'api.vercel.com',
   'discord.com',
   'github.com',
@@ -337,6 +340,14 @@ ipcMain.handle('ark:engine-generate-stream', async (event, payload) => {
       }
     },
   });
+});
+
+ipcMain.handle('ark:engine-generate-cancel', async () => {
+  try {
+    return arkGguf.cancelGguf?.() || { ok: true };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'Cancel failed' };
+  }
 });
 
 ipcMain.handle('ark:models-dir-info', async () => arkPaths.modelsDirInfo());

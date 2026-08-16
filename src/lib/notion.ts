@@ -111,6 +111,44 @@ function blockToLine(block: NotionBlock): string | null {
   return text;
 }
 
+/** Create a simple page under a parent page (or as a workspace child of first search hit). */
+export async function createNotionPage(
+  token: string,
+  title: string,
+  body?: string,
+  parentPageId?: string,
+) {
+  let parentId = parentPageId;
+  if (!parentId) {
+    const hits = await searchNotion(token, 'ARK');
+    const page = hits.find(h => h.object === 'page');
+    if (!page) throw new Error('Share at least one page with the integration, then try again');
+    parentId = page.id;
+  }
+  const children = body
+    ? [{
+        object: 'block',
+        type: 'paragraph',
+        paragraph: {
+          rich_text: [{ type: 'text', text: { content: body.slice(0, 1900) } }],
+        },
+      }]
+    : [];
+  const created = await notionRequest<{ id: string; url?: string }>(token, '/pages', {
+    method: 'POST',
+    body: {
+      parent: { page_id: parentId },
+      properties: {
+        title: {
+          title: [{ type: 'text', text: { content: title.slice(0, 200) } }],
+        },
+      },
+      children,
+    },
+  });
+  return created;
+}
+
 /** Pull plain text from a Notion page for briefs/specs. */
 export async function fetchNotionPageText(token: string, pageId: string, maxChars = 3500) {
   const result = await notionRequest<{ results: NotionBlock[] }>(
@@ -134,6 +172,30 @@ export async function runNotionLive(
 ): Promise<string> {
   const lower = userText.toLowerCase();
   const perms = opts?.permissions || [];
+
+  if (/\b(create|update|write|add)\b/.test(lower) && /page|note|doc/.test(lower)) {
+    if (perms.length > 0 && !perms.includes('write')) {
+      return [
+        'Notion · permission needed',
+        '',
+        'Creating or updating pages needs Write. Enable it under Plugins → Notion → Permissions.',
+      ].join('\n');
+    }
+    const titleMatch = userText.match(
+      /(?:create|add|new|write)\s+(?:a\s+)?(?:page|note|doc)\s*[:\-]?\s*(.+)$/i,
+    );
+    const title = (titleMatch?.[1] || 'Note from ARK').replace(/[?.!]+$/, '').trim().slice(0, 120);
+    const account = await verifyNotionToken(token);
+    const page = await createNotionPage(token, title, `Created from ARK chat:\n${userText.slice(0, 500)}`);
+    return [
+      `Notion · created (@${account.label})`,
+      '',
+      title,
+      page.url || page.id,
+      '',
+      'Live write via Notion pages API.',
+    ].join('\n');
+  }
 
   if (/\b(create|update|write|add)\b/.test(lower) && perms.length > 0 && !perms.includes('write')) {
     return [
@@ -201,6 +263,6 @@ export async function runNotionLive(
     '',
     ...lines,
     '',
-    'Ask to “read” or “open” a page for full text. Live data from your Notion workspace.',
+    'Ask to “read” or “open” a page for full text, or “create page Meeting notes”. Live data from your Notion workspace.',
   ].join('\n');
 }

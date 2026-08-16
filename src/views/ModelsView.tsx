@@ -134,6 +134,8 @@ const CLOUD_PROVIDERS: CloudProvider[] = [
   { id: 'fireworks', name: 'Fireworks AI', description: 'Fast serverless inference — wired into ARK Router.', tiers: ['free', 'pro'], tone: 'from-rose-500 to-orange-700', initial: 'Fw', health: 'available', availability: 'live' },
   { id: 'deepseek', name: 'DeepSeek', description: 'Coding and reasoning via API — wired into ARK Router.', tiers: ['free', 'pro'], tone: 'from-blue-400 to-indigo-700', initial: 'DS', health: 'available', availability: 'live' },
   { id: 'mistral', name: 'Mistral', description: 'Mistral and Codestral — wired into ARK Router.', tiers: ['free', 'pro'], tone: 'from-orange-400 to-amber-700', initial: 'Mi', health: 'available', availability: 'live' },
+  { id: 'cerebras', name: 'Cerebras', description: 'Ultra-fast Llama free tier — wired into ARK Router.', tiers: ['free', 'pro'], tone: 'from-cyan-500 to-teal-800', initial: 'Ce', health: 'available', availability: 'live' },
+  { id: 'sambanova', name: 'SambaNova', description: 'SambaNova Cloud open models — wired into ARK Router.', tiers: ['free', 'pro'], tone: 'from-fuchsia-500 to-purple-800', initial: 'Sn', health: 'available', availability: 'live' },
   { id: 'github-models', name: 'GitHub Models', description: 'Retired by GitHub (July 2026).', tiers: ['free'], tone: 'from-zinc-500 to-zinc-900', initial: 'GH', health: 'offline', availability: 'retired' },
 ];
 

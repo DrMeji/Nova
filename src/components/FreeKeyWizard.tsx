@@ -41,6 +41,18 @@ const FREE_KEYS: FreeKeyProvider[] = [
     signupUrl: 'https://api.together.xyz/settings/api-keys',
     blurb: 'Open model hosting.',
   },
+  {
+    id: 'cerebras',
+    name: 'Cerebras',
+    signupUrl: 'https://cloud.cerebras.ai/',
+    blurb: 'Ultra-fast free Llama.',
+  },
+  {
+    id: 'sambanova',
+    name: 'SambaNova',
+    signupUrl: 'https://cloud.sambanova.ai/',
+    blurb: 'SambaNova Cloud free key.',
+  },
 ];
 
 export function FreeKeyWizard({

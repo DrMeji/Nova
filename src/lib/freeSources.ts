@@ -138,6 +138,22 @@ export const FREE_SOURCES: FreeSource[] = [
     detail: 'Mistral / Codestral API — wired into ARK Router.',
     wired: true,
   },
+  {
+    id: 'cerebras-free',
+    name: 'Cerebras',
+    kind: 'free-key',
+    use: 'coding',
+    detail: 'Ultra-fast Llama free tier — wired into ARK Router.',
+    wired: true,
+  },
+  {
+    id: 'sambanova-free',
+    name: 'SambaNova',
+    kind: 'free-key',
+    use: 'coding',
+    detail: 'SambaNova Cloud free-key hop — wired into ARK Router.',
+    wired: true,
+  },
 ];
 
 export function wiredFreeSources() {

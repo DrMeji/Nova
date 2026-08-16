@@ -64,6 +64,8 @@ const PROVIDER_ROWS = [
   { id: 'fireworks', name: 'Fireworks', hint: 'Fast serverless open models' },
   { id: 'deepseek', name: 'DeepSeek', hint: 'Coding + chat API' },
   { id: 'mistral', name: 'Mistral', hint: 'Mistral + Codestral' },
+  { id: 'cerebras', name: 'Cerebras', hint: 'Ultra-fast Llama free tier' },
+  { id: 'sambanova', name: 'SambaNova', hint: 'SambaNova Cloud open models' },
   { id: 'github-models', name: 'GitHub Models', hint: 'Retired — use Groq / Google / OpenRouter' },
 ];
 
@@ -95,7 +97,7 @@ export function SettingsContent() {
     latestTag?: string;
   } | null>(null);
   const [updatePercent, setUpdatePercent] = useState(0);
-  const [appVersion, setAppVersion] = useState('0.1.21');
+  const [appVersion, setAppVersion] = useState('0.1.22');
   const [twoFaCode, setTwoFaCode] = useState('');
   const [twoFaSetup, setTwoFaSetup] = useState(false);
   const [savedFlash, setSavedFlash] = useState('');
@@ -594,8 +596,8 @@ export function SettingsContent() {
                   <div>
                     <p className="text-sm font-medium text-content-primary">Plugin OAuth client IDs</p>
                     <p className="text-xs text-content-tertiary mt-0.5 leading-relaxed">
-                      Optional public client ids for one-click GitHub device login / Google browser OAuth.
-                      Create an OAuth App, paste the client id here (or set ARK_GITHUB_CLIENT_ID). Secrets stay in env only.
+                      Register OAuth apps once, paste the public client ids here, then use one-click sign-in in Build.
+                      Client secrets stay in env only (`ARK_GOOGLE_CLIENT_SECRET`).
                     </p>
                   </div>
                   {(['github', 'google'] as const).map(id => (
@@ -972,7 +974,15 @@ export function SettingsContent() {
                 <div className="rounded-xl border border-surface-border p-4 space-y-2">
                   <p className="text-sm font-medium text-content-primary">Install signing</p>
                   <p className="text-xs text-content-tertiary leading-relaxed">
-                    A paid Authenticode certificate (CSC_LINK) removes SmartScreen warnings. See build/signing.env.example.
+                    Buy an Authenticode cert (DigiCert, Sectigo, SSL.com), export a .pfx, then before packaging:
+                  </p>
+                  <ol className="text-[11px] text-content-tertiary space-y-1 list-decimal list-inside leading-relaxed">
+                    <li>Set CSC_LINK to the .pfx path and CSC_KEY_PASSWORD</li>
+                    <li>Run Open-ARK-Packaged.bat or npm run electron:build</li>
+                    <li>Confirm with “Check this install’s signature” on the packaged app</li>
+                  </ol>
+                  <p className="text-[11px] text-content-tertiary leading-relaxed">
+                    Dev builds show n/a until you install a packaged build. Full notes: build/signing.env.example
                   </p>
                   <button
                     type="button"
@@ -981,7 +991,7 @@ export function SettingsContent() {
                       void window.arkDesktop?.signingStatus?.().then((s) => {
                         setUpdateMsg(
                           s?.status
-                            ? `Signing status: ${s.status}${s.signed ? ' (trusted)' : ''}`
+                            ? `Signing status: ${s.status}${s.signed ? ' (trusted)' : ''}${s.packaged === false ? ' · unpackaged/dev' : ''}`
                             : 'Signing check unavailable in this build.',
                         );
                       });
@@ -1070,6 +1080,20 @@ function OAuthClientRow({
   onSaved: (msg: string) => void;
 }) {
   const [value, setValue] = useState('');
+  const setup =
+    pluginId === 'github'
+      ? {
+          label: 'GitHub',
+          url: 'https://github.com/settings/developers',
+          steps: 'New OAuth App → any Homepage URL → Device Flow enabled → copy Client ID',
+          env: 'ARK_GITHUB_CLIENT_ID',
+        }
+      : {
+          label: 'Google',
+          url: 'https://console.cloud.google.com/apis/credentials',
+          steps: 'OAuth client (Desktop or Web) → copy Client ID; set ARK_GOOGLE_CLIENT_SECRET in env',
+          env: 'ARK_GOOGLE_CLIENT_ID',
+        };
 
   useEffect(() => {
     void window.arkDesktop?.pluginOAuthStatus?.().then((s) => {
@@ -1079,26 +1103,38 @@ function OAuthClientRow({
   }, [pluginId]);
 
   return (
-    <div className="flex gap-2 items-center">
-      <span className="text-xs text-content-secondary w-16 shrink-0 capitalize">{pluginId}</span>
-      <input
-        type="text"
-        value={value}
-        onChange={e => setValue(e.target.value)}
-        placeholder={`${pluginId} client id`}
-        className="ark-input flex-1 text-sm"
-      />
-      <button
-        type="button"
-        className="ark-btn-secondary shrink-0 text-xs"
-        onClick={() => {
-          void window.arkDesktop?.pluginOAuthSetClient?.(pluginId, value).then(() => {
-            onSaved(`${pluginId} client id saved`);
-          });
-        }}
-      >
-        Save
-      </button>
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs text-content-secondary capitalize">{setup.label}</span>
+        <button
+          type="button"
+          className="text-[11px] text-sky-400 hover:text-sky-300"
+          onClick={() => void window.arkDesktop?.openExternal?.(setup.url)}
+        >
+          Open console
+        </button>
+      </div>
+      <p className="text-[11px] text-content-tertiary leading-relaxed">{setup.steps}</p>
+      <div className="flex gap-2 items-center">
+        <input
+          type="text"
+          value={value}
+          onChange={e => setValue(e.target.value)}
+          placeholder={`${setup.env} or paste client id`}
+          className="ark-input flex-1 text-sm"
+        />
+        <button
+          type="button"
+          className="ark-btn-secondary shrink-0 text-xs"
+          onClick={() => {
+            void window.arkDesktop?.pluginOAuthSetClient?.(pluginId, value).then(() => {
+              onSaved(`${pluginId} client id saved`);
+            });
+          }}
+        >
+          Save
+        </button>
+      </div>
     </div>
   );
 }

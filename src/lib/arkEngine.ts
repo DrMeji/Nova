@@ -139,3 +139,10 @@ export async function engineGenerateStream(
   }
   return engineGenerate(message, modelId, kind);
 }
+
+export async function engineGenerateCancel() {
+  if (window.arkDesktop?.engineGenerateCancel) {
+    return window.arkDesktop.engineGenerateCancel();
+  }
+  return { ok: false };
+}

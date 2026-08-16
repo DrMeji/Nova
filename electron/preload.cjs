@@ -40,6 +40,7 @@ contextBridge.exposeInMainWorld('arkDesktop', {
   brainStatus: () => ipcRenderer.invoke('ark:brain-status'),
   engineGenerateStream: (message, modelId, kind) =>
     ipcRenderer.invoke('ark:engine-generate-stream', { message, modelId, kind }),
+  engineGenerateCancel: () => ipcRenderer.invoke('ark:engine-generate-cancel'),
   onEngineChunk: (handler) => {
     const listener = (_event, payload) => handler?.(payload);
     ipcRenderer.on('ark:engine-chunk', listener);

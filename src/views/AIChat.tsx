@@ -34,8 +34,9 @@ import {
 import type { ChatMessage } from '@/types';
 import {
   Bot, User as UserIcon, Loader2, Plus, Mic, ImageIcon, Video, Code2,
-  Upload, Cpu, Cloud, ChevronDown, Check, Blocks, FolderKanban, Zap,
+  Upload, Cpu, Cloud, ChevronDown, Check, Blocks, FolderKanban, Zap, Square,
 } from 'lucide-react';
+import { engineGenerateCancel } from '@/lib/arkEngine';
 
 type ModelSource = 'local' | 'cloud' | 'auto';
 
@@ -70,6 +71,8 @@ const CLOUD_CHAT_WHEN_KEYED: (ChatModelOption & { keyId: string })[] = [
   { id: 'fireworks-llama', name: 'Llama 3.1 (Fireworks)', source: 'cloud', detail: 'Free-key · Fireworks', kind: 'chat', keyId: 'fireworks' },
   { id: 'deepseek-chat', name: 'DeepSeek Chat', source: 'cloud', detail: 'Free-key · DeepSeek', kind: 'chat', keyId: 'deepseek' },
   { id: 'mistral-small', name: 'Mistral Small', source: 'cloud', detail: 'Free-key · Mistral', kind: 'chat', keyId: 'mistral' },
+  { id: 'cerebras-llama', name: 'Llama 3.1 (Cerebras)', source: 'cloud', detail: 'Free-key · ultra-fast', kind: 'chat', keyId: 'cerebras' },
+  { id: 'sambanova-llama', name: 'Llama 3.1 (SambaNova)', source: 'cloud', detail: 'Free-key · SambaNova', kind: 'chat', keyId: 'sambanova' },
   { id: 'gpt-4o', name: 'GPT-4o', source: 'cloud', detail: 'Cloud chat and code', kind: 'chat', keyId: 'openai' },
   { id: 'claude-sonnet', name: 'Claude Sonnet', source: 'cloud', detail: 'Cloud long context', kind: 'chat', keyId: 'anthropic' },
 ];
@@ -254,6 +257,7 @@ export function AIChat() {
   const [ollamaModels, setOllamaModels] = useState<ChatModelOption[]>([]);
   const [capacity, setCapacity] = useState<LiveCapacity | null>(null);
   const [generating, setGenerating] = useState(false);
+  const stopRequestedRef = useRef(false);
   const [freeKeyOpen, setFreeKeyOpen] = useState(false);
   const [menuPos, setMenuPos] = useState<{ left: number; top?: number; bottom?: number } | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -521,9 +525,16 @@ export function AIChat() {
     return () => document.removeEventListener('mousedown', onDoc);
   }, [modelMenuOpen]);
 
+  const handleStop = () => {
+    stopRequestedRef.current = true;
+    void engineGenerateCancel();
+    setGenerating(false);
+  };
+
   const handleSend = async () => {
     if (!input.trim() || !user || generating) return;
     const content = input.trim();
+    stopRequestedRef.current = false;
 
     // Move this conversation into Recent (ChatGPT-style) on first send.
     let activeChatId = route.name === 'chat' ? route.chatId : undefined;
@@ -589,7 +600,7 @@ export function AIChat() {
     });
     setInput('');
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
-    if (isMediaMode) setGenerating(true);
+    setGenerating(true);
 
     if (isNewChat) {
       navigate({
@@ -604,7 +615,9 @@ export function AIChat() {
       let usedPlugin = false;
       let lastLibraryId: string | undefined;
       let resolvedProvider = providerLabel;
+      let streamedPartial = '';
 
+      try {
       if (pluginId) {
         const pluginReply = await runPluginAction(
           pluginId,
@@ -630,6 +643,7 @@ export function AIChat() {
 
           for (const stage of stages) {
             if (!stage.ms) continue;
+            if (stopRequestedRef.current) break;
             setAssistantContent(`__generating__:${kind}:${stage.label}`);
             await new Promise(r => window.setTimeout(r, stage.ms));
           }
@@ -680,12 +694,9 @@ export function AIChat() {
         } catch (err) {
           response = err instanceof Error ? err.message : 'Media generation failed';
           usedPlugin = true;
-        } finally {
-          setGenerating(false);
         }
       } else {
         try {
-          // Prior thread + this user turn — ARK owns memory across provider hops.
           const prefs = getLocalPrefs();
           const history = prefs.rememberContext
             ? buildRouterHistory(messages, content)
@@ -698,6 +709,8 @@ export function AIChat() {
             preferredSource: activeModel.source,
             history,
             onChunk: (piece) => {
+              if (stopRequestedRef.current) return;
+              streamedPartial += piece;
               setMessages(prev => prev.map(m => {
                 if (m.id !== assistantId) return m;
                 const base = (m.content.startsWith('__generating__:') || m.content.startsWith('__progress__:'))
@@ -707,13 +720,20 @@ export function AIChat() {
               }));
             },
           });
-          response = routed.reply;
+          response = stopRequestedRef.current && streamedPartial
+            ? streamedPartial
+            : routed.reply;
           resolvedProvider = routerProviderLabel(routed, providerLabel);
           usedPlugin = true;
         } catch (err) {
-          response = err instanceof Error ? err.message : 'ARK Router failed';
+          response = stopRequestedRef.current && streamedPartial
+            ? streamedPartial
+            : (err instanceof Error ? err.message : 'ARK Router failed');
           usedPlugin = true;
         }
+      }
+      } finally {
+        setGenerating(false);
       }
 
       window.setTimeout(async () => {
@@ -961,11 +981,16 @@ export function AIChat() {
 
           <button
             type="button"
-            className="w-9 h-9 rounded-full flex items-center justify-center text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors shrink-0"
-            title="Voice input"
-            aria-label="Voice input"
+            onClick={() => (generating ? handleStop() : undefined)}
+            className={`w-9 h-9 rounded-full flex items-center justify-center transition-colors shrink-0 ${
+              generating
+                ? 'bg-rose-500/20 text-rose-300 hover:bg-rose-500/30'
+                : 'text-content-secondary hover:text-content-primary hover:bg-surface-hover'
+            }`}
+            title={generating ? 'Stop generating' : 'Voice input'}
+            aria-label={generating ? 'Stop generating' : 'Voice input'}
           >
-            <Mic className="w-4 h-4" />
+            {generating ? <Square className="w-3.5 h-3.5 fill-current" /> : <Mic className="w-4 h-4" />}
           </button>
         </div>
 

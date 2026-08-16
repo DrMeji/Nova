@@ -128,7 +128,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
   // —— Rest of catalog (installable; connect later) ——
   { id: 'gdrive', name: 'Google Drive', description: 'Work across Drive, Docs, Sheets, and slides.', longDescription: 'Browse and open Drive files from ARK.', tone: 'from-yellow-500 to-blue-600', initial: 'D', category: 'featured', authKind: 'oauth', permissions: [{ id: 'read', label: 'Read files', detail: 'Open Drive files', required: true }], actions: [] },
   { id: 'gcal', name: 'Google Calendar', description: 'Manage calendar events and schedules.', longDescription: 'See and create calendar events.', tone: 'from-blue-500 to-blue-700', initial: 'C', category: 'featured', authKind: 'oauth', permissions: [{ id: 'read', label: 'Read events', detail: 'View schedule', required: true }], actions: [] },
-  { id: 'slack', name: 'Slack', description: 'Read and manage Slack conversations.', longDescription: 'Bring Slack threads into ARK chat.', tone: 'from-purple-500 to-pink-600', initial: 'S', category: 'featured', hero: true, authKind: 'token', permissions: [{ id: 'read', label: 'Read channels', detail: 'Read messages', required: true }, { id: 'search', label: 'Search', detail: 'Search messages', required: false }], actions: [{ id: 'unread', label: 'Unread channels', prompt: 'Using Slack, summarize unread channels.' }] },
+  { id: 'slack', name: 'Slack', description: 'Read and manage Slack conversations.', longDescription: 'Bring Slack threads into ARK chat.', tone: 'from-purple-500 to-pink-600', initial: 'S', category: 'featured', hero: true, authKind: 'token', permissions: [{ id: 'read', label: 'Read channels', detail: 'Read messages', required: true }, { id: 'search', label: 'Search', detail: 'Search messages', required: false }, { id: 'write', label: 'Post messages', detail: 'Post to channels the bot can see', required: false }], actions: [{ id: 'unread', label: 'Unread channels', prompt: 'Using Slack, summarize unread channels.' }] },
   { id: 'outlook-mail', name: 'Outlook Email', description: 'Read and send Outlook mail.', longDescription: 'Outlook mail in ARK.', tone: 'from-sky-500 to-blue-700', initial: 'Oe', category: 'featured', authKind: 'oauth', permissions: [{ id: 'read', label: 'Read mail', detail: 'Open Outlook mail', required: true }], actions: [] },
   { id: 'granola', name: 'Granola', description: 'Add your meeting context.', longDescription: 'Meeting notes context for ARK.', tone: 'from-emerald-500 to-teal-700', initial: 'Gr', category: 'featured', authKind: 'token', permissions: [{ id: 'read', label: 'Read notes', detail: 'Access meeting notes', required: true }], actions: [] },
 
@@ -151,7 +151,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
 
   { id: 'datadog', name: 'Datadog', description: 'Search and act on your data.', longDescription: 'Observability in ARK.', tone: 'from-violet-600 to-purple-900', initial: 'Dd', category: 'developer', authKind: 'token', permissions: [{ id: 'search', label: 'Search', detail: 'Search telemetry', required: true }], actions: [] },
   { id: 'supabase', name: 'Supabase', description: 'Manage and query databases.', longDescription: 'Supabase projects in ARK.', tone: 'from-emerald-500 to-green-800', initial: 'Sb', category: 'developer', authKind: 'token', permissions: [{ id: 'read', label: 'Query', detail: 'Run read queries', required: true }], actions: [] },
-  { id: 'vercel', name: 'Vercel', description: 'Build and deploy web apps and agents.', longDescription: 'Deployments from ARK.', tone: 'from-zinc-500 to-black', initial: 'V', category: 'developer', hero: true, authKind: 'token', permissions: [{ id: 'read', label: 'Read deploys', detail: 'View deployments', required: true }], actions: [{ id: 'deploys', label: 'Recent deploys', prompt: 'Using Vercel, list my recent deployments.' }] },
+  { id: 'vercel', name: 'Vercel', description: 'Build and deploy web apps and agents.', longDescription: 'Deployments from ARK.', tone: 'from-zinc-500 to-black', initial: 'V', category: 'developer', hero: true, authKind: 'token', permissions: [{ id: 'read', label: 'Read deploys', detail: 'View deployments', required: true }, { id: 'write', label: 'Redeploy', detail: 'Trigger redeploys', required: false }], actions: [{ id: 'deploys', label: 'Recent deploys', prompt: 'Using Vercel, list my recent deployments.' }] },
   { id: 'exa', name: 'Exa', description: 'Web search for AI agents.', longDescription: 'Web search tool.', tone: 'from-blue-500 to-indigo-700', initial: 'Ex', category: 'developer', authKind: 'token', permissions: [{ id: 'search', label: 'Search web', detail: 'Run searches', required: true }], actions: [] },
   { id: 'neon', name: 'Neon Postgres', description: 'Manage Neon Postgres databases.', longDescription: 'Neon database access.', tone: 'from-green-400 to-emerald-700', initial: 'Ne', category: 'developer', authKind: 'token', permissions: [{ id: 'read', label: 'Query', detail: 'Read data', required: true }], actions: [] },
   { id: 'devpost', name: 'Devpost Hackathons', description: 'Find and submit to hackathons.', longDescription: 'Hackathon discovery.', tone: 'from-sky-500 to-blue-700', initial: 'Dp', category: 'developer', authKind: 'none', permissions: [{ id: 'read', label: 'Browse', detail: 'Browse events', required: true }], actions: [] },
@@ -168,7 +168,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
   { id: 'asana', name: 'Asana', description: 'Organize work across teams.', longDescription: 'Asana tasks.', tone: 'from-rose-400 to-red-700', initial: 'As', category: 'business', authKind: 'oauth', permissions: [{ id: 'read', label: 'Read tasks', detail: 'View tasks', required: true }], actions: [] },
 
   { id: 'teams', name: 'Teams', description: 'Collaborate in Microsoft Teams.', longDescription: 'Teams chat.', tone: 'from-purple-500 to-indigo-700', initial: 'T', category: 'communication', authKind: 'oauth', permissions: [{ id: 'read', label: 'Read chats', detail: 'Read messages', required: true }], actions: [] },
-  { id: 'discord', name: 'Discord', description: 'Community and chat workflows.', longDescription: 'Discord servers.', tone: 'from-indigo-500 to-violet-700', initial: 'Dc', category: 'communication', hero: true, authKind: 'token', permissions: [{ id: 'read', label: 'Read channels', detail: 'Read messages', required: true }], actions: [{ id: 'servers', label: 'My servers', prompt: 'Using Discord, list my servers.' }] },
+  { id: 'discord', name: 'Discord', description: 'Community and chat workflows.', longDescription: 'Discord servers.', tone: 'from-indigo-500 to-violet-700', initial: 'Dc', category: 'communication', hero: true, authKind: 'token', permissions: [{ id: 'read', label: 'Read channels', detail: 'Read messages', required: true }, { id: 'write', label: 'Post messages', detail: 'Post to a channel by id', required: false }], actions: [{ id: 'servers', label: 'My servers', prompt: 'Using Discord, list my servers.' }] },
   { id: 'zoom', name: 'Zoom', description: 'Meetings and recordings.', longDescription: 'Zoom meetings.', tone: 'from-blue-400 to-blue-700', initial: 'Zm', category: 'communication', authKind: 'oauth', permissions: [{ id: 'read', label: 'Read meetings', detail: 'View meetings', required: true }], actions: [] },
   { id: 'telegram', name: 'Telegram', description: 'Message and bot integrations.', longDescription: 'Telegram bots.', tone: 'from-sky-400 to-cyan-700', initial: 'Tg', category: 'communication', authKind: 'token', permissions: [{ id: 'send', label: 'Send', detail: 'Send messages', required: true }], actions: [] },
   { id: 'whatsapp', name: 'WhatsApp', description: 'Business messaging support.', longDescription: 'WhatsApp business.', tone: 'from-emerald-400 to-green-700', initial: 'Wa', category: 'communication', authKind: 'oauth', permissions: [{ id: 'send', label: 'Send', detail: 'Send messages', required: true }], actions: [] },
@@ -343,7 +343,7 @@ export async function runPluginAction(
     if (token) {
       try {
         const { runGmailLive } = await import('@/lib/gmail');
-        return await runGmailLive(token, userText);
+        return await runGmailLive(token, userText, { permissions });
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Gmail request failed';
         return [
@@ -413,7 +413,7 @@ export async function runPluginAction(
     if (token) {
       try {
         const { runVercelLive } = await import('@/lib/vercel');
-        return await runVercelLive(token, userText);
+        return await runVercelLive(token, userText, { permissions });
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Vercel request failed';
         return ['Vercel · error', '', msg].join('\n');
@@ -426,7 +426,7 @@ export async function runPluginAction(
     if (token) {
       try {
         const { runDiscordLive } = await import('@/lib/discord');
-        return await runDiscordLive(token, userText);
+        return await runDiscordLive(token, userText, { permissions });
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Discord request failed';
         return ['Discord · error', '', msg].join('\n');
