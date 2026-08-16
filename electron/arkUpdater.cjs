@@ -1,6 +1,6 @@
 /**
  * In-app updates via public DrMeji/ark-dist Releases.
- * Download → install → relaunch. Session/userData must survive upgrades.
+ * Fully silent helper (no terminals). Download + install UI stays inside ARK.
  */
 
 const fs = require('fs');
@@ -171,81 +171,89 @@ function isNewer(latest, current) {
   return false;
 }
 
-function escapeForCmd(p) {
-  return String(p).replace(/"/g, '');
+function psSingleQuote(p) {
+  return `'${String(p).replace(/'/g, "''")}'`;
 }
 
 /**
- * VBS launcher survives Electron quitting (plain detached cmd often dies with the app).
- * Waits for ARK.exe to exit, runs silent NSIS, then starts ARK again.
+ * Fully hidden PowerShell helper — no cmd, no ping, no visible terminals.
+ * Waits for ARK to exit, runs silent NSIS, relaunches ARK.
  */
 function launchInstallerThenRelaunch(setupPath) {
   const appExe = process.execPath;
   const temp = app.getPath('temp');
   const stamp = Date.now();
-  const helperCmd = path.join(temp, `ark-update-${stamp}.cmd`);
-  const helperVbs = path.join(temp, `ark-update-${stamp}.vbs`);
+  const helperPs1 = path.join(temp, `ark-update-${stamp}.ps1`);
   const logFile = path.join(temp, `ark-update-${stamp}.log`);
 
   const localPrograms = path.join(process.env.LOCALAPPDATA || '', 'Programs', 'ARK', 'ARK.exe');
   const programFiles = path.join(process.env.ProgramFiles || 'C:\\Program Files', 'ARK', 'ARK.exe');
 
-  const setup = escapeForCmd(setupPath);
-  const exe = escapeForCmd(appExe);
-  const local = escapeForCmd(localPrograms);
-  const pf = escapeForCmd(programFiles);
-  const log = escapeForCmd(logFile);
+  const ps = `
+$ErrorActionPreference = 'SilentlyContinue'
+$log = ${psSingleQuote(logFile)}
+function Write-Log($m) { Add-Content -Path $log -Value ("[{0}] {1}" -f (Get-Date -Format o), $m) }
+Write-Log 'helper start'
+$setup = ${psSingleQuote(setupPath)}
+$exe = ${psSingleQuote(appExe)}
+$local = ${psSingleQuote(localPrograms)}
+$pf = ${psSingleQuote(programFiles)}
 
-  const cmd = [
-    '@echo off',
-    'setlocal EnableExtensions',
-    `echo ARK update helper started > "${log}"`,
-    'echo Waiting for ARK.exe to exit...>> "' + log + '"',
-    'set /a _tries=0',
-    ':waitloop',
-    'set /a _tries+=1',
-    'if %_tries% GEQ 90 goto afterwait',
-    'tasklist /FI "IMAGENAME eq ARK.exe" 2>NUL | find /I "ARK.exe" >NUL',
-    'if not errorlevel 1 (',
-    '  ping -n 2 127.0.0.1 >nul',
-    '  goto waitloop',
-    ')',
-    ':afterwait',
-    'ping -n 3 127.0.0.1 >nul',
-    `echo Running installer...>> "${log}"`,
-    `"${setup}" /S`,
-    'set _err=%ERRORLEVEL%',
-    `echo Installer exit=%_err%>> "${log}"`,
-    'ping -n 3 127.0.0.1 >nul',
-    'set "TARGET="',
-    `if exist "${exe}" set "TARGET=${exe}"`,
-    `if not defined TARGET if exist "${local}" set "TARGET=${local}"`,
-    `if not defined TARGET if exist "${pf}" set "TARGET=${pf}"`,
-    'if defined TARGET (',
-    `  echo Starting %TARGET%>> "${log}"`,
-    '  start "" "%TARGET%"',
-    ') else (',
-    `  echo Could not find ARK.exe to relaunch>> "${log}"`,
-    ')',
-    `del /q "${escapeForCmd(helperVbs)}" 2>nul`,
-    `del /q "${escapeForCmd(helperCmd)}" 2>nul`,
-  ].join('\r\n');
+# Wait until ARK.exe is gone (file locks released)
+$tries = 0
+while ($tries -lt 90) {
+  $proc = Get-Process -Name 'ARK' -ErrorAction SilentlyContinue
+  if (-not $proc) { break }
+  Start-Sleep -Seconds 1
+  $tries++
+}
+Start-Sleep -Seconds 2
+Write-Log 'ARK exited; starting silent install'
 
-  fs.writeFileSync(helperCmd, `${cmd}\r\n`, 'utf8');
+if (Test-Path -LiteralPath $setup) {
+  # /S = silent NSIS; --updated marks upgrade so app data is preserved
+  $p = Start-Process -FilePath $setup -ArgumentList @('/S','--updated') -Wait -PassThru -WindowStyle Hidden
+  Write-Log ("installer exit=" + $p.ExitCode)
+} else {
+  Write-Log 'setup missing'
+}
 
-  // 0 = hidden window; False = don't wait (returns immediately so VBS exits, cmd keeps running)
-  const vbs = [
-    'Set sh = CreateObject("WScript.Shell")',
-    `sh.Run "cmd /c ""${escapeForCmd(helperCmd)}""", 0, False`,
-  ].join('\r\n');
-  fs.writeFileSync(helperVbs, `${vbs}\r\n`, 'utf8');
+Start-Sleep -Seconds 2
 
-  const child = spawn('wscript.exe', [helperVbs], {
-    detached: true,
-    stdio: 'ignore',
-    windowsHide: true,
-    cwd: temp,
-  });
+$target = $null
+foreach ($c in @($exe, $local, $pf)) {
+  if ($c -and (Test-Path -LiteralPath $c)) { $target = $c; break }
+}
+if ($target) {
+  Write-Log ("starting " + $target)
+  Start-Process -FilePath $target -WindowStyle Normal
+} else {
+  Write-Log 'ARK.exe not found for relaunch'
+}
+
+Start-Sleep -Seconds 1
+Remove-Item -LiteralPath ${psSingleQuote(helperPs1)} -Force -ErrorAction SilentlyContinue
+`;
+
+  fs.writeFileSync(helperPs1, ps, 'utf8');
+
+  // Spawn PowerShell completely hidden. Do NOT use cmd/ping.
+  const child = spawn(
+    path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
+    [
+      '-NoProfile',
+      '-NonInteractive',
+      '-ExecutionPolicy', 'Bypass',
+      '-WindowStyle', 'Hidden',
+      '-File', helperPs1,
+    ],
+    {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+      cwd: temp,
+    },
+  );
   child.unref();
 }
 
@@ -358,7 +366,7 @@ async function downloadAndInstall(setupUrl, latestTag) {
   sendProgress({
     status: 'downloading',
     percent: 0,
-    message: 'Downloading update…',
+    message: 'Updating…',
     version: normalizeVersion(latestTag || ''),
   });
 
@@ -367,7 +375,7 @@ async function downloadAndInstall(setupUrl, latestTag) {
       sendProgress({
         status: 'downloading',
         percent,
-        message: `Downloading update… ${percent}%`,
+        message: 'Updating…',
         version: normalizeVersion(latestTag || ''),
       });
     });
@@ -381,11 +389,10 @@ async function downloadAndInstall(setupUrl, latestTag) {
   sendProgress({
     status: 'installing',
     percent: 100,
-    message: 'Download complete. Installing — ARK will reopen automatically…',
+    message: 'Updating…',
     version: normalizeVersion(latestTag || ''),
   });
 
-  // Let the overlay paint, start the detached helper, then quit so NSIS can replace files.
   setTimeout(() => {
     try {
       launchInstallerThenRelaunch(dest);
@@ -399,10 +406,10 @@ async function downloadAndInstall(setupUrl, latestTag) {
       });
       return;
     }
-    setTimeout(() => app.quit(), 600);
-  }, 1500);
+    setTimeout(() => app.quit(), 800);
+  }, 1800);
 
-  return { ok: true, message: 'Download complete. Installing — ARK will reopen automatically…' };
+  return { ok: true, message: 'Updating…' };
 }
 
 module.exports = {

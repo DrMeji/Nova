@@ -89,7 +89,7 @@ export function SettingsContent() {
     latestTag?: string;
   } | null>(null);
   const [updatePercent, setUpdatePercent] = useState(0);
-  const [appVersion, setAppVersion] = useState('0.1.8');
+  const [appVersion, setAppVersion] = useState('0.1.9');
   const [twoFaCode, setTwoFaCode] = useState('');
   const [twoFaSetup, setTwoFaSetup] = useState(false);
   const [savedFlash, setSavedFlash] = useState('');
@@ -188,7 +188,7 @@ export function SettingsContent() {
     if (!updateInfo?.newerAvailable || !updateInfo.setupAssetUrl) return;
     setDownloadingUpdate(true);
     setUpdatePercent(0);
-    setUpdateMsg('Downloading update…');
+    setUpdateMsg('Updating…');
     void (async () => {
       const { downloadAndInstallArkUpdate } = await import('@/lib/arkUpdates');
       const result = await downloadAndInstallArkUpdate({
@@ -196,7 +196,7 @@ export function SettingsContent() {
         latestTag: updateInfo.latestTag,
       });
       if (!result?.ok) {
-        setUpdateMsg(result?.message || 'Download failed.');
+        setUpdateMsg(result?.message || 'Update failed.');
         setDownloadingUpdate(false);
       }
     })();
@@ -875,13 +875,13 @@ export function SettingsContent() {
                           className="ark-btn-primary"
                         >
                           {downloadingUpdate ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-                          {downloadingUpdate ? 'Updating…' : 'Download'}
+                          {downloadingUpdate ? 'Updating…' : 'Update'}
                         </button>
                       )}
                     </div>
                   </div>
                   <p className="text-[11px] text-content-tertiary leading-relaxed">
-                    Download shows live progress. After install, ARK reopens on New Chat — you stay signed in, and models/setup stay on this PC.
+                    Check finds a new build, then Update installs it inside ARK and reopens on New Chat — no browser, no terminals.
                   </p>
                 </div>
 

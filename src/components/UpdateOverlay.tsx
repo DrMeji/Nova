@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
-import { Download, Loader2, RefreshCw } from 'lucide-react';
 
 type UpdatePhase = 'idle' | 'downloading' | 'installing' | 'error';
 
 /**
- * Full-window update HUD so download → install → reopen never looks like a freeze.
+ * Single clean update surface — logo + Updating + percent.
+ * No second browser window, no terminal noise.
  */
 export function UpdateOverlay() {
   const [phase, setPhase] = useState<UpdatePhase>('idle');
@@ -17,13 +17,13 @@ export function UpdateOverlay() {
       if (status === 'downloading') {
         setPhase('downloading');
         setPercent(typeof payload.percent === 'number' ? payload.percent : 0);
-        setMessage(payload.message || 'Downloading update…');
+        setMessage(payload.message || 'Updating…');
         return;
       }
       if (status === 'installing') {
         setPhase('installing');
         setPercent(100);
-        setMessage(payload.message || 'Installing and reopening ARK…');
+        setMessage('Finishing update…');
         return;
       }
       if (status === 'error') {
@@ -38,53 +38,48 @@ export function UpdateOverlay() {
 
   if (phase === 'idle') return null;
 
-  return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-sm">
-      <div className="w-full max-w-md mx-4 rounded-2xl border border-surface-border bg-ark-navy-900 p-6 shadow-2xl">
-        <div className="flex items-center gap-3 mb-4">
-          <span className="w-11 h-11 rounded-xl bg-surface-hover flex items-center justify-center">
-            {phase === 'error' ? (
-              <RefreshCw className="w-5 h-5 text-rose-400" />
-            ) : phase === 'installing' ? (
-              <Loader2 className="w-5 h-5 text-content-primary animate-spin" />
-            ) : (
-              <Download className="w-5 h-5 text-content-primary" />
-            )}
-          </span>
-          <div className="min-w-0">
-            <p className="text-sm font-semibold text-content-primary">
-              {phase === 'downloading' && 'Downloading update'}
-              {phase === 'installing' && 'Installing update'}
-              {phase === 'error' && 'Update failed'}
-            </p>
-            <p className="text-xs text-content-tertiary mt-0.5">{message}</p>
-          </div>
-        </div>
+  const shown = phase === 'installing' ? 100 : Math.min(100, Math.max(percent, 0));
 
-        {(phase === 'downloading' || phase === 'installing') && (
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-ark-navy-950">
+      <div className="w-full max-w-sm mx-4 flex flex-col items-center text-center px-6">
+        <img
+          src={`${import.meta.env.BASE_URL}ark-icon.png`}
+          alt="ARK"
+          className="w-16 h-16 object-contain mb-8 select-none"
+          draggable={false}
+        />
+
+        {phase === 'error' ? (
           <>
-            <div className="h-2 rounded-full bg-surface-hover overflow-hidden">
+            <p className="text-base font-medium text-content-primary">Update failed</p>
+            <p className="text-sm text-content-tertiary mt-2">{message}</p>
+            <button
+              type="button"
+              className="ark-btn-secondary mt-8 min-w-[8rem]"
+              onClick={() => setPhase('idle')}
+            >
+              Dismiss
+            </button>
+          </>
+        ) : (
+          <>
+            <p className="text-base font-medium text-content-primary tracking-tight">
+              {phase === 'installing' ? 'Updating' : 'Updating'}
+            </p>
+            <p className="text-sm text-content-tertiary mt-1 tabular-nums">{shown}%</p>
+            <div className="w-full mt-6 h-1.5 rounded-full bg-surface-hover overflow-hidden">
               <div
-                className="h-full bg-sky-500 transition-all duration-300"
-                style={{ width: `${Math.min(100, Math.max(phase === 'installing' ? 100 : percent, 4))}%` }}
+                className="h-full bg-content-primary transition-all duration-300 ease-out"
+                style={{ width: `${Math.max(shown, 3)}%` }}
               />
             </div>
-            <p className="text-[11px] text-content-tertiary mt-3 leading-relaxed">
-              {phase === 'downloading'
-                ? 'Keep ARK open while the package downloads.'
-                : 'ARK will close briefly, install the build, then reopen on New Chat. You stay signed in — models and setup stay on this PC.'}
+            <p className="text-[11px] text-content-tertiary mt-5 leading-relaxed max-w-xs">
+              {phase === 'installing'
+                ? 'ARK will reopen on New Chat. Stay signed in.'
+                : 'Please keep this window open.'}
             </p>
           </>
-        )}
-
-        {phase === 'error' && (
-          <button
-            type="button"
-            className="ark-btn-secondary w-full mt-4"
-            onClick={() => setPhase('idle')}
-          >
-            Dismiss
-          </button>
         )}
       </div>
     </div>

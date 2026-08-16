@@ -187,11 +187,9 @@ export function LocalAI() {
     }
   };
 
-  // Auto-run a real speed test the first time Speed tab opens.
+  // Speed tab is blanked for now (inaccurate) — bounce away if selected.
   useEffect(() => {
-    if (tab !== 'speed' || speedSample || speedTesting) return;
-    void handleSpeedTest();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (tab === 'speed') setTab('overview');
   }, [tab]);
 
   const toggleEngine = () => {
@@ -339,7 +337,7 @@ export function LocalAI() {
           <div className="flex items-center gap-1 mb-4 flex-wrap">
             {([
               { id: 'overview' as const, label: 'Overview' },
-              { id: 'speed' as const, label: 'Speed' },
+              { id: 'speed' as const, label: 'Speed', disabled: true },
               { id: 'hardware' as const, label: 'Hardware' },
               { id: 'storage' as const, label: 'Storage' },
               { id: 'advanced' as const, label: 'Advanced' },
@@ -347,11 +345,18 @@ export function LocalAI() {
               <button
                 key={t.id}
                 type="button"
-                onClick={() => setTab(t.id)}
+                disabled={'disabled' in t && t.disabled}
+                onClick={() => {
+                  if ('disabled' in t && t.disabled) return;
+                  setTab(t.id);
+                }}
+                title={'disabled' in t && t.disabled ? 'Coming later' : undefined}
                 className={`rounded-full px-3.5 py-1.5 text-sm transition-colors ${
-                  tab === t.id
-                    ? 'bg-surface-hover text-content-primary'
-                    : 'text-content-secondary hover:text-content-primary'
+                  'disabled' in t && t.disabled
+                    ? 'opacity-40 cursor-not-allowed text-content-tertiary pointer-events-none'
+                    : tab === t.id
+                      ? 'bg-surface-hover text-content-primary'
+                      : 'text-content-secondary hover:text-content-primary'
                 }`}
               >
                 {t.label}
@@ -549,38 +554,18 @@ export function LocalAI() {
                 </div>
               </section>
 
-              {/* Speed / preload teaser */}
-              <section>
+              {/* Speed / preload — blanked while Speed tab is disabled */}
+              <section className="opacity-40 pointer-events-none select-none">
                 <div className="flex items-center justify-between gap-3 mb-4">
                   <div className="flex items-center gap-2">
                     <Wifi className="w-4 h-4 text-content-secondary" />
                     <h2 className="text-base font-semibold text-content-primary">Connection & preload</h2>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setTab('speed')}
-                    className="text-xs text-content-secondary hover:text-content-primary transition-colors"
-                  >
-                    Open speed test
-                  </button>
+                  <span className="text-xs text-content-tertiary">Coming later</span>
                 </div>
-                {preloadPlan && speedSample ? (
-                  <div className="flex flex-col">
-                    <div className="flex items-center gap-3 py-3 px-1">
-                      <span className="w-36 shrink-0 text-sm text-content-secondary">Download speed</span>
-                      <span className="text-sm text-content-primary">{formatMBps(speedSample.MBps)}</span>
-                    </div>
-                    <div className="flex items-center gap-3 py-3 px-1">
-                      <span className="w-36 shrink-0 text-sm text-content-secondary">Start next model</span>
-                      <span className="text-sm text-content-primary">at ~{preloadPlan.startAtPercent}% usage</span>
-                    </div>
-                    <p className="text-xs text-content-tertiary px-1 pt-1">{preloadPlan.summary}</p>
-                  </div>
-                ) : (
-                  <p className="text-sm text-content-tertiary px-1">
-                    Run a speed test so ARK knows how early to preload the next model in the background while you chat.
-                  </p>
-                )}
+                <p className="text-sm text-content-tertiary px-1">
+                  Speed test is paused for now. Local models and hardware tools still work as usual.
+                </p>
               </section>
 
               <p className="flex items-start gap-2 text-xs text-content-tertiary pt-2">
@@ -593,23 +578,14 @@ export function LocalAI() {
           )}
 
           {tab === 'speed' && (
-            <div className="space-y-10">
+            <div className="space-y-10 opacity-40 pointer-events-none select-none">
               <section>
                 <div className="flex items-center justify-between gap-3 mb-4">
                   <div className="flex items-center gap-2">
                     <Wifi className="w-4 h-4 text-content-secondary" />
                     <h2 className="text-base font-semibold text-content-primary">Speed test</h2>
                   </div>
-                  <button
-                    type="button"
-                    onClick={handleSpeedTest}
-                    disabled={speedTesting}
-                    className="inline-flex items-center gap-2 rounded-full px-3.5 py-2 text-sm text-[rgb(var(--color-accent-fg))] disabled:opacity-60"
-                    style={{ backgroundColor: 'rgb(var(--color-accent))' }}
-                  >
-                    {speedTesting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Wifi className="w-3.5 h-3.5" />}
-                    {speedTesting ? 'Testing…' : speedSample ? 'Run again' : 'Run speed test'}
-                  </button>
+                  <span className="text-xs text-content-tertiary">Coming later</span>
                 </div>
                 <p className="text-xs text-content-tertiary mb-4 px-1">
                   ARK measures download speed so it can start the next model early enough, especially on slow connections,

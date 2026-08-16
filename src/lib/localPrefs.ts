@@ -200,6 +200,17 @@ export function hasProviderApiKey(providerId: string) {
 /** App changelog shown in Settings → Updates. */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.9',
+    channel: 'stable' as const,
+    date: 'Aug 15, 2026',
+    title: 'Clean silent updates',
+    notes: [
+      'Single Updating screen with logo + percent — no terminals',
+      'Silent install helper (no ping / cmd windows)',
+      'Local AI Speed tab grayed out for now',
+    ],
+  },
+  {
     version: '0.1.8',
     channel: 'stable' as const,
     date: 'Aug 15, 2026',
