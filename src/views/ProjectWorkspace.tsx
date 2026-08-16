@@ -17,6 +17,16 @@ import {
   loadPluginState,
   runPluginAction,
 } from '@/lib/plugins';
+import { arkRoute, routerProviderLabel } from '@/lib/arkRouter';
+import { buildRouterHistory } from '@/lib/chatHistory';
+import { getLocalPrefs } from '@/lib/localPrefs';
+import {
+  applyFileEdits,
+  buildProjectCodingPrompt,
+  foldersToExpand,
+  parseFileEdits,
+  stripFileBlocks,
+} from '@/lib/projectCodeEdit';
 
 type ProjectRow = Project & { id: string };
 
@@ -75,13 +85,9 @@ export function App() {
 };
 
 const AGENT_STEPS = [
-  { id: 'analyze', label: 'Analyzing requirements' },
-  { id: 'plan', label: 'Planning architecture' },
-  { id: 'structure', label: 'Created project structure' },
-  { id: 'database', label: 'Created database layer' },
-  { id: 'ui', label: 'Created UI components' },
-  { id: 'deps', label: 'Installing dependencies' },
-  { id: 'preview', label: 'Running preview' },
+  { id: 'route', label: 'Routing through ARK' },
+  { id: 'apply', label: 'Applying file changes' },
+  { id: 'ready', label: 'Changes ready in Explorer' },
 ] as const;
 
 function ResizeHandle({ onDrag }: { onDrag: (deltaX: number) => void }) {
@@ -145,7 +151,10 @@ export function ProjectWorkspace() {
   const [diffStats, setDiffStats] = useState({ added: 0, removed: 0 });
   const [showHistory, setShowHistory] = useState(false);
   const [runHistory, setRunHistory] = useState<{ id: string; title: string; at: string }[]>([]);
-  const [fileContents, setFileContents] = useState<Record<string, string>>(() => ({ ...DEMO_CODE }));
+  const [fileContents, setFileContents] = useState<Record<string, string>>(() => ({
+    ...DEMO_CODE,
+    'src/App.tsx': DEMO_CODE['App.tsx'],
+  }));
   const [rightTab, setRightTab] = useState<'code' | 'preview'>('code');
   const [fileFlash, setFileFlash] = useState(false);
   const [previewReady, setPreviewReady] = useState(false);
@@ -273,8 +282,6 @@ export function ProjectWorkspace() {
     setAttachedImages([]);
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
 
-    const looksLikeFreshBuild = /build|create|make|new app|calculator|todo|dashboard/i.test(content);
-
     const userMsg: ChatMessage = {
       id: crypto.randomUUID(),
       user_id: uid,
@@ -286,89 +293,156 @@ export function ProjectWorkspace() {
     };
     setMessages(prev => [...prev, userMsg]);
 
-    if (looksLikeFreshBuild) {
-      setAgentRunActive(true);
-      setAgentSteps(AGENT_STEPS.map(s => ({ ...s, status: 'pending' as const })));
-      setRunHistory(prev => [
-        { id: crypto.randomUUID(), title: content.slice(0, 48) || 'New build', at: new Date().toLocaleTimeString() },
-        ...prev,
-      ]);
-      // Animate steps, then clear from main view (they live in history)
-      let step = 0;
-      const tick = window.setInterval(() => {
-        step += 1;
-        setAgentSteps(prev => prev.map((s, i) => ({
-          ...s,
-          status: (i < step - 1 ? 'done' : i === step - 1 ? 'active' : 'pending') as 'pending' | 'active' | 'done',
-        })));
-        if (step >= AGENT_STEPS.length) {
-          window.clearInterval(tick);
-          setAgentSteps(prev => prev.map(s => ({ ...s, status: 'done' as const })));
-          window.setTimeout(() => setAgentRunActive(false), 900);
-        }
-      }, 550);
-    }
-
-    // Placeholder diff bump when agent works on code
-    setDiffStats(prev => ({
-      added: prev.added + 12 + Math.floor(Math.random() * 40),
-      removed: prev.removed + 3 + Math.floor(Math.random() * 15),
-    }));
-
-    // Chat → code link: update the open file and flash the panel
+    setAgentRunActive(true);
+    setAgentSteps(AGENT_STEPS.map((s, i) => ({
+      ...s,
+      status: (i === 0 ? 'active' : 'pending') as 'pending' | 'active' | 'done',
+    })));
+    setRunHistory(prev => [
+      { id: crypto.randomUUID(), title: content.slice(0, 48) || 'Project edit', at: new Date().toLocaleTimeString() },
+      ...prev,
+    ]);
     setCodeOpen(true);
     setRightTab('code');
-    const targetPath = selectedFile.endsWith('.tsx') || selectedFile.endsWith('.ts') || selectedFile.endsWith('.js')
-      ? selectedFile
-      : 'src/App.tsx';
-    const targetKey = targetPath.split('/').pop() ?? 'App.tsx';
-    setSelectedFile(targetPath);
-    setFileContents(prev => {
-      const current = prev[targetKey] ?? DEMO_CODE[targetKey] ?? `// ${targetPath}\n`;
-      const stamp = `// ARK update · ${new Date().toLocaleTimeString()}\n// ${content.slice(0, 72) || 'image request'}\n`;
-      const next = current.includes('// ARK update')
-        ? current.replace(/\/\/ ARK update[\s\S]*?(?=\n(?:import|export|\/\/(?! ARK)|$))/m, stamp.trimEnd())
-        : `${stamp}\n${current}`;
-      return { ...prev, [targetKey]: next };
-    });
-    setFileFlash(true);
-    window.setTimeout(() => setFileFlash(false), 1400);
 
     try {
       await saveChatMessage(project.id, 'user', content);
       await updateProject(project.id, { last_prompt: content, status: 'building' });
-    } catch { /* placeholder */ }
+    } catch { /* offline / guest ok */ }
 
     void (async () => {
       const pluginState = loadPluginState();
       const enabled = getChatEnabledPlugins(pluginState);
       const pluginId = detectPluginIntent(content, enabled.map(p => p.id));
-      let replyText = looksLikeFreshBuild
-        ? `Starting that build now. I updated ${targetKey} — check the code panel (highlighted).`
-        : `Updated ${targetKey} based on that. The code panel is highlighted so you can see what changed.`;
-      let provider = 'Local';
 
-      if (pluginId) {
-        const runtime = getPluginRuntime(pluginId, pluginState);
-        const pluginReply = await runPluginAction(pluginId, content, runtime.token);
-        if (pluginReply) {
-          replyText = pluginReply;
-          provider = `${enabled.find(p => p.id === pluginId)?.name ?? 'Plugin'}${runtime.accountLabel ? ` · ${runtime.accountLabel}` : ''}`;
+      let replyText = '';
+      let provider = 'ARK';
+      let changedPaths: string[] = [];
+
+      try {
+        if (pluginId) {
+          const runtime = getPluginRuntime(pluginId, pluginState);
+          const pluginReply = await runPluginAction(pluginId, content, runtime.token);
+          if (pluginReply) {
+            replyText = pluginReply;
+            provider = `${enabled.find(p => p.id === pluginId)?.name ?? 'Plugin'}${runtime.accountLabel ? ` · ${runtime.accountLabel}` : ''}`;
+            setAgentSteps(prev => prev.map(s => ({ ...s, status: 'done' as const })));
+          }
         }
+
+        if (!replyText) {
+          const prefs = getLocalPrefs();
+          const priorForHistory = [...messages, userMsg];
+          const historyBase = prefs.rememberContext
+            ? buildRouterHistory(priorForHistory, content)
+            : buildRouterHistory([], content);
+          // Prefer project files for the latest turn so the model can edit them.
+          const codingMessage = buildProjectCodingPrompt(content, fileContents, project.name);
+          const history = historyBase.map((turn, i) =>
+            i === historyBase.length - 1 && turn.role === 'user'
+              ? { ...turn, content: codingMessage }
+              : turn,
+          );
+
+          const routed = await arkRoute({
+            message: codingMessage,
+            kind: 'coding',
+            preferredModelId: prefs.defaultModelId,
+            preferredSource: prefs.aiMode === 'local_only' ? 'local' : 'auto',
+            history,
+          });
+          provider = routerProviderLabel(routed, 'ARK');
+
+          setAgentSteps(prev => prev.map((s, i) => ({
+            ...s,
+            status: (i === 0 ? 'done' : i === 1 ? 'active' : 'pending') as 'pending' | 'active' | 'done',
+          })));
+
+          const edits = parseFileEdits(routed.reply);
+          if (edits.length > 0) {
+            const applied = applyFileEdits(fileContents, fileTree, edits);
+            setFileContents(applied.files);
+            setFileTree(applied.tree);
+            setDiffStats(prev => ({
+              added: prev.added + applied.addedLines,
+              removed: prev.removed + applied.removedLines,
+            }));
+            changedPaths = applied.changedPaths;
+            const expand = foldersToExpand(applied.changedPaths);
+            setExpandedFolders(prev => {
+              const next = new Set(prev);
+              expand.forEach(p => next.add(p));
+              return next;
+            });
+            const focus = applied.changedPaths[0];
+            if (focus) {
+              setSelectedFile(focus);
+              setFileFlash(true);
+              window.setTimeout(() => setFileFlash(false), 1400);
+            }
+
+            // Persist immediately (don't wait for debounce)
+            if (window.arkDesktop?.projectWrite) {
+              const payloadFiles: Record<string, string> = {};
+              for (const [k, v] of Object.entries(applied.files)) {
+                if (k.includes('/')) payloadFiles[k] = v;
+                else if (/\.(tsx|ts|jsx|js|css)$/i.test(k)) payloadFiles[`src/${k}`] = v;
+                else payloadFiles[k] = v;
+              }
+              void window.arkDesktop.projectWrite({
+                projectId: project.id,
+                projectName: project.name,
+                files: payloadFiles,
+              }).then(res => {
+                if (res.root) setDiskRoot(res.root);
+              });
+            }
+
+            const prose = stripFileBlocks(routed.reply);
+            replyText = prose
+              ? `${prose}\n\n${applied.summary}`
+              : applied.summary;
+          } else {
+            replyText = stripFileBlocks(routed.reply) || routed.reply;
+          }
+
+          setAgentSteps(prev => prev.map(s => ({ ...s, status: 'done' as const })));
+        }
+      } catch (err) {
+        replyText = err instanceof Error
+          ? `Could not complete that edit: ${err.message}`
+          : 'ARK Router failed on this project edit.';
+        setAgentSteps(prev => prev.map((s, i) => ({
+          ...s,
+          status: (i === 0 ? 'done' : 'pending') as 'pending' | 'active' | 'done',
+        })));
       }
 
-      window.setTimeout(() => {
-        const reply: ChatMessage = {
-          id: crypto.randomUUID(),
-          user_id: uid,
-          project_id: project.id,
-          role: 'assistant',
-          content: replyText,
-          provider_used: provider,
-          created_at: new Date().toISOString(),
-        };
-        setMessages(prev => [...prev, reply]);
-      }, pluginId ? 250 : 700);
+      if (changedPaths.length) {
+        try {
+          await updateProject(project.id, {
+            status: 'idle',
+            build_status: 'idle',
+            last_prompt: content,
+          });
+        } catch { /* ignore */ }
+      }
+
+      const reply: ChatMessage = {
+        id: crypto.randomUUID(),
+        user_id: uid,
+        project_id: project.id,
+        role: 'assistant',
+        content: replyText,
+        provider_used: provider,
+        created_at: new Date().toISOString(),
+      };
+      setMessages(prev => [...prev, reply]);
+      window.setTimeout(() => setAgentRunActive(false), 700);
+
+      try {
+        await saveChatMessage(project.id, 'assistant', replyText);
+      } catch { /* ignore */ }
     })();
   };
 
@@ -615,10 +689,12 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
             setSelectedFile(fullPath);
             const key = fullPath.split('/').pop() ?? fullPath;
             setFileContents(prev => {
-              if (prev[key]) return prev;
+              if (prev[fullPath] || prev[key]) return prev;
+              const seed = DEMO_CODE[key] ?? `// ${fullPath}\n// Editable placeholder content.\n`;
               return {
                 ...prev,
-                [key]: DEMO_CODE[key] ?? `// ${fullPath}\n// Editable placeholder content.\n`,
+                [fullPath]: seed,
+                [key]: seed,
               };
             });
             setRightTab('code');
@@ -645,7 +721,8 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
   }
 
   const fileKey = selectedFile.split('/').pop() ?? 'App.tsx';
-  const codeBody = fileContents[fileKey]
+  const codeBody = fileContents[selectedFile]
+    ?? fileContents[fileKey]
     ?? DEMO_CODE[fileKey]
     ?? `// ${selectedFile}\n// Placeholder file content for UI preview.\n`;
 
@@ -1041,7 +1118,7 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
                     handleSendChat();
                   }
                 }}
-                placeholder="Ask ARK to change this project..."
+                placeholder="Ask ARK to build or edit files in this project…"
                 rows={1}
                 className="w-full bg-transparent text-sm text-content-primary placeholder:text-content-tertiary px-3.5 pt-3 pb-2 resize-none outline-none max-h-[220px] overflow-y-auto leading-relaxed"
               />
@@ -1138,10 +1215,10 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
                     value={codeBody}
                     onChange={e => {
                       const next = e.target.value;
-                      setFileContents(prev => ({ ...prev, [fileKey]: next }));
-                      setDiffStats(prev => ({
-                        added: prev.added + 1,
-                        removed: prev.removed,
+                      setFileContents(prev => ({
+                        ...prev,
+                        [fileKey]: next,
+                        [selectedFile]: next,
                       }));
                     }}
                     spellCheck={false}

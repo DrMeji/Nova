@@ -198,6 +198,17 @@ export function hasProviderApiKey(providerId: string) {
 /** App changelog shown in Settings → Updates. */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.6',
+    channel: 'stable' as const,
+    date: 'Aug 15, 2026',
+    title: 'Real project coding loop',
+    notes: [
+      'Project chat calls ARK Router and writes real files',
+      'Explorer and editor update from model file blocks',
+      'Honest routing status — no fake install steps',
+    ],
+  },
+  {
     version: '0.1.5',
     channel: 'stable' as const,
     date: 'Aug 15, 2026',

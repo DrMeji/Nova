@@ -14,7 +14,7 @@ const MAX_CHARS = 12_000;
 const MAX_TURN_CHARS = 2_400;
 
 const BASE_SYSTEM =
-  'You are ARK, a helpful AI creation studio assistant for chat, coding, and creation.';
+  'You are ARK, a developer studio assistant for building software, coding, and creation — not a generic chatbot.';
 
 const CONTINUITY =
   'You are continuing an ongoing ARK conversation. Use the prior messages as context. '
