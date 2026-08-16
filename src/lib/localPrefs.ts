@@ -200,6 +200,15 @@ export function hasProviderApiKey(providerId: string) {
 /** App changelog shown in Settings → Updates. */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.19',
+    channel: 'stable' as const,
+    date: 'Aug 15, 2026',
+    title: 'Update flow verification',
+    notes: [
+      'Check → Update from 0.1.18 to confirm download → splash → reopen',
+    ],
+  },
+  {
     version: '0.1.18',
     channel: 'stable' as const,
     date: 'Aug 15, 2026',
