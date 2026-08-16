@@ -200,6 +200,15 @@ export function hasProviderApiKey(providerId: string) {
 /** App changelog shown in Settings → Updates. */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.17',
+    channel: 'stable' as const,
+    date: 'Aug 15, 2026',
+    title: 'Clean ARK splash update test',
+    notes: [
+      'Check → Update from 0.1.16: black ARK splash, no PowerShell taskbar entry',
+    ],
+  },
+  {
     version: '0.1.16',
     channel: 'stable' as const,
     date: 'Aug 15, 2026',
