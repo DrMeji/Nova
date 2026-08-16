@@ -89,7 +89,7 @@ export function SettingsContent() {
     latestTag?: string;
   } | null>(null);
   const [updatePercent, setUpdatePercent] = useState(0);
-  const [appVersion, setAppVersion] = useState('0.1.6');
+  const [appVersion, setAppVersion] = useState('0.1.7');
   const [twoFaCode, setTwoFaCode] = useState('');
   const [twoFaSetup, setTwoFaSetup] = useState(false);
   const [savedFlash, setSavedFlash] = useState('');
@@ -833,11 +833,11 @@ export function SettingsContent() {
                     <div className="min-w-0">
                       <p className="text-sm font-medium text-content-primary">ARK v{appVersion}</p>
                       <p className="text-xs text-content-tertiary mt-0.5">{updateMsg}</p>
-                      {downloadingUpdate && updatePercent > 0 && (
+                      {downloadingUpdate && (
                         <div className="mt-2 h-1.5 rounded-full bg-surface-hover overflow-hidden max-w-xs">
                           <div
-                            className="h-full bg-content-primary transition-all"
-                            style={{ width: `${Math.min(100, updatePercent)}%` }}
+                            className="h-full bg-sky-500 transition-all"
+                            style={{ width: `${Math.min(100, Math.max(updatePercent, 4))}%` }}
                           />
                         </div>
                       )}
@@ -866,7 +866,7 @@ export function SettingsContent() {
                     </div>
                   </div>
                   <p className="text-[11px] text-content-tertiary leading-relaxed">
-                    After install, ARK restarts into New Chat. You stay signed in — your account and data stay on this PC.
+                    Download shows live progress. After install, ARK reopens on New Chat — you stay signed in, and models/setup stay on this PC.
                   </p>
                 </div>
 

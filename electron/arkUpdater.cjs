@@ -1,6 +1,6 @@
 /**
  * In-app updates via public DrMeji/ark-dist Releases (source repo stays private).
- * Check → download ARK-Setup.exe → launch installer → quit. Session/userData survives.
+ * Check → download ARK-Setup.exe → install → relaunch. Session/userData must survive.
  */
 
 const fs = require('fs');
@@ -39,7 +39,7 @@ function markPostUpdateLandChat() {
   try {
     fs.writeFileSync(
       postUpdatePath(),
-      JSON.stringify({ land: 'chat', at: new Date().toISOString() }),
+      JSON.stringify({ land: 'chat', at: new Date().toISOString(), keepSession: true }),
       'utf8',
     );
   } catch {
@@ -169,6 +169,41 @@ function isNewer(latest, current) {
     if (x < y) return false;
   }
   return false;
+}
+
+/**
+ * Write a tiny helper that waits for ARK to exit, runs the installer, then relaunches.
+ * Keeps the UI honest: we quit only after the helper is running.
+ */
+function launchInstallerThenRelaunch(setupPath) {
+  const appExe = process.execPath;
+  const helper = path.join(app.getPath('temp'), `ark-update-relaunch-${Date.now()}.cmd`);
+  // Escape for cmd: double quotes inside quoted strings.
+  const q = (p) => `"${String(p).replace(/"/g, '')}"`;
+  const lines = [
+    '@echo off',
+    'setlocal',
+    'REM Wait for ARK.exe to release file locks',
+    'ping -n 4 127.0.0.1 >nul',
+    `echo Installing ARK update...`,
+    `${q(setupPath)} /S`,
+    'if errorlevel 1 (',
+    `  echo Installer reported an error.`,
+    '  ping -n 3 127.0.0.1 >nul',
+    ')',
+    'ping -n 2 127.0.0.1 >nul',
+    `start "" ${q(appExe)}`,
+    `del ${q(helper)}`,
+  ];
+  fs.writeFileSync(helper, `${lines.join('\r\n')}\r\n`, 'utf8');
+
+  const child = spawn('cmd.exe', ['/c', helper], {
+    detached: true,
+    stdio: 'ignore',
+    windowsHide: true,
+    cwd: app.getPath('temp'),
+  });
+  child.unref();
 }
 
 async function checkForUpdate() {
@@ -303,26 +338,28 @@ async function downloadAndInstall(setupUrl, latestTag) {
   sendProgress({
     status: 'installing',
     percent: 100,
-    message: 'Installing update and restarting…',
+    message: 'Download complete. Installing and reopening ARK…',
     version: normalizeVersion(latestTag || ''),
   });
 
-  // Quit first so NSIS can replace files, then run the installer.
+  // Give the UI a beat to show the installing state, then hand off to the helper.
   setTimeout(() => {
     try {
-      const child = spawn(dest, ['/S'], {
-        detached: true,
-        stdio: 'ignore',
-        windowsHide: true,
-      });
-      child.unref();
+      launchInstallerThenRelaunch(dest);
     } catch (err) {
-      console.error('[ark] failed to launch installer', err);
+      console.error('[ark] failed to launch installer helper', err);
+      sendProgress({
+        status: 'error',
+        percent: 100,
+        message: 'Could not start the installer. Try again.',
+        error: err instanceof Error ? err.message : 'spawn failed',
+      });
+      return;
     }
     app.quit();
-  }, 400);
+  }, 1200);
 
-  return { ok: true, message: 'Downloading finished. Installing and restarting…' };
+  return { ok: true, message: 'Download complete. Installing and reopening ARK…' };
 }
 
 module.exports = {

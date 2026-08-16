@@ -198,6 +198,17 @@ export function hasProviderApiKey(providerId: string) {
 /** App changelog shown in Settings → Updates. */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.7',
+    channel: 'stable' as const,
+    date: 'Aug 15, 2026',
+    title: 'Update flow that keeps your session',
+    notes: [
+      'Upgrades no longer wipe sign-in, setup, or models',
+      'Clear download → install overlay, then auto-reopen ARK',
+      'Lands on New Chat still signed in',
+    ],
+  },
+  {
     version: '0.1.6',
     channel: 'stable' as const,
     date: 'Aug 15, 2026',

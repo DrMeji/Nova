@@ -16,6 +16,7 @@ import { LocalAI } from '@/views/LocalAI';
 import { CreationViewer } from '@/views/CreationViewer';
 import { Settings } from '@/views/Settings';
 import { runCleanBootIfNeeded } from '@/lib/clearSession';
+import { UpdateOverlay } from '@/components/UpdateOverlay';
 import { Loader2 } from 'lucide-react';
 
 runCleanBootIfNeeded();
@@ -78,6 +79,7 @@ function App() {
             </RouterProvider>
           </AuthProvider>
         </div>
+        <UpdateOverlay />
       </div>
     </ThemeProvider>
   );
