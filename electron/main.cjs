@@ -183,6 +183,28 @@ function createWindow() {
     if (!win.isDestroyed()) win.setTitle('ARK');
   });
 
+  // If the renderer boots to an empty #root (common when a build lacked Vite env),
+  // surface a visible error instead of a permanent black window.
+  win.webContents.on('did-finish-load', async () => {
+    if (win.isDestroyed()) return;
+    try {
+      await new Promise((r) => setTimeout(r, 2500));
+      if (win.isDestroyed()) return;
+      const rootLen = await win.webContents.executeJavaScript(
+        `(() => { const r = document.getElementById('root'); return r ? (r.innerHTML || '').length : 0; })()`,
+      );
+      if (typeof rootLen === 'number' && rootLen < 40) {
+        await win.webContents.executeJavaScript(`(() => {
+          const root = document.getElementById('root') || document.body;
+          root.innerHTML = '<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0a0a0b;color:#f5f5f5;font-family:Segoe UI,system-ui,sans-serif;padding:32px;text-align:center"><div><p style="font-size:18px;font-weight:600;margin:0 0 8px">ARK UI failed to load</p><p style="opacity:.7;font-size:13px;margin:0">The window stayed blank. Quit ARK fully from the tray, reinstall the latest release, or run Open-ARK-Build.bat after a successful npm run build.</p></div></div>';
+        })()`);
+        reveal();
+      }
+    } catch {
+      /* ignore probe failures */
+    }
+  });
+
   win.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
     return { action: 'deny' };

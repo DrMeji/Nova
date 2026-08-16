@@ -19,6 +19,7 @@ import { runCleanBootIfNeeded } from '@/lib/clearSession';
 import { getLocalPrefs } from '@/lib/localPrefs';
 import { needsFirstRunSetup } from '@/lib/setup';
 import { UpdateOverlay } from '@/components/UpdateOverlay';
+import { supabaseConfigError } from '@/lib/supabase';
 import { useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 
@@ -87,6 +88,18 @@ function AppContent() {
 }
 
 function App() {
+  if (supabaseConfigError) {
+    return (
+      <div className="h-screen flex items-center justify-center bg-ark-navy-950 text-white p-8 text-center">
+        <div className="max-w-md space-y-3">
+          <p className="text-lg font-semibold">ARK could not start</p>
+          <p className="text-sm text-white/70">{supabaseConfigError}</p>
+          <p className="text-xs text-white/50">Rebuild with .env.production present, or set the Vite env vars.</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <ThemeProvider>
       {/* Full-bleed shell; title controls overlay so sidebar padding is even top/bottom */}

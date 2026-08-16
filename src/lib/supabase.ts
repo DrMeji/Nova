@@ -1,11 +1,13 @@
 import { createClient, type SupportedStorage } from '@supabase/supabase-js';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.trim() || '';
+const supabaseAnonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined)?.trim() || '';
 
-if (!supabaseUrl || !supabaseAnonKey) {
-  throw new Error('Missing Supabase environment variables');
-}
+/** Set when the production bundle was built without Vite env — UI should show this, not go blank. */
+export const supabaseConfigError =
+  !supabaseUrl || !supabaseAnonKey
+    ? 'ARK was built without Supabase config (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY).'
+    : null;
 
 /**
  * Prefer Electron userData for the auth session so upgrades keep you signed in.
@@ -32,12 +34,17 @@ const arkAuthStorage: SupportedStorage = {
   },
 };
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-  auth: {
-    persistSession: true,
-    autoRefreshToken: true,
-    detectSessionInUrl: false,
-    storage: arkAuthStorage,
-    storageKey: 'ark-auth-token',
+// Placeholder client keeps the module from throwing at import time (black screen).
+export const supabase = createClient(
+  supabaseUrl || 'https://placeholder.invalid',
+  supabaseAnonKey || 'public-anon-placeholder',
+  {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: false,
+      storage: arkAuthStorage,
+      storageKey: 'ark-auth-token',
+    },
   },
-});
+);
