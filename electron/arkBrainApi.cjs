@@ -58,7 +58,7 @@ const MODEL_ALIASES = {
   'llama3.1': 'llama31-8b',
   'llama3.1:8b': 'llama31-8b',
   'llama3': 'llama31-8b',
-  qwen2.5: 'qwen25-7b',
+  'qwen2.5': 'qwen25-7b',
   'qwen2.5:7b': 'qwen25-7b',
   'qwen2.5:1.5b': 'qwen25-15b',
   'qwen2.5-coder': 'qwen25-coder-7b',
