@@ -7,11 +7,6 @@ import {
   getRecommendedModel,
   type HardwareInfo,
 } from '@/lib/api';
-import {
-  formatMBps,
-  runSpeedTest,
-  type SpeedSample,
-} from '@/lib/speedTest';
 import { markSetupCompleted } from '@/lib/setup';
 import {
   getProviderApiKeys,
@@ -22,10 +17,10 @@ import { openInSystemBrowser } from '@/lib/openExternal';
 import { AuthAmbientOrbs } from '@/components/auth/AuthAmbientOrbs';
 import {
   Loader2, Cpu, MemoryStick, HardDrive, Zap, CheckCircle2, Download,
-  Monitor, MonitorCog, Wifi, Check, Gauge, KeyRound, Shield, ExternalLink,
+  Monitor, MonitorCog, Check, Gauge, KeyRound, Shield, ExternalLink,
 } from 'lucide-react';
 
-type Phase = 'intro' | 'speed' | 'hardware' | 'models' | 'connect' | 'finishing';
+type Phase = 'intro' | 'hardware' | 'models' | 'connect' | 'finishing';
 
 type RecModel = {
   id: string;
@@ -109,8 +104,6 @@ function recommendationsFor(hw: HardwareInfo): RecModel[] {
 export function OnboardingScreen() {
   const { refreshProfile } = useAuth();
   const [phase, setPhase] = useState<Phase>('intro');
-  const [speedSample, setSpeedSample] = useState<SpeedSample | null>(null);
-  const [speedTesting, setSpeedTesting] = useState(false);
   const [hw, setHw] = useState<HardwareInfo | null>(null);
   const [hwScanning, setHwScanning] = useState(false);
   const [hwStep, setHwStep] = useState(0);
@@ -129,14 +122,6 @@ export function OnboardingScreen() {
   const pcClass = useMemo(() => (hw ? getHardwareClass(hw) : null), [hw]);
   const selected = models.find(m => m.id === selectedId) ?? models.find(m => m.recommended) ?? null;
   const connectedCount = Object.values(savedKeys).filter(Boolean).length;
-
-  const runSpeed = async () => {
-    setPhase('speed');
-    setSpeedTesting(true);
-    const sample = await runSpeedTest();
-    setSpeedSample(sample);
-    setSpeedTesting(false);
-  };
 
   const runHardware = async () => {
     setPhase('hardware');
@@ -257,7 +242,7 @@ export function OnboardingScreen() {
     'Matching models to this PC',
   ];
 
-  const stepLabels = ['Speed', 'Hardware', 'Models', 'Connect'] as const;
+  const stepLabels = ['Hardware', 'Models', 'Connect'] as const;
 
   return (
     <div className="h-full bg-ark-navy-950 flex items-center justify-center px-4 relative overflow-hidden">
@@ -272,7 +257,7 @@ export function OnboardingScreen() {
           <p className="text-sm text-content-secondary mt-2 max-w-md mx-auto">
             {phase === 'connect'
               ? 'Link the providers you want once. ARK Auto will fail over between them so chat keeps going.'
-              : 'ARK checks your connection and hardware, then helps you connect capacity before you enter the studio.'}
+              : 'ARK checks your hardware, installs a fitting local brain, then helps you connect capacity.'}
           </p>
         </div>
 
@@ -280,15 +265,13 @@ export function OnboardingScreen() {
           <div className="flex items-center gap-2 mb-7">
             {stepLabels.map((label, i) => {
               const active =
-                (i === 0 && (phase === 'intro' || phase === 'speed'))
-                || (i === 1 && phase === 'hardware')
-                || (i === 2 && phase === 'models')
-                || (i === 3 && (phase === 'connect' || phase === 'finishing'));
+                (i === 0 && (phase === 'intro' || phase === 'hardware'))
+                || (i === 1 && phase === 'models')
+                || (i === 2 && (phase === 'connect' || phase === 'finishing'));
               const done =
-                (i === 0 && Boolean(speedSample) && phase !== 'intro' && phase !== 'speed')
-                || (i === 1 && Boolean(hw) && (phase === 'models' || phase === 'connect' || phase === 'finishing'))
-                || (i === 2 && (phase === 'connect' || phase === 'finishing'))
-                || (i === 3 && phase === 'finishing' && progress >= 100);
+                (i === 0 && Boolean(hw) && (phase === 'models' || phase === 'connect' || phase === 'finishing'))
+                || (i === 1 && (phase === 'connect' || phase === 'finishing'))
+                || (i === 2 && phase === 'finishing' && progress >= 100);
               return (
                 <div key={label} className="flex-1">
                   <div className={`h-1 rounded-full mb-2 ${
@@ -306,10 +289,6 @@ export function OnboardingScreen() {
             <div className="space-y-5">
               <div className="space-y-3 text-sm text-content-secondary">
                 <p className="flex items-start gap-2.5">
-                  <Wifi className="w-4 h-4 mt-0.5 shrink-0 text-content-tertiary" />
-                  Measure download speed so ARK knows when to preload the next model.
-                </p>
-                <p className="flex items-start gap-2.5">
                   <MonitorCog className="w-4 h-4 mt-0.5 shrink-0 text-content-tertiary" />
                   Scan this PC and match models that fit your hardware.
                 </p>
@@ -322,62 +301,9 @@ export function OnboardingScreen() {
                   API keys never leave this PC except to the provider you connected.
                 </p>
               </div>
-              <button type="button" onClick={runSpeed} className="ark-btn-primary w-full h-11 rounded-xl">
+              <button type="button" onClick={runHardware} className="ark-btn-primary w-full h-11 rounded-xl">
                 Start optimization
               </button>
-            </div>
-          )}
-
-          {phase === 'speed' && (
-            <div className="space-y-5">
-              <div className="flex items-center gap-3">
-                <span className="w-10 h-10 rounded-xl bg-surface-hover flex items-center justify-center">
-                  {speedTesting ? (
-                    <Loader2 className="w-5 h-5 text-content-secondary animate-spin" />
-                  ) : (
-                    <Wifi className="w-5 h-5 text-content-secondary" />
-                  )}
-                </span>
-                <div>
-                  <p className="text-sm font-medium text-content-primary">
-                    {speedTesting ? 'Running speed test…' : 'Connection checked'}
-                  </p>
-                  <p className="text-xs text-content-tertiary mt-0.5">
-                    Download and upload awareness for model preloading
-                  </p>
-                </div>
-              </div>
-
-              {speedSample && (
-                <div className="flex flex-col animate-fade-in">
-                  <div className="flex items-center justify-between py-3 border-b border-surface-border">
-                    <span className="text-sm text-content-secondary">Download</span>
-                    <span className="text-sm text-content-primary">{formatMBps(speedSample.MBps)}</span>
-                  </div>
-                  {speedSample.upMBps != null && speedSample.upMBps > 0 && (
-                    <div className="flex items-center justify-between py-3 border-b border-surface-border">
-                      <span className="text-sm text-content-secondary">Upload</span>
-                      <span className="text-sm text-content-primary">{formatMBps(speedSample.upMBps)}</span>
-                    </div>
-                  )}
-                  <div className="flex items-center justify-between py-3">
-                    <span className="text-sm text-content-secondary">Source</span>
-                    <span className="text-sm text-content-primary">
-                      {speedSample.source === 'measured'
-                        ? `Live · ${speedSample.samples ? `${speedSample.samples} samples` : 'measured'}`
-                        : speedSample.source === 'browser'
-                          ? 'Browser estimate'
-                          : 'Fallback estimate'}
-                    </span>
-                  </div>
-                </div>
-              )}
-
-              {!speedTesting && speedSample && (
-                <button type="button" onClick={runHardware} className="ark-btn-primary w-full h-11 rounded-xl">
-                  Continue to hardware
-                </button>
-              )}
             </div>
           )}
 

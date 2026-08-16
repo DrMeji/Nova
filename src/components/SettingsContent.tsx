@@ -81,8 +81,15 @@ export function SettingsContent() {
   const [editingProvider, setEditingProvider] = useState<string | null>(null);
   const [keyDraft, setKeyDraft] = useState('');
   const [checkingUpdates, setCheckingUpdates] = useState(false);
-  const [updateMsg, setUpdateMsg] = useState('You are on the latest build for this channel.');
-  const [appVersion, setAppVersion] = useState('0.1.4');
+  const [downloadingUpdate, setDownloadingUpdate] = useState(false);
+  const [updateMsg, setUpdateMsg] = useState('Check for a new build, then download it inside ARK.');
+  const [updateInfo, setUpdateInfo] = useState<{
+    newerAvailable: boolean;
+    setupAssetUrl?: string;
+    latestTag?: string;
+  } | null>(null);
+  const [updatePercent, setUpdatePercent] = useState(0);
+  const [appVersion, setAppVersion] = useState('0.1.5');
   const [twoFaCode, setTwoFaCode] = useState('');
   const [twoFaSetup, setTwoFaSetup] = useState(false);
   const [savedFlash, setSavedFlash] = useState('');
@@ -93,6 +100,21 @@ export function SettingsContent() {
         if (meta?.version) setAppVersion(meta.version);
       })
       .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    const unsub = window.arkDesktop?.onUpdateProgress?.((payload) => {
+      if (typeof payload?.percent === 'number') setUpdatePercent(payload.percent);
+      if (payload?.message) setUpdateMsg(payload.message);
+      if (payload?.status === 'downloading' || payload?.status === 'installing') {
+        setDownloadingUpdate(true);
+      } else if (payload?.status === 'error' || payload?.status === 'idle' || payload?.status === 'available') {
+        setDownloadingUpdate(false);
+      }
+    });
+    return () => {
+      unsub?.();
+    };
   }, []);
 
   const patchPrefs = (patch: Partial<LocalPrefs>) => {
@@ -128,14 +150,39 @@ export function SettingsContent() {
 
   const checkForUpdates = () => {
     setCheckingUpdates(true);
-    setUpdateMsg('Checking GitHub Releases…');
+    setUpdateMsg('Checking for updates…');
+    setUpdateInfo(null);
     void (async () => {
-      const { checkArkGitHubUpdate, openArkReleasesPage } = await import('@/lib/arkUpdates');
+      const { checkArkGitHubUpdate } = await import('@/lib/arkUpdates');
       const info = await checkArkGitHubUpdate();
       setUpdateMsg(info.message);
+      setUpdateInfo(
+        info.newerAvailable
+          ? {
+              newerAvailable: true,
+              setupAssetUrl: info.setupAssetUrl,
+              latestTag: info.latestTag,
+            }
+          : { newerAvailable: false },
+      );
       setCheckingUpdates(false);
-      if (info.newerAvailable || !info.ok) {
-        await openArkReleasesPage(info.downloadUrl);
+    })();
+  };
+
+  const downloadUpdate = () => {
+    if (!updateInfo?.newerAvailable || !updateInfo.setupAssetUrl) return;
+    setDownloadingUpdate(true);
+    setUpdatePercent(0);
+    setUpdateMsg('Downloading update…');
+    void (async () => {
+      const { downloadAndInstallArkUpdate } = await import('@/lib/arkUpdates');
+      const result = await downloadAndInstallArkUpdate({
+        setupAssetUrl: updateInfo.setupAssetUrl,
+        latestTag: updateInfo.latestTag,
+      });
+      if (!result?.ok) {
+        setUpdateMsg(result?.message || 'Download failed.');
+        setDownloadingUpdate(false);
       }
     })();
   };
@@ -255,7 +302,7 @@ export function SettingsContent() {
                   <label className="block text-xs font-medium text-content-secondary mb-2">Theme</label>
                   <div className="grid grid-cols-2 gap-3">
                     <ThemeCard label="Dark" active={theme === 'dark'} onClick={() => setTheme('dark')} />
-                    <ThemeCard label="Light" active={theme === 'light'} onClick={() => setTheme('light')} />
+                    <ThemeCard label="Cream" active={theme === 'light'} onClick={() => setTheme('light')} />
                   </div>
                 </div>
 
@@ -779,22 +826,48 @@ export function SettingsContent() {
           )}
 
           {activeSection === 'updates' && (
-            <SettingsSection title="Updates" description="Pull new builds from GitHub Releases (same idea as Lyndsey)">
+            <SettingsSection title="Updates" description="Download new builds inside ARK — no browser needed">
               <div className="space-y-5">
-                <div className="ark-card p-4 flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-medium text-content-primary">ARK v{appVersion}</p>
-                    <p className="text-xs text-content-tertiary mt-0.5">{updateMsg}</p>
+                <div className="ark-card p-4 flex flex-col gap-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-content-primary">ARK v{appVersion}</p>
+                      <p className="text-xs text-content-tertiary mt-0.5">{updateMsg}</p>
+                      {downloadingUpdate && updatePercent > 0 && (
+                        <div className="mt-2 h-1.5 rounded-full bg-surface-hover overflow-hidden max-w-xs">
+                          <div
+                            className="h-full bg-content-primary transition-all"
+                            style={{ width: `${Math.min(100, updatePercent)}%` }}
+                          />
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={checkForUpdates}
+                        disabled={checkingUpdates || downloadingUpdate}
+                        className="ark-btn-secondary"
+                      >
+                        {checkingUpdates ? <RefreshCw className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                        Check
+                      </button>
+                      {updateInfo?.newerAvailable && (
+                        <button
+                          type="button"
+                          onClick={downloadUpdate}
+                          disabled={downloadingUpdate || !updateInfo.setupAssetUrl}
+                          className="ark-btn-primary"
+                        >
+                          {downloadingUpdate ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                          {downloadingUpdate ? 'Updating…' : 'Download'}
+                        </button>
+                      )}
+                    </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={checkForUpdates}
-                    disabled={checkingUpdates}
-                    className="ark-btn-secondary shrink-0"
-                  >
-                    {checkingUpdates ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-                    Check
-                  </button>
+                  <p className="text-[11px] text-content-tertiary leading-relaxed">
+                    After install, ARK restarts into New Chat. You stay signed in — your account and data stay on this PC.
+                  </p>
                 </div>
 
                 <ToggleRow

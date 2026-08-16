@@ -375,7 +375,7 @@ export function AuthScreen() {
                     onClick={() => bypassLogin({ skipSetup: false })}
                     disabled={loading}
                     className="ark-btn-secondary h-11 rounded-xl px-2"
-                    title="Sign in as guest, then run speed and hardware setup"
+                    title="Sign in as guest, then run hardware setup"
                   >
                     <Zap className="w-3.5 h-3.5 text-ark-accent-amber shrink-0" />
                     <span className="text-xs leading-tight text-left">Bypass + Setup</span>

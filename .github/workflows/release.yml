@@ -1,6 +1,7 @@
 name: Release
 
 # Windows build + GitHub Release for tags like v0.1.0
+# Publishes to private DrMeji/Ark AND public DrMeji/ark-dist (in-app update feed).
 on:
   push:
     tags:
@@ -29,15 +30,15 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npm run electron:build
 
-      - name: Create GitHub release
+      - name: Create GitHub releases
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $tag = "${{ github.ref_name }}"
           $ver = $tag.TrimStart("v")
-          $setup = "release/ARK-Setup-$ver.exe"
-          $portable = "release/ARK-Portable-$ver.exe"
+          $setup = "release/ARK-Setup.exe"
+          $portable = "release/ARK-Portable.exe"
           if (-not (Test-Path $setup)) { throw "Missing $setup" }
           if (-not (Test-Path $portable)) { throw "Missing $portable" }
           $body = @"
@@ -45,9 +46,10 @@ jobs:
 
           Windows desktop build.
 
-          - **ARK-Setup-$ver.exe** — installer (recommended)
-          - **ARK-Portable-$ver.exe** — portable (no install)
+          - **ARK-Setup.exe** — installer (recommended)
+          - **ARK-Portable.exe** — portable (no install)
 
-          After install, use **Settings → Updates** to check for newer releases.
+          After install, use **Settings → Updates → Check → Download** for newer builds in-app.
           "@
-          gh release create $tag $setup $portable --title "ARK $ver" --notes $body
+          gh release create $tag $setup $portable --repo DrMeji/Ark --title "ARK $ver" --notes $body
+          gh release create $tag $setup $portable --repo DrMeji/ark-dist --title "ARK $ver" --notes $body

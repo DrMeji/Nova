@@ -14,6 +14,15 @@ contextBridge.exposeInMainWorld('arkDesktop', {
   systemInfo: () => ipcRenderer.invoke('ark:system-info'),
   speedTest: () => ipcRenderer.invoke('ark:speed-test'),
   appMeta: () => ipcRenderer.invoke('ark:app-meta'),
+  updateCheck: () => ipcRenderer.invoke('ark:update-check'),
+  updateDownload: (payload) => ipcRenderer.invoke('ark:update-download', payload || {}),
+  updateState: () => ipcRenderer.invoke('ark:update-state'),
+  postUpdateConsume: () => ipcRenderer.invoke('ark:post-update-consume'),
+  onUpdateProgress: (handler) => {
+    const listener = (_event, payload) => handler?.(payload);
+    ipcRenderer.on('ark:update-progress', listener);
+    return () => ipcRenderer.removeListener('ark:update-progress', listener);
+  },
   setupGet: () => ipcRenderer.invoke('ark:setup-get'),
   setupSet: (completed) => ipcRenderer.invoke('ark:setup-set', { completed: Boolean(completed) }),
   windowMinimize: () => ipcRenderer.invoke('ark:window-minimize'),

@@ -51,6 +51,15 @@ export function AppShell({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    void window.arkDesktop?.postUpdateConsume?.().then((res) => {
+      if (res?.land === 'chat') {
+        setSettingsOpen(false);
+        navigate({ name: 'chat' });
+      }
+    }).catch(() => {});
+  }, [navigate]);
+
+  useEffect(() => {
     if (!settingsOpen) setPrefsName(getLocalPrefs().displayName);
   }, [settingsOpen]);
 

@@ -198,6 +198,18 @@ export function hasProviderApiKey(providerId: string) {
 /** App changelog shown in Settings → Updates. */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.5',
+    channel: 'stable' as const,
+    date: 'Aug 15, 2026',
+    title: 'In-app updates + cream light',
+    notes: [
+      'Check → Download updates inside ARK (no GitHub browser hop)',
+      'Removed speed step from first-run setup',
+      'Light appearance uses soft cream instead of pure white',
+      'Uninstall wipes ARK models and app data',
+    ],
+  },
+  {
     version: '0.1.4',
     channel: 'stable' as const,
     date: 'Aug 15, 2026',

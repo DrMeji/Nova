@@ -8,6 +8,7 @@ const arkProjects = require('./arkProjects.cjs');
 const arkSecrets = require('./arkSecrets.cjs');
 const arkSystem = require('./arkSystem.cjs');
 const arkSetup = require('./arkSetup.cjs');
+const arkUpdater = require('./arkUpdater.cjs');
 
 const DEV_URL = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173';
 const isDev = process.env.ARK_DEV === '1';
@@ -173,12 +174,20 @@ ipcMain.handle('ark:system-info', async () => arkSystem.probeSystemInfo());
 
 ipcMain.handle('ark:speed-test', async () => arkSystem.probeSpeedTest());
 
+ipcMain.handle('ark:update-check', async () => arkUpdater.checkForUpdate());
+ipcMain.handle('ark:update-download', async (_event, payload) =>
+  arkUpdater.downloadAndInstall(payload?.setupAssetUrl, payload?.latestTag),
+);
+ipcMain.handle('ark:update-state', async () => arkUpdater.getState());
+ipcMain.handle('ark:post-update-consume', async () => arkUpdater.consumePostUpdate());
+
 ipcMain.handle('ark:app-meta', async () => ({
   ok: true,
   isPackaged: app.isPackaged,
   isDev: Boolean(isDev),
   version: app.getVersion(),
   name: app.getName(),
+  updateFeed: arkUpdater.UPDATE_REPO,
 }));
 
 ipcMain.handle('ark:setup-get', async () => arkSetup.readSetup());

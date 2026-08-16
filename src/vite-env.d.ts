@@ -25,7 +25,38 @@ declare global {
         isDev?: boolean;
         version?: string;
         name?: string;
+        updateFeed?: string;
       }>;
+      updateCheck?: () => Promise<{
+        ok: boolean;
+        newerAvailable?: boolean;
+        currentVersion?: string;
+        latestTag?: string;
+        latestName?: string;
+        setupAssetUrl?: string;
+        message?: string;
+      }>;
+      updateDownload?: (payload?: {
+        setupAssetUrl?: string;
+        latestTag?: string;
+      }) => Promise<{ ok: boolean; message?: string }>;
+      updateState?: () => Promise<{
+        status: string;
+        percent: number;
+        message: string;
+        version?: string;
+        error?: string;
+      }>;
+      postUpdateConsume?: () => Promise<{ ok: boolean; land?: string | null }>;
+      onUpdateProgress?: (
+        handler: (payload: {
+          status: string;
+          percent: number;
+          message: string;
+          version?: string;
+          error?: string;
+        }) => void,
+      ) => () => void;
       setupGet?: () => Promise<{ ok: boolean; completed?: boolean }>;
       setupSet?: (completed: boolean) => Promise<{ ok: boolean; completed?: boolean }>;
       systemInfo?: () => Promise<{
