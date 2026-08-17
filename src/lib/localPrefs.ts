@@ -223,6 +223,17 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.41',
+    channel: 'stable' as const,
+    date: 'Aug 17, 2026',
+    title: 'Build switch + cleaner chat answers',
+    notes: [
+      'Build button in chat and sidebar opens the VS Code–style workspace',
+      'New topics (weather → build an app) no longer paste the previous answer',
+      'Plugins stay under Plugins; Build is its own path',
+    ],
+  },
+  {
     version: '0.1.40',
     channel: 'stable' as const,
     date: 'Aug 17, 2026',

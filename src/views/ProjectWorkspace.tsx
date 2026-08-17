@@ -173,6 +173,20 @@ export function ProjectWorkspace() {
 
   useEffect(() => {
     if (!projectId) return;
+    try {
+      const draft = localStorage.getItem(`ark:project-draft:${projectId}`);
+      if (draft) {
+        setChatInput(draft);
+        localStorage.removeItem(`ark:project-draft:${projectId}`);
+        requestAnimationFrame(() => textareaRef.current?.focus());
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [projectId]);
+
+  useEffect(() => {
+    if (!projectId) return;
 
     if (projectId.startsWith('demo-')) {
       const name = projectId

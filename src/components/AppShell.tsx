@@ -5,7 +5,7 @@ import { getLocalPrefs } from '@/lib/localPrefs';
 import {
   SquarePen, Briefcase, Blocks, Database, Bot,
   Settings, Search, PanelLeft, ChevronDown, Folder, History, Clock3,
-  ImageIcon, Video, MessageSquare, Archive, Trash2,
+  ImageIcon, Video, MessageSquare, Archive, Trash2, Hammer,
 } from 'lucide-react';
 import { Modal } from './Modal';
 import { SettingsContent } from './SettingsContent';
@@ -16,6 +16,7 @@ const NAV_ITEMS: { label: string; icon: React.ComponentType<{ className?: string
   { label: 'New Chat', icon: SquarePen, route: { name: 'chat' } },
   { label: 'Image', icon: ImageIcon, route: { name: 'chat', mode: 'image' } },
   { label: 'Video', icon: Video, route: { name: 'chat', mode: 'video' } },
+  { label: 'Build', icon: Hammer, route: { name: 'projects' } },
   { label: 'Projects', icon: Briefcase, route: { name: 'projects' } },
   { label: 'History', icon: History, route: { name: 'dashboard' } },
   { label: 'Plugins', icon: Blocks, route: { name: 'build' } },
@@ -37,7 +38,7 @@ function resolveDisplayName(
 export function AppShell({ children }: { children: ReactNode }) {
   const { route, navigate } = useRouter();
   const { user, profile } = useAuth();
-  const { recent, activeChats, archiveChat, deleteChatForever } = useRecentProjects();
+  const { recent, activeChats, archiveChat, deleteChatForever, addRecent } = useRecentProjects();
   const [collapsed, setCollapsed] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -86,7 +87,12 @@ export function AppShell({ children }: { children: ReactNode }) {
     if (item.label === 'Video') {
       return route.name === 'chat' && route.mode === 'video' && !route.chatId;
     }
-    if (item.route.name === 'projects' && route.name === 'project') return true;
+    if (item.label === 'Build') {
+      return route.name === 'project';
+    }
+    if (item.label === 'Projects') {
+      return route.name === 'projects';
+    }
     return route.name === item.route.name;
   };
 
@@ -177,8 +183,16 @@ export function AppShell({ children }: { children: ReactNode }) {
                   type="button"
                   onClick={() => {
                     // New Chat / Image / Video are distinct tabs — always navigate explicitly.
-                    if (item.label === 'New Chat') navigate({ name: 'chat' });
-                    else navigate(item.route);
+                    if (item.label === 'New Chat') {
+                      navigate({ name: 'chat' });
+                      return;
+                    }
+                    if (item.label === 'Build') {
+                      const project = addRecent('New build');
+                      navigate({ name: 'project', id: project.id });
+                      return;
+                    }
+                    navigate(item.route);
                   }}
                   title={collapsed ? item.label : undefined}
                   className={`ark-nav-item w-full ${collapsed ? '!justify-center' : ''} ${active ? 'active' : ''}`}

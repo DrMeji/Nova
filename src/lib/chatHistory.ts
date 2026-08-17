@@ -26,6 +26,45 @@ const CONTINUITY =
   + 'Do not repeat or continue a previous assistant answer unless the user asks. '
   + 'Answer ONLY the latest user message directly.';
 
+const BUILD_HINT =
+  /\b(build|create|make|code|app|apps|calculator|website|project|implement|develop|program|software|ui|api)\b/i;
+const FACT_HINT =
+  /\b(weather|temperature|forecast|rain|humid|capital of|who is|what is|when did|population|india|history of)\b/i;
+
+function significantTokens(text: string): Set<string> {
+  return new Set(
+    String(text || '')
+      .toLowerCase()
+      .split(/[^a-z0-9]+/i)
+      .filter(w => w.length > 3)
+      .filter(w => !/^(that|this|with|from|have|what|when|where|your|about|please|would|could|should|there|their)$/i.test(w)),
+  );
+}
+
+/** True when the latest ask is a new task, not a follow-up to the prior one. */
+export function isTopicShift(history: RouterChatTurn[], latestUserMessage: string): boolean {
+  const latest = String(latestUserMessage || '').trim();
+  if (!latest) return false;
+  const priorUsers = history.filter(t => t.role === 'user');
+  // history may already include latest as last turn
+  const earlier = priorUsers.length > 1
+    ? priorUsers[priorUsers.length - 2]
+    : priorUsers.length === 1 && priorUsers[0].content !== latest
+      ? priorUsers[0]
+      : null;
+  if (!earlier?.content) return false;
+  const a = earlier.content.trim();
+  const b = latest;
+  if (BUILD_HINT.test(b) && !BUILD_HINT.test(a) && (FACT_HINT.test(a) || a.length > 12)) return true;
+  if (FACT_HINT.test(b) && BUILD_HINT.test(a)) return true;
+  const ta = significantTokens(a);
+  const tb = significantTokens(b);
+  if (tb.size < 2 || ta.size < 2) return false;
+  let overlap = 0;
+  for (const t of tb) if (ta.has(t)) overlap += 1;
+  return overlap / tb.size < 0.18;
+}
+
 /** Strip UI / media noise so providers get usable text. */
 export function slimTurnContent(content: string): string {
   const raw = (content || '').trim();
@@ -104,6 +143,12 @@ export function buildRouterHistory(
   if (window.length === 0 && latest) {
     window = [{ role: 'user', content: latest.slice(0, MAX_TURN_CHARS) }];
   }
+
+  // New task (e.g. weather → “build an app”): drop prior turns so GGUF cannot regurgitate them.
+  if (latest && isTopicShift(window, latest)) {
+    return [{ role: 'user', content: latest.slice(0, MAX_TURN_CHARS) }];
+  }
+
   return window;
 }
 
@@ -115,13 +160,28 @@ export function routerSystemPrompt(history: RouterChatTurn[]): string {
 /** Pack history into one prompt for engines that only take a single string (GGUF / Core / Ollama generate). */
 export function packHistoryPrompt(history: RouterChatTurn[], latestFallback?: string): string {
   if (history.length === 0) return latestFallback || '';
-  if (history.length === 1 && history[0].role === 'user') return history[0].content;
+  if (history.length === 1 && history[0].role === 'user') {
+    const alone = history[0].content;
+    if (BUILD_HINT.test(alone)) {
+      return [
+        'You are ARK helping the user build software.',
+        'Answer this build request only. Do not mention unrelated prior topics.',
+        '',
+        alone,
+      ].join('\n');
+    }
+    return alone;
+  }
 
   const latest = latestUserMessage(history, latestFallback || '');
+  if (isTopicShift(history, latest)) {
+    return packHistoryPrompt([{ role: 'user', content: latest }], latest);
+  }
+
   const lines: string[] = [
     'Ongoing ARK conversation.',
     'Answer ONLY the latest User message below.',
-    'Do not repeat earlier ARK answers. Do not continue a previous story unless asked.',
+    'Do not repeat earlier ARK answers. Do not continue a previous topic unless asked.',
     '',
   ];
   for (const turn of history) {
@@ -181,19 +241,47 @@ export function sanitizeAssistantReply(
     }
   }
 
-  // If the model re-emits the previous assistant answer, drop that prefix.
+  // If the model re-emits the previous assistant answer, drop that prefix / paragraphs.
   const prev = String(previousAssistant || '').trim();
   if (prev.length >= 48) {
     const prevHead = prev.slice(0, Math.min(180, prev.length)).trim();
     if (prevHead && text.startsWith(prevHead)) {
       text = text.slice(prevHead.length).replace(/^\s*[.…]*(truncated)?\s*/i, '').trim();
     } else {
-      // Fuzzy: first ~12 words of prior answer glued onto a new reply
       const words = prev.split(/\s+/).slice(0, 14).join(' ');
       if (words.length >= 40 && text.toLowerCase().startsWith(words.toLowerCase())) {
         text = text.slice(words.length).replace(/^\s*[.…]*(truncated)?\s*/i, '').trim();
       }
     }
+    const prevLower = prev.toLowerCase();
+    const keptParas = text.split(/\n{2,}/).filter((para) => {
+      const chunk = para.trim();
+      if (chunk.length < 36) return true;
+      const sample = chunk.slice(0, 56).toLowerCase();
+      // Drop regurgitated prior paragraphs that are not about the new ask.
+      if (prevLower.includes(sample.slice(0, 28))) {
+        if (user && significantTokens(user).size > 0) {
+          const ut = significantTokens(user);
+          const pt = significantTokens(chunk);
+          let hit = 0;
+          for (const t of ut) if (pt.has(t)) hit += 1;
+          if (hit / ut.size < 0.2) return false;
+        } else {
+          return false;
+        }
+      }
+      return true;
+    });
+    if (keptParas.length) text = keptParas.join('\n\n').trim();
+  }
+
+  // If user asked to build something, strip leftover weather/fact lead-ins.
+  if (user && BUILD_HINT.test(user)) {
+    text = text
+      .split(/\n{2,}/)
+      .filter((para) => !FACT_HINT.test(para) || BUILD_HINT.test(para))
+      .join('\n\n')
+      .trim();
   }
 
   // Drop "Latest request: ..." echo lines from packed prompts
