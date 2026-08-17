@@ -223,6 +223,18 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.51',
+    channel: 'stable' as const,
+    date: 'Aug 16, 2026',
+    title: 'ARK Engine is the brain — Auto picks the right local model',
+    notes: [
+      'Auto routes chat vs code vs media on the same ARK pill, and uses a ready Engine GGUF that fits this PC (7B / 3B when installed — not stuck on 1.5B)',
+      'Build asks load a Coder GGUF when you have one; Lindsay on :8787 gets the same pick instead of Ollama',
+      'Local llama-cli now uses a real chat template and stop strings so answers stay on-topic',
+      'Ollama stays optional last — never the default brain',
+    ],
+  },
+  {
     version: '0.1.50',
     channel: 'stable' as const,
     date: 'Aug 16, 2026',

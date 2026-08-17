@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from '@/context/RouterContext';
-import { detectHardware, getAccurateHardware, getHardwareClass, getRecommendedModel, loadHardwareSnapshot, type HardwareInfo } from '@/lib/api';
+import { detectHardware, getAccurateHardware, getHardwareClass, getRecommendedChatModel, loadHardwareSnapshot, type HardwareInfo } from '@/lib/api';
 import { getLocalPrefs, setLocalPrefs } from '@/lib/localPrefs';
 import {
   engineDiskSpace,
@@ -213,7 +213,7 @@ export function LocalAI() {
   const { navigate } = useRouter();
   const [tab, setTab] = useState<TabId>('overview');
   const [hw, setHw] = useState<HardwareInfo>(() => loadHardwareSnapshot() || detectHardware());
-  const [recommendation, setRecommendation] = useState(() => getRecommendedModel(loadHardwareSnapshot() || detectHardware()));
+  const [recommendation, setRecommendation] = useState(() => getRecommendedChatModel(loadHardwareSnapshot() || detectHardware()));
   const [engineRunning, setEngineRunning] = useState(false);
   const [enginePhase, setEnginePhase] = useState<'offline' | 'starting' | 'online'>('offline');
   const [installed, setInstalled] = useState<Array<{
@@ -252,7 +252,7 @@ export function LocalAI() {
     void getAccurateHardware(true).then(info => {
       if (cancelled) return;
       setHw(info);
-      setRecommendation(getRecommendedModel(info));
+      setRecommendation(getRecommendedChatModel(info));
     });
     return () => {
       cancelled = true;

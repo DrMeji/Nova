@@ -228,6 +228,42 @@ function cancelGguf() {
   return { ok: true };
 }
 
+const ARK_SYSTEM =
+  'You are ARK, the assistant inside the ARK desktop creation studio on this computer. '
+  + 'Answer the latest user request clearly. Do not echo the prompt.';
+
+function llamaFamily(modelId) {
+  return /llama3/i.test(String(modelId || ''));
+}
+
+function promptBody(prompt) {
+  return String(prompt || '').replace(/\nARK:\s*$/, '').trim();
+}
+
+/** ChatML for Qwen/Mistral/Gemma; Llama 3 headers for llama3*. */
+function wrapChatPrompt(modelId, prompt) {
+  const body = promptBody(prompt);
+  if (/<\|im_start\|>/.test(body) || /<\|start_header_id\|>/.test(body)) {
+    return body.endsWith('\n') ? body : `${body}\n`;
+  }
+  if (llamaFamily(modelId)) {
+    return (
+      `<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n${ARK_SYSTEM}<|eot_id|>`
+      + `<|start_header_id|>user<|end_header_id|>\n\n${body}<|eot_id|>`
+      + `<|start_header_id|>assistant<|end_header_id|>\n\n`
+    );
+  }
+  return (
+    `<|im_start|>system\n${ARK_SYSTEM}<|im_end|>\n`
+    + `<|im_start|>user\n${body}<|im_end|>\n`
+    + `<|im_start|>assistant\n`
+  );
+}
+
+function stopToken(modelId) {
+  return llamaFamily(modelId) ? '<|eot_id|>' : '<|im_end|>';
+}
+
 /**
  * Strip prompt echo that some llama-cli builds print before the completion.
  */
@@ -335,6 +371,10 @@ function stripLlamaCliNoise(text) {
   // Trailing interactive prompt / stats
   t = t.replace(/\n?\s*\[\s*Prompt:[^\]]*\]\s*$/i, '');
   t = t.replace(/\n?\s*>\s*$/g, '');
+  t = t.replace(/<\|im_end\|>[\s\S]*$/g, '');
+  t = t.replace(/<\|eot_id\|>[\s\S]*$/g, '');
+  t = t.replace(/<\|im_start\|>[\s\S]*$/g, '');
+  t = t.replace(/<\|start_header_id\|>[\s\S]*$/g, '');
   return t.trim();
 }
 
@@ -368,13 +408,14 @@ function runGgufStream(modelId, prompt, onChunk, timeoutMs = 120000) {
       activeChild = null;
     }
 
-    const promptStr = String(prompt || '');
-    // Keep flags conservative — unknown args dump "available commands" into the stream.
+    const promptStr = wrapChatPrompt(modelId, prompt);
     const args = [
       '-m', gguf,
       '-p', promptStr,
-      '-n', '512',
-      '--temp', '0.7',
+      '-n', '768',
+      '-c', '4096',
+      '--temp', '0.55',
+      '-r', stopToken(modelId),
     ];
     const child = spawn(bin, args, { windowsHide: true });
     activeChild = child;

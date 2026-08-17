@@ -31,7 +31,7 @@ Clients may send Ollama-style names; ARK maps common aliases, for example:
 | `mistral` | `mistral-7b` |
 | `phi3` | `phi3-mini` |
 
-Prefer exact ARK ids from `GET /api/tags` or `GET /v1/models`.
+Prefer exact ARK ids from `GET /api/tags` or `GET /v1/models`. If the client omits `model` (or sends `ark-auto`), ARK picks the best **ready** Engine GGUF for that prompt — instruct for chat, Coder for build/code — so Lindsay can use every model you installed in ARK, not a single Ollama weight.
 
 ## Endpoints
 

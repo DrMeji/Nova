@@ -8,6 +8,7 @@
  */
 
 const http = require('http');
+const arkModelRank = require('./arkModelRank.cjs');
 
 const CONTRACT_VERSION = '0.4.0';
 
@@ -149,9 +150,10 @@ function createBrainServer(opts) {
     ensureOnline(arkEngine);
     const message = packMessages(parsed);
     const modelId = resolveModelId(parsed.model, arkEngine);
-    const kind = parsed.kind === 'image' || parsed.kind === 'video'
-      ? parsed.kind
-      : undefined;
+    let kind = parsed.kind;
+    if (kind !== 'image' && kind !== 'video') {
+      kind = kind === 'coding' || arkModelRank.looksLikeCodeAsk(message) ? 'coding' : 'chat';
+    }
     return arkEngine.generate(message, { modelId, kind });
   }
 
@@ -159,9 +161,10 @@ function createBrainServer(opts) {
     ensureOnline(arkEngine);
     const message = packMessages(parsed);
     const modelId = resolveModelId(parsed.model, arkEngine);
-    const kind = parsed.kind === 'image' || parsed.kind === 'video'
-      ? parsed.kind
-      : undefined;
+    let kind = parsed.kind;
+    if (kind !== 'image' && kind !== 'video') {
+      kind = kind === 'coding' || arkModelRank.looksLikeCodeAsk(message) ? 'coding' : 'chat';
+    }
     return arkEngine.generate(message, { modelId, kind, onChunk });
   }
 

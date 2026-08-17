@@ -13,6 +13,8 @@ const arkGguf = require('./arkGguf.cjs');
 const arkSd = require('./arkSd.cjs');
 const arkFetch = require('./arkFetch.cjs');
 const arkPaths = require('./arkPaths.cjs');
+const arkModelRank = require('./arkModelRank.cjs');
+const os = require('os');
 
 /** Default zero-key brain for new installs (~1 GB Q4). */
 const DEFAULT_BRAIN_ID = 'qwen25-15b';
@@ -621,12 +623,13 @@ function arkCoreGenerate(message, modelName) {
     `I heard: “${preview}”`,
     '',
     'ARK Core is a template helper, not a live LLM.',
-    'Install the default local brain from Local AI (Qwen2.5 1.5B) or connect Groq / Google / OpenRouter.',
+    'Install the default local brain from Local AI (Llama 3.2 3B or Qwen2.5 7B when your PC can run it) or connect Groq / Google / OpenRouter.',
   ].join('\n');
 }
 
 async function generate(message, opts = {}) {
-  const modelId = opts.modelId || activeModelId;
+  const requestedId = opts.modelId;
+  const modelId = requestedId || activeModelId;
   const kind = opts.kind;
   const models = listModels();
   let model = models.find((m) => m.id === modelId) || models[0];
@@ -670,10 +673,19 @@ async function generate(message, opts = {}) {
     throw new Error('ARK Engine is offline. Start it from Local AI.');
   }
 
-  // Prefer any ready GGUF when caller asked for ark-core / auto / missing id
-  const ggufReady = models.find((m) => m.gguf && m.status === 'ready');
-  if ((!model || model.id === 'ark-core' || model.status !== 'ready') && ggufReady) {
-    model = ggufReady;
+  const ramGb = Math.round(os.totalmem() / (1024 * 1024 * 1024));
+  // Only honor a caller-specified id. activeModelId must not pin Lindsay/Auto to 1.5B.
+  const explicit = requestedId && requestedId !== 'ark-core' && requestedId !== 'ark-auto';
+  if (!explicit || !model || model.status !== 'ready' || !model.gguf) {
+    const intent = arkModelRank.classifyIntent(message, kind);
+    const pickedId = arkModelRank.pickReadyEngineId(models, intent, ramGb);
+    if (pickedId) {
+      const hit = models.find((m) => m.id === pickedId);
+      if (hit) model = hit;
+    } else {
+      const ggufReady = models.find((m) => m.gguf && m.status === 'ready');
+      if (ggufReady) model = ggufReady;
+    }
   }
 
   if (!model || (model.status !== 'ready' && !model.gguf)) {

@@ -214,6 +214,18 @@ export function getRecommendedModel(hw: HardwareInfo): { name: string; size: str
   return { name: 'Qwen2.5 1.5B Instruct', size: '1.0 GB', id: 'qwen25-15b' };
 }
 
+/** Default chat brain for Auto / onboarding — instruct, not the tiny 1.5B, when RAM allows. */
+export function getRecommendedChatModel(hw: HardwareInfo): { name: string; size: string; id: string } {
+  const ramGb = parseRamGb(hw);
+  if (ramGb >= 16) {
+    return { name: 'Qwen2.5 7B Instruct', size: '4.7 GB', id: 'qwen25-7b' };
+  }
+  if (ramGb >= 8) {
+    return { name: 'Llama 3.2 3B Instruct', size: '2.0 GB', id: 'llama32-3b' };
+  }
+  return { name: 'Qwen2.5 1.5B Instruct', size: '1.0 GB', id: 'qwen25-15b' };
+}
+
 /** Free-key providers that work well as first hops for this PC (always useful; heavier local needs RAM). */
 export function suggestedKeysForHardware(hw: HardwareInfo): { id: string; name: string; why: string }[] {
   const tier = getHardwareClass(hw);

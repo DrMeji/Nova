@@ -14,6 +14,8 @@ Contract: `GET /v1/contract` (currently **0.4.0**)
 
 Apps that used to require Ollama can point at ARK instead and get every installed Engine model (plus ARK’s router when using the native API). ARK stays the brain; other apps are clients.
 
+If the request omits `model` (or sends `ark-auto`), Engine picks the best **ready** GGUF for the prompt: instruct models for chat, Coder GGUFs for build/code asks, skipping sizes that do not fit this PC’s RAM. A tiny 1.5B is only used when nothing larger is installed.
+
 ## Native ARK routes
 
 | Method | Path | Notes |

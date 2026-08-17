@@ -1,9 +1,9 @@
 /**
- * ARK Router — ARK-owned free-first routing for chat / image / video.
+ * ARK Router — ARK-owned routing for chat / image / video.
  *
- * Not a localhost proxy for other IDEs. This is the in-app path picker:
- *   local Engine → optional Ollama → free-key clouds → paid keys
- * with silent fallback when a hop fails or rate-limits.
+ * Auto hops (ARK is the brain; Ollama is never identity):
+ *   capable ARK Engine GGUF (intent + RAM) → free-key cloud if local is
+ *   weak/missing → remaining Engine GGUFs → paid keys → optional Ollama last
  *
  * Chat memory is ARK-owned: history travels with every hop so a new
  * provider continues mid-task instead of greeting like a fresh chat.
@@ -30,6 +30,9 @@ import {
   probeOllamaOptional,
 } from '@/lib/ollamaOptional';
 import { getEngineStatus } from '@/lib/arkEngine';
+import { classifyChatIntent } from '@/lib/chatIntent';
+import { isWeakChatBrain, rankedReadyEngineIds } from '@/lib/enginePick';
+import { loadHardwareSnapshot, parseRamGb } from '@/lib/api';
 
 export type RouterKind = 'chat' | 'image' | 'video' | 'coding';
 
@@ -106,6 +109,8 @@ async function tryLocalChat(
   attempted: string[],
   onChunk?: (text: string) => void,
   failover = true,
+  failoverIds?: string[],
+  kind: 'chat' | 'coding' = 'chat',
 ): Promise<ArkRouterResult | null> {
   const runOne = async (id: string | undefined): Promise<ArkRouterResult | null> => {
     attempted.push(id ? `ARK Engine · ${id}` : 'ARK Engine');
@@ -116,8 +121,8 @@ async function tryLocalChat(
       }
       const prompt = packHistoryPrompt(history, message);
       const result = onChunk
-        ? await brainGenerateStream(prompt, id, onChunk, 'chat')
-        : await brainGenerate(prompt, id, 'chat');
+        ? await brainGenerateStream(prompt, id, onChunk, kind)
+        : await brainGenerate(prompt, id, kind);
       const prevAsst = [...history].reverse().find(t => t.role === 'assistant')?.content;
       const cleaned = sanitizeAssistantReply(result.reply, message, prevAsst);
       return {
@@ -140,21 +145,31 @@ async function tryLocalChat(
 
   if (!failover) return null;
 
-  try {
-    const status = await getEngineStatus();
-    const ready = status.models.filter(m =>
-      m.status === 'ready'
-      && m.id !== modelId
-      && m.id !== 'ark-core'
-      && m.id !== 'ark-image-core'
-      && m.id !== 'ark-video-core',
-    );
-    for (const m of ready) {
-      const hit = await runOne(m.id);
-      if (hit && isStrongLocal(hit.source)) return hit;
+  const extras: string[] = [];
+  if (failoverIds?.length) {
+    for (const id of failoverIds) {
+      if (id && id !== modelId && !extras.includes(id)) extras.push(id);
     }
-  } catch {
-    /* ignore */
+  } else {
+    try {
+      const status = await getEngineStatus();
+      for (const m of status.models) {
+        if (
+          m.status === 'ready'
+          && m.id !== modelId
+          && m.id !== 'ark-core'
+          && m.id !== 'ark-image-core'
+          && m.id !== 'ark-video-core'
+        ) extras.push(m.id);
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  for (const id of extras) {
+    const hit = await runOne(id);
+    if (hit && isStrongLocal(hit.source)) return hit;
   }
 
   return null;
@@ -214,6 +229,8 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
     && preferredId !== 'ark-auto'
     && opts.preferredSource === 'local';
   const history = historyFor(opts);
+  const intent = classifyChatIntent(opts.message, opts.kind);
+  const brainKind: 'chat' | 'coding' = intent === 'coding' ? 'coding' : 'chat';
 
   // ── Pinned cloud model (skipped for ARK Auto) ──────────────────────
   if (pinnedCloud && modeAllowsCloud(mode) && !isAuto) {
@@ -270,6 +287,8 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
       attempted,
       opts.onChunk,
       failover,
+      undefined,
+      brainKind,
     );
     if (localPinned && isStrongLocal(localPinned.source)) return localPinned;
     if (!failover) {
@@ -307,14 +326,139 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
     }
   }
 
-  // ── Local (GGUF / Engine) ─────────────────────────────────────────
+  const hwSnap = loadHardwareSnapshot();
+  const ramGb = hwSnap ? parseRamGb(hwSnap) : 8;
+  let ranked: string[] = [];
+  try {
+    const status = await getEngineStatus();
+    ranked = rankedReadyEngineIds(status.models, intent, ramGb);
+  } catch {
+    /* Engine offline */
+  }
+  const picked = ranked[0];
+  const rest = ranked.slice(1);
+  const capableLocal = Boolean(picked && !isWeakChatBrain(picked));
+
+  // ── ARK Auto: Engine is the brain; Ollama is last-resort optional ──
+  if (isAuto) {
+    if (capableLocal) {
+      const local = await tryLocalChat(
+        history,
+        opts.message,
+        picked,
+        attempted,
+        opts.onChunk,
+        failover,
+        rest,
+        brainKind,
+      );
+      if (local && isStrongLocal(local.source)) return local;
+    }
+
+    if (mode === 'local_only') {
+      if (picked) {
+        const weak = await tryLocalChat(
+          history,
+          opts.message,
+          picked,
+          attempted,
+          opts.onChunk,
+          failover,
+          rest,
+          brainKind,
+        );
+        if (weak && isStrongLocal(weak.source)) return weak;
+      }
+      const ollamaOnly = await tryOllama(history, opts.message, preferredId, attempted);
+      if (ollamaOnly) return ollamaOnly;
+      return {
+        reply: [
+          'Local-only mode is on, but no live local brain is ready.',
+          'Install a GGUF model into ARK Engine (Local AI / Models), or enable optional Ollama.',
+          'ARK Core’s template replies are not a live model — they won’t answer like ChatGPT.',
+        ].join('\n'),
+        modelName: 'ARK Engine',
+        source: 'none',
+        tier: 'local-free',
+        attempted,
+      };
+    }
+
+    // Tiny 1.5B-only (or no GGUF): free cloud for quality, then weak Engine.
+    if (modeAllowsCloud(mode) && hasAnyCloudChatKey() && !capableLocal) {
+      const free = await cloudChatFreeKeys(opts.message, attempted, history, opts.onChunk);
+      if (free) {
+        return withContinued({
+          reply: free.reply,
+          modelName: `${free.provider} · ${free.model}`,
+          source: hitSource(free.provider),
+          tier: 'free-key',
+          attempted,
+        }, history);
+      }
+    }
+
+    if (picked) {
+      const local = await tryLocalChat(
+        history,
+        opts.message,
+        picked,
+        attempted,
+        opts.onChunk,
+        failover,
+        rest,
+        brainKind,
+      );
+      if (local && isStrongLocal(local.source)) return local;
+    }
+
+    if (modeAllowsCloud(mode)) {
+      if (hasAnyCloudChatKey()) {
+        const free = await cloudChatFreeKeys(opts.message, attempted, history, opts.onChunk);
+        if (free) {
+          return withContinued({
+            reply: free.reply,
+            modelName: `${free.provider} · ${free.model}`,
+            source: hitSource(free.provider),
+            tier: 'free-key',
+            attempted,
+          }, history);
+        }
+      }
+      const paid = await cloudChatPaidKeys(opts.message, attempted, history, opts.onChunk);
+      if (paid) {
+        return withContinued({
+          reply: paid.reply,
+          modelName: `${paid.provider} · ${paid.model}`,
+          source: hitSource(paid.provider),
+          tier: 'paid',
+          attempted,
+        }, history);
+      }
+    }
+
+    const ollama = await tryOllama(history, opts.message, preferredId, attempted);
+    if (ollama) return ollama;
+
+    return {
+      reply: honestNoLiveChatReply(),
+      modelName: 'ARK Auto',
+      source: 'none',
+      tier: 'local-free',
+      attempted,
+    };
+  }
+
+  // ── Pinned / named Engine (not Auto) ──────────────────────────────
   const local = await tryLocalChat(
     history,
     opts.message,
-    isAuto || pinnedCloud || pinnedOllama || pinnedLocalEngine ? undefined : preferredId,
+    pinnedCloud || pinnedOllama || pinnedLocalEngine ? undefined : preferredId,
     attempted,
     opts.onChunk,
     failover,
+    undefined,
+    brainKind,
   );
 
   if (local && isStrongLocal(local.source)) {
@@ -338,11 +482,7 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
     };
   }
 
-  // ── Optional Ollama ───────────────────────────────────────────────
-  const ollama = await tryOllama(history, opts.message, preferredId, attempted);
-  if (ollama) return ollama;
-
-  // ── Free-key → paid (automatic / after soft local) ─────────────────
+  // ── Free-key → paid, then optional Ollama ─────────────────────────
   if (modeAllowsCloud(mode)) {
     const free = await cloudChatFreeKeys(opts.message, attempted, history, opts.onChunk);
     if (free) {
@@ -365,6 +505,9 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
       }, history);
     }
   }
+
+  const ollama = await tryOllama(history, opts.message, preferredId, attempted);
+  if (ollama) return ollama;
 
   // Never return ARK Core template as a finished answer — be honest.
   return {

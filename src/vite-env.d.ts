@@ -177,7 +177,7 @@ declare global {
       engineGenerate?: (
         message: string,
         modelId?: string,
-        kind?: 'image' | 'video' | 'chat',
+        kind?: 'image' | 'video' | 'chat' | 'coding',
       ) => Promise<{
         ok: boolean;
         reply: string;

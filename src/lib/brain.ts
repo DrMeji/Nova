@@ -33,7 +33,7 @@ export async function probeBrain(): Promise<{
 export async function brainGenerate(
   message: string,
   modelId?: string,
-  kind?: 'image' | 'video' | 'chat',
+  kind?: 'image' | 'video' | 'chat' | 'coding',
 ): Promise<{
   reply: string;
   media?: { kind: string; dataUrl: string; path?: string; libraryId?: string; real?: boolean };
@@ -80,7 +80,7 @@ export async function brainGenerateStream(
   message: string,
   modelId: string | undefined,
   onChunk: (text: string) => void,
-  kind?: 'image' | 'video' | 'chat',
+  kind?: 'image' | 'video' | 'chat' | 'coding',
 ) {
   try {
     if (window.arkDesktop?.engineGenerateStream) {
@@ -103,7 +103,7 @@ export async function brainGenerateStream(
 export async function brainChat(
   message: string,
   modelId?: string,
-  kind?: 'image' | 'video' | 'chat',
+  kind?: 'image' | 'video' | 'chat' | 'coding',
 ): Promise<string> {
   const result = await brainGenerate(message, modelId, kind);
   return result.reply;

@@ -14,6 +14,7 @@ import {
   slimChatContent,
   titleFromPrompt,
 } from '@/lib/recentStore';
+import { looksLikeCodeAsk } from '@/lib/chatIntent';
 import {
   MEDIA_GEN_STAGES,
   rewriteImagePrompt,
@@ -54,22 +55,6 @@ const COMPOSER_MODE_PREFIX: Record<'plan' | 'ask' | 'debug' | 'multitask', strin
   multitask: 'Break this into parallel tasks and tackle them clearly:\n\n',
 };
 
-function looksLikeCodeAsk(text: string) {
-  const t = text.trim();
-  if (!t) return false;
-  if (/```[\w]*\n/.test(t)) return true;
-  if (/\b(build|create|make|scaffold|implement|refactor|debug|fix)\b[\s\S]{0,40}\b(app|website|component|function|api|project|calculator|tool)\b/i.test(t)) {
-    return true;
-  }
-  if (/\b(look (at|into)|review|open|edit|read)\b[\s\S]{0,40}\b(file|code|repo|project|source)\b/i.test(t)) {
-    return true;
-  }
-  if (/\b(typescript|javascript|python|react|node\.?js|html|css)\b/i.test(t) && /\b(build|write|create|fix|add)\b/i.test(t)) {
-    return true;
-  }
-  return false;
-}
-
 type ModelSource = 'local' | 'cloud' | 'auto';
 
 type ModelKind = 'chat' | 'image' | 'video';
@@ -84,7 +69,7 @@ type ChatModelOption = {
 
 const CHAT_MODELS: ChatModelOption[] = [
   // Chat — only Auto by default; keyed clouds + Ollama added at runtime
-  { id: 'ark-auto', name: 'ARK', source: 'auto', detail: 'Free-first · silent failover', kind: 'chat' },
+  { id: 'ark-auto', name: 'ARK', source: 'auto', detail: 'ARK Engine first · silent failover', kind: 'chat' },
   // Image — paths that generate today
   { id: 'ark-image-core', name: 'ARK Image Core', source: 'local', detail: 'Free · Pollinations · local SD when installed', kind: 'image' },
   { id: 'sd15-local', name: 'SD 1.5 Local', source: 'local', detail: 'On-device · install from Local AI', kind: 'image' },
@@ -1120,7 +1105,7 @@ export function AIChat() {
             : buildRouterHistory([], content);
           const routePromise = arkRoute({
             message: content,
-            kind: mode === 'code' ? 'coding' : 'chat',
+            kind: mode === 'code' || looksLikeCodeAsk(content) ? 'coding' : 'chat',
             preferredModelId: pinnedModel.id,
             preferredModelName: pinnedModel.name,
             preferredSource: pinnedModel.source,

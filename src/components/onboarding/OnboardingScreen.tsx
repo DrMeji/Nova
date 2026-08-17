@@ -4,7 +4,7 @@ import {
   completeOnboarding,
   detectHardwareAsync,
   getHardwareClass,
-  getRecommendedModel,
+  getRecommendedChatModel,
   saveHardwareSnapshot,
   type HardwareInfo,
 } from '@/lib/api';
@@ -106,21 +106,21 @@ function hardwareLabel(pc: ReturnType<typeof getHardwareClass>) {
 
 function recommendationsFor(hw: HardwareInfo): RecModel[] {
   const pc = getHardwareClass(hw);
-  const primary = getRecommendedModel(hw);
+  const primary = getRecommendedChatModel(hw);
 
   if (pc === 'strong') {
     return [
-      { id: primary.id, name: primary.name, size: primary.size, detail: 'Best quality for this PC', recommended: true },
-      { id: 'llama32-3b', name: 'Llama 3.2 3B Instruct', size: '2.0 GB', detail: 'Balanced general use' },
-      { id: 'qwen25-15b', name: 'Qwen2.5 1.5B Instruct', size: '1.0 GB', detail: 'Default · fastest install' },
+      { id: primary.id, name: primary.name, size: primary.size, detail: 'Best chat brain for this PC', recommended: true },
+      { id: 'qwen25-coder-7b', name: 'Qwen2.5-Coder 7B', size: '4.7 GB', detail: 'Coding · build apps in ARK' },
+      { id: 'llama32-3b', name: 'Llama 3.2 3B Instruct', size: '2.0 GB', detail: 'Lighter general use' },
     ];
   }
 
   if (pc === 'standard') {
     return [
-      { id: primary.id, name: primary.name, size: primary.size, detail: 'Best quality for this PC', recommended: true },
-      { id: 'qwen25-15b', name: 'Qwen2.5 1.5B Instruct', size: '1.0 GB', detail: 'Default · fastest install' },
+      { id: primary.id, name: primary.name, size: primary.size, detail: 'Best chat brain for this PC', recommended: true },
       { id: 'qwen25-coder-7b', name: 'Qwen2.5-Coder 7B', size: '4.7 GB', detail: 'Coding · larger download' },
+      { id: 'qwen25-15b', name: 'Qwen2.5 1.5B Instruct', size: '1.0 GB', detail: 'Fastest install' },
     ];
   }
 
@@ -176,8 +176,9 @@ export function OnboardingScreen() {
     setProgress(0);
     setFinishError(null);
 
+    const allowed = ['qwen25-15b', 'llama32-3b', 'qwen25-7b', 'qwen25-coder-7b', 'qwen25-coder-14b'];
     const brainId =
-      selectedId && ['qwen25-15b', 'llama32-3b', 'qwen25-coder-7b'].includes(selectedId)
+      selectedId && allowed.includes(selectedId)
         ? selectedId
         : 'qwen25-15b';
 

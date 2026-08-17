@@ -121,7 +121,7 @@ export async function ensureEngineRuntime() {
 export async function engineGenerate(
   message: string,
   modelId?: string,
-  kind?: 'image' | 'video' | 'chat',
+  kind?: 'image' | 'video' | 'chat' | 'coding',
 ) {
   if (window.arkDesktop?.engineGenerate) {
     return window.arkDesktop.engineGenerate(message, modelId, kind);
@@ -146,7 +146,7 @@ export async function engineGenerateStream(
   message: string,
   modelId: string | undefined,
   onChunk: (text: string) => void,
-  kind?: 'image' | 'video' | 'chat',
+  kind?: 'image' | 'video' | 'chat' | 'coding',
 ) {
   if (window.arkDesktop?.engineGenerateStream) {
     const stop = window.arkDesktop.onEngineChunk?.((payload) => {
