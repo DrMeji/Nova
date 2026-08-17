@@ -223,6 +223,18 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.57',
+    channel: 'stable' as const,
+    date: 'Aug 17, 2026',
+    title: 'Ships 0.1.56 fixes + chat composer + Local AI layout',
+    notes: [
+      'Fixes failed 0.1.56 release (Code workspace build error) so Updates can install again',
+      'Chat composer: wider, single-line pill with aligned + / model controls',
+      'Local AI: Installed and download lists use the same side-by-side grid as Models',
+      'Code build progress in chat bubble + Explorer project label (from 0.1.56)',
+    ],
+  },
+  {
     version: '0.1.56',
     channel: 'stable' as const,
     date: 'Aug 17, 2026',

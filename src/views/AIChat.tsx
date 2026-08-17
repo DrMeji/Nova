@@ -1287,7 +1287,8 @@ export function AIChat() {
     const el = textareaRef.current;
     if (el) {
       el.style.height = 'auto';
-      el.style.height = `${Math.min(el.scrollHeight, 128)}px`;
+      const line = 22;
+      el.style.height = `${Math.min(Math.max(el.scrollHeight, line), 112)}px`;
     }
   };
 
@@ -1502,7 +1503,7 @@ export function AIChat() {
   ) : null;
 
   const composer = (
-    <div className="w-full max-w-2xl mx-auto">
+    <div className="w-full max-w-3xl mx-auto">
       {failoverChip}
       {composerMode && (
         <div className="mb-2 flex items-center gap-2 px-1">
@@ -1519,7 +1520,7 @@ export function AIChat() {
           </span>
         </div>
       )}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2.5">
         <div className="flex-1 min-w-0 flex flex-col">
           {queueLen > 0 && (
             <div className="mb-2 flex items-center justify-between gap-2 rounded-full border border-amber-500/25 bg-amber-500/10 px-3.5 py-2 text-[11px] text-amber-100/90">
@@ -1563,7 +1564,7 @@ export function AIChat() {
               </span>
             </div>
           )}
-          <div className="flex items-center gap-1 rounded-full border border-surface-border bg-ark-navy-900/90 pl-1.5 pr-1.5 py-2 shadow-lg shadow-black/20 min-w-0">
+          <div className="flex items-center gap-1.5 rounded-full border border-surface-border bg-ark-navy-900/90 px-1.5 py-1 shadow-lg shadow-black/20 min-w-0">
           <input
             ref={attachInputRef}
             type="file"
@@ -1585,7 +1586,10 @@ export function AIChat() {
               e.target.value = '';
             }}
           />
-          <ComposerPlusMenu onAction={handlePlusAction} />
+          <ComposerPlusMenu
+            onAction={handlePlusAction}
+            buttonClassName="w-8 h-8 rounded-full flex items-center justify-center text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors shrink-0"
+          />
 
           <textarea
             ref={textareaRef}
@@ -1598,15 +1602,15 @@ export function AIChat() {
               }
             }}
             placeholder={placeholder}
-            rows={2}
-            className="flex-1 bg-transparent border-none resize-none px-1 py-2.5 text-sm text-content-primary placeholder:text-content-tertiary focus:outline-none max-h-36 min-h-[2.75rem] leading-5 min-w-0"
+            rows={1}
+            className="flex-1 bg-transparent border-none resize-none px-1 py-1.5 text-sm text-content-primary placeholder:text-content-tertiary focus:outline-none max-h-28 leading-5 min-w-0 self-center"
           />
 
           <button
             ref={modelButtonRef}
             type="button"
             onClick={() => setModelMenuOpen(o => !o)}
-            className="inline-flex items-center gap-1 rounded-full border border-surface-border/80 bg-surface-hover/60 hover:bg-surface-hover px-2.5 py-1.5 text-xs text-content-primary transition-colors shrink-0 max-w-[10rem]"
+            className="inline-flex items-center gap-1 rounded-full border border-surface-border/80 bg-surface-hover/60 hover:bg-surface-hover px-2.5 py-1 text-xs text-content-primary transition-colors shrink-0 max-w-[9rem] self-center"
             title={`Active model · ${
               activeModel.source === 'auto'
                 ? (threadBrain ? `${autoModelLabel} · equipped for this chat` : 'ARK Auto · picks best brain')
@@ -1647,7 +1651,7 @@ export function AIChat() {
           </div>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0 self-center">
+        <div className="flex items-center gap-2 shrink-0">
         <TokenUsageRing
           ratio={tokenRatio}
           className="text-content-primary shrink-0"
@@ -1846,11 +1850,11 @@ export function AIChat() {
         </div>
       ) : showEmpty ? (
         mode === 'general' ? (
-          <div className="flex-1 flex flex-col items-center justify-center px-6 pb-16">
+          <div className="flex-1 flex flex-col items-center justify-center px-4 sm:px-8 pb-16 w-full">
             <h1 className="text-2xl sm:text-3xl font-semibold text-content-primary tracking-tight mb-3 text-center">
               {greeting}
             </h1>
-            <p className="text-xs text-content-tertiary mb-4 text-center max-w-md">
+            <p className="text-xs text-content-tertiary mb-4 text-center max-w-lg">
               {capacity && !capacity.liveChat
                 ? 'No live model yet. Connect a free key or install a local brain, then send a message.'
                 : 'Say hello to start. ARK uses your local brain and free keys, and switches if one runs out.'}
@@ -1873,11 +1877,13 @@ export function AIChat() {
                 </button>
               </div>
             )}
-            {composer}
+            <div className="w-full max-w-3xl">
+              {composer}
+            </div>
           </div>
         ) : (
-          <div className="flex-1 flex flex-col px-6 pt-[min(12vh,5.5rem)] pb-4 min-h-0 overflow-hidden">
-            <div className="shrink-0 flex flex-col items-center">
+          <div className="flex-1 flex flex-col px-4 sm:px-8 pt-[min(12vh,5.5rem)] pb-4 min-h-0 overflow-hidden">
+            <div className="shrink-0 flex flex-col items-center w-full max-w-3xl mx-auto">
               <h1 className="text-2xl sm:text-3xl font-semibold text-content-primary tracking-tight mb-8 text-center">
                 {greeting}
               </h1>
@@ -1930,9 +1936,9 @@ export function AIChat() {
               <div ref={messagesEndRef} />
             </div>
           </div>
-          <div className="shrink-0 px-6 pb-6 pt-2 space-y-2">
+          <div className="shrink-0 px-4 sm:px-8 pb-6 pt-2 space-y-2">
             {setupNote && (
-              <div className="max-w-2xl mx-auto rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-200/90 leading-relaxed flex items-start justify-between gap-3">
+              <div className="max-w-3xl mx-auto rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-200/90 leading-relaxed flex items-start justify-between gap-3">
                 <p>
                   Local brain install had an issue during setup. Use{' '}
                   <button type="button" className="underline hover:text-amber-100" onClick={() => navigate({ name: 'local-ai' })}>

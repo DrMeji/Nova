@@ -1250,7 +1250,6 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
                     Hide
                   </button>
                 </div>
-              </div>
               {creating && (
                 <div className="px-2 pb-2">
                   <div className="rounded-lg border border-surface-border bg-ark-navy-950/80 p-2">

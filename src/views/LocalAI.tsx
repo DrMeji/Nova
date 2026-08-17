@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useRouter } from '@/context/RouterContext';
 import { detectHardware, getAccurateHardware, getHardwareClass, getRecommendedChatModel, loadHardwareSnapshot, type HardwareInfo } from '@/lib/api';
 import { getLocalPrefs, setLocalPrefs } from '@/lib/localPrefs';
@@ -33,11 +33,13 @@ import {
   Cpu, MemoryStick, HardDrive, Zap, Monitor, MonitorCog,
   Power, Activity, Check, Download, Shield,
   Gauge, Boxes, Wifi, Loader2, FolderOpen, FileBox,
+  Code, Brain, Image as ImageIcon,
 } from 'lucide-react';
 
 import {
   categoryDisplayLabel,
   DEFAULT_ENGINE_MODEL_ID,
+  LOCAL_CATEGORY_ORDER,
   sortModelsByCategoryThenSizeDesc,
 } from '@/lib/modelSort';
 
@@ -203,6 +205,79 @@ function FreeBadge() {
   );
 }
 
+const LOCAL_CATEGORY_META: Record<CatalogModel['category'], { title: string; icon: typeof Code }> = {
+  general: { title: 'General', icon: Boxes },
+  coding: { title: 'Coding', icon: Code },
+  reasoning: { title: 'Reasoning', icon: Brain },
+  fast: { title: 'Fast', icon: Zap },
+  image: { title: 'Image', icon: ImageIcon },
+};
+
+function LocalDownloadControl({
+  name,
+  isActive,
+  isInstalled,
+  isDownloading,
+  progress,
+  onDownload,
+  onCancel,
+}: {
+  name: string;
+  isActive?: boolean;
+  isInstalled?: boolean;
+  isDownloading?: boolean;
+  progress?: number;
+  onDownload?: () => void;
+  onCancel?: () => void;
+}) {
+  if (isInstalled) {
+    return (
+      <span
+        className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${
+          isActive ? 'bg-surface-hover text-ark-accent-green' : 'text-content-tertiary'
+        }`}
+        title={isActive ? 'Active model' : 'Installed'}
+        aria-label={isActive ? `Active ${name}` : `Installed ${name}`}
+      >
+        <Check className="w-4 h-4" />
+      </span>
+    );
+  }
+  if (isDownloading) {
+    return (
+      <button
+        type="button"
+        onClick={onCancel}
+        className="inline-flex items-center gap-1 rounded-full bg-rose-500/15 px-2 py-1 text-[10px] font-medium text-rose-300 shrink-0 hover:bg-rose-500/25"
+        title="Cancel download"
+        aria-label={`Cancel ${name}`}
+      >
+        <Loader2 className="w-3 h-3 animate-spin" />
+        {progress != null ? `${Math.round(progress)}%` : '…'}
+      </button>
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={onDownload}
+      className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors"
+      title="Download into ARK Engine"
+      aria-label={`Download ${name}`}
+    >
+      <Download className="w-4 h-4" />
+    </button>
+  );
+}
+
+function ModelGrid({ children }: { children: ReactNode }) {
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1">
+      {children}
+    </div>
+  );
+}
+
 function StatusDot({ on }: { on: boolean }) {
   return (
     <span className={`w-2 h-2 rounded-full shrink-0 ${on ? 'bg-ark-accent-green' : 'bg-content-tertiary'}`} />
@@ -236,6 +311,24 @@ export function LocalAI() {
   const [speedSample, setSpeedSample] = useState<SpeedSample | null>(null);
   const [preloadPlan, setPreloadPlan] = useState<PreloadPlan | null>(null);
   const pcClass = useMemo(() => getHardwareClass(hw), [hw]);
+
+  const availableByCategory = useMemo(() => {
+    const installedIds = new Set(installed.map(m => m.id));
+    return LOCAL_CATEGORY_ORDER
+      .filter(id => id in LOCAL_CATEGORY_META)
+      .map(id => {
+        const meta = LOCAL_CATEGORY_META[id as CatalogModel['category']];
+        return {
+          id,
+          title: meta.title,
+          icon: meta.icon,
+          models: sortModelsByCategoryThenSizeDesc(
+            CATALOG.filter(m => m.category === id && !installedIds.has(m.id)),
+          ),
+        };
+      })
+      .filter(cat => cat.models.length > 0);
+  }, [installed]);
 
   useEffect(() => {
     const sync = () => {
@@ -630,15 +723,18 @@ export function LocalAI() {
                     })}
                   </div>
                 )}
-                <div className="flex flex-col">
-                  {installed.map(model => {
+                {installed.length === 0 ? (
+                  <p className="text-sm text-content-tertiary px-1">No local models installed yet.</p>
+                ) : (
+                  <ModelGrid>
+                    {installed.map(model => {
                     const isActive = model.id === activeId;
                     return (
                       <button
                         key={model.id}
                         type="button"
                         onClick={() => switchModel(model.id)}
-                        className="w-full flex items-center gap-3 py-3 px-1 rounded-xl text-left hover:bg-surface-hover/50 transition-colors"
+                        className="flex items-center gap-3 py-3 px-1 rounded-xl text-left hover:bg-surface-hover/50 transition-colors min-w-0"
                       >
                         <span className={`w-10 h-10 rounded-xl bg-gradient-to-br ${model.tone} flex items-center justify-center text-[10px] font-bold text-white shrink-0`}>
                           {model.initial}
@@ -655,51 +751,63 @@ export function LocalAI() {
                           </span>
                           <span className="block text-xs text-content-tertiary truncate mt-0.5">{model.detail}</span>
                         </span>
-                        <span className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${
-                          isActive ? 'bg-surface-hover text-ark-accent-green' : 'text-content-tertiary'
-                        }`}>
-                          {isActive ? <Check className="w-4 h-4" /> : <Download className="w-4 h-4 opacity-40" />}
-                        </span>
+                        <LocalDownloadControl
+                          name={model.name}
+                          isInstalled
+                          isActive={isActive}
+                        />
                       </button>
                     );
                   })}
-                </div>
+                  </ModelGrid>
+                )}
               </section>
 
-              <section>
-                <div className="flex items-center gap-2 mb-4">
-                  <Download className="w-4 h-4 text-content-secondary" />
-                  <h2 className="text-base font-semibold text-content-primary">Get more models</h2>
-                </div>
-                <div className="flex flex-col">
-                  {CATALOG.filter(m => !installed.some(i => i.id === m.id)).map(model => (
-                    <button
-                      key={model.id}
-                      type="button"
-                      onClick={() => downloadModel(model)}
-                      disabled={downloadProgressMap[model.id] != null && downloadProgressMap[model.id] < 100}
-                      className="w-full flex items-center gap-3 py-3 px-1 rounded-xl text-left hover:bg-surface-hover/50 transition-colors disabled:opacity-50"
-                    >
-                      <span className={`w-10 h-10 rounded-xl bg-gradient-to-br ${model.tone} flex items-center justify-center text-[10px] font-bold text-white shrink-0`}>
-                        {model.initial}
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="text-sm font-medium text-content-primary truncate block">{model.name}</span>
-                        <span className="block text-xs text-content-tertiary truncate mt-0.5">
-                          {downloadProgressMap[model.id] != null && downloadProgressMap[model.id] < 100
-                            ? `Downloading… ${Math.round(downloadProgressMap[model.id])}%`
-                            : catalogLine(model)}
-                        </span>
-                      </span>
-                      <span className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 text-content-secondary hover:text-content-primary">
-                        {downloadProgressMap[model.id] != null && downloadProgressMap[model.id] < 100
-                          ? <Loader2 className="w-4 h-4 animate-spin" />
-                          : <Download className="w-4 h-4" />}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </section>
+              <div className="space-y-10">
+                {availableByCategory.map(cat => (
+                  <section key={cat.id}>
+                    <div className="flex items-center gap-2 mb-4">
+                      <cat.icon className="w-4 h-4 text-content-secondary" />
+                      <h2 className="text-base font-semibold text-content-primary">{cat.title}</h2>
+                    </div>
+                    <ModelGrid>
+                      {cat.models.map(model => {
+                        const pct = downloadProgressMap[model.id];
+                        const isDownloading = pct != null && pct < 100;
+                        return (
+                          <div
+                            key={model.id}
+                            className="flex items-center gap-3 py-3 px-1 rounded-xl hover:bg-surface-hover/50 transition-colors min-w-0"
+                          >
+                            <span className={`w-10 h-10 rounded-xl bg-gradient-to-br ${model.tone} flex items-center justify-center text-[10px] font-bold text-white shrink-0`}>
+                              {model.initial}
+                            </span>
+                            <span className="min-w-0 flex-1">
+                              <span className="flex items-center gap-2 min-w-0 flex-wrap">
+                                <span className="text-sm font-medium text-content-primary truncate">{model.name}</span>
+                                <FreeBadge />
+                              </span>
+                              <span className="block text-xs text-content-tertiary truncate mt-0.5">
+                                {isDownloading ? `Downloading… ${Math.round(pct)}%` : catalogLine(model)}
+                              </span>
+                            </span>
+                            <LocalDownloadControl
+                              name={model.name}
+                              isDownloading={isDownloading}
+                              progress={pct}
+                              onDownload={() => downloadModel(model)}
+                              onCancel={() => cancelModelDownload(model.id)}
+                            />
+                          </div>
+                        );
+                      })}
+                    </ModelGrid>
+                  </section>
+                ))}
+                {availableByCategory.length === 0 && (
+                  <p className="text-sm text-content-tertiary px-1">All catalog models are installed.</p>
+                )}
+              </div>
 
               {/* Performance */}
               <section>
