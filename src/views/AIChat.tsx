@@ -316,6 +316,8 @@ export function AIChat() {
   /** Always-current route chat id — avoid stale closures when flushing the queue. */
   const routeChatIdRef = useRef<string | undefined>(undefined);
   const sendMessageRef = useRef<(content: string) => Promise<void>>(async () => {});
+  /** Bumps on every new send/stop so late chunks from an old turn cannot stick Stop/queue. */
+  const genSeqRef = useRef(0);
   const activeModelRef = useRef(activeModel);
   const [freeKeyOpen, setFreeKeyOpen] = useState(false);
   const [failoverNote, setFailoverNote] = useState<string | null>(null);
@@ -677,6 +679,7 @@ export function AIChat() {
   }, [modelMenuOpen]);
 
   const handleStop = () => {
+    genSeqRef.current += 1;
     stopRequestedRef.current = true;
     pendingQueueRef.current = [];
     setQueueLen(0);
@@ -684,9 +687,20 @@ export function AIChat() {
     generatingRef.current = false;
     activeGenChatIdRef.current = null;
     setGenerating(false);
+    setMessages(prev => {
+      const next = prev.map(m => (
+        m.role === 'assistant' && String(m.content || '').startsWith('__generating__:')
+          ? { ...m, content: '(stopped)' }
+          : m
+      ));
+      const chatId = persistChatIdRef.current || routeChatIdRef.current;
+      if (chatId) persistModeThread(mode, next, { chatId });
+      return next;
+    });
   };
 
   const flushQueuedSend = () => {
+    if (generatingRef.current) return;
     const next = pendingQueueRef.current.shift();
     setQueueLen(pendingQueueRef.current.length);
     if (next) {
@@ -720,6 +734,7 @@ export function AIChat() {
     if (!content.trim() || !user || generatingRef.current) return;
     stopRequestedRef.current = false;
     setFailoverNote(null);
+    const mySeq = ++genSeqRef.current;
 
     // Prefer live route id, then the id created by an in-flight first send (queue-safe).
     let activeChatId = routeChatIdRef.current || persistChatIdRef.current || undefined;
@@ -781,9 +796,24 @@ export function AIChat() {
       created_at: new Date().toISOString(),
     };
 
+    // Sync ref immediately so history / queue flushes don't see a stale thread.
+    const normalized = messagesRef.current.map(m => (
+      m.role === 'assistant' && String(m.content || '').startsWith('__generating__:')
+        ? { ...m, content: '(no response)' }
+        : m
+    ));
+    const priorForHistory = normalized.filter(m => {
+      const c = String(m.content || '');
+      if (!c || c.startsWith('__progress__:')) return false;
+      if (c === '(no response)') return false;
+      return true;
+    });
+    const previousAssistant = [...priorForHistory].reverse().find(m => m.role === 'assistant')?.content || '';
+    messagesRef.current = [...normalized, userMsg, assistantMsg];
+
     // Messages first — then navigate — so Explore ideas never replaces the thread.
-    setMessages(prev => {
-      const next = [...prev, userMsg, assistantMsg];
+    setMessages(() => {
+      const next = messagesRef.current;
       persistModeThread(mode, next, { chatId: activeChatId });
       return next;
     });
@@ -798,6 +828,56 @@ export function AIChat() {
       });
     }
 
+    const clearGeneratingIfMine = () => {
+      if (mySeq !== genSeqRef.current) return;
+      generatingRef.current = false;
+      if (activeGenChatIdRef.current === activeChatId) {
+        activeGenChatIdRef.current = null;
+      }
+      setGenerating(false);
+    };
+
+    const finalizeAssistant = (finalText: string, provider: string, libraryId?: string) => {
+      if (mySeq !== genSeqRef.current) return;
+      const threadChatId = persistChatIdRef.current || activeChatId;
+      setMessages(prev => {
+        const routeChat = routeChatIdRef.current;
+        if (routeChat && threadChatId && routeChat !== threadChatId) {
+          try {
+            const raw = localStorage.getItem(chatThreadKey(threadChatId));
+            const stored = raw ? JSON.parse(raw) as ChatMessage[] : [];
+            const nextStored = stored.map(m => (
+              m.id === assistantId
+                ? { ...m, content: finalText, provider_used: provider }
+                : m
+            ));
+            persistModeThread(mode, nextStored, {
+              chatId: threadChatId,
+              libraryId,
+              assistantId,
+            });
+          } catch {
+            /* ignore */
+          }
+          return prev;
+        }
+        const next = prev.map(m => (
+          m.id === assistantId
+            ? { ...m, content: finalText, provider_used: provider }
+            : m
+        ));
+        messagesRef.current = next;
+        const activeCreationId = route.name === 'chat' ? route.creationId : undefined;
+        persistModeThread(mode, next, {
+          chatId: threadChatId,
+          creationId: activeCreationId || libraryId,
+          libraryId,
+          assistantId,
+        });
+        return next;
+      });
+    };
+
     // First-run guarantee: no live chat path → honest CTA reply (no fake ARK Core answer).
     if (
       !pluginId
@@ -806,21 +886,11 @@ export function AIChat() {
       && !capacity.liveChat
     ) {
       const honest = honestNoLiveChatReply();
-      setMessages(prev => {
-        const next = prev.map(m =>
-          m.id === assistantId
-            ? { ...m, content: honest, provider_used: 'ARK · setup needed' }
-            : m,
-        );
-        persistModeThread(mode, next, { chatId: activeChatId });
-        return next;
-      });
-      generatingRef.current = false;
-      if (activeGenChatIdRef.current === activeChatId) {
-        activeGenChatIdRef.current = null;
-      }
-      setGenerating(false);
-      flushQueuedSend();
+      finalizeAssistant(honest, 'ARK · setup needed');
+      clearGeneratingIfMine();
+      window.setTimeout(() => {
+        if (mySeq === genSeqRef.current) flushQueuedSend();
+      }, 0);
       return;
     }
 
@@ -831,6 +901,24 @@ export function AIChat() {
       let resolvedProvider = providerLabel;
       let streamedPartial = '';
       let abandoned = false;
+      let idleTimer: number | undefined;
+      let earlyResolve: ((value: { reply: string }) => void) | null = null;
+      const earlyDone = new Promise<{ reply: string }>((resolve) => {
+        earlyResolve = resolve;
+      });
+
+      const armStreamIdleFinish = () => {
+        if (idleTimer) window.clearTimeout(idleTimer);
+        idleTimer = window.setTimeout(() => {
+          if (mySeq !== genSeqRef.current || abandoned || stopRequestedRef.current) return;
+          const cleaned = sanitizeAssistantReply(streamedPartial, content, previousAssistant);
+          if (cleaned.trim().length < 24) return;
+          // GGUF often finishes streaming before llama-cli exits — don't leave Stop stuck.
+          abandoned = true;
+          void engineGenerateCancel();
+          earlyResolve?.({ reply: cleaned });
+        }, 2200);
+      };
 
       try {
       if (pluginId) {
@@ -849,7 +937,7 @@ export function AIChat() {
           const kind = mode === 'image' ? 'image' : 'video';
           const stages = MEDIA_GEN_STAGES[kind];
           const setAssistantContent = (text: string) => {
-            if (abandoned || stopRequestedRef.current) return;
+            if (abandoned || stopRequestedRef.current || mySeq !== genSeqRef.current) return;
             setMessages(prev => {
               const next = prev.map(m => (m.id === assistantId ? { ...m, content: text } : m));
               persistModeThread(mode, next, { chatId: persistChatIdRef.current || activeChatId });
@@ -859,7 +947,7 @@ export function AIChat() {
 
           for (const stage of stages) {
             if (!stage.ms) continue;
-            if (stopRequestedRef.current) break;
+            if (stopRequestedRef.current || mySeq !== genSeqRef.current) break;
             setAssistantContent(`__generating__:${kind}:${stage.label}`);
             await new Promise(r => window.setTimeout(r, stage.ms));
           }
@@ -898,7 +986,6 @@ export function AIChat() {
               real: isReal,
               source: routed.source,
             });
-            // Keep honest preview text when not a finished generation.
             if (!isReal && routed.reply) {
               response = routed.reply.includes('![')
                 ? routed.reply
@@ -928,7 +1015,7 @@ export function AIChat() {
         try {
           const prefs = getLocalPrefs();
           const history = prefs.rememberContext
-            ? buildRouterHistory(messagesRef.current, content)
+            ? buildRouterHistory(priorForHistory, content)
             : buildRouterHistory([], content);
           const routePromise = arkRoute({
             message: content,
@@ -938,105 +1025,82 @@ export function AIChat() {
             preferredSource: pinnedModel.source,
             history,
             onChunk: (piece) => {
-              if (abandoned || stopRequestedRef.current) return;
+              if (abandoned || stopRequestedRef.current || mySeq !== genSeqRef.current) return;
               streamedPartial += piece;
-              const cleaned = sanitizeAssistantReply(streamedPartial, content);
+              const cleaned = sanitizeAssistantReply(streamedPartial, content, previousAssistant);
               setMessages(prev => prev.map(m => {
                 if (m.id !== assistantId) return m;
                 return { ...m, content: cleaned || '__generating__:chat:Thinking…' };
               }));
+              armStreamIdleFinish();
             },
           });
           const timeoutMs = 90_000;
           const routed = await Promise.race([
-            routePromise,
+            routePromise.then(r => ({ reply: r.reply, full: r as Awaited<typeof routePromise> })),
+            earlyDone.then(r => ({ reply: r.reply, full: null })),
             new Promise<never>((_, reject) => {
               window.setTimeout(() => reject(new Error('Response timed out. Try again or pick another model.')), timeoutMs);
             }),
           ]);
-          response = stopRequestedRef.current && streamedPartial
-            ? sanitizeAssistantReply(streamedPartial, content)
-            : sanitizeAssistantReply(routed.reply, content);
-          resolvedProvider = routerProviderLabel(routed, providerLabel);
-          const hopNote = failoverChipText(routed, pinnedModel);
-          if (hopNote) setFailoverNote(hopNote);
-          // Remember backend for chips/telemetry — never overwrite Auto / cloud picker pin.
-          if (pinnedModel.source === 'local' && pinnedModel.id !== 'ark-auto') {
-            setLocalPrefs({ lastChatModelId: pinnedModel.id });
+          if (idleTimer) window.clearTimeout(idleTimer);
+          const rawReply = stopRequestedRef.current && streamedPartial
+            ? streamedPartial
+            : routed.reply;
+          response = sanitizeAssistantReply(rawReply, content, previousAssistant);
+          if (routed.full) {
+            resolvedProvider = routerProviderLabel(routed.full, providerLabel);
+            const hopNote = failoverChipText(routed.full, pinnedModel);
+            if (hopNote) setFailoverNote(hopNote);
+            if (pinnedModel.source === 'local' && pinnedModel.id !== 'ark-auto') {
+              setLocalPrefs({ lastChatModelId: pinnedModel.id });
+            }
           }
           usedPlugin = true;
         } catch (err) {
+          if (idleTimer) window.clearTimeout(idleTimer);
           abandoned = true;
           void engineGenerateCancel();
           const timedOut = err instanceof Error && /timed out/i.test(err.message);
           response = stopRequestedRef.current && streamedPartial
-            ? sanitizeAssistantReply(streamedPartial, content)
-            : (timedOut
-              ? 'Response timed out. Try again or pick another model.'
-              : (err instanceof Error ? err.message : 'ARK Router failed'));
+            ? sanitizeAssistantReply(streamedPartial, content, previousAssistant)
+            : streamedPartial.trim().length > 20
+              ? sanitizeAssistantReply(streamedPartial, content, previousAssistant)
+              : (timedOut
+                ? 'Response timed out. Try again or pick another model.'
+                : (err instanceof Error ? err.message : 'ARK Router failed'));
           usedPlugin = true;
         }
       }
       } finally {
-        generatingRef.current = false;
-        if (activeGenChatIdRef.current === activeChatId) {
-          activeGenChatIdRef.current = null;
-        }
-        setGenerating(false);
+        if (idleTimer) window.clearTimeout(idleTimer);
+        clearGeneratingIfMine();
       }
+
+      if (mySeq !== genSeqRef.current) return;
 
       if (!isMediaMode && !pluginId) {
-        response = sanitizeAssistantReply(response, content);
+        response = sanitizeAssistantReply(response, content, previousAssistant);
+      }
+      if (stopRequestedRef.current && !response.trim()) {
+        response = '(stopped)';
       }
 
-      const threadChatId = persistChatIdRef.current || activeChatId;
-      window.setTimeout(async () => {
-        setMessages(prev => {
-          // If the user navigated to another chat, don't clobber that thread's UI state.
-          const routeChat = routeChatIdRef.current;
-          if (routeChat && threadChatId && routeChat !== threadChatId) {
-            try {
-              const raw = localStorage.getItem(chatThreadKey(threadChatId));
-              const stored = raw ? JSON.parse(raw) as ChatMessage[] : [];
-              const nextStored = stored.map(m => (
-                m.id === assistantId
-                  ? { ...m, content: response, provider_used: resolvedProvider }
-                  : m
-              ));
-              persistModeThread(mode, nextStored, {
-                chatId: threadChatId,
-                libraryId: lastLibraryId,
-                assistantId,
-              });
-            } catch {
-              /* ignore */
-            }
-            return prev;
-          }
-          const next = prev.map(m => (
-            m.id === assistantId
-              ? { ...m, content: response, provider_used: resolvedProvider }
-              : m
-          ));
-          const activeCreationId = route.name === 'chat' ? route.creationId : undefined;
-          persistModeThread(mode, next, {
-            chatId: threadChatId,
-            creationId: activeCreationId || lastLibraryId,
-            libraryId: lastLibraryId,
-            assistantId,
-          });
-          return next;
-        });
-        if (mode === 'general') {
-          try {
-            await saveChatMessage(null, 'user', content);
-            await saveChatMessage(null, 'assistant', slimChatContent(response, lastLibraryId), resolvedProvider);
-          } catch {
-            // offline / guest ok
-          }
+      finalizeAssistant(response, resolvedProvider, lastLibraryId);
+
+      if (mode === 'general') {
+        try {
+          await saveChatMessage(null, 'user', content);
+          await saveChatMessage(null, 'assistant', slimChatContent(response, lastLibraryId), resolvedProvider);
+        } catch {
+          // offline / guest ok
         }
-        flushQueuedSend();
-      }, usedPlugin ? 200 : 800);
+      }
+
+      // Flush the next queued prompt immediately once Stop is cleared.
+      window.setTimeout(() => {
+        if (mySeq === genSeqRef.current) flushQueuedSend();
+      }, 0);
     })();
   };
 
@@ -1256,6 +1320,25 @@ export function AIChat() {
   const composer = (
     <div className="w-full max-w-2xl mx-auto">
       {failoverChip}
+      {queueLen > 0 && (
+        <div className="mb-2 flex items-center justify-between gap-2 rounded-xl border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-100/90">
+          <span>
+            {queueLen === 1
+              ? '1 message queued — sends as soon as this reply finishes'
+              : `${queueLen} messages queued — send next when this reply finishes`}
+          </span>
+          <button
+            type="button"
+            className="shrink-0 rounded-md px-2 py-0.5 text-amber-200/90 hover:bg-amber-500/20 transition-colors"
+            onClick={() => {
+              pendingQueueRef.current = [];
+              setQueueLen(0);
+            }}
+          >
+            Clear
+          </button>
+        </div>
+      )}
       <div className="flex items-center gap-2">
         <div className="flex flex-1 items-center gap-1 rounded-full border border-surface-border bg-ark-navy-900/90 pl-1.5 pr-1.5 py-1.5 shadow-lg shadow-black/20 min-w-0">
           <button
@@ -1277,7 +1360,7 @@ export function AIChat() {
                 handleSend();
               }
             }}
-            placeholder={queueLen > 0 ? `Queued ${queueLen} · ${placeholder}` : placeholder}
+            placeholder={placeholder}
             rows={1}
             className="flex-1 bg-transparent border-none resize-none px-1 py-2 text-sm text-content-primary placeholder:text-content-tertiary focus:outline-none max-h-32 leading-5 min-w-0"
           />

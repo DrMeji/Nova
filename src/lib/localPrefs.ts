@@ -223,6 +223,17 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.39',
+    channel: 'stable' as const,
+    date: 'Aug 17, 2026',
+    title: 'Chat queue, stop, and reply continuity',
+    notes: [
+      'Stop clears as soon as a reply finishes (including when local streaming ends early)',
+      'Queued prompts show a banner and auto-send when the current reply completes',
+      'Follow-ups no longer paste the previous story into the next answer',
+    ],
+  },
+  {
     version: '0.1.38',
     channel: 'stable' as const,
     date: 'Aug 17, 2026',

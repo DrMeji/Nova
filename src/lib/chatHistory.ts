@@ -23,7 +23,8 @@ const CONTINUITY =
   'You are continuing an ongoing ARK conversation. Use the prior messages as context. '
   + 'Do not restart with a greeting, intro, or “what would you like to do today?” '
   + 'Do not repeat the user’s words back as a quote. '
-  + 'Pick up mid-task and answer the latest user message directly.';
+  + 'Do not repeat or continue a previous assistant answer unless the user asks. '
+  + 'Answer ONLY the latest user message directly.';
 
 /** Strip UI / media noise so providers get usable text. */
 export function slimTurnContent(content: string): string {
@@ -116,8 +117,11 @@ export function packHistoryPrompt(history: RouterChatTurn[], latestFallback?: st
   if (history.length === 0) return latestFallback || '';
   if (history.length === 1 && history[0].role === 'user') return history[0].content;
 
+  const latest = latestUserMessage(history, latestFallback || '');
   const lines: string[] = [
-    'Ongoing ARK conversation — continue from context. Do not restart with a greeting.',
+    'Ongoing ARK conversation.',
+    'Answer ONLY the latest User message below.',
+    'Do not repeat earlier ARK answers. Do not continue a previous story unless asked.',
     '',
   ];
   for (const turn of history) {
@@ -125,6 +129,7 @@ export function packHistoryPrompt(history: RouterChatTurn[], latestFallback?: st
     lines.push(`${who}: ${turn.content}`);
     lines.push('');
   }
+  lines.push(`Latest request: ${latest}`);
   lines.push('ARK:');
   return lines.join('\n');
 }
@@ -140,7 +145,11 @@ export function latestUserMessage(history: RouterChatTurn[], fallback: string): 
  * Strip GGUF / packed-prompt echoes so the bubble never shows “> hello” or
  * a full User:/ARK: transcript before the real answer.
  */
-export function sanitizeAssistantReply(raw: string, lastUserMessage?: string): string {
+export function sanitizeAssistantReply(
+  raw: string,
+  lastUserMessage?: string,
+  previousAssistant?: string,
+): string {
   let text = String(raw || '').replace(/\r\n/g, '\n').trim();
   if (!text) return '';
 
@@ -172,6 +181,24 @@ export function sanitizeAssistantReply(raw: string, lastUserMessage?: string): s
     }
   }
 
+  // If the model re-emits the previous assistant answer, drop that prefix.
+  const prev = String(previousAssistant || '').trim();
+  if (prev.length >= 48) {
+    const prevHead = prev.slice(0, Math.min(180, prev.length)).trim();
+    if (prevHead && text.startsWith(prevHead)) {
+      text = text.slice(prevHead.length).replace(/^\s*[.…]*(truncated)?\s*/i, '').trim();
+    } else {
+      // Fuzzy: first ~12 words of prior answer glued onto a new reply
+      const words = prev.split(/\s+/).slice(0, 14).join(' ');
+      if (words.length >= 40 && text.toLowerCase().startsWith(words.toLowerCase())) {
+        text = text.slice(words.length).replace(/^\s*[.…]*(truncated)?\s*/i, '').trim();
+      }
+    }
+  }
+
+  // Drop "Latest request: ..." echo lines from packed prompts
+  text = text.replace(/^Latest request:\s*.+\n+/im, '').trim();
+
   // Collapse accidental duplicated timeout / error lines glued together
   text = text.replace(
     /(Response timed out\.[^\n]*)\1+/gi,
@@ -182,6 +209,7 @@ export function sanitizeAssistantReply(raw: string, lastUserMessage?: string): s
   text = text
     .split('\n')
     .filter(line => !/^\s*User\s*:/i.test(line.trim()))
+    .filter(line => !/^\s*Latest request:/i.test(line.trim()))
     .join('\n')
     .trim();
 
