@@ -162,6 +162,13 @@
     background-color: rgb(var(--color-surface-active));
     color: rgb(var(--color-content-primary));
   }
+  .ark-nav-activity {
+    animation: arkNavActivity 1.05s ease-in-out infinite;
+    color: rgb(110 231 183);
+  }
+  .ark-nav-activity:hover {
+    color: rgb(167 243 208);
+  }
 }
 
 @layer utilities {
@@ -243,6 +250,10 @@
   @keyframes mediaGenShimmer {
     0% { background-position: 120% 0; }
     100% { background-position: -80% 0; }
+  }
+  @keyframes arkNavActivity {
+    0%, 100% { opacity: 1; filter: drop-shadow(0 0 0 rgba(52, 211, 153, 0)); }
+    50% { opacity: 0.72; filter: drop-shadow(0 0 6px rgba(52, 211, 153, 0.55)); }
   }
   @keyframes fadeIn {
     from { opacity: 0; }

@@ -3,9 +3,6 @@ import { useRouter } from '@/context/RouterContext';
 import { detectHardware, getAccurateHardware, getHardwareClass, getRecommendedModel, loadHardwareSnapshot, type HardwareInfo } from '@/lib/api';
 import { getLocalPrefs, setLocalPrefs } from '@/lib/localPrefs';
 import {
-  downloadEngineModel,
-  engineDownloadCancel,
-  engineDownloadProgress,
   engineDiskSpace,
   getEngineStatus,
   importGgufPick,
@@ -14,6 +11,15 @@ import {
   stopEngine,
   type ArkEngineStatus,
 } from '@/lib/arkEngine';
+import {
+  cancelEngineDownload,
+  getEngineDownloadMap,
+  getEngineDownloadPhaseMap,
+  isEngineDownloading,
+  reattachEngineDownloads,
+  startEngineDownload,
+  subscribeEngineDownloads,
+} from '@/lib/engineDownloads';
 import { probeBrain } from '@/lib/brain';
 import {
   computePreloadPlan,
@@ -219,10 +225,10 @@ export function LocalAI() {
     active: boolean;
   }>>([]);
   const [activeId, setActiveId] = useState(() => getLocalPrefs().defaultModelId || recommendation.id);
-  const [downloadProgressMap, setDownloadProgressMap] = useState<Record<string, number>>({});
-  const [downloadPhaseMap, setDownloadPhaseMap] = useState<Record<string, string>>({});
+  const [downloadProgressMap, setDownloadProgressMap] = useState<Record<string, number>>(() => getEngineDownloadMap());
+  const [downloadPhaseMap, setDownloadPhaseMap] = useState<Record<string, string>>(() => getEngineDownloadPhaseMap());
   const [diskNote, setDiskNote] = useState('');
-  const downloadingIds = Object.keys(downloadProgressMap);
+  const downloadingIds = Object.keys(downloadProgressMap).filter(id => (downloadProgressMap[id] ?? 0) < 100);
   const [statusNote, setStatusNote] = useState('Starting ARK Engine…');
   const [engineMeta, setEngineMeta] = useState<ArkEngineStatus | null>(null);
   const [brainNote, setBrainNote] = useState('Brain API · checking');
@@ -230,6 +236,16 @@ export function LocalAI() {
   const [speedSample, setSpeedSample] = useState<SpeedSample | null>(null);
   const [preloadPlan, setPreloadPlan] = useState<PreloadPlan | null>(null);
   const pcClass = useMemo(() => getHardwareClass(hw), [hw]);
+
+  useEffect(() => {
+    const sync = () => {
+      setDownloadProgressMap(getEngineDownloadMap());
+      setDownloadPhaseMap(getEngineDownloadPhaseMap());
+    };
+    sync();
+    void reattachEngineDownloads('local-ai').then(sync);
+    return subscribeEngineDownloads(sync);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -335,7 +351,7 @@ export function LocalAI() {
   };
 
   const downloadModel = (model: typeof CATALOG[number]) => {
-    if (downloadProgressMap[model.id] != null && downloadProgressMap[model.id] < 100) return;
+    if (isEngineDownloading(model.id)) return;
     void engineDiskSpace().then(disk => {
       const needGb = model.sizeGb * 1.15;
       if (disk?.freeGb != null && disk.freeGb < needGb) {
@@ -344,83 +360,26 @@ export function LocalAI() {
         return;
       }
       setDiskNote(disk?.freeGb != null ? `${disk.freeGb.toFixed(0)} GB free` : '');
-      setDownloadProgressMap(prev => ({ ...prev, [model.id]: 1 }));
-      setDownloadPhaseMap(prev => ({ ...prev, [model.id]: 'queued' }));
-      void downloadEngineModel(model.id).then(async () => {
-        const tick = window.setInterval(async () => {
-          const p = await engineDownloadProgress(model.id);
-          setDownloadProgressMap(prev => ({ ...prev, [model.id]: p }));
-          const status = await getEngineStatus();
-          const row = status.models.find(m => m.id === model.id) as { downloadPhase?: string } | undefined;
-          if (row?.downloadPhase) {
-            setDownloadPhaseMap(prev => ({ ...prev, [model.id]: row.downloadPhase || '' }));
-          }
-          try {
-            const { engineDownloadError } = await import('@/lib/arkEngine');
-            const err = await engineDownloadError(model.id);
-            if (err) {
-              window.clearInterval(tick);
-              setDownloadProgressMap(prev => {
-                const next = { ...prev };
-                delete next[model.id];
-                return next;
-              });
-              setDownloadPhaseMap(prev => {
-                const next = { ...prev };
-                delete next[model.id];
-                return next;
-              });
-              setStatusNote(err);
-              return;
+      setStatusNote(`Downloading ${model.name}…`);
+      void startEngineDownload({ id: model.id, name: model.name, source: 'local-ai' }).then(() => {
+        const watch = window.setInterval(async () => {
+          if (!isEngineDownloading(model.id) && getEngineDownloadMap()[model.id] == null) {
+            window.clearInterval(watch);
+            try {
+              const st = await getEngineStatus();
+              applyEngine(st);
+              setStatusNote(`${model.name} ready`);
+            } catch {
+              /* ignore */
             }
-          } catch {
-            /* ignore */
           }
-          if (p >= 100) {
-            window.clearInterval(tick);
-            setDownloadProgressMap(prev => {
-              const next = { ...prev };
-              delete next[model.id];
-              return next;
-            });
-            setDownloadPhaseMap(prev => {
-              const next = { ...prev };
-              delete next[model.id];
-              return next;
-            });
-            const st = await getEngineStatus();
-            applyEngine(st);
-            setStatusNote(`${model.name} ready`);
-          }
-        }, 350);
-      }).catch(err => {
-        setDownloadProgressMap(prev => {
-          const next = { ...prev };
-          delete next[model.id];
-          return next;
-        });
-        setDownloadPhaseMap(prev => {
-          const next = { ...prev };
-          delete next[model.id];
-          return next;
-        });
-        setStatusNote(err instanceof Error ? err.message : 'Download failed');
+        }, 600);
       });
     });
   };
 
   const cancelModelDownload = (id: string) => {
-    void engineDownloadCancel(id).then(() => {
-      setDownloadProgressMap(prev => {
-        const next = { ...prev };
-        delete next[id];
-        return next;
-      });
-      setDownloadPhaseMap(prev => {
-        const next = { ...prev };
-        delete next[id];
-        return next;
-      });
+    void cancelEngineDownload(id).then(() => {
       setStatusNote('Download canceled');
       void getEngineStatus().then(applyEngine);
     });

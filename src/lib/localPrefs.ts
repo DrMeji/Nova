@@ -223,6 +223,18 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.47',
+    channel: 'stable' as const,
+    date: 'Aug 16, 2026',
+    title: 'Background downloads + done indicators',
+    notes: [
+      'Collapsed sidebar: no logo / no profile — logo only when expanded; Settings alone at bottom',
+      'Queue banner matches composer width; token ring click shows model + budget',
+      'Model downloads keep going when you leave Models / Local AI; nav blinks green when ready',
+      'Chat reply finished while away blinks New Chat / Image / Video until you open it',
+    ],
+  },
+  {
     version: '0.1.46',
     channel: 'stable' as const,
     date: 'Aug 16, 2026',

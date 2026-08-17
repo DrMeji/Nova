@@ -23,6 +23,7 @@ import { arkRoute, routerProviderLabel, type ArkRouterResult } from '@/lib/arkRo
 import { FreeKeyWizard } from '@/components/FreeKeyWizard';
 import { ComposerPlusMenu, type ComposerPlusAction } from '@/components/ComposerPlusMenu';
 import { TokenUsageRing } from '@/components/TokenUsageRing';
+import { activityKeyForChatMode, notifyWorkDone } from '@/lib/activityIndicators';
 import { getTokenUsageRatio, recordTokenUsage } from '@/lib/tokenUsage';
 import { buildRouterHistory, sanitizeAssistantReply } from '@/lib/chatHistory';
 import { MessageContent } from '@/components/MediaMessage';
@@ -932,42 +933,44 @@ export function AIChat() {
     const finalizeAssistant = (finalText: string, provider: string, libraryId?: string) => {
       if (mySeq !== genSeqRef.current) return;
       const threadChatId = persistChatIdRef.current || activeChatId;
-      setMessages(prev => {
-        const routeChat = routeChatIdRef.current;
-        if (routeChat && threadChatId && routeChat !== threadChatId) {
-          try {
-            const raw = localStorage.getItem(chatThreadKey(threadChatId));
-            const stored = raw ? JSON.parse(raw) as ChatMessage[] : [];
-            const nextStored = stored.map(m => (
-              m.id === assistantId
-                ? { ...m, content: finalText, provider_used: provider }
-                : m
-            ));
-            persistModeThread(mode, nextStored, {
-              chatId: threadChatId,
-              libraryId,
-              assistantId,
-            });
-          } catch {
-            /* ignore */
+      const routeChat = routeChatIdRef.current;
+      const patchThread = (list: ChatMessage[]) => list.map(m => (
+        m.id === assistantId
+          ? { ...m, content: finalText, provider_used: provider }
+          : m
+      ));
+
+      // Prefer live messages; fall back to stored thread when the view already switched chats.
+      let next = patchThread(messagesRef.current);
+      if (routeChat && threadChatId && routeChat !== threadChatId) {
+        try {
+          const raw = localStorage.getItem(chatThreadKey(threadChatId));
+          const stored = raw ? JSON.parse(raw) as ChatMessage[] : [];
+          if (Array.isArray(stored) && stored.some(m => m.id === assistantId)) {
+            next = patchThread(stored);
           }
-          return prev;
+        } catch {
+          /* ignore */
         }
-        const next = prev.map(m => (
-          m.id === assistantId
-            ? { ...m, content: finalText, provider_used: provider }
-            : m
-        ));
+      } else {
         messagesRef.current = next;
-        const activeCreationId = route.name === 'chat' ? route.creationId : undefined;
-        persistModeThread(mode, next, {
-          chatId: threadChatId,
-          creationId: activeCreationId || libraryId,
-          libraryId,
-          assistantId,
-        });
+      }
+
+      const activeCreationId = route.name === 'chat' ? route.creationId : undefined;
+      persistModeThread(mode, next, {
+        chatId: threadChatId,
+        creationId: activeCreationId || libraryId,
+        libraryId,
+        assistantId,
+      });
+
+      // Safe if unmounted — React ignores; persistence above already landed.
+      setMessages(prev => {
+        if (routeChat && threadChatId && routeChat !== threadChatId) return prev;
         return next;
       });
+
+      notifyWorkDone(activityKeyForChatMode(mode));
     };
 
     // First-run guarantee: no live chat path → honest CTA reply (no fake ARK Core answer).
@@ -1450,27 +1453,28 @@ export function AIChat() {
           </span>
         </div>
       )}
-      {queueLen > 0 && (
-        <div className="mb-2 flex items-center justify-between gap-2 rounded-xl border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-100/90">
-          <span>
-            {queueLen === 1
-              ? '1 message queued — sends as soon as this reply finishes'
-              : `${queueLen} messages queued — send next when this reply finishes`}
-          </span>
-          <button
-            type="button"
-            className="shrink-0 rounded-md px-2 py-0.5 text-amber-200/90 hover:bg-amber-500/20 transition-colors"
-            onClick={() => {
-              pendingQueueRef.current = [];
-              setQueueLen(0);
-            }}
-          >
-            Clear
-          </button>
-        </div>
-      )}
-      <div className="flex items-center gap-2">
-        <div className="flex flex-1 items-center gap-1 rounded-full border border-surface-border bg-ark-navy-900/90 pl-1.5 pr-1.5 py-1.5 shadow-lg shadow-black/20 min-w-0">
+      <div className="flex items-end gap-2">
+        <div className="flex-1 min-w-0 flex flex-col">
+          {queueLen > 0 && (
+            <div className="mb-2 flex items-center justify-between gap-2 rounded-full border border-amber-500/25 bg-amber-500/10 px-3.5 py-2 text-[11px] text-amber-100/90">
+              <span className="min-w-0 truncate">
+                {queueLen === 1
+                  ? '1 message queued — sends as soon as this reply finishes'
+                  : `${queueLen} messages queued — send next when this reply finishes`}
+              </span>
+              <button
+                type="button"
+                className="shrink-0 rounded-md px-2 py-0.5 text-amber-200/90 hover:bg-amber-500/20 transition-colors"
+                onClick={() => {
+                  pendingQueueRef.current = [];
+                  setQueueLen(0);
+                }}
+              >
+                Clear
+              </button>
+            </div>
+          )}
+          <div className="flex items-center gap-1 rounded-full border border-surface-border bg-ark-navy-900/90 pl-1.5 pr-1.5 py-1.5 shadow-lg shadow-black/20 min-w-0">
           <input
             ref={attachInputRef}
             type="file"
@@ -1549,9 +1553,32 @@ export function AIChat() {
               <Square className="w-3.5 h-3.5 fill-current" />
             </button>
           )}
+          </div>
         </div>
 
-        <TokenUsageRing ratio={tokenRatio} className="text-content-primary shrink-0" />
+        <div className="flex items-center gap-2 shrink-0 pb-1">
+        <TokenUsageRing
+          ratio={tokenRatio}
+          className="text-content-primary shrink-0"
+          modelName={
+            mode === 'image' || mode === 'video'
+              ? activeModel.name
+              : activeModel.source === 'auto'
+                ? 'ARK Auto'
+                : activeModel.name
+          }
+          modelDetail={
+            mode === 'image'
+              ? 'Image · session budget'
+              : mode === 'video'
+                ? 'Video · session budget'
+                : activeModel.source === 'auto'
+                  ? 'Free-first · silent failover'
+                  : activeModel.source === 'local'
+                    ? 'Local · ARK Engine'
+                    : 'Cloud · connected key'
+          }
+        />
 
         {ModeIcon && (
           <button
@@ -1576,6 +1603,7 @@ export function AIChat() {
             <Code2 className="w-5 h-5" />
           </button>
         )}
+        </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 mt-2.5 px-1">

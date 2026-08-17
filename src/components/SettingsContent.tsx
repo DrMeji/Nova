@@ -64,6 +64,7 @@ const DEFAULT_MODELS = [
   { id: 'llama32-3b', label: 'Llama 3.2 3B', detail: 'Local · fast', source: 'local' },
   { id: 'gpt-4o', label: 'GPT-4o', detail: 'Cloud · chat and code', source: 'cloud' },
   { id: 'claude-sonnet', label: 'Claude Sonnet', detail: 'Cloud · long context', source: 'cloud' },
+  { id: 'deepseek-chat', label: 'DeepSeek Chat', detail: 'Cloud · coding + chat', source: 'cloud' },
   { id: 'gemini-flash', label: 'Gemini 2.0 Flash', detail: 'Cloud · fast', source: 'cloud' },
 ];
 
@@ -305,7 +306,7 @@ export function SettingsContent({ onClose }: { onClose?: () => void } = {}) {
           LOCKED_SCROLL_SECTIONS.has(activeSection) ? 'overflow-hidden' : 'overflow-y-auto'
         }`}
       >
-        <div className="max-w-2xl">
+        <div className={activeSection === 'providers' || activeSection === 'models' ? 'max-w-4xl' : 'max-w-2xl'}>
           {activeSection === 'account' && (
             <SettingsSection title="Account" description="Profile, sign in, and session controls">
               <div className="space-y-5">
@@ -557,10 +558,10 @@ export function SettingsContent({ onClose }: { onClose?: () => void } = {}) {
               title="Providers"
               description="Connect once. Keys stay on this device (OS-encrypted in Desktop) and power ARK Auto failover."
             >
-              <div className="space-y-4">
-                <div className="ark-card p-4 flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-lg bg-ark-blue-500/10 flex items-center justify-center shrink-0">
-                    <Cloud className="w-5 h-5 text-ark-blue-400" />
+              <div className="space-y-3">
+                <div className="ark-card p-3.5 flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-lg bg-ark-blue-500/10 flex items-center justify-center shrink-0">
+                    <Cloud className="w-4 h-4 text-ark-blue-400" />
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-content-primary">Cloud connections</p>
@@ -571,21 +572,24 @@ export function SettingsContent({ onClose }: { onClose?: () => void } = {}) {
                   <KeyRound className="w-4 h-4 text-content-tertiary" />
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[min(48vh,26rem)] overflow-y-auto">
+                <div className="grid grid-cols-2 lg:grid-cols-3 gap-2">
                   {PROVIDER_ROWS.map(p => {
                     const hasKey = Boolean(providerKeys[p.id]);
                     const editing = editingProvider === p.id;
                     return (
-                      <div key={p.id} className={`rounded-xl border border-surface-border p-3 ${editing ? 'sm:col-span-2' : ''}`}>
-                        <div className="flex items-center justify-between gap-3">
+                      <div
+                        key={p.id}
+                        className={`rounded-xl border border-surface-border p-2.5 ${editing ? 'col-span-2 lg:col-span-3' : ''}`}
+                      >
+                        <div className="flex items-center justify-between gap-2">
                           <div className="min-w-0">
-                            <p className="text-sm font-medium text-content-primary">{p.name}</p>
-                            <p className="text-xs text-content-tertiary">{p.hint}</p>
+                            <p className="text-sm font-medium text-content-primary truncate">{p.name}</p>
+                            <p className="text-[11px] text-content-tertiary truncate">{p.hint}</p>
                           </div>
-                          <div className="flex items-center gap-2 shrink-0">
+                          <div className="flex items-center gap-1.5 shrink-0">
                             {hasKey && (
-                              <span className="text-[10px] rounded-full bg-emerald-500/15 text-emerald-400 px-2 py-0.5">
-                                Key saved
+                              <span className="text-[10px] rounded-full bg-emerald-500/15 text-emerald-400 px-1.5 py-0.5">
+                                Saved
                               </span>
                             )}
                             <button
@@ -596,12 +600,12 @@ export function SettingsContent({ onClose }: { onClose?: () => void } = {}) {
                               }}
                               className="text-xs text-sky-400 hover:text-sky-300"
                             >
-                              {editing ? 'Close' : hasKey ? 'Edit' : 'Add key'}
+                              {editing ? 'Close' : hasKey ? 'Edit' : 'Add'}
                             </button>
                           </div>
                         </div>
                         {editing && (
-                          <div className="mt-3 space-y-2">
+                          <div className="mt-2.5 space-y-2">
                             <input
                               type="password"
                               value={keyDraft}
@@ -647,13 +651,12 @@ export function SettingsContent({ onClose }: { onClose?: () => void } = {}) {
                   })}
                 </div>
 
-                <div className="rounded-xl border border-surface-border p-4 space-y-3">
+                <div className="rounded-xl border border-surface-border p-3 space-y-2.5">
                   <div className="flex items-start justify-between gap-3">
-                    <div>
+                    <div className="min-w-0">
                       <p className="text-sm font-medium text-content-primary">Plugin OAuth client IDs</p>
-                      <p className="text-xs text-content-tertiary mt-0.5 leading-relaxed">
-                        Register OAuth apps once, paste the public client ids here, then use one-click sign-in in Build.
-                        Client secrets stay in env only (`ARK_GOOGLE_CLIENT_SECRET`).
+                      <p className="text-[11px] text-content-tertiary mt-0.5 leading-snug">
+                        Register once, paste public client IDs, then one-click sign-in in Build.
                       </p>
                     </div>
                     <button
@@ -664,12 +667,16 @@ export function SettingsContent({ onClose }: { onClose?: () => void } = {}) {
                       Setup guide
                     </button>
                   </div>
-                  {(['github', 'google'] as const).map(id => (
-                    <OAuthClientRow key={id} pluginId={id} onSaved={(msg) => {
-                      setSavedFlash(msg);
-                      window.setTimeout(() => setSavedFlash(''), 1600);
-                    }} />
-                  ))}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {(['github', 'google'] as const).map(id => (
+                      <div key={id} className="rounded-lg border border-surface-border/80 bg-ark-navy-950/40 p-2.5">
+                        <OAuthClientRow pluginId={id} onSaved={(msg) => {
+                          setSavedFlash(msg);
+                          window.setTimeout(() => setSavedFlash(''), 1600);
+                        }} />
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
             </SettingsSection>
@@ -1117,7 +1124,7 @@ function SettingsSection({ title, description, children }: { title: string; desc
   return (
     <div className="animate-fade-in">
       <h1 className="text-xl font-bold text-content-primary mb-1">{title}</h1>
-      <p className="text-sm text-content-secondary mb-6">{description}</p>
+      <p className="text-sm text-content-secondary mb-4">{description}</p>
       {children}
     </div>
   );
@@ -1136,13 +1143,13 @@ function OAuthClientRow({
       ? {
           label: 'GitHub',
           url: 'https://github.com/settings/developers',
-          steps: 'New OAuth App → any Homepage URL → Device Flow enabled → copy Client ID',
+          steps: 'OAuth App → Device Flow → copy Client ID',
           env: 'ARK_GITHUB_CLIENT_ID',
         }
       : {
           label: 'Google',
           url: 'https://console.cloud.google.com/apis/credentials',
-          steps: 'OAuth client (Desktop or Web) → copy Client ID; set ARK_GOOGLE_CLIENT_SECRET in env',
+          steps: 'Desktop/Web OAuth client → paste Client ID',
           env: 'ARK_GOOGLE_CLIENT_ID',
         };
 

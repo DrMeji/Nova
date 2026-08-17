@@ -9,7 +9,15 @@ import {
   LOCAL_CATEGORY_ORDER,
   sortModelsByCategoryThenSizeDesc,
 } from '@/lib/modelSort';
-import { downloadEngineModel, engineDownloadProgress, engineDownloadError, engineDownloadCancel, engineDiskSpace, getEngineStatus } from '@/lib/arkEngine';
+import { engineDiskSpace, getEngineStatus } from '@/lib/arkEngine';
+import {
+  cancelEngineDownload,
+  getEngineDownloadMap,
+  isEngineDownloading,
+  reattachEngineDownloads,
+  startEngineDownload,
+  subscribeEngineDownloads,
+} from '@/lib/engineDownloads';
 import {
   getProviderApiKeys,
   hasProviderApiKey,
@@ -409,8 +417,10 @@ export function ModelsView() {
   const [tab, setTab] = useState<TabId>('for-pc');
   const [query, setQuery] = useState('');
   const [installed, setInstalled] = useState<Set<string>>(() => new Set());
-  const [installing, setInstalling] = useState<Set<string>>(new Set());
-  const [installProgress, setInstallProgress] = useState<Record<string, number>>({});
+  const [installing, setInstalling] = useState<Set<string>>(() => new Set(
+    Object.keys(getEngineDownloadMap()).filter(id => isEngineDownloading(id)),
+  ));
+  const [installProgress, setInstallProgress] = useState<Record<string, number>>(() => getEngineDownloadMap());
   const [connected, setConnected] = useState<Set<string>>(() => {
     const s = new Set<string>();
     if (isOllamaEnabled()) s.add('ollama');
@@ -431,6 +441,52 @@ export function ModelsView() {
   const pcClass = useMemo(() => getHardwareClass(hw), [hw]);
   const ramGb = useMemo(() => parseRamGb(hw), [hw]);
   const fitLists = useMemo(() => buildFitLists(pcClass, ramGb), [pcClass, ramGb]);
+
+
+  useEffect(() => {
+    const sync = () => {
+      const map = getEngineDownloadMap();
+      setInstallProgress(map);
+      setInstalling(new Set(Object.keys(map).filter(id => isEngineDownloading(id))));
+    };
+    sync();
+    void reattachEngineDownloads('models').then(async () => {
+      sync();
+      try {
+        const status = await getEngineStatus();
+        const ready = new Set(
+          status.models
+            .filter(m =>
+              m.status === 'ready'
+              && m.id !== 'ark-core'
+              && m.id !== 'ark-image-core'
+              && m.id !== 'ark-video-core',
+            )
+            .map(m => m.id),
+        );
+        setInstalled(ready);
+      } catch {
+        /* ignore */
+      }
+    });
+    return subscribeEngineDownloads(() => {
+      sync();
+      // When a job drops off at 100%, refresh installed set
+      void getEngineStatus().then(status => {
+        const ready = new Set(
+          status.models
+            .filter(m =>
+              m.status === 'ready'
+              && m.id !== 'ark-core'
+              && m.id !== 'ark-image-core'
+              && m.id !== 'ark-video-core',
+            )
+            .map(m => m.id),
+        );
+        setInstalled(ready);
+      }).catch(() => undefined);
+    });
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -633,7 +689,7 @@ export function ModelsView() {
       setOllamaNote('Not downloadable in ARK Engine yet — search shows discovery only.');
       return;
     }
-    if (installed.has(id) || installing.has(id)) return;
+    if (installed.has(id) || isEngineDownloading(id)) return;
     const model = LOCAL_MODELS.find(m => m.id === id);
     const needGb = modelSizeGb(model || { size: '0' }) * 1.15;
     void engineDiskSpace().then(disk => {
@@ -641,57 +697,17 @@ export function ModelsView() {
         setOllamaNote(`Need ~${needGb.toFixed(1)} GB free (have ${disk.freeGb.toFixed(1)} GB)`);
         return;
       }
-      setInstalling(prev => new Set(prev).add(id));
-      setInstallProgress(prev => ({ ...prev, [id]: 1 }));
-      void downloadEngineModel(id).then(() => {
-        const tick = window.setInterval(async () => {
-          const p = await engineDownloadProgress(id);
-          setInstallProgress(prev => ({ ...prev, [id]: p }));
-          const err = await engineDownloadError(id);
-          if (err) {
-            window.clearInterval(tick);
-            setInstalling(prev => {
-              const next = new Set(prev);
-              next.delete(id);
-              return next;
-            });
-            setOllamaNote(err);
-            return;
-          }
-          if (p >= 100) {
-            window.clearInterval(tick);
-            setInstalling(prev => {
-              const next = new Set(prev);
-              next.delete(id);
-              return next;
-            });
-            setInstalled(prev => new Set(prev).add(id));
-            setOllamaNote(`${id} ready`);
-          }
-        }, 400);
-      }).catch(err => {
-        setInstalling(prev => {
-          const next = new Set(prev);
-          next.delete(id);
-          return next;
-        });
-        setOllamaNote(err instanceof Error ? err.message : 'Download failed');
+      setOllamaNote(`Downloading ${model?.name || id}…`);
+      void startEngineDownload({
+        id,
+        name: model?.name || id,
+        source: 'models',
       });
     });
   };
 
   const cancelInstall = (id: string) => {
-    void engineDownloadCancel(id).then(() => {
-      setInstalling(prev => {
-        const next = new Set(prev);
-        next.delete(id);
-        return next;
-      });
-      setInstallProgress(prev => {
-        const next = { ...prev };
-        delete next[id];
-        return next;
-      });
+    void cancelEngineDownload(id).then(() => {
       setOllamaNote('Download canceled');
     });
   };

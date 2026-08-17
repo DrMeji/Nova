@@ -1,7 +1,5 @@
 ﻿import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useRouter, type Route } from '@/context/RouterContext';
-import { useAuth } from '@/context/AuthContext';
-import { getLocalPrefs } from '@/lib/localPrefs';
 import {
   SquarePen, Briefcase, Blocks, Database, Bot,
   Settings, Search, PanelLeft, ChevronDown, History, Clock3,
@@ -11,47 +9,48 @@ import { Modal } from './Modal';
 import { SettingsContent } from './SettingsContent';
 import { SearchPanel } from './SearchPanel';
 import { useRecentProjects } from '@/context/RecentProjectsContext';
+import {
+  clearActivity,
+  getActivityFlags,
+  setActivityViewing,
+  subscribeActivity,
+  type ActivityKey,
+} from '@/lib/activityIndicators';
+import { reattachEngineDownloads } from '@/lib/engineDownloads';
 
-const NAV_ITEMS: { label: string; icon: React.ComponentType<{ className?: string }>; route: Route }[] = [
-  { label: 'New Chat', icon: SquarePen, route: { name: 'chat' } },
-  { label: 'Image', icon: ImageIcon, route: { name: 'chat', mode: 'image' } },
-  { label: 'Video', icon: Video, route: { name: 'chat', mode: 'video' } },
-  { label: 'Code', icon: Code2, route: { name: 'projects' } },
+const NAV_ITEMS: {
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  route: Route;
+  activity?: ActivityKey;
+}[] = [
+  { label: 'New Chat', icon: SquarePen, route: { name: 'chat' }, activity: 'chat' },
+  { label: 'Image', icon: ImageIcon, route: { name: 'chat', mode: 'image' }, activity: 'image' },
+  { label: 'Video', icon: Video, route: { name: 'chat', mode: 'video' }, activity: 'video' },
+  { label: 'Code', icon: Code2, route: { name: 'projects' }, activity: 'code' },
   { label: 'Projects', icon: Briefcase, route: { name: 'projects' } },
   { label: 'History', icon: History, route: { name: 'dashboard' } },
-  { label: 'Plugins', icon: Blocks, route: { name: 'build' } },
-  { label: 'Models', icon: Database, route: { name: 'models' } },
-  { label: 'Local AI', icon: Bot, route: { name: 'local-ai' } },
+  { label: 'Plugins', icon: Blocks, route: { name: 'build' }, activity: 'plugins' },
+  { label: 'Models', icon: Database, route: { name: 'models' }, activity: 'models' },
+  { label: 'Local AI', icon: Bot, route: { name: 'local-ai' }, activity: 'local-ai' },
 ];
-
-function resolveDisplayName(
-  prefsName: string | undefined,
-  profileName: string | null | undefined,
-  email: string | undefined,
-) {
-  const fromPrefs = prefsName?.trim();
-  if (fromPrefs && fromPrefs !== 'Guest') return fromPrefs;
-  if (profileName?.trim()) return profileName.trim();
-  return email?.split('@')[0] || 'Guest';
-}
 
 export function AppShell({ children }: { children: ReactNode }) {
   const { route, navigate } = useRouter();
-  const { user, profile } = useAuth();
   const { recent, activeChats, archiveChat, deleteChatForever, addRecent, renameRecent, renameChat, removeRecent } = useRecentProjects();
   const [collapsed, setCollapsed] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [recentOpen, setRecentOpen] = useState(true);
-  const [prefsName, setPrefsName] = useState(() => getLocalPrefs().displayName);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string; kind: 'chat' | 'project' } | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
+  const [activity, setActivity] = useState(() => ({ ...getActivityFlags() }));
+
+  useEffect(() => subscribeActivity(() => setActivity({ ...getActivityFlags() })), []);
 
   useEffect(() => {
-    const onPrefs = () => setPrefsName(getLocalPrefs().displayName);
-    window.addEventListener('ark:prefs-changed', onPrefs);
-    return () => window.removeEventListener('ark:prefs-changed', onPrefs);
+    void reattachEngineDownloads('models');
   }, []);
 
   useEffect(() => {
@@ -64,11 +63,12 @@ export function AppShell({ children }: { children: ReactNode }) {
   }, [navigate]);
 
   useEffect(() => {
-    if (!settingsOpen) setPrefsName(getLocalPrefs().displayName);
-  }, [settingsOpen]);
-
-  const displayName = resolveDisplayName(prefsName, profile?.display_name, user?.email);
-  const initial = displayName[0]?.toUpperCase() || '?';
+    setActivityViewing({
+      route: route.name,
+      mode: route.name === 'chat' ? route.mode : undefined,
+      chatId: route.name === 'chat' ? route.chatId : undefined,
+    });
+  }, [route]);
 
   const inRecentChat = route.name === 'chat' && Boolean(route.chatId);
 
@@ -168,24 +168,14 @@ export function AppShell({ children }: { children: ReactNode }) {
                 </div>
               )}
               {collapsed ? (
-                <>
-                  <img
-                    src={`${import.meta.env.BASE_URL}ark-icon.png`}
-                    alt="ARK"
-                    className="w-8 h-8 rounded-lg object-cover"
-                    onError={e => {
-                      (e.currentTarget as HTMLImageElement).style.display = 'none';
-                    }}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setCollapsed(c => !c)}
-                    className="ark-nav-item w-full !justify-center"
-                    title="Expand sidebar"
-                  >
-                    <PanelLeft className="w-4 h-4" />
-                  </button>
-                </>
+                <button
+                  type="button"
+                  onClick={() => setCollapsed(c => !c)}
+                  className="ark-nav-item w-full !justify-center"
+                  title="Expand sidebar"
+                >
+                  <PanelLeft className="w-4 h-4" />
+                </button>
               ) : (
                 <div className="flex items-center gap-0.5">
                   <button
@@ -213,11 +203,13 @@ export function AppShell({ children }: { children: ReactNode }) {
           <nav className={`flex-1 min-h-0 flex flex-col gap-1 overflow-y-auto ${collapsed ? 'px-2 pt-4' : 'px-3 pt-4'}`}>
             {NAV_ITEMS.map(item => {
               const active = isActive(item);
+              const busy = Boolean(item.activity && activity[item.activity]);
               return (
                 <button
                   key={item.label}
                   type="button"
                   onClick={() => {
+                    if (item.activity) clearActivity(item.activity);
                     // New Chat / Image / Video are distinct tabs — always navigate explicitly.
                     if (item.label === 'New Chat') {
                       navigate({ name: 'chat' });
@@ -231,10 +223,16 @@ export function AppShell({ children }: { children: ReactNode }) {
                     navigate(item.route);
                   }}
                   title={collapsed ? item.label : undefined}
-                  className={`ark-nav-item w-full ${collapsed ? '!justify-center' : ''} ${active ? 'active' : ''}`}
+                  className={`ark-nav-item w-full relative ${collapsed ? '!justify-center' : ''} ${active ? 'active' : ''} ${busy ? 'ark-nav-activity' : ''}`}
                 >
                   <item.icon className="w-4 h-4 shrink-0" />
                   {!collapsed && <span>{item.label}</span>}
+                  {busy && (
+                    <span
+                      className={`absolute w-1.5 h-1.5 rounded-full bg-emerald-400 ${collapsed ? 'top-1.5 right-1.5' : 'top-2 right-2'}`}
+                      aria-hidden
+                    />
+                  )}
                 </button>
               );
             })}
@@ -411,50 +409,20 @@ export function AppShell({ children }: { children: ReactNode }) {
           </nav>
 
           <div className={`mt-auto flex-none shrink-0 ${collapsed ? 'p-2 pb-3' : 'p-3 pt-2 pb-3'}`}>
-            {collapsed ? (
-              <div className="flex flex-col items-center gap-2">
-                <span
-                  className="w-8 h-8 rounded-lg bg-surface-hover border border-surface-border flex items-center justify-center text-xs font-semibold text-content-primary"
-                  title={displayName}
-                  aria-label={displayName}
-                >
-                  {initial}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setSettingsOpen(true)}
-                  title="Open Settings"
-                  className="w-9 h-9 rounded-xl border border-surface-border bg-ark-navy-900/80 flex items-center justify-center text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors"
-                  aria-label="Open Settings"
-                >
-                  <Settings className="w-4 h-4" />
-                </button>
-              </div>
-            ) : (
-              <div className="flex items-center gap-2 rounded-xl border border-surface-border bg-ark-navy-950/80 px-2.5 py-2">
-                <span
-                  className="w-8 h-8 shrink-0 rounded-lg bg-surface-hover border border-surface-border flex items-center justify-center text-sm font-semibold text-content-primary"
-                  aria-hidden="true"
-                >
-                  {initial}
-                </span>
-                <span
-                  className="flex-1 min-w-0 text-xs font-medium text-content-primary truncate select-none"
-                  title={displayName}
-                >
-                  {displayName}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setSettingsOpen(true)}
-                  title="Open Settings"
-                  className="p-1.5 rounded-lg shrink-0 text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors"
-                  aria-label="Open Settings"
-                >
-                  <Settings className="w-4 h-4" />
-                </button>
-              </div>
-            )}
+            <button
+              type="button"
+              onClick={() => setSettingsOpen(true)}
+              title="Open Settings"
+              className={`flex items-center justify-center text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors ${
+                collapsed
+                  ? 'w-9 h-9 mx-auto rounded-xl border border-surface-border bg-ark-navy-900/80'
+                  : 'w-full gap-2 rounded-xl border border-surface-border bg-ark-navy-950/80 px-2.5 py-2.5'
+              }`}
+              aria-label="Open Settings"
+            >
+              <Settings className="w-4 h-4 shrink-0" />
+              {!collapsed && <span className="text-xs font-medium text-content-primary">Settings</span>}
+            </button>
           </div>
       </aside>
 
