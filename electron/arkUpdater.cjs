@@ -289,32 +289,39 @@ function killParentTree(parentPid, writeLog) {
   }
 }
 
-/** Discord-style black box — slightly larger, clean type, thin bar. */
+/** Small centered Updating card — logo, status, percent, thin bar. */
 function splashHtml(iconFileUrl) {
   const icon = splashIconMarkup(iconFileUrl);
   return `<!DOCTYPE html>
 <html><head><meta charset="utf-8" />
 <style>
-  html,body{margin:0;height:100%;background:#050506;color:#f2f2f3;font-family:"Segoe UI",system-ui,sans-serif;overflow:hidden;user-select:none;-webkit-app-region:drag;}
-  .wrap{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:32px 36px 40px;box-sizing:border-box;}
-  #label{font-size:16px;font-weight:600;letter-spacing:0.01em;margin:0 0 8px;text-align:center;}
-  #sub{font-size:12px;font-weight:400;color:rgba(255,255,255,0.45);margin:0 0 22px;text-align:center;min-height:1.2em;}
-  .track{width:260px;height:5px;border-radius:999px;background:#1c1c20;overflow:hidden;}
-  #fill{height:100%;width:4%;border-radius:999px;background:#c8ccd4;transition:width 0.18s ease-out;}
+  html,body{margin:0;height:100%;background:#0a0a0c;color:#f2f2f3;font-family:"Segoe UI",system-ui,sans-serif;overflow:hidden;user-select:none;-webkit-app-region:drag;}
+  .wrap{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:28px 32px 32px;box-sizing:border-box;}
+  .logo-wrap{margin:0 0 20px;animation:pulse 1.8s ease-in-out infinite;}
+  @keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:0.88;transform:scale(1.03)}}
+  #label{font-size:15px;font-weight:600;letter-spacing:0.01em;margin:0 0 6px;text-align:center;}
+  #pct{font-size:12px;font-weight:500;color:rgba(255,255,255,0.55);margin:0 0 14px;text-align:center;font-variant-numeric:tabular-nums;min-height:1.2em;}
+  #sub{font-size:11px;font-weight:400;color:rgba(255,255,255,0.38);margin:0 0 16px;text-align:center;min-height:1.1em;}
+  .track{width:240px;height:4px;border-radius:999px;background:#1c1c20;overflow:hidden;}
+  #fill{height:100%;width:4%;border-radius:999px;background:linear-gradient(90deg,#9aa3b2,#e8eaed);transition:width 0.22s ease-out;}
 </style></head>
 <body>
   <div class="wrap">
-    ${icon}
-    <div id="label">Updating ARK...</div>
+    <div class="logo-wrap">${icon}</div>
+    <div id="label">Updating ARK</div>
+    <div id="pct">0%</div>
     <div id="sub">Preparing</div>
     <div class="track"><div id="fill"></div></div>
   </div>
   <script>
     window.__arkSet = function(pct, text, sub) {
+      var n = Math.max(0, Math.min(100, Math.round(Number(pct) || 0)));
       var f = document.getElementById('fill');
       var l = document.getElementById('label');
+      var p = document.getElementById('pct');
       var s = document.getElementById('sub');
-      if (f) f.style.width = Math.max(4, Math.min(100, pct || 0)) + '%';
+      if (f) f.style.width = Math.max(4, n) + '%';
+      if (p) p.textContent = n + '%';
       if (l && text) l.textContent = text;
       if (s) s.textContent = sub || '';
     };
@@ -428,14 +435,14 @@ async function runStandaloneSplash(argv) {
   }
 
   const win = new BrowserWindow({
-    width: 420,
-    height: 268,
+    width: 380,
+    height: 240,
     frame: false,
     resizable: false,
     maximizable: false,
     minimizable: false,
     fullscreenable: false,
-    backgroundColor: '#050506',
+    backgroundColor: '#0a0a0c',
     show: false,
     alwaysOnTop: true,
     center: true,
@@ -458,14 +465,25 @@ async function runStandaloneSplash(argv) {
   }
 
   try {
-    win.show();
-    win.center();
-    win.focus();
+    win.once('ready-to-show', () => {
+      try {
+        win.show();
+        win.center();
+        win.focus();
+      } catch {
+        /* ignore */
+      }
+    });
+    // Fallback if ready-to-show already fired
+    if (!win.isVisible()) {
+      win.show();
+      win.center();
+    }
   } catch {
     /* ignore */
   }
 
-  await setSplash(win, 5, 'Updating ARK...', 'Preparing');
+  await setSplash(win, 4, 'Updating ARK', 'Preparing');
   writeLog('splash shown');
   // Signal parent that the updater process is alive (Lyndsey-style ready handoff).
   try {
@@ -478,8 +496,19 @@ async function runStandaloneSplash(argv) {
 
   const installDir = path.dirname(process.execPath);
 
+  /** Smooth fake progress while NSIS runs (silent install has no percent). */
+  const startInstallProgress = () => {
+    let p = 22;
+    const id = setInterval(() => {
+      p = Math.min(88, p + 2 + Math.random() * 3);
+      void setSplash(win, p, 'Updating ARK', 'Installing…');
+      if (p >= 88) clearInterval(id);
+    }, 400);
+    return () => clearInterval(id);
+  };
+
   try {
-    await setSplash(win, 8, 'Updating ARK...', 'Waiting for ARK to close');
+    await setSplash(win, 8, 'Updating ARK', 'Waiting for ARK to close');
     // Give the parent a few seconds to exit on its own, then force-kill that PID tree only.
     const softDeadline = Date.now() + 8_000;
     while (pidAlive(parentPid) && Date.now() < softDeadline) {
@@ -494,22 +523,22 @@ async function runStandaloneSplash(argv) {
     // Brief pause so file locks on ARK.exe release — do NOT mass-kill ARK.exe.
     await sleep(700);
 
-    await setSplash(win, 18, 'Updating ARK...', 'Installing update');
+    await setSplash(win, 18, 'Updating ARK', 'Installing update');
     writeLog('past waiting — starting install prep');
 
     if (isUrl) {
-      await setSplash(win, 12, 'Downloading update...', 'Fetching installer');
+      await setSplash(win, 10, 'Updating ARK', 'Downloading installer');
       try {
         if (fs.existsSync(localSetup)) fs.unlinkSync(localSetup);
       } catch {
         /* ignore */
       }
       await downloadFile(payload, localSetup, async (pct) => {
-        await setSplash(win, 12 + Math.round((pct / 100) * 48), 'Downloading update...', `${pct}%`);
+        await setSplash(win, Math.round((pct / 100) * 55), 'Updating ARK', 'Downloading installer');
       });
       writeLog('download done');
     } else {
-      await setSplash(win, 45, 'Updating ARK...', 'Installer ready');
+      await setSplash(win, 22, 'Updating ARK', 'Installer ready');
       const exists = fs.existsSync(localSetup);
       let size = 0;
       try {
@@ -534,22 +563,26 @@ async function runStandaloneSplash(argv) {
     }
     const setupToRun = fs.existsSync(installCopy) ? installCopy : localSetup;
 
-    await setSplash(win, 62, 'Installing...', 'Almost done');
+    await setSplash(win, 28, 'Updating ARK', 'Installing…');
     writeLog(`runInstaller ${setupToRun} → ${installDir}`);
+    const stopProgress = startInstallProgress();
     let code = await runInstaller(setupToRun, installDir);
+    stopProgress();
     writeLog(`installer exit=${code}`);
     if (code !== 0) {
       await sleep(900);
       writeLog('installer retry');
+      const stopRetry = startInstallProgress();
       code = await runInstaller(setupToRun, installDir);
+      stopRetry();
       writeLog(`installer retry exit=${code}`);
     }
     if (code !== 0) {
       throw new Error(`Installer exited with code ${code}`);
     }
 
-    await setSplash(win, 96, 'Opening ARK...', '');
-    await sleep(250);
+    await setSplash(win, 96, 'Updating ARK', 'Opening ARK…');
+    await sleep(280);
 
     const candidates = [
       path.join(process.env.LOCALAPPDATA || '', 'Programs', 'ARK', 'ARK.exe'),
@@ -742,8 +775,8 @@ function launchCmdApplyUpdate({ setupPath, installDir, expectedVersion, parentPi
     `Set log = fso.OpenTextFile("${q(logPath)}", 8, True)`,
     'log.WriteLine "vbs apply launch"',
     'Set sh = CreateObject("WScript.Shell")',
-    // 1 = normal window with "Updating ARK" title so the user sees progress text
-    `sh.Run "cmd.exe /c ""${q(cmdPath)}""", 1, False`,
+    // 0 = hidden — never flash a terminal; GUI splash owns the UX
+    `sh.Run "cmd.exe /c ""${q(cmdPath)}""", 0, False`,
     'log.WriteLine "vbs Run issued"',
     'log.Close',
   ].join('\r\n');
@@ -761,7 +794,7 @@ function launchCmdApplyUpdate({ setupPath, installDir, expectedVersion, parentPi
     spawn(cmdPath, [], {
       detached: true,
       stdio: 'ignore',
-      windowsHide: false,
+      windowsHide: true,
       shell: true,
       cwd: temp,
     }).unref();
@@ -991,23 +1024,23 @@ async function downloadAndInstall(setupUrl, latestTag) {
     const arkExe = process.execPath;
 
     try {
-      // Primary: independent CMD apply (cannot blank itself). Fallback: Electron splash.
-      const handoff = launchCmdApplyUpdate({
-        setupPath: stable,
-        installDir,
+      // Primary: small Updating ARK splash (logo + %). Hidden CMD only if splash fails.
+      const electronHandoff = launchUpdaterBreakaway({
+        payload: stable,
         expectedVersion,
         parentPid: process.pid,
-        arkExe,
       });
-      const ready = await waitForUpdaterReady(handoff.readyPath, 5_000);
-      if (!ready) {
-        const electronHandoff = launchUpdaterBreakaway({
-          payload: stable,
+      const electronReady = await waitForUpdaterReady(electronHandoff.readyPath, 14_000);
+      if (!electronReady) {
+        const handoff = launchCmdApplyUpdate({
+          setupPath: stable,
+          installDir,
           expectedVersion,
           parentPid: process.pid,
+          arkExe,
         });
-        const electronReady = await waitForUpdaterReady(electronHandoff.readyPath, 12_000);
-        if (!electronReady) {
+        const ready = await waitForUpdaterReady(handoff.readyPath, 5_000);
+        if (!ready) {
           sendProgress({
             status: 'error',
             percent: 100,

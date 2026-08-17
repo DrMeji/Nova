@@ -969,7 +969,7 @@ export function SettingsContent() {
                     </div>
                   </div>
                   <p className="text-[11px] text-content-tertiary leading-relaxed">
-                    Download stays in ARK. When it finishes, ARK closes, the installer runs, then ARK reopens.
+                    Download stays in ARK. When it finishes, a small Updating window installs, then ARK reopens.
                   </p>
                 </div>
 

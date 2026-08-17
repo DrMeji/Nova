@@ -223,6 +223,17 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.40',
+    channel: 'stable' as const,
+    date: 'Aug 17, 2026',
+    title: 'Updating splash instead of a terminal',
+    notes: [
+      'Install shows a small Updating ARK window (logo, percent, progress bar)',
+      'No more command-prompt window during updates',
+      'Hidden backup installer path if the splash cannot start',
+    ],
+  },
+  {
     version: '0.1.39',
     channel: 'stable' as const,
     date: 'Aug 17, 2026',
