@@ -27,8 +27,20 @@ const CONTINUITY =
   + 'Do not repeat, finish, or continue a previous assistant sentence, list item (a. b. c.), or closing question. '
   + 'Do not start with leftover fragments like “c. Is there anything…”.';
 
+const CHAT_CODE_OUTPUT =
+  'The user wants working source code they can copy and paste in chat (not the Code workspace). '
+  + 'Reply with: (1) one short intro sentence, (2) a complete markdown code fence with the FULL file — no placeholders, no "..." omissions. '
+  + 'Pick the right fence tag (html, javascript, tsx, etc.). Do not repeat system instructions.';
+
+const SYSTEM_ECHO_RE =
+  /^You are ARK(?:,|\s)[\s\S]*?(?:Do not echo the prompt\.|Never continue a previous sentence[^.\n]*\.|Answer only the latest user message[^.\n]*\.)/i;
+
+const CODING_WORKSPACE_ECHO_RE =
+  /^You are ARK inside a developer project workspace[\s\S]*?(?:WITHOUT @@@FILE blocks\.|answer normally WITHOUT @@@FILE blocks\.)/i;
+
 const BUILD_HINT =
-  /\b(build|create|make|code|app|apps|calculator|website|project|implement|develop|program|software|ui|api)\b/i;
+  /\b(build|create|make|code|app|apps|calculator|website|project|implement|develop|program|software|ui|api|write)\b/i;
+
 const FACT_HINT =
   /\b(weather|temperature|forecast|rain|humid|capital of|who is|what is|when did|population|india|history of)\b/i;
 const STORY_HINT = /\b(story|joke|poem|song|riddle|fairytale)\b/i;
@@ -197,7 +209,7 @@ export function packHistoryPrompt(history: RouterChatTurn[], latestFallback?: st
 
   if (history.length <= 1 || !history.some(t => t.role === 'assistant') || isTopicShift(history, latest)) {
     if (BUILD_HINT.test(latest)) {
-      return instruct(`Help the user build this in ARK. Request:\n${latest}`);
+      return instruct(`${CHAT_CODE_OUTPUT}\n\nRequest:\n${latest}`);
     }
     return instruct(`User: ${latest}`);
   }
@@ -213,6 +225,7 @@ export function packHistoryPrompt(history: RouterChatTurn[], latestFallback?: st
     const gist = lastArk.replace(/\s+/g, ' ').slice(0, 280);
     return instruct(
       [
+        CHAT_CODE_OUTPUT,
         priorUsers.length ? `Earlier user asks:\n${priorUsers.join('\n')}` : '',
         gist ? `ARK already wrote (do not repeat or finish this): ${gist}` : '',
         `Latest build request:\n${latest}`,
@@ -246,6 +259,12 @@ export function sanitizeAssistantReply(
 ): string {
   let text = String(raw || '').replace(/\r\n/g, '\n').trim();
   if (!text) return '';
+
+  // Drop full system-prompt echoes from GGUF / packed prompts.
+  text = text.replace(SYSTEM_ECHO_RE, '').trim();
+  text = text.replace(CODING_WORKSPACE_ECHO_RE, '').trim();
+  if (/^You are ARK[\s\S]{20,400}$/i.test(text.trim())) return '';
+
   text = text.replace(/^\(?\s*truncated\s*\)?\s*/i, '').trim();
 
   // Prefer the completion after the last ARK: / Assistant: marker (packed prompt echo).

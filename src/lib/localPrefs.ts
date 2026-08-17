@@ -223,6 +223,17 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.54',
+    channel: 'stable' as const,
+    date: 'Aug 17, 2026',
+    title: 'Chat code replies and Code workspace planning flow',
+    notes: [
+      'Build hint bar is smaller and cleaner; chat still returns copy-pasteable code when you press Enter',
+      'System-prompt echoes stripped from chat bubbles',
+      'Code workspace shows plan → write → apply steps (Cursor-style) and creates files from markdown fences',
+    ],
+  },
+  {
     version: '0.1.53',
     channel: 'stable' as const,
     date: 'Aug 17, 2026',

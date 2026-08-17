@@ -15,6 +15,7 @@ export function looksLikeCodeAsk(text: string): boolean {
   if (!t) return false;
   if (/```[\w]*\n/.test(t)) return true;
   if (BUILD_ASK.test(t)) return true;
+  if (/\b(write|create|build|make)\b[\s\S]{0,64}\b(calculator|html|website|app|component|page)\b/i.test(t)) return true;
   if (CODE_FILE.test(t)) return true;
   if (/\b(typescript|javascript|python|react|node\.?js|html|css)\b/i.test(t) && /\b(build|write|create|fix|add)\b/i.test(t)) {
     return true;

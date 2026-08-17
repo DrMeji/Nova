@@ -177,6 +177,28 @@ export function parseFileEdits(reply: string): ParsedFileEdit[] {
   return found;
 }
 
+/** When the model returns chat-style fences instead of @@@FILE blocks. */
+export function extractChatStyleFileEdits(reply: string, userMessage: string): ParsedFileEdit[] {
+  const ask = String(userMessage || '').toLowerCase();
+  const singleFile = /\b(single[\s-]?file|one file|index\.html)\b/i.test(ask)
+    || /\bcalculator\b/i.test(ask);
+  if (!singleFile) return [];
+
+  const html = reply.match(/```html\s*\n([\s\S]*?)```/i);
+  if (html?.[1]?.trim()) {
+    return [{ path: 'index.html', content: html[1].trim() }];
+  }
+
+  const any = reply.match(/```([\w.+-]*)\s*\n([\s\S]*?)```/);
+  if (!any?.[2]?.trim()) return [];
+
+  const tag = (any[1] || '').toLowerCase();
+  if (tag === 'html' || tag === 'htm') return [{ path: 'index.html', content: any[2].trim() }];
+  if (tag === 'javascript' || tag === 'js') return [{ path: 'index.html', content: `<script>\n${any[2].trim()}\n</script>` }];
+  if (tag.includes('.')) return [{ path: normalizePath(tag), content: any[2].trim() }];
+  return [{ path: 'index.html', content: any[2].trim() }];
+}
+
 /** Strip file blocks from reply so the chat bubble stays readable. */
 export function stripFileBlocks(reply: string): string {
   let text = reply || '';

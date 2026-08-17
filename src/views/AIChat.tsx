@@ -1196,6 +1196,20 @@ export function AIChat() {
             ? streamedPartial
             : routed.reply;
           response = sanitizeAssistantReply(rawReply, content, previousAssistant);
+          if (
+            looksLikeCodeAsk(content)
+            && mode !== 'image'
+            && mode !== 'video'
+            && (!response.trim() || (!/```[\s\S]+```/.test(response) && response.length < 100))
+          ) {
+            response = [
+              "I couldn't produce copy-pasteable code with the current brain yet.",
+              '',
+              '**In chat:** try again with a stronger model from the ARK menu, or open **Code** (sidebar or **Yes** above) so ARK writes files you can edit and preview.',
+              '',
+              'Your prompt works — Code workspace is the best path for a full calculator app with Explorer + Preview.',
+            ].join('\n');
+          }
           if (routed.full) {
             resolvedProvider = routerProviderLabel(routed.full, providerLabel);
             const hopNote = failoverChipText(routed.full, pinnedModel);
@@ -1491,12 +1505,12 @@ export function AIChat() {
     <div className="w-full max-w-2xl mx-auto">
       {failoverChip}
       {(mode === 'general' || mode === 'code') && looksLikeCodeAsk(input) && !codeSwitchDismissed && (
-        <div className="mb-2 flex items-center justify-between gap-2 rounded-xl border border-violet-500/25 bg-violet-500/10 px-3 py-2 text-[11px] text-violet-100/90">
-          <span>This looks like a build — switch to Code?</span>
-          <div className="flex items-center gap-1 shrink-0">
+        <div className="mb-1.5 flex items-center justify-between gap-2 rounded-full border border-violet-500/20 bg-violet-500/8 px-2.5 py-1 text-[10px] text-violet-100/85">
+          <span className="min-w-0 truncate">This looks like a build. Switch to Code?</span>
+          <div className="flex items-center gap-0.5 shrink-0">
             <button
               type="button"
-              className="rounded-md px-2 py-0.5 text-violet-100/70 hover:bg-violet-500/20 transition-colors"
+              className="rounded-full px-2 py-0.5 text-violet-100/65 hover:bg-violet-500/15 transition-colors"
               onClick={() => setCodeSwitchDismissed(true)}
               title="Stay in chat"
             >
@@ -1504,7 +1518,7 @@ export function AIChat() {
             </button>
             <button
               type="button"
-              className="rounded-md px-2 py-0.5 text-violet-100 hover:bg-violet-500/20 transition-colors font-medium"
+              className="rounded-full px-2 py-0.5 text-violet-100 hover:bg-violet-500/15 transition-colors font-medium"
               onClick={() => openCodeWorkspace()}
             >
               Yes

@@ -21,7 +21,7 @@ import {
   runPluginAction,
 } from '@/lib/plugins';
 import { arkRoute, routerProviderLabel } from '@/lib/arkRouter';
-import { buildRouterHistory } from '@/lib/chatHistory';
+import { buildRouterHistory, sanitizeAssistantReply } from '@/lib/chatHistory';
 import {
   autoPillLabel,
   autoRingDetail,
@@ -37,6 +37,7 @@ import {
   buildProjectCodingPrompt,
   foldersToExpand,
   parseFileEdits,
+  extractChatStyleFileEdits,
   stripFileBlocks,
 } from '@/lib/projectCodeEdit';
 import { ComposerPlusMenu, type ComposerPlusAction } from '@/components/ComposerPlusMenu';
@@ -78,10 +79,30 @@ interface FileNode {
 }
 
 const AGENT_STEPS = [
-  { id: 'route', label: 'Routing through ARK' },
-  { id: 'apply', label: 'Applying file changes' },
-  { id: 'ready', label: 'Changes ready in Explorer' },
+  { id: 'understand', label: 'Understanding your request' },
+  { id: 'plan', label: 'Planning structure and files' },
+  { id: 'generate', label: 'Writing code' },
+  { id: 'apply', label: 'Applying changes to Explorer' },
+  { id: 'ready', label: 'Ready to preview' },
 ] as const;
+
+const BUILD_STEP_LABELS: Record<string, string> = {
+  understand: 'Understanding your request…',
+  plan: 'Planning files and layout…',
+  generate: 'Writing code…',
+  apply: 'Applying file changes…',
+  ready: 'Finishing up…',
+};
+
+function setStepStatuses(
+  steps: typeof AGENT_STEPS,
+  activeIndex: number,
+): { id: string; label: string; status: 'pending' | 'active' | 'done' }[] {
+  return steps.map((s, i) => ({
+    ...s,
+    status: (i < activeIndex ? 'done' : i === activeIndex ? 'active' : 'pending') as 'pending' | 'active' | 'done',
+  }));
+}
 
 function ResizeHandle({ onDrag }: { onDrag: (deltaX: number) => void }) {
   const dragging = useRef(false);
@@ -477,11 +498,38 @@ export function ProjectWorkspace() {
     };
     setMessages(prev => [...prev, userMsg]);
 
+    const assistantId = crypto.randomUUID();
+    const assistantPlaceholder: ChatMessage = {
+      id: assistantId,
+      user_id: uid,
+      project_id: project.id,
+      role: 'assistant',
+      content: '__building__:understand',
+      provider_used: null,
+      created_at: new Date().toISOString(),
+    };
+    setMessages(prev => [...prev, assistantPlaceholder]);
+
+    const patchAssistant = (stepId: string, text?: string) => {
+      setMessages(prev => prev.map(m => (
+        m.id === assistantId
+          ? { ...m, content: text || `__building__:${stepId}` }
+          : m
+      )));
+    };
+
     setAgentRunActive(true);
-    setAgentSteps(AGENT_STEPS.map((s, i) => ({
-      ...s,
-      status: (i === 0 ? 'active' : 'pending') as 'pending' | 'active' | 'done',
-    })));
+    setAgentSteps(setStepStatuses(AGENT_STEPS, 0));
+    patchAssistant('understand');
+
+    const planTimer = window.setTimeout(() => {
+      setAgentSteps(setStepStatuses(AGENT_STEPS, 1));
+      patchAssistant('plan');
+    }, 650);
+    const generateTimer = window.setTimeout(() => {
+      setAgentSteps(setStepStatuses(AGENT_STEPS, 2));
+      patchAssistant('generate');
+    }, 1800);
     setRunHistory(prev => [
       { id: crypto.randomUUID(), title: content.slice(0, 48) || 'Project edit', at: new Date().toLocaleTimeString() },
       ...prev,
@@ -515,11 +563,14 @@ export function ProjectWorkspace() {
           if (pluginReply) {
             replyText = pluginReply;
             provider = `${enabled.find(p => p.id === pluginId)?.name ?? 'Plugin'}${runtime.accountLabel ? ` · ${runtime.accountLabel}` : ''}`;
-            setAgentSteps(prev => prev.map(s => ({ ...s, status: 'done' as const })));
+            setAgentSteps(setStepStatuses(AGENT_STEPS, AGENT_STEPS.length));
           }
         }
 
         if (!replyText) {
+          setAgentSteps(setStepStatuses(AGENT_STEPS, 2));
+          patchAssistant('generate');
+
           const prefs = getLocalPrefs();
           const priorForHistory = [...messages, userMsg];
           const historyBase = prefs.rememberContext
@@ -562,12 +613,13 @@ export function ProjectWorkspace() {
             if (nextBrain) setThreadBrain(nextBrain);
           }
 
-          setAgentSteps(prev => prev.map((s, i) => ({
-            ...s,
-            status: (i === 0 ? 'done' : i === 1 ? 'active' : 'pending') as 'pending' | 'active' | 'done',
-          })));
+          setAgentSteps(setStepStatuses(AGENT_STEPS, 3));
+          patchAssistant('apply');
 
-          const edits = parseFileEdits(routed.reply);
+          const parsedEdits = parseFileEdits(routed.reply);
+          const edits = parsedEdits.length
+            ? parsedEdits
+            : extractChatStyleFileEdits(routed.reply, content);
           if (edits.length > 0) {
             const applied = applyFileEdits(fileContents, fileTree, edits);
             setFileContents(applied.files);
@@ -612,19 +664,21 @@ export function ProjectWorkspace() {
               ? `${prose}\n\n${applied.summary}`
               : applied.summary;
           } else {
-            replyText = stripFileBlocks(routed.reply) || routed.reply;
+            const stripped = stripFileBlocks(routed.reply);
+            replyText = sanitizeAssistantReply(stripped || routed.reply, content) || stripped || routed.reply;
           }
 
-          setAgentSteps(prev => prev.map(s => ({ ...s, status: 'done' as const })));
+          setAgentSteps(setStepStatuses(AGENT_STEPS, 4));
+          patchAssistant('ready');
         }
       } catch (err) {
         replyText = err instanceof Error
           ? `Could not complete that edit: ${err.message}`
           : 'ARK Router failed on this project edit.';
-        setAgentSteps(prev => prev.map((s, i) => ({
-          ...s,
-          status: (i === 0 ? 'done' : 'pending') as 'pending' | 'active' | 'done',
-        })));
+        setAgentSteps(setStepStatuses(AGENT_STEPS, 0));
+      } finally {
+        window.clearTimeout(planTimer);
+        window.clearTimeout(generateTimer);
       }
 
       if (changedPaths.length) {
@@ -638,7 +692,7 @@ export function ProjectWorkspace() {
       }
 
       const reply: ChatMessage = {
-        id: crypto.randomUUID(),
+        id: assistantId,
         user_id: uid,
         project_id: project.id,
         role: 'assistant',
@@ -646,7 +700,7 @@ export function ProjectWorkspace() {
         provider_used: provider,
         created_at: new Date().toISOString(),
       };
-      setMessages(prev => [...prev, reply]);
+      setMessages(prev => prev.map(m => (m.id === assistantId ? reply : m)));
       window.setTimeout(() => setAgentRunActive(false), 700);
 
       try {
@@ -1217,19 +1271,19 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
 
           {/* Agent steps only during a fresh build */}
           {agentRunActive && (
-            <div className="shrink-0 border-b border-surface-border px-3 py-2.5 bg-ark-navy-900/30">
-              <p className="text-[10px] uppercase tracking-wider text-content-tertiary mb-2 font-semibold">Building</p>
-              <div className="space-y-1.5">
+            <div className="shrink-0 border-b border-surface-border px-3 py-2 bg-ark-navy-900/30">
+              <p className="text-[10px] uppercase tracking-wider text-content-tertiary mb-1.5 font-semibold">Building</p>
+              <div className="space-y-1">
                 {agentSteps.map(step => (
                   <div key={step.id} className="flex items-center gap-2">
                     {step.status === 'done' ? (
-                      <CheckCircle2 className="w-3.5 h-3.5 text-ark-accent-green shrink-0" />
+                      <CheckCircle2 className="w-3 h-3 text-ark-accent-green shrink-0" />
                     ) : step.status === 'active' ? (
-                      <Loader2 className="w-3.5 h-3.5 text-amber-400 shrink-0 animate-spin" />
+                      <Loader2 className="w-3 h-3 text-amber-400 shrink-0 animate-spin" />
                     ) : (
-                      <Circle className="w-3.5 h-3.5 text-content-tertiary shrink-0" />
+                      <Circle className="w-3 h-3 text-content-tertiary shrink-0" />
                     )}
-                    <span className={`text-xs ${
+                    <span className={`text-[11px] ${
                       step.status === 'done' ? 'text-content-secondary'
                         : step.status === 'active' ? 'text-content-primary'
                           : 'text-content-tertiary'
@@ -1261,7 +1315,14 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
                 <div className={`max-w-[80%] rounded-2xl px-3.5 py-2.5 text-sm text-content-primary ${
                   msg.role === 'user' ? 'bg-surface-hover' : 'bg-ark-navy-900 border border-surface-border'
                 }`}>
-                  {msg.content || <Loader2 className="w-3.5 h-3.5 animate-spin text-content-tertiary" />}
+                  {msg.content?.startsWith('__building__:') ? (
+                    <div className="flex items-center gap-2 text-content-secondary">
+                      <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+                      <span>{BUILD_STEP_LABELS[msg.content.slice('__building__:'.length)] || 'Working…'}</span>
+                    </div>
+                  ) : (
+                    msg.content || <Loader2 className="w-3.5 h-3.5 animate-spin text-content-tertiary" />
+                  )}
                 </div>
               </div>
             ))}
