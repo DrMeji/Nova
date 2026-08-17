@@ -248,9 +248,9 @@ function resolveUpdateIcon() {
 /** Inline mark so the splash never shows a broken image icon. */
 function splashIconMarkup(iconFileUrl) {
   if (iconFileUrl) {
-    return `<img src="${iconFileUrl}" alt="ARK" width="64" height="64" draggable="false" style="object-fit:contain;display:block;margin:0 auto 22px;user-select:none;" />`;
+    return `<img src="${iconFileUrl}" alt="ARK" width="72" height="72" draggable="false" style="object-fit:contain;display:block;margin:0 auto;user-select:none;" />`;
   }
-  return `<div style="width:64px;height:64px;margin:0 auto 22px;border-radius:14px;background:#141416;display:flex;align-items:center;justify-content:center;color:#f2f2f3;font:700 18px Segoe UI,system-ui,sans-serif;">ARK</div>`;
+  return `<div style="width:72px;height:72px;margin:0 auto 0;border-radius:16px;background:#141416;display:flex;align-items:center;justify-content:center;color:#f2f2f3;font:700 20px Segoe UI,system-ui,sans-serif;">ARK</div>`;
 }
 
 function pidAlive(pid) {
@@ -296,13 +296,13 @@ function splashHtml(iconFileUrl) {
 <html><head><meta charset="utf-8" />
 <style>
   html,body{margin:0;height:100%;background:#0a0a0c;color:#f2f2f3;font-family:"Segoe UI",system-ui,sans-serif;overflow:hidden;user-select:none;-webkit-app-region:drag;}
-  .wrap{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:28px 32px 32px;box-sizing:border-box;}
-  .logo-wrap{margin:0 0 20px;animation:pulse 1.8s ease-in-out infinite;}
+  .wrap{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:36px 40px 40px;box-sizing:border-box;}
+  .logo-wrap{margin:0 0 24px;animation:pulse 1.8s ease-in-out infinite;}
   @keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:0.88;transform:scale(1.03)}}
-  #label{font-size:15px;font-weight:600;letter-spacing:0.01em;margin:0 0 6px;text-align:center;}
-  #pct{font-size:12px;font-weight:500;color:rgba(255,255,255,0.55);margin:0 0 14px;text-align:center;font-variant-numeric:tabular-nums;min-height:1.2em;}
-  #sub{font-size:11px;font-weight:400;color:rgba(255,255,255,0.38);margin:0 0 16px;text-align:center;min-height:1.1em;}
-  .track{width:240px;height:4px;border-radius:999px;background:#1c1c20;overflow:hidden;}
+  #label{font-size:17px;font-weight:600;letter-spacing:0.01em;margin:0 0 8px;text-align:center;}
+  #pct{font-size:13px;font-weight:500;color:rgba(255,255,255,0.55);margin:0 0 16px;text-align:center;font-variant-numeric:tabular-nums;min-height:1.2em;}
+  #sub{font-size:12px;font-weight:400;color:rgba(255,255,255,0.38);margin:0 0 18px;text-align:center;min-height:1.1em;}
+  .track{width:280px;height:5px;border-radius:999px;background:#1c1c20;overflow:hidden;}
   #fill{height:100%;width:4%;border-radius:999px;background:linear-gradient(90deg,#9aa3b2,#e8eaed);transition:width 0.22s ease-out;}
 </style></head>
 <body>
@@ -435,8 +435,8 @@ async function runStandaloneSplash(argv) {
   }
 
   const win = new BrowserWindow({
-    width: 380,
-    height: 240,
+    width: 460,
+    height: 300,
     frame: false,
     resizable: false,
     maximizable: false,
@@ -495,17 +495,15 @@ async function runStandaloneSplash(argv) {
   }
 
   const installDir = path.dirname(process.execPath);
-
-  /** Smooth fake progress while NSIS runs (silent install has no percent). */
-  const startInstallProgress = () => {
-    let p = 22;
-    const id = setInterval(() => {
-      p = Math.min(88, p + 2 + Math.random() * 3);
-      void setSplash(win, p, 'Updating ARK', 'Installing…');
-      if (p >= 88) clearInterval(id);
-    }, 400);
-    return () => clearInterval(id);
-  };
+  const arkExeTarget = path.join(
+    process.env.LOCALAPPDATA || '',
+    'Programs',
+    'ARK',
+    'ARK.exe',
+  );
+  const reopenExe = (arkExeTarget && fs.existsSync(arkExeTarget))
+    ? arkExeTarget
+    : path.join(installDir, 'ARK.exe');
 
   try {
     await setSplash(win, 8, 'Updating ARK', 'Waiting for ARK to close');
@@ -520,25 +518,24 @@ async function runStandaloneSplash(argv) {
       await sleep(1200);
     }
     writeLog(`parent exited alive=${pidAlive(parentPid)}`);
-    // Brief pause so file locks on ARK.exe release — do NOT mass-kill ARK.exe.
-    await sleep(700);
+    await sleep(500);
 
-    await setSplash(win, 18, 'Updating ARK', 'Installing update');
+    await setSplash(win, 18, 'Updating ARK', 'Preparing installer');
     writeLog('past waiting — starting install prep');
 
     if (isUrl) {
-      await setSplash(win, 10, 'Updating ARK', 'Downloading installer');
+      await setSplash(win, 12, 'Updating ARK', 'Downloading installer');
       try {
         if (fs.existsSync(localSetup)) fs.unlinkSync(localSetup);
       } catch {
         /* ignore */
       }
       await downloadFile(payload, localSetup, async (pct) => {
-        await setSplash(win, Math.round((pct / 100) * 55), 'Updating ARK', 'Downloading installer');
+        await setSplash(win, Math.round((pct / 100) * 40), 'Updating ARK', 'Downloading installer');
       });
       writeLog('download done');
     } else {
-      await setSplash(win, 22, 'Updating ARK', 'Installer ready');
+      await setSplash(win, 24, 'Updating ARK', 'Installer ready');
       const exists = fs.existsSync(localSetup);
       let size = 0;
       try {
@@ -563,33 +560,31 @@ async function runStandaloneSplash(argv) {
     }
     const setupToRun = fs.existsSync(installCopy) ? installCopy : localSetup;
 
-    await setSplash(win, 28, 'Updating ARK', 'Installing…');
-    writeLog(`runInstaller ${setupToRun} → ${installDir}`);
-    const stopProgress = startInstallProgress();
-    let code = await runInstaller(setupToRun, installDir);
-    stopProgress();
-    writeLog(`installer exit=${code}`);
-    if (code !== 0) {
-      await sleep(900);
-      writeLog('installer retry');
-      const stopRetry = startInstallProgress();
-      code = await runInstaller(setupToRun, installDir);
-      stopRetry();
-      writeLog(`installer retry exit=${code}`);
-    }
-    if (code !== 0) {
-      throw new Error(`Installer exited with code ${code}`);
-    }
+    /**
+     * CRITICAL: do NOT run NSIS while this process still holds ARK.exe open.
+     * Silent install overwrites ARK.exe → kills this splash mid-way (~60%) and never relaunches.
+     * Hand off to a hidden apply script that waits for *this* PID to exit, then installs + opens ARK.
+     */
+    await setSplash(win, 35, 'Updating ARK', 'Starting installer');
+    writeLog(`delegate install ${setupToRun} → ${installDir}; reopen=${reopenExe}`);
+    launchCmdApplyUpdate({
+      setupPath: setupToRun,
+      installDir,
+      expectedVersion,
+      parentPid: process.pid,
+      arkExe: reopenExe,
+    });
 
-    await setSplash(win, 96, 'Updating ARK', 'Opening ARK…');
-    await sleep(280);
-
-    const candidates = [
-      path.join(process.env.LOCALAPPDATA || '', 'Programs', 'ARK', 'ARK.exe'),
-      path.join(process.env.ProgramFiles || 'C:\\Program Files', 'ARK', 'ARK.exe'),
-      process.execPath,
-    ];
-    const target = candidates.find((c) => c && fs.existsSync(c)) || process.execPath;
+    // Brief progress while we exit cleanly (unlocks ARK.exe for NSIS).
+    for (const step of [
+      [48, 'Installing…'],
+      [62, 'Installing…'],
+      [78, 'Almost done…'],
+      [92, 'ARK will reopen shortly'],
+    ]) {
+      await setSplash(win, step[0], 'Updating ARK', step[1]);
+      await sleep(350);
+    }
 
     try {
       if (!win.isDestroyed()) win.close();
@@ -597,8 +592,7 @@ async function runStandaloneSplash(argv) {
       /* ignore */
     }
 
-    writeLog(`starting ${target}`);
-    startArk(target);
+    writeLog('splash exiting so installer can replace ARK.exe');
   } catch (err) {
     writeLog(`error ${err instanceof Error ? err.stack || err.message : err}`);
     try {
@@ -614,7 +608,14 @@ async function runStandaloneSplash(argv) {
     } catch {
       /* ignore */
     }
-    app.exit(0);
+    // Small delay so the apply script observes this PID as gone, then installs.
+    setTimeout(() => {
+      try {
+        app.exit(0);
+      } catch {
+        process.exit(0);
+      }
+    }, 200);
   }
 }
 
@@ -741,13 +742,20 @@ function launchCmdApplyUpdate({ setupPath, installDir, expectedVersion, parentPi
     'setlocal',
     `title Updating ARK ${ver}`,
     `echo [%date% %time%] apply begin>> "${logPath}"`,
-    `echo Waiting for ARK to close...>> "${logPath}"`,
+    `echo Waiting for updater pid ${parentPid} to exit...>> "${logPath}"`,
+    'set /a waits=0',
     ':waitparent',
     `tasklist /FI "PID eq ${parentPid}" 2>nul | findstr /C:"${parentPid}" >nul`,
     'if not errorlevel 1 (',
+    '  set /a waits+=1',
+    '  if %waits% GEQ 90 (',
+    `    echo timed out waiting for pid ${parentPid}>> "${logPath}"`,
+    '    goto install',
+    '  )',
     '  timeout /t 1 /nobreak >nul',
     '  goto waitparent',
     ')',
+    ':install',
     'timeout /t 2 /nobreak >nul',
     `echo Installing ${q(setupPath)} into ${q(installDir)}>> "${logPath}"`,
     `"${setupPath}" /S --updated /D=${installDir}`,
@@ -759,9 +767,14 @@ function launchCmdApplyUpdate({ setupPath, installDir, expectedVersion, parentPi
     '  set EXITCODE=%ERRORLEVEL%',
     `  echo installer retry exit=%EXITCODE%>> "${logPath}"`,
     ')',
-    'timeout /t 1 /nobreak >nul',
-    `echo Starting ARK>> "${logPath}"`,
-    `start "" "${arkExe}"`,
+    'timeout /t 2 /nobreak >nul',
+    `if exist "${arkExe}" (`,
+    `  echo Starting ARK ${q(arkExe)}>> "${logPath}"`,
+    `  start "" "${arkExe}"`,
+    ') else (',
+    `  echo missing ${q(arkExe)}, trying install dir>> "${logPath}"`,
+    `  start "" "${installDir}\\ARK.exe"`,
+    ')',
     `echo done>> "${logPath}"`,
     'endlocal',
     'exit /b 0',

@@ -223,6 +223,17 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.42',
+    channel: 'stable' as const,
+    date: 'Aug 17, 2026',
+    title: 'Updater finishes and reopens ARK',
+    notes: [
+      'Install no longer kills the Updating window mid-way by overwriting a locked ARK.exe',
+      'Hidden apply step runs after the splash exits, then ARK reopens',
+      'Updating window is a bit larger',
+    ],
+  },
+  {
     version: '0.1.41',
     channel: 'stable' as const,
     date: 'Aug 17, 2026',
