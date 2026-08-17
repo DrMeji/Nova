@@ -14,17 +14,20 @@ const MAX_CHARS = 12_000;
 const MAX_TURN_CHARS = 2_400;
 
 const BASE_SYSTEM =
-  'You are ARK, a professional AI creation studio assistant for building software, coding, and creation. '
+  'You are ARK — the ARK desktop creation studio (local AI brain, chat, Code workspace, image, and video). '
+  + 'ARK is this software product the user is talking to inside the ARK app. '
+  + 'You are NOT “Ark: Survival Evolved”, NOT a game engine named Ark, and NOT any unrelated video game. '
+  + 'Never correct the user toward that game and never answer as if ARK were that game. '
   + 'Be concise and useful. Never echo the user’s greeting back (do not reply “Hello” then another hello). '
   + 'If the user only says hi/hello, reply once with a short professional offer of help — for example: '
   + '“How can I assist you today?” — and nothing else.';
 
 const CONTINUITY =
-  'You are continuing an ongoing ARK conversation. Use the prior messages as context. '
-  + 'Do not restart with a greeting, intro, or “what would you like to do today?” '
+  'You are continuing an ongoing ARK conversation inside the ARK app. Use prior messages only as context. '
+  + 'Do not restart with a greeting or intro. '
   + 'Do not repeat the user’s words back as a quote. '
-  + 'Do not paste, continue, or remix a previous assistant answer into this reply. '
-  + 'Answer ONLY the latest user message directly with new content.';
+  + 'Do not paste, continue, or finish a previous assistant answer — especially not mid-word or after a “…” truncation. '
+  + 'Answer ONLY the latest user message with brand-new content about ARK the app / their request.';
 
 const BUILD_HINT =
   /\b(build|create|make|code|app|apps|calculator|website|project|implement|develop|program|software|ui|api)\b/i;
@@ -97,7 +100,16 @@ export function slimTurnContent(content: string): string {
       .trim();
   }
   if (text.length > MAX_TURN_CHARS) {
-    text = `${text.slice(0, MAX_TURN_CHARS)}…`;
+    const slice = text.slice(0, MAX_TURN_CHARS);
+    const breakAt = Math.max(
+      slice.lastIndexOf('\n'),
+      slice.lastIndexOf('. '),
+      slice.lastIndexOf('? '),
+      slice.lastIndexOf('! '),
+      slice.lastIndexOf(' '),
+    );
+    const cut = breakAt > MAX_TURN_CHARS * 0.45 ? slice.slice(0, breakAt + 1) : slice;
+    text = `${cut.trimEnd()}…`;
   }
   return text.trim();
 }
@@ -119,8 +131,14 @@ export function buildRouterHistory(
   for (const m of prior) {
     const role = m.role === 'assistant' ? 'assistant' : m.role === 'user' ? 'user' : null;
     if (!role) continue;
-    const content = slimTurnContent(m.content || '');
+    let content = slimTurnContent(m.content || '');
     if (!content) continue;
+    // Keep prior assistant turns short so local models do not “finish” a truncated line.
+    if (role === 'assistant' && content.length > 720) {
+      const slice = content.slice(0, 720);
+      const breakAt = Math.max(slice.lastIndexOf('. '), slice.lastIndexOf('\n'), slice.lastIndexOf(' '));
+      content = `${(breakAt > 280 ? slice.slice(0, breakAt + 1) : slice).trimEnd()}…`;
+    }
     turns.push({ role, content });
   }
 
@@ -179,9 +197,9 @@ export function packHistoryPrompt(history: RouterChatTurn[], latestFallback?: st
   }
 
   const lines: string[] = [
-    'Ongoing ARK conversation.',
-    'Answer ONLY the latest User message below.',
-    'Do not repeat earlier ARK answers. Do not continue a previous topic unless asked.',
+    'Ongoing ARK conversation inside the ARK desktop app (not a video game).',
+    'Answer ONLY the latest User message below with a fresh reply.',
+    'Never continue a prior ARK line mid-word or after an ellipsis. Do not reuse prior closers.',
     '',
   ];
   for (const turn of history) {
@@ -212,6 +230,7 @@ export function sanitizeAssistantReply(
 ): string {
   let text = String(raw || '').replace(/\r\n/g, '\n').trim();
   if (!text) return '';
+  text = text.replace(/^\(?\s*truncated\s*\)?\s*/i, '').trim();
 
   // Prefer the completion after the last ARK: / Assistant: marker (packed prompt echo).
   const markRe = /(?:^|\n)\s*(?:ARK|Assistant)\s*:\s*/gi;
@@ -244,6 +263,14 @@ export function sanitizeAssistantReply(
   // If the model re-emits the previous assistant answer, drop that prefix / paragraphs.
   const prev = String(previousAssistant || '').trim();
   if (prev.length >= 24) {
+    // Mid-word continuation of a truncated prior reply (e.g. "…Evolved" → "vival Evolved")
+    if (/^[a-z0-9]/.test(text) && /[A-Za-z]$/.test(prev.replace(/…$/, ''))) {
+      const firstBreak = text.search(/[\s.!?]/);
+      const glued = firstBreak > 0 ? text.slice(0, firstBreak) : text.slice(0, 24);
+      if (glued.length > 0 && glued.length < 28) {
+        text = text.slice(glued.length).replace(/^\s+/, '');
+      }
+    }
     const prevLower = prev.toLowerCase();
     const textLower = text.toLowerCase();
     if (textLower === prevLower || (prev.length >= 40 && textLower.startsWith(prevLower))) {

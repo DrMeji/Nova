@@ -223,6 +223,17 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.49',
+    channel: 'stable' as const,
+    date: 'Aug 16, 2026',
+    title: 'Code Recent only on activity + ARK identity',
+    notes: [
+      'Opening Code no longer adds a Recent project until you chat or create a file',
+      'ARK replies know this is the ARK app — not Ark: Survival Evolved; less history bleed',
+      'Cleaner delete confirmation (no header divider line)',
+    ],
+  },
+  {
     version: '0.1.48',
     channel: 'stable' as const,
     date: 'Aug 16, 2026',

@@ -91,6 +91,28 @@ export function removeRecentProject(id: string): RecentProject[] {
   return list;
 }
 
+/** Put a project in Recent only when the user actually works in it (chat / files). */
+export function ensureRecentProject(id: string, name?: string): RecentProject[] {
+  if (!id || id.startsWith('demo-')) return loadRecentProjects();
+  const list = loadRecentProjects();
+  const label = (name || '').trim() || 'Code project';
+  const existing = list.find(p => p.id === id);
+  const nextEntry: RecentProject = {
+    id,
+    name: existing?.name || label,
+    kind: 'project',
+    updatedAt: new Date().toISOString(),
+  };
+  const next = [nextEntry, ...list.filter(p => p.id !== id)].slice(0, 30);
+  saveRecentProjects(next);
+  try {
+    window.dispatchEvent(new Event('ark:projects-changed'));
+  } catch {
+    /* ignore */
+  }
+  return next;
+}
+
 export function loadRecentCreations(): RecentCreation[] {
   try {
     const raw = localStorage.getItem(CREATIONS_KEY);

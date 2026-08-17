@@ -9,6 +9,7 @@ import {
   renameRecentChatTitle,
   renameRecentProject,
   removeRecentProject,
+  ensureRecentProject,
   saveRecentChats,
   saveRecentProjects,
   upsertCreation,
@@ -29,6 +30,8 @@ interface RecentProjectsContextValue {
   renameRecent: (id: string, name: string) => void;
   renameChat: (id: string, title: string) => void;
   removeRecent: (id: string) => void;
+  /** Add/touch a Code project in Recent after real activity (not on bare nav). */
+  touchRecentProject: (id: string, name?: string) => void;
   addCreation: (entry: RecentCreation) => void;
   addChat: (entry: RecentChat) => void;
   archiveChat: (chatId: string) => void;
@@ -58,8 +61,10 @@ export function RecentProjectsProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const syncCreations = () => refreshCreations();
     const syncChats = () => refreshChats();
+    const syncProjects = () => setRecent(loadRecentProjects());
     window.addEventListener('ark:creations-changed', syncCreations);
     window.addEventListener('ark:chats-changed', syncChats);
+    window.addEventListener('ark:projects-changed', syncProjects);
     window.addEventListener('focus', syncCreations);
     window.addEventListener('focus', syncChats);
 
@@ -109,6 +114,7 @@ export function RecentProjectsProvider({ children }: { children: ReactNode }) {
       window.clearTimeout(t);
       window.removeEventListener('ark:creations-changed', syncCreations);
       window.removeEventListener('ark:chats-changed', syncChats);
+      window.removeEventListener('ark:projects-changed', syncProjects);
       window.removeEventListener('focus', syncCreations);
       window.removeEventListener('focus', syncChats);
     };
@@ -139,6 +145,10 @@ export function RecentProjectsProvider({ children }: { children: ReactNode }) {
 
   const removeRecent = useCallback((id: string) => {
     setRecent(removeRecentProject(id));
+  }, []);
+
+  const touchRecentProject = useCallback((id: string, name?: string) => {
+    setRecent(ensureRecentProject(id, name));
   }, []);
 
   const addCreation = useCallback((entry: RecentCreation) => {
@@ -184,6 +194,7 @@ export function RecentProjectsProvider({ children }: { children: ReactNode }) {
         renameRecent,
         renameChat,
         removeRecent,
+        touchRecentProject,
         addCreation,
         addChat,
         archiveChat,

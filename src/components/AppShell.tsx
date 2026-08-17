@@ -37,7 +37,7 @@ const NAV_ITEMS: {
 
 export function AppShell({ children }: { children: ReactNode }) {
   const { route, navigate } = useRouter();
-  const { recent, activeChats, archiveChat, deleteChatForever, addRecent, renameRecent, renameChat, removeRecent } = useRecentProjects();
+  const { recent, activeChats, archiveChat, deleteChatForever, renameRecent, renameChat, removeRecent } = useRecentProjects();
   const [collapsed, setCollapsed] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -226,18 +226,12 @@ export function AppShell({ children }: { children: ReactNode }) {
                       }
                       return;
                     }
-                    // Code: reopen the most recent project — never spawn a new “Code project” on every click.
+                    // Code: reopen latest project if any — never mint a Recent row just by visiting Code.
                     if (item.label === 'Code') {
                       const latest = [...recent].sort((a, b) =>
                         (b.updatedAt || '').localeCompare(a.updatedAt || ''),
                       )[0];
-                      if (latest) {
-                        renameRecent(latest.id, latest.name); // touch updatedAt
-                        navigate({ name: 'project', id: latest.id });
-                      } else {
-                        const project = addRecent('Code project');
-                        navigate({ name: 'project', id: project.id });
-                      }
+                      navigate({ name: 'project', id: latest?.id || 'proj-scratch' });
                       return;
                     }
                     navigate(item.route);
@@ -475,27 +469,41 @@ export function AppShell({ children }: { children: ReactNode }) {
       <Modal
         isOpen={Boolean(deleteTarget)}
         onClose={() => setDeleteTarget(null)}
-        title={deleteTarget?.kind === 'project' ? 'Delete Code project?' : 'Delete chat?'}
         size="sm"
+        hideHeader
+        title={deleteTarget?.kind === 'project' ? 'Delete Code project?' : 'Delete chat?'}
       >
-        <div className="px-1 pb-1">
-          <p className="text-sm text-content-secondary leading-relaxed">
-            You’re about to permanently delete
-            {deleteTarget ? (
-              <>
-                {' '}
-                <span className="text-content-primary font-medium">“{deleteTarget.title}”</span>
-              </>
-            ) : null}
-            {deleteTarget?.kind === 'project'
-              ? ' from Recent. Project files on disk are kept unless you remove them yourself.'
-              : '. This removes the conversation and linked local data from this PC. This can’t be undone.'}
-          </p>
-          <div className="flex items-center justify-end gap-2 mt-6">
+        <div className="px-6 pt-6 pb-5">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-xl bg-rose-500/15 border border-rose-400/25 flex items-center justify-center shrink-0">
+              <Trash2 className="w-4 h-4 text-rose-300" />
+            </div>
+            <div className="min-w-0 pt-0.5">
+              <h2 className="text-base font-semibold text-content-primary tracking-tight">
+                {deleteTarget?.kind === 'project' ? 'Delete Code project?' : 'Delete this chat?'}
+              </h2>
+              <p className="text-sm text-content-secondary leading-relaxed mt-2">
+                {deleteTarget?.kind === 'project' ? (
+                  <>
+                    Remove{' '}
+                    <span className="text-content-primary font-medium">“{deleteTarget.title}”</span>
+                    {' '}from Recent. Files on disk stay unless you delete them yourself.
+                  </>
+                ) : (
+                  <>
+                    Permanently remove{' '}
+                    <span className="text-content-primary font-medium">“{deleteTarget?.title}”</span>
+                    {' '}and its local conversation data on this PC. This can’t be undone.
+                  </>
+                )}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center justify-end gap-2 mt-7">
             <button
               type="button"
               onClick={() => setDeleteTarget(null)}
-              className="rounded-full px-3.5 py-1.5 text-xs font-medium text-content-secondary hover:bg-surface-hover transition-colors"
+              className="rounded-full px-4 py-2 text-xs font-medium text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors"
             >
               Cancel
             </button>
@@ -514,9 +522,9 @@ export function AppShell({ children }: { children: ReactNode }) {
                   if (activeChatId === id) navigate({ name: 'chat' });
                 }
               }}
-              className="rounded-full px-3.5 py-1.5 text-xs font-medium bg-rose-500/20 text-rose-300 hover:bg-rose-500/30 transition-colors"
+              className="rounded-full px-4 py-2 text-xs font-semibold bg-rose-500/90 text-white hover:bg-rose-500 transition-colors"
             >
-              Yes, delete forever
+              Delete forever
             </button>
           </div>
         </div>

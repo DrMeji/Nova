@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter } from '@/context/RouterContext';
 import { useAuth } from '@/context/AuthContext';
+import { useRecentProjects } from '@/context/RecentProjectsContext';
 import { fetchProjects, fetchChatMessages, saveChatMessage, updateProject } from '@/lib/api';
 import type { Project, ChatMessage } from '@/types';
 import {
@@ -113,6 +114,7 @@ function ResizeHandle({ onDrag }: { onDrag: (deltaX: number) => void }) {
 export function ProjectWorkspace() {
   const { route, navigate } = useRouter();
   const { user } = useAuth();
+  const { touchRecentProject } = useRecentProjects();
   const projectId = route.name === 'project' ? route.id : '';
   const [project, setProject] = useState<ProjectRow | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -429,6 +431,7 @@ export function ProjectWorkspace() {
 
   const handleSendChat = async () => {
     if ((!chatInput.trim() && attachedImages.length === 0) || !project) return;
+    touchRecentProject(project.id, project.name);
     let content = chatInput.trim();
     if (composerMode && COMPOSER_MODE_PREFIX[composerMode]) {
       content = `${COMPOSER_MODE_PREFIX[composerMode]}${content}`;
@@ -783,6 +786,7 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
           language: name.split('.').pop(),
         };
     setFileTree(prev => insertNode(prev, creating.parentPath, node));
+    if (projectId) touchRecentProject(projectId, project?.name);
     if (creating.parentPath) {
       setExpandedFolders(prev => new Set(prev).add(creating.parentPath));
     }
