@@ -1383,20 +1383,7 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
                     }}
                   />
                 </div>
-                <div className="flex items-center gap-1.5 shrink-0">
-                  <TokenUsageRing
-                    ratio={tokenRatio}
-                    size={16}
-                    className="text-content-primary"
-                    modelName={activeModel.source === 'auto' ? 'ARK Auto' : activeModel.name}
-                    modelDetail={
-                      activeModel.source === 'auto'
-                        ? 'Free-first · silent failover'
-                        : activeModel.source === 'local'
-                          ? 'Local · ARK Engine'
-                          : 'Cloud · connected key'
-                    }
-                  />
+                <div className="flex items-center gap-1.5 shrink-0 self-center">
                   <button
                     ref={modelButtonRef}
                     type="button"
@@ -1416,6 +1403,19 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
                     </span>
                     <ChevronDown className={`w-3 h-3 text-content-tertiary shrink-0 ${modelMenuOpen ? 'rotate-180' : ''}`} />
                   </button>
+                  <TokenUsageRing
+                    ratio={tokenRatio}
+                    size={16}
+                    className="text-content-primary"
+                    modelName={activeModel.source === 'auto' ? 'ARK Auto' : activeModel.name}
+                    modelDetail={
+                      activeModel.source === 'auto'
+                        ? 'Free-first · silent failover'
+                        : activeModel.source === 'local'
+                          ? 'Local · ARK Engine'
+                          : 'Cloud · connected key'
+                    }
+                  />
                   {modelMenuOpen && menuPos && createPortal(
                     <div
                       ref={modelMenuRef}

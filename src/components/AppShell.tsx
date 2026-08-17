@@ -210,14 +210,34 @@ export function AppShell({ children }: { children: ReactNode }) {
                   type="button"
                   onClick={() => {
                     if (item.activity) clearActivity(item.activity);
-                    // New Chat / Image / Video are distinct tabs — always navigate explicitly.
+                    // New Chat is always a blank starter (never reopen last thread).
                     if (item.label === 'New Chat') {
                       navigate({ name: 'chat' });
                       return;
                     }
+                    // Image / Video: reopen the latest thread of that mode so nav doesn't mint duplicates.
+                    if (item.label === 'Image' || item.label === 'Video') {
+                      const mode = item.label === 'Image' ? 'image' : 'video';
+                      const last = activeChats.find(c => c.mode === mode);
+                      if (last) {
+                        navigate({ name: 'chat', mode, chatId: last.id, creationId: last.creationId });
+                      } else {
+                        navigate({ name: 'chat', mode });
+                      }
+                      return;
+                    }
+                    // Code: reopen the most recent project — never spawn a new “Code project” on every click.
                     if (item.label === 'Code') {
-                      const project = addRecent('Code project');
-                      navigate({ name: 'project', id: project.id });
+                      const latest = [...recent].sort((a, b) =>
+                        (b.updatedAt || '').localeCompare(a.updatedAt || ''),
+                      )[0];
+                      if (latest) {
+                        renameRecent(latest.id, latest.name); // touch updatedAt
+                        navigate({ name: 'project', id: latest.id });
+                      } else {
+                        const project = addRecent('Code project');
+                        navigate({ name: 'project', id: project.id });
+                      }
                       return;
                     }
                     navigate(item.route);

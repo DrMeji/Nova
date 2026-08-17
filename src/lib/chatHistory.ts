@@ -23,8 +23,8 @@ const CONTINUITY =
   'You are continuing an ongoing ARK conversation. Use the prior messages as context. '
   + 'Do not restart with a greeting, intro, or “what would you like to do today?” '
   + 'Do not repeat the user’s words back as a quote. '
-  + 'Do not repeat or continue a previous assistant answer unless the user asks. '
-  + 'Answer ONLY the latest user message directly.';
+  + 'Do not paste, continue, or remix a previous assistant answer into this reply. '
+  + 'Answer ONLY the latest user message directly with new content.';
 
 const BUILD_HINT =
   /\b(build|create|make|code|app|apps|calculator|website|project|implement|develop|program|software|ui|api)\b/i;
@@ -62,7 +62,7 @@ export function isTopicShift(history: RouterChatTurn[], latestUserMessage: strin
   if (tb.size < 2 || ta.size < 2) return false;
   let overlap = 0;
   for (const t of tb) if (ta.has(t)) overlap += 1;
-  return overlap / tb.size < 0.18;
+  return overlap / tb.size < 0.28;
 }
 
 /** Strip UI / media noise so providers get usable text. */
@@ -243,22 +243,25 @@ export function sanitizeAssistantReply(
 
   // If the model re-emits the previous assistant answer, drop that prefix / paragraphs.
   const prev = String(previousAssistant || '').trim();
-  if (prev.length >= 48) {
+  if (prev.length >= 24) {
+    const prevLower = prev.toLowerCase();
+    const textLower = text.toLowerCase();
+    if (textLower === prevLower || (prev.length >= 40 && textLower.startsWith(prevLower))) {
+      text = text.slice(prev.length).replace(/^\s*[.…\-–—]+/i, '').trim();
+    }
     const prevHead = prev.slice(0, Math.min(180, prev.length)).trim();
     if (prevHead && text.startsWith(prevHead)) {
-      text = text.slice(prevHead.length).replace(/^\s*[.…]*(truncated)?\s*/i, '').trim();
+      text = text.slice(prevHead.length).replace(/^\s*[.…\-–—]+/i, '').trim();
     } else {
       const words = prev.split(/\s+/).slice(0, 14).join(' ');
-      if (words.length >= 40 && text.toLowerCase().startsWith(words.toLowerCase())) {
-        text = text.slice(words.length).replace(/^\s*[.…]*(truncated)?\s*/i, '').trim();
+      if (words.length >= 24 && text.toLowerCase().startsWith(words.toLowerCase())) {
+        text = text.slice(words.length).replace(/^\s*[.…\-–—]+/i, '').trim();
       }
     }
-    const prevLower = prev.toLowerCase();
     const keptParas = text.split(/\n{2,}/).filter((para) => {
       const chunk = para.trim();
       if (chunk.length < 36) return true;
       const sample = chunk.slice(0, 56).toLowerCase();
-      // Drop regurgitated prior paragraphs that are not about the new ask.
       if (prevLower.includes(sample.slice(0, 28))) {
         if (user && significantTokens(user).size > 0) {
           const ut = significantTokens(user);

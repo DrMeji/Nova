@@ -392,11 +392,10 @@ export function AIChat() {
       persistChatIdRef.current = route.chatId;
       return;
     }
+    // Explicit blank starter (New Chat / Image / Video with no id) — never keep a stale thread id.
+    // Otherwise the next send attaches to the previous Recent chat and looks like a “duplicate mix”.
     routeChatIdRef.current = undefined;
-    // Blank New Chat — clear prior thread id unless a generation is still creating one.
-    if (!generatingRef.current) {
-      persistChatIdRef.current = null;
-    }
+    persistChatIdRef.current = null;
   }, [route]);
 
   const refreshChatPlugins = () => {
@@ -828,12 +827,18 @@ export function AIChat() {
     setFailoverNote(null);
     const mySeq = ++genSeqRef.current;
 
-    // Prefer live route id, then the id created by an in-flight first send (queue-safe).
-    let activeChatId = routeChatIdRef.current || persistChatIdRef.current || undefined;
+    // Prefer live route id. Blank starters (no chatId) always mint a new id — never reuse persist.
+    const blankStarter = route.name === 'chat' && !route.chatId;
+    let activeChatId = blankStarter
+      ? undefined
+      : (routeChatIdRef.current || persistChatIdRef.current || undefined);
     const isNewChat = !activeChatId;
     if (!activeChatId) {
       activeChatId = `chat-${crypto.randomUUID().slice(0, 10)}`;
       skipChatLoadIdsRef.current.add(activeChatId);
+      // Fresh thread: wipe any leftover UI messages so history cannot leak from a prior chat.
+      messagesRef.current = [];
+      setMessages([]);
       addChat({
         id: activeChatId,
         mode,
@@ -1007,12 +1012,13 @@ export function AIChat() {
         idleTimer = window.setTimeout(() => {
           if (mySeq !== genSeqRef.current || abandoned || stopRequestedRef.current) return;
           const cleaned = sanitizeAssistantReply(streamedPartial, content, previousAssistant);
-          if (cleaned.trim().length < 24) return;
-          // GGUF often finishes streaming before llama-cli exits — don't leave Stop stuck.
+          if (cleaned.trim().length < 16) return;
+          // GGUF often finishes streaming before llama-cli exits — release Stop quickly.
           abandoned = true;
           void engineGenerateCancel();
+          clearGeneratingIfMine();
           earlyResolve?.({ reply: cleaned });
-        }, 2200);
+        }, 480);
       };
 
       try {
@@ -1139,6 +1145,8 @@ export function AIChat() {
             }),
           ]);
           if (idleTimer) window.clearTimeout(idleTimer);
+          // Release Stop as soon as we have a usable reply — don't wait on trailing work.
+          clearGeneratingIfMine();
           const rawReply = stopRequestedRef.current && streamedPartial
             ? streamedPartial
             : routed.reply;
@@ -1156,6 +1164,7 @@ export function AIChat() {
           if (idleTimer) window.clearTimeout(idleTimer);
           abandoned = true;
           void engineGenerateCancel();
+          clearGeneratingIfMine();
           const timedOut = err instanceof Error && /timed out/i.test(err.message);
           response = stopRequestedRef.current && streamedPartial
             ? sanitizeAssistantReply(streamedPartial, content, previousAssistant)
@@ -1453,7 +1462,7 @@ export function AIChat() {
           </span>
         </div>
       )}
-      <div className="flex items-end gap-2">
+      <div className="flex items-center gap-2">
         <div className="flex-1 min-w-0 flex flex-col">
           {queueLen > 0 && (
             <div className="mb-2 flex items-center justify-between gap-2 rounded-full border border-amber-500/25 bg-amber-500/10 px-3.5 py-2 text-[11px] text-amber-100/90">
@@ -1556,7 +1565,7 @@ export function AIChat() {
           </div>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0 pb-1">
+        <div className="flex items-center gap-2 shrink-0 self-center">
         <TokenUsageRing
           ratio={tokenRatio}
           className="text-content-primary shrink-0"

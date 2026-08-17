@@ -223,6 +223,17 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.48',
+    channel: 'stable' as const,
+    date: 'Aug 16, 2026',
+    title: 'Stop Recent duplicates + faster New Chat',
+    notes: [
+      'Code / Image / Video no longer spawn a new Recent row on every sidebar click',
+      'New Chat no longer reuses a stale thread id (fixes mixed follow-up replies)',
+      'Token ring centered with the ARK pill; Stop clears sooner when the reply is done',
+    ],
+  },
+  {
     version: '0.1.47',
     channel: 'stable' as const,
     date: 'Aug 16, 2026',
