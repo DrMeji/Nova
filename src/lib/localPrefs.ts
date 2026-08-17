@@ -223,14 +223,14 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
-    version: '0.1.49',
+    version: '0.1.50',
     channel: 'stable' as const,
     date: 'Aug 16, 2026',
-    title: 'Code Recent only on activity + ARK identity',
+    title: 'New Chat answers the question you asked',
     notes: [
-      'Opening Code no longer adds a Recent project until you chat or create a file',
-      'ARK replies know this is the ARK app — not Ark: Survival Evolved; less history bleed',
-      'Cleaner delete confirmation (no header divider line)',
+      'Local chat no longer pastes the previous reply into the next one (the “c. Is there anything…” leak)',
+      'ARK knows it is this app — not Ark: Survival Evolved — and won’t “correct” the name',
+      'Follow-ups like “tell me a story” start a fresh answer; build asks still keep useful context',
     ],
   },
   {

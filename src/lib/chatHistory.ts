@@ -14,25 +14,27 @@ const MAX_CHARS = 12_000;
 const MAX_TURN_CHARS = 2_400;
 
 const BASE_SYSTEM =
-  'You are ARK — the ARK desktop creation studio (local AI brain, chat, Code workspace, image, and video). '
-  + 'ARK is this software product the user is talking to inside the ARK app. '
-  + 'You are NOT “Ark: Survival Evolved”, NOT a game engine named Ark, and NOT any unrelated video game. '
-  + 'Never correct the user toward that game and never answer as if ARK were that game. '
-  + 'Be concise and useful. Never echo the user’s greeting back (do not reply “Hello” then another hello). '
-  + 'If the user only says hi/hello, reply once with a short professional offer of help — for example: '
-  + '“How can I assist you today?” — and nothing else.';
+  'You are ARK, the assistant inside the ARK desktop creation studio on this computer. '
+  + 'ARK the product can chat, write and edit code, generate images and video, run a local AI brain, and connect free/cloud models. '
+  + 'You are not the video game Ark: Survival Evolved, not a dinosaur-survival game, and not an unrelated game engine. '
+  + 'Never “correct” the user’s spelling of ARK. Never mention that game unless they clearly ask about it by name. '
+  + 'Be concise. Never echo the user’s greeting. '
+  + 'If they only say hi/hello, reply once: “How can I assist you today?”';
 
 const CONTINUITY =
-  'You are continuing an ongoing ARK conversation inside the ARK app. Use prior messages only as context. '
-  + 'Do not restart with a greeting or intro. '
-  + 'Do not repeat the user’s words back as a quote. '
-  + 'Do not paste, continue, or finish a previous assistant answer — especially not mid-word or after a “…” truncation. '
-  + 'Answer ONLY the latest user message with brand-new content about ARK the app / their request.';
+  'This is a follow-up in the same ARK app chat. '
+  + 'Answer the latest user message with a brand-new reply. '
+  + 'Do not repeat, finish, or continue a previous assistant sentence, list item (a. b. c.), or closing question. '
+  + 'Do not start with leftover fragments like “c. Is there anything…”.';
 
 const BUILD_HINT =
   /\b(build|create|make|code|app|apps|calculator|website|project|implement|develop|program|software|ui|api)\b/i;
 const FACT_HINT =
   /\b(weather|temperature|forecast|rain|humid|capital of|who is|what is|when did|population|india|history of)\b/i;
+const STORY_HINT = /\b(story|joke|poem|song|riddle|fairytale)\b/i;
+const GREET_HINT = /^(hi|hello|hey|yo|sup|howdy)\b/i;
+const FOLLOW_UP_HINT =
+  /^(tell me more|more|go on|continue|why|how so|and\b|also\b|what about|ok but|please explain|elaborate)\b/i;
 
 function significantTokens(text: string): Set<string> {
   return new Set(
@@ -48,8 +50,8 @@ function significantTokens(text: string): Set<string> {
 export function isTopicShift(history: RouterChatTurn[], latestUserMessage: string): boolean {
   const latest = String(latestUserMessage || '').trim();
   if (!latest) return false;
+  if (FOLLOW_UP_HINT.test(latest)) return false;
   const priorUsers = history.filter(t => t.role === 'user');
-  // history may already include latest as last turn
   const earlier = priorUsers.length > 1
     ? priorUsers[priorUsers.length - 2]
     : priorUsers.length === 1 && priorUsers[0].content !== latest
@@ -58,11 +60,16 @@ export function isTopicShift(history: RouterChatTurn[], latestUserMessage: strin
   if (!earlier?.content) return false;
   const a = earlier.content.trim();
   const b = latest;
+  if (GREET_HINT.test(a) && !GREET_HINT.test(b) && !FOLLOW_UP_HINT.test(b)) return true;
+  if (STORY_HINT.test(b) && !STORY_HINT.test(a)) return true;
+  if (STORY_HINT.test(a) && !STORY_HINT.test(b) && !FOLLOW_UP_HINT.test(b)) return true;
   if (BUILD_HINT.test(b) && !BUILD_HINT.test(a) && (FACT_HINT.test(a) || a.length > 12)) return true;
   if (FACT_HINT.test(b) && BUILD_HINT.test(a)) return true;
   const ta = significantTokens(a);
   const tb = significantTokens(b);
-  if (tb.size < 2 || ta.size < 2) return false;
+  if (tb.size < 2 || ta.size < 2) {
+    return a.toLowerCase() !== b.toLowerCase() && !FOLLOW_UP_HINT.test(b);
+  }
   let overlap = 0;
   for (const t of tb) if (ta.has(t)) overlap += 1;
   return overlap / tb.size < 0.28;
@@ -175,41 +182,50 @@ export function routerSystemPrompt(history: RouterChatTurn[]): string {
   return hasPrior ? `${BASE_SYSTEM}\n\n${CONTINUITY}` : BASE_SYSTEM;
 }
 
+const GGUF_IDENTITY =
+  'You are ARK, the assistant in the ARK desktop creation studio (chat, Code, image, video, local AI). '
+  + 'You are not the video game Ark: Survival Evolved. Do not mention that game unless the user asks about it. '
+  + 'Do not correct the spelling of ARK. Answer only the latest user message with a brand-new reply. '
+  + 'Never continue a previous sentence, list item, or closing question.';
+
 /** Pack history into one prompt for engines that only take a single string (GGUF / Core / Ollama generate). */
 export function packHistoryPrompt(history: RouterChatTurn[], latestFallback?: string): string {
-  if (history.length === 0) return latestFallback || '';
-  if (history.length === 1 && history[0].role === 'user') {
-    const alone = history[0].content;
-    if (BUILD_HINT.test(alone)) {
-      return [
-        'You are ARK helping the user build software.',
-        'Answer this build request only. Do not mention unrelated prior topics.',
-        '',
-        alone,
-      ].join('\n');
+  const latest = latestUserMessage(history, latestFallback || '').trim();
+  if (!latest) return latestFallback || '';
+
+  const instruct = (body: string) => `${GGUF_IDENTITY}\n\n${body}\nARK:`;
+
+  if (history.length <= 1 || !history.some(t => t.role === 'assistant') || isTopicShift(history, latest)) {
+    if (BUILD_HINT.test(latest)) {
+      return instruct(`Help the user build this in ARK. Request:\n${latest}`);
     }
-    return alone;
+    return instruct(`User: ${latest}`);
   }
 
-  const latest = latestUserMessage(history, latestFallback || '');
-  if (isTopicShift(history, latest)) {
-    return packHistoryPrompt([{ role: 'user', content: latest }], latest);
+  // Follow-up: give user-ask context only — never dump prior ARK answers (local models continue those).
+  const priorUsers = history
+    .filter(t => t.role === 'user' && t.content.trim() && t.content.trim() !== latest)
+    .slice(-3)
+    .map(t => `- ${t.content.replace(/\s+/g, ' ').slice(0, 160)}`);
+
+  if (BUILD_HINT.test(latest)) {
+    const lastArk = [...history].reverse().find(t => t.role === 'assistant')?.content || '';
+    const gist = lastArk.replace(/\s+/g, ' ').slice(0, 280);
+    return instruct(
+      [
+        priorUsers.length ? `Earlier user asks:\n${priorUsers.join('\n')}` : '',
+        gist ? `ARK already wrote (do not repeat or finish this): ${gist}` : '',
+        `Latest build request:\n${latest}`,
+      ].filter(Boolean).join('\n\n'),
+    );
   }
 
-  const lines: string[] = [
-    'Ongoing ARK conversation inside the ARK desktop app (not a video game).',
-    'Answer ONLY the latest User message below with a fresh reply.',
-    'Never continue a prior ARK line mid-word or after an ellipsis. Do not reuse prior closers.',
-    '',
-  ];
-  for (const turn of history) {
-    const who = turn.role === 'user' ? 'User' : 'ARK';
-    lines.push(`${who}: ${turn.content}`);
-    lines.push('');
-  }
-  lines.push(`Latest request: ${latest}`);
-  lines.push('ARK:');
-  return lines.join('\n');
+  return instruct(
+    [
+      priorUsers.length ? `Earlier user asks (already answered — do not repeat):\n${priorUsers.join('\n')}` : '',
+      `Latest user message:\n${latest}`,
+    ].filter(Boolean).join('\n\n'),
+  );
 }
 
 export function latestUserMessage(history: RouterChatTurn[], fallback: string): string {
@@ -244,6 +260,11 @@ export function sanitizeAssistantReply(
   // Drop leading shell-style echoes: "> hello"
   text = text.replace(/^(?:>\s*.+\n)+/m, '').trim();
   text = text.replace(/^>\s*.+$/m, '').trim();
+
+  // Orphan leftovers from a prior turn (list item / typo-correction closer)
+  text = text.replace(/^[a-z]\.\s+Is there anything specific you'd like to know about Ark\??\s*/i, '').trim();
+  text = text.replace(/^[a-z]\.\s+(?:If you have any specific|I(?:['’]d| would) be happy)[^\n]*\n*/i, '').trim();
+  text = text.replace(/^Hello!\s+It (?:looks|seems) like you might have (?:meant|a typo)[^\n]*\n*/i, '').trim();
 
   const user = String(lastUserMessage || '').trim();
   if (user) {
@@ -303,6 +324,19 @@ export function sanitizeAssistantReply(
       return true;
     });
     if (keptParas.length) text = keptParas.join('\n\n').trim();
+    text = stripPreviousBleed(text, prev);
+  }
+
+  // If the user didn't ask about the game, drop Survival Evolved / gameplay-tip riffs.
+  if (user && !/\bsurvival evolved\b/i.test(user) && !/\bgameplay\b/i.test(user)) {
+    text = text
+      .split(/\n{2,}/)
+      .filter((para) => {
+        if (!/\bsurvival evolved\b|\bgameplay tips\b|\btroubleshooting issues with the game\b/i.test(para)) return true;
+        return BUILD_HINT.test(user) || STORY_HINT.test(user);
+      })
+      .join('\n\n')
+      .trim();
   }
 
   // If user asked to build something, strip leftover weather/fact lead-ins.
@@ -327,9 +361,49 @@ export function sanitizeAssistantReply(
   text = text
     .split('\n')
     .filter(line => !/^\s*User\s*:/i.test(line.trim()))
-    .filter(line => !/^\s*Latest request:/i.test(line.trim()))
+    .filter(line => !/^\s*Latest (request|user message):/i.test(line.trim()))
     .join('\n')
     .trim();
 
   return text;
+}
+
+function firstSentence(text: string) {
+  const m = String(text || '').match(/^[\s\S]{8,280}?(?:[.!?](?=\s|$)|$)/);
+  return (m?.[0] || text.split('\n')[0] || '').trim();
+}
+
+function stripPreviousBleed(text: string, previousAssistant: string): string {
+  let out = text.trim();
+  const prev = previousAssistant.trim();
+  if (!out || prev.length < 16) return out;
+
+  const prevLower = prev.toLowerCase();
+
+  // Leading list leftover: "c. Is there anything specific…"
+  out = out.replace(/^[a-z]\.\s+[^\n]{8,180}\n*/i, (lead) => (
+    prevLower.includes(lead.replace(/^[a-z]\.\s+/i, '').slice(0, 24).toLowerCase()) ? '' : lead
+  )).trim();
+
+  const sent = firstSentence(out);
+  if (sent.length >= 16 && prevLower.includes(sent.slice(0, Math.min(80, sent.length)).toLowerCase())) {
+    out = out.slice(sent.length).replace(/^[.\s]+/, '').trim();
+  }
+
+  const firstLine = out.split('\n')[0]?.trim() || '';
+  if (firstLine.length >= 16 && prevLower.includes(firstLine.slice(0, 48).toLowerCase())) {
+    out = out.slice(firstLine.length).replace(/^\s+/, '').trim();
+  }
+
+  // Tail of previous reply glued onto the start of this one
+  for (const n of [48, 72, 96, 140]) {
+    const tail = prev.slice(-n).replace(/^\S*\s/, '').trim();
+    if (tail.length < 20) continue;
+    if (out.toLowerCase().startsWith(tail.toLowerCase())) {
+      out = out.slice(tail.length).replace(/^[.,;:\s]+/, '').trim();
+      break;
+    }
+  }
+
+  return out;
 }

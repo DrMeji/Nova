@@ -373,7 +373,7 @@ function runGgufStream(modelId, prompt, onChunk, timeoutMs = 120000) {
     const args = [
       '-m', gguf,
       '-p', promptStr,
-      '-n', '384',
+      '-n', '512',
       '--temp', '0.7',
     ];
     const child = spawn(bin, args, { windowsHide: true });

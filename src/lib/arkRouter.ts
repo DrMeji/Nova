@@ -118,7 +118,8 @@ async function tryLocalChat(
       const result = onChunk
         ? await brainGenerateStream(prompt, id, onChunk, 'chat')
         : await brainGenerate(prompt, id, 'chat');
-      const cleaned = sanitizeAssistantReply(result.reply, message);
+      const prevAsst = [...history].reverse().find(t => t.role === 'assistant')?.content;
+      const cleaned = sanitizeAssistantReply(result.reply, message, prevAsst);
       return {
         reply: cleaned || result.reply,
         media: result.media,
@@ -176,10 +177,12 @@ async function tryOllama(
     const model = preferred && probe.models.some(m => m.name === preferred)
       ? preferred
       : probe.models[0].name;
+    const prevAsst = [...history].reverse().find(t => t.role === 'assistant')?.content;
     const packed = packHistoryPrompt(history, message);
     const reply = await ollamaChat(model, history, packed);
+    const cleaned = sanitizeAssistantReply(reply, message, prevAsst);
     return {
-      reply,
+      reply: cleaned || reply,
       modelName: model,
       source: 'ollama',
       tier: 'optional',
