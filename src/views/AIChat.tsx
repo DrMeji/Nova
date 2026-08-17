@@ -21,7 +21,6 @@ import {
 } from '@/lib/mediaPrompt';
 import { arkRoute, routerProviderLabel, type ArkRouterResult } from '@/lib/arkRouter';
 import { FreeKeyWizard } from '@/components/FreeKeyWizard';
-import { CapacityMeter } from '@/components/CapacityMeter';
 import { ComposerPlusMenu, type ComposerPlusAction } from '@/components/ComposerPlusMenu';
 import { TokenUsageRing } from '@/components/TokenUsageRing';
 import { getTokenUsageRatio, recordTokenUsage } from '@/lib/tokenUsage';
@@ -39,8 +38,10 @@ import type { ChatMessage } from '@/types';
 import {
   Bot, User as UserIcon, Loader2, ImageIcon, Video, Code2,
   Upload, Cpu, Cloud, ChevronDown, Check, Blocks, FolderKanban, Zap, Square, X,
+  Puzzle, Briefcase,
 } from 'lucide-react';
 import { engineGenerateCancel, getEngineStatus, setEngineModel } from '@/lib/arkEngine';
+// CapacityMeter removed from footer — ring + model pill carry status
 
 const CODE_FILE_RE =
   /\.(tsx?|jsx?|mjs|cjs|py|go|rs|java|kt|swift|cs|cpp|cxx|cc|c|h|hpp|rb|php|vue|svelte|css|scss|less|html|json|toml|ya?ml|md|sql|sh|bash|zsh|ps1|dockerfile|makefile)$/i;
@@ -785,12 +786,8 @@ export function AIChat() {
   }, [route]);
 
   const handlePlusAction = (action: ComposerPlusAction) => {
-    if (action === 'file') {
+    if (action === 'file' || action === 'image') {
       attachInputRef.current?.click();
-      return;
-    }
-    if (action === 'image') {
-      imageInputRef.current?.click();
       return;
     }
     setComposerMode(action);
@@ -1479,7 +1476,7 @@ export function AIChat() {
             type="file"
             multiple
             className="hidden"
-            accept=".ts,.tsx,.js,.jsx,.mjs,.cjs,.py,.go,.rs,.java,.kt,.swift,.cs,.cpp,.c,.h,.hpp,.rb,.php,.vue,.svelte,.css,.scss,.html,.json,.toml,.yaml,.yml,.md,.sql,.sh,.ps1,text/*,application/json"
+            accept=".ts,.tsx,.js,.jsx,.mjs,.cjs,.py,.go,.rs,.java,.kt,.swift,.cs,.cpp,.c,.h,.hpp,.rb,.php,.vue,.svelte,.css,.scss,.html,.json,.toml,.yaml,.yml,.md,.sql,.sh,.ps1,image/*,text/*,application/json"
             onChange={e => {
               void onPickCodeFiles(e.target.files);
               e.target.value = '';
@@ -1492,11 +1489,10 @@ export function AIChat() {
             multiple
             className="hidden"
             onChange={e => {
-              // Images stay in chat for now — attach opens picker for future media turns
               e.target.value = '';
             }}
           />
-          <ComposerPlusMenu onAction={handlePlusAction} showImage={mode === 'general' || mode === 'code' || mode === 'image'} />
+          <ComposerPlusMenu onAction={handlePlusAction} />
 
           <textarea
             ref={textareaRef}
@@ -1512,8 +1508,6 @@ export function AIChat() {
             rows={1}
             className="flex-1 bg-transparent border-none resize-none px-1 py-2 text-sm text-content-primary placeholder:text-content-tertiary focus:outline-none max-h-32 leading-5 min-w-0"
           />
-
-          <TokenUsageRing ratio={tokenRatio} className="text-content-primary mx-0.5" />
 
           <button
             ref={modelButtonRef}
@@ -1557,6 +1551,8 @@ export function AIChat() {
           )}
         </div>
 
+        <TokenUsageRing ratio={tokenRatio} className="text-content-primary shrink-0" />
+
         {ModeIcon && (
           <button
             type="button"
@@ -1583,10 +1579,6 @@ export function AIChat() {
       </div>
 
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 mt-2.5 px-1">
-        <CapacityMeter
-          capacity={capacity}
-          kind={mode === 'image' ? 'image' : mode === 'video' ? 'video' : 'chat'}
-        />
         {capacity && !capacity.liveChat && (mode === 'general' || mode === 'code') && (
           <>
             <button
@@ -1643,9 +1635,9 @@ export function AIChat() {
             <button
               type="button"
               onClick={() => navigate({ name: 'build' })}
-              className="inline-flex items-center gap-1 text-[11px] text-content-tertiary hover:text-content-secondary transition-colors"
+              className="inline-flex items-center gap-1.5 text-[11px] text-content-tertiary hover:text-content-secondary transition-colors"
             >
-              <Blocks className="w-3 h-3" />
+              <Puzzle className="w-3.5 h-3.5" strokeWidth={1.75} />
               {chatPlugins.length ? 'Manage plugins' : 'Add plugins'}
             </button>
 
@@ -1655,7 +1647,7 @@ export function AIChat() {
                 onClick={() => navigate({ name: 'projects' })}
                 className="inline-flex items-center gap-1.5 text-[11px] text-content-tertiary hover:text-content-secondary transition-colors"
               >
-                <FolderKanban className="w-3 h-3" />
+                <Briefcase className="w-3.5 h-3.5" strokeWidth={1.75} />
                 Open a project
               </button>
             )}

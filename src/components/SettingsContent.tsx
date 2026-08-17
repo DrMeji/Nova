@@ -46,7 +46,9 @@ const SECTIONS: { id: string; label: string; icon: typeof User; disabled?: boole
 ];
 
 /** Tabs that rarely overflow — keep overflow locked so empty space doesn’t scroll. */
-const LOCKED_SCROLL_SECTIONS = new Set(['account', 'appearance', 'security']);
+const LOCKED_SCROLL_SECTIONS = new Set([
+  'account', 'appearance', 'security', 'ai', 'models', 'providers', 'testers', 'local-ai', 'storage',
+]);
 
 const AI_MODES = [
   { value: 'automatic', label: 'Automatic', description: 'ARK Router: local → free keys → paid' },
@@ -89,7 +91,7 @@ const ACCENTS: { id: AccentPref; label: string; swatch: string }[] = [
   { id: 'rose', label: 'Rose', swatch: 'bg-rose-400' },
 ];
 
-export function SettingsContent() {
+export function SettingsContent({ onClose }: { onClose?: () => void } = {}) {
   const { user, profile, settings, updateSettings, signOut, refreshProfile } = useAuth();
   const { theme, setTheme } = useTheme();
   const { navigate } = useRouter();
@@ -280,7 +282,7 @@ export function SettingsContent() {
             </button>
           ))}
         </nav>
-        <div className="shrink-0 border-t border-surface-border p-3">
+        <div className="shrink-0 p-3">
           {savedFlash && (
             <p className="text-[10px] text-emerald-400 mb-2 truncate flex items-center gap-1">
               <Check className="w-3 h-3 shrink-0" />
@@ -421,6 +423,7 @@ export function SettingsContent() {
                   </div>
                 </div>
 
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <ToggleRow
                   label="Compact sidebar"
                   description="Use a narrower icon rail by default"
@@ -439,6 +442,7 @@ export function SettingsContent() {
                   value={prefs.reduceMotion}
                   onChange={v => patchPrefs({ reduceMotion: v })}
                 />
+                </div>
               </div>
             </SettingsSection>
           )}
@@ -459,8 +463,7 @@ export function SettingsContent() {
                   <Sparkles className="w-4 h-4 text-sky-400" />
                 </div>
 
-                <div className="space-y-3">
-                  <label className="block text-xs font-medium text-content-secondary">Preferred mode</label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   {AI_MODES.map(mode => (
                     <button
                       key={mode.value}
@@ -469,18 +472,18 @@ export function SettingsContent() {
                         patchPrefs({ aiMode: mode.value as AiModePref });
                         if (settings) updateSettings({ ai_mode: mode.value as typeof settings.ai_mode });
                       }}
-                      className={`w-full text-left p-4 rounded-lg border transition-all ${
+                      className={`w-full text-left p-3 rounded-lg border transition-all ${
                         aiMode === mode.value
                           ? 'border-ark-blue-400 bg-ark-blue-500/10'
                           : 'border-surface-border hover:border-surface-border-light'
                       }`}
                     >
-                      <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-center justify-between gap-2">
                         <div>
                           <p className={`text-sm font-medium ${aiMode === mode.value ? 'text-ark-blue-300' : 'text-content-primary'}`}>
                             {mode.label}
                           </p>
-                          <p className="text-xs text-content-tertiary mt-0.5">{mode.description}</p>
+                          <p className="text-[11px] text-content-tertiary mt-0.5">{mode.description}</p>
                         </div>
                         {aiMode === mode.value && <Check className="w-4 h-4 text-ark-blue-400 shrink-0" />}
                       </div>
@@ -488,6 +491,7 @@ export function SettingsContent() {
                   ))}
                 </div>
 
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <ToggleRow
                   label="Auto failover"
                   description="If a provider is limited or offline, switch to the next healthy option"
@@ -506,28 +510,29 @@ export function SettingsContent() {
                   value={prefs.rememberContext}
                   onChange={v => patchPrefs({ rememberContext: v })}
                 />
+                </div>
               </div>
             </SettingsSection>
           )}
 
           {activeSection === 'models' && (
             <SettingsSection title="Models" description="Default model for new chats and builds">
-              <div className="space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {DEFAULT_MODELS.map(m => (
                   <button
                     key={m.id}
                     type="button"
                     onClick={() => patchPrefs({ defaultModelId: m.id })}
-                    className={`w-full text-left p-3.5 rounded-xl border transition-all ${
+                    className={`w-full text-left p-3 rounded-xl border transition-all ${
                       prefs.defaultModelId === m.id
                         ? 'border-ark-blue-400 bg-ark-blue-500/10'
                         : 'border-surface-border hover:border-surface-border-light'
                     }`}
                   >
-                    <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center justify-between gap-2">
                       <div className="min-w-0">
                         <p className="text-sm font-medium text-content-primary truncate">{m.label}</p>
-                        <p className="text-xs text-content-tertiary mt-0.5">{m.detail}</p>
+                        <p className="text-[11px] text-content-tertiary mt-0.5 line-clamp-2">{m.detail}</p>
                       </div>
                       {prefs.defaultModelId === m.id && <Check className="w-4 h-4 text-ark-blue-400 shrink-0" />}
                     </div>
@@ -535,8 +540,11 @@ export function SettingsContent() {
                 ))}
                 <button
                   type="button"
-                  onClick={() => navigate({ name: 'models' })}
-                  className="ark-btn-secondary w-full mt-2"
+                  onClick={() => {
+                    onClose?.();
+                    navigate({ name: 'models' });
+                  }}
+                  className="ark-btn-secondary w-full sm:col-span-2"
                 >
                   Open Models library
                 </button>
@@ -563,12 +571,12 @@ export function SettingsContent() {
                   <KeyRound className="w-4 h-4 text-content-tertiary" />
                 </div>
 
-                <div className="space-y-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[min(48vh,26rem)] overflow-y-auto">
                   {PROVIDER_ROWS.map(p => {
                     const hasKey = Boolean(providerKeys[p.id]);
                     const editing = editingProvider === p.id;
                     return (
-                      <div key={p.id} className="rounded-xl border border-surface-border p-3">
+                      <div key={p.id} className={`rounded-xl border border-surface-border p-3 ${editing ? 'sm:col-span-2' : ''}`}>
                         <div className="flex items-center justify-between gap-3">
                           <div className="min-w-0">
                             <p className="text-sm font-medium text-content-primary">{p.name}</p>
@@ -745,7 +753,7 @@ export function SettingsContent() {
                     <Trash2 className="w-4 h-4" />
                     Clear cache
                   </button>
-                  <button type="button" className="ark-btn-secondary" onClick={() => navigate({ name: 'local-ai' })}>
+                  <button type="button" className="ark-btn-secondary" onClick={() => { onClose?.(); navigate({ name: 'local-ai' }); }}>
                     Manage models
                   </button>
                 </div>

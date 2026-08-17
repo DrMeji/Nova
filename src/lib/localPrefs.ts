@@ -223,6 +223,17 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.46',
+    channel: 'stable' as const,
+    date: 'Aug 16, 2026',
+    title: 'Update wait screen + UI polish',
+    notes: [
+      'Updating screen stays until ARK reopens (“Waiting for ARK to reopen”)',
+      'Smaller plus menu; Recent shows chat vs Code icons with archive/delete',
+      'Cleaner Code Start/Stop, chat footer, Settings grids without empty scroll',
+    ],
+  },
+  {
     version: '0.1.45',
     channel: 'stable' as const,
     date: 'Aug 16, 2026',

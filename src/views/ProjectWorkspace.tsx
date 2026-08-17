@@ -951,19 +951,6 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
               {diskRoot}
             </span>
           ) : null}
-          {showBrowserChrome && (
-            <button
-              type="button"
-              onClick={openPreviewInBrowser}
-              title="Open localhost in your system browser"
-              className="inline-flex items-center gap-1.5 rounded-full border border-surface-border px-2 py-0.5 text-[11px] text-content-secondary shrink-0 hover:bg-surface-hover hover:text-content-primary transition-colors"
-            >
-              <Globe className="w-3 h-3 text-sky-400" />
-              Browser
-              <span className="text-content-tertiary">·</span>
-              <span className="font-mono text-content-tertiary truncate max-w-[9rem]">{previewUrl}</span>
-            </button>
-          )}
         </div>
 
         <div className="flex items-center gap-1.5 shrink-0">
@@ -993,7 +980,7 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
             type="button"
             onClick={handleBuild}
             disabled={!hasFiles && !buildRunning}
-            title={hasFiles ? (buildRunning ? 'Stop' : 'Build & Run') : 'Ask ARK to create files first'}
+            title={hasFiles ? (buildRunning ? 'Stop preview' : 'Start preview') : 'Ask ARK to create files first'}
             className={`inline-flex items-center gap-1 h-8 px-2.5 rounded-lg text-xs font-medium ml-1 mr-1 transition-colors ${
               buildRunning
                 ? 'border border-rose-400/35 bg-rose-500/15 text-rose-200 hover:bg-rose-500/25'
@@ -1003,7 +990,7 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
             }`}
           >
             {buildRunning ? <Square className="w-3 h-3" /> : <Play className="w-3 h-3" />}
-            {buildRunning ? 'Stop' : 'Run'}
+            {buildRunning ? 'Stop' : 'Start'}
           </button>
         </div>
       </div>
@@ -1332,7 +1319,7 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
                     type="file"
                     multiple
                     className="hidden"
-                    accept=".ts,.tsx,.js,.jsx,.mjs,.cjs,.py,.go,.rs,.java,.css,.html,.json,.md,.toml,.yaml,.yml,text/*"
+                    accept=".ts,.tsx,.js,.jsx,.mjs,.cjs,.py,.go,.rs,.java,.css,.html,.json,.md,.toml,.yaml,.yml,image/*,text/*"
                     onChange={async e => {
                       const list = e.target.files;
                       e.target.value = '';
@@ -1385,32 +1372,19 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
                     }}
                   />
                   <ComposerPlusMenu
-                    showImage
                     buttonClassName="w-8 h-8 rounded-lg flex items-center justify-center text-content-tertiary hover:text-content-primary hover:bg-surface-hover transition-colors"
                     onAction={(action: ComposerPlusAction) => {
-                      if (action === 'file') {
+                      if (action === 'file' || action === 'image') {
                         codeFileInputRef.current?.click();
-                        return;
-                      }
-                      if (action === 'image') {
-                        fileInputRef.current?.click();
                         return;
                       }
                       setComposerMode(action);
                       requestAnimationFrame(() => textareaRef.current?.focus());
                     }}
                   />
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    className="w-8 h-8 rounded-lg flex items-center justify-center text-content-tertiary hover:text-content-primary hover:bg-surface-hover transition-colors"
-                    title="Upload image"
-                  >
-                    <ImageIcon className="w-3.5 h-3.5" />
-                  </button>
-                  <TokenUsageRing ratio={tokenRatio} size={16} className="text-content-primary mx-1" />
                 </div>
-                <div className="flex items-center gap-1 shrink-0">
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <TokenUsageRing ratio={tokenRatio} size={16} className="text-content-primary" />
                   <button
                     ref={modelButtonRef}
                     type="button"
@@ -1481,7 +1455,7 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
                     type="button"
                     onClick={() => void handleSendChat()}
                     disabled={!chatInput.trim() && attachedImages.length === 0}
-                    className="w-8 h-8 rounded-lg bg-content-primary text-ark-navy-950 flex items-center justify-center hover:opacity-90 transition-opacity disabled:opacity-30 disabled:cursor-not-allowed"
+                    className="w-8 h-8 rounded-full bg-content-primary text-ark-navy-950 flex items-center justify-center hover:opacity-90 transition-opacity disabled:opacity-30 disabled:cursor-not-allowed"
                   >
                     <ArrowUp className="w-4 h-4" strokeWidth={2.5} />
                   </button>
@@ -1595,7 +1569,7 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
                       <Globe className="w-5 h-5 text-sky-400" />
                       <p className="text-sm text-content-secondary">No preview yet</p>
                       <p className="text-xs text-content-tertiary max-w-xs">
-                        Create files with chat, then hit Run for a local preview.
+                        Create files with chat, then hit Start for a local preview.
                       </p>
                     </div>
                   )}
@@ -1636,11 +1610,13 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
                 Open preview
               </button>
             )}
-            {!buildLabel && !showBrowserChrome && (
-              <span className="text-content-tertiary">Ready — ask ARK to build</span>
-            )}
           </div>
-          <div className="flex items-center gap-1 shrink-0">
+          <div className="flex items-center gap-2 shrink-0 min-w-0">
+            {showBrowserChrome && (
+              <span className="text-[11px] text-content-tertiary truncate font-mono max-w-[18rem]" title={livePreviewUrl || previewUrl}>
+                {livePreviewUrl || previewUrl}
+              </span>
+            )}
             {!explorerOpen && (
               <button type="button" onClick={() => setExplorerOpen(true)} className="text-[11px] text-content-tertiary hover:text-content-secondary px-1.5">
                 Explorer

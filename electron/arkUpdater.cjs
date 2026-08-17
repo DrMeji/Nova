@@ -608,6 +608,8 @@ async function runStandaloneSplash(argv) {
     }
 
     writeLog('electron splash exiting; handoff splash owns remaining UX');
+    // Give the WinForms handoff a moment to paint before this process dies.
+    await sleep(600);
   } catch (err) {
     writeLog(`error ${err instanceof Error ? err.stack || err.message : err}`);
     try {
@@ -808,11 +810,15 @@ function launchInstallHandoffSplash({ statusPath, expectedVersion, arkExe }) {
     '$form.Controls.Add($pct)',
     '$form.Controls.Add($sub)',
     '$form.Controls.Add($track)',
-    '$script:seenOpening = $false',
+    '$script:baselinePids = @{}',
+    'try { Get-Process -Name "ARK" -ErrorAction SilentlyContinue | ForEach-Object { $script:baselinePids[$_.Id] = $true } } catch {}',
+    '$script:installFinished = $false',
+    '$script:waitingReopen = $false',
     '$script:closeArmed = $false',
     '$script:closeAt = 0',
+    '$script:startedAt = [Environment]::TickCount',
     '$timer = New-Object System.Windows.Forms.Timer',
-    '$timer.Interval = 400',
+    '$timer.Interval = 450',
     '$timer.Add_Tick({',
     '  try {',
     '    if (Test-Path -LiteralPath $statusPath) {',
@@ -829,30 +835,41 @@ function launchInstallHandoffSplash({ statusPath, expectedVersion, arkExe }) {
     '        $w = [Math]::Max(8, [int](280 * $n / 100))',
     '        $fill.Width = $w',
     '      }',
-    '      if ($map.sub) { $sub.Text = [string]$map.sub }',
+    '      if ($map.sub -and -not $script:waitingReopen) { $sub.Text = [string]$map.sub }',
     '      $stage = [string]$map.stage',
-    '      if ($stage -eq "opening" -or $stage -eq "done") { $script:seenOpening = $true }',
+    '      if ($stage -eq "opening" -or $stage -eq "done" -or $stage -eq "waiting_reopen") {',
+    '        $script:installFinished = $true',
+    '        if (-not $script:waitingReopen) {',
+    '          $script:waitingReopen = $true',
+    '          $label.Text = "Update complete"',
+    '          $sub.Text = "Waiting for ARK to reopen"',
+    '          $pct.Text = "100%"',
+    '          $fill.Width = 280',
+    '        }',
+    '      }',
     '    }',
     '  } catch {}',
-    '  $arkUp = $false',
-    '  try {',
-    '    $procs = Get-Process -Name "ARK" -ErrorAction SilentlyContinue',
-    '    if ($procs) { $arkUp = $true }',
-    '  } catch {}',
-    '  if ($script:seenOpening -and $arkUp -and -not $script:closeArmed) {',
-    '    $script:closeArmed = $true',
-    '    $script:closeAt = [Environment]::TickCount + 900',
-    '    $label.Text = "Update complete"',
-    '    $sub.Text = "Opening ARK…"',
-    '    $pct.Text = "100%"',
-    '    $fill.Width = 280',
+    '  if ($script:installFinished -and -not $script:closeArmed) {',
+    '    $newArk = $false',
+    '    try {',
+    '      Get-Process -Name "ARK" -ErrorAction SilentlyContinue | ForEach-Object {',
+    '        if (-not $script:baselinePids.ContainsKey($_.Id)) { $newArk = $true }',
+    '      }',
+    '    } catch {}',
+    '    if ($newArk) {',
+    '      $script:closeArmed = $true',
+    '      $script:closeAt = [Environment]::TickCount + 1200',
+    '      $sub.Text = "ARK is opening"',
+    '    }',
     '  }',
+    '  if (([Environment]::TickCount - $script:startedAt) -gt 600000) { $timer.Stop(); $form.Close() }',
     '  if ($script:closeArmed -and [Environment]::TickCount -ge $script:closeAt) {',
     '    $timer.Stop()',
     '    $form.Close()',
     '  }',
     '})',
     '$timer.Start()',
+    '$form.Add_Shown({ $form.Activate(); $form.BringToFront() })',
     '[void]$form.ShowDialog()',
   ].join('\r\n');
 
@@ -872,7 +889,7 @@ function launchInstallHandoffSplash({ statusPath, expectedVersion, arkExe }) {
   try {
     spawn(
       psExe,
-      ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Normal', '-File', ps1Path],
+      ['-STA', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Normal', '-File', ps1Path],
       {
         detached: true,
         stdio: 'ignore',
@@ -890,7 +907,7 @@ function launchInstallHandoffSplash({ statusPath, expectedVersion, arkExe }) {
     } catch {
       /* ignore */
     }
-  }, 120_000);
+  }, 300_000);
 
   return { ok: true, ps1Path };
 }
@@ -974,7 +991,7 @@ function launchCmdApplyUpdate({ setupPath, installDir, expectedVersion, parentPi
     `  echo missing ${q(arkExe)}, trying install dir>> "${logPath}"`,
     `  start "" "${installDir}\\ARK.exe"`,
     ')',
-    setStatus('done', 100, 'Update complete', 'Opening ARK'),
+    setStatus('waiting_reopen', 100, 'Update complete', 'Waiting for ARK to reopen'),
     `echo done>> "${logPath}"`,
     'endlocal',
     'exit /b 0',

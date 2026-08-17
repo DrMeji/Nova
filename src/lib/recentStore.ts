@@ -85,6 +85,12 @@ export function renameRecentChatTitle(chatId: string, title: string): RecentChat
   return list;
 }
 
+export function removeRecentProject(id: string): RecentProject[] {
+  const list = loadRecentProjects().filter(p => p.id !== id);
+  saveRecentProjects(list);
+  return list;
+}
+
 export function loadRecentCreations(): RecentCreation[] {
   try {
     const raw = localStorage.getItem(CREATIONS_KEY);

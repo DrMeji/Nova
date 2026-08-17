@@ -38,13 +38,13 @@ function resolveDisplayName(
 export function AppShell({ children }: { children: ReactNode }) {
   const { route, navigate } = useRouter();
   const { user, profile } = useAuth();
-  const { recent, activeChats, archiveChat, deleteChatForever, addRecent, renameRecent, renameChat } = useRecentProjects();
+  const { recent, activeChats, archiveChat, deleteChatForever, addRecent, renameRecent, renameChat, removeRecent } = useRecentProjects();
   const [collapsed, setCollapsed] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [recentOpen, setRecentOpen] = useState(true);
   const [prefsName, setPrefsName] = useState(() => getLocalPrefs().displayName);
-  const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string; kind: 'chat' | 'project' } | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
 
@@ -142,6 +142,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const chatIcon = (mode: string) => {
     if (mode === 'image') return ImageIcon;
     if (mode === 'video') return Video;
+    if (mode === 'code') return Code2;
     return MessageSquare;
   };
 
@@ -323,30 +324,33 @@ export function AppShell({ children }: { children: ReactNode }) {
                           </button>
                         )}
                         {!editing && (
-                          <button
-                            type="button"
-                            title="Rename"
-                            aria-label={`Rename ${item.title}`}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setRenamingId(renameKey);
-                              setRenameDraft(item.title);
-                            }}
-                            className="opacity-0 group-hover:opacity-100 focus:opacity-100 w-7 h-7 rounded-md flex items-center justify-center text-content-tertiary hover:text-content-primary hover:bg-surface-hover shrink-0 transition-opacity"
-                          >
-                            <Pencil className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-                        {item.kind === 'chat' && !editing && (
                           <>
                             <button
                               type="button"
-                              title="Archive to History"
+                              title="Rename"
+                              aria-label={`Rename ${item.title}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setRenamingId(renameKey);
+                                setRenameDraft(item.title);
+                              }}
+                              className="opacity-0 group-hover:opacity-100 focus:opacity-100 w-7 h-7 rounded-md flex items-center justify-center text-content-tertiary hover:text-content-primary hover:bg-surface-hover shrink-0 transition-opacity"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              title={item.kind === 'chat' ? 'Archive to History' : 'Remove from Recent'}
                               aria-label={`Archive ${item.title}`}
                               onClick={(e) => {
                                 e.stopPropagation();
-                                archiveChat(item.id);
-                                if (activeChatId === item.id) navigate({ name: 'chat' });
+                                if (item.kind === 'chat') {
+                                  archiveChat(item.id);
+                                  if (activeChatId === item.id) navigate({ name: 'chat' });
+                                } else {
+                                  removeRecent(item.id);
+                                  if (activeRecentId === item.id) navigate({ name: 'chat' });
+                                }
                               }}
                               className="opacity-0 group-hover:opacity-100 focus:opacity-100 w-7 h-7 rounded-md flex items-center justify-center text-content-tertiary hover:text-sky-300 hover:bg-surface-hover shrink-0 transition-opacity"
                             >
@@ -358,7 +362,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                               aria-label={`Delete ${item.title}`}
                               onClick={(e) => {
                                 e.stopPropagation();
-                                setDeleteTarget({ id: item.id, title: item.title });
+                                setDeleteTarget({ id: item.id, title: item.title, kind: item.kind });
                               }}
                               className="opacity-0 group-hover:opacity-100 focus:opacity-100 w-7 h-7 rounded-md flex items-center justify-center text-content-tertiary hover:text-rose-400 hover:bg-surface-hover shrink-0 transition-opacity mr-0.5"
                             >
@@ -477,13 +481,13 @@ export function AppShell({ children }: { children: ReactNode }) {
         title="Settings"
         size="settings"
       >
-        <SettingsContent />
+        <SettingsContent onClose={() => setSettingsOpen(false)} />
       </Modal>
 
       <Modal
         isOpen={Boolean(deleteTarget)}
         onClose={() => setDeleteTarget(null)}
-        title="Delete chat?"
+        title={deleteTarget?.kind === 'project' ? 'Delete Code project?' : 'Delete chat?'}
         size="sm"
       >
         <div className="px-1 pb-1">
@@ -495,7 +499,9 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <span className="text-content-primary font-medium">“{deleteTarget.title}”</span>
               </>
             ) : null}
-            . This removes the conversation and linked local data from this PC. This can’t be undone.
+            {deleteTarget?.kind === 'project'
+              ? ' from Recent. Project files on disk are kept unless you remove them yourself.'
+              : '. This removes the conversation and linked local data from this PC. This can’t be undone.'}
           </p>
           <div className="flex items-center justify-end gap-2 mt-6">
             <button
@@ -510,9 +516,15 @@ export function AppShell({ children }: { children: ReactNode }) {
               onClick={() => {
                 if (!deleteTarget) return;
                 const id = deleteTarget.id;
-                deleteChatForever(id);
-                setDeleteTarget(null);
-                if (activeChatId === id) navigate({ name: 'chat' });
+                if (deleteTarget.kind === 'project') {
+                  removeRecent(id);
+                  setDeleteTarget(null);
+                  if (activeRecentId === id) navigate({ name: 'chat' });
+                } else {
+                  deleteChatForever(id);
+                  setDeleteTarget(null);
+                  if (activeChatId === id) navigate({ name: 'chat' });
+                }
               }}
               className="rounded-full px-3.5 py-1.5 text-xs font-medium bg-rose-500/20 text-rose-300 hover:bg-rose-500/30 transition-colors"
             >

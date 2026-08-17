@@ -8,6 +8,7 @@ import {
   loadRecentProjects,
   renameRecentChatTitle,
   renameRecentProject,
+  removeRecentProject,
   saveRecentChats,
   saveRecentProjects,
   upsertCreation,
@@ -27,6 +28,7 @@ interface RecentProjectsContextValue {
   addRecent: (name: string) => RecentProject;
   renameRecent: (id: string, name: string) => void;
   renameChat: (id: string, title: string) => void;
+  removeRecent: (id: string) => void;
   addCreation: (entry: RecentCreation) => void;
   addChat: (entry: RecentChat) => void;
   archiveChat: (chatId: string) => void;
@@ -135,6 +137,10 @@ export function RecentProjectsProvider({ children }: { children: ReactNode }) {
     setChats(renameRecentChatTitle(id, title));
   }, []);
 
+  const removeRecent = useCallback((id: string) => {
+    setRecent(removeRecentProject(id));
+  }, []);
+
   const addCreation = useCallback((entry: RecentCreation) => {
     upsertCreation(entry);
     setCreations(loadRecentCreations());
@@ -177,6 +183,7 @@ export function RecentProjectsProvider({ children }: { children: ReactNode }) {
         addRecent,
         renameRecent,
         renameChat,
+        removeRecent,
         addCreation,
         addChat,
         archiveChat,
