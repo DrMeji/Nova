@@ -240,7 +240,7 @@ function splashHtml(iconFileUrl) {
 <body>
   <div class="wrap">
     ${icon}
-    <div id="label">Updating...</div>
+    <div id="label">Updating ARK...</div>
     <div id="sub"></div>
     <div class="track"><div id="fill"></div></div>
   </div>
@@ -363,7 +363,7 @@ async function runStandaloneSplash(argv) {
     alwaysOnTop: true,
     center: true,
     autoHideMenuBar: true,
-    title: 'ARK',
+    title: 'Updating ARK',
     icon: iconPath || undefined,
     webPreferences: {
       contextIsolation: true,
@@ -373,13 +373,21 @@ async function runStandaloneSplash(argv) {
   });
   win.setMenuBarVisibility(false);
   await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(splashHtml(iconUrl))}`);
-  await setSplash(win, 5, 'Updating...', 'Preparing');
+  await setSplash(win, 5, 'Updating ARK...', 'Preparing');
   writeLog('splash shown');
+  // Signal parent that the updater process is alive (Lyndsey-style ready handoff).
+  try {
+    const readyPath = path.join(app.getPath('temp'), `ark-update-helper-${parentPid || '0'}.ready`);
+    fs.writeFileSync(readyPath, `ok ${new Date().toISOString()}\n`, 'utf8');
+    writeLog(`ready ${readyPath}`);
+  } catch (err) {
+    writeLog(`ready write failed: ${err}`);
+  }
 
   const installDir = path.dirname(process.execPath);
 
   try {
-    await setSplash(win, 8, 'Updating...', 'Waiting for ARK to close');
+    await setSplash(win, 8, 'Updating ARK...', 'Waiting for ARK to close');
     const deadline = Date.now() + 60_000;
     while (pidAlive(parentPid) && Date.now() < deadline) {
       await sleep(80);
@@ -401,7 +409,7 @@ async function runStandaloneSplash(argv) {
       });
       writeLog('download done');
     } else {
-      await setSplash(win, 45, 'Updating...', 'Installer ready');
+      await setSplash(win, 45, 'Updating ARK...', 'Installer ready');
       writeLog(`local setup exists=${fs.existsSync(localSetup)}`);
       if (!fs.existsSync(localSetup)) throw new Error('Installer file missing');
     }
@@ -547,10 +555,17 @@ function launchUpdaterBreakaway({ payload, expectedVersion, parentPid }) {
   const vbsPath = path.join(temp, `ark-boot-updater-${stamp}.vbs`);
   const cmdPath = path.join(temp, `ark-boot-updater-${stamp}.cmd`);
   const logPath = path.join(temp, `ark-boot-updater-${stamp}.log`);
+  const readyPath = path.join(temp, `ark-update-helper-${parentPid || process.pid}.ready`);
   const exe = process.execPath;
   const cwd = path.dirname(exe);
   const ver = normalizeVersion(expectedVersion);
   const q = (s) => String(s).replace(/"/g, '""');
+
+  try {
+    if (fs.existsSync(readyPath)) fs.unlinkSync(readyPath);
+  } catch {
+    /* ignore */
+  }
 
   const vbs = [
     'On Error Resume Next',
@@ -596,10 +611,10 @@ function launchUpdaterBreakaway({ payload, expectedVersion, parentPid }) {
     }).unref();
   }
 
-  // Secondary delayed fallback if VBS silently failed
+  // Secondary delayed fallback if VBS silently failed AND updater never became ready
   setTimeout(() => {
     try {
-      if (!fs.existsSync(logPath)) {
+      if (!fs.existsSync(readyPath) && !fs.existsSync(logPath)) {
         spawn(cmdPath, [], {
           detached: true,
           stdio: 'ignore',
@@ -623,7 +638,20 @@ function launchUpdaterBreakaway({ payload, expectedVersion, parentPid }) {
     }
   }, 25_000);
 
-  return { logPath };
+  return { logPath, readyPath };
+}
+
+async function waitForUpdaterReady(readyPath, timeoutMs = 12_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      if (readyPath && fs.existsSync(readyPath)) return true;
+    } catch {
+      /* ignore */
+    }
+    await sleep(100);
+  }
+  return false;
 }
 
 /** Try electron-updater differential download; returns local installer path or null. */
@@ -711,24 +739,32 @@ async function downloadAndInstall(setupUrl, latestTag) {
       message: 'Closing ARK to finish updating...',
       version: expectedVersion,
     });
-    setTimeout(() => {
-      try {
-        launchUpdaterBreakaway({
-          payload: deltaPath,
-          expectedVersion,
-          parentPid: process.pid,
-        });
-      } catch (err) {
+    try {
+      const handoff = launchUpdaterBreakaway({
+        payload: deltaPath,
+        expectedVersion,
+        parentPid: process.pid,
+      });
+      const ready = await waitForUpdaterReady(handoff.readyPath, 12_000);
+      if (!ready) {
         sendProgress({
           status: 'error',
           percent: 100,
-          message: 'Could not start the updater. Try again.',
-          error: err instanceof Error ? err.message : 'spawn failed',
+          message: 'Updater window did not start. Try Update again.',
+          error: 'updater-ready-timeout',
         });
-        return;
+        return { ok: false, message: 'Updater window did not start.' };
       }
-      setTimeout(() => app.quit(), 1100);
-    }, 300);
+    } catch (err) {
+      sendProgress({
+        status: 'error',
+        percent: 100,
+        message: 'Could not start the updater. Try again.',
+        error: err instanceof Error ? err.message : 'spawn failed',
+      });
+      return { ok: false, message: 'Could not start the updater.' };
+    }
+    setTimeout(() => app.quit(), 400);
     return { ok: true, message: 'Closing ARK to finish updating...' };
   }
 
@@ -783,26 +819,34 @@ async function downloadAndInstall(setupUrl, latestTag) {
     version: expectedVersion,
   });
 
-  setTimeout(() => {
-    try {
-      launchUpdaterBreakaway({
-        payload: dest,
-        expectedVersion,
-        parentPid: process.pid,
-      });
-    } catch (err) {
-      console.error('[ark] failed to launch updater', err);
+  try {
+    const handoff = launchUpdaterBreakaway({
+      payload: dest,
+      expectedVersion,
+      parentPid: process.pid,
+    });
+    const ready = await waitForUpdaterReady(handoff.readyPath, 12_000);
+    if (!ready) {
       sendProgress({
         status: 'error',
         percent: 100,
-        message: 'Could not start the updater. Try again.',
-        error: err instanceof Error ? err.message : 'spawn failed',
+        message: 'Updater window did not start. Try Update again.',
+        error: 'updater-ready-timeout',
       });
-      return;
+      return { ok: false, message: 'Updater window did not start.' };
     }
-    setTimeout(() => app.quit(), 1100);
-  }, 300);
+  } catch (err) {
+    console.error('[ark] failed to launch updater', err);
+    sendProgress({
+      status: 'error',
+      percent: 100,
+      message: 'Could not start the updater. Try again.',
+      error: err instanceof Error ? err.message : 'spawn failed',
+    });
+    return { ok: false, message: 'Could not start the updater.' };
+  }
 
+  setTimeout(() => app.quit(), 400);
   return { ok: true, message: 'Closing ARK to finish updating...' };
 }
 

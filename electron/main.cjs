@@ -745,51 +745,60 @@ function startBrainApi() {
   });
 }
 
-// One process only — desktop shortcut / installer must not spawn duplicate trays.
-const gotLock = app.requestSingleInstanceLock();
-if (!gotLock) {
-  app.quit();
-} else {
-  app.on('second-instance', () => {
-    showMainWindow();
+// Updater must NOT take/contend for the single-instance lock. The main app still
+// holds the lock when it breakaway-launches `ARK.exe --ark-updater`, so requesting
+// the lock here used to make the updater exit immediately (no Updating window,
+// no install, same update still available after reopen).
+if (isUpdaterMode) {
+  app.whenReady().then(() =>
+    arkUpdater.runStandaloneSplash(process.argv).catch((err) => {
+      console.error('[ark-updater] fatal', err);
+      app.quit();
+    }),
+  );
+  app.on('window-all-closed', () => {
+    /* splash owns lifetime */
   });
-
-  app.whenReady().then(() => {
-    if (isUpdaterMode) {
-      return arkUpdater.runStandaloneSplash(process.argv).catch((err) => {
-        console.error('[ark-updater] fatal', err);
-        app.quit();
-      });
-    }
-    arkEngine.start();
-    startBrainApi();
-    createWindow();
-    createTray();
-    app.on('activate', () => {
+} else {
+  // One process only — desktop shortcut / installer must not spawn duplicate trays.
+  const gotLock = app.requestSingleInstanceLock();
+  if (!gotLock) {
+    app.quit();
+  } else {
+    app.on('second-instance', () => {
       showMainWindow();
     });
-  });
 
-  app.on('before-quit', () => {
-    quitting = true;
-    if (tray) {
-      try {
-        tray.destroy();
-      } catch {
-        /* ignore */
+    app.whenReady().then(() => {
+      arkEngine.start();
+      startBrainApi();
+      createWindow();
+      createTray();
+      app.on('activate', () => {
+        showMainWindow();
+      });
+    });
+
+    app.on('before-quit', () => {
+      quitting = true;
+      if (tray) {
+        try {
+          tray.destroy();
+        } catch {
+          /* ignore */
+        }
+        tray = null;
       }
-      tray = null;
-    }
-  });
+    });
 
-  app.on('window-all-closed', () => {
-    if (isUpdaterMode) return;
-    // With tray, closing the window hides ARK — brain stays on :8787 until Quit.
-    if (tray && !quitting) return;
-    if (brainApi) {
-      void brainApi.close();
-      brainApi = null;
-    }
-    if (process.platform !== 'darwin') app.quit();
-  });
+    app.on('window-all-closed', () => {
+      // With tray, closing the window hides ARK — brain stays on :8787 until Quit.
+      if (tray && !quitting) return;
+      if (brainApi) {
+        void brainApi.close();
+        brainApi = null;
+      }
+      if (process.platform !== 'darwin') app.quit();
+    });
+  }
 }
