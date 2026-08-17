@@ -135,3 +135,55 @@ export function latestUserMessage(history: RouterChatTurn[], fallback: string): 
   }
   return fallback;
 }
+
+/**
+ * Strip GGUF / packed-prompt echoes so the bubble never shows “> hello” or
+ * a full User:/ARK: transcript before the real answer.
+ */
+export function sanitizeAssistantReply(raw: string, lastUserMessage?: string): string {
+  let text = String(raw || '').replace(/\r\n/g, '\n').trim();
+  if (!text) return '';
+
+  // Prefer the completion after the last ARK: / Assistant: marker (packed prompt echo).
+  const markRe = /(?:^|\n)\s*(?:ARK|Assistant)\s*:\s*/gi;
+  let lastMark: RegExpExecArray | null = null;
+  let m: RegExpExecArray | null;
+  while ((m = markRe.exec(text)) !== null) lastMark = m;
+  if (lastMark && typeof lastMark.index === 'number') {
+    text = text.slice(lastMark.index + lastMark[0].length).replace(/^\s*ARK\s*:\s*/i, '').trim();
+  }
+
+  // Drop leading shell-style echoes: "> hello"
+  text = text.replace(/^(?:>\s*.+\n)+/m, '').trim();
+  text = text.replace(/^>\s*.+$/m, '').trim();
+
+  const user = String(lastUserMessage || '').trim();
+  if (user) {
+    const esc = user.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const echoLead = new RegExp(
+      `^(?:>\\s*)?(?:User\\s*:\\s*)?${esc}\\s*(?:\\n+|\\s{2,})`,
+      'i',
+    );
+    text = text.replace(echoLead, '').trim();
+    // Bare first-line echo of the user message
+    const firstLine = text.split('\n')[0]?.trim() || '';
+    if (firstLine.toLowerCase() === user.toLowerCase() || firstLine.toLowerCase() === `> ${user}`.toLowerCase()) {
+      text = text.slice(firstLine.length).replace(/^\n+/, '').trim();
+    }
+  }
+
+  // Collapse accidental duplicated timeout / error lines glued together
+  text = text.replace(
+    /(Response timed out\.[^\n]*)\1+/gi,
+    '$1',
+  );
+
+  // Drop leftover "User: …" lines if the model still mirrored the transcript
+  text = text
+    .split('\n')
+    .filter(line => !/^\s*User\s*:/i.test(line.trim()))
+    .join('\n')
+    .trim();
+
+  return text;
+}

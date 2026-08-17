@@ -42,7 +42,11 @@ const SECTIONS: { id: string; label: string; icon: typeof User; disabled?: boole
   { id: 'security', label: 'Security', icon: Lock },
   { id: 'updates', label: 'Updates', icon: RefreshCw },
   { id: 'testers', label: 'Testers', icon: FlaskConical },
+  { id: 'beta', label: 'Beta', icon: Sparkles, disabled: true },
 ];
+
+/** Tabs that rarely overflow — keep overflow locked so empty space doesn’t scroll. */
+const LOCKED_SCROLL_SECTIONS = new Set(['account', 'appearance', 'security']);
 
 const AI_MODES = [
   { value: 'automatic', label: 'Automatic', description: 'ARK Router: local → free keys → paid' },
@@ -252,8 +256,8 @@ export function SettingsContent() {
 
   return (
     <div className="flex h-full min-h-0 animate-fade-in">
-      <div className="w-56 shrink-0 border-r border-surface-border p-3 overflow-auto">
-        <nav className="flex flex-col gap-0.5">
+      <div className="w-56 shrink-0 border-r border-surface-border flex flex-col min-h-0">
+        <nav className="flex-1 min-h-0 overflow-y-auto p-3 flex flex-col gap-0.5">
           {SECTIONS.map(section => (
             <button
               key={section.id}
@@ -264,26 +268,42 @@ export function SettingsContent() {
                 setActiveSection(section.id);
               }}
               className={`ark-nav-item ${activeSection === section.id ? 'active' : ''} ${
-                section.disabled ? 'opacity-40 cursor-not-allowed pointer-events-none' : ''
+                section.disabled ? 'opacity-35 cursor-not-allowed pointer-events-none' : ''
               }`}
-              title={section.disabled ? 'Coming later' : undefined}
+              title={section.disabled ? 'Locked' : undefined}
             >
               <section.icon className="w-4 h-4 shrink-0" />
               <span>{section.label}</span>
+              {section.disabled && (
+                <Lock className="w-3 h-3 ml-auto shrink-0 opacity-70" />
+              )}
             </button>
           ))}
         </nav>
+        <div className="shrink-0 border-t border-surface-border p-3">
+          {savedFlash && (
+            <p className="text-[10px] text-emerald-400 mb-2 truncate flex items-center gap-1">
+              <Check className="w-3 h-3 shrink-0" />
+              {savedFlash}
+            </p>
+          )}
+          <button
+            type="button"
+            className="ark-btn-primary w-full justify-center"
+            onClick={saveAllVisible}
+          >
+            <Check className="w-4 h-4" />
+            Save
+          </button>
+        </div>
       </div>
 
-      <div className="flex-1 overflow-auto p-8 min-h-0">
-        <div className="max-w-2xl pb-16">
-          {savedFlash && (
-            <div className="sticky top-0 z-20 mb-4 inline-flex items-center gap-2 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 px-3 py-1.5 text-xs font-medium shadow-lg">
-              <Check className="w-3.5 h-3.5" />
-              {savedFlash}
-            </div>
-          )}
-
+      <div
+        className={`flex-1 min-h-0 p-8 ${
+          LOCKED_SCROLL_SECTIONS.has(activeSection) ? 'overflow-hidden' : 'overflow-y-auto'
+        }`}
+      >
+        <div className="max-w-2xl">
           {activeSection === 'account' && (
             <SettingsSection title="Account" description="Profile, sign in, and session controls">
               <div className="space-y-5">
@@ -909,7 +929,7 @@ export function SettingsContent() {
           )}
 
           {activeSection === 'updates' && (
-            <SettingsSection title="Updates" description="Checks https://github.com/DrMeji/Ark/releases — download inside ARK, no browser">
+            <SettingsSection title="Updates" description="Check for new ARK builds and install them in-app">
               <div className="space-y-5">
                 <div className="ark-card p-4 flex flex-col gap-3">
                   <div className="flex items-center justify-between gap-3">
@@ -983,7 +1003,7 @@ export function SettingsContent() {
                   <div className="space-y-3">
                     {visibleChangelog.length === 0 ? (
                       <p className="text-xs text-content-tertiary">
-                        You’re on ARK v{appVersion}. Open Check for updates for newer builds.
+                        You’re on ARK v{appVersion}.
                       </p>
                     ) : (
                       visibleChangelog.map(entry => (
@@ -1014,81 +1034,6 @@ export function SettingsContent() {
                       </div>
                       ))
                     )}
-                  </div>
-                </div>
-
-                <p className="text-[11px] text-content-tertiary leading-relaxed">
-                  Changelog updates here whenever we ship meaningful product changes.
-                </p>
-
-                <div className="rounded-xl border border-surface-border p-4 space-y-2">
-                  <p className="text-sm font-medium text-content-primary">Install signing</p>
-                  <p className="text-xs text-content-tertiary leading-relaxed">
-                    ARK cannot buy the certificate for you. After you purchase Authenticode (OV or EV), wire it once:
-                  </p>
-                  <ol className="text-[11px] text-content-tertiary space-y-1 list-decimal list-inside leading-relaxed">
-                    <li>Buy from DigiCert, Sectigo, or SSL.com and export a .pfx</li>
-                    <li>Local: set CSC_LINK + CSC_KEY_PASSWORD before Open-ARK-Packaged.bat</li>
-                    <li>CI: add the same as secrets on DrMeji/Ark (signed tag builds)</li>
-                    <li>Confirm with “Check this install’s signature” on a packaged install</li>
-                  </ol>
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      className="ark-btn-secondary text-xs"
-                      onClick={() => void window.arkDesktop?.openExternal?.('https://www.digicert.com/signing/code-signing-certificates')}
-                    >
-                      DigiCert
-                    </button>
-                    <button
-                      type="button"
-                      className="ark-btn-secondary text-xs"
-                      onClick={() => void window.arkDesktop?.openExternal?.('https://github.com/DrMeji/Ark/blob/main/build/signing.env.example')}
-                    >
-                      Setup notes
-                    </button>
-                    <button
-                      type="button"
-                      className="ark-btn-secondary text-xs"
-                      onClick={() => {
-                        void window.arkDesktop?.signingStatus?.().then((s) => {
-                          setUpdateMsg(
-                            s?.status
-                              ? `Signing status: ${s.status}${s.signed ? ' (trusted)' : ''}${s.packaged === false ? ' · unpackaged/dev' : ''}`
-                              : 'Signing check unavailable in this build.',
-                          );
-                        });
-                      }}
-                    >
-                      Check this install’s signature
-                    </button>
-                  </div>
-                </div>
-
-                <div className="rounded-xl border border-surface-border p-4 space-y-2">
-                  <p className="text-sm font-medium text-content-primary">Local failure reports</p>
-                  <p className="text-xs text-content-tertiary leading-relaxed">
-                    Update/install errors are saved only on this PC — never uploaded.
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      className="ark-btn-secondary text-xs"
-                      onClick={() => void window.arkDesktop?.localReportsOpen?.()}
-                    >
-                      Open reports folder
-                    </button>
-                    <button
-                      type="button"
-                      className="ark-btn-secondary text-xs"
-                      onClick={() => {
-                        void window.arkDesktop?.localReportsClear?.().then(() => {
-                          setUpdateMsg('Local reports cleared.');
-                        });
-                      }}
-                    >
-                      Clear reports
-                    </button>
                   </div>
                 </div>
               </div>
@@ -1154,18 +1099,6 @@ export function SettingsContent() {
               </div>
             </SettingsSection>
           )}
-        </div>
-
-        <div className="sticky bottom-0 z-20 pt-4 mt-2 border-t border-surface-border bg-ark-navy-950/95 backdrop-blur-sm">
-          <div className="max-w-2xl flex items-center justify-between gap-3">
-            <p className="text-[11px] text-content-tertiary">
-              {savedFlash || 'Changes save on this device. Press Save for a clear confirmation.'}
-            </p>
-            <button type="button" className="ark-btn-primary shrink-0" onClick={saveAllVisible}>
-              <Check className="w-4 h-4" />
-              Save
-            </button>
-          </div>
         </div>
       </div>
     </div>

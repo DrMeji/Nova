@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Copy, Download, Check } from 'lucide-react';
 import { resolveMediaRef } from '@/lib/recentStore';
+import { sanitizeAssistantReply } from '@/lib/chatHistory';
 
 export function GeneratingPlaceholder({
   kind,
@@ -185,6 +186,13 @@ export function MessageContent({ content }: { content: string }) {
 
   if (content.startsWith('__progress__:')) {
     return <GeneratingPlaceholder kind="chat" label="Working…" />;
+  }
+
+  if (!content.includes('ark-media:')) {
+    content = sanitizeAssistantReply(content);
+    if (!content) {
+      return <GeneratingPlaceholder kind="chat" label="Thinking…" />;
+    }
   }
 
   const mediaRe = /!\[([^\]]*)\]\(([^)]+)\)/g;

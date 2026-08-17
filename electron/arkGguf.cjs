@@ -293,12 +293,13 @@ function stripLlamaCliNoise(text) {
   let t = String(text || '').replace(/\r\n/g, '\n');
   if (!t.trim()) return '';
 
-  // Prefer the completion after a clear ARK: / Assistant: marker if present.
-  const arkMark = t.match(/(?:^|\n)\s*(?:ARK|Assistant)\s*:\s*/i);
-  if (arkMark && typeof arkMark.index === 'number') {
-    const after = t.slice(arkMark.index + arkMark[0].length);
-    // Avoid keeping a duplicated "ARK:" prefix
-    t = after.replace(/^\s*ARK\s*:\s*/i, '');
+  // Prefer the completion after the *last* ARK: / Assistant: marker (packed prompt).
+  const markRe = /(?:^|\n)\s*(?:ARK|Assistant)\s*:\s*/gi;
+  let lastMark = null;
+  let mm;
+  while ((mm = markRe.exec(t)) !== null) lastMark = mm;
+  if (lastMark && typeof lastMark.index === 'number') {
+    t = t.slice(lastMark.index + lastMark[0].length).replace(/^\s*ARK\s*:\s*/i, '');
   }
 
   const lines = t.split('\n');
@@ -306,6 +307,9 @@ function stripLlamaCliNoise(text) {
   let sawCommands = false;
   for (const line of lines) {
     const trimmed = line.trim();
+    // Interactive / echoed prompt lines: "> hello"
+    if (/^>\s+\S/.test(trimmed)) continue;
+    if (/^\s*User\s*:/i.test(trimmed)) continue;
     if (/^available commands/i.test(trimmed)) {
       sawCommands = true;
       continue;

@@ -22,7 +22,7 @@ import {
 import { arkRoute, routerProviderLabel, type ArkRouterResult } from '@/lib/arkRouter';
 import { FreeKeyWizard } from '@/components/FreeKeyWizard';
 import { CapacityMeter } from '@/components/CapacityMeter';
-import { buildRouterHistory } from '@/lib/chatHistory';
+import { buildRouterHistory, sanitizeAssistantReply } from '@/lib/chatHistory';
 import { MessageContent } from '@/components/MediaMessage';
 import {
   detectPluginIntent,
@@ -313,6 +313,9 @@ export function AIChat() {
   const activeGenChatIdRef = useRef<string | null>(null);
   const pendingQueueRef = useRef<string[]>([]);
   const persistChatIdRef = useRef<string | null>(null);
+  /** Always-current route chat id — avoid stale closures when flushing the queue. */
+  const routeChatIdRef = useRef<string | undefined>(undefined);
+  const sendMessageRef = useRef<(content: string) => Promise<void>>(async () => {});
   const activeModelRef = useRef(activeModel);
   const [freeKeyOpen, setFreeKeyOpen] = useState(false);
   const [failoverNote, setFailoverNote] = useState<string | null>(null);
@@ -340,6 +343,23 @@ export function AIChat() {
   useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
+
+  useEffect(() => {
+    if (route.name !== 'chat') {
+      routeChatIdRef.current = undefined;
+      return;
+    }
+    if (route.chatId) {
+      routeChatIdRef.current = route.chatId;
+      persistChatIdRef.current = route.chatId;
+      return;
+    }
+    routeChatIdRef.current = undefined;
+    // Blank New Chat — clear prior thread id unless a generation is still creating one.
+    if (!generatingRef.current) {
+      persistChatIdRef.current = null;
+    }
+  }, [route]);
 
   const refreshChatPlugins = () => {
     setChatPlugins(getChatEnabledPlugins(loadPluginState()));
@@ -670,18 +690,19 @@ export function AIChat() {
     const next = pendingQueueRef.current.shift();
     setQueueLen(pendingQueueRef.current.length);
     if (next) {
-      void sendMessage(next);
+      void sendMessageRef.current(next);
     }
   };
 
   const handleSend = () => {
     const content = input.trim();
     if (!content || !user) return;
-    const viewingChatId = route.name === 'chat' ? route.chatId : undefined;
+    const viewingChatId = routeChatIdRef.current;
     const busyOnThisChat = generatingRef.current && (
       !viewingChatId
       || !activeGenChatIdRef.current
       || activeGenChatIdRef.current === viewingChatId
+      || activeGenChatIdRef.current === persistChatIdRef.current
     );
     if (busyOnThisChat) {
       pendingQueueRef.current.push(content);
@@ -692,7 +713,7 @@ export function AIChat() {
     }
     setInput('');
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
-    void sendMessage(content);
+    void sendMessageRef.current(content);
   };
 
   const sendMessage = async (content: string) => {
@@ -700,8 +721,8 @@ export function AIChat() {
     stopRequestedRef.current = false;
     setFailoverNote(null);
 
-    // Move this conversation into Recent (ChatGPT-style) on first send.
-    let activeChatId = route.name === 'chat' ? route.chatId : undefined;
+    // Prefer live route id, then the id created by an in-flight first send (queue-safe).
+    let activeChatId = routeChatIdRef.current || persistChatIdRef.current || undefined;
     const isNewChat = !activeChatId;
     if (!activeChatId) {
       activeChatId = `chat-${crypto.randomUUID().slice(0, 10)}`;
@@ -723,6 +744,7 @@ export function AIChat() {
       });
     }
     persistChatIdRef.current = activeChatId;
+    routeChatIdRef.current = activeChatId;
     activeGenChatIdRef.current = activeChatId;
 
     const pinnedModel = activeModelRef.current;
@@ -808,6 +830,7 @@ export function AIChat() {
       let lastLibraryId: string | undefined;
       let resolvedProvider = providerLabel;
       let streamedPartial = '';
+      let abandoned = false;
 
       try {
       if (pluginId) {
@@ -826,6 +849,7 @@ export function AIChat() {
           const kind = mode === 'image' ? 'image' : 'video';
           const stages = MEDIA_GEN_STAGES[kind];
           const setAssistantContent = (text: string) => {
+            if (abandoned || stopRequestedRef.current) return;
             setMessages(prev => {
               const next = prev.map(m => (m.id === assistantId ? { ...m, content: text } : m));
               persistModeThread(mode, next, { chatId: persistChatIdRef.current || activeChatId });
@@ -914,14 +938,12 @@ export function AIChat() {
             preferredSource: pinnedModel.source,
             history,
             onChunk: (piece) => {
-              if (stopRequestedRef.current) return;
+              if (abandoned || stopRequestedRef.current) return;
               streamedPartial += piece;
+              const cleaned = sanitizeAssistantReply(streamedPartial, content);
               setMessages(prev => prev.map(m => {
                 if (m.id !== assistantId) return m;
-                const base = (m.content.startsWith('__generating__:') || m.content.startsWith('__progress__:'))
-                  ? ''
-                  : m.content;
-                return { ...m, content: base + piece };
+                return { ...m, content: cleaned || '__generating__:chat:Thinking…' };
               }));
             },
           });
@@ -933,8 +955,8 @@ export function AIChat() {
             }),
           ]);
           response = stopRequestedRef.current && streamedPartial
-            ? streamedPartial
-            : routed.reply;
+            ? sanitizeAssistantReply(streamedPartial, content)
+            : sanitizeAssistantReply(routed.reply, content);
           resolvedProvider = routerProviderLabel(routed, providerLabel);
           const hopNote = failoverChipText(routed, pinnedModel);
           if (hopNote) setFailoverNote(hopNote);
@@ -944,9 +966,14 @@ export function AIChat() {
           }
           usedPlugin = true;
         } catch (err) {
+          abandoned = true;
+          void engineGenerateCancel();
+          const timedOut = err instanceof Error && /timed out/i.test(err.message);
           response = stopRequestedRef.current && streamedPartial
-            ? streamedPartial
-            : (err instanceof Error ? err.message : 'ARK Router failed');
+            ? sanitizeAssistantReply(streamedPartial, content)
+            : (timedOut
+              ? 'Response timed out. Try again or pick another model.'
+              : (err instanceof Error ? err.message : 'ARK Router failed'));
           usedPlugin = true;
         }
       }
@@ -955,17 +982,18 @@ export function AIChat() {
         if (activeGenChatIdRef.current === activeChatId) {
           activeGenChatIdRef.current = null;
         }
-        const viewing = route.name === 'chat' ? route.chatId : undefined;
-        if (!viewing || viewing === activeChatId) {
-          setGenerating(false);
-        }
+        setGenerating(false);
+      }
+
+      if (!isMediaMode && !pluginId) {
+        response = sanitizeAssistantReply(response, content);
       }
 
       const threadChatId = persistChatIdRef.current || activeChatId;
       window.setTimeout(async () => {
         setMessages(prev => {
           // If the user navigated to another chat, don't clobber that thread's UI state.
-          const routeChat = route.name === 'chat' ? route.chatId : undefined;
+          const routeChat = routeChatIdRef.current;
           if (routeChat && threadChatId && routeChat !== threadChatId) {
             try {
               const raw = localStorage.getItem(chatThreadKey(threadChatId));
@@ -1011,6 +1039,8 @@ export function AIChat() {
       }, usedPlugin ? 200 : 800);
     })();
   };
+
+  sendMessageRef.current = sendMessage;
 
   const onInput = (value: string) => {
     setInput(value);

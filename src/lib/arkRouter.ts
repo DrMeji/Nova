@@ -11,6 +11,7 @@
 
 import {
   packHistoryPrompt,
+  sanitizeAssistantReply,
   type RouterChatTurn,
 } from '@/lib/chatHistory';
 import { honestNoLiveChatReply } from '@/lib/arkCapacity';
@@ -117,8 +118,9 @@ async function tryLocalChat(
       const result = onChunk
         ? await brainGenerateStream(prompt, id, onChunk, 'chat')
         : await brainGenerate(prompt, id, 'chat');
+      const cleaned = sanitizeAssistantReply(result.reply, message);
       return {
-        reply: result.reply,
+        reply: cleaned || result.reply,
         media: result.media,
         modelName: result.modelName || 'ARK Engine',
         modelId: id || result.modelName,

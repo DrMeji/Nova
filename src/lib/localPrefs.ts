@@ -223,6 +223,19 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.37',
+    channel: 'stable' as const,
+    date: 'Aug 17, 2026',
+    title: 'Settings polish and chat continuity',
+    notes: [
+      'Save lives in the Settings nav — no black sticky bar',
+      'Short Settings tabs no longer phantom-scroll; Updates drops GitHub URL and signing/reports',
+      'Locked Beta tab reserved for advanced tooling',
+      'Follow-up messages stay in the same Recent chat; queue/stop clear correctly',
+      'Local replies no longer echo “> hello” or User:/ARK: transcripts',
+    ],
+  },
+  {
     version: '0.1.36',
     channel: 'stable' as const,
     date: 'Aug 17, 2026',
