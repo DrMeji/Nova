@@ -463,7 +463,7 @@ export function OnboardingScreen() {
 
           {phase === 'connect' && (
             <div className="space-y-4">
-              <div className="space-y-2 max-h-[min(24rem,48vh)] overflow-y-auto">
+              <div className="space-y-2">
                 {CONNECT_PROVIDERS.map(p => {
                   const open = expandedProvider === p.id;
                   const saved = savedKeys[p.id];

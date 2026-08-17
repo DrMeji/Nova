@@ -220,8 +220,31 @@ export function clearPluginToken(pluginId: string) {
   return setPluginToken(pluginId, '');
 }
 
-/** App changelog shown in Settings → Updates. */
+/** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
+  {
+    version: '0.1.35',
+    channel: 'stable' as const,
+    date: 'Aug 17, 2026',
+    title: 'Chat queue, stop, setup, and Settings polish',
+    notes: [
+      'Connect setup lists all free keys without scrolling',
+      'Chat only queues while a reply is in progress; stop clears when done',
+      'Recent chats no longer open to a blank Explore screen',
+      'Settings Save confirmation; What’s new shows only this version',
+      'Suggested plugins include plus buttons and two more cards',
+    ],
+  },
+  {
+    version: '0.1.34',
+    channel: 'stable' as const,
+    date: 'Aug 17, 2026',
+    title: 'In-app updater handoff fix',
+    notes: [
+      'Updating ARK window can install while the main app closes (single-instance lock fix)',
+      'Updater waits until the splash is ready before quitting the old process',
+    ],
+  },
   {
     version: '0.1.33',
     channel: 'stable' as const,

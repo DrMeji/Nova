@@ -294,7 +294,7 @@ export function BuildRun() {
                           <span className={`w-9 h-9 rounded-xl bg-gradient-to-br ${plugin.tone} flex items-center justify-center text-[10px] font-bold text-white shrink-0`}>
                             {plugin.initial}
                           </span>
-                          <span className="min-w-0">
+                          <span className="min-w-0 flex-1">
                             <span className="block text-sm font-medium text-content-primary">{plugin.name}</span>
                             <span className="block text-[11px] text-content-tertiary truncate">
                               {!isPluginLive(plugin.id)
@@ -307,6 +307,13 @@ export function BuildRun() {
                                       ? 'Connected · in chat'
                                       : 'Connected'}
                             </span>
+                          </span>
+                          <span className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${
+                            runtime.installed
+                              ? 'bg-surface-hover text-ark-accent-green'
+                              : 'text-content-secondary'
+                          }`}>
+                            {runtime.installed ? <Check className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
                           </span>
                         </span>
                       </button>

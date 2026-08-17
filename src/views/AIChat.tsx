@@ -309,6 +309,8 @@ export function AIChat() {
   const [queueLen, setQueueLen] = useState(0);
   const stopRequestedRef = useRef(false);
   const generatingRef = useRef(false);
+  /** Which chat id currently owns the in-flight generation (queue only for that chat). */
+  const activeGenChatIdRef = useRef<string | null>(null);
   const pendingQueueRef = useRef<string[]>([]);
   const persistChatIdRef = useRef<string | null>(null);
   const activeModelRef = useRef(activeModel);
@@ -327,8 +329,8 @@ export function AIChat() {
   const modelMenuRef = useRef<HTMLDivElement>(null);
   const modelButtonRef = useRef<HTMLButtonElement>(null);
   const hydratedCreationRef = useRef<string | null>(null);
-  /** Skip one storage reload after we create a chat so Explore ideas doesn't flash back. */
-  const skipChatLoadRef = useRef<string | null>(null);
+  /** Skip storage reload after we create a chat so Explore ideas doesn't flash back. */
+  const skipChatLoadIdsRef = useRef<Set<string>>(new Set());
   const messagesRef = useRef(messages);
 
   useEffect(() => {
@@ -458,20 +460,23 @@ export function AIChat() {
 
     if (route.chatId) {
       // We just created this chat and already have messages in state — don't wipe them.
-      if (skipChatLoadRef.current === route.chatId) {
-        skipChatLoadRef.current = null;
+      if (skipChatLoadIdsRef.current.has(route.chatId)) {
+        skipChatLoadIdsRef.current.delete(route.chatId);
         setLoading(false);
+        setGenerating(Boolean(generatingRef.current && activeGenChatIdRef.current === route.chatId));
         return;
       }
       try {
         const raw = localStorage.getItem(chatThreadKey(route.chatId));
         const loaded = raw ? JSON.parse(raw) as ChatMessage[] : [];
-        setMessages(loaded);
-        messagesRef.current = loaded;
+        setMessages(Array.isArray(loaded) ? loaded : []);
+        messagesRef.current = Array.isArray(loaded) ? loaded : [];
       } catch {
         setMessages([]);
         messagesRef.current = [];
       }
+      // Stop button / queue only apply to the chat that is actively generating.
+      setGenerating(Boolean(generatingRef.current && activeGenChatIdRef.current === route.chatId));
       setLoading(false);
       requestAnimationFrame(() => textareaRef.current?.focus());
       return;
@@ -480,6 +485,7 @@ export function AIChat() {
     // Fresh New Chat / Image / Video — empty canvas
     setMessages([]);
     messagesRef.current = [];
+    setGenerating(Boolean(generatingRef.current && !activeGenChatIdRef.current));
     setLoading(false);
   }, [route]);
 
@@ -656,6 +662,7 @@ export function AIChat() {
     setQueueLen(0);
     void engineGenerateCancel();
     generatingRef.current = false;
+    activeGenChatIdRef.current = null;
     setGenerating(false);
   };
 
@@ -670,7 +677,13 @@ export function AIChat() {
   const handleSend = () => {
     const content = input.trim();
     if (!content || !user) return;
-    if (generatingRef.current) {
+    const viewingChatId = route.name === 'chat' ? route.chatId : undefined;
+    const busyOnThisChat = generatingRef.current && (
+      !viewingChatId
+      || !activeGenChatIdRef.current
+      || activeGenChatIdRef.current === viewingChatId
+    );
+    if (busyOnThisChat) {
       pendingQueueRef.current.push(content);
       setQueueLen(pendingQueueRef.current.length);
       setInput('');
@@ -692,7 +705,7 @@ export function AIChat() {
     const isNewChat = !activeChatId;
     if (!activeChatId) {
       activeChatId = `chat-${crypto.randomUUID().slice(0, 10)}`;
-      skipChatLoadRef.current = activeChatId;
+      skipChatLoadIdsRef.current.add(activeChatId);
       addChat({
         id: activeChatId,
         mode,
@@ -710,6 +723,7 @@ export function AIChat() {
       });
     }
     persistChatIdRef.current = activeChatId;
+    activeGenChatIdRef.current = activeChatId;
 
     const pinnedModel = activeModelRef.current;
     const userMsg: ChatMessage = {
@@ -780,6 +794,9 @@ export function AIChat() {
         return next;
       });
       generatingRef.current = false;
+      if (activeGenChatIdRef.current === activeChatId) {
+        activeGenChatIdRef.current = null;
+      }
       setGenerating(false);
       flushQueuedSend();
       return;
@@ -889,7 +906,7 @@ export function AIChat() {
           const history = prefs.rememberContext
             ? buildRouterHistory(messagesRef.current, content)
             : buildRouterHistory([], content);
-          const routed = await arkRoute({
+          const routePromise = arkRoute({
             message: content,
             kind: mode === 'code' ? 'coding' : 'chat',
             preferredModelId: pinnedModel.id,
@@ -908,6 +925,13 @@ export function AIChat() {
               }));
             },
           });
+          const timeoutMs = 90_000;
+          const routed = await Promise.race([
+            routePromise,
+            new Promise<never>((_, reject) => {
+              window.setTimeout(() => reject(new Error('Response timed out. Try again or pick another model.')), timeoutMs);
+            }),
+          ]);
           response = stopRequestedRef.current && streamedPartial
             ? streamedPartial
             : routed.reply;
@@ -928,7 +952,13 @@ export function AIChat() {
       }
       } finally {
         generatingRef.current = false;
-        setGenerating(false);
+        if (activeGenChatIdRef.current === activeChatId) {
+          activeGenChatIdRef.current = null;
+        }
+        const viewing = route.name === 'chat' ? route.chatId : undefined;
+        if (!viewing || viewing === activeChatId) {
+          setGenerating(false);
+        }
       }
 
       const threadChatId = persistChatIdRef.current || activeChatId;
@@ -1005,7 +1035,10 @@ export function AIChat() {
     textareaRef.current?.focus();
   };
 
-  const showEmpty = !loading && messages.length === 0;
+  const viewingChatId = route.name === 'chat' ? route.chatId : undefined;
+  // Explore / idea grid only for brand-new chats — never when a Recent thread is open.
+  const showEmpty = !loading && messages.length === 0 && !viewingChatId;
+  const showOpenThread = !loading && Boolean(viewingChatId);
   const activeMode = mode !== 'general' ? MODE_META[mode] : null;
   const ModeIcon = activeMode?.icon;
   const ModelSourceIcon = activeModel.source === 'cloud' ? Cloud : Cpu;
@@ -1421,8 +1454,8 @@ export function AIChat() {
             </h1>
             <p className="text-xs text-content-tertiary mb-4 text-center max-w-md">
               {capacity && !capacity.liveChat
-                ? 'No live model yet — connect a free key or install the local brain, then send a message.'
-                : 'Try “Hello” with ARK Auto — it uses local brains and free keys with automatic failover.'}
+                ? 'No live model yet. Connect a free key or install a local brain, then send a message.'
+                : 'Say hello to start. ARK Auto uses your local brain and free keys, and switches if one runs out.'}
             </p>
             {capacity && !capacity.liveChat && (
               <div className="flex flex-wrap items-center justify-center gap-2 mb-8">
@@ -1461,6 +1494,11 @@ export function AIChat() {
         <>
           <div className="flex-1 overflow-auto px-4 sm:px-8 py-6">
             <div className="max-w-5xl mx-auto w-full space-y-5">
+              {messages.length === 0 && showOpenThread && (
+                <p className="text-center text-xs text-content-tertiary py-8">
+                  This chat is empty. Send a message to continue here.
+                </p>
+              )}
               {messages.map(msg => (
                 <div
                   key={msg.id}

@@ -158,7 +158,7 @@ export function SettingsContent() {
     const next = setLocalPrefs(patch);
     setPrefs(next);
     setSavedFlash('Saved on this device');
-    window.setTimeout(() => setSavedFlash(''), 1600);
+    window.setTimeout(() => setSavedFlash(''), 2200);
   };
 
   const aiMode = (settings?.ai_mode as AiModePref | undefined) ?? prefs.aiMode;
@@ -183,6 +183,13 @@ export function SettingsContent() {
         /* local prefs still saved */
       }
     }
+  };
+
+  const saveAllVisible = () => {
+    void saveDisplayName();
+    setLocalPrefs(prefs);
+    setSavedFlash('Settings saved');
+    window.setTimeout(() => setSavedFlash(''), 2200);
   };
 
   const checkForUpdates = () => {
@@ -234,9 +241,11 @@ export function SettingsContent() {
     })();
   };
 
-  const visibleChangelog = ARK_CHANGELOG.filter(entry =>
-    prefs.updateChannel === 'beta' ? true : entry.channel === 'stable',
-  );
+  const visibleChangelog = ARK_CHANGELOG.filter(entry => {
+    if (prefs.updateChannel !== 'beta' && entry.channel !== 'stable') return false;
+    // Only show the entry for the version this install is running.
+    return entry.version === appVersion;
+  }).slice(0, 1);
 
   return (
     <div className="flex h-full min-h-0 animate-fade-in">
@@ -264,10 +273,10 @@ export function SettingsContent() {
       </div>
 
       <div className="flex-1 overflow-auto p-8 min-h-0">
-        <div className="max-w-2xl">
+        <div className="max-w-2xl pb-16">
           {savedFlash && (
-            <div className="mb-4 inline-flex items-center gap-2 rounded-full bg-emerald-500/10 text-emerald-400 px-3 py-1 text-[11px]">
-              <Check className="w-3 h-3" />
+            <div className="sticky top-0 z-20 mb-4 inline-flex items-center gap-2 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 px-3 py-1.5 text-xs font-medium shadow-lg">
+              <Check className="w-3.5 h-3.5" />
               {savedFlash}
             </div>
           )}
@@ -969,7 +978,12 @@ export function SettingsContent() {
                     <h2 className="text-sm font-semibold text-content-primary">What’s new</h2>
                   </div>
                   <div className="space-y-3">
-                    {visibleChangelog.map(entry => (
+                    {visibleChangelog.length === 0 ? (
+                      <p className="text-xs text-content-tertiary">
+                        You’re on ARK v{appVersion}. Open Check for updates for newer builds.
+                      </p>
+                    ) : (
+                      visibleChangelog.map(entry => (
                       <div key={entry.version} className="rounded-xl border border-surface-border p-4">
                         <div className="flex items-center justify-between gap-2 mb-2">
                           <div>
@@ -995,7 +1009,8 @@ export function SettingsContent() {
                           ))}
                         </ul>
                       </div>
-                    ))}
+                      ))
+                    )}
                   </div>
                 </div>
 
@@ -1137,6 +1152,18 @@ export function SettingsContent() {
             </SettingsSection>
           )}
         </div>
+
+        <div className="sticky bottom-0 z-20 pt-4 mt-2 border-t border-surface-border bg-ark-navy-950/95 backdrop-blur-sm">
+          <div className="max-w-2xl flex items-center justify-between gap-3">
+            <p className="text-[11px] text-content-tertiary">
+              {savedFlash || 'Changes save on this device. Press Save for a clear confirmation.'}
+            </p>
+            <button type="button" className="ark-btn-primary shrink-0" onClick={saveAllVisible}>
+              <Check className="w-4 h-4" />
+              Save
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -1207,8 +1234,14 @@ function OAuthClientRow({
           type="button"
           className="ark-btn-secondary shrink-0 text-xs"
           onClick={() => {
-            void window.arkDesktop?.pluginOAuthSetClient?.(pluginId, value).then(() => {
+            void window.arkDesktop?.pluginOAuthSetClient?.(pluginId, value).then((res) => {
+              if (res && typeof res === 'object' && 'ok' in res && res.ok === false) {
+                onSaved(`Could not save ${pluginId} client id`);
+                return;
+              }
               onSaved(`${pluginId} client id saved`);
+            }).catch(() => {
+              onSaved(`Could not save ${pluginId} client id`);
             });
           }}
         >
