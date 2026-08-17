@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 
-type UpdatePhase = 'idle' | 'downloading' | 'closing' | 'error';
+type UpdatePhase = 'idle' | 'downloading' | 'error';
 
 /**
- * Download progress in-app, then a brief closing notice before the ARK splash finishes install.
+ * Download progress stays in-app only.
+ * After download, ARK exits and the separate “Updating ARK” window handles install.
  */
 export function UpdateOverlay() {
   const [phase, setPhase] = useState<UpdatePhase>('idle');
@@ -19,10 +20,9 @@ export function UpdateOverlay() {
         setMessage(payload.message || 'Downloading update...');
         return;
       }
-      if (status === 'installing') {
-        setPhase('closing');
-        setPercent(100);
-        setMessage(payload.message || 'Closing ARK to finish updating...');
+      // Handoff / install happens in the external Updating window — hide this overlay.
+      if (status === 'handoff' || status === 'installing') {
+        setPhase('idle');
         return;
       }
       if (status === 'error') {
@@ -37,7 +37,7 @@ export function UpdateOverlay() {
 
   if (phase === 'idle') return null;
 
-  const shown = phase === 'closing' ? 100 : Math.min(100, Math.max(percent, 0));
+  const shown = Math.min(100, Math.max(percent, 0));
 
   return (
     <div className="fixed inset-0 z-[200] pointer-events-none flex items-center justify-center">
@@ -56,15 +56,10 @@ export function UpdateOverlay() {
           </>
         ) : (
           <>
-            <img
-              src={`${import.meta.env.BASE_URL}ark-icon.png`}
-              alt="ARK"
-              className="w-11 h-11 object-contain mx-auto mb-3 select-none"
-              draggable={false}
-            />
-            <p className="text-sm font-medium text-white">
-              {phase === 'closing' ? 'Closing to finish update...' : 'Downloading update'}
-            </p>
+            <div className="w-11 h-11 rounded-xl bg-[#141416] text-white text-xs font-bold flex items-center justify-center mx-auto mb-3 select-none">
+              ARK
+            </div>
+            <p className="text-sm font-medium text-white">Downloading update</p>
             <p className="text-sm text-white/55 mt-1 tabular-nums">{shown}%</p>
             <div className="w-full mt-4 h-1.5 rounded-full bg-white/10 overflow-hidden">
               <div
@@ -73,9 +68,7 @@ export function UpdateOverlay() {
               />
             </div>
             <p className="text-[11px] text-white/45 mt-3 leading-relaxed">
-              {phase === 'closing'
-                ? 'A small Updating window opens next.'
-                : 'Keep ARK open until the download finishes.'}
+              Keep ARK open until the download finishes. Then ARK closes and an Updating window installs.
             </p>
           </>
         )}

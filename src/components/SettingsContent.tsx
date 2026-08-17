@@ -143,7 +143,10 @@ export function SettingsContent() {
     const unsub = window.arkDesktop?.onUpdateProgress?.((payload) => {
       if (typeof payload?.percent === 'number') setUpdatePercent(payload.percent);
       if (payload?.message) setUpdateMsg(payload.message);
-      if (payload?.status === 'downloading' || payload?.status === 'installing') {
+      if (payload?.status === 'downloading') {
+        setDownloadingUpdate(true);
+      } else if (payload?.status === 'handoff' || payload?.status === 'installing') {
+        // App is about to exit for the Updating window — keep button busy briefly.
         setDownloadingUpdate(true);
       } else if (payload?.status === 'error' || payload?.status === 'idle' || payload?.status === 'available') {
         setDownloadingUpdate(false);
@@ -946,7 +949,7 @@ export function SettingsContent() {
                     </div>
                   </div>
                   <p className="text-[11px] text-content-tertiary leading-relaxed">
-                    Download finishes in ARK, then a black Updating window installs and reopens the app (no PowerShell).
+                    Download stays in ARK. When it finishes, ARK closes and a black Updating window installs, then reopens the app.
                   </p>
                 </div>
 

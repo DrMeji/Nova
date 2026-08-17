@@ -770,6 +770,25 @@ if (isUpdaterMode) {
     });
 
     app.whenReady().then(() => {
+      arkUpdater.setForceExitHook(() => {
+        quitting = true;
+        if (tray) {
+          try {
+            tray.destroy();
+          } catch {
+            /* ignore */
+          }
+          tray = null;
+        }
+        if (brainApi) {
+          try {
+            void brainApi.close();
+          } catch {
+            /* ignore */
+          }
+          brainApi = null;
+        }
+      });
       arkEngine.start();
       startBrainApi();
       createWindow();

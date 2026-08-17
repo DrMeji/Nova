@@ -33,6 +33,41 @@ function tryElectronUpdater() {
 /** @type {{ status: string, percent: number, message: string, version?: string, error?: string } | null} */
 let state = null;
 
+/** @type {null | (() => void)} */
+let onBeforeForceExit = null;
+
+function setForceExitHook(fn) {
+  onBeforeForceExit = typeof fn === 'function' ? fn : null;
+}
+
+/** Hard exit so the Updating splash is not stuck on “Waiting for ARK to close”. */
+function forceExitForUpdate() {
+  try {
+    onBeforeForceExit?.();
+  } catch {
+    /* ignore */
+  }
+  try {
+    for (const win of BrowserWindow.getAllWindows()) {
+      try {
+        win.destroy();
+      } catch {
+        /* ignore */
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  // app.quit() can hang with tray/brain; Lyndsey uses exit after handoff.
+  setTimeout(() => {
+    try {
+      app.exit(0);
+    } catch {
+      process.exit(0);
+    }
+  }, 120);
+}
+
 function sendProgress(payload) {
   state = { ...(state || {}), ...payload };
   if (payload?.status === 'error') {
@@ -193,19 +228,29 @@ function downloadFile(url, dest, onProgress) {
 
 function resolveUpdateIcon() {
   const candidates = [
+    path.join(process.resourcesPath || '', 'app.asar', 'dist', 'ark-icon.png'),
     path.join(app.getAppPath(), 'dist', 'ark-icon.png'),
     path.join(__dirname, '..', 'dist', 'ark-icon.png'),
     path.join(__dirname, '..', 'public', 'ark-icon.png'),
+    path.join(app.getAppPath(), 'build', 'icon.png'),
     path.join(__dirname, '..', 'build', 'icon.png'),
   ];
   for (const src of candidates) {
     try {
-      if (fs.existsSync(src)) return src;
+      if (src && fs.existsSync(src)) return src;
     } catch {
       /* try next */
     }
   }
   return null;
+}
+
+/** Inline mark so the splash never shows a broken image icon. */
+function splashIconMarkup(iconFileUrl) {
+  if (iconFileUrl) {
+    return `<img src="${iconFileUrl}" alt="ARK" width="64" height="64" draggable="false" style="object-fit:contain;display:block;margin:0 auto 22px;user-select:none;" />`;
+  }
+  return `<div style="width:64px;height:64px;margin:0 auto 22px;border-radius:14px;background:#141416;display:flex;align-items:center;justify-content:center;color:#f2f2f3;font:700 18px Segoe UI,system-ui,sans-serif;">ARK</div>`;
 }
 
 function pidAlive(pid) {
@@ -224,9 +269,7 @@ function sleep(ms) {
 
 /** Discord-style black box — slightly larger, clean type, thin bar. */
 function splashHtml(iconFileUrl) {
-  const icon = iconFileUrl
-    ? `<img src="${iconFileUrl}" alt="ARK" width="64" height="64" draggable="false" style="object-fit:contain;display:block;margin:0 auto 22px;user-select:none;" />`
-    : `<div style="width:64px;height:64px;margin:0 auto 22px;border-radius:14px;background:#141416;"></div>`;
+  const icon = splashIconMarkup(iconFileUrl);
   return `<!DOCTYPE html>
 <html><head><meta charset="utf-8" />
 <style>
@@ -388,14 +431,27 @@ async function runStandaloneSplash(argv) {
 
   try {
     await setSplash(win, 8, 'Updating ARK...', 'Waiting for ARK to close');
-    const deadline = Date.now() + 60_000;
-    while (pidAlive(parentPid) && Date.now() < deadline) {
-      await sleep(80);
+    // Give the parent a few seconds to exit on its own, then force-kill it.
+    const softDeadline = Date.now() + 5_000;
+    while (pidAlive(parentPid) && Date.now() < softDeadline) {
+      await sleep(100);
     }
-    await sleep(500);
+    if (pidAlive(parentPid) && parentPid > 0) {
+      writeLog(`force taskkill parent pid=${parentPid}`);
+      try {
+        spawn('taskkill', ['/F', '/PID', String(parentPid), '/T'], {
+          windowsHide: true,
+          stdio: 'ignore',
+        });
+      } catch (err) {
+        writeLog(`taskkill parent failed: ${err}`);
+      }
+      await sleep(900);
+    }
     killOtherArkProcesses(writeLog);
     await sleep(400);
     writeLog(`parent exited alive=${pidAlive(parentPid)}`);
+    await setSplash(win, 18, 'Updating ARK...', 'Installing update');
 
     if (isUrl) {
       await setSplash(win, 12, 'Downloading update...', 'Fetching installer');
@@ -734,9 +790,9 @@ async function downloadAndInstall(setupUrl, latestTag) {
   if (deltaPath) {
     markPostUpdateLandChat();
     sendProgress({
-      status: 'installing',
+      status: 'handoff',
       percent: 100,
-      message: 'Closing ARK to finish updating...',
+      message: 'Download complete. Installing…',
       version: expectedVersion,
     });
     try {
@@ -764,8 +820,8 @@ async function downloadAndInstall(setupUrl, latestTag) {
       });
       return { ok: false, message: 'Could not start the updater.' };
     }
-    setTimeout(() => app.quit(), 400);
-    return { ok: true, message: 'Closing ARK to finish updating...' };
+    setTimeout(() => forceExitForUpdate(), 200);
+    return { ok: true, message: 'Installing update…' };
   }
 
   if (typeof setupUrl !== 'string' || !/^https:\/\//i.test(setupUrl)) {
@@ -812,10 +868,11 @@ async function downloadAndInstall(setupUrl, latestTag) {
     return { ok: false, message: 'Download incomplete' };
   }
 
+  // Download finished in-app. Hand off to Updating splash — do not keep a second “closing” UI.
   sendProgress({
-    status: 'installing',
+    status: 'handoff',
     percent: 100,
-    message: 'Closing ARK to finish updating...',
+    message: 'Download complete. Installing…',
     version: expectedVersion,
   });
 
@@ -846,8 +903,8 @@ async function downloadAndInstall(setupUrl, latestTag) {
     return { ok: false, message: 'Could not start the updater.' };
   }
 
-  setTimeout(() => app.quit(), 400);
-  return { ok: true, message: 'Closing ARK to finish updating...' };
+  setTimeout(() => forceExitForUpdate(), 200);
+  return { ok: true, message: 'Installing update…' };
 }
 
 module.exports = {
@@ -856,5 +913,6 @@ module.exports = {
   getState,
   consumePostUpdate,
   runStandaloneSplash,
+  setForceExitHook,
   UPDATE_REPO,
 };

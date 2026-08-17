@@ -223,6 +223,17 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.36',
+    channel: 'stable' as const,
+    date: 'Aug 17, 2026',
+    title: 'Updater actually closes and installs',
+    notes: [
+      'After download, ARK force-exits so the Updating window is not stuck waiting',
+      'No second “Closing…” overlay — download in-app, then only the Updating splash',
+      'Updater force-kills a stuck parent process and continues install',
+    ],
+  },
+  {
     version: '0.1.35',
     channel: 'stable' as const,
     date: 'Aug 17, 2026',
