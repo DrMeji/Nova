@@ -223,6 +223,17 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.55',
+    channel: 'stable' as const,
+    date: 'Aug 17, 2026',
+    title: 'Code builds that finish — Explorer, scaffolds, compact build chip',
+    notes: [
+      'Build hint is a short centered pill above the chat box; composer is slightly taller',
+      'Code workspace auto-sends when you click Yes, streams into Explorer, and scaffolds calculator if the brain times out',
+      'Projects save under ark-projects/code/ on disk for easy access',
+    ],
+  },
+  {
     version: '0.1.54',
     channel: 'stable' as const,
     date: 'Aug 17, 2026',

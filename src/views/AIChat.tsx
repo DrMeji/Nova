@@ -1504,28 +1504,6 @@ export function AIChat() {
   const composer = (
     <div className="w-full max-w-2xl mx-auto">
       {failoverChip}
-      {(mode === 'general' || mode === 'code') && looksLikeCodeAsk(input) && !codeSwitchDismissed && (
-        <div className="mb-1.5 flex items-center justify-between gap-2 rounded-full border border-violet-500/20 bg-violet-500/8 px-2.5 py-1 text-[10px] text-violet-100/85">
-          <span className="min-w-0 truncate">This looks like a build. Switch to Code?</span>
-          <div className="flex items-center gap-0.5 shrink-0">
-            <button
-              type="button"
-              className="rounded-full px-2 py-0.5 text-violet-100/65 hover:bg-violet-500/15 transition-colors"
-              onClick={() => setCodeSwitchDismissed(true)}
-              title="Stay in chat"
-            >
-              Stay
-            </button>
-            <button
-              type="button"
-              className="rounded-full px-2 py-0.5 text-violet-100 hover:bg-violet-500/15 transition-colors font-medium"
-              onClick={() => openCodeWorkspace()}
-            >
-              Yes
-            </button>
-          </div>
-        </div>
-      )}
       {composerMode && (
         <div className="mb-2 flex items-center gap-2 px-1">
           <span className="inline-flex items-center gap-1.5 rounded-full border border-surface-border bg-surface-hover/60 px-2.5 py-0.5 text-[11px] text-content-secondary capitalize">
@@ -1562,7 +1540,30 @@ export function AIChat() {
               </button>
             </div>
           )}
-          <div className="flex items-center gap-1 rounded-full border border-surface-border bg-ark-navy-900/90 pl-1.5 pr-1.5 py-1.5 shadow-lg shadow-black/20 min-w-0">
+          {(mode === 'general' || mode === 'code') && looksLikeCodeAsk(input) && !codeSwitchDismissed && (
+            <div className="mb-1 flex justify-center px-1">
+              <span className="inline-flex items-center gap-1 rounded-full border border-violet-500/25 bg-violet-500/10 pl-2 pr-0.5 py-0.5 text-[10px] text-violet-100/90 shadow-sm max-w-full">
+                <Code2 className="w-3 h-3 shrink-0 text-violet-300/90" />
+                <span className="truncate max-w-[11rem] sm:max-w-[14rem]">Build? Switch to Code</span>
+                <button
+                  type="button"
+                  className="rounded-full px-1.5 py-0.5 text-violet-100/60 hover:bg-violet-500/15 transition-colors"
+                  onClick={() => setCodeSwitchDismissed(true)}
+                  title="Stay in chat"
+                >
+                  Stay
+                </button>
+                <button
+                  type="button"
+                  className="rounded-full px-1.5 py-0.5 text-violet-50 hover:bg-violet-500/20 transition-colors font-medium"
+                  onClick={() => openCodeWorkspace()}
+                >
+                  Yes
+                </button>
+              </span>
+            </div>
+          )}
+          <div className="flex items-center gap-1 rounded-full border border-surface-border bg-ark-navy-900/90 pl-1.5 pr-1.5 py-2 shadow-lg shadow-black/20 min-w-0">
           <input
             ref={attachInputRef}
             type="file"
@@ -1597,8 +1598,8 @@ export function AIChat() {
               }
             }}
             placeholder={placeholder}
-            rows={1}
-            className="flex-1 bg-transparent border-none resize-none px-1 py-2 text-sm text-content-primary placeholder:text-content-tertiary focus:outline-none max-h-32 leading-5 min-w-0"
+            rows={2}
+            className="flex-1 bg-transparent border-none resize-none px-1 py-2.5 text-sm text-content-primary placeholder:text-content-tertiary focus:outline-none max-h-36 min-h-[2.75rem] leading-5 min-w-0"
           />
 
           <button

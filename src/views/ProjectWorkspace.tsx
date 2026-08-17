@@ -35,9 +35,12 @@ import { loadRecentProjects } from '@/lib/recentStore';
 import {
   applyFileEdits,
   buildProjectCodingPrompt,
+  buildFileTreeFromPaths,
+  extractStreamingHtml,
+  extractChatStyleFileEdits,
   foldersToExpand,
   parseFileEdits,
-  extractChatStyleFileEdits,
+  scaffoldFallbackEdits,
   stripFileBlocks,
 } from '@/lib/projectCodeEdit';
 import { ComposerPlusMenu, type ComposerPlusAction } from '@/components/ComposerPlusMenu';
@@ -193,6 +196,8 @@ export function ProjectWorkspace() {
   const codeEditorRef = useRef<HTMLTextAreaElement>(null);
   const modelButtonRef = useRef<HTMLButtonElement>(null);
   const modelMenuRef = useRef<HTMLDivElement>(null);
+  const pendingAutoSendRef = useRef<string | null>(null);
+  const streamDraftRef = useRef('');
 
   const isWebProject = !project || project.project_type === 'web' || project.project_type === 'api';
   const [previewUrl, setPreviewUrl] = useState('http://127.0.0.1:0');
@@ -270,6 +275,7 @@ export function ProjectWorkspace() {
       const draft = localStorage.getItem(`ark:project-draft:${projectId}`);
       if (draft) {
         setChatInput(draft);
+        pendingAutoSendRef.current = draft;
         localStorage.removeItem(`ark:project-draft:${projectId}`);
         requestAnimationFrame(() => textareaRef.current?.focus());
       }
@@ -361,6 +367,16 @@ export function ProjectWorkspace() {
     };
   }, [projectId, user?.id]);
 
+  // Auto-send when opened from Chat "Yes" with a seeded prompt
+  useEffect(() => {
+    if (!project || !pendingAutoSendRef.current) return;
+    const msg = pendingAutoSendRef.current;
+    pendingAutoSendRef.current = null;
+    window.setTimeout(() => {
+      void handleSendChat(msg);
+    }, 350);
+  }, [project]);
+
   // Seed files dropped from Chat (code uploads)
   useEffect(() => {
     if (!projectId) return;
@@ -393,7 +409,7 @@ export function ProjectWorkspace() {
                 if (!src.children.some(c => c.name === f.name)) src.children.push(f);
               }
             }
-            return clone;
+            return clone.length ? clone : buildFileTreeFromPaths(next);
           });
           const first = Object.keys(files)[0];
           if (first) setSelectedFile(first.includes('/') ? first : `src/${first}`);
@@ -422,8 +438,12 @@ export function ProjectWorkspace() {
             mapped[rel] = content;
           }
           setFileContents(mapped);
+          setFileTree(buildFileTreeFromPaths(mapped));
           const keys = Object.keys(res.files);
-          if (keys.length && !selectedFile) setSelectedFile(keys[0]);
+          if (keys.length && !selectedFile) {
+            setSelectedFile(keys[0]);
+            setRightTab('code');
+          }
         }
       } catch {
         /* ignore */
@@ -472,10 +492,11 @@ export function ProjectWorkspace() {
     };
   }, []);
 
-  const handleSendChat = async () => {
-    if ((!chatInput.trim() && attachedImages.length === 0) || !project) return;
+  const handleSendChat = async (overrideContent?: string) => {
+    const rawContent = (overrideContent ?? chatInput).trim();
+    if ((!rawContent && attachedImages.length === 0) || !project) return;
     touchRecentProject(project.id, project.name);
-    let content = chatInput.trim();
+    let content = rawContent;
     if (composerMode && COMPOSER_MODE_PREFIX[composerMode]) {
       content = `${COMPOSER_MODE_PREFIX[composerMode]}${content}`;
     }
@@ -585,22 +606,47 @@ export function ProjectWorkspace() {
           );
 
           const sticky = activeModel.source === 'auto' ? threadBrainRef.current : null;
-          const routed = await arkRoute({
-            message: codingMessage,
-            kind: 'coding',
-            preferredModelId: activeModel.id,
-            preferredModelName: activeModel.name,
-            preferredSource:
-              activeModel.source === 'auto'
-                ? 'auto'
-                : activeModel.source === 'local'
-                  ? 'local'
-                  : 'cloud',
-            stickyModelId: sticky?.modelId,
-            stickyModelName: sticky?.modelName,
-            stickyPinnedSource: sticky?.pinnedSource,
-            history,
-          });
+          streamDraftRef.current = '';
+          const routeTimeoutMs = 120_000;
+          const routed = await Promise.race([
+            arkRoute({
+              message: codingMessage,
+              kind: 'coding',
+              preferredModelId: activeModel.id,
+              preferredModelName: activeModel.name,
+              preferredSource:
+                activeModel.source === 'auto'
+                  ? 'auto'
+                  : activeModel.source === 'local'
+                    ? 'local'
+                    : 'cloud',
+              stickyModelId: sticky?.modelId,
+              stickyModelName: sticky?.modelName,
+              stickyPinnedSource: sticky?.pinnedSource,
+              history,
+              onChunk: (piece) => {
+                streamDraftRef.current += piece;
+                patchAssistant('generate');
+                const partial = extractStreamingHtml(streamDraftRef.current);
+                if (partial && partial.length > 48) {
+                  setFileContents(prev => {
+                    const next = { ...prev, 'index.html': partial };
+                    setFileTree(buildFileTreeFromPaths(next));
+                    return next;
+                  });
+                  setSelectedFile('index.html');
+                  setCodeOpen(true);
+                  setRightTab('code');
+                }
+              },
+            }),
+            new Promise<never>((_, reject) => {
+              window.setTimeout(
+                () => reject(new Error('Code generation timed out. Using ARK scaffold.')),
+                routeTimeoutMs,
+              );
+            }),
+          ]);
           provider = routerProviderLabel(routed, 'ARK');
           if (activeModel.source === 'auto' && routed.source !== 'none') {
             const nextBrain = saveAutoThreadBrain(
@@ -617,13 +663,16 @@ export function ProjectWorkspace() {
           patchAssistant('apply');
 
           const parsedEdits = parseFileEdits(routed.reply);
-          const edits = parsedEdits.length
+          let edits = parsedEdits.length
             ? parsedEdits
             : extractChatStyleFileEdits(routed.reply, content);
+          if (!edits.length) {
+            edits = scaffoldFallbackEdits(content);
+          }
           if (edits.length > 0) {
             const applied = applyFileEdits(fileContents, fileTree, edits);
             setFileContents(applied.files);
-            setFileTree(applied.tree);
+            setFileTree(applied.tree.length ? applied.tree : buildFileTreeFromPaths(applied.files));
             setDiffStats(prev => ({
               added: prev.added + applied.addedLines,
               removed: prev.removed + applied.removedLines,
@@ -672,10 +721,35 @@ export function ProjectWorkspace() {
           patchAssistant('ready');
         }
       } catch (err) {
-        replyText = err instanceof Error
-          ? `Could not complete that edit: ${err.message}`
-          : 'ARK Router failed on this project edit.';
-        setAgentSteps(setStepStatuses(AGENT_STEPS, 0));
+        const timedOut = err instanceof Error && /timed out|scaffold/i.test(err.message);
+        const fallback = scaffoldFallbackEdits(content);
+        if (fallback.length > 0) {
+          const applied = applyFileEdits(fileContents, fileTree, fallback);
+          setFileContents(applied.files);
+          setFileTree(buildFileTreeFromPaths(applied.files));
+          setSelectedFile('index.html');
+          setCodeOpen(true);
+          setRightTab('preview');
+          changedPaths = applied.changedPaths;
+          if (window.arkDesktop?.projectWrite) {
+            void window.arkDesktop.projectWrite({
+              projectId: project.id,
+              projectName: project.name,
+              files: { 'index.html': applied.files['index.html'] || '' },
+            }).then(res => {
+              if (res.root) setDiskRoot(res.root);
+            });
+          }
+          replyText = timedOut
+            ? 'Local brain timed out — dropped in a working calculator scaffold. Edit it in Explorer or Preview.'
+            : `${applied.summary} (ARK scaffold)`;
+          setAgentSteps(setStepStatuses(AGENT_STEPS, AGENT_STEPS.length));
+        } else {
+          replyText = err instanceof Error
+            ? `Could not complete that edit: ${err.message}`
+            : 'ARK Router failed on this project edit.';
+          setAgentSteps(setStepStatuses(AGENT_STEPS, 0));
+        }
       } finally {
         window.clearTimeout(planTimer);
         window.clearTimeout(generateTimer);
@@ -985,6 +1059,7 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
   }
 
   const hasFiles = fileTree.length > 0 || Object.keys(fileContents).length > 0;
+  const explorerTree = fileTree.length > 0 ? fileTree : buildFileTreeFromPaths(fileContents);
   const fileKey = selectedFile ? (selectedFile.split('/').pop() ?? selectedFile) : '';
   const codeBody = selectedFile
     ? (fileContents[selectedFile] ?? fileContents[fileKey] ?? '')
@@ -1154,12 +1229,12 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
                 </div>
               )}
               <div className="flex-1 overflow-auto p-2">
-                {fileTree.length === 0 ? (
+                {explorerTree.length === 0 ? (
                   <p className="px-2 py-6 text-[11px] text-content-tertiary leading-relaxed text-center">
                     No files yet. Ask ARK in chat to create your project.
                   </p>
                 ) : (
-                  renderFileTree(fileTree)
+                  renderFileTree(explorerTree)
                 )}
               </div>
             </div>

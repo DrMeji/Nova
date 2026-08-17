@@ -9,12 +9,28 @@ const { app } = require('electron');
 function projectsRoot() {
   const root = path.join(app.getPath('userData'), 'ark-projects');
   fs.mkdirSync(root, { recursive: true });
+  // Category folders — code builds land under ark-projects/code/
+  for (const cat of ['code', 'uploads']) {
+    fs.mkdirSync(path.join(root, cat), { recursive: true });
+  }
   return root;
 }
 
-function projectDir(projectId) {
+function resolveProjectDir(projectId) {
   const safe = String(projectId || 'default').replace(/[<>:"/\\|?*]/g, '_');
-  const dir = path.join(projectsRoot(), safe);
+  const root = projectsRoot();
+  const candidates = [
+    path.join(root, 'code', safe),
+    path.join(root, safe),
+  ];
+  for (const dir of candidates) {
+    if (fs.existsSync(dir)) return dir;
+  }
+  return path.join(root, 'code', safe);
+}
+
+function projectDir(projectId) {
+  const dir = resolveProjectDir(projectId);
   fs.mkdirSync(dir, { recursive: true });
   return dir;
 }
@@ -37,6 +53,7 @@ function writeProjectFiles(projectId, projectName, files) {
   const meta = {
     id: projectId,
     name: projectName || projectId,
+    category: 'code',
     root,
     updatedAt: new Date().toISOString(),
     files: written,

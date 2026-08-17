@@ -199,6 +199,124 @@ export function extractChatStyleFileEdits(reply: string, userMessage: string): P
   return [{ path: 'index.html', content: any[2].trim() }];
 }
 
+/** Build explorer tree from a flat path → content map. */
+export function buildFileTreeFromPaths(files: ProjectFileMap): ProjectFileNode[] {
+  const flat = flattenProjectFiles(files);
+  const paths = Object.keys(flat).filter(p => p.includes('.') && flat[p]?.trim());
+  const root: ProjectFileNode[] = [];
+
+  const sortNodes = (nodes: ProjectFileNode[]) => {
+    nodes.sort((a, b) => {
+      if (a.type !== b.type) return a.type === 'folder' ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+  };
+
+  for (const filePath of paths.sort()) {
+    const parts = normalizePath(filePath).split('/').filter(Boolean);
+    let nodes = root;
+    for (let i = 0; i < parts.length; i++) {
+      const name = parts[i];
+      const isFile = i === parts.length - 1;
+      if (isFile) {
+        if (!nodes.some(n => n.name === name && n.type === 'file')) {
+          nodes.push({ name, type: 'file', language: languageFor(filePath) });
+          sortNodes(nodes);
+        }
+      } else {
+        let folder = nodes.find(n => n.name === name && n.type === 'folder');
+        if (!folder) {
+          folder = { name, type: 'folder', children: [] };
+          nodes.push(folder);
+          sortNodes(nodes);
+        }
+        folder.children = folder.children ?? [];
+        nodes = folder.children;
+      }
+    }
+  }
+  return root;
+}
+
+const CALCULATOR_SCAFFOLD = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Calculator</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; background: #0f172a; color: #e2e8f0; display: grid; place-items: center; min-height: 100vh; margin: 0; }
+    .calc { width: min(320px, 92vw); background: #1e293b; border-radius: 16px; padding: 16px; box-shadow: 0 12px 40px rgba(0,0,0,.35); }
+    #display { width: 100%; font-size: 1.75rem; text-align: right; padding: 12px; border: none; border-radius: 10px; margin-bottom: 12px; background: #0f172a; color: #f8fafc; }
+    .keys { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+    button { font-size: 1.1rem; padding: 14px; border: none; border-radius: 10px; cursor: pointer; background: #334155; color: #f1f5f9; }
+    button.op { background: #0369a1; }
+    button.eq { background: #059669; grid-column: span 2; }
+    button.clear { background: #b91c1c; }
+  </style>
+</head>
+<body>
+  <div class="calc">
+    <input id="display" type="text" readonly value="0" />
+    <div class="keys">
+      <button class="clear" data-a="C">C</button>
+      <button class="op" data-a="/">÷</button>
+      <button class="op" data-a="*">×</button>
+      <button class="op" data-a="-">−</button>
+      <button data-a="7">7</button><button data-a="8">8</button><button data-a="9">9</button>
+      <button class="op" data-a="+">+</button>
+      <button data-a="4">4</button><button data-a="5">5</button><button data-a="6">6</button>
+      <button data-a="1">1</button><button data-a="2">2</button><button data-a="3">3</button>
+      <button data-a="0">0</button><button data-a=".">.</button>
+      <button class="eq" data-a="=">=</button>
+    </div>
+  </div>
+  <script>
+    const display = document.getElementById('display');
+    let current = '0', pending = null, op = null;
+    function render() { display.value = current; }
+    function inputDigit(d) { current = current === '0' && d !== '.' ? d : current + d; render(); }
+    function compute(a, b, op) {
+      const x = parseFloat(a), y = parseFloat(b);
+      if (op === '+') return String(x + y);
+      if (op === '-') return String(x - y);
+      if (op === '*') return String(x * y);
+      if (op === '/') return y === 0 ? 'Error' : String(x / y);
+      return b;
+    }
+    document.querySelector('.keys').addEventListener('click', (e) => {
+      const btn = e.target.closest('button'); if (!btn) return;
+      const a = btn.dataset.a;
+      if (a === 'C') { current = '0'; pending = null; op = null; render(); return; }
+      if ('0123456789.'.includes(a)) { inputDigit(a); return; }
+      if ('+-*/'.includes(a)) { pending = current; op = a; current = '0'; return; }
+      if (a === '=' && pending != null && op) { current = compute(pending, current, op); pending = op = null; render(); }
+    });
+  </script>
+</body>
+</html>`;
+
+/** Offline fallback when the brain times out or returns no file blocks. */
+export function scaffoldFallbackEdits(userMessage: string): ParsedFileEdit[] {
+  const ask = String(userMessage || '').toLowerCase();
+  if (/\bcalculator\b/.test(ask) && (/\bhtml\b/.test(ask) || /\bsingle[\s-]?file\b/.test(ask) || /\bweb\b/.test(ask))) {
+    return [{ path: 'index.html', content: CALCULATOR_SCAFFOLD }];
+  }
+  return [];
+}
+
+/** Pull partial HTML from a streaming model reply for live editor preview. */
+export function extractStreamingHtml(partial: string): string | null {
+  const fenced = partial.match(/```html\s*\n([\s\S]*)$/i);
+  if (fenced?.[1] && fenced[1].trim().length > 40) return fenced[1];
+  if (/<!DOCTYPE html/i.test(partial) || /<html[\s>]/i.test(partial)) {
+    const start = partial.search(/<!DOCTYPE html|<html[\s>]/i);
+    if (start >= 0) return partial.slice(start);
+  }
+  return null;
+}
+
 /** Strip file blocks from reply so the chat bubble stays readable. */
 export function stripFileBlocks(reply: string): string {
   let text = reply || '';
