@@ -27,6 +27,15 @@ import { TokenUsageRing } from '@/components/TokenUsageRing';
 import { activityKeyForChatMode, notifyWorkDone } from '@/lib/activityIndicators';
 import { getTokenUsageRatio, recordTokenUsage } from '@/lib/tokenUsage';
 import { buildRouterHistory, sanitizeAssistantReply } from '@/lib/chatHistory';
+import {
+  autoPillLabel,
+  autoRingDetail,
+  brainKindForChatMode,
+  clearThreadBrain,
+  loadThreadBrain,
+  saveAutoThreadBrain,
+  type ThreadBrain,
+} from '@/lib/threadBrain';
 import { MessageContent } from '@/components/MediaMessage';
 import {
   detectPluginIntent,
@@ -69,14 +78,16 @@ type ChatModelOption = {
 
 const CHAT_MODELS: ChatModelOption[] = [
   // Chat — only Auto by default; keyed clouds + Ollama added at runtime
-  { id: 'ark-auto', name: 'ARK', source: 'auto', detail: 'ARK Engine first · silent failover', kind: 'chat' },
+  { id: 'ark-auto', name: 'ARK', source: 'auto', detail: 'Best brain · stays on for this chat', kind: 'chat' },
   // Image — paths that generate today
+  { id: 'ark-auto', name: 'ARK', source: 'auto', detail: 'Best path · stays on for this chat', kind: 'image' },
   { id: 'ark-image-core', name: 'ARK Image Core', source: 'local', detail: 'Free · Pollinations · local SD when installed', kind: 'image' },
   { id: 'sd15-local', name: 'SD 1.5 Local', source: 'local', detail: 'On-device · install from Local AI', kind: 'image' },
   { id: 'sdxl-turbo-local', name: 'SDXL Turbo Local', source: 'local', detail: 'Fast on-device · install from Local AI', kind: 'image' },
   { id: 'flux-schnell-local', name: 'FLUX Schnell Local', source: 'local', detail: 'On-device FLUX · ~13 GB · Local AI', kind: 'image' },
   { id: 'dall-e-3', name: 'DALL·E 3', source: 'cloud', detail: 'Cloud image · OpenAI key', kind: 'image' },
   // Video — Engine path until real MP4 ships
+  { id: 'ark-auto', name: 'ARK', source: 'auto', detail: 'Best path · stays on for this chat', kind: 'video' },
   { id: 'ark-video-core', name: 'ARK Video Core', source: 'local', detail: 'MP4 when free · motion fallback', kind: 'video' },
 ];
 
@@ -104,6 +115,8 @@ function kindForMode(mode: ChatMode): ModelKind {
 }
 
 function defaultModelForKind(kind: ModelKind): ChatModelOption {
+  const auto = CHAT_MODELS.find(m => m.id === 'ark-auto' && m.kind === kind);
+  if (auto) return auto;
   if (kind === 'chat') {
     return CHAT_MODELS.find(m => m.id === 'ark-auto') ?? CHAT_MODELS[0];
   }
@@ -340,6 +353,15 @@ export function AIChat() {
   const activeModelRef = useRef(activeModel);
   const [freeKeyOpen, setFreeKeyOpen] = useState(false);
   const [failoverNote, setFailoverNote] = useState<string | null>(null);
+  /** Auto: equipped brain for this chat thread (sticky until failover). */
+  const [threadBrain, setThreadBrain] = useState<ThreadBrain | null>(() => {
+    if (route.name === 'chat' && route.chatId) {
+      const m = route.mode && route.mode !== 'general' ? route.mode : 'general';
+      return loadThreadBrain(route.chatId, brainKindForChatMode(m));
+    }
+    return null;
+  });
+  const threadBrainRef = useRef<ThreadBrain | null>(threadBrain);
   const [setupNote, setSetupNote] = useState<string | null>(() => {
     try {
       return localStorage.getItem('ark:setup-brain-note');
@@ -362,6 +384,10 @@ export function AIChat() {
   useEffect(() => {
     activeModelRef.current = activeModel;
   }, [activeModel]);
+
+  useEffect(() => {
+    threadBrainRef.current = threadBrain;
+  }, [threadBrain]);
 
   useEffect(() => {
     messagesRef.current = messages;
@@ -396,6 +422,15 @@ export function AIChat() {
     const list = PLACEHOLDERS[mode];
     return list[Math.floor(Math.random() * list.length)];
   }, [mode]);
+
+  const autoModelLabel = useMemo(() => autoPillLabel(threadBrain), [threadBrain]);
+  const threadKind = useMemo(() => brainKindForChatMode(mode), [mode]);
+
+  const unpickAutoSticky = () => {
+    const chatId = routeChatIdRef.current ?? persistChatIdRef.current;
+    if (chatId) clearThreadBrain(chatId, threadKind);
+    setThreadBrain(null);
+  };
 
   useEffect(() => {
     if (route.name !== 'chat') return;
@@ -500,6 +535,10 @@ export function AIChat() {
     if (route.name !== 'chat') return;
     if (route.creationId && !route.chatId) return;
 
+    const kind = brainKindForChatMode(
+      route.mode && route.mode !== 'general' ? route.mode : mode,
+    );
+
     if (route.chatId) {
       // We just created this chat and already have messages in state — don't wipe them.
       if (skipChatLoadIdsRef.current.has(route.chatId)) {
@@ -513,9 +552,11 @@ export function AIChat() {
         const loaded = raw ? JSON.parse(raw) as ChatMessage[] : [];
         setMessages(Array.isArray(loaded) ? loaded : []);
         messagesRef.current = Array.isArray(loaded) ? loaded : [];
+        setThreadBrain(loadThreadBrain(route.chatId, kind));
       } catch {
         setMessages([]);
         messagesRef.current = [];
+        setThreadBrain(null);
       }
       // Stop button / queue only apply to the chat that is actively generating.
       setGenerating(Boolean(generatingRef.current && activeGenChatIdRef.current === route.chatId));
@@ -527,9 +568,10 @@ export function AIChat() {
     // Fresh New Chat / Image / Video — empty canvas
     setMessages([]);
     messagesRef.current = [];
+    setThreadBrain(null);
     setGenerating(Boolean(generatingRef.current && !activeGenChatIdRef.current));
     setLoading(false);
-  }, [route]);
+  }, [route, mode]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1043,12 +1085,16 @@ export function AIChat() {
             kind === 'image' ? rewriteImagePrompt(content) : rewriteVideoPrompt(content);
 
           const minMs = kind === 'image' ? 3200 : 5500;
+          const sticky = pinnedModel.source === 'auto' ? threadBrainRef.current : null;
           const routePromise = arkRoute({
             message: rewritten,
             kind,
             preferredModelId: pinnedModel.id,
             preferredModelName: pinnedModel.name,
             preferredSource: pinnedModel.source,
+            stickyModelId: sticky?.modelId,
+            stickyModelName: sticky?.modelName,
+            stickyPinnedSource: sticky?.pinnedSource,
           });
           const waitPromise = new Promise(r => window.setTimeout(r, minMs));
           const [routed] = await Promise.all([routePromise, waitPromise]);
@@ -1056,6 +1102,16 @@ export function AIChat() {
           resolvedProvider = routerProviderLabel(routed, providerLabel);
           const hopNote = failoverChipText(routed, pinnedModel);
           if (hopNote) setFailoverNote(hopNote);
+          if (pinnedModel.source === 'auto' && routed.source !== 'none') {
+            const nextBrain = saveAutoThreadBrain(
+              activeChatId,
+              kind,
+              routed,
+              threadBrainRef.current,
+              routed.attempted?.length ?? 0,
+            );
+            if (nextBrain) setThreadBrain(nextBrain);
+          }
           const libraryId = routed.media?.libraryId || `local-${Date.now()}`;
           lastLibraryId = libraryId;
           if (routed.media?.dataUrl) {
@@ -1103,12 +1159,16 @@ export function AIChat() {
           const history = prefs.rememberContext
             ? buildRouterHistory(priorForHistory, content)
             : buildRouterHistory([], content);
+          const sticky = pinnedModel.source === 'auto' ? threadBrainRef.current : null;
           const routePromise = arkRoute({
             message: content,
             kind: mode === 'code' || looksLikeCodeAsk(content) ? 'coding' : 'chat',
             preferredModelId: pinnedModel.id,
             preferredModelName: pinnedModel.name,
             preferredSource: pinnedModel.source,
+            stickyModelId: sticky?.modelId,
+            stickyModelName: sticky?.modelName,
+            stickyPinnedSource: sticky?.pinnedSource,
             history,
             onChunk: (piece) => {
               if (abandoned || stopRequestedRef.current || mySeq !== genSeqRef.current) return;
@@ -1140,6 +1200,18 @@ export function AIChat() {
             resolvedProvider = routerProviderLabel(routed.full, providerLabel);
             const hopNote = failoverChipText(routed.full, pinnedModel);
             if (hopNote) setFailoverNote(hopNote);
+            if (pinnedModel.source === 'auto' && routed.full.source !== 'none') {
+              const saveKind =
+                mode === 'code' || looksLikeCodeAsk(content) ? 'coding' : threadKind;
+              const nextBrain = saveAutoThreadBrain(
+                activeChatId,
+                saveKind,
+                routed.full,
+                threadBrainRef.current,
+                routed.full.attempted?.length ?? 0,
+              );
+              if (nextBrain) setThreadBrain(nextBrain);
+            }
             if (pinnedModel.source === 'local' && pinnedModel.id !== 'ark-auto') {
               setLocalPrefs({ lastChatModelId: pinnedModel.id });
             }
@@ -1309,9 +1381,12 @@ export function AIChat() {
                   setActiveModel(model);
                   if (model.kind === 'chat') {
                     setLocalPrefs({ defaultModelId: model.id, lastChatModelId: model.id });
+                    unpickAutoSticky();
                     if (!model.id.startsWith('ollama:')) {
                       void setEngineModel(model.id).catch(() => undefined);
                     }
+                  } else if (model.source !== 'auto') {
+                    unpickAutoSticky();
                   }
                   setModelMenuOpen(false);
                 }}
@@ -1363,7 +1438,12 @@ export function AIChat() {
                 type="button"
                 onClick={() => {
                   setActiveModel(model);
-                  if (model.kind === 'chat') setLocalPrefs({ defaultModelId: model.id, lastChatModelId: model.id });
+                  if (model.kind === 'chat') {
+                    setLocalPrefs({ defaultModelId: model.id, lastChatModelId: model.id });
+                    unpickAutoSticky();
+                  } else if (model.source !== 'auto') {
+                    unpickAutoSticky();
+                  }
                   setModelMenuOpen(false);
                 }}
                 className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-surface-hover"
@@ -1512,7 +1592,11 @@ export function AIChat() {
             type="button"
             onClick={() => setModelMenuOpen(o => !o)}
             className="inline-flex items-center gap-1 rounded-full border border-surface-border/80 bg-surface-hover/60 hover:bg-surface-hover px-2.5 py-1.5 text-xs text-content-primary transition-colors shrink-0 max-w-[10rem]"
-            title={`Active model · ${activeModel.source === 'auto' ? 'ARK Auto (failover on)' : activeModel.name}`}
+            title={`Active model · ${
+              activeModel.source === 'auto'
+                ? (threadBrain ? `${autoModelLabel} · equipped for this chat` : 'ARK Auto · picks best brain')
+                : activeModel.name
+            }`}
             aria-label="Select model"
             aria-expanded={modelMenuOpen}
           >
@@ -1526,11 +1610,9 @@ export function AIChat() {
               }`} />
             ) : null}
             <span className="font-medium truncate">
-              {mode === 'image' || mode === 'video'
-                ? activeModel.name
-                : activeModel.source === 'auto'
-                  ? 'ARK'
-                  : activeModel.name}
+              {activeModel.source === 'auto'
+                ? autoModelLabel
+                : activeModel.name}
             </span>
             <ChevronDown className={`w-3.5 h-3.5 text-content-tertiary transition-transform shrink-0 ${modelMenuOpen ? 'rotate-180' : ''}`} />
           </button>
@@ -1555,19 +1637,21 @@ export function AIChat() {
           ratio={tokenRatio}
           className="text-content-primary shrink-0"
           modelName={
-            mode === 'image' || mode === 'video'
-              ? activeModel.name
-              : activeModel.source === 'auto'
-                ? 'ARK Auto'
-                : activeModel.name
+            activeModel.source === 'auto'
+              ? autoModelLabel
+              : activeModel.name
           }
           modelDetail={
             mode === 'image'
-              ? 'Image · session budget'
+              ? activeModel.source === 'auto'
+                ? autoRingDetail(threadBrain, 'image')
+                : 'Image · session budget'
               : mode === 'video'
-                ? 'Video · session budget'
+                ? activeModel.source === 'auto'
+                  ? autoRingDetail(threadBrain, 'video')
+                  : 'Video · session budget'
                 : activeModel.source === 'auto'
-                  ? 'Free-first · silent failover'
+                  ? autoRingDetail(threadBrain, threadKind)
                   : activeModel.source === 'local'
                     ? 'Local · ARK Engine'
                     : 'Cloud · connected key'

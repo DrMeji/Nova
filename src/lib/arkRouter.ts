@@ -72,6 +72,10 @@ export type ArkRouteOpts = {
   history?: RouterChatTurn[];
   /** When set, local GGUF tokens stream into this callback. */
   onChunk?: (text: string) => void;
+  /** Auto: reuse this equipped brain for the thread until it fails. */
+  stickyModelId?: string;
+  stickyModelName?: string;
+  stickyPinnedSource?: 'local' | 'cloud' | 'optional';
 };
 
 function modeAllowsCloud(mode: AiModePref) {
@@ -209,6 +213,66 @@ async function tryOllama(
   }
 }
 
+async function tryStickyBrain(
+  history: RouterChatTurn[],
+  message: string,
+  modelId: string,
+  modelName: string,
+  pinnedSource: 'local' | 'cloud' | 'optional',
+  attempted: string[],
+  onChunk: ((text: string) => void) | undefined,
+  brainKind: 'chat' | 'coding',
+  mode: AiModePref,
+): Promise<ArkRouterResult | null> {
+  if (pinnedSource === 'local') {
+    const hit = await tryLocalChat(
+      history,
+      message,
+      modelId,
+      attempted,
+      onChunk,
+      false,
+      undefined,
+      brainKind,
+    );
+    if (hit && isStrongLocal(hit.source)) {
+      return { ...hit, modelId };
+    }
+    return null;
+  }
+
+  if (pinnedSource === 'optional') {
+    const ollamaId = modelId.startsWith('ollama:') ? modelId : `ollama:${modelId}`;
+    const hit = await tryOllama(history, message, ollamaId, attempted);
+    if (hit) return { ...hit, modelId: ollamaId };
+    return null;
+  }
+
+  if (pinnedSource === 'cloud' && modeAllowsCloud(mode)) {
+    const hit = await cloudChatPreferredThenCascade({
+      modelId,
+      modelName,
+      message,
+      cascade: false,
+      attempted,
+      history,
+      onChunk,
+    });
+    if (hit) {
+      return withContinued({
+        reply: hit.reply,
+        modelName: `${hit.provider} · ${hit.model}`,
+        modelId,
+        source: hitSource(hit.provider),
+        tier: hit.cost,
+        attempted,
+      }, history);
+    }
+  }
+
+  return null;
+}
+
 async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
   const prefs = getLocalPrefs();
   const mode = prefs.aiMode;
@@ -341,6 +405,21 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
 
   // ── ARK Auto: Engine is the brain; Ollama is last-resort optional ──
   if (isAuto) {
+    if (opts.stickyModelId && opts.stickyPinnedSource) {
+      const sticky = await tryStickyBrain(
+        history,
+        opts.message,
+        opts.stickyModelId,
+        opts.stickyModelName || opts.stickyModelId,
+        opts.stickyPinnedSource,
+        attempted,
+        opts.onChunk,
+        brainKind,
+        mode,
+      );
+      if (sticky && sticky.source !== 'none') return sticky;
+    }
+
     if (capableLocal) {
       const local = await tryLocalChat(
         history,
@@ -523,17 +602,130 @@ function hitSource(provider: string) {
   return provider.toLowerCase().replace(/\s+/g, '-');
 }
 
+function isAutoRoute(opts: ArkRouteOpts) {
+  return opts.preferredModelId === 'ark-auto' || opts.preferredSource === 'auto';
+}
+
+async function tryStickyImage(
+  opts: ArkRouteOpts,
+  attempted: string[],
+  mode: AiModePref,
+): Promise<ArkRouterResult | null> {
+  if (!opts.stickyModelId || !opts.stickyPinnedSource) return null;
+  attempted.push(`Sticky · ${opts.stickyModelName || opts.stickyModelId}`);
+
+  if (opts.stickyPinnedSource === 'cloud' && modeAllowsCloud(mode)) {
+    try {
+      const cloud = await cloudGenerateImage(opts.message);
+      if (!cloud?.dataUrl && !cloud?.url) return null;
+      return {
+        reply: cloud.reply,
+        media: {
+          kind: 'image',
+          dataUrl: cloud.dataUrl || cloud.url || '',
+          libraryId: `cloud-${Date.now()}`,
+          real: true,
+        },
+        modelName: cloud.provider,
+        modelId: opts.stickyModelId,
+        source: hitSource(cloud.provider),
+        tier: cloud.tier === 'free-key' ? 'free-key' : 'paid',
+        attempted,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  const modelId = opts.stickyModelId || 'ark-image-core';
+  try {
+    const result = await brainGenerate(opts.message, modelId, 'image');
+    if (!result.media?.dataUrl) {
+      return result.reply
+        ? {
+          reply: result.reply,
+          modelName: result.modelName || 'ARK Image Core',
+          modelId,
+          source: result.source || 'ark-media',
+          tier: 'no-key-free',
+          attempted,
+        }
+        : null;
+    }
+    return {
+      reply: result.reply,
+      media: result.media,
+      modelName: result.modelName || 'ARK Image Core',
+      modelId,
+      source: result.source || 'ark-media',
+      tier: result.media.real ? 'no-key-free' : 'local-free',
+      attempted,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function tryStickyVideo(
+  opts: ArkRouteOpts,
+  attempted: string[],
+): Promise<ArkRouterResult | null> {
+  if (!opts.stickyModelId || !opts.stickyPinnedSource) return null;
+  attempted.push(`Sticky · ${opts.stickyModelName || opts.stickyModelId}`);
+  const modelId = opts.stickyModelId || 'ark-video-core';
+  try {
+    const result = await brainGenerate(opts.message, modelId, 'video');
+    const source = result.source || 'ark-media';
+    const isMp4 = Boolean(
+      result.media?.dataUrl?.startsWith('data:video/')
+      || source.includes('mp4')
+      || source.includes('huggingface-video'),
+    );
+    const isFallback = Boolean(
+      source.includes('motion-still')
+      || source.includes('fallback')
+      || (!isMp4 && result.media?.dataUrl?.startsWith('data:image/svg')),
+    );
+    let reply = result.reply;
+    if (isFallback && result.media?.dataUrl) {
+      reply = [
+        'Video preview · motion still (MP4 hosts were busy or need credits).',
+        '',
+        result.reply,
+      ].join('\n');
+    }
+    return {
+      reply,
+      media: result.media,
+      modelName: result.modelName || 'ARK Video Core',
+      modelId,
+      source,
+      tier: isMp4 ? 'no-key-free' : isFallback ? 'local-free' : (result.media?.real ? 'no-key-free' : 'local-free'),
+      attempted,
+    };
+  } catch {
+    return null;
+  }
+}
+
 async function routeImage(opts: ArkRouteOpts): Promise<ArkRouterResult> {
   const prefs = getLocalPrefs();
   const mode = prefs.aiMode;
   const failover = prefs.autoFailover;
   const attempted: string[] = [];
+  const isAuto = isAutoRoute(opts);
+
+  if (isAuto && opts.stickyModelId && opts.stickyPinnedSource) {
+    const sticky = await tryStickyImage(opts, attempted, mode);
+    if (sticky && sticky.source !== 'none') return sticky;
+  }
+
   const wantsCloud =
-    opts.preferredSource === 'cloud'
+    (!isAuto && opts.preferredSource === 'cloud')
     || Boolean(opts.preferredModelId?.includes('dall'))
     || Boolean(opts.preferredModelId?.includes('hf-flux'))
     || Boolean(opts.preferredModelId?.includes('flux'))
-    || modePrefersCloud(mode);
+    || (isAuto ? false : modePrefersCloud(mode));
 
   const tryCloud = async (): Promise<ArkRouterResult | null> => {
     if (!modeAllowsCloud(mode)) return null;
@@ -543,6 +735,7 @@ async function routeImage(opts: ArkRouteOpts): Promise<ArkRouterResult> {
       if (!cloud?.dataUrl && !cloud?.url) return null;
       const dataUrl = cloud.dataUrl || cloud.url || '';
       const libraryId = `cloud-${Date.now()}`;
+      const cloudModelId = opts.preferredModelId?.includes('dall') ? 'dall-e-3' : 'cloud-image';
       return {
         reply: cloud.reply,
         media: {
@@ -552,6 +745,7 @@ async function routeImage(opts: ArkRouteOpts): Promise<ArkRouterResult> {
           real: true,
         },
         modelName: cloud.provider,
+        modelId: cloudModelId,
         source: hitSource(cloud.provider),
         tier: cloud.tier === 'free-key' ? 'free-key' : 'paid',
         attempted,
@@ -561,14 +755,17 @@ async function routeImage(opts: ArkRouteOpts): Promise<ArkRouterResult> {
     }
   };
 
-  const tryLocalMedia = async (): Promise<ArkRouterResult | null> => {
-    attempted.push('ARK Image Core');
+  const tryLocalMedia = async (modelId?: string): Promise<ArkRouterResult | null> => {
+    const mid = modelId || opts.preferredModelId || 'ark-image-core';
+    const label = mid === 'ark-image-core' ? 'ARK Image Core' : mid;
+    attempted.push(label);
     try {
-      const result = await brainGenerate(opts.message, opts.preferredModelId || 'ark-image-core', 'image');
+      const result = await brainGenerate(opts.message, mid, 'image');
       if (!result.media?.dataUrl) {
         return {
           reply: result.reply,
-          modelName: result.modelName || 'ARK Image Core',
+          modelName: result.modelName || label,
+          modelId: mid,
           source: result.source || 'ark-media',
           tier: 'no-key-free',
           attempted,
@@ -577,7 +774,8 @@ async function routeImage(opts: ArkRouteOpts): Promise<ArkRouterResult> {
       return {
         reply: result.reply,
         media: result.media,
-        modelName: result.modelName || 'ARK Image Core',
+        modelName: result.modelName || label,
+        modelId: mid,
         source: result.source || 'ark-media',
         tier: result.media.real ? 'no-key-free' : 'local-free',
         attempted,
@@ -639,9 +837,19 @@ async function routeImage(opts: ArkRouteOpts): Promise<ArkRouterResult> {
 
 async function routeVideo(opts: ArkRouteOpts): Promise<ArkRouterResult> {
   const attempted: string[] = [];
-  attempted.push('ARK Video Core');
+  const isAuto = isAutoRoute(opts);
+
+  if (isAuto && opts.stickyModelId && opts.stickyPinnedSource) {
+    const sticky = await tryStickyVideo(opts, attempted);
+    if (sticky && sticky.source !== 'none') return sticky;
+  }
+
+  const modelId = opts.preferredModelId && opts.preferredModelId !== 'ark-auto'
+    ? opts.preferredModelId
+    : 'ark-video-core';
+  attempted.push(modelId === 'ark-video-core' ? 'ARK Video Core' : modelId);
   try {
-    const result = await brainGenerate(opts.message, opts.preferredModelId || 'ark-video-core', 'video');
+    const result = await brainGenerate(opts.message, modelId, 'video');
     const source = result.source || 'ark-media';
     const isMp4 = Boolean(
       result.media?.dataUrl?.startsWith('data:video/')
@@ -665,6 +873,7 @@ async function routeVideo(opts: ArkRouteOpts): Promise<ArkRouterResult> {
       reply,
       media: result.media,
       modelName: result.modelName || 'ARK Video Core',
+      modelId,
       source,
       tier: isMp4 ? 'no-key-free' : isFallback ? 'local-free' : (result.media?.real ? 'no-key-free' : 'local-free'),
       attempted,

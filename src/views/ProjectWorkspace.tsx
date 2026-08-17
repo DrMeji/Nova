@@ -22,6 +22,14 @@ import {
 } from '@/lib/plugins';
 import { arkRoute, routerProviderLabel } from '@/lib/arkRouter';
 import { buildRouterHistory } from '@/lib/chatHistory';
+import {
+  autoPillLabel,
+  autoRingDetail,
+  clearThreadBrain,
+  loadThreadBrain,
+  saveAutoThreadBrain,
+  type ThreadBrain,
+} from '@/lib/threadBrain';
 import { getLocalPrefs, hasProviderApiKey, setLocalPrefs } from '@/lib/localPrefs';
 import { loadRecentProjects } from '@/lib/recentStore';
 import {
@@ -44,7 +52,7 @@ type CodeModel = {
 };
 
 const CODE_MODELS: CodeModel[] = [
-  { id: 'ark-auto', name: 'ARK', source: 'auto', detail: 'Free-first · silent failover' },
+  { id: 'ark-auto', name: 'ARK', source: 'auto', detail: 'Best coder · stays on for this project' },
 ];
 
 const CLOUD_CODE_WHEN_KEYED: (CodeModel & { keyId: string })[] = [
@@ -127,6 +135,8 @@ export function ProjectWorkspace() {
     if (!saved || saved === 'ark-auto') return CODE_MODELS[0];
     return { id: saved, name: saved, source: 'local', detail: 'Pinned' };
   });
+  const [threadBrain, setThreadBrain] = useState<ThreadBrain | null>(null);
+  const threadBrainRef = useRef<ThreadBrain | null>(null);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [menuPos, setMenuPos] = useState<{ left: number; bottom: number } | null>(null);
   const [localModels, setLocalModels] = useState<CodeModel[]>([]);
@@ -166,6 +176,18 @@ export function ProjectWorkspace() {
   const isWebProject = !project || project.project_type === 'web' || project.project_type === 'api';
   const [previewUrl, setPreviewUrl] = useState('http://127.0.0.1:0');
   const [livePreviewUrl, setLivePreviewUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!projectId) {
+      setThreadBrain(null);
+      return;
+    }
+    setThreadBrain(loadThreadBrain(projectId, 'coding'));
+  }, [projectId]);
+
+  useEffect(() => {
+    threadBrainRef.current = threadBrain;
+  }, [threadBrain]);
 
   useEffect(() => {
     if (!projectId) return;
@@ -511,19 +533,34 @@ export function ProjectWorkspace() {
               : turn,
           );
 
+          const sticky = activeModel.source === 'auto' ? threadBrainRef.current : null;
           const routed = await arkRoute({
             message: codingMessage,
             kind: 'coding',
-            preferredModelId: activeModel.id === 'ark-auto' ? undefined : activeModel.id,
+            preferredModelId: activeModel.id,
+            preferredModelName: activeModel.name,
             preferredSource:
               activeModel.source === 'auto'
                 ? 'auto'
                 : activeModel.source === 'local'
                   ? 'local'
                   : 'cloud',
+            stickyModelId: sticky?.modelId,
+            stickyModelName: sticky?.modelName,
+            stickyPinnedSource: sticky?.pinnedSource,
             history,
           });
           provider = routerProviderLabel(routed, 'ARK');
+          if (activeModel.source === 'auto' && routed.source !== 'none') {
+            const nextBrain = saveAutoThreadBrain(
+              project.id,
+              'coding',
+              routed,
+              threadBrainRef.current,
+              routed.attempted?.length ?? 0,
+            );
+            if (nextBrain) setThreadBrain(nextBrain);
+          }
 
           setAgentSteps(prev => prev.map((s, i) => ({
             ...s,
@@ -1393,7 +1430,9 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
                     type="button"
                     onClick={() => setModelMenuOpen(o => !o)}
                     className="inline-flex items-center gap-1 rounded-full border border-surface-border/80 bg-surface-hover/60 hover:bg-surface-hover px-2 py-1 text-[11px] text-content-primary transition-colors max-w-[8.5rem]"
-                    title={activeModel.source === 'auto' ? 'ARK Auto · failover on' : activeModel.name}
+                    title={activeModel.source === 'auto'
+                      ? (threadBrain ? `${autoPillLabel(threadBrain)} · equipped` : 'ARK Auto · picks best coder')
+                      : activeModel.name}
                     aria-label="Select model"
                     aria-expanded={modelMenuOpen}
                   >
@@ -1403,7 +1442,7 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
                         : <Cloud className="w-3 h-3 text-sky-400 shrink-0" />
                     )}
                     <span className="font-medium truncate">
-                      {activeModel.source === 'auto' ? 'ARK' : activeModel.name}
+                      {activeModel.source === 'auto' ? autoPillLabel(threadBrain) : activeModel.name}
                     </span>
                     <ChevronDown className={`w-3 h-3 text-content-tertiary shrink-0 ${modelMenuOpen ? 'rotate-180' : ''}`} />
                   </button>
@@ -1411,10 +1450,10 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
                     ratio={tokenRatio}
                     size={16}
                     className="text-content-primary"
-                    modelName={activeModel.source === 'auto' ? 'ARK Auto' : activeModel.name}
+                    modelName={activeModel.source === 'auto' ? autoPillLabel(threadBrain) : activeModel.name}
                     modelDetail={
                       activeModel.source === 'auto'
-                        ? 'Free-first · silent failover'
+                        ? autoRingDetail(threadBrain, 'coding')
                         : activeModel.source === 'local'
                           ? 'Local · ARK Engine'
                           : 'Cloud · connected key'
@@ -1442,6 +1481,8 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
                               setLocalPrefs({ defaultModelId: 'ark-auto', aiMode: 'automatic', autoFailover: true });
                             } else {
                               setLocalPrefs({ defaultModelId: model.id, lastChatModelId: model.id });
+                              if (projectId) clearThreadBrain(projectId, 'coding');
+                              setThreadBrain(null);
                               if (model.source === 'local') void setEngineModel(model.id).catch(() => undefined);
                             }
                             setModelMenuOpen(false);

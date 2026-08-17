@@ -223,6 +223,17 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.53',
+    channel: 'stable' as const,
+    date: 'Aug 17, 2026',
+    title: 'Sticky Auto brain across chat, image, video, and code',
+    notes: [
+      'Auto picks a brain once per thread and stays on it until failover — pill shows ARK · model name',
+      'Image and video chats remember their equipped path; code workspace uses the same sticky coder brain',
+      'Token ring and model pill reflect the active brain instead of generic ARK',
+    ],
+  },
+  {
     version: '0.1.52',
     channel: 'stable' as const,
     date: 'Aug 17, 2026',
