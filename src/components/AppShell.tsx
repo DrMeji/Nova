@@ -5,7 +5,7 @@ import { getLocalPrefs } from '@/lib/localPrefs';
 import {
   SquarePen, Briefcase, Blocks, Database, Bot,
   Settings, Search, PanelLeft, ChevronDown, Folder, History, Clock3,
-  ImageIcon, Video, MessageSquare, Archive, Trash2, Hammer,
+  ImageIcon, Video, MessageSquare, Archive, Trash2, Code2,
 } from 'lucide-react';
 import { Modal } from './Modal';
 import { SettingsContent } from './SettingsContent';
@@ -16,7 +16,7 @@ const NAV_ITEMS: { label: string; icon: React.ComponentType<{ className?: string
   { label: 'New Chat', icon: SquarePen, route: { name: 'chat' } },
   { label: 'Image', icon: ImageIcon, route: { name: 'chat', mode: 'image' } },
   { label: 'Video', icon: Video, route: { name: 'chat', mode: 'video' } },
-  { label: 'Build', icon: Hammer, route: { name: 'projects' } },
+  { label: 'Code', icon: Code2, route: { name: 'projects' } },
   { label: 'Projects', icon: Briefcase, route: { name: 'projects' } },
   { label: 'History', icon: History, route: { name: 'dashboard' } },
   { label: 'Plugins', icon: Blocks, route: { name: 'build' } },
@@ -73,7 +73,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const isActive = (item: { route: Route; label: string }) => {
     if (route.name === 'project' || route.name === 'creation') {
       if (item.route.name === 'chat') return false;
-      if (item.route.name === 'projects') return false;
+      // Projects list stays inactive while inside a Code workspace; Code stays active.
+      if (item.label === 'Projects') return false;
     }
     // Once a conversation is in Recent, highlight that item — not New Chat / Image / Video.
     if (inRecentChat && item.route.name === 'chat') return false;
@@ -87,7 +88,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     if (item.label === 'Video') {
       return route.name === 'chat' && route.mode === 'video' && !route.chatId;
     }
-    if (item.label === 'Build') {
+    if (item.label === 'Code') {
       return route.name === 'project';
     }
     if (item.label === 'Projects') {
@@ -187,8 +188,8 @@ export function AppShell({ children }: { children: ReactNode }) {
                       navigate({ name: 'chat' });
                       return;
                     }
-                    if (item.label === 'Build') {
-                      const project = addRecent('New build');
+                    if (item.label === 'Code') {
+                      const project = addRecent('Code project');
                       navigate({ name: 'project', id: project.id });
                       return;
                     }

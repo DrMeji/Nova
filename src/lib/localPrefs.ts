@@ -223,6 +223,17 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.43',
+    channel: 'stable' as const,
+    date: 'Aug 16, 2026',
+    title: 'Code workspace back in the sidebar',
+    notes: [
+      'Sidebar Build is now Code (</> icon) and opens the explorer + editor + chat layout',
+      'Asking to build/look at code, or attaching a code file, auto-switches into Code',
+      'Local Code projects no longer spin forever on a blank screen',
+    ],
+  },
+  {
     version: '0.1.42',
     channel: 'stable' as const,
     date: 'Aug 17, 2026',

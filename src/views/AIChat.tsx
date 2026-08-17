@@ -35,9 +35,28 @@ import {
 import type { ChatMessage } from '@/types';
 import {
   Bot, User as UserIcon, Loader2, Plus, ImageIcon, Video, Code2,
-  Upload, Cpu, Cloud, ChevronDown, Check, Blocks, FolderKanban, Zap, Square, X, Hammer,
+  Upload, Cpu, Cloud, ChevronDown, Check, Blocks, FolderKanban, Zap, Square, X,
 } from 'lucide-react';
 import { engineGenerateCancel, getEngineStatus, setEngineModel } from '@/lib/arkEngine';
+
+const CODE_FILE_RE =
+  /\.(tsx?|jsx?|mjs|cjs|py|go|rs|java|kt|swift|cs|cpp|cxx|cc|c|h|hpp|rb|php|vue|svelte|css|scss|less|html|json|toml|ya?ml|md|sql|sh|bash|zsh|ps1|dockerfile|makefile)$/i;
+
+function looksLikeCodeAsk(text: string) {
+  const t = text.trim();
+  if (!t) return false;
+  if (/```[\w]*\n/.test(t)) return true;
+  if (/\b(build|create|make|scaffold|implement|refactor|debug|fix)\b[\s\S]{0,40}\b(app|website|component|function|api|project|calculator|tool)\b/i.test(t)) {
+    return true;
+  }
+  if (/\b(look (at|into)|review|open|edit|read)\b[\s\S]{0,40}\b(file|code|repo|project|source)\b/i.test(t)) {
+    return true;
+  }
+  if (/\b(typescript|javascript|python|react|node\.?js|html|css)\b/i.test(t) && /\b(build|write|create|fix|add)\b/i.test(t)) {
+    return true;
+  }
+  return false;
+}
 
 type ModelSource = 'local' | 'cloud' | 'auto';
 
@@ -337,6 +356,7 @@ export function AIChat() {
   /** Skip storage reload after we create a chat so Explore ideas doesn't flash back. */
   const skipChatLoadIdsRef = useRef<Set<string>>(new Set());
   const messagesRef = useRef(messages);
+  const attachInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     activeModelRef.current = activeModel;
@@ -708,9 +728,51 @@ export function AIChat() {
     }
   };
 
+  const openCodeWorkspace = (seedPrompt?: string, seedFiles?: Record<string, string>) => {
+    const seed = (seedPrompt ?? input).trim();
+    const name = seed
+      ? titleFromPrompt(seed).replace(/^(let'?s|lets|please)\s+/i, '').slice(0, 48) || 'Code project'
+      : 'Code project';
+    const project = addRecent(name);
+    try {
+      if (seed) localStorage.setItem(`ark:project-draft:${project.id}`, seed);
+      if (seedFiles && Object.keys(seedFiles).length) {
+        localStorage.setItem(`ark:project-seed-files:${project.id}`, JSON.stringify(seedFiles));
+      }
+    } catch {
+      /* ignore */
+    }
+    setInput('');
+    if (textareaRef.current) textareaRef.current.style.height = 'auto';
+    navigate({ name: 'project', id: project.id });
+  };
+
+  const onPickCodeFiles = async (list: FileList | null) => {
+    if (!list?.length) return;
+    const files = [...list];
+    const codeFiles = files.filter(f => CODE_FILE_RE.test(f.name) || /javascript|typescript|json|text\/plain|xml/.test(f.type));
+    if (!codeFiles.length) return;
+    const seedFiles: Record<string, string> = {};
+    for (const f of codeFiles.slice(0, 20)) {
+      try {
+        seedFiles[f.name] = await f.text();
+      } catch {
+        /* skip unreadable */
+      }
+    }
+    const prompt = input.trim()
+      || `Review and work with ${codeFiles.map(f => f.name).join(', ')}`;
+    openCodeWorkspace(prompt, seedFiles);
+  };
+
   const handleSend = () => {
     const content = input.trim();
     if (!content || !user) return;
+    // Build/code asks open the Code workspace (explorer + editor + chat) instead of plain chat.
+    if ((mode === 'general' || mode === 'code') && looksLikeCodeAsk(content)) {
+      openCodeWorkspace(content);
+      return;
+    }
     const viewingChatId = routeChatIdRef.current;
     const busyOnThisChat = generatingRef.current && (
       !viewingChatId
@@ -1129,24 +1191,6 @@ export function AIChat() {
     textareaRef.current?.focus();
   };
 
-  const openBuildWorkspace = (seedPrompt?: string) => {
-    const seed = (seedPrompt ?? input).trim();
-    const name = seed
-      ? titleFromPrompt(seed).replace(/^(let'?s|lets|please)\s+/i, '').slice(0, 48) || 'New build'
-      : 'New build';
-    const project = addRecent(name);
-    if (seed) {
-      try {
-        localStorage.setItem(`ark:project-draft:${project.id}`, seed);
-      } catch {
-        /* ignore */
-      }
-    }
-    setInput('');
-    if (textareaRef.current) textareaRef.current.style.height = 'auto';
-    navigate({ name: 'project', id: project.id });
-  };
-
   const viewingChatId = route.name === 'chat' ? route.chatId : undefined;
   // Explore / idea grid only for brand-new chats — never when a Recent thread is open.
   const showEmpty = !loading && messages.length === 0 && !viewingChatId;
@@ -1338,15 +1382,15 @@ export function AIChat() {
   const composer = (
     <div className="w-full max-w-2xl mx-auto">
       {failoverChip}
-      {(mode === 'general' || mode === 'code') && /\b(build|create|make)\b.+\b(app|website|calculator|project)\b/i.test(input) && (
+      {(mode === 'general' || mode === 'code') && looksLikeCodeAsk(input) && (
         <div className="mb-2 flex items-center justify-between gap-2 rounded-xl border border-violet-500/25 bg-violet-500/10 px-3 py-2 text-[11px] text-violet-100/90">
-          <span>Ready to build? Open the Build workspace (explorer, code, preview).</span>
+          <span>Code ask detected — opens explorer, editor, and chat.</span>
           <button
             type="button"
             className="shrink-0 rounded-md px-2 py-0.5 text-violet-100 hover:bg-violet-500/20 transition-colors font-medium"
-            onClick={() => openBuildWorkspace()}
+            onClick={() => openCodeWorkspace()}
           >
-            Open Build
+            Open Code
           </button>
         </div>
       )}
@@ -1371,11 +1415,23 @@ export function AIChat() {
       )}
       <div className="flex items-center gap-2">
         <div className="flex flex-1 items-center gap-1 rounded-full border border-surface-border bg-ark-navy-900/90 pl-1.5 pr-1.5 py-1.5 shadow-lg shadow-black/20 min-w-0">
+          <input
+            ref={attachInputRef}
+            type="file"
+            multiple
+            className="hidden"
+            accept=".ts,.tsx,.js,.jsx,.mjs,.cjs,.py,.go,.rs,.java,.kt,.swift,.cs,.cpp,.c,.h,.hpp,.rb,.php,.vue,.svelte,.css,.scss,.html,.json,.toml,.yaml,.yml,.md,.sql,.sh,.ps1,text/*,application/json"
+            onChange={e => {
+              void onPickCodeFiles(e.target.files);
+              e.target.value = '';
+            }}
+          />
           <button
             type="button"
             className="w-9 h-9 rounded-full flex items-center justify-center text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors shrink-0"
-            title="Add files"
+            title="Add files (code files open Code workspace)"
             aria-label="Add files"
+            onClick={() => attachInputRef.current?.click()}
           >
             <Plus className="w-4 h-4" />
           </button>
@@ -1454,12 +1510,12 @@ export function AIChat() {
         {(mode === 'general' || mode === 'code') && (
           <button
             type="button"
-            onClick={() => openBuildWorkspace()}
-            title="Open Build workspace (explorer, code, preview)"
-            aria-label="Open Build workspace"
+            onClick={() => openCodeWorkspace()}
+            title="Open Code workspace (explorer, editor, chat)"
+            aria-label="Open Code workspace"
             className="w-11 h-11 rounded-full border border-violet-400/35 bg-violet-500/15 text-violet-200 flex items-center justify-center shrink-0 hover:bg-violet-500/25 transition-colors"
           >
-            <Hammer className="w-5 h-5" />
+            <Code2 className="w-5 h-5" />
           </button>
         )}
       </div>
@@ -1512,12 +1568,12 @@ export function AIChat() {
           <>
             <button
               type="button"
-              onClick={() => openBuildWorkspace()}
+              onClick={() => openCodeWorkspace()}
               className="inline-flex items-center gap-1 text-[11px] text-violet-300/90 hover:text-violet-200 transition-colors"
-              title="Switch to Build workspace"
+              title="Switch to Code workspace"
             >
-              <Hammer className="w-3 h-3" />
-              Build
+              <Code2 className="w-3 h-3" />
+              Code
             </button>
 
             <button

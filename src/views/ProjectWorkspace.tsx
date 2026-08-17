@@ -20,6 +20,7 @@ import {
 import { arkRoute, routerProviderLabel } from '@/lib/arkRouter';
 import { buildRouterHistory } from '@/lib/chatHistory';
 import { getLocalPrefs } from '@/lib/localPrefs';
+import { loadRecentProjects } from '@/lib/recentStore';
 import {
   applyFileEdits,
   buildProjectCodingPrompt,
@@ -188,17 +189,21 @@ export function ProjectWorkspace() {
   useEffect(() => {
     if (!projectId) return;
 
-    if (projectId.startsWith('demo-')) {
-      const name = projectId
-        .replace(/^demo-/, '')
-        .split('-')
-        .map(part => part.charAt(0).toUpperCase() + part.slice(1))
-        .join(' ');
+    if (projectId.startsWith('demo-') || projectId.startsWith('proj-')) {
+      const recent = loadRecentProjects().find(p => p.id === projectId);
+      const name = recent?.name
+        || (projectId.startsWith('demo-')
+          ? projectId
+            .replace(/^demo-/, '')
+            .split('-')
+            .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+            .join(' ')
+          : 'Code project');
       setProject({
         id: projectId,
         user_id: user?.id ?? 'guest',
         name,
-        description: 'Placeholder project folder',
+        description: 'Local ARK code workspace',
         project_type: 'web',
         status: 'idle',
         build_status: 'idle',
@@ -210,17 +215,103 @@ export function ProjectWorkspace() {
       return;
     }
 
+    let cancelled = false;
     fetchProjects()
       .then(data => {
+        if (cancelled) return;
         const found = (data as ProjectRow[]).find(p => p.id === projectId);
-        if (found) setProject(found);
+        if (found) {
+          setProject(found);
+          return;
+        }
+        // Fallback so the workspace never spins forever
+        const recent = loadRecentProjects().find(p => p.id === projectId);
+        setProject({
+          id: projectId,
+          user_id: user?.id ?? 'guest',
+          name: recent?.name || 'Code project',
+          description: 'Local ARK code workspace',
+          project_type: 'web',
+          status: 'idle',
+          build_status: 'idle',
+          last_prompt: null,
+          agent_state: {},
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        } as ProjectRow);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        const recent = loadRecentProjects().find(p => p.id === projectId);
+        setProject({
+          id: projectId,
+          user_id: user?.id ?? 'guest',
+          name: recent?.name || 'Code project',
+          description: 'Local ARK code workspace',
+          project_type: 'web',
+          status: 'idle',
+          build_status: 'idle',
+          last_prompt: null,
+          agent_state: {},
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        } as ProjectRow);
+      });
+
+    fetchChatMessages(projectId)
+      .then(data => {
+        if (!cancelled) setMessages(data as ChatMessage[]);
       })
       .catch(() => {});
 
-    fetchChatMessages(projectId)
-      .then(data => setMessages(data as ChatMessage[]))
-      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, [projectId, user?.id]);
+
+  // Seed files dropped from Chat (code uploads)
+  useEffect(() => {
+    if (!projectId) return;
+    try {
+      const raw = localStorage.getItem(`ark:project-seed-files:${projectId}`);
+      if (!raw) return;
+      localStorage.removeItem(`ark:project-seed-files:${projectId}`);
+      const files = JSON.parse(raw) as Record<string, string>;
+      if (!files || typeof files !== 'object') return;
+      setFileContents(prev => {
+        const next = { ...prev };
+        const treeExtra: FileNode[] = [];
+        for (const [name, content] of Object.entries(files)) {
+          if (typeof content !== 'string') continue;
+          const rel = name.includes('/') ? name : `src/${name}`;
+          next[rel] = content;
+          next[name] = content;
+          treeExtra.push({
+            name: name.includes('/') ? name.split('/').pop()! : name,
+            type: 'file',
+            language: name.split('.').pop(),
+          });
+        }
+        if (treeExtra.length) {
+          setFileTree(prevTree => {
+            const clone = structuredClone(prevTree);
+            const src = clone.find(n => n.name === 'src' && n.type === 'folder');
+            if (src?.children) {
+              for (const f of treeExtra) {
+                if (!src.children.some(c => c.name === f.name)) src.children.push(f);
+              }
+            }
+            return clone;
+          });
+          const first = Object.keys(files)[0];
+          if (first) setSelectedFile(first.includes('/') ? first : `src/${first}`);
+        }
+        return next;
+      });
+    } catch {
+      /* ignore */
+    }
+  }, [projectId]);
 
   // Load / persist project files on disk (ARK userData/ark-projects)
   useEffect(() => {
