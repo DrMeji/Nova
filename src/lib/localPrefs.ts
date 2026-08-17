@@ -223,6 +223,17 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.56',
+    channel: 'stable' as const,
+    date: 'Aug 17, 2026',
+    title: 'Code builds show progress in chat; Explorer names your project',
+    notes: [
+      'Build steps live in the bot bubble (understand → plan → write → save) — not a bar at the top',
+      'Explorer shows what you are building (Calculator, Website, etc.) and file names as they appear',
+      'Faster path: lighter prompts, live streaming on the right, scaffold in ~5s if the brain stalls',
+    ],
+  },
+  {
     version: '0.1.55',
     channel: 'stable' as const,
     date: 'Aug 17, 2026',

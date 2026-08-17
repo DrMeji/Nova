@@ -36,12 +36,16 @@ import {
   applyFileEdits,
   buildProjectCodingPrompt,
   buildFileTreeFromPaths,
+  BUILD_PROGRESS_STEPS,
   extractStreamingHtml,
   extractChatStyleFileEdits,
   foldersToExpand,
+  inferBuildLabel,
   parseFileEdits,
+  planFilesForBuild,
   scaffoldFallbackEdits,
   stripFileBlocks,
+  type BuildLiveStep,
 } from '@/lib/projectCodeEdit';
 import { ComposerPlusMenu, type ComposerPlusAction } from '@/components/ComposerPlusMenu';
 import { TokenUsageRing } from '@/components/TokenUsageRing';
@@ -81,30 +85,55 @@ interface FileNode {
   language?: string;
 }
 
-const AGENT_STEPS = [
-  { id: 'understand', label: 'Understanding your request' },
-  { id: 'plan', label: 'Planning structure and files' },
-  { id: 'generate', label: 'Writing code' },
-  { id: 'apply', label: 'Applying changes to Explorer' },
-  { id: 'ready', label: 'Ready to preview' },
-] as const;
+const CODE_ROUTE_TIMEOUT_MS = 45_000;
+const CODE_STALL_MS = 5_000;
 
-const BUILD_STEP_LABELS: Record<string, string> = {
-  understand: 'Understanding your request…',
-  plan: 'Planning files and layout…',
-  generate: 'Writing code…',
-  apply: 'Applying file changes…',
-  ready: 'Finishing up…',
-};
-
-function setStepStatuses(
-  steps: typeof AGENT_STEPS,
-  activeIndex: number,
-): { id: string; label: string; status: 'pending' | 'active' | 'done' }[] {
-  return steps.map((s, i) => ({
-    ...s,
-    status: (i < activeIndex ? 'done' : i === activeIndex ? 'active' : 'pending') as 'pending' | 'active' | 'done',
-  }));
+function BuildProgressBubble({
+  label,
+  step,
+  plannedFiles,
+}: {
+  label: string;
+  step: BuildLiveStep;
+  plannedFiles: string[];
+}) {
+  const activeIdx = BUILD_PROGRESS_STEPS.findIndex(s => s.id === step);
+  return (
+    <div className="space-y-2.5 text-xs min-w-[14rem]">
+      <p className="text-sm font-medium text-content-primary">
+        {step === 'done' ? `Built ${label}` : `Building ${label}`}
+      </p>
+      <ul className="space-y-1.5">
+        {BUILD_PROGRESS_STEPS.map((s, i) => {
+          const done = step === 'done' ? true : i < activeIdx;
+          const active = step !== 'done' && i === activeIdx;
+          return (
+            <li key={s.id} className="flex items-center gap-2">
+              {done ? (
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+              ) : active ? (
+                <Loader2 className="w-3.5 h-3.5 text-amber-400 shrink-0 animate-spin" />
+              ) : (
+                <Circle className="w-3.5 h-3.5 text-content-tertiary shrink-0" />
+              )}
+              <span className={
+                active ? 'text-content-primary'
+                  : done ? 'text-content-secondary'
+                    : 'text-content-tertiary'
+              }>
+                {s.label}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+      {plannedFiles.length > 0 && activeIdx >= 1 && (
+        <p className="text-[10px] text-content-tertiary border-t border-surface-border/60 pt-2 leading-relaxed">
+          {step === 'done' ? 'Saved' : 'Creating'}: {plannedFiles.join(' · ')}
+        </p>
+      )}
+    </div>
+  );
 }
 
 function ResizeHandle({ onDrag }: { onDrag: (deltaX: number) => void }) {
@@ -172,10 +201,12 @@ export function ProjectWorkspace() {
   const [codeOpen, setCodeOpen] = useState(true);
   const [explorerWidth, setExplorerWidth] = useState(220);
   const [codeWidth, setCodeWidth] = useState(380);
-  const [agentRunActive, setAgentRunActive] = useState(false);
-  const [agentSteps, setAgentSteps] = useState(
-    AGENT_STEPS.map(s => ({ ...s, status: 'pending' as 'pending' | 'active' | 'done' })),
-  );
+  const [buildLive, setBuildLive] = useState<{
+    assistantId: string;
+    label: string;
+    step: BuildLiveStep;
+    plannedFiles: string[];
+  } | null>(null);
   const [attachedImages, setAttachedImages] = useState<{ id: string; url: string; name: string }[]>([]);
   const [changesOpen, setChangesOpen] = useState(false);
   const [diffStats, setDiffStats] = useState({ added: 0, removed: 0 });
@@ -479,7 +510,7 @@ export function ProjectWorkspace() {
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [messages, buildLive]);
 
   useEffect(() => {
     const refresh = () => setChatPlugins(getChatEnabledPlugins(loadPluginState()));
@@ -495,68 +526,118 @@ export function ProjectWorkspace() {
   const handleSendChat = async (overrideContent?: string) => {
     const rawContent = (overrideContent ?? chatInput).trim();
     if ((!rawContent && attachedImages.length === 0) || !project) return;
-    touchRecentProject(project.id, project.name);
+
+    const buildLabel = inferBuildLabel(rawContent, project.name);
+    touchRecentProject(project.id, buildLabel);
+
     let content = rawContent;
     if (composerMode && COMPOSER_MODE_PREFIX[composerMode]) {
       content = `${COMPOSER_MODE_PREFIX[composerMode]}${content}`;
     }
     setComposerMode(null);
     setTokenRatio(recordTokenUsage(project.id, content));
-    const images = [...attachedImages];
     const uid = user?.id ?? 'guest';
     setChatInput('');
     setAttachedImages([]);
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
 
+    const plannedFiles = planFilesForBuild(content);
     const userMsg: ChatMessage = {
       id: crypto.randomUUID(),
       user_id: uid,
       project_id: project.id,
       role: 'user',
-      content: content || (images.length ? `[${images.length} image${images.length > 1 ? 's' : ''} attached]` : ''),
+      content: content || '',
       provider_used: null,
       created_at: new Date().toISOString(),
     };
     setMessages(prev => [...prev, userMsg]);
 
     const assistantId = crypto.randomUUID();
-    const assistantPlaceholder: ChatMessage = {
+    setMessages(prev => [...prev, {
       id: assistantId,
       user_id: uid,
       project_id: project.id,
       role: 'assistant',
-      content: '__building__:understand',
+      content: '',
       provider_used: null,
       created_at: new Date().toISOString(),
-    };
-    setMessages(prev => [...prev, assistantPlaceholder]);
+    }]);
 
-    const patchAssistant = (stepId: string, text?: string) => {
-      setMessages(prev => prev.map(m => (
-        m.id === assistantId
-          ? { ...m, content: text || `__building__:${stepId}` }
-          : m
-      )));
-    };
-
-    setAgentRunActive(true);
-    setAgentSteps(setStepStatuses(AGENT_STEPS, 0));
-    patchAssistant('understand');
-
-    const planTimer = window.setTimeout(() => {
-      setAgentSteps(setStepStatuses(AGENT_STEPS, 1));
-      patchAssistant('plan');
-    }, 650);
-    const generateTimer = window.setTimeout(() => {
-      setAgentSteps(setStepStatuses(AGENT_STEPS, 2));
-      patchAssistant('generate');
-    }, 1800);
+    setBuildLive({ assistantId, label: buildLabel, step: 'understand', plannedFiles });
+    setExplorerOpen(true);
+    setCodeOpen(true);
+    setRightTab('code');
     setRunHistory(prev => [
       { id: crypto.randomUUID(), title: content.slice(0, 48) || 'Project edit', at: new Date().toLocaleTimeString() },
       ...prev,
     ]);
-    setCodeOpen(true);
-    setRightTab('code');
+
+    const bumpStep = (step: BuildLiveStep) => {
+      setBuildLive(prev => (prev?.assistantId === assistantId ? { ...prev, step } : prev));
+    };
+
+    const showPlannedFiles = () => {
+      const stubs: Record<string, string> = {};
+      for (const p of plannedFiles) stubs[p] = '';
+      setFileContents(prev => {
+        const next = { ...prev };
+        for (const [k, v] of Object.entries(stubs)) {
+          if (next[k] === undefined) next[k] = v;
+        }
+        setFileTree(buildFileTreeFromPaths(next));
+        return next;
+      });
+      if (plannedFiles[0]) setSelectedFile(plannedFiles[0]);
+    };
+
+    const commitEdits = (
+      edits: ReturnType<typeof parseFileEdits>,
+      opts?: { openPreview?: boolean },
+    ) => {
+      if (!edits.length) return { changedPaths: [] as string[], summary: '' };
+      const applied = applyFileEdits(fileContents, fileTree, edits);
+      setFileContents(applied.files);
+      setFileTree(applied.tree.length ? applied.tree : buildFileTreeFromPaths(applied.files));
+      setDiffStats(prev => ({
+        added: prev.added + applied.addedLines,
+        removed: prev.removed + applied.removedLines,
+      }));
+      const expand = foldersToExpand(applied.changedPaths);
+      setExpandedFolders(prev => {
+        const next = new Set(prev);
+        expand.forEach(p => next.add(p));
+        return next;
+      });
+      const focus = applied.changedPaths[0];
+      if (focus) {
+        setSelectedFile(focus);
+        setFileFlash(true);
+        window.setTimeout(() => setFileFlash(false), 1400);
+      }
+      if (opts?.openPreview) setRightTab('preview');
+      if (window.arkDesktop?.projectWrite) {
+        const payloadFiles: Record<string, string> = {};
+        for (const [k, v] of Object.entries(applied.files)) {
+          if (k.includes('/')) payloadFiles[k] = v;
+          else if (/\.(tsx|ts|jsx|js|css)$/i.test(k)) payloadFiles[`src/${k}`] = v;
+          else payloadFiles[k] = v;
+        }
+        void window.arkDesktop.projectWrite({
+          projectId: project.id,
+          projectName: buildLabel,
+          files: payloadFiles,
+        }).then(res => {
+          if (res.root) setDiskRoot(res.root);
+        });
+      }
+      return applied;
+    };
+
+    window.setTimeout(() => {
+      bumpStep('plan');
+      showPlannedFiles();
+    }, 120);
 
     try {
       await saveChatMessage(project.id, 'user', content);
@@ -571,6 +652,9 @@ export function ProjectWorkspace() {
       let replyText = '';
       let provider = 'ARK';
       let changedPaths: string[] = [];
+      let stallTimer: number | undefined;
+      let gotModelChunk = false;
+      let stallScaffoldApplied = false;
 
       try {
         if (pluginId) {
@@ -584,30 +668,37 @@ export function ProjectWorkspace() {
           if (pluginReply) {
             replyText = pluginReply;
             provider = `${enabled.find(p => p.id === pluginId)?.name ?? 'Plugin'}${runtime.accountLabel ? ` · ${runtime.accountLabel}` : ''}`;
-            setAgentSteps(setStepStatuses(AGENT_STEPS, AGENT_STEPS.length));
+            bumpStep('done');
           }
         }
 
         if (!replyText) {
-          setAgentSteps(setStepStatuses(AGENT_STEPS, 2));
-          patchAssistant('generate');
+          bumpStep('generate');
 
           const prefs = getLocalPrefs();
           const priorForHistory = [...messages, userMsg];
           const historyBase = prefs.rememberContext
             ? buildRouterHistory(priorForHistory, content)
             : buildRouterHistory([], content);
-          // Prefer project files for the latest turn so the model can edit them.
-          const codingMessage = buildProjectCodingPrompt(content, fileContents, project.name);
+          const codingMessage = buildProjectCodingPrompt(content, fileContents, buildLabel);
           const history = historyBase.map((turn, i) =>
             i === historyBase.length - 1 && turn.role === 'user'
               ? { ...turn, content: codingMessage }
               : turn,
           );
 
+          stallTimer = window.setTimeout(() => {
+            if (gotModelChunk || stallScaffoldApplied) return;
+            const early = scaffoldFallbackEdits(content);
+            if (!early.length) return;
+            stallScaffoldApplied = true;
+            const applied = commitEdits(early, { openPreview: true });
+            if (applied.changedPaths.length) changedPaths = applied.changedPaths;
+          }, CODE_STALL_MS);
+
           const sticky = activeModel.source === 'auto' ? threadBrainRef.current : null;
           streamDraftRef.current = '';
-          const routeTimeoutMs = 120_000;
+
           const routed = await Promise.race([
             arkRoute({
               message: codingMessage,
@@ -625,29 +716,33 @@ export function ProjectWorkspace() {
               stickyPinnedSource: sticky?.pinnedSource,
               history,
               onChunk: (piece) => {
+                gotModelChunk = true;
                 streamDraftRef.current += piece;
-                patchAssistant('generate');
+                bumpStep('generate');
                 const partial = extractStreamingHtml(streamDraftRef.current);
-                if (partial && partial.length > 48) {
+                const target = plannedFiles[0] || 'index.html';
+                if (partial && partial.length > 24) {
                   setFileContents(prev => {
-                    const next = { ...prev, 'index.html': partial };
+                    const next = { ...prev, [target]: partial };
                     setFileTree(buildFileTreeFromPaths(next));
                     return next;
                   });
-                  setSelectedFile('index.html');
-                  setCodeOpen(true);
+                  setSelectedFile(target);
                   setRightTab('code');
                 }
               },
             }),
             new Promise<never>((_, reject) => {
               window.setTimeout(
-                () => reject(new Error('Code generation timed out. Using ARK scaffold.')),
-                routeTimeoutMs,
+                () => reject(new Error('Code generation timed out')),
+                CODE_ROUTE_TIMEOUT_MS,
               );
             }),
           ]);
+
+          if (stallTimer) window.clearTimeout(stallTimer);
           provider = routerProviderLabel(routed, 'ARK');
+
           if (activeModel.source === 'auto' && routed.source !== 'none') {
             const nextBrain = saveAutoThreadBrain(
               project.id,
@@ -659,100 +754,44 @@ export function ProjectWorkspace() {
             if (nextBrain) setThreadBrain(nextBrain);
           }
 
-          setAgentSteps(setStepStatuses(AGENT_STEPS, 3));
-          patchAssistant('apply');
+          bumpStep('apply');
 
           const parsedEdits = parseFileEdits(routed.reply);
           let edits = parsedEdits.length
             ? parsedEdits
             : extractChatStyleFileEdits(routed.reply, content);
-          if (!edits.length) {
-            edits = scaffoldFallbackEdits(content);
-          }
+          if (!edits.length) edits = scaffoldFallbackEdits(content);
+
           if (edits.length > 0) {
-            const applied = applyFileEdits(fileContents, fileTree, edits);
-            setFileContents(applied.files);
-            setFileTree(applied.tree.length ? applied.tree : buildFileTreeFromPaths(applied.files));
-            setDiffStats(prev => ({
-              added: prev.added + applied.addedLines,
-              removed: prev.removed + applied.removedLines,
-            }));
+            const applied = commitEdits(edits, { openPreview: /\bcalculator\b/i.test(content) });
             changedPaths = applied.changedPaths;
-            const expand = foldersToExpand(applied.changedPaths);
-            setExpandedFolders(prev => {
-              const next = new Set(prev);
-              expand.forEach(p => next.add(p));
-              return next;
-            });
-            const focus = applied.changedPaths[0];
-            if (focus) {
-              setSelectedFile(focus);
-              setFileFlash(true);
-              window.setTimeout(() => setFileFlash(false), 1400);
-            }
-
-            // Persist immediately (don't wait for debounce)
-            if (window.arkDesktop?.projectWrite) {
-              const payloadFiles: Record<string, string> = {};
-              for (const [k, v] of Object.entries(applied.files)) {
-                if (k.includes('/')) payloadFiles[k] = v;
-                else if (/\.(tsx|ts|jsx|js|css)$/i.test(k)) payloadFiles[`src/${k}`] = v;
-                else payloadFiles[k] = v;
-              }
-              void window.arkDesktop.projectWrite({
-                projectId: project.id,
-                projectName: project.name,
-                files: payloadFiles,
-              }).then(res => {
-                if (res.root) setDiskRoot(res.root);
-              });
-            }
-
             const prose = stripFileBlocks(routed.reply);
             replyText = prose
               ? `${prose}\n\n${applied.summary}`
-              : applied.summary;
+              : `${applied.summary}\n\nOpen **Preview** to run ${buildLabel}. Files are in Explorer on the left.`;
           } else {
             const stripped = stripFileBlocks(routed.reply);
             replyText = sanitizeAssistantReply(stripped || routed.reply, content) || stripped || routed.reply;
           }
 
-          setAgentSteps(setStepStatuses(AGENT_STEPS, 4));
-          patchAssistant('ready');
+          bumpStep('done');
         }
       } catch (err) {
-        const timedOut = err instanceof Error && /timed out|scaffold/i.test(err.message);
+        if (stallTimer) window.clearTimeout(stallTimer);
         const fallback = scaffoldFallbackEdits(content);
         if (fallback.length > 0) {
-          const applied = applyFileEdits(fileContents, fileTree, fallback);
-          setFileContents(applied.files);
-          setFileTree(buildFileTreeFromPaths(applied.files));
-          setSelectedFile('index.html');
-          setCodeOpen(true);
-          setRightTab('preview');
+          bumpStep('apply');
+          const applied = commitEdits(fallback, { openPreview: true });
           changedPaths = applied.changedPaths;
-          if (window.arkDesktop?.projectWrite) {
-            void window.arkDesktop.projectWrite({
-              projectId: project.id,
-              projectName: project.name,
-              files: { 'index.html': applied.files['index.html'] || '' },
-            }).then(res => {
-              if (res.root) setDiskRoot(res.root);
-            });
-          }
-          replyText = timedOut
-            ? 'Local brain timed out — dropped in a working calculator scaffold. Edit it in Explorer or Preview.'
-            : `${applied.summary} (ARK scaffold)`;
-          setAgentSteps(setStepStatuses(AGENT_STEPS, AGENT_STEPS.length));
+          replyText = err instanceof Error && /timed out/i.test(err.message)
+            ? `${buildLabel} is ready in Explorer — ARK used a fast scaffold while the local brain was slow. Edit or hit Preview.`
+            : `${applied.summary}\n\n${buildLabel} saved to your project folder.`;
+          bumpStep('done');
         } else {
           replyText = err instanceof Error
             ? `Could not complete that edit: ${err.message}`
             : 'ARK Router failed on this project edit.';
-          setAgentSteps(setStepStatuses(AGENT_STEPS, 0));
         }
-      } finally {
-        window.clearTimeout(planTimer);
-        window.clearTimeout(generateTimer);
       }
 
       if (changedPaths.length) {
@@ -765,17 +804,12 @@ export function ProjectWorkspace() {
         } catch { /* ignore */ }
       }
 
-      const reply: ChatMessage = {
-        id: assistantId,
-        user_id: uid,
-        project_id: project.id,
-        role: 'assistant',
-        content: replyText,
-        provider_used: provider,
-        created_at: new Date().toISOString(),
-      };
-      setMessages(prev => prev.map(m => (m.id === assistantId ? reply : m)));
-      window.setTimeout(() => setAgentRunActive(false), 700);
+      setBuildLive(null);
+      setMessages(prev => prev.map(m => (
+        m.id === assistantId
+          ? { ...m, content: replyText, provider_used: provider }
+          : m
+      )));
 
       try {
         await saveChatMessage(project.id, 'assistant', replyText);
@@ -1170,9 +1204,28 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
         {explorerOpen && (
           <>
             <div className="shrink-0 flex flex-col bg-ark-navy-900/20 overflow-hidden" style={{ width: explorerWidth }}>
-              <div className="shrink-0 px-2 py-2 flex items-center justify-between gap-1">
-                <p className="text-[10px] uppercase tracking-wider text-content-tertiary font-semibold px-1">Explorer</p>
-                <div className="flex items-center gap-0.5">
+              <div className="shrink-0 px-2 py-2 border-b border-surface-border/60">
+                {buildLive ? (
+                  <div className="min-w-0">
+                    <p className="text-[10px] uppercase tracking-wider text-amber-400/90 font-semibold px-1">
+                      Building
+                    </p>
+                    <p className="text-sm font-semibold text-content-primary truncate px-1 mt-0.5">
+                      {buildLive.label}
+                    </p>
+                    {buildLive.plannedFiles.length > 0 && (
+                      <p className="text-[10px] text-content-tertiary truncate px-1 mt-1">
+                        {buildLive.plannedFiles.join(' · ')}
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-[10px] uppercase tracking-wider text-content-tertiary font-semibold px-1">
+                    Explorer
+                  </p>
+                )}
+              </div>
+              <div className="shrink-0 px-2 py-1.5 flex items-center justify-end gap-0.5">
                   <button
                     type="button"
                     onClick={() => startCreate('file')}
@@ -1344,35 +1397,8 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
             </div>
           )}
 
-          {/* Agent steps only during a fresh build */}
-          {agentRunActive && (
-            <div className="shrink-0 border-b border-surface-border px-3 py-2 bg-ark-navy-900/30">
-              <p className="text-[10px] uppercase tracking-wider text-content-tertiary mb-1.5 font-semibold">Building</p>
-              <div className="space-y-1">
-                {agentSteps.map(step => (
-                  <div key={step.id} className="flex items-center gap-2">
-                    {step.status === 'done' ? (
-                      <CheckCircle2 className="w-3 h-3 text-ark-accent-green shrink-0" />
-                    ) : step.status === 'active' ? (
-                      <Loader2 className="w-3 h-3 text-amber-400 shrink-0 animate-spin" />
-                    ) : (
-                      <Circle className="w-3 h-3 text-content-tertiary shrink-0" />
-                    )}
-                    <span className={`text-[11px] ${
-                      step.status === 'done' ? 'text-content-secondary'
-                        : step.status === 'active' ? 'text-content-primary'
-                          : 'text-content-tertiary'
-                    }`}>
-                      {step.label}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
           <div className="flex-1 overflow-auto px-4 py-4 space-y-3">
-            {messages.length === 0 && !agentRunActive && (
+            {messages.length === 0 && !buildLive && (
               <div className="text-center py-10 px-4">
                 <p className="text-sm text-content-secondary mb-1">Start building with chat</p>
                 <p className="text-xs text-content-tertiary max-w-sm mx-auto">
@@ -1387,14 +1413,15 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
                     ? <UserIcon className="w-3.5 h-3.5 text-content-secondary" />
                     : <Bot className="w-3.5 h-3.5 text-content-secondary" />}
                 </div>
-                <div className={`max-w-[80%] rounded-2xl px-3.5 py-2.5 text-sm text-content-primary ${
+                <div className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-sm text-content-primary ${
                   msg.role === 'user' ? 'bg-surface-hover' : 'bg-ark-navy-900 border border-surface-border'
                 }`}>
-                  {msg.content?.startsWith('__building__:') ? (
-                    <div className="flex items-center gap-2 text-content-secondary">
-                      <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
-                      <span>{BUILD_STEP_LABELS[msg.content.slice('__building__:'.length)] || 'Working…'}</span>
-                    </div>
+                  {msg.role === 'assistant' && buildLive?.assistantId === msg.id ? (
+                    <BuildProgressBubble
+                      label={buildLive.label}
+                      step={buildLive.step}
+                      plannedFiles={buildLive.plannedFiles}
+                    />
                   ) : (
                     msg.content || <Loader2 className="w-3.5 h-3.5 animate-spin text-content-tertiary" />
                   )}

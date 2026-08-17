@@ -88,6 +88,9 @@ export function buildProjectCodingPrompt(
   projectName?: string,
 ): string {
   const flat = flattenProjectFiles(files);
+  if (Object.keys(flat).length === 0) {
+    return buildProjectCodingPromptLite(userMessage, projectName);
+  }
   const entries = Object.entries(flat).sort(([a], [b]) => a.localeCompare(b));
   let used = 0;
   const chunks: string[] = [];
@@ -120,6 +123,67 @@ ${fileSection}
 User request:
 ${userMessage.trim()}`;
 }
+
+const LITE_CODING = `You are ARK in the Code workspace. Create working files now.
+
+Format each file exactly:
+@@@FILE path/to/file.ext
+\`\`\`
+...full file contents...
+\`\`\`
+
+Rules: prefer index.html for web/calculator asks; complete runnable code; one short summary after files.`;
+
+/** Shorter prompt for empty projects — faster on local GGUF. */
+export function buildProjectCodingPromptLite(userMessage: string, projectName?: string): string {
+  return `${LITE_CODING}
+
+Project: ${projectName || 'ARK project'}
+
+User request:
+${userMessage.trim()}`;
+}
+
+/** Human label for Explorer header while building. */
+export function inferBuildLabel(message: string, projectName?: string): string {
+  const t = String(message || '').toLowerCase();
+  if (/\bcalculator\b/.test(t)) return 'Calculator';
+  if (/\bdiscord\b/.test(t)) return 'Discord';
+  if (/\bwebsite\b|\bweb page\b|\blanding page\b|\bhomepage\b/.test(t)) {
+    const host = t.match(/\b([a-z0-9-]+\.(?:com|io|dev|app|org))\b/i);
+    if (host?.[1]) {
+      const base = host[1].split('.')[0];
+      return base.charAt(0).toUpperCase() + base.slice(1);
+    }
+    return 'Website';
+  }
+  if (/\bios\b|\biphone\b|\bandroid\b/.test(t)) return 'Mobile UI';
+  if (/\bapp\b|\bapplication\b/.test(t)) return 'App';
+  if (/\bapi\b|\bbackend\b/.test(t)) return 'API';
+  const name = String(projectName || '').trim();
+  if (name && !/^code project$/i.test(name)) return name;
+  return 'Project';
+}
+
+/** Planned file paths shown in Explorer before the model returns. */
+export function planFilesForBuild(message: string): string[] {
+  const t = String(message || '').toLowerCase();
+  if (/\bcalculator\b/.test(t)) return ['index.html'];
+  if (/\breact\b|\btsx\b/.test(t)) return ['index.html', 'src/App.tsx', 'src/main.tsx'];
+  if (/\bpython\b/.test(t)) return ['main.py'];
+  if (/\bwebsite\b|\bhtml\b/.test(t)) return ['index.html', 'styles.css'];
+  return ['index.html'];
+}
+
+export type BuildLiveStep = 'understand' | 'plan' | 'generate' | 'apply' | 'done';
+
+export const BUILD_PROGRESS_STEPS: { id: BuildLiveStep; label: string }[] = [
+  { id: 'understand', label: 'Understanding your request' },
+  { id: 'plan', label: 'Planning files and structure' },
+  { id: 'generate', label: 'Writing code' },
+  { id: 'apply', label: 'Saving to project folder' },
+  { id: 'done', label: 'Finished' },
+];
 
 /**
  * Parse @@@FILE blocks and common markdown fence variants with paths.
