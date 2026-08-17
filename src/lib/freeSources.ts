@@ -13,6 +13,8 @@ export type FreeSource = {
   detail: string;
   wired: boolean;
   notes?: string;
+  tone: string;
+  initial: string;
 };
 
 /** What ARK already wires or is actively locking in. */
@@ -24,6 +26,8 @@ export const FREE_SOURCES: FreeSource[] = [
     use: 'chat',
     detail: 'Built-in local brain — first hop in ARK Router; no third-party runtime required.',
     wired: true,
+    tone: 'from-sky-500 to-blue-700',
+    initial: 'AE',
   },
   {
     id: 'pollinations-image',
@@ -32,6 +36,8 @@ export const FREE_SOURCES: FreeSource[] = [
     use: 'image',
     detail: 'Free no-key image host — ARK Router image path via ARK Image Core.',
     wired: true,
+    tone: 'from-pink-500 to-rose-700',
+    initial: 'Po',
   },
   {
     id: 'pollinations-video-still',
@@ -40,6 +46,8 @@ export const FREE_SOURCES: FreeSource[] = [
     use: 'video',
     detail: 'Tries Pollinations + Hugging Face MP4 routes; honest motion-still fallback if hosts need credits.',
     wired: true,
+    tone: 'from-fuchsia-500 to-pink-800',
+    initial: 'Pv',
   },
   {
     id: 'ollama-optional',
@@ -48,6 +56,8 @@ export const FREE_SOURCES: FreeSource[] = [
     use: 'multi',
     detail: 'Optional plug-in hop in ARK Router — never required.',
     wired: true,
+    tone: 'from-zinc-400 to-zinc-700',
+    initial: 'Ol',
   },
   {
     id: 'gguf-local',
@@ -56,6 +66,8 @@ export const FREE_SOURCES: FreeSource[] = [
     use: 'coding',
     detail: 'Drop .gguf into the models folder (Local AI → Advanced can change the path), or install from Local AI.',
     wired: true,
+    tone: 'from-emerald-500 to-teal-800',
+    initial: 'GG',
   },
   {
     id: 'github-models',
@@ -65,6 +77,8 @@ export const FREE_SOURCES: FreeSource[] = [
     detail: 'Retired by GitHub (July 2026) — kept in catalog for history only.',
     wired: false,
     notes: 'Use Groq, Google AI Studio, or OpenRouter free routes instead.',
+    tone: 'from-zinc-500 to-zinc-900',
+    initial: 'GH',
   },
   {
     id: 'google-ai-studio',
@@ -73,6 +87,8 @@ export const FREE_SOURCES: FreeSource[] = [
     use: 'coding',
     detail: 'Gemini free tier API key — routed by ARK Router.',
     wired: true,
+    tone: 'from-blue-500 to-sky-700',
+    initial: 'G',
   },
   {
     id: 'groq-free',
@@ -81,6 +97,8 @@ export const FREE_SOURCES: FreeSource[] = [
     use: 'coding',
     detail: 'Fast free-tier Llama — routed by ARK Router.',
     wired: true,
+    tone: 'from-orange-500 to-red-700',
+    initial: 'Gq',
   },
   {
     id: 'openrouter-free',
@@ -89,6 +107,8 @@ export const FREE_SOURCES: FreeSource[] = [
     use: 'coding',
     detail: 'Community free model routes — routed by ARK Router.',
     wired: true,
+    tone: 'from-violet-500 to-purple-800',
+    initial: 'OR',
   },
   {
     id: 'huggingface-inference',
@@ -97,6 +117,8 @@ export const FREE_SOURCES: FreeSource[] = [
     use: 'multi',
     detail: 'HF token for chat (router) and FLUX image generation — wired into ARK Router.',
     wired: true,
+    tone: 'from-yellow-500 to-amber-700',
+    initial: 'HF',
   },
   {
     id: 'nvidia-nim-free',
@@ -105,6 +127,8 @@ export const FREE_SOURCES: FreeSource[] = [
     use: 'coding',
     detail: 'NIM / build.nvidia.com key — OpenAI-compatible chat hop in ARK Router.',
     wired: true,
+    tone: 'from-lime-500 to-green-800',
+    initial: 'NV',
   },
   {
     id: 'together-ai',
@@ -113,6 +137,8 @@ export const FREE_SOURCES: FreeSource[] = [
     use: 'coding',
     detail: 'Together open-model hosting — wired into ARK Router.',
     wired: true,
+    tone: 'from-indigo-500 to-blue-800',
+    initial: 'To',
   },
   {
     id: 'fireworks-ai',
@@ -121,6 +147,8 @@ export const FREE_SOURCES: FreeSource[] = [
     use: 'coding',
     detail: 'Fireworks serverless open models — wired into ARK Router.',
     wired: true,
+    tone: 'from-rose-500 to-orange-700',
+    initial: 'Fw',
   },
   {
     id: 'deepseek-api',
@@ -129,6 +157,8 @@ export const FREE_SOURCES: FreeSource[] = [
     use: 'coding',
     detail: 'DeepSeek chat/coder API — wired into ARK Router.',
     wired: true,
+    tone: 'from-blue-400 to-indigo-700',
+    initial: 'DS',
   },
   {
     id: 'mistral-api',
@@ -137,6 +167,8 @@ export const FREE_SOURCES: FreeSource[] = [
     use: 'coding',
     detail: 'Mistral / Codestral API — wired into ARK Router.',
     wired: true,
+    tone: 'from-orange-400 to-amber-700',
+    initial: 'Mi',
   },
   {
     id: 'cerebras-free',
@@ -145,6 +177,8 @@ export const FREE_SOURCES: FreeSource[] = [
     use: 'coding',
     detail: 'Ultra-fast Llama free tier — wired into ARK Router.',
     wired: true,
+    tone: 'from-cyan-500 to-teal-800',
+    initial: 'Ce',
   },
   {
     id: 'sambanova-free',
@@ -153,6 +187,8 @@ export const FREE_SOURCES: FreeSource[] = [
     use: 'coding',
     detail: 'SambaNova Cloud free-key hop — wired into ARK Router.',
     wired: true,
+    tone: 'from-fuchsia-500 to-purple-800',
+    initial: 'Sn',
   },
 ];
 

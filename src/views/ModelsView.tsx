@@ -980,18 +980,31 @@ export function ModelsView() {
 
               <section className="mb-10">
                 <h2 className="text-base font-semibold text-content-primary mb-4">Free sources</h2>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1">
                   {FREE_SOURCES.filter(s => !q || s.name.toLowerCase().includes(q) || s.detail.toLowerCase().includes(q)).map(src => (
                     <div
                       key={src.id}
-                      className="rounded-xl border border-surface-border bg-ark-navy-900/40 px-3 py-2.5"
+                      className="flex items-center gap-3 py-3 rounded-xl px-1 hover:bg-surface-hover/50 transition-colors"
+                      title={src.detail}
                     >
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm text-content-primary font-medium truncate">{src.name}</span>
-                        <span className={`ml-auto text-[10px] uppercase tracking-wide ${src.wired ? 'text-emerald-400' : 'text-content-tertiary'}`}>
-                          {src.wired ? 'wired' : 'next'}
+                      <span className={`w-10 h-10 rounded-xl bg-gradient-to-br ${src.tone} flex items-center justify-center text-[10px] font-bold text-white shrink-0`}>
+                        {src.initial}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="flex items-center gap-2 min-w-0 flex-wrap">
+                          <span className="text-sm font-medium text-content-primary truncate">{src.name}</span>
+                          {src.wired ? (
+                            <span className="inline-flex items-center rounded-full bg-emerald-500/15 text-emerald-400 px-2 py-0.5 text-[10px] font-medium leading-none">
+                              Live
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center rounded-full bg-zinc-500/20 text-content-tertiary px-2 py-0.5 text-[10px] font-medium leading-none">
+                              Next
+                            </span>
+                          )}
                         </span>
-                      </div>
+                        <span className="block text-xs text-content-tertiary mt-0.5 truncate">{src.detail}</span>
+                      </span>
                     </div>
                   ))}
                 </div>

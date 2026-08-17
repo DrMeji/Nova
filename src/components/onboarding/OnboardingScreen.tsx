@@ -37,6 +37,8 @@ type ConnectProvider = {
   blurb: string;
   signupUrl: string;
   free: boolean;
+  tone: string;
+  initial: string;
 };
 
 const CONNECT_PROVIDERS: ConnectProvider[] = [
@@ -46,6 +48,8 @@ const CONNECT_PROVIDERS: ConnectProvider[] = [
     blurb: 'Fast free Llama chat & coding.',
     signupUrl: 'https://console.groq.com/keys',
     free: true,
+    tone: 'from-orange-500 to-red-700',
+    initial: 'Gq',
   },
   {
     id: 'google',
@@ -53,6 +57,8 @@ const CONNECT_PROVIDERS: ConnectProvider[] = [
     blurb: 'Gemini free tier — one key.',
     signupUrl: 'https://aistudio.google.com/apikey',
     free: true,
+    tone: 'from-blue-500 to-sky-700',
+    initial: 'G',
   },
   {
     id: 'openrouter',
@@ -60,6 +66,8 @@ const CONNECT_PROVIDERS: ConnectProvider[] = [
     blurb: 'Many free routes · good backup.',
     signupUrl: 'https://openrouter.ai/keys',
     free: true,
+    tone: 'from-violet-500 to-purple-800',
+    initial: 'OR',
   },
   {
     id: 'huggingface',
@@ -67,6 +75,8 @@ const CONNECT_PROVIDERS: ConnectProvider[] = [
     blurb: 'Free chat + FLUX images.',
     signupUrl: 'https://huggingface.co/settings/tokens',
     free: true,
+    tone: 'from-yellow-500 to-amber-700',
+    initial: 'HF',
   },
   {
     id: 'nvidia',
@@ -74,6 +84,8 @@ const CONNECT_PROVIDERS: ConnectProvider[] = [
     blurb: 'Free NIM endpoints for chat.',
     signupUrl: 'https://build.nvidia.com/',
     free: true,
+    tone: 'from-lime-500 to-green-800',
+    initial: 'NV',
   },
   {
     id: 'openai',
@@ -81,6 +93,8 @@ const CONNECT_PROVIDERS: ConnectProvider[] = [
     blurb: 'Optional paid GPT / DALL·E path.',
     signupUrl: 'https://platform.openai.com/api-keys',
     free: false,
+    tone: 'from-emerald-400 to-green-800',
+    initial: 'OA',
   },
 ];
 
@@ -449,12 +463,6 @@ export function OnboardingScreen() {
 
           {phase === 'connect' && (
             <div className="space-y-4">
-              <p className="text-sm text-content-secondary">
-                Press Connect to open the provider site, create a free key, then paste it here.
-                Keys stay on this device{window.arkDesktop ? ' (OS-encrypted)' : ''} and power ARK Auto
-                with your local GGUF. Skip anytime — local ARK still works.
-              </p>
-
               <div className="space-y-2 max-h-[min(24rem,48vh)] overflow-y-auto">
                 {CONNECT_PROVIDERS.map(p => {
                   const open = expandedProvider === p.id;
@@ -462,6 +470,9 @@ export function OnboardingScreen() {
                   return (
                     <div key={p.id} className="rounded-xl border border-surface-border px-3 py-2.5">
                       <div className="flex items-center gap-3">
+                        <span className={`w-9 h-9 rounded-xl bg-gradient-to-br ${p.tone} flex items-center justify-center text-[10px] font-bold text-white shrink-0`}>
+                          {p.initial}
+                        </span>
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2">
                             <p className="text-sm font-medium text-content-primary">{p.name}</p>

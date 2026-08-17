@@ -260,9 +260,30 @@ export function AIChat() {
   const { user } = useAuth();
   const { route, navigate } = useRouter();
   const { addCreation, addChat, creations, chats } = useRecentProjects();
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [loading, setLoading] = useState(() => {
+    // Sync-load the active Recent thread so clicking Recent doesn't flash blank.
+    if (route.name === 'chat' && route.chatId) {
+      try {
+        const raw = localStorage.getItem(chatThreadKey(route.chatId));
+        if (raw) return false;
+      } catch {
+        /* ignore */
+      }
+    }
+    return true;
+  });
+  const [messages, setMessages] = useState<ChatMessage[]>(() => {
+    if (route.name === 'chat' && route.chatId) {
+      try {
+        const raw = localStorage.getItem(chatThreadKey(route.chatId));
+        if (raw) return JSON.parse(raw) as ChatMessage[];
+      } catch {
+        /* ignore */
+      }
+    }
+    return [];
+  });
   const [input, setInput] = useState('');
-  const [loading, setLoading] = useState(true);
   const [mode, setMode] = useState<ChatMode>(() =>
     route.name === 'chat' && route.mode && route.mode !== 'general' ? route.mode : 'general',
   );
@@ -275,7 +296,8 @@ export function AIChat() {
     if (savedId === 'ark-auto' || !savedId) return defaultModelForKind('chat');
     const keyed = CLOUD_CHAT_WHEN_KEYED.find(m => m.id === savedId);
     if (keyed && hasProviderApiKey(keyed.keyId)) return keyed;
-    return defaultModelForKind('chat');
+    // Local / other pinned ids resolve once engine status loads.
+    return { id: savedId, name: savedId, source: 'local', detail: 'Pinned', kind: 'chat' };
   });
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [chatPlugins, setChatPlugins] = useState<PluginDef[]>(() => getChatEnabledPlugins(loadPluginState()));
@@ -284,7 +306,12 @@ export function AIChat() {
   const [engineInstallingModels, setEngineInstallingModels] = useState<ChatModelOption[]>([]);
   const [capacity, setCapacity] = useState<LiveCapacity | null>(null);
   const [generating, setGenerating] = useState(false);
+  const [queueLen, setQueueLen] = useState(0);
   const stopRequestedRef = useRef(false);
+  const generatingRef = useRef(false);
+  const pendingQueueRef = useRef<string[]>([]);
+  const persistChatIdRef = useRef<string | null>(null);
+  const activeModelRef = useRef(activeModel);
   const [freeKeyOpen, setFreeKeyOpen] = useState(false);
   const [failoverNote, setFailoverNote] = useState<string | null>(null);
   const [setupNote, setSetupNote] = useState<string | null>(() => {
@@ -302,6 +329,15 @@ export function AIChat() {
   const hydratedCreationRef = useRef<string | null>(null);
   /** Skip one storage reload after we create a chat so Explore ideas doesn't flash back. */
   const skipChatLoadRef = useRef<string | null>(null);
+  const messagesRef = useRef(messages);
+
+  useEffect(() => {
+    activeModelRef.current = activeModel;
+  }, [activeModel]);
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
 
   const refreshChatPlugins = () => {
     setChatPlugins(getChatEnabledPlugins(loadPluginState()));
@@ -429,20 +465,21 @@ export function AIChat() {
       }
       try {
         const raw = localStorage.getItem(chatThreadKey(route.chatId));
-        if (raw) {
-          setMessages(JSON.parse(raw) as ChatMessage[]);
-        } else {
-          setMessages([]);
-        }
+        const loaded = raw ? JSON.parse(raw) as ChatMessage[] : [];
+        setMessages(loaded);
+        messagesRef.current = loaded;
       } catch {
         setMessages([]);
+        messagesRef.current = [];
       }
       setLoading(false);
+      requestAnimationFrame(() => textareaRef.current?.focus());
       return;
     }
 
     // Fresh New Chat / Image / Video — empty canvas
     setMessages([]);
+    messagesRef.current = [];
     setLoading(false);
   }, [route]);
 
@@ -525,10 +562,13 @@ export function AIChat() {
           setEngineLocalModels(ready);
           setEngineInstallingModels(installing);
           const prefs = getLocalPrefs();
-          const prefer = prefs.lastChatModelId || prefs.defaultModelId;
-          if (prefer && prefer !== 'ark-auto') {
-            const hit = ready.find(m => m.id === prefer);
-            if (hit) setActiveModel(prev => (prev.id === hit.id ? prev : hit));
+          // Never let last-used backend hijack Auto / cloud picks back to Qwen.
+          const pinned = prefs.defaultModelId;
+          if (!pinned || pinned === 'ark-auto') return;
+          if (CLOUD_CHAT_WHEN_KEYED.some(m => m.id === pinned) || pinned.startsWith('ollama:')) return;
+          const hit = ready.find(m => m.id === pinned);
+          if (hit) {
+            setActiveModel(prev => (prev.id === hit.id ? prev : hit));
           }
         })
         .catch(() => {
@@ -612,13 +652,38 @@ export function AIChat() {
 
   const handleStop = () => {
     stopRequestedRef.current = true;
+    pendingQueueRef.current = [];
+    setQueueLen(0);
     void engineGenerateCancel();
+    generatingRef.current = false;
     setGenerating(false);
   };
 
-  const handleSend = async () => {
-    if (!input.trim() || !user || generating) return;
+  const flushQueuedSend = () => {
+    const next = pendingQueueRef.current.shift();
+    setQueueLen(pendingQueueRef.current.length);
+    if (next) {
+      void sendMessage(next);
+    }
+  };
+
+  const handleSend = () => {
     const content = input.trim();
+    if (!content || !user) return;
+    if (generatingRef.current) {
+      pendingQueueRef.current.push(content);
+      setQueueLen(pendingQueueRef.current.length);
+      setInput('');
+      if (textareaRef.current) textareaRef.current.style.height = 'auto';
+      return;
+    }
+    setInput('');
+    if (textareaRef.current) textareaRef.current.style.height = 'auto';
+    void sendMessage(content);
+  };
+
+  const sendMessage = async (content: string) => {
+    if (!content.trim() || !user || generatingRef.current) return;
     stopRequestedRef.current = false;
     setFailoverNote(null);
 
@@ -644,7 +709,9 @@ export function AIChat() {
         creationId: existing?.creationId,
       });
     }
+    persistChatIdRef.current = activeChatId;
 
+    const pinnedModel = activeModelRef.current;
     const userMsg: ChatMessage = {
       id: crypto.randomUUID(),
       user_id: user.id,
@@ -660,9 +727,9 @@ export function AIChat() {
     const pluginState = pluginId ? getPluginRuntime(pluginId, loadPluginState()) : null;
     const providerLabel = pluginId
       ? `${chatPlugins.find(p => p.id === pluginId)?.name ?? 'Plugin'}${pluginState?.accountLabel ? ` · @${pluginState.accountLabel}` : ' · live'}`
-      : activeModel.source === 'auto'
+      : pinnedModel.source === 'auto'
         ? 'ARK Auto'
-        : `${activeModel.source === 'local' ? 'Local' : 'Cloud'} · ${activeModel.name}`;
+        : `${pinnedModel.source === 'local' ? 'Local' : 'Cloud'} · ${pinnedModel.name}`;
 
     const assistantId = crypto.randomUUID();
     const isMediaMode = mode === 'image' || mode === 'video';
@@ -684,8 +751,7 @@ export function AIChat() {
       persistModeThread(mode, next, { chatId: activeChatId });
       return next;
     });
-    setInput('');
-    if (textareaRef.current) textareaRef.current.style.height = 'auto';
+    generatingRef.current = true;
     setGenerating(true);
 
     if (isNewChat) {
@@ -713,7 +779,9 @@ export function AIChat() {
         persistModeThread(mode, next, { chatId: activeChatId });
         return next;
       });
+      generatingRef.current = false;
       setGenerating(false);
+      flushQueuedSend();
       return;
     }
 
@@ -743,7 +811,7 @@ export function AIChat() {
           const setAssistantContent = (text: string) => {
             setMessages(prev => {
               const next = prev.map(m => (m.id === assistantId ? { ...m, content: text } : m));
-              persistModeThread(mode, next, { chatId: activeChatId });
+              persistModeThread(mode, next, { chatId: persistChatIdRef.current || activeChatId });
               return next;
             });
           };
@@ -763,15 +831,15 @@ export function AIChat() {
           const routePromise = arkRoute({
             message: rewritten,
             kind,
-            preferredModelId: activeModel.id,
-            preferredModelName: activeModel.name,
-            preferredSource: activeModel.source,
+            preferredModelId: pinnedModel.id,
+            preferredModelName: pinnedModel.name,
+            preferredSource: pinnedModel.source,
           });
           const waitPromise = new Promise(r => window.setTimeout(r, minMs));
           const [routed] = await Promise.all([routePromise, waitPromise]);
 
           resolvedProvider = routerProviderLabel(routed, providerLabel);
-          const hopNote = failoverChipText(routed, activeModel);
+          const hopNote = failoverChipText(routed, pinnedModel);
           if (hopNote) setFailoverNote(hopNote);
           const libraryId = routed.media?.libraryId || `local-${Date.now()}`;
           lastLibraryId = libraryId;
@@ -783,7 +851,7 @@ export function AIChat() {
               kind,
               title: isReal ? content.slice(0, 80) : `Preview · ${content.slice(0, 70)}`,
               prompt: content,
-              modelName: routed.modelName || activeModel.name,
+              modelName: routed.modelName || pinnedModel.name,
               dataUrl: routed.media.dataUrl,
               createdAt: new Date().toISOString(),
               real: isReal,
@@ -819,14 +887,14 @@ export function AIChat() {
         try {
           const prefs = getLocalPrefs();
           const history = prefs.rememberContext
-            ? buildRouterHistory(messages, content)
+            ? buildRouterHistory(messagesRef.current, content)
             : buildRouterHistory([], content);
           const routed = await arkRoute({
             message: content,
             kind: mode === 'code' ? 'coding' : 'chat',
-            preferredModelId: activeModel.id,
-            preferredModelName: activeModel.name,
-            preferredSource: activeModel.source,
+            preferredModelId: pinnedModel.id,
+            preferredModelName: pinnedModel.name,
+            preferredSource: pinnedModel.source,
             history,
             onChunk: (piece) => {
               if (stopRequestedRef.current) return;
@@ -844,10 +912,11 @@ export function AIChat() {
             ? streamedPartial
             : routed.reply;
           resolvedProvider = routerProviderLabel(routed, providerLabel);
-          const hopNote = failoverChipText(routed, activeModel);
+          const hopNote = failoverChipText(routed, pinnedModel);
           if (hopNote) setFailoverNote(hopNote);
-          if (routed.modelId || routed.modelName) {
-            setLocalPrefs({ lastChatModelId: routed.modelId || activeModel.id });
+          // Remember backend for chips/telemetry — never overwrite Auto / cloud picker pin.
+          if (pinnedModel.source === 'local' && pinnedModel.id !== 'ark-auto') {
+            setLocalPrefs({ lastChatModelId: pinnedModel.id });
           }
           usedPlugin = true;
         } catch (err) {
@@ -858,11 +927,34 @@ export function AIChat() {
         }
       }
       } finally {
+        generatingRef.current = false;
         setGenerating(false);
       }
 
+      const threadChatId = persistChatIdRef.current || activeChatId;
       window.setTimeout(async () => {
         setMessages(prev => {
+          // If the user navigated to another chat, don't clobber that thread's UI state.
+          const routeChat = route.name === 'chat' ? route.chatId : undefined;
+          if (routeChat && threadChatId && routeChat !== threadChatId) {
+            try {
+              const raw = localStorage.getItem(chatThreadKey(threadChatId));
+              const stored = raw ? JSON.parse(raw) as ChatMessage[] : [];
+              const nextStored = stored.map(m => (
+                m.id === assistantId
+                  ? { ...m, content: response, provider_used: resolvedProvider }
+                  : m
+              ));
+              persistModeThread(mode, nextStored, {
+                chatId: threadChatId,
+                libraryId: lastLibraryId,
+                assistantId,
+              });
+            } catch {
+              /* ignore */
+            }
+            return prev;
+          }
           const next = prev.map(m => (
             m.id === assistantId
               ? { ...m, content: response, provider_used: resolvedProvider }
@@ -870,7 +962,7 @@ export function AIChat() {
           ));
           const activeCreationId = route.name === 'chat' ? route.creationId : undefined;
           persistModeThread(mode, next, {
-            chatId: activeChatId,
+            chatId: threadChatId,
             creationId: activeCreationId || lastLibraryId,
             libraryId: lastLibraryId,
             assistantId,
@@ -885,6 +977,7 @@ export function AIChat() {
             // offline / guest ok
           }
         }
+        flushQueuedSend();
       }, usedPlugin ? 200 : 800);
     })();
   };
@@ -961,7 +1054,14 @@ export function AIChat() {
                 type="button"
                 onClick={() => {
                   setActiveModel(model);
-                  if (model.kind === 'chat') setLocalPrefs({ defaultModelId: model.id, aiMode: 'automatic', autoFailover: true });
+                  if (model.kind === 'chat') {
+                    setLocalPrefs({
+                      defaultModelId: model.id,
+                      lastChatModelId: undefined,
+                      aiMode: 'automatic',
+                      autoFailover: true,
+                    });
+                  }
                   setModelMenuOpen(false);
                 }}
                 className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-surface-hover"
@@ -1111,13 +1211,12 @@ export function AIChat() {
             onKeyDown={e => {
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
-                if (!generating) handleSend();
+                handleSend();
               }
             }}
-            placeholder={placeholder}
+            placeholder={queueLen > 0 ? `Queued ${queueLen} · ${placeholder}` : placeholder}
             rows={1}
-            disabled={generating}
-            className="flex-1 bg-transparent border-none resize-none px-1 py-2 text-sm text-content-primary placeholder:text-content-tertiary focus:outline-none max-h-32 leading-5 min-w-0 disabled:opacity-60"
+            className="flex-1 bg-transparent border-none resize-none px-1 py-2 text-sm text-content-primary placeholder:text-content-tertiary focus:outline-none max-h-32 leading-5 min-w-0"
           />
 
           <button

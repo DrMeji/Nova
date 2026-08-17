@@ -91,7 +91,12 @@ export function getLocalPrefs(): LocalPrefs {
 }
 
 export function setLocalPrefs(patch: Partial<LocalPrefs>): LocalPrefs {
-  const next = { ...getLocalPrefs(), ...patch };
+  const next = { ...getLocalPrefs(), ...patch } as LocalPrefs;
+  for (const [key, value] of Object.entries(patch)) {
+    if (value === undefined) {
+      delete (next as Record<string, unknown>)[key];
+    }
+  }
   localStorage.setItem(PREFS_KEY, JSON.stringify(next));
   try {
     window.dispatchEvent(new CustomEvent('ark:prefs-changed', { detail: next }));
@@ -217,6 +222,19 @@ export function clearPluginToken(pluginId: string) {
 
 /** App changelog shown in Settings → Updates. */
 export const ARK_CHANGELOG = [
+  {
+    version: '0.1.33',
+    channel: 'stable' as const,
+    date: 'Aug 16, 2026',
+    title: 'Cleaner chat, setup, and Free sources',
+    notes: [
+      'Local chat no longer dumps llama.cpp banners / help into the bubble',
+      'Model picker stays on Auto / cloud picks (no silent snap back to Qwen)',
+      'Type and queue the next message while a reply is generating',
+      'Recent chats load without blanking; Free sources match Providers styling',
+      'Removed confusing Connect setup paragraph under the step tabs',
+    ],
+  },
   {
     version: '0.1.31',
     channel: 'stable' as const,

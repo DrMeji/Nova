@@ -49,6 +49,8 @@ export type ArkRouterResult = {
     real?: boolean;
   };
   modelName: string;
+  /** Engine / catalog id when known — for chips only; never hijack the picker. */
+  modelId?: string;
   source: string;
   tier: RouterTier;
   attempted: string[];
@@ -119,6 +121,7 @@ async function tryLocalChat(
         reply: result.reply,
         media: result.media,
         modelName: result.modelName || 'ARK Engine',
+        modelId: id || result.modelName,
         source: result.source || 'ark-engine',
         tier: 'local-free',
         attempted,

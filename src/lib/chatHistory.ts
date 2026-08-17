@@ -35,6 +35,23 @@ export function slimTurnContent(content: string): string {
     .replace(/!\[[^\]]*]\(data:[^)]+\)/g, '[image]')
     .replace(/!\[[^\]]*]\(https?:[^)]+\)/g, '[image]')
     .replace(/data:image\/[a-zA-Z+]+;base64,[A-Za-z0-9+/=]+/g, '[image]');
+  // Drop accidental llama.cpp banners that may have been stored in older threads
+  if (/loading model|available commands|llama\.cpp/i.test(text)) {
+    const ark = text.match(/(?:^|\n)\s*(?:ARK|Assistant)\s*:\s*([\s\S]+)/i);
+    if (ark?.[1]) text = ark[1].replace(/^\s*ARK\s*:\s*/i, '');
+    text = text
+      .split('\n')
+      .filter(line => {
+        const t = line.trim();
+        if (!t) return true;
+        if (/^(loading model|build\s*:|model\s*:|ftype\s*:|modalities\s*:|available commands)/i.test(t)) return false;
+        if (/^\[\s*Prompt:/i.test(t)) return false;
+        if (/ark-engine[\\/]+models/i.test(t)) return false;
+        return true;
+      })
+      .join('\n')
+      .trim();
+  }
   if (text.length > MAX_TURN_CHARS) {
     text = `${text.slice(0, MAX_TURN_CHARS)}…`;
   }
