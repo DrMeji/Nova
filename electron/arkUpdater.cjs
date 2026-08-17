@@ -267,6 +267,28 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+/**
+ * NEVER mass-kill ARK.exe by image name.
+ * Electron’s GPU/renderer helpers are also named ARK.exe — killing them blanks the
+ * Updating window and hangs forever on executeJavaScript (blank splash, 0% CPU).
+ * Only kill the known parent PID tree.
+ */
+function killParentTree(parentPid, writeLog) {
+  if (process.platform !== 'win32') return;
+  const pid = Number(parentPid);
+  if (!Number.isFinite(pid) || pid <= 0) return;
+  if (pid === process.pid) return;
+  try {
+    spawn('taskkill', ['/F', '/PID', String(pid), '/T'], {
+      windowsHide: true,
+      stdio: 'ignore',
+    });
+    writeLog?.(`taskkill parent tree pid=${pid}`);
+  } catch (err) {
+    writeLog?.(`taskkill parent failed: ${err}`);
+  }
+}
+
 /** Discord-style black box — slightly larger, clean type, thin bar. */
 function splashHtml(iconFileUrl) {
   const icon = splashIconMarkup(iconFileUrl);
@@ -284,7 +306,7 @@ function splashHtml(iconFileUrl) {
   <div class="wrap">
     ${icon}
     <div id="label">Updating ARK...</div>
-    <div id="sub"></div>
+    <div id="sub">Preparing</div>
     <div class="track"><div id="fill"></div></div>
   </div>
   <script>
@@ -304,9 +326,13 @@ async function setSplash(win, pct, text, sub) {
   if (!win || win.isDestroyed()) return;
   const esc = (v) => String(v || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
   try {
-    await win.webContents.executeJavaScript(
-      `window.__arkSet && window.__arkSet(${Number(pct) || 0}, '${esc(text)}', '${esc(sub)}')`,
-    );
+    // Hard timeout — never block install if the renderer was killed or hung.
+    await Promise.race([
+      win.webContents.executeJavaScript(
+        `window.__arkSet && window.__arkSet(${Number(pct) || 0}, '${esc(text)}', '${esc(sub)}')`,
+      ),
+      sleep(600),
+    ]);
   } catch {
     /* ignore */
   }
@@ -320,8 +346,22 @@ function runInstaller(setupPath, installDir) {
       stdio: 'ignore',
       detached: false,
     });
-    child.on('error', () => resolve(1));
-    child.on('exit', (code) => resolve(code ?? 1));
+    const timer = setTimeout(() => {
+      try {
+        child.kill();
+      } catch {
+        /* ignore */
+      }
+      resolve(124);
+    }, 8 * 60_000);
+    child.on('error', () => {
+      clearTimeout(timer);
+      resolve(1);
+    });
+    child.on('exit', (code) => {
+      clearTimeout(timer);
+      resolve(code ?? 1);
+    });
   });
 }
 
@@ -345,21 +385,6 @@ function startArk(exePath) {
   }).unref();
 }
 
-function killOtherArkProcesses(writeLog) {
-  if (process.platform !== 'win32') return;
-  try {
-    // Kill leftover ARK.exe except this updater process
-    spawn(
-      'taskkill',
-      ['/F', '/IM', 'ARK.exe', '/FI', `PID ne ${process.pid}`],
-      { windowsHide: true, stdio: 'ignore' },
-    );
-    writeLog?.('taskkill other ARK issued');
-  } catch (err) {
-    writeLog?.(`taskkill failed: ${err}`);
-  }
-}
-
 /**
  * Standalone updater: ARK.exe --ark-updater <setupPathOrUrl> <version> <parentPid>
  */
@@ -373,6 +398,7 @@ async function runStandaloneSplash(argv) {
     }
   };
   writeLog(`argv=${JSON.stringify(argv)}`);
+  writeLog(`pid=${process.pid} exec=${process.execPath}`);
 
   const idx = argv.indexOf('--ark-updater');
   const payload = argv[idx + 1];
@@ -391,7 +417,15 @@ async function runStandaloneSplash(argv) {
     : path.join(app.getPath('temp'), `ARK-Setup-${expectedVersion || 'update'}.exe`);
 
   const iconPath = resolveUpdateIcon();
-  const iconUrl = iconPath ? `file://${iconPath.replace(/\\/g, '/')}` : '';
+  const iconUrl = iconPath ? `file:///${iconPath.replace(/\\/g, '/')}` : '';
+
+  // loadFile is reliable; data: URLs can leave a blank black frame on Electron 43.
+  const splashPath = path.join(app.getPath('temp'), `ark-update-splash-${process.pid}.html`);
+  try {
+    fs.writeFileSync(splashPath, splashHtml(iconUrl), 'utf8');
+  } catch (err) {
+    writeLog(`splash write failed: ${err}`);
+  }
 
   const win = new BrowserWindow({
     width: 420,
@@ -402,7 +436,7 @@ async function runStandaloneSplash(argv) {
     minimizable: false,
     fullscreenable: false,
     backgroundColor: '#050506',
-    show: true,
+    show: false,
     alwaysOnTop: true,
     center: true,
     autoHideMenuBar: true,
@@ -415,7 +449,22 @@ async function runStandaloneSplash(argv) {
     },
   });
   win.setMenuBarVisibility(false);
-  await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(splashHtml(iconUrl))}`);
+
+  try {
+    await win.loadFile(splashPath);
+  } catch (err) {
+    writeLog(`loadFile failed: ${err}; falling back to data URL`);
+    await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(splashHtml(iconUrl))}`);
+  }
+
+  try {
+    win.show();
+    win.center();
+    win.focus();
+  } catch {
+    /* ignore */
+  }
+
   await setSplash(win, 5, 'Updating ARK...', 'Preparing');
   writeLog('splash shown');
   // Signal parent that the updater process is alive (Lyndsey-style ready handoff).
@@ -431,27 +480,22 @@ async function runStandaloneSplash(argv) {
 
   try {
     await setSplash(win, 8, 'Updating ARK...', 'Waiting for ARK to close');
-    // Give the parent a few seconds to exit on its own, then force-kill it.
-    const softDeadline = Date.now() + 5_000;
+    // Give the parent a few seconds to exit on its own, then force-kill that PID tree only.
+    const softDeadline = Date.now() + 8_000;
     while (pidAlive(parentPid) && Date.now() < softDeadline) {
-      await sleep(100);
+      await sleep(150);
     }
     if (pidAlive(parentPid) && parentPid > 0) {
-      writeLog(`force taskkill parent pid=${parentPid}`);
-      try {
-        spawn('taskkill', ['/F', '/PID', String(parentPid), '/T'], {
-          windowsHide: true,
-          stdio: 'ignore',
-        });
-      } catch (err) {
-        writeLog(`taskkill parent failed: ${err}`);
-      }
-      await sleep(900);
+      writeLog(`parent still alive after soft wait; force-killing tree pid=${parentPid}`);
+      killParentTree(parentPid, writeLog);
+      await sleep(1200);
     }
-    killOtherArkProcesses(writeLog);
-    await sleep(400);
     writeLog(`parent exited alive=${pidAlive(parentPid)}`);
+    // Brief pause so file locks on ARK.exe release — do NOT mass-kill ARK.exe.
+    await sleep(700);
+
     await setSplash(win, 18, 'Updating ARK...', 'Installing update');
+    writeLog('past waiting — starting install prep');
 
     if (isUrl) {
       await setSplash(win, 12, 'Downloading update...', 'Fetching installer');
@@ -466,26 +510,51 @@ async function runStandaloneSplash(argv) {
       writeLog('download done');
     } else {
       await setSplash(win, 45, 'Updating ARK...', 'Installer ready');
-      writeLog(`local setup exists=${fs.existsSync(localSetup)}`);
-      if (!fs.existsSync(localSetup)) throw new Error('Installer file missing');
+      const exists = fs.existsSync(localSetup);
+      let size = 0;
+      try {
+        size = exists ? fs.statSync(localSetup).size : 0;
+      } catch {
+        /* ignore */
+      }
+      writeLog(`local setup exists=${exists} size=${size} path=${localSetup}`);
+      if (!exists || size < 1_000_000) throw new Error('Installer file missing or incomplete');
     }
 
+    // Copy to a private temp path so the installer is not deleted/locked under pending/.
+    const installCopy = path.join(
+      app.getPath('temp'),
+      `ARK-Setup-install-${expectedVersion || 'update'}-${process.pid}.exe`,
+    );
+    try {
+      fs.copyFileSync(localSetup, installCopy);
+      writeLog(`copied installer to ${installCopy}`);
+    } catch (err) {
+      writeLog(`copy failed (${err}); installing from original path`);
+    }
+    const setupToRun = fs.existsSync(installCopy) ? installCopy : localSetup;
+
     await setSplash(win, 62, 'Installing...', 'Almost done');
-    let code = await runInstaller(localSetup, installDir);
+    writeLog(`runInstaller ${setupToRun} → ${installDir}`);
+    let code = await runInstaller(setupToRun, installDir);
     writeLog(`installer exit=${code}`);
     if (code !== 0) {
-      await sleep(700);
-      code = await runInstaller(localSetup, installDir);
+      await sleep(900);
+      writeLog('installer retry');
+      code = await runInstaller(setupToRun, installDir);
       writeLog(`installer retry exit=${code}`);
+    }
+    if (code !== 0) {
+      throw new Error(`Installer exited with code ${code}`);
     }
 
     await setSplash(win, 96, 'Opening ARK...', '');
-    await sleep(200);
+    await sleep(250);
 
     const candidates = [
-      process.execPath,
       path.join(process.env.LOCALAPPDATA || '', 'Programs', 'ARK', 'ARK.exe'),
       path.join(process.env.ProgramFiles || 'C:\\Program Files', 'ARK', 'ARK.exe'),
+      process.execPath,
     ];
     const target = candidates.find((c) => c && fs.existsSync(c)) || process.execPath;
 
@@ -501,13 +570,18 @@ async function runStandaloneSplash(argv) {
     writeLog(`error ${err instanceof Error ? err.stack || err.message : err}`);
     try {
       await setSplash(win, 100, 'Update failed', 'You can reopen ARK manually');
-      await sleep(2800);
+      await sleep(3200);
     } catch {
       /* ignore */
     }
   } finally {
     writeLog('updater done');
-    app.quit();
+    try {
+      fs.unlinkSync(splashPath);
+    } catch {
+      /* ignore */
+    }
+    app.exit(0);
   }
 }
 
@@ -604,7 +678,108 @@ async function checkForUpdate() {
 
 /**
  * Breakaway launch via wscript + cmd fallback so Electron's job object cannot kill the updater.
+ * Prefer a plain CMD apply script (no second Electron) — it cannot blank itself with taskkill.
  */
+function launchCmdApplyUpdate({ setupPath, installDir, expectedVersion, parentPid, arkExe }) {
+  const temp = app.getPath('temp');
+  const stamp = Date.now();
+  const cmdPath = path.join(temp, `ark-apply-update-${stamp}.cmd`);
+  const vbsPath = path.join(temp, `ark-apply-update-${stamp}.vbs`);
+  const logPath = path.join(temp, `ark-apply-update-${stamp}.log`);
+  const readyPath = path.join(temp, `ark-update-helper-${parentPid || process.pid}.ready`);
+  const ver = normalizeVersion(expectedVersion);
+  const q = (s) => String(s).replace(/"/g, '""');
+
+  try {
+    if (fs.existsSync(readyPath)) fs.unlinkSync(readyPath);
+  } catch {
+    /* ignore */
+  }
+
+  // Ready file immediately so the parent can exit; the script owns install after that.
+  try {
+    fs.writeFileSync(readyPath, `cmd-ready ${new Date().toISOString()}\n`, 'utf8');
+  } catch {
+    /* ignore */
+  }
+
+  const cmdBody = [
+    '@echo off',
+    'setlocal',
+    `title Updating ARK ${ver}`,
+    `echo [%date% %time%] apply begin>> "${logPath}"`,
+    `echo Waiting for ARK to close...>> "${logPath}"`,
+    ':waitparent',
+    `tasklist /FI "PID eq ${parentPid}" 2>nul | findstr /C:"${parentPid}" >nul`,
+    'if not errorlevel 1 (',
+    '  timeout /t 1 /nobreak >nul',
+    '  goto waitparent',
+    ')',
+    'timeout /t 2 /nobreak >nul',
+    `echo Installing ${q(setupPath)} into ${q(installDir)}>> "${logPath}"`,
+    `"${setupPath}" /S --updated /D=${installDir}`,
+    'set EXITCODE=%ERRORLEVEL%',
+    `echo installer exit=%EXITCODE%>> "${logPath}"`,
+    'if not "%EXITCODE%"=="0" (',
+    '  timeout /t 2 /nobreak >nul',
+    `  "${setupPath}" /S --updated /D=${installDir}`,
+    '  set EXITCODE=%ERRORLEVEL%',
+    `  echo installer retry exit=%EXITCODE%>> "${logPath}"`,
+    ')',
+    'timeout /t 1 /nobreak >nul',
+    `echo Starting ARK>> "${logPath}"`,
+    `start "" "${arkExe}"`,
+    `echo done>> "${logPath}"`,
+    'endlocal',
+    'exit /b 0',
+  ].join('\r\n');
+  fs.writeFileSync(cmdPath, cmdBody, 'utf8');
+
+  const vbs = [
+    'On Error Resume Next',
+    'Dim sh, fso, log',
+    'Set fso = CreateObject("Scripting.FileSystemObject")',
+    `Set log = fso.OpenTextFile("${q(logPath)}", 8, True)`,
+    'log.WriteLine "vbs apply launch"',
+    'Set sh = CreateObject("WScript.Shell")',
+    // 1 = normal window with "Updating ARK" title so the user sees progress text
+    `sh.Run "cmd.exe /c ""${q(cmdPath)}""", 1, False`,
+    'log.WriteLine "vbs Run issued"',
+    'log.Close',
+  ].join('\r\n');
+  fs.writeFileSync(vbsPath, vbs, 'utf8');
+
+  const wscript = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'wscript.exe');
+  try {
+    spawn(wscript, ['//B', '//Nologo', vbsPath], {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+      cwd: temp,
+    }).unref();
+  } catch {
+    spawn(cmdPath, [], {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: false,
+      shell: true,
+      cwd: temp,
+    }).unref();
+  }
+
+  setTimeout(() => {
+    for (const p of [vbsPath]) {
+      try {
+        fs.unlinkSync(p);
+      } catch {
+        /* ignore */
+      }
+    }
+  }, 30_000);
+
+  return { logPath, readyPath, cmdPath };
+}
+
 function launchUpdaterBreakaway({ payload, expectedVersion, parentPid }) {
   const temp = app.getPath('temp');
   const stamp = Date.now();
@@ -785,9 +960,25 @@ async function downloadAndInstall(setupUrl, latestTag) {
 
   const expectedVersion = normalizeVersion(latestTag || '');
 
-  // Prefer electron-updater delta download when latest.yml was published.
-  const deltaPath = await tryDownloadWithElectronUpdater(expectedVersion);
-  if (deltaPath) {
+  const handoffAndExit = async (installerPath) => {
+    // Copy out of electron-updater's pending/ folder before the parent exits —
+    // that directory can be cleaned or locked when the main app dies.
+    const stable = path.join(
+      app.getPath('temp'),
+      `ARK-Setup-handoff-${expectedVersion || 'update'}.exe`,
+    );
+    try {
+      fs.copyFileSync(installerPath, stable);
+    } catch (err) {
+      sendProgress({
+        status: 'error',
+        percent: 100,
+        message: 'Could not stage the installer. Try Update again.',
+        error: err instanceof Error ? err.message : 'copy failed',
+      });
+      return { ok: false, message: 'Could not stage the installer.' };
+    }
+
     markPostUpdateLandChat();
     sendProgress({
       status: 'handoff',
@@ -795,23 +986,39 @@ async function downloadAndInstall(setupUrl, latestTag) {
       message: 'Download complete. Installing…',
       version: expectedVersion,
     });
+
+    const installDir = path.dirname(process.execPath);
+    const arkExe = process.execPath;
+
     try {
-      const handoff = launchUpdaterBreakaway({
-        payload: deltaPath,
+      // Primary: independent CMD apply (cannot blank itself). Fallback: Electron splash.
+      const handoff = launchCmdApplyUpdate({
+        setupPath: stable,
+        installDir,
         expectedVersion,
         parentPid: process.pid,
+        arkExe,
       });
-      const ready = await waitForUpdaterReady(handoff.readyPath, 12_000);
+      const ready = await waitForUpdaterReady(handoff.readyPath, 5_000);
       if (!ready) {
-        sendProgress({
-          status: 'error',
-          percent: 100,
-          message: 'Updater window did not start. Try Update again.',
-          error: 'updater-ready-timeout',
+        const electronHandoff = launchUpdaterBreakaway({
+          payload: stable,
+          expectedVersion,
+          parentPid: process.pid,
         });
-        return { ok: false, message: 'Updater window did not start.' };
+        const electronReady = await waitForUpdaterReady(electronHandoff.readyPath, 12_000);
+        if (!electronReady) {
+          sendProgress({
+            status: 'error',
+            percent: 100,
+            message: 'Updater did not start. Try Update again, or install ARK-Setup.exe from GitHub Releases.',
+            error: 'updater-ready-timeout',
+          });
+          return { ok: false, message: 'Updater did not start.' };
+        }
       }
     } catch (err) {
+      console.error('[ark] failed to launch updater', err);
       sendProgress({
         status: 'error',
         percent: 100,
@@ -820,8 +1027,16 @@ async function downloadAndInstall(setupUrl, latestTag) {
       });
       return { ok: false, message: 'Could not start the updater.' };
     }
-    setTimeout(() => forceExitForUpdate(), 200);
+
+    setTimeout(() => forceExitForUpdate(), 250);
     return { ok: true, message: 'Installing update…' };
+  };
+
+  // Prefer a full Setup.exe download. electron-updater deltas previously handed a path
+  // into a second Electron process that blanked itself; full download + CMD apply is reliable.
+  const deltaPath = null;
+  if (deltaPath) {
+    return handoffAndExit(deltaPath);
   }
 
   if (typeof setupUrl !== 'string' || !/^https:\/\//i.test(setupUrl)) {
@@ -830,7 +1045,6 @@ async function downloadAndInstall(setupUrl, latestTag) {
 
   const dest = path.join(app.getPath('temp'), `ARK-Setup-${expectedVersion || 'update'}.exe`);
 
-  markPostUpdateLandChat();
   sendProgress({
     status: 'downloading',
     percent: 0,
@@ -868,43 +1082,7 @@ async function downloadAndInstall(setupUrl, latestTag) {
     return { ok: false, message: 'Download incomplete' };
   }
 
-  // Download finished in-app. Hand off to Updating splash — do not keep a second “closing” UI.
-  sendProgress({
-    status: 'handoff',
-    percent: 100,
-    message: 'Download complete. Installing…',
-    version: expectedVersion,
-  });
-
-  try {
-    const handoff = launchUpdaterBreakaway({
-      payload: dest,
-      expectedVersion,
-      parentPid: process.pid,
-    });
-    const ready = await waitForUpdaterReady(handoff.readyPath, 12_000);
-    if (!ready) {
-      sendProgress({
-        status: 'error',
-        percent: 100,
-        message: 'Updater window did not start. Try Update again.',
-        error: 'updater-ready-timeout',
-      });
-      return { ok: false, message: 'Updater window did not start.' };
-    }
-  } catch (err) {
-    console.error('[ark] failed to launch updater', err);
-    sendProgress({
-      status: 'error',
-      percent: 100,
-      message: 'Could not start the updater. Try again.',
-      error: err instanceof Error ? err.message : 'spawn failed',
-    });
-    return { ok: false, message: 'Could not start the updater.' };
-  }
-
-  setTimeout(() => forceExitForUpdate(), 200);
-  return { ok: true, message: 'Installing update…' };
+  return handoffAndExit(dest);
 }
 
 module.exports = {

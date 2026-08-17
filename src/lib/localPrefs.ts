@@ -223,6 +223,18 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.38',
+    channel: 'stable' as const,
+    date: 'Aug 17, 2026',
+    title: 'Updater install actually finishes',
+    notes: [
+      'Fixed blank “Updating ARK” hang caused by killing Electron helper processes',
+      'Install now runs via a standalone apply script after download (no stuck black window)',
+      'Single download progress in Settings — no second overlay',
+      'Installer is staged to a stable temp path before ARK exits',
+    ],
+  },
+  {
     version: '0.1.37',
     channel: 'stable' as const,
     date: 'Aug 17, 2026',

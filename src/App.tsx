@@ -18,7 +18,6 @@ import { Settings } from '@/views/Settings';
 import { runCleanBootIfNeeded } from '@/lib/clearSession';
 import { getLocalPrefs } from '@/lib/localPrefs';
 import { needsFirstRunSetup } from '@/lib/setup';
-import { UpdateOverlay } from '@/components/UpdateOverlay';
 import { supabaseConfigError } from '@/lib/supabase';
 import { useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
@@ -112,7 +111,6 @@ function App() {
             </RouterProvider>
           </AuthProvider>
         </div>
-        <UpdateOverlay />
       </div>
     </ThemeProvider>
   );
