@@ -223,6 +223,17 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.45',
+    channel: 'stable' as const,
+    date: 'Aug 16, 2026',
+    title: 'Plus menu, ARK model pill, token ring',
+    notes: [
+      'Plus button opens Plan / Ask / Debug / Multitask / Add file (Chat and Code)',
+      'Model pill shows ARK with a dropdown; Code chat has the same model picker + failover',
+      'Code button only appears when a build-style ask is detected; token ring shows budget use',
+    ],
+  },
+  {
     version: '0.1.44',
     channel: 'stable' as const,
     date: 'Aug 16, 2026',
