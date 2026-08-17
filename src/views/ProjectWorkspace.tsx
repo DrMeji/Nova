@@ -6,7 +6,7 @@ import type { Project, ChatMessage } from '@/types';
 import {
   ChevronRight, FileCode, Folder, FolderOpen, FileText,
   Play, Square, CheckCircle2, Loader2, Bot, User as UserIcon,
-  Wrench, TestTube, Hammer, Cpu, Cloud, PanelLeft, PanelRight,
+  PanelLeft, PanelRight,
   Globe, Circle, Plus, ImageIcon, ArrowUp, X, History, Eye, FilePlus2, FolderPlus,
 } from 'lucide-react';
 import { openInSystemBrowser } from '@/lib/openExternal';
@@ -37,53 +37,6 @@ interface FileNode {
   children?: FileNode[];
   language?: string;
 }
-
-const DEMO_FILES: FileNode[] = [
-  {
-    name: 'src', type: 'folder', children: [
-      { name: 'App.tsx', type: 'file', language: 'tsx' },
-      { name: 'main.tsx', type: 'file', language: 'tsx' },
-      { name: 'index.css', type: 'file', language: 'css' },
-      {
-        name: 'components', type: 'folder', children: [
-          { name: 'Header.tsx', type: 'file', language: 'tsx' },
-          { name: 'TaskList.tsx', type: 'file', language: 'tsx' },
-          { name: 'TaskItem.tsx', type: 'file', language: 'tsx' },
-        ],
-      },
-      {
-        name: 'lib', type: 'folder', children: [
-          { name: 'api.ts', type: 'file', language: 'ts' },
-          { name: 'db.ts', type: 'file', language: 'ts' },
-        ],
-      },
-    ],
-  },
-  { name: 'public', type: 'folder', children: [{ name: 'favicon.svg', type: 'file' }] },
-  { name: 'package.json', type: 'file', language: 'json' },
-  { name: 'README.md', type: 'file', language: 'md' },
-  { name: 'tailwind.config.js', type: 'file', language: 'js' },
-  { name: 'vite.config.ts', type: 'file', language: 'ts' },
-];
-
-const DEMO_CODE: Record<string, string> = {
-  'App.tsx': `import { useState } from 'react';
-import { Header } from './components/Header';
-import { TaskList } from './components/TaskList';
-
-export function App() {
-  const [tasks, setTasks] = useState<Task[]>([]);
-
-  return (
-    <div className="min-h-screen bg-gray-50">
-      <Header />
-      <main className="max-w-3xl mx-auto p-6">
-        <TaskList tasks={tasks} onChange={setTasks} />
-      </main>
-    </div>
-  );
-}`,
-};
 
 const AGENT_STEPS = [
   { id: 'route', label: 'Routing through ARK' },
@@ -135,8 +88,8 @@ export function ProjectWorkspace() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [chatPlugins, setChatPlugins] = useState(() => getChatEnabledPlugins(loadPluginState()));
   const [chatInput, setChatInput] = useState('');
-  const [selectedFile, setSelectedFile] = useState('src/App.tsx');
-  const [expandedFolders, setExpandedFolders] = useState(new Set(['src', 'src/components', 'src/lib']));
+  const [selectedFile, setSelectedFile] = useState('');
+  const [expandedFolders, setExpandedFolders] = useState(new Set<string>());
   const [buildRunning, setBuildRunning] = useState(false);
   const [buildProgress, setBuildProgress] = useState(0);
   const [explorerOpen, setExplorerOpen] = useState(true);
@@ -152,14 +105,11 @@ export function ProjectWorkspace() {
   const [diffStats, setDiffStats] = useState({ added: 0, removed: 0 });
   const [showHistory, setShowHistory] = useState(false);
   const [runHistory, setRunHistory] = useState<{ id: string; title: string; at: string }[]>([]);
-  const [fileContents, setFileContents] = useState<Record<string, string>>(() => ({
-    ...DEMO_CODE,
-    'src/App.tsx': DEMO_CODE['App.tsx'],
-  }));
+  const [fileContents, setFileContents] = useState<Record<string, string>>({});
   const [rightTab, setRightTab] = useState<'code' | 'preview'>('code');
   const [fileFlash, setFileFlash] = useState(false);
   const [previewReady, setPreviewReady] = useState(false);
-  const [fileTree, setFileTree] = useState<FileNode[]>(() => structuredClone(DEMO_FILES));
+  const [fileTree, setFileTree] = useState<FileNode[]>([]);
   const [creating, setCreating] = useState<null | { kind: 'file' | 'folder'; parentPath: string }>(null);
   const [createName, setCreateName] = useState('');
   const [diskRoot, setDiskRoot] = useState<string | null>(null);
@@ -323,13 +273,15 @@ export function ProjectWorkspace() {
         if (cancelled) return;
         if (res.root) setDiskRoot(res.root);
         if (res.ok && res.files && Object.keys(res.files).length > 0) {
-          const mapped: Record<string, string> = { ...DEMO_CODE };
+          const mapped: Record<string, string> = {};
           for (const [rel, content] of Object.entries(res.files)) {
             const base = rel.includes('/') ? rel.split('/').pop()! : rel;
             mapped[base] = content;
             mapped[rel] = content;
           }
           setFileContents(mapped);
+          const keys = Object.keys(res.files);
+          if (keys.length && !selectedFile) setSelectedFile(keys[0]);
         }
       } catch {
         /* ignore */
@@ -603,7 +555,7 @@ export function ProjectWorkspace() {
 
     void (async () => {
       try {
-        const files: Record<string, string> = { ...DEMO_CODE, ...fileContents };
+        const files: Record<string, string> = { ...fileContents };
         // Flatten keys that are basenames into src/ paths when needed
         const payloadFiles: Record<string, string> = {};
         for (const [k, v] of Object.entries(files)) {
@@ -800,7 +752,7 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
             const key = fullPath.split('/').pop() ?? fullPath;
             setFileContents(prev => {
               if (prev[fullPath] || prev[key]) return prev;
-              const seed = DEMO_CODE[key] ?? `// ${fullPath}\n// Editable placeholder content.\n`;
+              const seed = `// ${fullPath}\n`;
               return {
                 ...prev,
                 [fullPath]: seed,
@@ -830,11 +782,12 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
     );
   }
 
-  const fileKey = selectedFile.split('/').pop() ?? 'App.tsx';
-  const codeBody = fileContents[selectedFile]
-    ?? fileContents[fileKey]
-    ?? DEMO_CODE[fileKey]
-    ?? `// ${selectedFile}\n// Placeholder file content for UI preview.\n`;
+  const hasFiles = fileTree.length > 0 || Object.keys(fileContents).length > 0;
+  const fileKey = selectedFile ? (selectedFile.split('/').pop() ?? selectedFile) : '';
+  const codeBody = selectedFile
+    ? (fileContents[selectedFile] ?? fileContents[fileKey] ?? '')
+    : '';
+  const showBrowserChrome = Boolean(livePreviewUrl || previewReady);
 
   const previewHtml = (() => {
     const name = (project?.name ?? 'Project').replace(/</g, '');
@@ -870,14 +823,16 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
 </body></html>`;
   })();
 
-  const buildLabel = buildRunning ? `Building ${buildProgress}%` : previewReady || buildProgress >= 100 ? 'Build ready' : 'Build idle';
-  const engineLabel = 'Local AI ready';
-  const providerLabel = 'Providers standing by';
+  const buildLabel = buildRunning
+    ? `Building ${buildProgress}%`
+    : previewReady || buildProgress >= 100
+      ? 'Build ready'
+      : null;
 
   return (
     <div className="h-full flex flex-col min-h-0">
       {/* Header */}
-      <div className="shrink-0 border-b border-surface-border px-4 py-2.5 flex items-center justify-between gap-3 bg-ark-navy-900/30">
+      <div className="shrink-0 border-b border-surface-border px-4 py-2 flex items-center justify-between gap-3 bg-ark-navy-900/30 pr-28">
         <div className="flex items-center gap-2 min-w-0">
           <button type="button" onClick={() => navigate({ name: 'projects' })} className="ark-btn-ghost text-xs shrink-0">
             Projects
@@ -889,7 +844,7 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
               {diskRoot}
             </span>
           ) : null}
-          {isWebProject && (
+          {showBrowserChrome && (
             <button
               type="button"
               onClick={openPreviewInBrowser}
@@ -930,10 +885,18 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
           <button
             type="button"
             onClick={handleBuild}
-            className={buildRunning ? 'ark-btn-secondary !text-ark-accent-red ml-1' : 'ark-btn-primary ml-1'}
+            disabled={!hasFiles && !buildRunning}
+            title={hasFiles ? (buildRunning ? 'Stop' : 'Build & Run') : 'Ask ARK to create files first'}
+            className={`inline-flex items-center gap-1 h-8 px-2.5 rounded-lg text-xs font-medium ml-1 mr-1 transition-colors ${
+              buildRunning
+                ? 'border border-rose-400/35 bg-rose-500/15 text-rose-200 hover:bg-rose-500/25'
+                : hasFiles
+                  ? 'bg-sky-500/90 text-white hover:bg-sky-500'
+                  : 'bg-surface-hover text-content-tertiary cursor-not-allowed'
+            }`}
           >
-            {buildRunning ? <Square className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
-            {buildRunning ? 'Stop' : 'Build & Run'}
+            {buildRunning ? <Square className="w-3 h-3" /> : <Play className="w-3 h-3" />}
+            {buildRunning ? 'Stop' : 'Run'}
           </button>
         </div>
       </div>
@@ -1001,7 +964,15 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
                   </div>
                 </div>
               )}
-              <div className="flex-1 overflow-auto p-2">{renderFileTree(fileTree)}</div>
+              <div className="flex-1 overflow-auto p-2">
+                {fileTree.length === 0 ? (
+                  <p className="px-2 py-6 text-[11px] text-content-tertiary leading-relaxed text-center">
+                    No files yet. Ask ARK in chat to create your project.
+                  </p>
+                ) : (
+                  renderFileTree(fileTree)
+                )}
+              </div>
             </div>
             <ResizeHandle onDrag={dragExplorer} />
           </>
@@ -1320,20 +1291,30 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
 
               {rightTab === 'code' ? (
                 <div className="flex-1 min-h-0 overflow-hidden p-2">
-                  <textarea
-                    ref={codeEditorRef}
-                    value={codeBody}
-                    onChange={e => {
-                      const next = e.target.value;
-                      setFileContents(prev => ({
-                        ...prev,
-                        [fileKey]: next,
-                        [selectedFile]: next,
-                      }));
-                    }}
-                    spellCheck={false}
-                    className="w-full h-full resize-none bg-transparent font-mono text-xs text-content-primary leading-relaxed outline-none p-2 rounded-lg focus:bg-ark-navy-900/40"
-                  />
+                  {!selectedFile ? (
+                    <div className="h-full flex flex-col items-center justify-center text-center px-6 gap-2">
+                      <FileCode className="w-5 h-5 text-content-tertiary" />
+                      <p className="text-sm text-content-secondary">No code yet</p>
+                      <p className="text-xs text-content-tertiary max-w-xs">
+                        Ask ARK in chat to create files — they’ll show up here.
+                      </p>
+                    </div>
+                  ) : (
+                    <textarea
+                      ref={codeEditorRef}
+                      value={codeBody}
+                      onChange={e => {
+                        const next = e.target.value;
+                        setFileContents(prev => ({
+                          ...prev,
+                          [fileKey]: next,
+                          [selectedFile]: next,
+                        }));
+                      }}
+                      spellCheck={false}
+                      className="w-full h-full resize-none bg-transparent font-mono text-xs text-content-primary leading-relaxed outline-none p-2 rounded-lg focus:bg-ark-navy-900/40"
+                    />
+                  )}
                 </div>
               ) : (
                 <div className="flex-1 min-h-0 bg-ark-navy-950 relative">
@@ -1358,20 +1339,18 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
                       <Globe className="w-5 h-5 text-sky-400" />
                       <p className="text-sm text-content-secondary">No preview yet</p>
                       <p className="text-xs text-content-tertiary max-w-xs">
-                        Hit Build & Run to start ARK’s local preview server for this project.
+                        Create files with chat, then hit Run for a local preview.
                       </p>
                     </div>
                   )}
                 </div>
               )}
 
-              {isWebProject && (
+              {showBrowserChrome && (
                 <div className="shrink-0 px-3 py-2 flex items-center gap-2 text-xs text-content-secondary">
                   <Globe className="w-3.5 h-3.5 text-sky-400 shrink-0" />
                   <span className="truncate">
-                    {previewReady || buildProgress >= 100 || buildRunning
-                      ? `ARK preview · ${livePreviewUrl || fileKey}${previewReady ? ' · ready' : ''}`
-                      : 'Web project · hit Build & Run for a live local preview'}
+                    {`ARK preview · ${livePreviewUrl || fileKey}${previewReady ? ' · ready' : ''}`}
                   </span>
                 </div>
               )}
@@ -1380,49 +1359,45 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
         )}
       </div>
 
-      {/* Status strip */}
-      <div className="shrink-0 px-3 py-1.5 flex items-center justify-between gap-3 bg-ark-navy-900/40">
-        <div className="flex items-center gap-3 min-w-0 text-[11px]">
-          <span className="inline-flex items-center gap-1.5 text-content-secondary">
-            <span className={`w-1.5 h-1.5 rounded-full ${buildRunning ? 'bg-amber-400' : buildProgress >= 100 ? 'bg-ark-accent-green' : 'bg-content-tertiary'}`} />
-            {buildLabel}
-          </span>
-          <span className="inline-flex items-center gap-1.5 text-content-secondary">
-            <Cpu className="w-3 h-3 text-emerald-400" />
-            {engineLabel}
-          </span>
-          <span className="inline-flex items-center gap-1.5 text-content-secondary">
-            <Cloud className="w-3 h-3 text-sky-400" />
-            {providerLabel}
-          </span>
-          {isWebProject && (
-            <button
-              type="button"
-              onClick={openPreviewInBrowser}
-              className="inline-flex items-center gap-1.5 text-content-secondary truncate hover:text-content-primary transition-colors"
-              title="Open localhost in your system browser"
-            >
-              <Globe className="w-3 h-3 text-sky-400" />
-              Browser target
-            </button>
-          )}
+      {/* Status strip — only meaningful activity */}
+      {(buildLabel || showBrowserChrome || !explorerOpen || !codeOpen) ? (
+        <div className="shrink-0 px-3 py-1.5 flex items-center justify-between gap-3 bg-ark-navy-900/40">
+          <div className="flex items-center gap-3 min-w-0 text-[11px]">
+            {buildLabel && (
+              <span className="inline-flex items-center gap-1.5 text-content-secondary">
+                <span className={`w-1.5 h-1.5 rounded-full ${buildRunning ? 'bg-amber-400' : 'bg-ark-accent-green'}`} />
+                {buildLabel}
+              </span>
+            )}
+            {showBrowserChrome && (
+              <button
+                type="button"
+                onClick={openPreviewInBrowser}
+                className="inline-flex items-center gap-1.5 text-content-secondary truncate hover:text-content-primary transition-colors"
+                title="Open preview in browser"
+              >
+                <Globe className="w-3 h-3 text-sky-400" />
+                Open preview
+              </button>
+            )}
+            {!buildLabel && !showBrowserChrome && (
+              <span className="text-content-tertiary">Ready — ask ARK to build</span>
+            )}
+          </div>
+          <div className="flex items-center gap-1 shrink-0">
+            {!explorerOpen && (
+              <button type="button" onClick={() => setExplorerOpen(true)} className="text-[11px] text-content-tertiary hover:text-content-secondary px-1.5">
+                Explorer
+              </button>
+            )}
+            {!codeOpen && (
+              <button type="button" onClick={() => setCodeOpen(true)} className="text-[11px] text-content-tertiary hover:text-content-secondary px-1.5">
+                Code
+              </button>
+            )}
+          </div>
         </div>
-        <div className="flex items-center gap-1 shrink-0">
-          {!explorerOpen && (
-            <button type="button" onClick={() => setExplorerOpen(true)} className="text-[11px] text-content-tertiary hover:text-content-secondary px-1.5">
-              Explorer
-            </button>
-          )}
-          {!codeOpen && (
-            <button type="button" onClick={() => setCodeOpen(true)} className="text-[11px] text-content-tertiary hover:text-content-secondary px-1.5">
-              Code
-            </button>
-          )}
-          <Hammer className="w-3 h-3 text-content-tertiary ml-1" />
-          <Wrench className="w-3 h-3 text-content-tertiary" />
-          <TestTube className="w-3 h-3 text-content-tertiary" />
-        </div>
-      </div>
+      ) : null}
     </div>
   );
 }

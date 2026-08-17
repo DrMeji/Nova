@@ -223,6 +223,17 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.44',
+    channel: 'stable' as const,
+    date: 'Aug 16, 2026',
+    title: 'Code cleanup + update screen stays open',
+    notes: [
+      'Updating window stays through install until ARK reopens (Installing → Opening ARK)',
+      'Code starts empty — no fake files; Browser/Run chrome only when you build',
+      'Chat asks before switching to Code; Recent is one list with rename',
+    ],
+  },
+  {
     version: '0.1.43',
     channel: 'stable' as const,
     date: 'Aug 16, 2026',

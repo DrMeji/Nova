@@ -6,6 +6,8 @@ import {
   loadRecentChats,
   loadRecentCreations,
   loadRecentProjects,
+  renameRecentChatTitle,
+  renameRecentProject,
   saveRecentChats,
   saveRecentProjects,
   upsertCreation,
@@ -23,6 +25,8 @@ interface RecentProjectsContextValue {
   /** Sidebar Recent — excludes archived. */
   activeChats: RecentChat[];
   addRecent: (name: string) => RecentProject;
+  renameRecent: (id: string, name: string) => void;
+  renameChat: (id: string, title: string) => void;
   addCreation: (entry: RecentCreation) => void;
   addChat: (entry: RecentChat) => void;
   archiveChat: (chatId: string) => void;
@@ -113,13 +117,22 @@ export function RecentProjectsProvider({ children }: { children: ReactNode }) {
       id: `proj-${crypto.randomUUID().slice(0, 8)}`,
       name: name.trim() || 'New Project',
       kind: 'project',
+      updatedAt: new Date().toISOString(),
     };
     setRecent(prev => {
-      const next = [project, ...prev.filter(p => p.name.toLowerCase() !== project.name.toLowerCase())].slice(0, 30);
+      const next = [project, ...prev.filter(p => p.id !== project.id)].slice(0, 30);
       saveRecentProjects(next);
       return next;
     });
     return project;
+  }, []);
+
+  const renameRecent = useCallback((id: string, name: string) => {
+    setRecent(renameRecentProject(id, name));
+  }, []);
+
+  const renameChat = useCallback((id: string, title: string) => {
+    setChats(renameRecentChatTitle(id, title));
   }, []);
 
   const addCreation = useCallback((entry: RecentCreation) => {
@@ -162,6 +175,8 @@ export function RecentProjectsProvider({ children }: { children: ReactNode }) {
         chats,
         activeChats,
         addRecent,
+        renameRecent,
+        renameChat,
         addCreation,
         addChat,
         archiveChat,

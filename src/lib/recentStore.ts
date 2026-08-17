@@ -1,6 +1,6 @@
 /** Persisted Recent: projects + creation metadata (media bytes stay in Engine). */
 
-export type RecentProject = { id: string; name: string; kind?: 'project' };
+export type RecentProject = { id: string; name: string; kind?: 'project'; updatedAt?: string };
 
 export type RecentCreation = {
   id: string;
@@ -54,6 +54,35 @@ export function loadRecentProjects(): RecentProject[] {
 
 export function saveRecentProjects(list: RecentProject[]) {
   localStorage.setItem(PROJECTS_KEY, JSON.stringify(list.slice(0, 30)));
+}
+
+export function renameRecentProject(id: string, name: string): RecentProject[] {
+  const nextName = name.trim();
+  if (!nextName) return loadRecentProjects();
+  const list = loadRecentProjects().map(p =>
+    p.id === id
+      ? { ...p, name: nextName, updatedAt: new Date().toISOString() }
+      : p,
+  );
+  saveRecentProjects(list);
+  return list;
+}
+
+export function renameRecentChatTitle(chatId: string, title: string): RecentChat[] {
+  const nextTitle = title.trim();
+  if (!nextTitle) return loadRecentChats();
+  const list = loadRecentChats().map(c =>
+    c.id === chatId
+      ? { ...c, title: nextTitle, updatedAt: new Date().toISOString() }
+      : c,
+  );
+  saveRecentChats(list);
+  try {
+    window.dispatchEvent(new Event('ark:chats-changed'));
+  } catch {
+    /* ignore */
+  }
+  return list;
 }
 
 export function loadRecentCreations(): RecentCreation[] {

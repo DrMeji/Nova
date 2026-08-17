@@ -326,6 +326,7 @@ export function AIChat() {
   const [capacity, setCapacity] = useState<LiveCapacity | null>(null);
   const [generating, setGenerating] = useState(false);
   const [queueLen, setQueueLen] = useState(0);
+  const [codeSwitchDismissed, setCodeSwitchDismissed] = useState(false);
   const stopRequestedRef = useRef(false);
   const generatingRef = useRef(false);
   /** Which chat id currently owns the in-flight generation (queue only for that chat). */
@@ -768,11 +769,7 @@ export function AIChat() {
   const handleSend = () => {
     const content = input.trim();
     if (!content || !user) return;
-    // Build/code asks open the Code workspace (explorer + editor + chat) instead of plain chat.
-    if ((mode === 'general' || mode === 'code') && looksLikeCodeAsk(content)) {
-      openCodeWorkspace(content);
-      return;
-    }
+    // Do not auto-navigate on build-ish prompts — Yes on the chip switches to Code.
     const viewingChatId = routeChatIdRef.current;
     const busyOnThisChat = generatingRef.current && (
       !viewingChatId
@@ -1170,6 +1167,7 @@ export function AIChat() {
 
   const onInput = (value: string) => {
     setInput(value);
+    if (codeSwitchDismissed && !looksLikeCodeAsk(value)) setCodeSwitchDismissed(false);
     const el = textareaRef.current;
     if (el) {
       el.style.height = 'auto';
@@ -1382,16 +1380,26 @@ export function AIChat() {
   const composer = (
     <div className="w-full max-w-2xl mx-auto">
       {failoverChip}
-      {(mode === 'general' || mode === 'code') && looksLikeCodeAsk(input) && (
+      {(mode === 'general' || mode === 'code') && looksLikeCodeAsk(input) && !codeSwitchDismissed && (
         <div className="mb-2 flex items-center justify-between gap-2 rounded-xl border border-violet-500/25 bg-violet-500/10 px-3 py-2 text-[11px] text-violet-100/90">
-          <span>Code ask detected — opens explorer, editor, and chat.</span>
-          <button
-            type="button"
-            className="shrink-0 rounded-md px-2 py-0.5 text-violet-100 hover:bg-violet-500/20 transition-colors font-medium"
-            onClick={() => openCodeWorkspace()}
-          >
-            Open Code
-          </button>
+          <span>This looks like a build — switch to Code?</span>
+          <div className="flex items-center gap-1 shrink-0">
+            <button
+              type="button"
+              className="rounded-md px-2 py-0.5 text-violet-100/70 hover:bg-violet-500/20 transition-colors"
+              onClick={() => setCodeSwitchDismissed(true)}
+              title="Stay in chat"
+            >
+              Stay
+            </button>
+            <button
+              type="button"
+              className="rounded-md px-2 py-0.5 text-violet-100 hover:bg-violet-500/20 transition-colors font-medium"
+              onClick={() => openCodeWorkspace()}
+            >
+              Yes
+            </button>
+          </div>
         </div>
       )}
       {queueLen > 0 && (

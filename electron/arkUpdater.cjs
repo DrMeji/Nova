@@ -564,7 +564,19 @@ async function runStandaloneSplash(argv) {
      * CRITICAL: do NOT run NSIS while this process still holds ARK.exe open.
      * Silent install overwrites ARK.exe → kills this splash mid-way (~60%) and never relaunches.
      * Hand off to a hidden apply script that waits for *this* PID to exit, then installs + opens ARK.
+     * A separate WinForms splash stays visible through the install gap until ARK reopens.
      */
+    const statusPath = path.join(
+      app.getPath('temp'),
+      `ark-update-status-${process.pid}-${Date.now()}.txt`,
+    );
+    writeUpdateStatus(statusPath, 'waiting', 40, 'Updating ARK', 'Starting installer');
+    launchInstallHandoffSplash({
+      statusPath,
+      expectedVersion,
+      arkExe: reopenExe,
+    });
+
     await setSplash(win, 35, 'Updating ARK', 'Starting installer');
     writeLog(`delegate install ${setupToRun} → ${installDir}; reopen=${reopenExe}`);
     launchCmdApplyUpdate({
@@ -573,17 +585,20 @@ async function runStandaloneSplash(argv) {
       expectedVersion,
       parentPid: process.pid,
       arkExe: reopenExe,
+      statusPath,
     });
 
-    // Brief progress while we exit cleanly (unlocks ARK.exe for NSIS).
+    // Brief progress on Electron splash, then exit so NSIS can replace ARK.exe.
+    // The WinForms handoff splash continues: Installing → Opening ARK.
     for (const step of [
-      [48, 'Installing…'],
-      [62, 'Installing…'],
+      [48, 'Handing off install…'],
+      [62, 'Handing off install…'],
       [78, 'Almost done…'],
-      [92, 'ARK will reopen shortly'],
+      [92, 'Keeping update screen open…'],
     ]) {
       await setSplash(win, step[0], 'Updating ARK', step[1]);
-      await sleep(350);
+      writeUpdateStatus(statusPath, 'waiting', step[0], 'Updating ARK', step[1]);
+      await sleep(280);
     }
 
     try {
@@ -592,7 +607,7 @@ async function runStandaloneSplash(argv) {
       /* ignore */
     }
 
-    writeLog('splash exiting so installer can replace ARK.exe');
+    writeLog('electron splash exiting; handoff splash owns remaining UX');
   } catch (err) {
     writeLog(`error ${err instanceof Error ? err.stack || err.message : err}`);
     try {
@@ -710,17 +725,189 @@ async function checkForUpdate() {
   }
 }
 
+/** Status file the install CMD + handoff splash share (survives NSIS killing ARK.exe). */
+function writeUpdateStatus(statusPath, stage, pct, label, sub) {
+  try {
+    fs.writeFileSync(
+      statusPath,
+      [
+        `stage=${String(stage || '')}`,
+        `pct=${Math.max(0, Math.min(100, Math.round(Number(pct) || 0)))}`,
+        `label=${String(label || 'Updating ARK')}`,
+        `sub=${String(sub || '')}`,
+      ].join('\n') + '\n',
+      'utf8',
+    );
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * Independent WinForms splash — not loaded from install-dir ARK.exe, so NSIS cannot kill it.
+ * Stays up through install until ARK.exe is running again, then closes.
+ */
+function launchInstallHandoffSplash({ statusPath, expectedVersion, arkExe }) {
+  const temp = app.getPath('temp');
+  const stamp = Date.now();
+  const ps1Path = path.join(temp, `ark-update-handoff-${stamp}.ps1`);
+  const ver = normalizeVersion(expectedVersion) || 'update';
+  const qPs = (s) => String(s).replace(/'/g, "''");
+
+  writeUpdateStatus(statusPath, 'waiting', 40, 'Updating ARK', 'Waiting to install…');
+
+  const ps1 = [
+    '$ErrorActionPreference = "SilentlyContinue"',
+    'Add-Type -AssemblyName System.Windows.Forms | Out-Null',
+    'Add-Type -AssemblyName System.Drawing | Out-Null',
+    `$statusPath = '${qPs(statusPath)}'`,
+    `$arkExe = '${qPs(arkExe || '')}'`,
+    `$ver = '${qPs(ver)}'`,
+    '$form = New-Object System.Windows.Forms.Form',
+    `$form.Text = "Updating ARK $ver"`,
+    '$form.Size = New-Object System.Drawing.Size(460, 300)',
+    '$form.StartPosition = "CenterScreen"',
+    '$form.FormBorderStyle = "None"',
+    '$form.BackColor = [System.Drawing.Color]::FromArgb(10, 10, 12)',
+    '$form.TopMost = $true',
+    '$form.ShowInTaskbar = $true',
+    '$label = New-Object System.Windows.Forms.Label',
+    '$label.Text = "Updating ARK"',
+    '$label.ForeColor = [System.Drawing.Color]::FromArgb(242, 242, 243)',
+    '$label.Font = New-Object System.Drawing.Font("Segoe UI", 14, [System.Drawing.FontStyle]::Bold)',
+    '$label.AutoSize = $false',
+    '$label.TextAlign = "MiddleCenter"',
+    '$label.Size = New-Object System.Drawing.Size(420, 32)',
+    '$label.Location = New-Object System.Drawing.Point(20, 78)',
+    '$pct = New-Object System.Windows.Forms.Label',
+    '$pct.Text = "40%"',
+    '$pct.ForeColor = [System.Drawing.Color]::FromArgb(140, 140, 148)',
+    '$pct.Font = New-Object System.Drawing.Font("Segoe UI", 11)',
+    '$pct.AutoSize = $false',
+    '$pct.TextAlign = "MiddleCenter"',
+    '$pct.Size = New-Object System.Drawing.Size(420, 24)',
+    '$pct.Location = New-Object System.Drawing.Point(20, 114)',
+    '$sub = New-Object System.Windows.Forms.Label',
+    '$sub.Text = "Waiting to install…"',
+    '$sub.ForeColor = [System.Drawing.Color]::FromArgb(100, 100, 108)',
+    '$sub.Font = New-Object System.Drawing.Font("Segoe UI", 10)',
+    '$sub.AutoSize = $false',
+    '$sub.TextAlign = "MiddleCenter"',
+    '$sub.Size = New-Object System.Drawing.Size(420, 24)',
+    '$sub.Location = New-Object System.Drawing.Point(20, 140)',
+    '$track = New-Object System.Windows.Forms.Panel',
+    '$track.BackColor = [System.Drawing.Color]::FromArgb(28, 28, 32)',
+    '$track.Size = New-Object System.Drawing.Size(280, 5)',
+    '$track.Location = New-Object System.Drawing.Point(90, 180)',
+    '$fill = New-Object System.Windows.Forms.Panel',
+    '$fill.BackColor = [System.Drawing.Color]::FromArgb(220, 224, 230)',
+    '$fill.Size = New-Object System.Drawing.Size(112, 5)',
+    '$fill.Location = New-Object System.Drawing.Point(0, 0)',
+    '$track.Controls.Add($fill)',
+    '$form.Controls.Add($label)',
+    '$form.Controls.Add($pct)',
+    '$form.Controls.Add($sub)',
+    '$form.Controls.Add($track)',
+    '$script:seenOpening = $false',
+    '$script:closeArmed = $false',
+    '$script:closeAt = 0',
+    '$timer = New-Object System.Windows.Forms.Timer',
+    '$timer.Interval = 400',
+    '$timer.Add_Tick({',
+    '  try {',
+    '    if (Test-Path -LiteralPath $statusPath) {',
+    '      $map = @{}',
+    '      Get-Content -LiteralPath $statusPath -ErrorAction SilentlyContinue | ForEach-Object {',
+    '        if ($_ -match "^(.*?)=(.*)$") { $map[$matches[1]] = $matches[2] }',
+    '      }',
+    '      if ($map.label) { $label.Text = [string]$map.label }',
+    '      if ($map.pct) {',
+    '        $n = [int]$map.pct',
+    '        if ($n -lt 0) { $n = 0 }',
+    '        if ($n -gt 100) { $n = 100 }',
+    '        $pct.Text = "$n%"',
+    '        $w = [Math]::Max(8, [int](280 * $n / 100))',
+    '        $fill.Width = $w',
+    '      }',
+    '      if ($map.sub) { $sub.Text = [string]$map.sub }',
+    '      $stage = [string]$map.stage',
+    '      if ($stage -eq "opening" -or $stage -eq "done") { $script:seenOpening = $true }',
+    '    }',
+    '  } catch {}',
+    '  $arkUp = $false',
+    '  try {',
+    '    $procs = Get-Process -Name "ARK" -ErrorAction SilentlyContinue',
+    '    if ($procs) { $arkUp = $true }',
+    '  } catch {}',
+    '  if ($script:seenOpening -and $arkUp -and -not $script:closeArmed) {',
+    '    $script:closeArmed = $true',
+    '    $script:closeAt = [Environment]::TickCount + 900',
+    '    $label.Text = "Update complete"',
+    '    $sub.Text = "Opening ARK…"',
+    '    $pct.Text = "100%"',
+    '    $fill.Width = 280',
+    '  }',
+    '  if ($script:closeArmed -and [Environment]::TickCount -ge $script:closeAt) {',
+    '    $timer.Stop()',
+    '    $form.Close()',
+    '  }',
+    '})',
+    '$timer.Start()',
+    '[void]$form.ShowDialog()',
+  ].join('\r\n');
+
+  try {
+    fs.writeFileSync(ps1Path, ps1, 'utf8');
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+
+  const psExe = path.join(
+    process.env.SystemRoot || 'C:\\Windows',
+    'System32',
+    'WindowsPowerShell',
+    'v1.0',
+    'powershell.exe',
+  );
+  try {
+    spawn(
+      psExe,
+      ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Normal', '-File', ps1Path],
+      {
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: false,
+        cwd: temp,
+      },
+    ).unref();
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+
+  setTimeout(() => {
+    try {
+      fs.unlinkSync(ps1Path);
+    } catch {
+      /* ignore */
+    }
+  }, 120_000);
+
+  return { ok: true, ps1Path };
+}
+
 /**
  * Breakaway launch via wscript + cmd fallback so Electron's job object cannot kill the updater.
  * Prefer a plain CMD apply script (no second Electron) — it cannot blank itself with taskkill.
+ * A separate WinForms splash (launchInstallHandoffSplash) covers the install gap.
  */
-function launchCmdApplyUpdate({ setupPath, installDir, expectedVersion, parentPid, arkExe }) {
+function launchCmdApplyUpdate({ setupPath, installDir, expectedVersion, parentPid, arkExe, statusPath }) {
   const temp = app.getPath('temp');
   const stamp = Date.now();
   const cmdPath = path.join(temp, `ark-apply-update-${stamp}.cmd`);
   const vbsPath = path.join(temp, `ark-apply-update-${stamp}.vbs`);
   const logPath = path.join(temp, `ark-apply-update-${stamp}.log`);
   const readyPath = path.join(temp, `ark-update-helper-${parentPid || process.pid}.ready`);
+  const statusFile = statusPath || path.join(temp, `ark-update-status-${stamp}.json`);
   const ver = normalizeVersion(expectedVersion);
   const q = (s) => String(s).replace(/"/g, '""');
 
@@ -730,12 +917,19 @@ function launchCmdApplyUpdate({ setupPath, installDir, expectedVersion, parentPi
     /* ignore */
   }
 
-  // Ready file immediately so the parent can exit; the script owns install after that.
   try {
     fs.writeFileSync(readyPath, `cmd-ready ${new Date().toISOString()}\n`, 'utf8');
   } catch {
     /* ignore */
   }
+
+  // Plain key=value status — echo-friendly for CMD (no JSON quoting).
+  const setStatus = (stage, pct, label, sub) => [
+    `> "${statusFile}" echo stage=${stage}`,
+    `>> "${statusFile}" echo pct=${pct}`,
+    `>> "${statusFile}" echo label=${label}`,
+    `>> "${statusFile}" echo sub=${sub}`,
+  ].join('\r\n');
 
   const cmdBody = [
     '@echo off',
@@ -743,6 +937,7 @@ function launchCmdApplyUpdate({ setupPath, installDir, expectedVersion, parentPi
     `title Updating ARK ${ver}`,
     `echo [%date% %time%] apply begin>> "${logPath}"`,
     `echo Waiting for updater pid ${parentPid} to exit...>> "${logPath}"`,
+    setStatus('waiting', 42, 'Updating ARK', 'Waiting for ARK to close'),
     'set /a waits=0',
     ':waitparent',
     `tasklist /FI "PID eq ${parentPid}" 2>nul | findstr /C:"${parentPid}" >nul`,
@@ -757,17 +952,21 @@ function launchCmdApplyUpdate({ setupPath, installDir, expectedVersion, parentPi
     ')',
     ':install',
     'timeout /t 2 /nobreak >nul',
+    setStatus('installing', 55, 'Updating ARK', 'Installing update'),
     `echo Installing ${q(setupPath)} into ${q(installDir)}>> "${logPath}"`,
     `"${setupPath}" /S --updated /D=${installDir}`,
     'set EXITCODE=%ERRORLEVEL%',
     `echo installer exit=%EXITCODE%>> "${logPath}"`,
     'if not "%EXITCODE%"=="0" (',
     '  timeout /t 2 /nobreak >nul',
+    setStatus('installing', 68, 'Updating ARK', 'Retrying install'),
     `  "${setupPath}" /S --updated /D=${installDir}`,
     '  set EXITCODE=%ERRORLEVEL%',
     `  echo installer retry exit=%EXITCODE%>> "${logPath}"`,
     ')',
+    setStatus('finishing', 85, 'Updating ARK', 'Finishing update'),
     'timeout /t 2 /nobreak >nul',
+    setStatus('opening', 96, 'Updating ARK', 'Opening ARK'),
     `if exist "${arkExe}" (`,
     `  echo Starting ARK ${q(arkExe)}>> "${logPath}"`,
     `  start "" "${arkExe}"`,
@@ -775,6 +974,7 @@ function launchCmdApplyUpdate({ setupPath, installDir, expectedVersion, parentPi
     `  echo missing ${q(arkExe)}, trying install dir>> "${logPath}"`,
     `  start "" "${installDir}\\ARK.exe"`,
     ')',
+    setStatus('done', 100, 'Update complete', 'Opening ARK'),
     `echo done>> "${logPath}"`,
     'endlocal',
     'exit /b 0',
@@ -823,7 +1023,7 @@ function launchCmdApplyUpdate({ setupPath, installDir, expectedVersion, parentPi
     }
   }, 30_000);
 
-  return { logPath, readyPath, cmdPath };
+  return { logPath, readyPath, cmdPath, statusPath: statusFile };
 }
 
 function launchUpdaterBreakaway({ payload, expectedVersion, parentPid }) {
@@ -1045,12 +1245,22 @@ async function downloadAndInstall(setupUrl, latestTag) {
       });
       const electronReady = await waitForUpdaterReady(electronHandoff.readyPath, 14_000);
       if (!electronReady) {
+        const statusPath = path.join(
+          app.getPath('temp'),
+          `ark-update-status-fallback-${process.pid}.txt`,
+        );
+        launchInstallHandoffSplash({
+          statusPath,
+          expectedVersion,
+          arkExe,
+        });
         const handoff = launchCmdApplyUpdate({
           setupPath: stable,
           installDir,
           expectedVersion,
           parentPid: process.pid,
           arkExe,
+          statusPath,
         });
         const ready = await waitForUpdaterReady(handoff.readyPath, 5_000);
         if (!ready) {
