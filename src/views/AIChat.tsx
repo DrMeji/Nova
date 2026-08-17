@@ -22,6 +22,9 @@ import {
 import { arkRoute, routerProviderLabel, type ArkRouterResult } from '@/lib/arkRouter';
 import { FreeKeyWizard } from '@/components/FreeKeyWizard';
 import { CapacityMeter } from '@/components/CapacityMeter';
+import { ComposerPlusMenu, type ComposerPlusAction } from '@/components/ComposerPlusMenu';
+import { TokenUsageRing } from '@/components/TokenUsageRing';
+import { getTokenUsageRatio, recordTokenUsage } from '@/lib/tokenUsage';
 import { buildRouterHistory, sanitizeAssistantReply } from '@/lib/chatHistory';
 import { MessageContent } from '@/components/MediaMessage';
 import {
@@ -34,13 +37,20 @@ import {
 } from '@/lib/plugins';
 import type { ChatMessage } from '@/types';
 import {
-  Bot, User as UserIcon, Loader2, Plus, ImageIcon, Video, Code2,
+  Bot, User as UserIcon, Loader2, ImageIcon, Video, Code2,
   Upload, Cpu, Cloud, ChevronDown, Check, Blocks, FolderKanban, Zap, Square, X,
 } from 'lucide-react';
 import { engineGenerateCancel, getEngineStatus, setEngineModel } from '@/lib/arkEngine';
 
 const CODE_FILE_RE =
   /\.(tsx?|jsx?|mjs|cjs|py|go|rs|java|kt|swift|cs|cpp|cxx|cc|c|h|hpp|rb|php|vue|svelte|css|scss|less|html|json|toml|ya?ml|md|sql|sh|bash|zsh|ps1|dockerfile|makefile)$/i;
+
+const COMPOSER_MODE_PREFIX: Record<'plan' | 'ask' | 'debug' | 'multitask', string> = {
+  plan: 'Plan this out step by step, then we can build:\n\n',
+  ask: '',
+  debug: 'Debug this — find the issue and propose a fix:\n\n',
+  multitask: 'Break this into parallel tasks and tackle them clearly:\n\n',
+};
 
 function looksLikeCodeAsk(text: string) {
   const t = text.trim();
@@ -72,7 +82,7 @@ type ChatModelOption = {
 
 const CHAT_MODELS: ChatModelOption[] = [
   // Chat — only Auto by default; keyed clouds + Ollama added at runtime
-  { id: 'ark-auto', name: 'ARK Auto', source: 'auto', detail: 'Free-first · silent failover', kind: 'chat' },
+  { id: 'ark-auto', name: 'ARK', source: 'auto', detail: 'Free-first · silent failover', kind: 'chat' },
   // Image — paths that generate today
   { id: 'ark-image-core', name: 'ARK Image Core', source: 'local', detail: 'Free · Pollinations · local SD when installed', kind: 'image' },
   { id: 'sd15-local', name: 'SD 1.5 Local', source: 'local', detail: 'On-device · install from Local AI', kind: 'image' },
@@ -327,6 +337,8 @@ export function AIChat() {
   const [generating, setGenerating] = useState(false);
   const [queueLen, setQueueLen] = useState(0);
   const [codeSwitchDismissed, setCodeSwitchDismissed] = useState(false);
+  const [composerMode, setComposerMode] = useState<'plan' | 'ask' | 'debug' | 'multitask' | null>(null);
+  const [tokenRatio, setTokenRatio] = useState(0);
   const stopRequestedRef = useRef(false);
   const generatingRef = useRef(false);
   /** Which chat id currently owns the in-flight generation (queue only for that chat). */
@@ -358,6 +370,7 @@ export function AIChat() {
   const skipChatLoadIdsRef = useRef<Set<string>>(new Set());
   const messagesRef = useRef(messages);
   const attachInputRef = useRef<HTMLInputElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     activeModelRef.current = activeModel;
@@ -766,9 +779,31 @@ export function AIChat() {
     openCodeWorkspace(prompt, seedFiles);
   };
 
+  useEffect(() => {
+    const scope = route.name === 'chat' ? (route.chatId || 'new-chat') : 'new-chat';
+    setTokenRatio(getTokenUsageRatio(scope));
+  }, [route]);
+
+  const handlePlusAction = (action: ComposerPlusAction) => {
+    if (action === 'file') {
+      attachInputRef.current?.click();
+      return;
+    }
+    if (action === 'image') {
+      imageInputRef.current?.click();
+      return;
+    }
+    setComposerMode(action);
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  };
+
   const handleSend = () => {
-    const content = input.trim();
+    let content = input.trim();
     if (!content || !user) return;
+    if (composerMode && COMPOSER_MODE_PREFIX[composerMode]) {
+      content = `${COMPOSER_MODE_PREFIX[composerMode]}${content}`;
+    }
+    setComposerMode(null);
     // Do not auto-navigate on build-ish prompts — Yes on the chip switches to Code.
     const viewingChatId = routeChatIdRef.current;
     const busyOnThisChat = generatingRef.current && (
@@ -820,6 +855,7 @@ export function AIChat() {
     persistChatIdRef.current = activeChatId;
     routeChatIdRef.current = activeChatId;
     activeGenChatIdRef.current = activeChatId;
+    setTokenRatio(recordTokenUsage(activeChatId, content));
 
     const pinnedModel = activeModelRef.current;
     const userMsg: ChatMessage = {
@@ -1402,6 +1438,21 @@ export function AIChat() {
           </div>
         </div>
       )}
+      {composerMode && (
+        <div className="mb-2 flex items-center gap-2 px-1">
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-surface-border bg-surface-hover/60 px-2.5 py-0.5 text-[11px] text-content-secondary capitalize">
+            {composerMode}
+            <button
+              type="button"
+              onClick={() => setComposerMode(null)}
+              className="text-content-tertiary hover:text-content-primary"
+              aria-label="Clear mode"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          </span>
+        </div>
+      )}
       {queueLen > 0 && (
         <div className="mb-2 flex items-center justify-between gap-2 rounded-xl border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-100/90">
           <span>
@@ -1434,15 +1485,18 @@ export function AIChat() {
               e.target.value = '';
             }}
           />
-          <button
-            type="button"
-            className="w-9 h-9 rounded-full flex items-center justify-center text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors shrink-0"
-            title="Add files (code files open Code workspace)"
-            aria-label="Add files"
-            onClick={() => attachInputRef.current?.click()}
-          >
-            <Plus className="w-4 h-4" />
-          </button>
+          <input
+            ref={imageInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            className="hidden"
+            onChange={e => {
+              // Images stay in chat for now — attach opens picker for future media turns
+              e.target.value = '';
+            }}
+          />
+          <ComposerPlusMenu onAction={handlePlusAction} showImage={mode === 'general' || mode === 'code' || mode === 'image'} />
 
           <textarea
             ref={textareaRef}
@@ -1459,33 +1513,33 @@ export function AIChat() {
             className="flex-1 bg-transparent border-none resize-none px-1 py-2 text-sm text-content-primary placeholder:text-content-tertiary focus:outline-none max-h-32 leading-5 min-w-0"
           />
 
+          <TokenUsageRing ratio={tokenRatio} className="text-content-primary mx-0.5" />
+
           <button
             ref={modelButtonRef}
             type="button"
             onClick={() => setModelMenuOpen(o => !o)}
-            className="inline-flex items-center gap-1 rounded-full border border-surface-border/80 bg-surface-hover/60 hover:bg-surface-hover px-2 py-1.5 text-xs text-content-primary transition-colors shrink-0 max-w-[9.5rem]"
-            title={`Active model · ${activeModel.source === 'auto' ? 'Auto' : activeModel.source === 'local' ? 'Local' : 'Cloud'}`}
+            className="inline-flex items-center gap-1 rounded-full border border-surface-border/80 bg-surface-hover/60 hover:bg-surface-hover px-2.5 py-1.5 text-xs text-content-primary transition-colors shrink-0 max-w-[10rem]"
+            title={`Active model · ${activeModel.source === 'auto' ? 'ARK Auto (failover on)' : activeModel.name}`}
             aria-label="Select model"
             aria-expanded={modelMenuOpen}
           >
-            <span className={`w-4 h-4 rounded flex items-center justify-center shrink-0 ${
-              activeModel.source === 'auto'
-                ? 'text-sky-400'
-                : activeModel.source === 'local'
-                  ? 'text-emerald-400'
-                  : 'text-sky-400'
-            }`}>
-              {mode === 'image' ? <ImageIcon className="w-3.5 h-3.5" />
-                : mode === 'video' ? <Video className="w-3.5 h-3.5" />
-                  : activeModel.source === 'auto' ? <Zap className="w-3.5 h-3.5" />
-                    : <ModelSourceIcon className="w-3.5 h-3.5" />}
-            </span>
+            {mode === 'image' ? (
+              <ImageIcon className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+            ) : mode === 'video' ? (
+              <Video className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+            ) : activeModel.source !== 'auto' ? (
+              <ModelSourceIcon className={`w-3.5 h-3.5 shrink-0 ${
+                activeModel.source === 'local' ? 'text-emerald-400' : 'text-sky-400'
+              }`} />
+            ) : null}
             <span className="font-medium truncate">
-              {activeModel.source === 'auto' ? 'Auto' : activeModel.name}
+              {mode === 'image' || mode === 'video'
+                ? activeModel.name
+                : activeModel.source === 'auto'
+                  ? 'ARK'
+                  : activeModel.name}
             </span>
-            {activeModel.source === 'auto' && (
-              <span className="text-[10px] text-sky-400/90 font-medium hidden sm:inline">ARK</span>
-            )}
             <ChevronDown className={`w-3.5 h-3.5 text-content-tertiary transition-transform shrink-0 ${modelMenuOpen ? 'rotate-180' : ''}`} />
           </button>
           {modelMenu}
@@ -1515,7 +1569,7 @@ export function AIChat() {
           </button>
         )}
 
-        {(mode === 'general' || mode === 'code') && (
+        {(mode === 'general' || mode === 'code') && looksLikeCodeAsk(input) && !codeSwitchDismissed && (
           <button
             type="button"
             onClick={() => openCodeWorkspace()}
@@ -1574,15 +1628,17 @@ export function AIChat() {
 
         {(mode === 'general' || mode === 'code') && (
           <>
-            <button
-              type="button"
-              onClick={() => openCodeWorkspace()}
-              className="inline-flex items-center gap-1 text-[11px] text-violet-300/90 hover:text-violet-200 transition-colors"
-              title="Switch to Code workspace"
-            >
-              <Code2 className="w-3 h-3" />
-              Code
-            </button>
+            {looksLikeCodeAsk(input) && !codeSwitchDismissed && (
+              <button
+                type="button"
+                onClick={() => openCodeWorkspace()}
+                className="inline-flex items-center gap-1 text-[11px] text-violet-300/90 hover:text-violet-200 transition-colors"
+                title="Switch to Code workspace"
+              >
+                <Code2 className="w-3 h-3" />
+                Code
+              </button>
+            )}
 
             <button
               type="button"
@@ -1684,7 +1740,7 @@ export function AIChat() {
             <p className="text-xs text-content-tertiary mb-4 text-center max-w-md">
               {capacity && !capacity.liveChat
                 ? 'No live model yet. Connect a free key or install a local brain, then send a message.'
-                : 'Say hello to start. ARK Auto uses your local brain and free keys, and switches if one runs out.'}
+                : 'Say hello to start. ARK uses your local brain and free keys, and switches if one runs out.'}
             </p>
             {capacity && !capacity.liveChat && (
               <div className="flex flex-wrap items-center justify-center gap-2 mb-8">

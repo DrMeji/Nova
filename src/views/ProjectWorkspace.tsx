@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { useRouter } from '@/context/RouterContext';
 import { useAuth } from '@/context/AuthContext';
 import { fetchProjects, fetchChatMessages, saveChatMessage, updateProject } from '@/lib/api';
@@ -7,7 +8,8 @@ import {
   ChevronRight, FileCode, Folder, FolderOpen, FileText,
   Play, Square, CheckCircle2, Loader2, Bot, User as UserIcon,
   PanelLeft, PanelRight,
-  Globe, Circle, Plus, ImageIcon, ArrowUp, X, History, Eye, FilePlus2, FolderPlus,
+  Globe, Circle, ImageIcon, ArrowUp, X, History, Eye, FilePlus2, FolderPlus,
+  ChevronDown, Check, Cpu, Cloud, Zap,
 } from 'lucide-react';
 import { openInSystemBrowser } from '@/lib/openExternal';
 import {
@@ -19,7 +21,7 @@ import {
 } from '@/lib/plugins';
 import { arkRoute, routerProviderLabel } from '@/lib/arkRouter';
 import { buildRouterHistory } from '@/lib/chatHistory';
-import { getLocalPrefs } from '@/lib/localPrefs';
+import { getLocalPrefs, hasProviderApiKey, setLocalPrefs } from '@/lib/localPrefs';
 import { loadRecentProjects } from '@/lib/recentStore';
 import {
   applyFileEdits,
@@ -28,6 +30,34 @@ import {
   parseFileEdits,
   stripFileBlocks,
 } from '@/lib/projectCodeEdit';
+import { ComposerPlusMenu, type ComposerPlusAction } from '@/components/ComposerPlusMenu';
+import { TokenUsageRing } from '@/components/TokenUsageRing';
+import { getTokenUsageRatio, recordTokenUsage } from '@/lib/tokenUsage';
+import { getEngineStatus, setEngineModel } from '@/lib/arkEngine';
+
+type CodeModel = {
+  id: string;
+  name: string;
+  source: 'auto' | 'local' | 'cloud';
+  detail: string;
+};
+
+const CODE_MODELS: CodeModel[] = [
+  { id: 'ark-auto', name: 'ARK', source: 'auto', detail: 'Free-first · silent failover' },
+];
+
+const CLOUD_CODE_WHEN_KEYED: (CodeModel & { keyId: string })[] = [
+  { id: 'groq:llama-3.3-70b', name: 'Llama 3.3 70B', source: 'cloud', detail: 'Groq', keyId: 'groq' },
+  { id: 'google:gemini-2.0-flash', name: 'Gemini 2.0 Flash', source: 'cloud', detail: 'Google', keyId: 'google' },
+  { id: 'openrouter:auto', name: 'OpenRouter', source: 'cloud', detail: 'Free routes', keyId: 'openrouter' },
+];
+
+const COMPOSER_MODE_PREFIX: Record<'plan' | 'ask' | 'debug' | 'multitask', string> = {
+  plan: 'Plan this out step by step, then we can build:\n\n',
+  ask: '',
+  debug: 'Debug this — find the issue and propose a fix:\n\n',
+  multitask: 'Break this into parallel tasks and tackle them clearly:\n\n',
+};
 
 type ProjectRow = Project & { id: string };
 
@@ -88,6 +118,16 @@ export function ProjectWorkspace() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [chatPlugins, setChatPlugins] = useState(() => getChatEnabledPlugins(loadPluginState()));
   const [chatInput, setChatInput] = useState('');
+  const [composerMode, setComposerMode] = useState<'plan' | 'ask' | 'debug' | 'multitask' | null>(null);
+  const [tokenRatio, setTokenRatio] = useState(0);
+  const [activeModel, setActiveModel] = useState<CodeModel>(() => {
+    const saved = getLocalPrefs().defaultModelId;
+    if (!saved || saved === 'ark-auto') return CODE_MODELS[0];
+    return { id: saved, name: saved, source: 'local', detail: 'Pinned' };
+  });
+  const [modelMenuOpen, setModelMenuOpen] = useState(false);
+  const [menuPos, setMenuPos] = useState<{ left: number; bottom: number } | null>(null);
+  const [localModels, setLocalModels] = useState<CodeModel[]>([]);
   const [selectedFile, setSelectedFile] = useState('');
   const [expandedFolders, setExpandedFolders] = useState(new Set<string>());
   const [buildRunning, setBuildRunning] = useState(false);
@@ -115,12 +155,69 @@ export function ProjectWorkspace() {
   const [diskRoot, setDiskRoot] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const codeFileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const codeEditorRef = useRef<HTMLTextAreaElement>(null);
+  const modelButtonRef = useRef<HTMLButtonElement>(null);
+  const modelMenuRef = useRef<HTMLDivElement>(null);
 
   const isWebProject = !project || project.project_type === 'web' || project.project_type === 'api';
   const [previewUrl, setPreviewUrl] = useState('http://127.0.0.1:0');
   const [livePreviewUrl, setLivePreviewUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!projectId) return;
+    setTokenRatio(getTokenUsageRatio(projectId));
+  }, [projectId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void getEngineStatus().then(status => {
+      if (cancelled) return;
+      const installed = (status.models || [])
+        .filter(m => m.status === 'ready')
+        .map(m => ({
+          id: m.id,
+          name: m.name || m.id,
+          source: 'local' as const,
+          detail: m.detail || 'Local GGUF',
+        }));
+      setLocalModels(installed);
+      setActiveModel(prev => {
+        if (prev.source !== 'local' || prev.id === 'ark-auto') return prev;
+        const hit = installed.find(m => m.id === prev.id);
+        return hit || prev;
+      });
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    if (!modelMenuOpen) return;
+    const place = () => {
+      const btn = modelButtonRef.current;
+      if (!btn) return;
+      const r = btn.getBoundingClientRect();
+      setMenuPos({ left: r.left + r.width / 2, bottom: window.innerHeight - r.top + 8 });
+    };
+    place();
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (modelButtonRef.current?.contains(t) || modelMenuRef.current?.contains(t)) return;
+      setModelMenuOpen(false);
+    };
+    window.addEventListener('resize', place);
+    document.addEventListener('mousedown', onDown);
+    return () => {
+      window.removeEventListener('resize', place);
+      document.removeEventListener('mousedown', onDown);
+    };
+  }, [modelMenuOpen]);
+
+  const codeModelOptions = useMemo(() => {
+    const keyed = CLOUD_CODE_WHEN_KEYED.filter(m => hasProviderApiKey(m.keyId));
+    return [...CODE_MODELS, ...localModels, ...keyed];
+  }, [localModels]);
 
   useEffect(() => {
     if (!projectId) return;
@@ -332,7 +429,12 @@ export function ProjectWorkspace() {
 
   const handleSendChat = async () => {
     if ((!chatInput.trim() && attachedImages.length === 0) || !project) return;
-    const content = chatInput.trim();
+    let content = chatInput.trim();
+    if (composerMode && COMPOSER_MODE_PREFIX[composerMode]) {
+      content = `${COMPOSER_MODE_PREFIX[composerMode]}${content}`;
+    }
+    setComposerMode(null);
+    setTokenRatio(recordTokenUsage(project.id, content));
     const images = [...attachedImages];
     const uid = user?.id ?? 'guest';
     setChatInput('');
@@ -409,8 +511,13 @@ export function ProjectWorkspace() {
           const routed = await arkRoute({
             message: codingMessage,
             kind: 'coding',
-            preferredModelId: prefs.defaultModelId,
-            preferredSource: prefs.aiMode === 'local_only' ? 'local' : 'auto',
+            preferredModelId: activeModel.id === 'ark-auto' ? undefined : activeModel.id,
+            preferredSource:
+              activeModel.source === 'auto'
+                ? 'auto'
+                : activeModel.source === 'local'
+                  ? 'local'
+                  : 'cloud',
             history,
           });
           provider = routerProviderLabel(routed, 'ARK');
@@ -1189,6 +1296,21 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
                   ))}
                 </div>
               )}
+              {composerMode && (
+                <div className="flex items-center gap-2 px-3.5 pt-2">
+                  <span className="inline-flex items-center gap-1.5 rounded-full border border-surface-border bg-surface-hover/60 px-2.5 py-0.5 text-[11px] text-content-secondary capitalize">
+                    {composerMode}
+                    <button
+                      type="button"
+                      onClick={() => setComposerMode(null)}
+                      className="text-content-tertiary hover:text-content-primary"
+                      aria-label="Clear mode"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                </div>
+              )}
               <textarea
                 ref={textareaRef}
                 value={chatInput}
@@ -1196,23 +1318,88 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
                 onKeyDown={e => {
                   if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault();
-                    handleSendChat();
+                    void handleSendChat();
                   }
                 }}
                 placeholder="Ask ARK to build or edit files in this project…"
                 rows={1}
                 className="w-full bg-transparent text-sm text-content-primary placeholder:text-content-tertiary px-3.5 pt-3 pb-2 resize-none outline-none max-h-[220px] overflow-y-auto leading-relaxed"
               />
-              <div className="flex items-center justify-between px-2 pb-2">
-                <div className="flex items-center gap-0.5">
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    className="w-8 h-8 rounded-lg flex items-center justify-center text-content-tertiary hover:text-content-primary hover:bg-surface-hover transition-colors"
-                    title="Attach image"
-                  >
-                    <Plus className="w-4 h-4" />
-                  </button>
+              <div className="flex items-center justify-between px-2 pb-2 gap-1">
+                <div className="flex items-center gap-0.5 min-w-0">
+                  <input
+                    ref={codeFileInputRef}
+                    type="file"
+                    multiple
+                    className="hidden"
+                    accept=".ts,.tsx,.js,.jsx,.mjs,.cjs,.py,.go,.rs,.java,.css,.html,.json,.md,.toml,.yaml,.yml,text/*"
+                    onChange={async e => {
+                      const list = e.target.files;
+                      e.target.value = '';
+                      if (!list?.length) return;
+                      const next: Record<string, string> = {};
+                      for (const f of [...list].slice(0, 20)) {
+                        try {
+                          next[f.name] = await f.text();
+                        } catch {
+                          /* skip */
+                        }
+                      }
+                      if (!Object.keys(next).length) return;
+                      setFileContents(prev => {
+                        const mapped = { ...prev };
+                        const treeExtra: FileNode[] = [];
+                        for (const [name, body] of Object.entries(next)) {
+                          const rel = name.includes('/') ? name : `src/${name}`;
+                          mapped[rel] = body;
+                          mapped[name] = body;
+                          treeExtra.push({
+                            name: name.includes('/') ? name.split('/').pop()! : name,
+                            type: 'file',
+                            language: name.split('.').pop(),
+                          });
+                        }
+                        if (treeExtra.length) {
+                          setFileTree(prevTree => {
+                            if (!prevTree.length) {
+                              return [{
+                                name: 'src',
+                                type: 'folder',
+                                children: treeExtra,
+                              }];
+                            }
+                            const clone = structuredClone(prevTree);
+                            const src = clone.find(n => n.name === 'src' && n.type === 'folder');
+                            if (src?.children) {
+                              for (const f of treeExtra) {
+                                if (!src.children.some(c => c.name === f.name)) src.children.push(f);
+                              }
+                            }
+                            return clone;
+                          });
+                          const first = Object.keys(next)[0];
+                          if (first) setSelectedFile(first.includes('/') ? first : `src/${first}`);
+                        }
+                        return mapped;
+                      });
+                    }}
+                  />
+                  <ComposerPlusMenu
+                    showImage
+                    buttonClassName="w-8 h-8 rounded-lg flex items-center justify-center text-content-tertiary hover:text-content-primary hover:bg-surface-hover transition-colors"
+                    onAction={(action: ComposerPlusAction) => {
+                      if (action === 'file') {
+                        codeFileInputRef.current?.click();
+                        return;
+                      }
+                      if (action === 'image') {
+                        fileInputRef.current?.click();
+                        return;
+                      }
+                      setComposerMode(action);
+                      requestAnimationFrame(() => textareaRef.current?.focus());
+                    }}
+                  />
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
@@ -1221,15 +1408,84 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
                   >
                     <ImageIcon className="w-3.5 h-3.5" />
                   </button>
+                  <TokenUsageRing ratio={tokenRatio} size={16} className="text-content-primary mx-1" />
                 </div>
-                <button
-                  type="button"
-                  onClick={handleSendChat}
-                  disabled={!chatInput.trim() && attachedImages.length === 0}
-                  className="w-8 h-8 rounded-lg bg-content-primary text-ark-navy-950 flex items-center justify-center hover:opacity-90 transition-opacity disabled:opacity-30 disabled:cursor-not-allowed"
-                >
-                  <ArrowUp className="w-4 h-4" strokeWidth={2.5} />
-                </button>
+                <div className="flex items-center gap-1 shrink-0">
+                  <button
+                    ref={modelButtonRef}
+                    type="button"
+                    onClick={() => setModelMenuOpen(o => !o)}
+                    className="inline-flex items-center gap-1 rounded-full border border-surface-border/80 bg-surface-hover/60 hover:bg-surface-hover px-2 py-1 text-[11px] text-content-primary transition-colors max-w-[8.5rem]"
+                    title={activeModel.source === 'auto' ? 'ARK Auto · failover on' : activeModel.name}
+                    aria-label="Select model"
+                    aria-expanded={modelMenuOpen}
+                  >
+                    {activeModel.source !== 'auto' && (
+                      activeModel.source === 'local'
+                        ? <Cpu className="w-3 h-3 text-emerald-400 shrink-0" />
+                        : <Cloud className="w-3 h-3 text-sky-400 shrink-0" />
+                    )}
+                    <span className="font-medium truncate">
+                      {activeModel.source === 'auto' ? 'ARK' : activeModel.name}
+                    </span>
+                    <ChevronDown className={`w-3 h-3 text-content-tertiary shrink-0 ${modelMenuOpen ? 'rotate-180' : ''}`} />
+                  </button>
+                  {modelMenuOpen && menuPos && createPortal(
+                    <div
+                      ref={modelMenuRef}
+                      className="w-64 max-h-72 overflow-y-auto rounded-xl border border-surface-border bg-ark-navy-900 shadow-2xl py-1.5"
+                      style={{
+                        position: 'fixed',
+                        left: menuPos.left,
+                        bottom: menuPos.bottom,
+                        transform: 'translateX(-50%)',
+                        zIndex: 99999,
+                      }}
+                    >
+                      {codeModelOptions.map(model => (
+                        <button
+                          key={model.id}
+                          type="button"
+                          onClick={() => {
+                            setActiveModel(model);
+                            if (model.source === 'auto') {
+                              setLocalPrefs({ defaultModelId: 'ark-auto', aiMode: 'automatic', autoFailover: true });
+                            } else {
+                              setLocalPrefs({ defaultModelId: model.id, lastChatModelId: model.id });
+                              if (model.source === 'local') void setEngineModel(model.id).catch(() => undefined);
+                            }
+                            setModelMenuOpen(false);
+                          }}
+                          className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-surface-hover"
+                        >
+                          <span className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${
+                            model.source === 'auto' ? 'bg-sky-500/15 text-sky-400'
+                              : model.source === 'local' ? 'bg-emerald-500/15 text-emerald-400'
+                                : 'bg-sky-500/15 text-sky-400'
+                          }`}>
+                            {model.source === 'auto' ? <Zap className="w-3.5 h-3.5" />
+                              : model.source === 'local' ? <Cpu className="w-3.5 h-3.5" />
+                                : <Cloud className="w-3.5 h-3.5" />}
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-sm text-content-primary truncate">{model.name}</span>
+                            <span className="block text-[11px] text-content-tertiary truncate">{model.detail}</span>
+                          </span>
+                          {activeModel.id === model.id && <Check className="w-4 h-4 text-ark-accent-green shrink-0" />}
+                        </button>
+                      ))}
+                    </div>,
+                    document.body,
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => void handleSendChat()}
+                    disabled={!chatInput.trim() && attachedImages.length === 0}
+                    className="w-8 h-8 rounded-lg bg-content-primary text-ark-navy-950 flex items-center justify-center hover:opacity-90 transition-opacity disabled:opacity-30 disabled:cursor-not-allowed"
+                  >
+                    <ArrowUp className="w-4 h-4" strokeWidth={2.5} />
+                  </button>
+                </div>
               </div>
             </div>
           </div>
