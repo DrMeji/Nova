@@ -139,8 +139,10 @@ export function SettingsContent({ onClose }: { onClose?: () => void } = {}) {
             if (prev.launchOnStartup === s.openAtLogin) return prev;
             return setLocalPrefs({ launchOnStartup: s.openAtLogin });
           });
-        } else if (getLocalPrefs().launchOnStartup) {
-          void window.arkDesktop?.loginItemSet?.(true);
+        } else if (getLocalPrefs().launchOnStartup && s?.canSetLoginItem !== false) {
+          void window.arkDesktop?.appMeta?.().then((meta) => {
+            if (meta?.isPackaged) void window.arkDesktop?.loginItemSet?.(true);
+          });
         }
       })
       .catch(() => {});
@@ -994,7 +996,9 @@ export function SettingsContent({ onClose }: { onClose?: () => void } = {}) {
                   value={prefs.launchOnStartup}
                   onChange={v => {
                     patchPrefs({ launchOnStartup: v });
-                    void window.arkDesktop?.loginItemSet?.(v);
+                    void window.arkDesktop?.loginItemSet?.(v).then((r) => {
+                      if (r?.devBlocked && v) patchPrefs({ launchOnStartup: false });
+                    });
                   }}
                 />
                 <ToggleRow

@@ -223,6 +223,17 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.52',
+    channel: 'stable' as const,
+    date: 'Aug 17, 2026',
+    title: 'Fix stray Electron window on PC restart',
+    notes: [
+      'Dev Electron builds no longer register Windows startup (that caused the raw Electron splash on boot)',
+      'Packaged ARK cleans up stale dev startup entries and re-registers the real ARK.exe when Launch on startup is on',
+      'Lindsay / brain API unchanged — ARK still starts from the installed app only',
+    ],
+  },
+  {
     version: '0.1.51',
     channel: 'stable' as const,
     date: 'Aug 16, 2026',

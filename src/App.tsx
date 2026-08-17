@@ -46,10 +46,12 @@ function AppContent() {
   const [setupTick, setSetupTick] = useState(0);
 
   useEffect(() => {
-    if (!window.arkDesktop?.loginItemSet) return;
-    if (getLocalPrefs().launchOnStartup) {
-      void window.arkDesktop.loginItemSet(true);
-    }
+    void window.arkDesktop?.appMeta?.().then((meta) => {
+      if (!meta?.isPackaged) return;
+      if (getLocalPrefs().launchOnStartup) {
+        void window.arkDesktop?.loginItemSet?.(true);
+      }
+    });
   }, []);
 
   useEffect(() => {

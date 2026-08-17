@@ -61,8 +61,18 @@ declare global {
       authStorageGet?: (key: string) => Promise<string | null>;
       authStorageSet?: (key: string, value: string) => Promise<boolean>;
       authStorageRemove?: (key: string) => Promise<boolean>;
-      loginItemGet?: () => Promise<{ ok: boolean; openAtLogin?: boolean; openAsHidden?: boolean }>;
-      loginItemSet?: (openAtLogin: boolean) => Promise<{ ok: boolean; openAtLogin?: boolean }>;
+      loginItemGet?: () => Promise<{
+        ok: boolean;
+        openAtLogin?: boolean;
+        openAsHidden?: boolean;
+        isPackaged?: boolean;
+        canSetLoginItem?: boolean;
+      }>;
+      loginItemSet?: (openAtLogin: boolean) => Promise<{
+        ok: boolean;
+        openAtLogin?: boolean;
+        devBlocked?: boolean;
+      }>;
       setupGet?: () => Promise<{ ok: boolean; completed?: boolean }>;
       setupSet?: (completed: boolean) => Promise<{ ok: boolean; completed?: boolean }>;
       systemInfo?: () => Promise<{

@@ -119,6 +119,56 @@ function showMainWindow() {
   mainWindow.focus();
 }
 
+/** Dev builds must never register Windows startup — raw electron.exe shows the Electron splash. */
+function loginItemAllowed() {
+  return app.isPackaged && !isDev;
+}
+
+function applyLoginItem(openAtLogin) {
+  if (!loginItemAllowed()) {
+    try {
+      app.setLoginItemSettings({ openAtLogin: false });
+    } catch {
+      /* ignore */
+    }
+    return { ok: true, openAtLogin: false, devBlocked: true };
+  }
+  app.setLoginItemSettings({
+    openAtLogin: Boolean(openAtLogin),
+    openAsHidden: false,
+    path: process.execPath,
+    args: [],
+  });
+  const s = app.getLoginItemSettings();
+  return { ok: true, openAtLogin: Boolean(s.openAtLogin) };
+}
+
+/** Remove stale Run-key entries left by dev Electron (node_modules\\electron). */
+function cleanupStaleDevStartupEntry() {
+  if (process.platform !== 'win32') return;
+  try {
+    const { execFileSync } = require('child_process');
+    const script = [
+      '$k = "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run"',
+      '$p = Get-ItemProperty -Path $k -ErrorAction SilentlyContinue',
+      'if (-not $p) { exit 0 }',
+      'foreach ($prop in $p.PSObject.Properties) {',
+      '  if ($prop.Name -match "^PS") { continue }',
+      '  if ("$($prop.Value)" -match "node_modules[\\\\/]+electron") {',
+      '    Remove-ItemProperty -Path $k -Name $prop.Name -Force -ErrorAction SilentlyContinue',
+      '  }',
+      '}',
+    ].join(' ');
+    execFileSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script], {
+      stdio: 'ignore',
+      windowsHide: true,
+      timeout: 12000,
+    });
+  } catch {
+    /* ignore */
+  }
+}
+
 function createWindow() {
   if (mainWindow && !mainWindow.isDestroyed()) {
     showMainWindow();
@@ -401,19 +451,17 @@ ipcMain.handle('ark:auth-storage-remove', async (_event, key) => arkAuthStore.re
 
 ipcMain.handle('ark:login-item-get', async () => {
   const s = app.getLoginItemSettings();
-  return { ok: true, openAtLogin: Boolean(s.openAtLogin), openAsHidden: Boolean(s.openAsHidden) };
+  return {
+    ok: true,
+    openAtLogin: Boolean(s.openAtLogin),
+    openAsHidden: Boolean(s.openAsHidden),
+    isPackaged: app.isPackaged,
+    canSetLoginItem: loginItemAllowed(),
+  };
 });
 
 ipcMain.handle('ark:login-item-set', async (_event, payload) => {
-  const enabled = Boolean(payload?.openAtLogin);
-  app.setLoginItemSettings({
-    openAtLogin: enabled,
-    openAsHidden: false,
-    path: process.execPath,
-    args: [],
-  });
-  const s = app.getLoginItemSettings();
-  return { ok: true, openAtLogin: Boolean(s.openAtLogin) };
+  return applyLoginItem(Boolean(payload?.openAtLogin));
 });
 
 ipcMain.handle('ark:app-meta', async () => ({
@@ -770,6 +818,10 @@ if (isUpdaterMode) {
     });
 
     app.whenReady().then(() => {
+      cleanupStaleDevStartupEntry();
+      if (!app.isPackaged) {
+        applyLoginItem(false);
+      }
       arkUpdater.setForceExitHook(() => {
         quitting = true;
         if (tray) {
