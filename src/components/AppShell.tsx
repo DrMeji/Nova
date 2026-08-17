@@ -9,6 +9,8 @@ import { Modal } from './Modal';
 import { SettingsContent } from './SettingsContent';
 import { SearchPanel } from './SearchPanel';
 import { useRecentProjects } from '@/context/RecentProjectsContext';
+import { useAuth } from '@/context/AuthContext';
+import { getLocalPrefs } from '@/lib/localPrefs';
 import {
   clearActivity,
   getActivityFlags,
@@ -35,19 +37,47 @@ const NAV_ITEMS: {
   { label: 'Local AI', icon: Bot, route: { name: 'local-ai' }, activity: 'local-ai' },
 ];
 
+function resolveDisplayName(
+  prefsName: string | undefined,
+  profileName: string | null | undefined,
+  email: string | undefined,
+) {
+  const fromPrefs = prefsName?.trim();
+  if (fromPrefs && fromPrefs !== 'Guest') return fromPrefs;
+  if (profileName?.trim()) return profileName.trim();
+  return email?.split('@')[0] || 'Guest';
+}
+
 export function AppShell({ children }: { children: ReactNode }) {
   const { route, navigate } = useRouter();
+  const { user, profile } = useAuth();
   const { recent, activeChats, archiveChat, deleteChatForever, renameRecent, renameChat, removeRecent } = useRecentProjects();
   const [collapsed, setCollapsed] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [recentOpen, setRecentOpen] = useState(true);
+  const [prefsName, setPrefsName] = useState(() => getLocalPrefs().displayName);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string; kind: 'chat' | 'project' } | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
   const [activity, setActivity] = useState(() => ({ ...getActivityFlags() }));
 
-  useEffect(() => subscribeActivity(() => setActivity({ ...getActivityFlags() })), []);
+  useEffect(() => {
+    const unsub = subscribeActivity(() => setActivity({ ...getActivityFlags() }));
+    return () => {
+      unsub();
+    };
+  }, []);
+
+  useEffect(() => {
+    const onPrefs = () => setPrefsName(getLocalPrefs().displayName);
+    window.addEventListener('ark:prefs-changed', onPrefs);
+    return () => window.removeEventListener('ark:prefs-changed', onPrefs);
+  }, []);
+
+  useEffect(() => {
+    if (!settingsOpen) setPrefsName(getLocalPrefs().displayName);
+  }, [settingsOpen]);
 
   useEffect(() => {
     void reattachEngineDownloads('models');
@@ -69,6 +99,9 @@ export function AppShell({ children }: { children: ReactNode }) {
       chatId: route.name === 'chat' ? route.chatId : undefined,
     });
   }, [route]);
+
+  const displayName = resolveDisplayName(prefsName, profile?.display_name, user?.email);
+  const initial = displayName[0]?.toUpperCase() || '?';
 
   const inRecentChat = route.name === 'chat' && Boolean(route.chatId);
 
@@ -423,20 +456,50 @@ export function AppShell({ children }: { children: ReactNode }) {
           </nav>
 
           <div className={`mt-auto flex-none shrink-0 ${collapsed ? 'p-2 pb-3' : 'p-3 pt-2 pb-3'}`}>
-            <button
-              type="button"
-              onClick={() => setSettingsOpen(true)}
-              title="Open Settings"
-              className={`flex items-center justify-center text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors ${
-                collapsed
-                  ? 'w-9 h-9 mx-auto rounded-xl border border-surface-border bg-ark-navy-900/80'
-                  : 'w-full gap-2 rounded-xl border border-surface-border bg-ark-navy-950/80 px-2.5 py-2.5'
-              }`}
-              aria-label="Open Settings"
-            >
-              <Settings className="w-4 h-4 shrink-0" />
-              {!collapsed && <span className="text-xs font-medium text-content-primary">Settings</span>}
-            </button>
+            {collapsed ? (
+              <div className="flex flex-col items-center gap-2">
+                <span
+                  className="w-8 h-8 rounded-lg bg-surface-hover border border-surface-border flex items-center justify-center text-xs font-semibold text-content-primary"
+                  title={displayName}
+                  aria-label={displayName}
+                >
+                  {initial}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setSettingsOpen(true)}
+                  title="Open Settings"
+                  className="w-9 h-9 rounded-xl border border-surface-border bg-ark-navy-900/80 flex items-center justify-center text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors"
+                  aria-label="Open Settings"
+                >
+                  <Settings className="w-4 h-4" />
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 rounded-xl border border-surface-border bg-ark-navy-950/80 px-2.5 py-2">
+                <span
+                  className="w-8 h-8 shrink-0 rounded-lg bg-surface-hover border border-surface-border flex items-center justify-center text-sm font-semibold text-content-primary"
+                  aria-hidden="true"
+                >
+                  {initial}
+                </span>
+                <span
+                  className="flex-1 min-w-0 text-xs font-medium text-content-primary truncate select-none"
+                  title={displayName}
+                >
+                  {displayName}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setSettingsOpen(true)}
+                  title="Open Settings"
+                  className="p-1.5 rounded-lg shrink-0 text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors"
+                  aria-label="Open Settings"
+                >
+                  <Settings className="w-4 h-4" />
+                </button>
+              </div>
+            )}
           </div>
       </aside>
 

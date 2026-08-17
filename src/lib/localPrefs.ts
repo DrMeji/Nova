@@ -231,6 +231,7 @@ export const ARK_CHANGELOG = [
       'Auto picks a brain once per thread and stays on it until failover — pill shows ARK · model name',
       'Image and video chats remember their equipped path; code workspace uses the same sticky coder brain',
       'Token ring and model pill reflect the active brain instead of generic ARK',
+      'Sidebar profile restored at the bottom (name + settings gear)',
     ],
   },
   {
