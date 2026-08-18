@@ -229,6 +229,15 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.62',
+    channel: 'stable' as const,
+    date: 'Aug 17, 2026',
+    title: 'Re-enable Networking + Message (test)',
+    notes: [
+      'Networking and Message tabs are enabled again for UI testing',
+    ],
+  },
+  {
     version: '0.1.61',
     channel: 'stable' as const,
     date: 'Aug 17, 2026',
