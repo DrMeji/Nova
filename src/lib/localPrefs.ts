@@ -229,6 +229,26 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.59',
+    channel: 'stable' as const,
+    date: 'Aug 17, 2026',
+    title: 'Updating screen stays until ARK reopens',
+    notes: [
+      'The Updating splash no longer vanishes after install while ARK is still starting',
+      'Splash stays on screen until the real ARK window appears, then it closes',
+    ],
+  },
+  {
+    version: '0.1.58',
+    channel: 'stable' as const,
+    date: 'Aug 17, 2026',
+    title: 'Code studio, native iPhone/Android apps, and honest brains',
+    notes: [
+      'Code can author real iPhone (Xcode) and Android (Android Studio) projects and push to GitHub',
+      'Updating splash and install path unchanged in 0.1.58 — 0.1.59 keeps that screen until reopen',
+    ],
+  },
+  {
     version: '0.1.57',
     channel: 'stable' as const,
     date: 'Aug 17, 2026',

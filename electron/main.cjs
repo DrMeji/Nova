@@ -212,6 +212,11 @@ function createWindow() {
       }
     }
     if (!win.isVisible()) win.show();
+    try {
+      arkUpdater.markUiShown();
+    } catch {
+      /* ignore */
+    }
   };
 
   win.once('ready-to-show', reveal);
