@@ -39,7 +39,7 @@ const NAV_ITEMS: {
   { label: 'Plugins', icon: Blocks, route: { name: 'build' }, activity: 'plugins' },
   { label: 'Models', icon: Database, route: { name: 'models' }, activity: 'models' },
   { label: 'Local AI', icon: Bot, route: { name: 'local-ai' }, activity: 'local-ai' },
-  { label: 'Networking', icon: Globe, route: { name: 'networking' }, activity: 'networking' },
+  { label: 'Networking', icon: Globe, route: { name: 'networking' }, activity: 'networking', comingSoon: true },
   { label: 'Message', icon: MessageSquare, route: { name: 'message' }, activity: 'message' },
   { label: 'Call', icon: Phone, route: { name: 'call' }, activity: 'call' },
 ];

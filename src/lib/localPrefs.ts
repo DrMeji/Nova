@@ -229,6 +229,16 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.60',
+    channel: 'stable' as const,
+    date: 'Aug 17, 2026',
+    title: 'Networking marked Coming soon (update splash test)',
+    notes: [
+      'Networking is disabled in the sidebar with Coming soon — Message and Call stay available',
+      'Use this build to confirm the Updating screen stays until ARK reopens',
+    ],
+  },
+  {
     version: '0.1.59',
     channel: 'stable' as const,
     date: 'Aug 17, 2026',
