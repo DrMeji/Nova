@@ -15,9 +15,6 @@ import { BuildRun } from '@/views/BuildRun';
 import { LocalAI } from '@/views/LocalAI';
 import { CreationViewer } from '@/views/CreationViewer';
 import { Settings } from '@/views/Settings';
-import { NetworkingView } from '@/views/NetworkingView';
-import { MessageView } from '@/views/MessageView';
-import { CallView } from '@/views/CallView';
 import { SocialProvider } from '@/context/SocialContext';
 import { runCleanBootIfNeeded } from '@/lib/clearSession';
 import { getLocalPrefs } from '@/lib/localPrefs';
@@ -30,7 +27,17 @@ import { Loader2 } from 'lucide-react';
 runCleanBootIfNeeded();
 
 function AppRoutes() {
-  const { route } = useRouter();
+  const { route, navigate } = useRouter();
+
+  useEffect(() => {
+    if (route.name === 'networking' || route.name === 'message' || route.name === 'call') {
+      navigate({ name: 'chat' });
+      return;
+    }
+    if (route.name === 'chat' && (route.mode === 'image' || route.mode === 'video')) {
+      navigate({ name: 'chat', chatId: route.chatId, creationId: route.creationId });
+    }
+  }, [route, navigate]);
 
   switch (route.name) {
     case 'dashboard': return <Dashboard />;
@@ -42,9 +49,10 @@ function AppRoutes() {
     case 'models': return <ModelsView />;
     case 'build': return <BuildRun />;
     case 'local-ai': return <LocalAI />;
-    case 'networking': return <NetworkingView />;
-    case 'message': return <MessageView />;
-    case 'call': return <CallView />;
+    case 'networking':
+    case 'message':
+    case 'call':
+      return <AIChat key="general" />;
     case 'settings': return <Settings />;
     default: return <Dashboard />;
   }

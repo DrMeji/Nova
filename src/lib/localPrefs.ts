@@ -249,6 +249,17 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.70',
+    channel: 'stable' as const,
+    date: 'Aug 18, 2026',
+    title: 'Sweep dead UI and wire Coming soon for real',
+    notes: [
+      'Coming soon tabs (Image, Video, Networking, Message, Call) no longer open if something still links to them',
+      'Settings full-page and overlay now share one panel; unused capacity/update overlays and demo project stubs are gone',
+      'Code chat respects Models cloud on/off, and leftover Invite / New iPhone starter code is out of the workspace',
+    ],
+  },
+  {
     version: '0.1.69',
     channel: 'stable' as const,
     date: 'Aug 18, 2026',

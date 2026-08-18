@@ -3,7 +3,6 @@ import { createPortal } from 'react-dom';
 import { useRouter } from '@/context/RouterContext';
 import { useAuth } from '@/context/AuthContext';
 import { useRecentProjects } from '@/context/RecentProjectsContext';
-import { useSocial } from '@/context/SocialContext';
 import { fetchProjects, saveChatMessage, updateProject } from '@/lib/api';
 import type { Project, ChatMessage } from '@/types';
 import {
@@ -67,9 +66,7 @@ import {
 import { classifyMobileTarget, inferMobileTargetFromFiles, isNativeMobileTree, needsMobileTargetChoice } from '@/lib/mobileTarget';
 import { finalizeMobileEdits, formatNativeBuildReply, formatNativePushReply, mobileTemplateEdits, preferredMobileFocus } from '@/lib/mobileTemplates';
 import {
-  defaultDeviceForTarget,
   devicesForChips,
-  deviceLine,
   familyBuildPrompt,
   isLayoutLockAsk,
   layoutLockPrompt,
@@ -79,6 +76,7 @@ import {
   type MobilePlatform,
   type PhoneDevice,
 } from '@/lib/mobileDevices';
+import { isCloudProviderEnabled } from '@/lib/cloudSources';
 import { DeviceFamilyChips } from '@/components/DeviceFamilyChips';
 import { DevicePreview } from '@/components/DevicePreview';
 import { ComposerPlusMenu, type ComposerPlusAction } from '@/components/ComposerPlusMenu';
@@ -109,14 +107,8 @@ import { appendScaffoldHonesty } from '@/lib/codeBuildHonesty';
 import { runCodeStudioCommand } from '@/lib/studioCommands';
 import { StudioEmptyState } from '@/components/StudioEmptyState';
 import { GitHubRepoPicker } from '@/components/GitHubRepoPicker';
-import { TeammateBar } from '@/components/TeammateBar';
-import { BLANK_STARTER, loadTeamState, saveTeamState } from '@/lib/arkTeam';
-import { formatArkId, isArkUserId, lookupArkUser, normalizeArkId } from '@/lib/arkUserId';
 import {
   getGitHubRepoAccess,
-  inviteGitHubCollaborator,
-  listGitHubCollaborators,
-  type GitHubCollaborator,
   type GitHubRepo,
   type TeamAccess,
 } from '@/lib/github';
@@ -347,7 +339,6 @@ function ResizeHandle({ onDrag }: { onDrag: (deltaX: number) => void }) {
 export function ProjectWorkspace() {
   const { route, navigate } = useRouter();
   const { user } = useAuth();
-  const { inviteByArkId } = useSocial();
   const { touchRecentProject, addRecent } = useRecentProjects();
   const projectId = route.name === 'project' ? route.id : '';
   const isFreshCode = route.name === 'code';
@@ -400,9 +391,7 @@ export function ProjectWorkspace() {
   const [gitInfo, setGitInfo] = useState<GitStatus | null>(null);
   const [gitBusy, setGitBusy] = useState(false);
   const [githubPickerOpen, setGithubPickerOpen] = useState(false);
-  const [teammates, setTeammates] = useState<GitHubCollaborator[]>([]);
   const [myAccess, setMyAccess] = useState<TeamAccess>('full');
-  const [teamState, setTeamState] = useState(() => loadTeamState(projectId));
   const [jumpLine, setJumpLine] = useState(0);
   const [fileFindOpen, setFileFindOpen] = useState(false);
   const [fileFind, setFileFind] = useState('');
@@ -481,24 +470,6 @@ export function ProjectWorkspace() {
 
   const canEdit = myAccess !== 'read';
 
-  const teamPeople = useMemo(() => {
-    const ark = (teamState.arkMembers || []).map(m => ({
-      login: m.arkId,
-      avatar_url: '',
-      html_url: '',
-      role_name: m.access === 'full' ? 'admin' : m.access === 'write' ? 'write' : 'read',
-      permissions: {
-        admin: m.access === 'full',
-        push: m.access !== 'read',
-        pull: true,
-      },
-      arkId: m.arkId,
-      displayName: m.displayName,
-    }));
-    const taken = new Set(ark.map(a => a.login));
-    return [...teammates.filter(t => !taken.has(t.login)), ...ark];
-  }, [teammates, teamState.arkMembers]);
-
   const openPathInEditor = useCallback((path: string, line?: number) => {
     const flat = fileContentsRef.current;
     const hit = flat[path]
@@ -514,88 +485,6 @@ export function ProjectWorkspace() {
     setCodeOpen(true);
     setJumpLine(line || 1);
   }, []);
-
-  const startBlankProject = () => {
-    if (!canEdit) return;
-    const uid = user?.id ?? 'guest';
-    let pid = project?.id || projectId;
-    if (!pid) {
-      const created = addRecent('Blank page');
-      pid = created.id;
-      skipHydrateRef.current = true;
-      setProject(emptyWorkspaceProject(uid, created.id, created.name));
-      navigate({ name: 'project', id: created.id });
-    }
-    applyProjectFiles(BLANK_STARTER);
-    if (window.arkDesktop?.projectWrite) {
-      void window.arkDesktop.projectWrite({
-        projectId: pid,
-        projectName: project?.name || 'Blank page',
-        files: packDiskFiles(BLANK_STARTER, messagesRef.current),
-      });
-    }
-    setChatInput('Add ');
-    requestAnimationFrame(() => textareaRef.current?.focus());
-  };
-
-  const startNativeProject = (target: 'ios' | 'android') => {
-    if (!canEdit) return;
-    const uid = user?.id ?? 'guest';
-    const label = target === 'ios' ? 'iPhone app' : 'Android app';
-    const device = defaultDeviceForTarget(target);
-    const prompt = target === 'ios'
-      ? `Build a native iPhone app for ${deviceLine(device)} for the Apple App Store (SwiftUI + Xcode).`
-      : `Build a native Android app for ${deviceLine(device)} for Google Play (Kotlin + Android Studio).`;
-    let pid = project?.id || projectId;
-    if (!pid) {
-      const created = addRecent(label);
-      pid = created.id;
-      skipHydrateRef.current = true;
-      setProject(emptyWorkspaceProject(uid, created.id, created.name));
-      navigate({ name: 'project', id: created.id });
-    }
-    const edits = mobileTemplateEdits(target, prompt, label);
-    const files = Object.fromEntries(edits.map(e => [e.path, e.content]));
-    applyProjectFiles(files);
-    setPreviewDevice(device);
-    setRightTab('preview');
-    setCodeOpen(true);
-    const assistantId = crypto.randomUUID();
-    const userMsg: ChatMessage = {
-      id: crypto.randomUUID(),
-      user_id: uid,
-      project_id: pid,
-      role: 'user',
-      content: prompt,
-      provider_used: null,
-      created_at: new Date().toISOString(),
-    };
-    const assistantMsg: ChatMessage = {
-      id: assistantId,
-      user_id: uid,
-      project_id: pid,
-      role: 'assistant',
-      content: formatNativeBuildReply(label, prompt, files),
-      provider_used: 'ARK',
-      created_at: new Date().toISOString(),
-    };
-    const nextMsgs = [...messagesRef.current, userMsg, assistantMsg];
-    messagesRef.current = nextMsgs;
-    saveProjectThread(pid, nextMsgs);
-    setMessages(nextMsgs);
-    setDeviceOfferId(assistantId);
-    setShipOfferId(assistantId);
-    if (window.arkDesktop?.projectWrite) {
-      void window.arkDesktop.projectWrite({
-        projectId: pid,
-        projectName: label,
-        files: packDiskFiles(files, nextMsgs),
-      }).then(res => {
-        if (res.root) setDiskRoot(res.root);
-      });
-    }
-    requestAnimationFrame(() => textareaRef.current?.focus());
-  };
 
   const undoLastEdit = () => {
     const snap = undoSnapshotRef.current;
@@ -617,15 +506,10 @@ export function ProjectWorkspace() {
   };
 
   useEffect(() => {
-    setTeamState(loadTeamState(projectId));
-  }, [projectId]);
-
-  useEffect(() => {
     const remote = gitInfo?.remote || '';
     const parsed = parseGithubRemote(remote);
     const token = getPluginRuntime('github', loadPluginState()).token?.trim();
     if (!parsed || !token) {
-      setTeammates([]);
       setMyAccess('full');
       return;
     }
@@ -636,12 +520,6 @@ export function ProjectWorkspace() {
         if (!cancelled) setMyAccess(mine.access);
       } catch {
         if (!cancelled) setMyAccess('read');
-      }
-      try {
-        const people = await listGitHubCollaborators(token, parsed.owner, parsed.repo);
-        if (!cancelled) setTeammates(people);
-      } catch {
-        if (!cancelled) setTeammates([]);
       }
     })();
     return () => { cancelled = true; };
@@ -711,7 +589,9 @@ export function ProjectWorkspace() {
   }, [modelMenuOpen]);
 
   const codeModelOptions = useMemo(() => {
-    const keyed = CLOUD_CODE_WHEN_KEYED.filter(m => hasProviderApiKey(m.keyId));
+    const keyed = CLOUD_CODE_WHEN_KEYED.filter(
+      m => hasProviderApiKey(m.keyId) && isCloudProviderEnabled(m.keyId),
+    );
     return [...CODE_MODELS, ...localModels, ...keyed];
   }, [localModels]);
 
@@ -3188,80 +3068,6 @@ export function ProjectWorkspace() {
           </>
         )}
       </div>
-
-      {false && <TeammateBar
-        people={teamPeople}
-        assignments={teamState.assignments}
-        myAccess={myAccess}
-        canInvite={myAccess === 'full'}
-        onInvite={(username, access) => {
-          const arkId = normalizeArkId(username);
-          if (isArkUserId(arkId)) {
-            void lookupArkUser(arkId).then(found => {
-              const member = {
-                arkId,
-                displayName: found?.displayName || formatArkId(arkId),
-                access,
-              };
-              const arkMembers = [
-                ...(teamState.arkMembers || []).filter(m => m.arkId !== arkId),
-                member,
-              ];
-              const trusted = teamState.trusted.includes(arkId)
-                ? teamState.trusted
-                : [...teamState.trusted, arkId];
-              const next = { ...teamState, arkMembers, trusted };
-              setTeamState(next);
-              saveTeamState(projectId, next);
-              void inviteByArkId(arkId, member.displayName);
-            });
-            return;
-          }
-          const parsed = parseGithubRemote(gitInfo?.remote || '');
-          const token = getPluginRuntime('github', loadPluginState()).token?.trim();
-          if (!parsed || !token) {
-            setMessages(prev => [...prev, {
-              id: crypto.randomUUID(),
-              user_id: user?.id ?? 'guest',
-              project_id: projectId,
-              role: 'assistant',
-              content: 'Use their 7-digit ARK ID to add them. GitHub usernames need a connected GitHub repo.',
-              provider_used: 'Team',
-              created_at: new Date().toISOString(),
-            }]);
-            return;
-          }
-          void inviteGitHubCollaborator(token, parsed.owner, parsed.repo, username, access)
-            .then(() => listGitHubCollaborators(token, parsed.owner, parsed.repo))
-            .then(setTeammates)
-            .catch(err => {
-              setMessages(prev => [...prev, {
-                id: crypto.randomUUID(),
-                user_id: user?.id ?? 'guest',
-                project_id: projectId,
-                role: 'assistant',
-                content: err instanceof Error ? err.message : 'Could not invite that GitHub user.',
-                provider_used: 'GitHub',
-                created_at: new Date().toISOString(),
-              }]);
-            });
-          const trusted = teamState.trusted.includes(username)
-            ? teamState.trusted
-            : [...teamState.trusted, username];
-          const next = { ...teamState, trusted };
-          setTeamState(next);
-          saveTeamState(projectId, next);
-        }}
-        onAssign={(login, area) => {
-          const assignments = [
-            ...teamState.assignments.filter(a => a.login.toLowerCase() !== login.toLowerCase()),
-            ...(area ? [{ login, area }] : []),
-          ];
-          const next = { ...teamState, assignments };
-          setTeamState(next);
-          saveTeamState(projectId, next);
-        }}
-      />}
 
       <GitHubRepoPicker
         open={githubPickerOpen}

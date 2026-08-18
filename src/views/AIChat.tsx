@@ -85,7 +85,6 @@ import {
   Puzzle, Briefcase, Github,
 } from 'lucide-react';
 import { engineGenerateCancel, getEngineStatus, setEngineModel } from '@/lib/arkEngine';
-// CapacityMeter removed from footer — ring + model pill carry status
 
 const CODE_FILE_RE =
   /\.(tsx?|jsx?|mjs|cjs|py|go|rs|java|kt|swift|cs|cpp|cxx|cc|c|h|hpp|rb|php|vue|svelte|css|scss|less|html|json|toml|ya?ml|md|sql|sh|bash|zsh|ps1|dockerfile|makefile)$/i;

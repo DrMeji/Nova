@@ -13,7 +13,6 @@ import { useRecentProjects } from '@/context/RecentProjectsContext';
 import { useAuth } from '@/context/AuthContext';
 import { getLocalPrefs } from '@/lib/localPrefs';
 import { formatArkId } from '@/lib/arkUserId';
-import { useSocial } from '@/context/SocialContext';
 import {
   clearActivity,
   getActivityFlags,
@@ -58,7 +57,6 @@ function resolveDisplayName(
 export function AppShell({ children }: { children: ReactNode }) {
   const { route, navigate } = useRouter();
   const { user, profile } = useAuth();
-  const { incoming, acceptCall, declineCall } = useSocial();
   const { recent, activeChats, archiveChat, deleteChatForever, renameRecent, renameChat, removeRecent } = useRecentProjects();
   const [collapsed, setCollapsed] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -536,20 +534,6 @@ export function AppShell({ children }: { children: ReactNode }) {
       </aside>
 
         <main className="flex-1 min-h-0 min-w-0 overflow-hidden m-2 ml-2 relative">
-          {incoming && (
-            <div className="absolute top-3 left-1/2 -translate-x-1/2 z-30 flex items-center gap-3 rounded-2xl border border-surface-border bg-ark-navy-950/95 px-4 py-2.5 shadow-xl">
-              <Phone className="w-4 h-4 text-emerald-400" />
-              <p className="text-sm text-content-primary">
-                Incoming call from {incoming.fromName || formatArkId(incoming.from)}
-              </p>
-              <button type="button" onClick={acceptCall} className="text-xs rounded-full bg-emerald-600 text-white px-3 py-1">
-                Accept
-              </button>
-              <button type="button" onClick={declineCall} className="text-xs rounded-full border border-surface-border px-3 py-1 text-content-secondary">
-                Decline
-              </button>
-            </div>
-          )}
           {children}
         </main>
 

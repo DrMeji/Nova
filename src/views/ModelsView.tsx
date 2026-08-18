@@ -967,8 +967,6 @@ export function ModelsView() {
                 </section>
               )}
 
-              )}
-
               <div className="space-y-10">
                 {FIT_SECTIONS.map(section => {
                   const models = filteredFit[section.id];
