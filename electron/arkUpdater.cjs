@@ -10,7 +10,7 @@ const fs = require('fs');
 const path = require('path');
 const https = require('https');
 const http = require('http');
-const { spawn } = require('child_process');
+const { spawn, execFileSync } = require('child_process');
 const { app, BrowserWindow } = require('electron');
 
 const UPDATE_REPO = 'DrMeji/Ark';
@@ -348,6 +348,40 @@ function pidAlive(pid) {
   } catch {
     return false;
   }
+}
+
+async function waitForNoOtherArkExe(exceptPid, timeoutMs, writeLog) {
+  if (process.platform !== 'win32') return true;
+  const keep = Number(exceptPid);
+  const deadline = Date.now() + timeoutMs;
+
+  const otherArkPids = () => {
+    try {
+      // CSV output: "Image Name","PID",...
+      const out = execFileSync('tasklist', ['/FI', 'IMAGENAME eq ARK.exe', '/FO', 'CSV', '/NH'], {
+        encoding: 'utf8',
+        windowsHide: true,
+      });
+      const lines = String(out || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+      const pids = [];
+      for (const line of lines) {
+        const m = line.match(/"ARK\.exe"\s*,\s*"(\d+)"/i);
+        if (m) pids.push(Number(m[1]));
+      }
+      return pids;
+    } catch {
+      return [];
+    }
+  };
+
+  while (Date.now() < deadline) {
+    const pids = otherArkPids().filter(p => Number.isFinite(p) && p > 0 && p !== keep);
+    if (pids.length === 0) return true;
+    writeLog?.(`waitForNoOtherArkExe still running=${pids.join(',')}`);
+    await sleep(200);
+  }
+
+  return false;
 }
 
 function sleep(ms) {
@@ -796,6 +830,11 @@ async function runStandaloneSplash(argv) {
       await sleep(1200);
     }
     writeLog(`parent exited alive=${pidAlive(parentPid)}`);
+    // NSIS fails with: "Failed to uninstall old application files"
+    // when any lingering ARK.exe process still holds file locks.
+    // So wait until no ARK.exe remains besides this updater.
+    const noOtherArk = await waitForNoOtherArkExe(process.pid, 8000, writeLog);
+    writeLog(`noOtherArk exe except updater=${noOtherArk}`);
     await sleep(400);
 
     await setSplash(win, 18, 'Installing update');
