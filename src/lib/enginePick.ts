@@ -79,9 +79,13 @@ export function rankedReadyEngineIds(
   );
   if (!ready.size) return [];
 
+  const extraCoders = [...ready].filter(id =>
+    /coder|starcoder|codestral|codellama|devstral|deepseek-coder/i.test(id)
+    && !(CODER_ENGINE_RANK as readonly string[]).includes(id),
+  );
   const rank: string[] =
     intent === 'coding'
-      ? [...CODER_ENGINE_RANK, ...CHAT_ENGINE_RANK]
+      ? [...extraCoders, ...CODER_ENGINE_RANK, ...CHAT_ENGINE_RANK]
       : [...CHAT_ENGINE_RANK];
 
   const ordered: string[] = [];

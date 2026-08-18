@@ -16,6 +16,27 @@ import {
 } from '@/lib/recentStore';
 import { looksLikeCodeAsk } from '@/lib/chatIntent';
 import {
+  formatChatInspectReply,
+  formatRepoCatalog,
+  handoffPrompt,
+  isGithubPullAsk,
+  listAccountRepos,
+  looksLikeBuildStart,
+  pickGithubRepo,
+  shouldHandoffToCode,
+  shouldInspectInChat,
+  wantsGithubCatalog,
+} from '@/lib/chatStudio';
+import {
+  buildInspectPrompt,
+  pickFilesForInspect,
+  scanProjectFindings,
+} from '@/lib/projectInspect';
+import { saveProjectThread, persistProjectThreadToDisk } from '@/lib/projectThread';
+import { GitHubRepoPicker } from '@/components/GitHubRepoPicker';
+import { gitClone, githubCloneUrl, parseGithubRepoRef } from '@/lib/arkGitClient';
+import { verifyGitHubToken, type GitHubRepo } from '@/lib/github';
+import {
   MEDIA_GEN_STAGES,
   rewriteImagePrompt,
   rewriteVideoPrompt,
@@ -26,7 +47,7 @@ import { ComposerPlusMenu, type ComposerPlusAction } from '@/components/Composer
 import { TokenUsageRing } from '@/components/TokenUsageRing';
 import { activityKeyForChatMode, notifyWorkDone } from '@/lib/activityIndicators';
 import { getTokenUsageRatio, recordTokenUsage } from '@/lib/tokenUsage';
-import { buildRouterHistory, sanitizeAssistantReply } from '@/lib/chatHistory';
+import { buildRouterHistory, sanitizeAssistantReply, usableAssistantText } from '@/lib/chatHistory';
 import {
   autoPillLabel,
   autoRingDetail,
@@ -49,7 +70,7 @@ import type { ChatMessage } from '@/types';
 import {
   Bot, User as UserIcon, Loader2, ImageIcon, Video, Code2,
   Upload, Cpu, Cloud, ChevronDown, Check, Blocks, FolderKanban, Zap, Square, X,
-  Puzzle, Briefcase,
+  Puzzle, Briefcase, Github,
 } from 'lucide-react';
 import { engineGenerateCancel, getEngineStatus, setEngineModel } from '@/lib/arkEngine';
 // CapacityMeter removed from footer — ring + model pill carry status
@@ -288,7 +309,7 @@ function persistModeThread(
 export function AIChat() {
   const { user } = useAuth();
   const { route, navigate } = useRouter();
-  const { addCreation, addChat, addRecent, creations, chats } = useRecentProjects();
+  const { addCreation, addChat, addRecent, touchRecentProject, creations, chats } = useRecentProjects();
   const [loading, setLoading] = useState(() => {
     // Sync-load the active Recent thread so clicking Recent doesn't flash blank.
     if (route.name === 'chat' && route.chatId) {
@@ -320,13 +341,7 @@ export function AIChat() {
     const kind = kindForMode(
       route.name === 'chat' && route.mode && route.mode !== 'general' ? route.mode : 'general',
     );
-    if (kind !== 'chat') return defaultModelForKind(kind);
-    const savedId = getLocalPrefs().defaultModelId;
-    if (savedId === 'ark-auto' || !savedId) return defaultModelForKind('chat');
-    const keyed = CLOUD_CHAT_WHEN_KEYED.find(m => m.id === savedId);
-    if (keyed && hasProviderApiKey(keyed.keyId)) return keyed;
-    // Local / other pinned ids resolve once engine status loads.
-    return { id: savedId, name: savedId, source: 'local', detail: 'Pinned', kind: 'chat' };
+    return defaultModelForKind(kind);
   });
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [chatPlugins, setChatPlugins] = useState<PluginDef[]>(() => getChatEnabledPlugins(loadPluginState()));
@@ -337,6 +352,12 @@ export function AIChat() {
   const [generating, setGenerating] = useState(false);
   const [queueLen, setQueueLen] = useState(0);
   const [codeSwitchDismissed, setCodeSwitchDismissed] = useState(false);
+  const [chatStudioFiles, setChatStudioFiles] = useState<Record<string, string>>({});
+  const [chatStudioProjectId, setChatStudioProjectId] = useState<string | null>(null);
+  const [githubPickerOpen, setGithubPickerOpen] = useState(false);
+  const [inspectOfferId, setInspectOfferId] = useState<string | null>(null);
+  const [githubOfferId, setGithubOfferId] = useState<string | null>(null);
+  const [composerTall, setComposerTall] = useState(false);
   const [composerMode, setComposerMode] = useState<'plan' | 'ask' | 'debug' | 'multitask' | null>(null);
   const [tokenRatio, setTokenRatio] = useState(0);
   const stopRequestedRef = useRef(false);
@@ -350,6 +371,7 @@ export function AIChat() {
   const sendMessageRef = useRef<(content: string) => Promise<void>>(async () => {});
   /** Bumps on every new send/stop so late chunks from an old turn cannot stick Stop/queue. */
   const genSeqRef = useRef(0);
+  const persistTimerRef = useRef<number | undefined>(undefined);
   const activeModelRef = useRef(activeModel);
   const [freeKeyOpen, setFreeKeyOpen] = useState(false);
   const [failoverNote, setFailoverNote] = useState<string | null>(null);
@@ -380,6 +402,11 @@ export function AIChat() {
   const messagesRef = useRef(messages);
   const attachInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const chatStudioFilesRef = useRef<Record<string, string>>({});
+  const chatStudioProjectIdRef = useRef<string | null>(null);
+  const lastInspectReplyRef = useRef('');
+  chatStudioFilesRef.current = chatStudioFiles;
+  chatStudioProjectIdRef.current = chatStudioProjectId;
 
   useEffect(() => {
     activeModelRef.current = activeModel;
@@ -388,6 +415,10 @@ export function AIChat() {
   useEffect(() => {
     threadBrainRef.current = threadBrain;
   }, [threadBrain]);
+
+  useEffect(() => {
+    setLocalPrefs({ defaultModelId: 'ark-auto', aiMode: 'automatic', autoFailover: true });
+  }, []);
 
   useEffect(() => {
     messagesRef.current = messages;
@@ -540,9 +571,12 @@ export function AIChat() {
     );
 
     if (route.chatId) {
+      const inFlight = Boolean(
+        generatingRef.current && activeGenChatIdRef.current === route.chatId && messagesRef.current.length,
+      );
       // We just created this chat and already have messages in state — don't wipe them.
-      if (skipChatLoadIdsRef.current.has(route.chatId)) {
-        skipChatLoadIdsRef.current.delete(route.chatId);
+      if (skipChatLoadIdsRef.current.has(route.chatId) || inFlight) {
+        if (!inFlight) skipChatLoadIdsRef.current.delete(route.chatId);
         setLoading(false);
         setGenerating(Boolean(generatingRef.current && activeGenChatIdRef.current === route.chatId));
         return;
@@ -651,15 +685,6 @@ export function AIChat() {
             }));
           setEngineLocalModels(ready);
           setEngineInstallingModels(installing);
-          const prefs = getLocalPrefs();
-          // Never let last-used backend hijack Auto / cloud picks back to Qwen.
-          const pinned = prefs.defaultModelId;
-          if (!pinned || pinned === 'ark-auto') return;
-          if (CLOUD_CHAT_WHEN_KEYED.some(m => m.id === pinned) || pinned.startsWith('ollama:')) return;
-          const hit = ready.find(m => m.id === pinned);
-          if (hit) {
-            setActiveModel(prev => (prev.id === hit.id ? prev : hit));
-          }
         })
         .catch(() => {
           setEngineLocalModels([]);
@@ -772,20 +797,85 @@ export function AIChat() {
 
   const openCodeWorkspace = (seedPrompt?: string, seedFiles?: Record<string, string>) => {
     const seed = (seedPrompt ?? input).trim();
+    const files = { ...chatStudioFilesRef.current, ...(seedFiles || {}) };
     const name = seed
       ? titleFromPrompt(seed).replace(/^(let'?s|lets|please)\s+/i, '').slice(0, 48) || 'Code project'
       : 'Code project';
-    const project = addRecent(name);
+    const existingId = chatStudioProjectIdRef.current;
+    const project = existingId
+      ? { id: existingId, name }
+      : addRecent(name);
+    if (existingId) touchRecentProject(existingId, name);
     try {
       if (seed) localStorage.setItem(`ark:project-draft:${project.id}`, seed);
-      if (seedFiles && Object.keys(seedFiles).length) {
-        localStorage.setItem(`ark:project-seed-files:${project.id}`, JSON.stringify(seedFiles));
+      if (!existingId && Object.keys(files).length) {
+        localStorage.setItem(`ark:project-seed-files:${project.id}`, JSON.stringify(files));
+      }
+    } catch {
+      /* ignore */
+    }
+    try {
+      saveProjectThread(project.id, messagesRef.current.map(m => ({
+        ...m,
+        project_id: project.id,
+      })));
+      const threadMsgs = messagesRef.current.map(m => ({
+        ...m,
+        project_id: project.id,
+      }));
+      if (Object.keys(files).length) {
+        void persistProjectThreadToDisk(project.id, name, threadMsgs, files);
+      } else {
+        void persistProjectThreadToDisk(project.id, name, threadMsgs);
+      }
+      try {
+        localStorage.setItem(`ark:project-source-chat:${project.id}`, routeChatIdRef.current || persistChatIdRef.current || '');
+      } catch {
+        /* ignore */
       }
     } catch {
       /* ignore */
     }
     setInput('');
+    setComposerTall(false);
+    setChatStudioFiles({});
+    setChatStudioProjectId(null);
+    setInspectOfferId(null);
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
+    navigate({ name: 'project', id: project.id });
+  };
+
+  const clonePickedRepo = async (repo: GitHubRepo) => {
+    setGithubPickerOpen(false);
+    setGithubOfferId(null);
+    const token = getPluginRuntime('github', loadPluginState()).token?.trim();
+    const project = addRecent(repo.name);
+    const [owner, name] = repo.full_name.split('/');
+    const cloned = await gitClone(project.id, githubCloneUrl(owner, name), token);
+    const seed = (repo.size ?? 1) === 0
+      ? 'This GitHub repo is empty. Start with a blank page, then add what I describe.'
+      : `Continue in ${repo.full_name}. Inspect the files, then add, remove, or upgrade as I ask.`;
+    try {
+      localStorage.setItem(`ark:project-draft:${project.id}`, seed);
+      saveProjectThread(project.id, messagesRef.current.map(m => ({
+        ...m,
+        project_id: project.id,
+      })));
+    } catch {
+      /* ignore */
+    }
+    if (!cloned.ok) {
+      setMessages(prev => [...prev, {
+        id: crypto.randomUUID(),
+        user_id: user?.id ?? 'guest',
+        project_id: null,
+        role: 'assistant',
+        content: cloned.error || `Could not clone ${repo.full_name}.`,
+        provider_used: 'GitHub',
+        created_at: new Date().toISOString(),
+      }]);
+      return;
+    }
     navigate({ name: 'project', id: project.id });
   };
 
@@ -794,17 +884,36 @@ export function AIChat() {
     const files = [...list];
     const codeFiles = files.filter(f => CODE_FILE_RE.test(f.name) || /javascript|typescript|json|text\/plain|xml/.test(f.type));
     if (!codeFiles.length) return;
-    const seedFiles: Record<string, string> = {};
-    for (const f of codeFiles.slice(0, 20)) {
+    const seedFiles: Record<string, string> = { ...chatStudioFilesRef.current };
+    for (const f of codeFiles.slice(0, 40)) {
       try {
-        seedFiles[f.name] = await f.text();
+        const rel = (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name;
+        seedFiles[rel.replace(/\\/g, '/')] = await f.text();
       } catch {
         /* skip unreadable */
       }
     }
-    const prompt = input.trim()
-      || `Review and work with ${codeFiles.map(f => f.name).join(', ')}`;
-    openCodeWorkspace(prompt, seedFiles);
+    setChatStudioFiles(seedFiles);
+  };
+
+  const openFolderInChat = async () => {
+    if (!window.arkDesktop?.projectImportFolder) {
+      attachInputRef.current?.click();
+      return;
+    }
+    const pid = `proj-${crypto.randomUUID().slice(0, 8)}`;
+    const res = await window.arkDesktop.projectImportFolder({
+      projectId: pid,
+      projectName: 'Inspect',
+    });
+    if (!res?.ok || res.canceled) return;
+    const files = res.files || {};
+    setChatStudioFiles(files);
+    setChatStudioProjectId(pid);
+    touchRecentProject(pid, res.name || 'Inspect');
+    if (res.root && window.arkDesktop.projectRead) {
+      /* files already on disk for later Code handoff */
+    }
   };
 
   useEffect(() => {
@@ -815,6 +924,10 @@ export function AIChat() {
   const handlePlusAction = (action: ComposerPlusAction) => {
     if (action === 'file' || action === 'image') {
       attachInputRef.current?.click();
+      return;
+    }
+    if (action === 'folder') {
+      void openFolderInChat();
       return;
     }
     setComposerMode(action);
@@ -844,6 +957,7 @@ export function AIChat() {
       return;
     }
     setInput('');
+    setComposerTall(false);
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
     void sendMessageRef.current(content);
   };
@@ -1011,6 +1125,7 @@ export function AIChat() {
       && (mode === 'general' || mode === 'code')
       && capacity
       && !capacity.liveChat
+      && !window.arkDesktop?.engineGenerate
     ) {
       const honest = honestNoLiveChatReply();
       finalizeAssistant(honest, 'ARK · setup needed');
@@ -1038,18 +1153,134 @@ export function AIChat() {
         if (idleTimer) window.clearTimeout(idleTimer);
         idleTimer = window.setTimeout(() => {
           if (mySeq !== genSeqRef.current || abandoned || stopRequestedRef.current) return;
-          const cleaned = sanitizeAssistantReply(streamedPartial, content, previousAssistant);
-          if (cleaned.trim().length < 16) return;
+          const cleaned = usableAssistantText(streamedPartial, content, previousAssistant);
+          if (cleaned.trim().length < 8 && streamedPartial.trim().length < 12) return;
           // GGUF often finishes streaming before llama-cli exits — release Stop quickly.
           abandoned = true;
           void engineGenerateCancel();
           clearGeneratingIfMine();
-          earlyResolve?.({ reply: cleaned });
-        }, 480);
+          earlyResolve?.({ reply: cleaned || streamedPartial.trim() });
+        }, 8_000);
       };
 
       try {
-      if (pluginId) {
+      const studioFiles = chatStudioFilesRef.current;
+      const hasStudioFiles = Object.keys(studioFiles).length > 0;
+
+      if ((mode === 'general' || mode === 'code') && isGithubPullAsk(content)) {
+        const runtime = getPluginRuntime('github', loadPluginState());
+        const token = runtime.token?.trim();
+        if (!token) {
+          response = [
+            'Connect GitHub under Plugins so ARK can see your repos.',
+            '',
+            'Then say “what repos do I have?” or **open owner/repo in Code**. Empty repos are fine — we start from a blank page.',
+          ].join('\n');
+          usedPlugin = true;
+        } else {
+          try {
+            const [user, repos] = await Promise.all([
+              verifyGitHubToken(token),
+              listAccountRepos(token),
+            ]);
+            const named = parseGithubRepoRef(content);
+            const picked = pickGithubRepo(repos, content)
+              || (/\b(latest|recent|last|empty|blank|new|fresh)\b/i.test(content) ? pickGithubRepo(repos, `${content} latest`) : null)
+              || (named ? { full_name: `${named.owner}/${named.repo}`, name: named.repo, html_url: `https://github.com/${named.owner}/${named.repo}`, private: false, id: 0, description: null, updated_at: '', language: null } : null);
+
+            if (wantsGithubCatalog(content) && !picked) {
+              response = formatRepoCatalog(repos, user.login);
+              usedPlugin = true;
+              setGithubOfferId(assistantId);
+            } else if (!picked) {
+              response = formatRepoCatalog(repos, user.login);
+              usedPlugin = true;
+              setGithubOfferId(assistantId);
+            } else {
+              const [owner, repo] = picked.full_name.split('/');
+              const project = addRecent(picked.name || repo);
+              const cloned = await gitClone(project.id, githubCloneUrl(owner, repo), token);
+              if (!cloned.ok) {
+                response = cloned.error || `Could not clone ${picked.full_name}.`;
+                usedPlugin = true;
+              } else {
+                const leftover = content
+                  .replace(/open (my )?(latest |empty |new )?(github )?repo(sitory)?( in code)?/ig, '')
+                  .replace(/pull in|clone|bring in|work on/ig, '')
+                  .replace(picked.full_name, '')
+                  .replace(`${owner}/${repo}`, '')
+                  .trim();
+                const seed = leftover
+                  || ((picked.size ?? 1) === 0
+                    ? 'This GitHub repo is empty. Start with a blank page, then add what I describe.'
+                    : `Continue in ${picked.full_name}. Inspect the files, then add, remove, or upgrade as I ask.`);
+                try {
+                  localStorage.setItem(`ark:project-draft:${project.id}`, seed);
+                } catch { /* ignore */ }
+                response = [
+                  `Pulled **${picked.full_name}** into Code.`,
+                  cloned.branch ? `Branch: ${cloned.branch}` : '',
+                  (picked.size ?? 1) === 0
+                    ? 'It looks empty — say what to add and I will start building.'
+                    : 'Explorer has the files. Keep chatting in Code to add, remove, upgrade, or fix.',
+                ].filter(Boolean).join('\n');
+                usedPlugin = true;
+                window.setTimeout(() => navigate({ name: 'project', id: project.id }), 120);
+              }
+            }
+          } catch (err) {
+            response = err instanceof Error ? err.message : 'GitHub could not list your repos.';
+            usedPlugin = true;
+          }
+        }
+      }
+
+      if (!usedPlugin && (mode === 'general' || mode === 'code') && shouldInspectInChat(content, hasStudioFiles, false)) {
+        const findings = scanProjectFindings(studioFiles, content);
+        const picked = pickFilesForInspect(studioFiles, content);
+        const inspectMessage = buildInspectPrompt(
+          content,
+          studioFiles,
+          picked,
+          findings,
+          'Chat inspect',
+        );
+        const prefs = getLocalPrefs();
+        const history = prefs.rememberContext
+          ? buildRouterHistory(priorForHistory, inspectMessage)
+          : buildRouterHistory([], inspectMessage);
+        const sticky = pinnedModel.source === 'auto' ? threadBrainRef.current : null;
+        const routed = await arkRoute({
+          message: inspectMessage,
+          kind: 'chat',
+          preferredModelId: pinnedModel.id,
+          preferredModelName: pinnedModel.name,
+          preferredSource: pinnedModel.source,
+          stickyModelId: sticky?.modelId,
+          stickyModelName: sticky?.modelName,
+          stickyPinnedSource: sticky?.pinnedSource,
+          history,
+        });
+        response = formatChatInspectReply(
+          routed.reply,
+          findings,
+          Object.keys(studioFiles),
+        );
+        lastInspectReplyRef.current = response;
+        resolvedProvider = routerProviderLabel(routed, providerLabel);
+        usedPlugin = true;
+        setInspectOfferId(assistantId);
+      }
+
+      if (!usedPlugin && (mode === 'general' || mode === 'code') && shouldHandoffToCode(content, hasStudioFiles, false)) {
+        openCodeWorkspace(handoffPrompt(content, lastInspectReplyRef.current), studioFiles);
+        response = hasStudioFiles
+          ? 'Opening **Code** with your files. I will apply the change there — you can keep adding, removing, or upgrading in that chat.'
+          : 'Opening **Code** so I can start building. Keep going there to add, remove, or upgrade.';
+        usedPlugin = true;
+      }
+
+      if (!usedPlugin && pluginId) {
         const pluginReply = await runPluginAction(
           pluginId,
           content,
@@ -1060,7 +1291,7 @@ export function AIChat() {
           response = pluginReply;
           usedPlugin = true;
         }
-      } else if (mode === 'image' || mode === 'video') {
+      } else if (!usedPlugin && (mode === 'image' || mode === 'video')) {
         try {
           const kind = mode === 'image' ? 'image' : 'video';
           const stages = MEDIA_GEN_STAGES[kind];
@@ -1117,17 +1348,19 @@ export function AIChat() {
           if (routed.media?.dataUrl) {
             const isReal = Boolean(routed.media.real);
             rememberThumb(libraryId, routed.media.dataUrl);
-            addCreation({
-              id: libraryId,
-              kind,
-              title: isReal ? content.slice(0, 80) : `Preview · ${content.slice(0, 70)}`,
-              prompt: content,
-              modelName: routed.modelName || pinnedModel.name,
-              dataUrl: routed.media.dataUrl,
-              createdAt: new Date().toISOString(),
-              real: isReal,
-              source: routed.source,
-            });
+            if (isReal) {
+              addCreation({
+                id: libraryId,
+                kind,
+                title: content.slice(0, 80),
+                prompt: content,
+                modelName: routed.modelName || pinnedModel.name,
+                dataUrl: routed.media.dataUrl,
+                createdAt: new Date().toISOString(),
+                real: true,
+                source: routed.source,
+              });
+            }
             if (!isReal && routed.reply) {
               response = routed.reply.includes('![')
                 ? routed.reply
@@ -1136,6 +1369,7 @@ export function AIChat() {
               response = mediaMessageMarkdown(content, libraryId, routed.media.dataUrl, {
                 real: isReal,
                 kind,
+                source: routed.source,
               });
             }
             addChat({
@@ -1153,7 +1387,7 @@ export function AIChat() {
           response = err instanceof Error ? err.message : 'Media generation failed';
           usedPlugin = true;
         }
-      } else {
+      } else if (!usedPlugin) {
         try {
           const prefs = getLocalPrefs();
           const history = prefs.rememberContext
@@ -1162,7 +1396,7 @@ export function AIChat() {
           const sticky = pinnedModel.source === 'auto' ? threadBrainRef.current : null;
           const routePromise = arkRoute({
             message: content,
-            kind: mode === 'code' || looksLikeCodeAsk(content) ? 'coding' : 'chat',
+            kind: mode === 'code' ? 'coding' : 'chat',
             preferredModelId: pinnedModel.id,
             preferredModelName: pinnedModel.name,
             preferredSource: pinnedModel.source,
@@ -1173,11 +1407,22 @@ export function AIChat() {
             onChunk: (piece) => {
               if (abandoned || stopRequestedRef.current || mySeq !== genSeqRef.current) return;
               streamedPartial += piece;
-              const cleaned = sanitizeAssistantReply(streamedPartial, content, previousAssistant);
-              setMessages(prev => prev.map(m => {
-                if (m.id !== assistantId) return m;
-                return { ...m, content: cleaned || '__generating__:chat:Thinking…' };
-              }));
+              const live = usableAssistantText(streamedPartial, content, previousAssistant)
+                || streamedPartial.trim();
+              setMessages(prev => {
+                const next = prev.map(m => {
+                  if (m.id !== assistantId) return m;
+                  return { ...m, content: live || '__generating__:chat:Writing…' };
+                });
+                messagesRef.current = next;
+                if (persistTimerRef.current) window.clearTimeout(persistTimerRef.current);
+                persistTimerRef.current = window.setTimeout(() => {
+                  persistModeThread(mode, messagesRef.current, {
+                    chatId: persistChatIdRef.current || activeChatId,
+                  });
+                }, 220);
+                return next;
+              });
               armStreamIdleFinish();
             },
           });
@@ -1195,7 +1440,9 @@ export function AIChat() {
           const rawReply = stopRequestedRef.current && streamedPartial
             ? streamedPartial
             : routed.reply;
-          response = sanitizeAssistantReply(rawReply, content, previousAssistant);
+          response = usableAssistantText(rawReply, content, previousAssistant)
+            || usableAssistantText(streamedPartial, content, previousAssistant)
+            || String(rawReply || streamedPartial || '').trim();
           if (
             looksLikeCodeAsk(content)
             && mode !== 'image'
@@ -1238,9 +1485,9 @@ export function AIChat() {
           clearGeneratingIfMine();
           const timedOut = err instanceof Error && /timed out/i.test(err.message);
           response = stopRequestedRef.current && streamedPartial
-            ? sanitizeAssistantReply(streamedPartial, content, previousAssistant)
-            : streamedPartial.trim().length > 20
-              ? sanitizeAssistantReply(streamedPartial, content, previousAssistant)
+            ? usableAssistantText(streamedPartial, content, previousAssistant) || streamedPartial.trim()
+            : streamedPartial.trim().length > 8
+              ? usableAssistantText(streamedPartial, content, previousAssistant) || streamedPartial.trim()
               : (timedOut
                 ? 'Response timed out. Try again or pick another model.'
                 : (err instanceof Error ? err.message : 'ARK Router failed'));
@@ -1255,7 +1502,7 @@ export function AIChat() {
       if (mySeq !== genSeqRef.current) return;
 
       if (!isMediaMode && !pluginId) {
-        response = sanitizeAssistantReply(response, content, previousAssistant);
+        response = usableAssistantText(response, content, previousAssistant) || String(response || '').trim();
       }
       if (stopRequestedRef.current && !response.trim()) {
         response = '(stopped)';
@@ -1281,16 +1528,32 @@ export function AIChat() {
 
   sendMessageRef.current = sendMessage;
 
+  const resizeComposer = () => {
+    const el = textareaRef.current;
+    if (!el) return;
+    if (!el.value) {
+      el.style.height = '20px';
+      el.style.overflowY = 'hidden';
+      setComposerTall(false);
+      return;
+    }
+    el.style.height = '20px';
+    const raw = el.scrollHeight;
+    const max = Math.round(window.innerHeight * 0.55);
+    el.style.height = `${Math.min(raw, max)}px`;
+    el.style.overflowY = raw > max ? 'auto' : 'hidden';
+    setComposerTall(raw > 28);
+  };
+
   const onInput = (value: string) => {
     setInput(value);
     if (codeSwitchDismissed && !looksLikeCodeAsk(value)) setCodeSwitchDismissed(false);
-    const el = textareaRef.current;
-    if (el) {
-      el.style.height = 'auto';
-      const line = 22;
-      el.style.height = `${Math.min(Math.max(el.scrollHeight, line), 112)}px`;
-    }
+    requestAnimationFrame(resizeComposer);
   };
+
+  useEffect(() => {
+    requestAnimationFrame(resizeComposer);
+  }, [input]);
 
   const setModeAndFocus = (next: ChatMode) => {
     setMode(next);
@@ -1360,7 +1623,7 @@ export function AIChat() {
                   setActiveModel(model);
                   if (model.kind === 'chat') {
                     setLocalPrefs({
-                      defaultModelId: model.id,
+                      defaultModelId: 'ark-auto',
                       lastChatModelId: undefined,
                       aiMode: 'automatic',
                       autoFailover: true,
@@ -1395,7 +1658,6 @@ export function AIChat() {
                 onClick={() => {
                   setActiveModel(model);
                   if (model.kind === 'chat') {
-                    setLocalPrefs({ defaultModelId: model.id, lastChatModelId: model.id });
                     unpickAutoSticky();
                     if (!model.id.startsWith('ollama:')) {
                       void setEngineModel(model.id).catch(() => undefined);
@@ -1454,7 +1716,6 @@ export function AIChat() {
                 onClick={() => {
                   setActiveModel(model);
                   if (model.kind === 'chat') {
-                    setLocalPrefs({ defaultModelId: model.id, lastChatModelId: model.id });
                     unpickAutoSticky();
                   } else if (model.source !== 'auto') {
                     unpickAutoSticky();
@@ -1520,8 +1781,8 @@ export function AIChat() {
           </span>
         </div>
       )}
-      <div className="flex items-center gap-2.5">
-        <div className="flex-1 min-w-0 flex flex-col">
+      <div className="flex flex-col">
+        <div className="min-w-0 flex flex-col">
           {queueLen > 0 && (
             <div className="mb-2 flex items-center justify-between gap-2 rounded-full border border-amber-500/25 bg-amber-500/10 px-3.5 py-2 text-[11px] text-amber-100/90">
               <span className="min-w-0 truncate">
@@ -1541,11 +1802,65 @@ export function AIChat() {
               </button>
             </div>
           )}
+          {Object.keys(chatStudioFiles).length > 0 && (
+            <div className="mb-2 flex flex-wrap items-center gap-1.5 px-1">
+              {Object.keys(chatStudioFiles).slice(0, 8).map(name => (
+                <span
+                  key={name}
+                  className="inline-flex items-center max-w-[10rem] truncate rounded-full border border-surface-border bg-ark-navy-900/80 px-2 py-0.5 text-[10px] text-content-secondary"
+                  title={name}
+                >
+                  {name.split('/').pop()}
+                </span>
+              ))}
+              {Object.keys(chatStudioFiles).length > 8 ? (
+                <span className="text-[10px] text-content-tertiary">
+                  +{Object.keys(chatStudioFiles).length - 8}
+                </span>
+              ) : null}
+              <button
+                type="button"
+                className="text-[10px] text-violet-300/90 hover:text-violet-200"
+                onClick={() => openCodeWorkspace(
+                  input.trim() || lastInspectReplyRef.current || 'Continue from chat',
+                )}
+              >
+                Continue in Code
+              </button>
+              <button
+                type="button"
+                className="text-[10px] text-amber-200/90 hover:text-amber-100"
+                onClick={() => {
+                  const text = input.trim() || 'Look at these files and tell me what you see.';
+                  setInput('');
+                  void sendMessageRef.current(`${COMPOSER_MODE_PREFIX.debug}${text}`);
+                }}
+              >
+                Debug
+              </button>
+              <button
+                type="button"
+                className="text-[10px] text-content-tertiary hover:text-content-secondary"
+                onClick={() => {
+                  setChatStudioFiles({});
+                  setChatStudioProjectId(null);
+                }}
+              >
+                Clear
+              </button>
+            </div>
+          )}
           {(mode === 'general' || mode === 'code') && looksLikeCodeAsk(input) && !codeSwitchDismissed && (
             <div className="mb-1 flex justify-center px-1">
               <span className="inline-flex items-center gap-1 rounded-full border border-violet-500/25 bg-violet-500/10 pl-2 pr-0.5 py-0.5 text-[10px] text-violet-100/90 shadow-sm max-w-full">
                 <Code2 className="w-3 h-3 shrink-0 text-violet-300/90" />
-                <span className="truncate max-w-[11rem] sm:max-w-[14rem]">Build? Switch to Code</span>
+                <span className="truncate max-w-[11rem] sm:max-w-[14rem]">
+                  {Object.keys(chatStudioFiles).length
+                    ? 'Fix or build in Code?'
+                    : looksLikeBuildStart(input)
+                      ? 'Start building in Code?'
+                      : 'Build? Switch to Code'}
+                </span>
                 <button
                   type="button"
                   className="rounded-full px-1.5 py-0.5 text-violet-100/60 hover:bg-violet-500/15 transition-colors"
@@ -1564,7 +1879,14 @@ export function AIChat() {
               </span>
             </div>
           )}
-          <div className="flex items-center gap-1.5 rounded-full border border-surface-border bg-ark-navy-900/90 px-1.5 py-1 shadow-lg shadow-black/20 min-w-0">
+          <div className={`flex gap-2 min-w-0 ${composerTall ? 'items-end' : 'items-center'}`}>
+          <div
+            className={`flex-1 min-w-0 border border-surface-border bg-ark-navy-900/90 shadow-lg shadow-black/20 ${
+              composerTall
+                ? 'flex flex-col rounded-2xl overflow-hidden'
+                : 'flex items-center gap-1 rounded-full h-11 pl-1 pr-1.5'
+            }`}
+          >
           <input
             ref={attachInputRef}
             type="file"
@@ -1586,10 +1908,13 @@ export function AIChat() {
               e.target.value = '';
             }}
           />
-          <ComposerPlusMenu
-            onAction={handlePlusAction}
-            buttonClassName="w-8 h-8 rounded-full flex items-center justify-center text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors shrink-0"
-          />
+
+          {!composerTall && (
+            <ComposerPlusMenu
+              onAction={handlePlusAction}
+              buttonClassName="w-8 h-8 rounded-full flex items-center justify-center text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors shrink-0"
+            />
+          )}
 
           <textarea
             ref={textareaRef}
@@ -1601,16 +1926,39 @@ export function AIChat() {
                 handleSend();
               }
             }}
-            placeholder={placeholder}
+            placeholder={
+              Object.keys(chatStudioFiles).length
+                ? 'Ask me to debug these files, or say what to add…'
+                : placeholder
+            }
             rows={1}
-            className="flex-1 bg-transparent border-none resize-none px-1 py-1.5 text-sm text-content-primary placeholder:text-content-tertiary focus:outline-none max-h-28 leading-5 min-w-0 self-center"
+            className={`bg-transparent border-none resize-none overflow-hidden text-sm text-content-primary placeholder:text-content-tertiary focus:outline-none leading-5 ${
+              composerTall
+                ? 'w-full px-3.5 pt-3.5 pb-2'
+                : 'flex-1 min-w-0 px-1 py-0'
+            }`}
           />
 
+          <div
+            className={
+              composerTall
+                ? 'flex items-center justify-between gap-2 px-2 pb-2 pt-1'
+                : 'flex items-center shrink-0'
+            }
+          >
+          {composerTall && (
+            <ComposerPlusMenu
+              onAction={handlePlusAction}
+              buttonClassName="w-8 h-8 rounded-full flex items-center justify-center text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors shrink-0"
+            />
+          )}
+
+          <div className="flex items-center gap-1.5 shrink-0">
           <button
             ref={modelButtonRef}
             type="button"
             onClick={() => setModelMenuOpen(o => !o)}
-            className="inline-flex items-center gap-1 rounded-full border border-surface-border/80 bg-surface-hover/60 hover:bg-surface-hover px-2.5 py-1 text-xs text-content-primary transition-colors shrink-0 max-w-[9rem] self-center"
+            className="inline-flex items-center gap-1 rounded-full border border-surface-border/80 bg-surface-hover/60 hover:bg-surface-hover px-2.5 py-1 text-xs text-content-primary transition-colors max-w-[9rem]"
             title={`Active model · ${
               activeModel.source === 'auto'
                 ? (threadBrain ? `${autoModelLabel} · equipped for this chat` : 'ARK Auto · picks best brain')
@@ -1641,7 +1989,7 @@ export function AIChat() {
             <button
               type="button"
               onClick={handleStop}
-              className="w-9 h-9 rounded-full flex items-center justify-center transition-colors shrink-0 bg-rose-500/20 text-rose-300 hover:bg-rose-500/30"
+              className="w-8 h-8 rounded-full flex items-center justify-center transition-colors shrink-0 bg-rose-500/20 text-rose-300 hover:bg-rose-500/30"
               title="Stop generating"
               aria-label="Stop generating"
             >
@@ -1649,11 +1997,13 @@ export function AIChat() {
             </button>
           )}
           </div>
-        </div>
+          </div>
+          </div>
 
-        <div className="flex items-center gap-2 shrink-0">
+          <div className={`flex items-center gap-1.5 shrink-0 ${composerTall ? 'pb-2' : ''}`}>
         <TokenUsageRing
           ratio={tokenRatio}
+          size={16}
           className="text-content-primary shrink-0"
           modelName={
             activeModel.source === 'auto'
@@ -1683,9 +2033,9 @@ export function AIChat() {
             onClick={clearMode}
             title={`${activeMode.title} mode · click to clear`}
             aria-label={`${activeMode.title} mode`}
-            className="w-11 h-11 rounded-full border border-sky-400/40 bg-sky-500/15 text-sky-300 flex items-center justify-center shrink-0 hover:bg-sky-500/25 transition-colors"
+            className="w-8 h-8 rounded-full border border-sky-400/40 bg-sky-500/15 text-sky-300 flex items-center justify-center shrink-0 hover:bg-sky-500/25 transition-colors"
           >
-            <ModeIcon className="w-5 h-5" />
+            <ModeIcon className="w-3.5 h-3.5" />
           </button>
         )}
 
@@ -1695,11 +2045,13 @@ export function AIChat() {
             onClick={() => openCodeWorkspace()}
             title="Open Code workspace (explorer, editor, chat)"
             aria-label="Open Code workspace"
-            className="w-11 h-11 rounded-full border border-violet-400/35 bg-violet-500/15 text-violet-200 flex items-center justify-center shrink-0 hover:bg-violet-500/25 transition-colors"
+            className="w-8 h-8 rounded-full border border-violet-400/35 bg-violet-500/15 text-violet-200 flex items-center justify-center shrink-0 hover:bg-violet-500/25 transition-colors"
           >
-            <Code2 className="w-5 h-5" />
+            <Code2 className="w-3.5 h-3.5" />
           </button>
         )}
+        </div>
+          </div>
         </div>
       </div>
 
@@ -1745,6 +2097,15 @@ export function AIChat() {
 
         {(mode === 'general' || mode === 'code') && (
           <>
+            <button
+              type="button"
+              onClick={() => setGithubPickerOpen(true)}
+              className="inline-flex items-center gap-1 text-[11px] text-content-tertiary hover:text-content-secondary transition-colors"
+              title="Pick a GitHub repo"
+            >
+              <Github className="w-3 h-3" />
+              My GitHub
+            </button>
             {looksLikeCodeAsk(input) && !codeSwitchDismissed && (
               <button
                 type="button"
@@ -1925,6 +2286,50 @@ export function AIChat() {
                     }`}
                   >
                     <MessageContent content={msg.content} />
+                    {msg.role === 'assistant' && inspectOfferId === msg.id && (
+                      <div className="flex flex-wrap gap-1 mt-2">
+                        <button
+                          type="button"
+                          className="text-[10px] rounded-full bg-sky-600 text-white px-2.5 py-1"
+                          onClick={() => openCodeWorkspace(
+                            handoffPrompt('yes, fix these', lastInspectReplyRef.current),
+                          )}
+                        >
+                          Yes, fix this
+                        </button>
+                        <button
+                          type="button"
+                          className="text-[10px] rounded-full border border-surface-border px-2.5 py-1 text-content-secondary"
+                          onClick={() => {
+                            setComposerMode('debug');
+                            setInput('Look at these files');
+                            requestAnimationFrame(() => textareaRef.current?.focus());
+                          }}
+                        >
+                          Debug
+                        </button>
+                        <button
+                          type="button"
+                          className="text-[10px] rounded-full border border-surface-border px-2.5 py-1 text-content-secondary"
+                          onClick={() => openCodeWorkspace(
+                            input.trim() || lastInspectReplyRef.current || 'Continue from chat',
+                          )}
+                        >
+                          Continue in Code
+                        </button>
+                      </div>
+                    )}
+                    {msg.role === 'assistant' && githubOfferId === msg.id && (
+                      <div className="flex flex-wrap gap-1 mt-2">
+                        <button
+                          type="button"
+                          className="text-[10px] rounded-full bg-sky-600 text-white px-2.5 py-1"
+                          onClick={() => setGithubPickerOpen(true)}
+                        >
+                          Pick a repo
+                        </button>
+                      </div>
+                    )}
                   </div>
                   {msg.role === 'user' && (
                     <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 bg-surface-hover border border-surface-border mt-0.5">
@@ -1962,6 +2367,11 @@ export function AIChat() {
           </div>
         </>
       )}
+      <GitHubRepoPicker
+        open={githubPickerOpen}
+        onClose={() => setGithubPickerOpen(false)}
+        onPick={repo => void clonePickedRepo(repo)}
+      />
       <FreeKeyWizard
         open={freeKeyOpen}
         onClose={() => {

@@ -15,8 +15,13 @@ import { BuildRun } from '@/views/BuildRun';
 import { LocalAI } from '@/views/LocalAI';
 import { CreationViewer } from '@/views/CreationViewer';
 import { Settings } from '@/views/Settings';
+import { NetworkingView } from '@/views/NetworkingView';
+import { MessageView } from '@/views/MessageView';
+import { CallView } from '@/views/CallView';
+import { SocialProvider } from '@/context/SocialContext';
 import { runCleanBootIfNeeded } from '@/lib/clearSession';
 import { getLocalPrefs } from '@/lib/localPrefs';
+import { startModelHuntCycle } from '@/lib/arkHuntBootstrap';
 import { needsFirstRunSetup } from '@/lib/setup';
 import { supabaseConfigError } from '@/lib/supabase';
 import { useEffect, useState } from 'react';
@@ -30,12 +35,16 @@ function AppRoutes() {
   switch (route.name) {
     case 'dashboard': return <Dashboard />;
     case 'projects': return <ProjectsView />;
+    case 'code':
     case 'project': return <ProjectWorkspace />;
     case 'creation': return <CreationViewer />;
     case 'chat': return <AIChat key={route.mode ?? 'general'} />;
     case 'models': return <ModelsView />;
     case 'build': return <BuildRun />;
     case 'local-ai': return <LocalAI />;
+    case 'networking': return <NetworkingView />;
+    case 'message': return <MessageView />;
+    case 'call': return <CallView />;
     case 'settings': return <Settings />;
     default: return <Dashboard />;
   }
@@ -81,11 +90,19 @@ function AppContent() {
 
   return (
     <RecentProjectsProvider>
-      <AppShell>
-        <AppRoutes />
-      </AppShell>
+      <SocialProvider>
+        <AppShell>
+          <HuntOnLaunch />
+          <AppRoutes />
+        </AppShell>
+      </SocialProvider>
     </RecentProjectsProvider>
   );
+}
+
+function HuntOnLaunch() {
+  useEffect(() => startModelHuntCycle(), []);
+  return null;
 }
 
 function App() {

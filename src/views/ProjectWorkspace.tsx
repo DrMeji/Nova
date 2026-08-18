@@ -3,15 +3,17 @@ import { createPortal } from 'react-dom';
 import { useRouter } from '@/context/RouterContext';
 import { useAuth } from '@/context/AuthContext';
 import { useRecentProjects } from '@/context/RecentProjectsContext';
-import { fetchProjects, fetchChatMessages, saveChatMessage, updateProject } from '@/lib/api';
+import { useSocial } from '@/context/SocialContext';
+import { fetchProjects, saveChatMessage, updateProject } from '@/lib/api';
 import type { Project, ChatMessage } from '@/types';
 import {
   ChevronRight, FileCode, Folder, FolderOpen, FileText,
   Play, Square, CheckCircle2, Loader2, Bot, User as UserIcon,
   PanelLeft, PanelRight,
-  Globe, Circle, ImageIcon, ArrowUp, X, History, Eye, FilePlus2, FolderPlus,
-  ChevronDown, Check, Cpu, Cloud, Zap,
+  Globe, Circle, ArrowUp, X, History, FilePlus2, FolderPlus,
+  ChevronDown, Check, Cpu, Cloud, Zap, Search, GitBranch, Upload, Undo2, Smartphone,
 } from 'lucide-react';
+import { Modal } from '@/components/Modal';
 import { openInSystemBrowser } from '@/lib/openExternal';
 import {
   detectPluginIntent,
@@ -21,7 +23,7 @@ import {
   runPluginAction,
 } from '@/lib/plugins';
 import { arkRoute, routerProviderLabel } from '@/lib/arkRouter';
-import { buildRouterHistory, sanitizeAssistantReply } from '@/lib/chatHistory';
+import { buildRouterHistory } from '@/lib/chatHistory';
 import {
   autoPillLabel,
   autoRingDetail,
@@ -30,27 +32,77 @@ import {
   saveAutoThreadBrain,
   type ThreadBrain,
 } from '@/lib/threadBrain';
+import {
+  loadProjectThread,
+  mergeProjectThreads,
+  parseProjectThread,
+  PROJECT_CHAT_FILE,
+  saveProjectThread,
+  serializeProjectThread,
+} from '@/lib/projectThread';
 import { getLocalPrefs, hasProviderApiKey, setLocalPrefs } from '@/lib/localPrefs';
 import { loadRecentProjects } from '@/lib/recentStore';
 import {
   applyFileEdits,
+  buildDoneSummary,
   buildProjectCodingPrompt,
   buildFileTreeFromPaths,
   BUILD_PROGRESS_STEPS,
+  composePreviewHtml,
+  editsFromWorkingHtml,
+  extractStreamingFileEdits,
   extractStreamingHtml,
   extractChatStyleFileEdits,
+  flattenProjectFiles,
   foldersToExpand,
   inferBuildLabel,
   parseFileEdits,
   planFilesForBuild,
   scaffoldFallbackEdits,
-  stripFileBlocks,
   type BuildLiveStep,
 } from '@/lib/projectCodeEdit';
+import { classifyMobileTarget, inferMobileTargetFromFiles, isNativeMobileTree, needsMobileTargetChoice } from '@/lib/mobileTarget';
+import { finalizeMobileEdits, formatNativeBuildReply, formatNativePushReply, mobileTemplateEdits, preferredMobileFocus } from '@/lib/mobileTemplates';
+import { defaultDeviceForTarget, devicesForChips, deviceLine, isLayoutLockAsk, layoutLockPrompt } from '@/lib/mobileDevices';
 import { ComposerPlusMenu, type ComposerPlusAction } from '@/components/ComposerPlusMenu';
+import { CodeEditor } from '@/components/CodeEditor';
+import { fileTintClass, languageFromPath } from '@/lib/syntaxHighlight';
 import { TokenUsageRing } from '@/components/TokenUsageRing';
 import { getTokenUsageRatio, recordTokenUsage } from '@/lib/tokenUsage';
-import { getEngineStatus, setEngineModel } from '@/lib/arkEngine';
+import { getEngineStatus, setEngineModel, engineGenerateCancel } from '@/lib/arkEngine';
+import {
+  buildInspectPrompt,
+  buildNamedPatchPrompt,
+  filterEditsToPaths,
+  formatLocalFindings,
+  isFindInFilesAsk,
+  pathsMentionedInText,
+  pickFilesForInspect,
+  preferredEntryPath,
+  parseReplyFindings,
+  scanProjectFindings,
+  searchInFiles,
+  stripFileBlocks,
+  wantsInspectOnly,
+  wantsNamedPatch,
+  type SearchHit,
+} from '@/lib/projectInspect';
+import { gitPush, gitCommit, gitStatus, gitClone, githubCloneUrl, parseGithubRemote, type GitStatus } from '@/lib/arkGitClient';
+import { appendScaffoldHonesty } from '@/lib/codeBuildHonesty';
+import { runCodeStudioCommand } from '@/lib/studioCommands';
+import { StudioEmptyState } from '@/components/StudioEmptyState';
+import { GitHubRepoPicker } from '@/components/GitHubRepoPicker';
+import { TeammateBar } from '@/components/TeammateBar';
+import { BLANK_STARTER, loadTeamState, saveTeamState } from '@/lib/arkTeam';
+import { formatArkId, isArkUserId, lookupArkUser, normalizeArkId } from '@/lib/arkUserId';
+import {
+  getGitHubRepoAccess,
+  inviteGitHubCollaborator,
+  listGitHubCollaborators,
+  type GitHubCollaborator,
+  type GitHubRepo,
+  type TeamAccess,
+} from '@/lib/github';
 
 type CodeModel = {
   id: string;
@@ -78,6 +130,22 @@ const COMPOSER_MODE_PREFIX: Record<'plan' | 'ask' | 'debug' | 'multitask', strin
 
 type ProjectRow = Project & { id: string };
 
+function emptyWorkspaceProject(userId: string, id = '', name = 'Code'): ProjectRow {
+  return {
+    id,
+    user_id: userId,
+    name,
+    description: 'Local ARK code workspace',
+    project_type: 'web',
+    status: 'idle',
+    build_status: 'idle',
+    last_prompt: null,
+    agent_state: {},
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  } as ProjectRow;
+}
+
 interface FileNode {
   name: string;
   type: 'file' | 'folder';
@@ -85,24 +153,111 @@ interface FileNode {
   language?: string;
 }
 
-const CODE_ROUTE_TIMEOUT_MS = 45_000;
-const CODE_STALL_MS = 5_000;
+const CODE_ROUTE_TIMEOUT_MS = 25_000;
+const CODE_STALL_MS = 6_000;
+const BUILD_STEP_ORDER: BuildLiveStep[] = ['understand', 'plan', 'generate', 'apply', 'done'];
+
+function packDiskFiles(files: Record<string, string>, messages?: ChatMessage[]) {
+  const payloadFiles: Record<string, string> = { ...flattenProjectFiles(files) };
+  delete payloadFiles[PROJECT_CHAT_FILE];
+  delete payloadFiles['ark-meta.json'];
+  if (messages?.some(m => String(m.content || '').trim())) {
+    payloadFiles[PROJECT_CHAT_FILE] = serializeProjectThread(messages);
+  }
+  return payloadFiles;
+}
+
+function sleep(ms: number) {
+  return new Promise<void>(resolve => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
+function formatElapsed(ms: number) {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  if (s < 60) return `${s}s`;
+  return `${Math.floor(s / 60)}m ${s % 60}s`;
+}
+
+function renderChatMarkup(text: string) {
+  const parts = text.split(/(\*\*[^*]+\*\*)/g);
+  return parts.map((part, i) => {
+    const bold = part.match(/^\*\*([^*]+)\*\*$/);
+    if (bold) return <strong key={i} className="font-semibold text-content-primary">{bold[1]}</strong>;
+    return <span key={i}>{part}</span>;
+  });
+}
+
+function AssistantBuildReply({
+  content,
+  onOpenPath,
+}: {
+  content: string;
+  onOpenPath?: (path: string, line?: number) => void;
+}) {
+  const match = content.match(/^(.*?)\n\nWorked for (.+)\s*$/s);
+  const body = (match ? match[1] : content).trim();
+  const worked = match?.[2]?.trim() || null;
+  const findings = onOpenPath ? parseReplyFindings(body) : [];
+  return (
+    <div className="space-y-2">
+      <p className="whitespace-pre-wrap leading-relaxed">{renderChatMarkup(body)}</p>
+      {findings.length > 0 && (
+        <div className="flex flex-wrap gap-1 pt-1">
+          {findings.map(f => (
+            <button
+              key={`${f.path}:${f.line || 0}`}
+              type="button"
+              onClick={() => onOpenPath?.(f.path, f.line)}
+              className="text-[10px] rounded-full border border-sky-500/30 bg-sky-500/10 px-2 py-0.5 text-sky-200 hover:bg-sky-500/20"
+            >
+              {f.path}{f.line ? `:${f.line}` : ''}
+            </button>
+          ))}
+        </div>
+      )}
+      {worked && (
+        <p className="text-[11px] text-content-tertiary">Worked for {worked}</p>
+      )}
+    </div>
+  );
+}
 
 function BuildProgressBubble({
   label,
   step,
   plannedFiles,
+  startedAt,
 }: {
   label: string;
   step: BuildLiveStep;
   plannedFiles: string[];
+  startedAt: number;
 }) {
   const activeIdx = BUILD_PROGRESS_STEPS.findIndex(s => s.id === step);
+  const [elapsedMs, setElapsedMs] = useState(() => Date.now() - startedAt);
+
+  useEffect(() => {
+    if (step === 'done') {
+      setElapsedMs(Date.now() - startedAt);
+      return;
+    }
+    const tick = window.setInterval(() => {
+      setElapsedMs(Date.now() - startedAt);
+    }, 1000);
+    return () => window.clearInterval(tick);
+  }, [startedAt, step]);
+
   return (
     <div className="space-y-2.5 text-xs min-w-[14rem]">
-      <p className="text-sm font-medium text-content-primary">
-        {step === 'done' ? `Built ${label}` : `Building ${label}`}
-      </p>
+      <div className="flex items-start justify-between gap-3">
+        <p className="text-sm font-medium text-content-primary">
+          {step === 'done' ? `Built ${label}` : `Building ${label}`}
+        </p>
+        <span className="text-[10px] text-content-tertiary tabular-nums shrink-0 pt-0.5">
+          {formatElapsed(elapsedMs)}
+        </span>
+      </div>
       <ul className="space-y-1.5">
         {BUILD_PROGRESS_STEPS.map((s, i) => {
           const done = step === 'done' ? true : i < activeIdx;
@@ -175,19 +330,19 @@ function ResizeHandle({ onDrag }: { onDrag: (deltaX: number) => void }) {
 export function ProjectWorkspace() {
   const { route, navigate } = useRouter();
   const { user } = useAuth();
-  const { touchRecentProject } = useRecentProjects();
+  const { inviteByArkId } = useSocial();
+  const { touchRecentProject, addRecent } = useRecentProjects();
   const projectId = route.name === 'project' ? route.id : '';
+  const isFreshCode = route.name === 'code';
+  const codeSession = route.name === 'code' ? (route.session || 'new') : '';
   const [project, setProject] = useState<ProjectRow | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [chatPlugins, setChatPlugins] = useState(() => getChatEnabledPlugins(loadPluginState()));
   const [chatInput, setChatInput] = useState('');
   const [composerMode, setComposerMode] = useState<'plan' | 'ask' | 'debug' | 'multitask' | null>(null);
+  const [composerTall, setComposerTall] = useState(false);
   const [tokenRatio, setTokenRatio] = useState(0);
-  const [activeModel, setActiveModel] = useState<CodeModel>(() => {
-    const saved = getLocalPrefs().defaultModelId;
-    if (!saved || saved === 'ark-auto') return CODE_MODELS[0];
-    return { id: saved, name: saved, source: 'local', detail: 'Pinned' };
-  });
+  const [activeModel, setActiveModel] = useState<CodeModel>(() => CODE_MODELS[0]);
   const [threadBrain, setThreadBrain] = useState<ThreadBrain | null>(null);
   const threadBrainRef = useRef<ThreadBrain | null>(null);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
@@ -206,6 +361,8 @@ export function ProjectWorkspace() {
     label: string;
     step: BuildLiveStep;
     plannedFiles: string[];
+    startedAt: number;
+    kind?: 'build' | 'inspect' | 'fix';
   } | null>(null);
   const [attachedImages, setAttachedImages] = useState<{ id: string; url: string; name: string }[]>([]);
   const [changesOpen, setChangesOpen] = useState(false);
@@ -220,6 +377,28 @@ export function ProjectWorkspace() {
   const [creating, setCreating] = useState<null | { kind: 'file' | 'folder'; parentPath: string }>(null);
   const [createName, setCreateName] = useState('');
   const [diskRoot, setDiskRoot] = useState<string | null>(null);
+  const [findOpen, setFindOpen] = useState(false);
+  const [findQuery, setFindQuery] = useState('');
+  const [findHits, setFindHits] = useState<SearchHit[]>([]);
+  const [gitInfo, setGitInfo] = useState<GitStatus | null>(null);
+  const [gitBusy, setGitBusy] = useState(false);
+  const [githubPickerOpen, setGithubPickerOpen] = useState(false);
+  const [teammates, setTeammates] = useState<GitHubCollaborator[]>([]);
+  const [myAccess, setMyAccess] = useState<TeamAccess>('full');
+  const [teamState, setTeamState] = useState(() => loadTeamState(projectId));
+  const [jumpLine, setJumpLine] = useState(0);
+  const [fileFindOpen, setFileFindOpen] = useState(false);
+  const [fileFind, setFileFind] = useState('');
+  const [undoReady, setUndoReady] = useState(false);
+  const [inspectOfferId, setInspectOfferId] = useState<string | null>(null);
+  const [shipOfferId, setShipOfferId] = useState<string | null>(null);
+  const [mobileOfferId, setMobileOfferId] = useState<string | null>(null);
+  const [mobileOfferPrompt, setMobileOfferPrompt] = useState('');
+  const [deviceOfferId, setDeviceOfferId] = useState<string | null>(null);
+  const [reviseUserMsgId, setReviseUserMsgId] = useState<string | null>(null);
+  const [editingUserId, setEditingUserId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState('');
+  const [revertPrompt, setRevertPrompt] = useState<{ userId: string; content: string } | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const codeFileInputRef = useRef<HTMLInputElement>(null);
@@ -229,8 +408,221 @@ export function ProjectWorkspace() {
   const modelMenuRef = useRef<HTMLDivElement>(null);
   const pendingAutoSendRef = useRef<string | null>(null);
   const streamDraftRef = useRef('');
+  const buildAbortRef = useRef<{ abort: () => void } | null>(null);
+  const fileContentsRef = useRef(fileContents);
+  const fileTreeRef = useRef(fileTree);
+  const skipHydrateRef = useRef(false);
+  const typeTimerRef = useRef<number | undefined>(undefined);
+  const messagesRef = useRef<ChatMessage[]>([]);
+  const runIdRef = useRef(0);
+  const lastInspectPathsRef = useRef<string[]>([]);
+  const undoSnapshotRef = useRef<Record<string, string> | null>(null);
+  fileContentsRef.current = fileContents;
+  fileTreeRef.current = fileTree;
+  messagesRef.current = messages;
 
-  const isWebProject = !project || project.project_type === 'web' || project.project_type === 'api';
+  const applyProjectFiles = useCallback((files: Record<string, string>) => {
+    const mapped: Record<string, string> = {};
+    for (const [rel, content] of Object.entries(files)) {
+      const norm = rel.replace(/\\/g, '/');
+      const base = norm.includes('/') ? norm.split('/').pop()! : norm;
+      if (base === PROJECT_CHAT_FILE || base === 'ark-meta.json') continue;
+      mapped[norm] = content;
+    }
+    const tree = buildFileTreeFromPaths(mapped);
+    fileContentsRef.current = mapped;
+    fileTreeRef.current = tree;
+    setFileContents(mapped);
+    setFileTree(tree);
+    const entry = preferredEntryPath(mapped);
+    if (entry) {
+      setSelectedFile(entry);
+      setExpandedFolders(prev => {
+        const next = new Set(prev);
+        foldersToExpand([entry]).forEach(p => next.add(p));
+        return next;
+      });
+      setRightTab('code');
+      setCodeOpen(true);
+      setExplorerOpen(true);
+    }
+  }, []);
+
+  const refreshGit = useCallback(async (id?: string) => {
+    const pid = id || projectId;
+    if (!pid || !window.arkDesktop?.gitStatus) return;
+    try {
+      const st = await gitStatus(pid);
+      setGitInfo(st);
+    } catch {
+      /* ignore */
+    }
+  }, [projectId]);
+
+  const canEdit = myAccess !== 'read';
+
+  const teamPeople = useMemo(() => {
+    const ark = (teamState.arkMembers || []).map(m => ({
+      login: m.arkId,
+      avatar_url: '',
+      html_url: '',
+      role_name: m.access === 'full' ? 'admin' : m.access === 'write' ? 'write' : 'read',
+      permissions: {
+        admin: m.access === 'full',
+        push: m.access !== 'read',
+        pull: true,
+      },
+      arkId: m.arkId,
+      displayName: m.displayName,
+    }));
+    const taken = new Set(ark.map(a => a.login));
+    return [...teammates.filter(t => !taken.has(t.login)), ...ark];
+  }, [teammates, teamState.arkMembers]);
+
+  const openPathInEditor = useCallback((path: string, line?: number) => {
+    const flat = fileContentsRef.current;
+    const hit = flat[path]
+      ? path
+      : Object.keys(flat).find(k => k.endsWith(`/${path}`) || k === path) || path;
+    setSelectedFile(hit);
+    setExpandedFolders(prev => {
+      const next = new Set(prev);
+      foldersToExpand([hit]).forEach(p => next.add(p));
+      return next;
+    });
+    setRightTab('code');
+    setCodeOpen(true);
+    setJumpLine(line || 1);
+  }, []);
+
+  const startBlankProject = () => {
+    if (!canEdit) return;
+    const uid = user?.id ?? 'guest';
+    let pid = project?.id || projectId;
+    if (!pid) {
+      const created = addRecent('Blank page');
+      pid = created.id;
+      skipHydrateRef.current = true;
+      setProject(emptyWorkspaceProject(uid, created.id, created.name));
+      navigate({ name: 'project', id: created.id });
+    }
+    applyProjectFiles(BLANK_STARTER);
+    if (window.arkDesktop?.projectWrite) {
+      void window.arkDesktop.projectWrite({
+        projectId: pid,
+        projectName: project?.name || 'Blank page',
+        files: packDiskFiles(BLANK_STARTER, messagesRef.current),
+      });
+    }
+    setChatInput('Add ');
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  };
+
+  const startNativeProject = (target: 'ios' | 'android') => {
+    if (!canEdit) return;
+    const uid = user?.id ?? 'guest';
+    const label = target === 'ios' ? 'iPhone app' : 'Android app';
+    const device = defaultDeviceForTarget(target);
+    const prompt = target === 'ios'
+      ? `Build a native iPhone app for ${deviceLine(device)} for the Apple App Store (SwiftUI + Xcode).`
+      : `Build a native Android app for ${deviceLine(device)} for Google Play (Kotlin + Android Studio).`;
+    let pid = project?.id || projectId;
+    if (!pid) {
+      const created = addRecent(label);
+      pid = created.id;
+      skipHydrateRef.current = true;
+      setProject(emptyWorkspaceProject(uid, created.id, created.name));
+      navigate({ name: 'project', id: created.id });
+    }
+    const edits = mobileTemplateEdits(target, prompt, label);
+    const files = Object.fromEntries(edits.map(e => [e.path, e.content]));
+    applyProjectFiles(files);
+    const assistantId = crypto.randomUUID();
+    const userMsg: ChatMessage = {
+      id: crypto.randomUUID(),
+      user_id: uid,
+      project_id: pid,
+      role: 'user',
+      content: prompt,
+      provider_used: null,
+      created_at: new Date().toISOString(),
+    };
+    const assistantMsg: ChatMessage = {
+      id: assistantId,
+      user_id: uid,
+      project_id: pid,
+      role: 'assistant',
+      content: formatNativeBuildReply(label, prompt, files),
+      provider_used: 'ARK',
+      created_at: new Date().toISOString(),
+    };
+    const nextMsgs = [...messagesRef.current, userMsg, assistantMsg];
+    messagesRef.current = nextMsgs;
+    saveProjectThread(pid, nextMsgs);
+    setMessages(nextMsgs);
+    setDeviceOfferId(assistantId);
+    setShipOfferId(assistantId);
+    if (window.arkDesktop?.projectWrite) {
+      void window.arkDesktop.projectWrite({
+        projectId: pid,
+        projectName: label,
+        files: packDiskFiles(files, nextMsgs),
+      }).then(res => {
+        if (res.root) setDiskRoot(res.root);
+      });
+    }
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  };
+
+  const undoLastEdit = () => {
+    const snap = undoSnapshotRef.current;
+    if (!snap) return;
+    applyProjectFiles(snap);
+    undoSnapshotRef.current = null;
+    setUndoReady(false);
+  };
+
+  const findNextInFile = () => {
+    const q = fileFind.trim().toLowerCase();
+    if (!q || !selectedFile) return;
+    const body = fileContentsRef.current[selectedFile] || '';
+    const lines = body.split('\n');
+    const start = jumpLine || 0;
+    const idx = lines.findIndex((line, i) => i >= start && line.toLowerCase().includes(q));
+    const wrap = idx < 0 ? lines.findIndex(line => line.toLowerCase().includes(q)) : idx;
+    if (wrap >= 0) setJumpLine(wrap + 1);
+  };
+
+  useEffect(() => {
+    setTeamState(loadTeamState(projectId));
+  }, [projectId]);
+
+  useEffect(() => {
+    const remote = gitInfo?.remote || '';
+    const parsed = parseGithubRemote(remote);
+    const token = getPluginRuntime('github', loadPluginState()).token?.trim();
+    if (!parsed || !token) {
+      setTeammates([]);
+      setMyAccess('full');
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const mine = await getGitHubRepoAccess(token, parsed.owner, parsed.repo);
+        if (!cancelled) setMyAccess(mine.access);
+      } catch {
+        if (!cancelled) setMyAccess('read');
+      }
+      try {
+        const people = await listGitHubCollaborators(token, parsed.owner, parsed.repo);
+        if (!cancelled) setTeammates(people);
+      } catch {
+        if (!cancelled) setTeammates([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [gitInfo?.remote]);
   const [previewUrl, setPreviewUrl] = useState('http://127.0.0.1:0');
   const [livePreviewUrl, setLivePreviewUrl] = useState<string | null>(null);
 
@@ -316,31 +708,55 @@ export function ProjectWorkspace() {
   }, [projectId]);
 
   useEffect(() => {
+    if (isFreshCode) {
+      runIdRef.current += 1;
+      buildAbortRef.current?.abort();
+      buildAbortRef.current = null;
+      setMessages([]);
+      messagesRef.current = [];
+      setFileContents({});
+      fileContentsRef.current = {};
+      setFileTree([]);
+      fileTreeRef.current = [];
+      setSelectedFile('');
+      setBuildLive(null);
+      setPreviewReady(false);
+      setLivePreviewUrl(null);
+      setDiskRoot(null);
+      setEditingUserId(null);
+      setReviseUserMsgId(null);
+      setRevertPrompt(null);
+      setProject(emptyWorkspaceProject(user?.id ?? 'guest'));
+      return;
+    }
     if (!projectId) return;
+    if (skipHydrateRef.current) {
+      skipHydrateRef.current = false;
+      return;
+    }
+
+    const cached = loadProjectThread(projectId);
+    setMessages(cached);
+    messagesRef.current = cached;
+    setFileContents({});
+    fileContentsRef.current = {};
+    setFileTree([]);
+    fileTreeRef.current = [];
+    setSelectedFile('');
+    setBuildLive(null);
+    setPreviewReady(false);
+    setLivePreviewUrl(null);
+    setEditingUserId(null);
+    setRevertPrompt(null);
+
+    const recent = loadRecentProjects().find(p => p.id === projectId);
+    const fallbackName = recent?.name
+      || (projectId.startsWith('demo-')
+        ? projectId.replace(/^demo-/, '').split('-').map(part => part.charAt(0).toUpperCase() + part.slice(1)).join(' ')
+        : 'Code project');
 
     if (projectId.startsWith('demo-') || projectId.startsWith('proj-')) {
-      const recent = loadRecentProjects().find(p => p.id === projectId);
-      const name = recent?.name
-        || (projectId.startsWith('demo-')
-          ? projectId
-            .replace(/^demo-/, '')
-            .split('-')
-            .map(part => part.charAt(0).toUpperCase() + part.slice(1))
-            .join(' ')
-          : 'Code project');
-      setProject({
-        id: projectId,
-        user_id: user?.id ?? 'guest',
-        name,
-        description: 'Local ARK code workspace',
-        project_type: 'web',
-        status: 'idle',
-        build_status: 'idle',
-        last_prompt: null,
-        agent_state: {},
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      } as ProjectRow);
+      setProject(emptyWorkspaceProject(user?.id ?? 'guest', projectId, fallbackName));
       return;
     }
 
@@ -349,54 +765,21 @@ export function ProjectWorkspace() {
       .then(data => {
         if (cancelled) return;
         const found = (data as ProjectRow[]).find(p => p.id === projectId);
-        if (found) {
-          setProject(found);
-          return;
-        }
-        // Fallback so the workspace never spins forever
-        const recent = loadRecentProjects().find(p => p.id === projectId);
-        setProject({
-          id: projectId,
-          user_id: user?.id ?? 'guest',
-          name: recent?.name || 'Code project',
-          description: 'Local ARK code workspace',
-          project_type: 'web',
-          status: 'idle',
-          build_status: 'idle',
-          last_prompt: null,
-          agent_state: {},
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        } as ProjectRow);
+        setProject(found || emptyWorkspaceProject(user?.id ?? 'guest', projectId, fallbackName));
       })
       .catch(() => {
-        if (cancelled) return;
-        const recent = loadRecentProjects().find(p => p.id === projectId);
-        setProject({
-          id: projectId,
-          user_id: user?.id ?? 'guest',
-          name: recent?.name || 'Code project',
-          description: 'Local ARK code workspace',
-          project_type: 'web',
-          status: 'idle',
-          build_status: 'idle',
-          last_prompt: null,
-          agent_state: {},
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        } as ProjectRow);
+        if (!cancelled) setProject(emptyWorkspaceProject(user?.id ?? 'guest', projectId, fallbackName));
       });
-
-    fetchChatMessages(projectId)
-      .then(data => {
-        if (!cancelled) setMessages(data as ChatMessage[]);
-      })
-      .catch(() => {});
-
     return () => {
       cancelled = true;
     };
-  }, [projectId, user?.id]);
+  }, [projectId, isFreshCode, codeSession, user?.id]);
+
+  useEffect(() => {
+    if (!projectId) return;
+    if (!messages.length) return;
+    saveProjectThread(projectId, messages);
+  }, [messages, projectId]);
 
   // Auto-send when opened from Chat "Yes" with a seeded prompt
   useEffect(() => {
@@ -461,20 +844,62 @@ export function ProjectWorkspace() {
         const res = await window.arkDesktop!.projectRead!(projectId);
         if (cancelled) return;
         if (res.root) setDiskRoot(res.root);
-        if (res.ok && res.files && Object.keys(res.files).length > 0) {
-          const mapped: Record<string, string> = {};
+        const mapped: Record<string, string> = {};
+        let diskChat: ChatMessage[] = [];
+        if (res.ok && res.files) {
           for (const [rel, content] of Object.entries(res.files)) {
             const base = rel.includes('/') ? rel.split('/').pop()! : rel;
-            mapped[base] = content;
-            mapped[rel] = content;
+            if (base === PROJECT_CHAT_FILE) {
+              diskChat = parseProjectThread(content);
+              continue;
+            }
+            if (base === 'ark-meta.json') continue;
+            mapped[rel.replace(/\\/g, '/')] = content;
           }
-          setFileContents(mapped);
-          setFileTree(buildFileTreeFromPaths(mapped));
-          const keys = Object.keys(res.files);
-          if (keys.length && !selectedFile) {
-            setSelectedFile(keys[0]);
-            setRightTab('code');
+        }
+        if (Object.keys(mapped).length > 0) {
+          applyProjectFiles(mapped);
+        }
+        void refreshGit(projectId);
+        if (diskChat.length && !skipHydrateRef.current) {
+          const local = loadProjectThread(projectId);
+          const best = mergeProjectThreads(local, diskChat);
+          if (best.length && (
+            messagesRef.current.length === 0 || best.length > messagesRef.current.length
+          )) {
+            setMessages(best);
+            messagesRef.current = best;
+            saveProjectThread(projectId, best);
           }
+        } else if (
+          !skipHydrateRef.current
+          && messagesRef.current.length === 0
+          && Object.keys(mapped).length > 0
+        ) {
+          const name = loadRecentProjects().find(p => p.id === projectId)?.name || 'Project';
+          const seeded: ChatMessage[] = [
+            {
+              id: `local-user-${projectId}`,
+              user_id: user?.id ?? 'guest',
+              project_id: projectId,
+              role: 'user',
+              content: name,
+              provider_used: null,
+              created_at: new Date().toISOString(),
+            },
+            {
+              id: `local-asst-${projectId}`,
+              user_id: user?.id ?? 'guest',
+              project_id: projectId,
+              role: 'assistant',
+              content: `I built **${name}**. It's saved on this PC — files are in Explorer. Ask me to change anything.`,
+              provider_used: 'ARK',
+              created_at: new Date().toISOString(),
+            },
+          ];
+          setMessages(seeded);
+          messagesRef.current = seeded;
+          saveProjectThread(projectId, seeded);
         }
       } catch {
         /* ignore */
@@ -483,20 +908,13 @@ export function ProjectWorkspace() {
     return () => {
       cancelled = true;
     };
-  }, [projectId]);
+  }, [projectId, applyProjectFiles, refreshGit]);
 
   useEffect(() => {
-    if (!project || !window.arkDesktop?.projectWrite) return;
+    if (!project?.id || !window.arkDesktop?.projectWrite) return;
     const t = window.setTimeout(() => {
-      const payloadFiles: Record<string, string> = {};
-      for (const [k, v] of Object.entries(fileContents)) {
-        if (k.includes('/')) payloadFiles[k] = v;
-        else if (k.endsWith('.tsx') || k.endsWith('.ts') || k.endsWith('.css')) {
-          payloadFiles[`src/${k}`] = v;
-        } else {
-          payloadFiles[k] = v;
-        }
-      }
+      const payloadFiles = packDiskFiles(fileContents, messagesRef.current);
+      if (!Object.keys(payloadFiles).length) return;
       void window.arkDesktop!.projectWrite!({
         projectId: project.id,
         projectName: project.name,
@@ -523,48 +941,304 @@ export function ProjectWorkspace() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!findOpen) return;
+    const q = findQuery.trim();
+    if (!q) {
+      setFindHits([]);
+      return;
+    }
+    const t = window.setTimeout(() => {
+      setFindHits(searchInFiles(fileContentsRef.current, q, 50));
+    }, 160);
+    return () => window.clearTimeout(t);
+  }, [findQuery, findOpen, fileContents]);
+
+  useEffect(() => {
+    if (!projectId) return;
+    void refreshGit(projectId);
+    const t = window.setInterval(() => void refreshGit(projectId), 12_000);
+    return () => window.clearInterval(t);
+  }, [projectId, refreshGit]);
+
+  const openProjectFolder = async () => {
+    const uid = user?.id ?? 'guest';
+    let active = project;
+    let pid = project?.id || projectId;
+    if (!pid) {
+      const created = addRecent('Code');
+      pid = created.id;
+      skipHydrateRef.current = true;
+      active = emptyWorkspaceProject(uid, created.id, created.name);
+      setProject(active);
+      navigate({ name: 'project', id: created.id });
+    }
+    if (!window.arkDesktop?.projectImportFolder) return;
+    const res = await window.arkDesktop.projectImportFolder({
+      projectId: pid,
+      projectName: active?.name,
+    });
+    if (!res?.ok || res.canceled) return;
+    if (res.root) setDiskRoot(res.root);
+    if (res.files) applyProjectFiles(res.files);
+    else {
+      const read = await window.arkDesktop.projectRead?.(pid);
+      if (read?.files) applyProjectFiles(read.files);
+      if (read?.root) setDiskRoot(read.root);
+    }
+    if (res.name) touchRecentProject(pid, res.name);
+    void refreshGit(pid);
+  };
+
+  const clonePickedRepo = async (repo: GitHubRepo) => {
+    setGithubPickerOpen(false);
+    const uid = user?.id ?? 'guest';
+    let pid = project?.id || projectId;
+    if (!pid) {
+      const created = addRecent(repo.name);
+      pid = created.id;
+      skipHydrateRef.current = true;
+      setProject(emptyWorkspaceProject(uid, created.id, created.name));
+      navigate({ name: 'project', id: created.id });
+    }
+    const token = getPluginRuntime('github', loadPluginState()).token?.trim();
+    const [owner, name] = repo.full_name.split('/');
+    const cloned = await gitClone(pid, githubCloneUrl(owner, name), token);
+    if (!cloned.ok) {
+      setMessages(prev => [...prev, {
+        id: crypto.randomUUID(),
+        user_id: uid,
+        project_id: pid,
+        role: 'assistant',
+        content: cloned.error || 'Clone failed.',
+        provider_used: 'GitHub',
+        created_at: new Date().toISOString(),
+      }]);
+      return;
+    }
+    const read = await window.arkDesktop?.projectRead?.(pid);
+    if (read?.files) applyProjectFiles(read.files);
+    if (read?.root) setDiskRoot(read.root);
+    touchRecentProject(pid, repo.name);
+    await refreshGit(pid);
+    if ((repo.size ?? 1) === 0) {
+      setChatInput('This repo is empty. Start with a blank page and add ');
+      textareaRef.current?.focus();
+    }
+  };
+
+  const headerPush = async () => {
+    if (!projectId || gitBusy || !canEdit) return;
+    setGitBusy(true);
+    try {
+      if (window.arkDesktop?.projectWrite) {
+        await window.arkDesktop.projectWrite({
+          projectId,
+          projectName: project?.name,
+          files: packDiskFiles(fileContentsRef.current, messagesRef.current),
+        });
+      }
+      const token = getPluginRuntime('github', loadPluginState()).token?.trim();
+      if (!gitInfo?.git || gitInfo.dirty) {
+        await gitCommit(projectId, 'Update from ARK');
+      }
+      const pushed = await gitPush(projectId, token);
+      if (!pushed.ok) {
+        let errText = pushed.error || 'Push failed.';
+        if (/No origin remote/i.test(errText)) {
+          errText += '\n\nSay “create a private GitHub repo” in chat, or connect GitHub in Plugins and add origin.';
+        }
+        if (/Git is not installed/i.test(errText)) {
+          errText += '\n\nInstall Git for Windows from https://git-scm.com/download/win then retry.';
+        }
+        if (!token && /401|403|Authentication|denied/i.test(errText)) {
+          errText += '\n\nAdd your GitHub token in Plugins → GitHub.';
+        }
+        setMessages(prev => {
+          const note: ChatMessage = {
+            id: crypto.randomUUID(),
+            user_id: user?.id ?? 'guest',
+            project_id: projectId,
+            role: 'assistant',
+            content: errText,
+            provider_used: 'Git',
+            created_at: new Date().toISOString(),
+          };
+          const next = [...prev, note];
+          saveProjectThread(projectId, next);
+          return next;
+        });
+      } else if (isNativeMobileTree(fileContentsRef.current)) {
+        const noteText = formatNativePushReply(pushed.remote || gitInfo?.remote || '', fileContentsRef.current);
+        setMessages(prev => {
+          const note: ChatMessage = {
+            id: crypto.randomUUID(),
+            user_id: user?.id ?? 'guest',
+            project_id: projectId,
+            role: 'assistant',
+            content: noteText,
+            provider_used: 'Git',
+            created_at: new Date().toISOString(),
+          };
+          const next = [...prev, note];
+          saveProjectThread(projectId, next);
+          return next;
+        });
+      }
+      await refreshGit(projectId);
+    } finally {
+      setGitBusy(false);
+    }
+  };
+
   const handleSendChat = async (overrideContent?: string) => {
+    if (buildAbortRef.current) {
+      const stoppingOnly = !overrideContent && !chatInput.trim() && !reviseUserMsgId;
+      buildAbortRef.current.abort();
+      if (stoppingOnly) return;
+    }
+
     const rawContent = (overrideContent ?? chatInput).trim();
     if ((!rawContent && attachedImages.length === 0) || !project) return;
 
-    const buildLabel = inferBuildLabel(rawContent, project.name);
-    touchRecentProject(project.id, buildLabel);
+    const uid = user?.id ?? 'guest';
+    let activeProject = project;
+    if (!activeProject.id) {
+      const created = addRecent(inferBuildLabel(rawContent, 'Code'));
+      skipHydrateRef.current = true;
+      activeProject = emptyWorkspaceProject(uid, created.id, created.name);
+      setProject(activeProject);
+      navigate({ name: 'project', id: created.id });
+    }
+    const pid = activeProject.id;
 
+    const persistLocalThread = (msgs: ChatMessage[]) => {
+      messagesRef.current = msgs;
+      saveProjectThread(pid, msgs);
+      if (window.arkDesktop?.projectWrite) {
+        void window.arkDesktop.projectWrite({
+          projectId: pid,
+          projectName: inferBuildLabel(rawContent, activeProject.name),
+          files: packDiskFiles(fileContentsRef.current, msgs),
+        }).then(res => {
+          if (res.root) setDiskRoot(res.root);
+        });
+      }
+    };
+
+    const buildLabel = inferBuildLabel(rawContent, activeProject.name);
+    touchRecentProject(pid, buildLabel);
+
+    const composerWasDebug = composerMode === 'debug';
     let content = rawContent;
     if (composerMode && COMPOSER_MODE_PREFIX[composerMode]) {
       content = `${COMPOSER_MODE_PREFIX[composerMode]}${content}`;
     }
     setComposerMode(null);
-    setTokenRatio(recordTokenUsage(project.id, content));
-    const uid = user?.id ?? 'guest';
+    const nativeDoneReply = (opts?: { continued?: boolean }) => {
+      if (isNativeMobileTree(fileContentsRef.current) || classifyMobileTarget(content)) {
+        return formatNativeBuildReply(buildLabel, content, fileContentsRef.current);
+      }
+      return buildDoneSummary(buildLabel, opts);
+    };
+    setTokenRatio(recordTokenUsage(pid, content));
+    const revisingId = reviseUserMsgId;
+    setReviseUserMsgId(null);
+    setEditingUserId(null);
     setChatInput('');
+    setComposerTall(false);
     setAttachedImages([]);
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
 
-    const plannedFiles = planFilesForBuild(content);
+    if (canEdit && needsMobileTargetChoice(rawContent)) {
+      const userMsg: ChatMessage = {
+        id: crypto.randomUUID(),
+        user_id: uid,
+        project_id: pid,
+        role: 'user',
+        content: rawContent,
+        provider_used: null,
+        created_at: new Date().toISOString(),
+      };
+      const assistantId = crypto.randomUUID();
+      const assistantMsg: ChatMessage = {
+        id: assistantId,
+        user_id: uid,
+        project_id: pid,
+        role: 'assistant',
+        content: 'Which devices is this for? I’ll write a real iPhone (Xcode) or Android (Android Studio) project — not a website. You push to GitHub, then open it on a Mac or in Android Studio to ship.',
+        provider_used: 'ARK',
+        created_at: new Date().toISOString(),
+      };
+      setMessages(prev => {
+        const next = [...prev, userMsg, assistantMsg];
+        persistLocalThread(next);
+        return next;
+      });
+      setMobileOfferId(assistantId);
+      setMobileOfferPrompt(rawContent);
+      return;
+    }
+
+    if (revisingId) {
+      fileContentsRef.current = {};
+      fileTreeRef.current = [];
+      setFileContents({});
+      setFileTree([]);
+      setSelectedFile('');
+      setPreviewReady(false);
+      setLivePreviewUrl(null);
+    }
+
+    const hadExistingFiles = !revisingId && Object.values(fileContentsRef.current)
+      .some(v => String(v || '').trim().length > 40);
+    const inspectOnly = !canEdit
+      || (hadExistingFiles && wantsInspectOnly(rawContent, composerWasDebug));
+    const patchOnlyNamed = canEdit && hadExistingFiles && wantsNamedPatch(rawContent, true) && !inspectOnly;
+    const mobileAsk = Boolean(classifyMobileTarget(content));
+    const allowScaffold = canEdit && !inspectOnly && !patchOnlyNamed && (!hadExistingFiles || mobileAsk);
+    const plannedFiles = inspectOnly || patchOnlyNamed
+      ? pickFilesForInspect(fileContentsRef.current, rawContent)
+      : planFilesForBuild(content);
     const userMsg: ChatMessage = {
-      id: crypto.randomUUID(),
+      id: revisingId || crypto.randomUUID(),
       user_id: uid,
-      project_id: project.id,
+      project_id: pid,
       role: 'user',
       content: content || '',
       provider_used: null,
       created_at: new Date().toISOString(),
     };
-    setMessages(prev => [...prev, userMsg]);
-
     const assistantId = crypto.randomUUID();
-    setMessages(prev => [...prev, {
+    const assistantPlaceholder: ChatMessage = {
       id: assistantId,
       user_id: uid,
-      project_id: project.id,
+      project_id: pid,
       role: 'assistant',
       content: '',
       provider_used: null,
       created_at: new Date().toISOString(),
-    }]);
+    };
+    let nextMsgs: ChatMessage[] = [];
+    setMessages(prev => {
+      let next = prev;
+      if (revisingId) {
+        const idx = prev.findIndex(m => m.id === revisingId);
+        if (idx >= 0) next = prev.slice(0, idx);
+      }
+      nextMsgs = [...next, userMsg, assistantPlaceholder];
+      return nextMsgs;
+    });
+    persistLocalThread(nextMsgs.length ? nextMsgs : [userMsg, assistantPlaceholder]);
 
-    setBuildLive({ assistantId, label: buildLabel, step: 'understand', plannedFiles });
+    setBuildLive({
+      assistantId,
+      label: buildLabel,
+      step: 'understand',
+      plannedFiles,
+      startedAt: Date.now(),
+      kind: inspectOnly ? 'inspect' : patchOnlyNamed ? 'fix' : 'build',
+    });
     setExplorerOpen(true);
     setCodeOpen(true);
     setRightTab('code');
@@ -574,7 +1248,13 @@ export function ProjectWorkspace() {
     ]);
 
     const bumpStep = (step: BuildLiveStep) => {
-      setBuildLive(prev => (prev?.assistantId === assistantId ? { ...prev, step } : prev));
+      setBuildLive(prev => {
+        if (prev?.assistantId !== assistantId) return prev;
+        const cur = BUILD_STEP_ORDER.indexOf(prev.step);
+        const next = BUILD_STEP_ORDER.indexOf(step);
+        if (next < cur) return prev;
+        return { ...prev, step };
+      });
     };
 
     const showPlannedFiles = () => {
@@ -585,10 +1265,18 @@ export function ProjectWorkspace() {
         for (const [k, v] of Object.entries(stubs)) {
           if (next[k] === undefined) next[k] = v;
         }
-        setFileTree(buildFileTreeFromPaths(next));
+        fileContentsRef.current = next;
+        const tree = buildFileTreeFromPaths(next);
+        fileTreeRef.current = tree;
+        setFileTree(tree);
         return next;
       });
       if (plannedFiles[0]) setSelectedFile(plannedFiles[0]);
+      setExpandedFolders(prev => {
+        const next = new Set(prev);
+        foldersToExpand(plannedFiles).forEach(p => next.add(p));
+        return next;
+      });
     };
 
     const commitEdits = (
@@ -596,9 +1284,21 @@ export function ProjectWorkspace() {
       opts?: { openPreview?: boolean },
     ) => {
       if (!edits.length) return { changedPaths: [] as string[], summary: '' };
-      const applied = applyFileEdits(fileContents, fileTree, edits);
+      if (!canEdit) return { changedPaths: [] as string[], summary: '' };
+      const nativeEdits = finalizeMobileEdits(content, edits, fileContentsRef.current);
+      if (classifyMobileTarget(content) && !isLayoutLockAsk(content)) {
+        const drop = new Set(['index.html', 'css/styles.css', 'js/app.js', 'src/App.tsx', 'src/main.tsx', 'src/index.css']);
+        fileContentsRef.current = Object.fromEntries(
+          Object.entries(fileContentsRef.current).filter(([path]) => !drop.has(path) && !/^css\/|^js\//.test(path)),
+        );
+      }
+      undoSnapshotRef.current = { ...fileContentsRef.current };
+      setUndoReady(true);
+      const applied = applyFileEdits(fileContentsRef.current, fileTreeRef.current, nativeEdits);
+      fileContentsRef.current = applied.files;
+      fileTreeRef.current = applied.tree.length ? applied.tree : buildFileTreeFromPaths(applied.files);
       setFileContents(applied.files);
-      setFileTree(applied.tree.length ? applied.tree : buildFileTreeFromPaths(applied.files));
+      setFileTree(fileTreeRef.current);
       setDiffStats(prev => ({
         added: prev.added + applied.addedLines,
         removed: prev.removed + applied.removedLines,
@@ -609,40 +1309,47 @@ export function ProjectWorkspace() {
         expand.forEach(p => next.add(p));
         return next;
       });
-      const focus = applied.changedPaths[0];
+      const native = isNativeMobileTree(applied.files);
+      const focus = preferredMobileFocus(applied.changedPaths) || applied.changedPaths[0];
       if (focus) {
         setSelectedFile(focus);
         setFileFlash(true);
         window.setTimeout(() => setFileFlash(false), 1400);
       }
-      if (opts?.openPreview) setRightTab('preview');
+      if (opts?.openPreview && !native) setRightTab('preview');
+      if (native) setRightTab('code');
       if (window.arkDesktop?.projectWrite) {
-        const payloadFiles: Record<string, string> = {};
-        for (const [k, v] of Object.entries(applied.files)) {
-          if (k.includes('/')) payloadFiles[k] = v;
-          else if (/\.(tsx|ts|jsx|js|css)$/i.test(k)) payloadFiles[`src/${k}`] = v;
-          else payloadFiles[k] = v;
-        }
         void window.arkDesktop.projectWrite({
-          projectId: project.id,
+          projectId: pid,
           projectName: buildLabel,
-          files: payloadFiles,
+          files: packDiskFiles(applied.files, messagesRef.current),
         }).then(res => {
           if (res.root) setDiskRoot(res.root);
         });
       }
+      if (applied.changedPaths.length && !native && window.arkDesktop?.previewStart) {
+        void window.arkDesktop.previewStart({
+          projectId: pid,
+          projectName: buildLabel,
+          files: packDiskFiles(applied.files, messagesRef.current),
+        }).then(res => {
+          if (res?.url) {
+            setLivePreviewUrl(res.url);
+            setPreviewUrl(res.url);
+            setPreviewReady(true);
+            setRightTab('preview');
+          }
+        }).catch(() => undefined);
+      }
+      setShipOfferId(assistantId);
+      if (isNativeMobileTree(applied.files)) setDeviceOfferId(assistantId);
       return applied;
     };
 
-    window.setTimeout(() => {
-      bumpStep('plan');
-      showPlannedFiles();
-    }, 120);
+    const runId = ++runIdRef.current;
 
-    try {
-      await saveChatMessage(project.id, 'user', content);
-      await updateProject(project.id, { last_prompt: content, status: 'building' });
-    } catch { /* offline / guest ok */ }
+    void saveChatMessage(pid, 'user', content).catch(() => undefined);
+    void updateProject(pid, { last_prompt: content, status: 'building' }).catch(() => undefined);
 
     void (async () => {
       const pluginState = loadPluginState();
@@ -652,12 +1359,90 @@ export function ProjectWorkspace() {
       let replyText = '';
       let provider = 'ARK';
       let changedPaths: string[] = [];
+      let usedScaffold = false;
       let stallTimer: number | undefined;
-      let gotModelChunk = false;
-      let stallScaffoldApplied = false;
+      let hardTimer: number | undefined;
+      let aborted = false;
+      let waitOpen = true;
+      let abortReject: ((err: Error) => void) | null = null;
+      const buildStartedAt = Date.now();
+      const withTiming = (body: string) =>
+        `${body.trim()}\n\nWorked for ${formatElapsed(Date.now() - buildStartedAt)}`;
+      const snapshotChanged = () => {
+        changedPaths = Object.entries(fileContentsRef.current)
+          .filter(([, v]) => String(v || '').trim().length > 24)
+          .map(([k]) => k);
+      };
+
+      const abortPromise = new Promise<never>((_, reject) => {
+        abortReject = reject;
+      });
+
+      const finishWait = (reason: string) => {
+        if (aborted || !waitOpen) return;
+        aborted = true;
+        waitOpen = false;
+        if (stallTimer) window.clearTimeout(stallTimer);
+        if (hardTimer) window.clearTimeout(hardTimer);
+        if (typeTimerRef.current) {
+          window.clearInterval(typeTimerRef.current);
+          typeTimerRef.current = undefined;
+        }
+        void engineGenerateCancel();
+        abortReject?.(new Error(reason));
+      };
+
+      buildAbortRef.current = {
+        abort: () => {
+          if (!waitOpen) return;
+          buildAbortRef.current = null;
+          finishWait('Stopped');
+        },
+      };
 
       try {
-        if (pluginId) {
+        await sleep(280);
+        if (aborted || runId !== runIdRef.current) throw new Error('Stopped');
+        bumpStep('plan');
+        if (!inspectOnly && !patchOnlyNamed && !hadExistingFiles && canEdit) {
+          showPlannedFiles();
+        } else if (plannedFiles.length) {
+          setExpandedFolders(prev => {
+            const next = new Set(prev);
+            foldersToExpand(plannedFiles).forEach(p => next.add(p));
+            return next;
+          });
+          if (plannedFiles[0]) setSelectedFile(plannedFiles[0]);
+        }
+        await sleep(220);
+        if (aborted || runId !== runIdRef.current) throw new Error('Stopped');
+
+        if (window.arkDesktop?.projectWrite) {
+          await window.arkDesktop.projectWrite({
+            projectId: pid,
+            projectName: buildLabel,
+            files: packDiskFiles(fileContentsRef.current, messagesRef.current),
+          });
+        }
+        const studio = await runCodeStudioCommand({
+          message: rawContent,
+          projectId: pid,
+          projectName: buildLabel,
+          files: fileContentsRef.current,
+        });
+        if (studio) {
+          replyText = studio.reply;
+          provider = 'ARK';
+          if (studio.reload) {
+            const read = await window.arkDesktop?.projectRead?.(pid);
+            if (read?.files) applyProjectFiles(read.files);
+            if (read?.root) setDiskRoot(read.root);
+          }
+          await refreshGit(pid);
+          bumpStep('done');
+        }
+
+        if (!replyText && pluginId && !inspectOnly && !patchOnlyNamed && !isFindInFilesAsk(rawContent)) {
           const runtime = getPluginRuntime(pluginId, pluginState);
           const pluginReply = await runPluginAction(
             pluginId,
@@ -674,27 +1459,116 @@ export function ProjectWorkspace() {
 
         if (!replyText) {
           bumpStep('generate');
+          setRightTab('code');
 
           const prefs = getLocalPrefs();
-          const priorForHistory = [...messages, userMsg];
+          const priorForHistory = revisingId
+            ? messages.filter(m => m.id !== revisingId).concat(userMsg)
+            : [...messages, userMsg];
           const historyBase = prefs.rememberContext
             ? buildRouterHistory(priorForHistory, content)
             : buildRouterHistory([], content);
-          const codingMessage = buildProjectCodingPrompt(content, fileContents, buildLabel);
+          const findings = scanProjectFindings(fileContentsRef.current, rawContent);
+          const inspectPaths = pickFilesForInspect(fileContentsRef.current, rawContent);
+          const mentioned = pathsMentionedInText(
+            `${rawContent}\n${messages.slice(-4).map(m => m.content).join('\n')}`,
+            fileContentsRef.current,
+          );
+          const allowedPatchPaths = [...new Set([
+            ...mentioned,
+            ...lastInspectPathsRef.current,
+            ...inspectPaths,
+          ])];
+          if (inspectOnly) lastInspectPathsRef.current = inspectPaths;
+          if (patchOnlyNamed && allowedPatchPaths.length) lastInspectPathsRef.current = allowedPatchPaths;
+
+          const codingMessage = inspectOnly
+            ? buildInspectPrompt(rawContent, fileContentsRef.current, inspectPaths, findings, buildLabel)
+            : patchOnlyNamed
+              ? buildNamedPatchPrompt(rawContent, fileContentsRef.current, allowedPatchPaths, buildLabel)
+              : buildProjectCodingPrompt(content, fileContentsRef.current, buildLabel);
           const history = historyBase.map((turn, i) =>
             i === historyBase.length - 1 && turn.role === 'user'
               ? { ...turn, content: codingMessage }
               : turn,
           );
 
+          const fallbackEdits = allowScaffold ? scaffoldFallbackEdits(content, fileContentsRef.current) : [];
+          let fileIndex = 0;
+          let typed = 0;
+          const paintFiles = (edits: ReturnType<typeof parseFileEdits>, focusLast = true) => {
+            if (!canEdit) return;
+            if (!edits.length || inspectOnly) return;
+            const nextEdits = patchOnlyNamed ? filterEditsToPaths(edits, allowedPatchPaths) : edits;
+            if (!nextEdits.length) return;
+            const applied = applyFileEdits(fileContentsRef.current, fileTreeRef.current, nextEdits);
+            fileContentsRef.current = applied.files;
+            fileTreeRef.current = applied.tree.length ? applied.tree : buildFileTreeFromPaths(applied.files);
+            setFileContents(applied.files);
+            setFileTree(fileTreeRef.current);
+            setExpandedFolders(prev => {
+              const next = new Set(prev);
+              foldersToExpand(applied.changedPaths).forEach(p => next.add(p));
+              return next;
+            });
+            const focus = focusLast
+              ? applied.changedPaths[applied.changedPaths.length - 1]
+              : applied.changedPaths[0];
+            if (focus) setSelectedFile(focus);
+            setRightTab('code');
+            bumpStep('generate');
+          };
+          if (typeTimerRef.current) window.clearInterval(typeTimerRef.current);
+          if (allowScaffold && fallbackEdits.length) usedScaffold = true;
+          if (allowScaffold) {
+            typeTimerRef.current = window.setInterval(() => {
+              if (aborted) {
+                window.clearInterval(typeTimerRef.current);
+                typeTimerRef.current = undefined;
+                return;
+              }
+              if (
+                extractStreamingFileEdits(streamDraftRef.current).length
+                || extractStreamingHtml(streamDraftRef.current)
+              ) {
+                window.clearInterval(typeTimerRef.current);
+                typeTimerRef.current = undefined;
+                return;
+              }
+              const edit = fallbackEdits[fileIndex];
+              if (!edit) {
+                window.clearInterval(typeTimerRef.current);
+                typeTimerRef.current = undefined;
+                return;
+              }
+              const step = Math.max(22, Math.ceil(edit.content.length / 36));
+              typed = Math.min(edit.content.length, typed + step);
+              paintFiles([{ path: edit.path, content: edit.content.slice(0, typed) }]);
+              if (typed >= edit.content.length) {
+                fileIndex += 1;
+                typed = 0;
+              }
+            }, 40);
+          }
+
           stallTimer = window.setTimeout(() => {
-            if (gotModelChunk || stallScaffoldApplied) return;
-            const early = scaffoldFallbackEdits(content);
-            if (!early.length) return;
-            stallScaffoldApplied = true;
-            const applied = commitEdits(early, { openPreview: true });
-            if (applied.changedPaths.length) changedPaths = applied.changedPaths;
-          }, CODE_STALL_MS);
+            if (aborted) return;
+            const streamed = extractStreamingHtml(streamDraftRef.current);
+            if (!streamed && allowScaffold) {
+              if (typeTimerRef.current) {
+                window.clearInterval(typeTimerRef.current);
+                typeTimerRef.current = undefined;
+              }
+              usedScaffold = true;
+              commitEdits(scaffoldFallbackEdits(content, fileContentsRef.current));
+            }
+            snapshotChanged();
+            if (changedPaths.length || streamed || inspectOnly) finishWait('Stalled');
+          }, inspectOnly || patchOnlyNamed ? 14_000 : CODE_STALL_MS);
+
+          hardTimer = window.setTimeout(() => {
+            finishWait('Code generation timed out');
+          }, inspectOnly || patchOnlyNamed ? 40_000 : CODE_ROUTE_TIMEOUT_MS);
 
           const sticky = activeModel.source === 'auto' ? threadBrainRef.current : null;
           streamDraftRef.current = '';
@@ -716,36 +1590,45 @@ export function ProjectWorkspace() {
               stickyPinnedSource: sticky?.pinnedSource,
               history,
               onChunk: (piece) => {
-                gotModelChunk = true;
+                if (aborted) return;
                 streamDraftRef.current += piece;
                 bumpStep('generate');
+                if (inspectOnly) return;
+                const streamedFiles = extractStreamingFileEdits(streamDraftRef.current);
+                if (streamedFiles.length) {
+                  if (typeTimerRef.current) {
+                    window.clearInterval(typeTimerRef.current);
+                    typeTimerRef.current = undefined;
+                  }
+                  paintFiles(patchOnlyNamed ? filterEditsToPaths(streamedFiles, allowedPatchPaths) : streamedFiles);
+                  return;
+                }
                 const partial = extractStreamingHtml(streamDraftRef.current);
-                const target = plannedFiles[0] || 'index.html';
-                if (partial && partial.length > 24) {
-                  setFileContents(prev => {
-                    const next = { ...prev, [target]: partial };
-                    setFileTree(buildFileTreeFromPaths(next));
-                    return next;
-                  });
-                  setSelectedFile(target);
-                  setRightTab('code');
+                if (partial && partial.length > 24 && !patchOnlyNamed) {
+                  if (typeTimerRef.current) {
+                    window.clearInterval(typeTimerRef.current);
+                    typeTimerRef.current = undefined;
+                  }
+                  paintFiles(editsFromWorkingHtml(partial, plannedFiles));
                 }
               },
             }),
-            new Promise<never>((_, reject) => {
-              window.setTimeout(
-                () => reject(new Error('Code generation timed out')),
-                CODE_ROUTE_TIMEOUT_MS,
-              );
-            }),
+            abortPromise,
           ]);
 
           if (stallTimer) window.clearTimeout(stallTimer);
+          if (hardTimer) window.clearTimeout(hardTimer);
+          if (typeTimerRef.current) {
+            window.clearInterval(typeTimerRef.current);
+            typeTimerRef.current = undefined;
+          }
+          waitOpen = false;
+          aborted = true;
           provider = routerProviderLabel(routed, 'ARK');
 
           if (activeModel.source === 'auto' && routed.source !== 'none') {
             const nextBrain = saveAutoThreadBrain(
-              project.id,
+              pid,
               'coding',
               routed,
               threadBrainRef.current,
@@ -754,49 +1637,148 @@ export function ProjectWorkspace() {
             if (nextBrain) setThreadBrain(nextBrain);
           }
 
-          bumpStep('apply');
+          bumpStep(inspectOnly ? 'done' : 'apply');
 
-          const parsedEdits = parseFileEdits(routed.reply);
-          let edits = parsedEdits.length
-            ? parsedEdits
-            : extractChatStyleFileEdits(routed.reply, content);
-          if (!edits.length) edits = scaffoldFallbackEdits(content);
-
-          if (edits.length > 0) {
-            const applied = commitEdits(edits, { openPreview: /\bcalculator\b/i.test(content) });
-            changedPaths = applied.changedPaths;
-            const prose = stripFileBlocks(routed.reply);
-            replyText = prose
-              ? `${prose}\n\n${applied.summary}`
-              : `${applied.summary}\n\nOpen **Preview** to run ${buildLabel}. Files are in Explorer on the left.`;
+          if (inspectOnly) {
+            const local = formatLocalFindings(findings);
+            const spoken = stripFileBlocks(routed.reply);
+            replyText = [spoken, !spoken.includes('`') && local ? local : '']
+              .filter(Boolean)
+              .join('\n\n')
+              || `${local || 'I looked through the project files.'}\n\nWould you like me to fix these, or only list the rest?`;
+            if (canEdit && !/would you like/i.test(replyText)) {
+              replyText = `${replyText.trim()}\n\nWould you like me to fix these, or only list the rest?`;
+            }
+            lastInspectPathsRef.current = inspectPaths;
+            setInspectOfferId(assistantId);
+            if (!canEdit) {
+              replyText = `${replyText.trim()}\n\nYou have Read on this repo — you can look and discuss, not edit or push.`;
+            }
           } else {
-            const stripped = stripFileBlocks(routed.reply);
-            replyText = sanitizeAssistantReply(stripped || routed.reply, content) || stripped || routed.reply;
+            const parsedEdits = parseFileEdits(routed.reply);
+            let edits = parsedEdits.length
+              ? parsedEdits
+              : extractChatStyleFileEdits(routed.reply, content);
+            if (!patchOnlyNamed && edits.length === 1 && edits[0].path === 'index.html' && plannedFiles.length > 1) {
+              edits = editsFromWorkingHtml(edits[0].content, plannedFiles);
+            }
+            if (!edits.length) {
+              const streamedFiles = extractStreamingFileEdits(streamDraftRef.current);
+              if (streamedFiles.length) edits = streamedFiles;
+              else if (!patchOnlyNamed) {
+                const streamed = extractStreamingHtml(streamDraftRef.current);
+                if (streamed && streamed.length > 40) {
+                  edits = editsFromWorkingHtml(streamed, plannedFiles);
+                }
+              }
+            }
+            if (patchOnlyNamed) edits = filterEditsToPaths(edits, allowedPatchPaths);
+
+            if (edits.length > 0) {
+              const applied = commitEdits(edits);
+              changedPaths = applied.changedPaths;
+            } else {
+              snapshotChanged();
+              if (!changedPaths.length && allowScaffold) {
+                usedScaffold = true;
+                const applied = commitEdits(scaffoldFallbackEdits(content, fileContentsRef.current));
+                changedPaths = applied.changedPaths;
+              }
+            }
+            const spoken = stripFileBlocks(routed.reply);
+            replyText = spoken
+              || nativeDoneReply({ continued: hadExistingFiles || Boolean(revisingId) });
           }
 
           bumpStep('done');
         }
       } catch (err) {
+        waitOpen = false;
         if (stallTimer) window.clearTimeout(stallTimer);
-        const fallback = scaffoldFallbackEdits(content);
-        if (fallback.length > 0) {
-          bumpStep('apply');
-          const applied = commitEdits(fallback, { openPreview: true });
-          changedPaths = applied.changedPaths;
-          replyText = err instanceof Error && /timed out/i.test(err.message)
-            ? `${buildLabel} is ready in Explorer — ARK used a fast scaffold while the local brain was slow. Edit or hit Preview.`
-            : `${applied.summary}\n\n${buildLabel} saved to your project folder.`;
-          bumpStep('done');
-        } else {
-          replyText = err instanceof Error
-            ? `Could not complete that edit: ${err.message}`
-            : 'ARK Router failed on this project edit.';
+        if (hardTimer) window.clearTimeout(hardTimer);
+        if (typeTimerRef.current) {
+          window.clearInterval(typeTimerRef.current);
+          typeTimerRef.current = undefined;
         }
+        void engineGenerateCancel();
+        const stopped = err instanceof Error && /stopped/i.test(err.message);
+
+        const streamedFiles = inspectOnly ? [] : extractStreamingFileEdits(streamDraftRef.current);
+        const streamed = inspectOnly || patchOnlyNamed ? '' : extractStreamingHtml(streamDraftRef.current);
+        if (runId !== runIdRef.current) {
+          replyText = '';
+        } else if (streamedFiles.length) {
+          bumpStep('apply');
+          const applied = commitEdits(
+            patchOnlyNamed
+              ? filterEditsToPaths(streamedFiles, lastInspectPathsRef.current)
+              : streamedFiles,
+          );
+          changedPaths = applied.changedPaths;
+        } else if (streamed && streamed.length > 40) {
+          bumpStep('apply');
+          const applied = commitEdits(editsFromWorkingHtml(streamed, plannedFiles));
+          changedPaths = applied.changedPaths;
+        } else {
+          snapshotChanged();
+        }
+
+        if (runId === runIdRef.current) {
+          if (inspectOnly) {
+            const local = formatLocalFindings(scanProjectFindings(fileContentsRef.current, rawContent));
+            const spoken = stripFileBlocks(streamDraftRef.current);
+            replyText = spoken || local || 'I looked through the files I could open.';
+            if (canEdit && !/would you like/i.test(replyText)) {
+              replyText = `${replyText.trim()}\n\nWould you like me to fix these, or only list the rest?`;
+            }
+            setInspectOfferId(assistantId);
+            if (!canEdit) {
+              replyText = `${replyText.trim()}\n\nYou have Read on this repo — you can look and discuss, not edit or push.`;
+            }
+            bumpStep('done');
+          } else if (stopped) {
+            replyText = buildDoneSummary(buildLabel, {
+              stopped: true,
+              hadFiles: changedPaths.length > 0,
+            });
+            bumpStep('done');
+          } else {
+            if (!changedPaths.length && allowScaffold && !patchOnlyNamed) {
+              bumpStep('apply');
+              usedScaffold = true;
+              const applied = commitEdits(scaffoldFallbackEdits(content, fileContentsRef.current));
+              changedPaths = applied.changedPaths;
+            }
+            replyText = stripFileBlocks(streamDraftRef.current)
+              || nativeDoneReply({ continued: hadExistingFiles || Boolean(revisingId) });
+            bumpStep('done');
+          }
+        }
+      }
+
+      buildAbortRef.current = null;
+      if (replyText && usedScaffold) replyText = appendScaffoldHonesty(replyText);
+      if (replyText) replyText = withTiming(replyText);
+
+      if (runId !== runIdRef.current) {
+        if (replyText) {
+          const existing = loadProjectThread(pid);
+          const mapped = existing.map(m => (
+            m.id === assistantId
+              ? { ...m, content: replyText, provider_used: provider }
+              : m
+          ));
+          const saved = mapped.some(m => m.id === assistantId)
+            ? mapped
+            : [...existing, { ...assistantPlaceholder, content: replyText, provider_used: provider }];
+          saveProjectThread(pid, saved);
+        }
+        return;
       }
 
       if (changedPaths.length) {
         try {
-          await updateProject(project.id, {
+          await updateProject(pid, {
             status: 'idle',
             build_status: 'idle',
             last_prompt: content,
@@ -804,25 +1786,51 @@ export function ProjectWorkspace() {
         } catch { /* ignore */ }
       }
 
-      setBuildLive(null);
-      setMessages(prev => prev.map(m => (
-        m.id === assistantId
-          ? { ...m, content: replyText, provider_used: provider }
-          : m
-      )));
+      setBuildLive(prev => prev?.assistantId === assistantId ? null : prev);
+      setMessages(prev => {
+        const next = prev.map(m => (
+          m.id === assistantId
+            ? { ...m, content: replyText, provider_used: provider }
+            : m
+        ));
+        persistLocalThread(next);
+        return next;
+      });
 
       try {
-        await saveChatMessage(project.id, 'assistant', replyText);
+        await saveChatMessage(pid, 'assistant', replyText);
       } catch { /* ignore */ }
     })();
   };
 
-  const onChatInput = (value: string) => {
-    setChatInput(value);
+  const resizeComposer = () => {
     const el = textareaRef.current;
     if (!el) return;
-    el.style.height = 'auto';
-    el.style.height = `${Math.min(el.scrollHeight, 220)}px`;
+    if (!el.value) {
+      el.style.height = '20px';
+      el.style.overflowY = 'hidden';
+      setComposerTall(attachedImages.length > 0);
+      return;
+    }
+    el.style.height = '20px';
+    const raw = el.scrollHeight;
+    const max = Math.round(window.innerHeight * 0.45);
+    el.style.height = `${Math.min(raw, max)}px`;
+    el.style.overflowY = raw > max ? 'auto' : 'hidden';
+    setComposerTall(raw > 28 || attachedImages.length > 0);
+  };
+
+  const onChatInput = (value: string) => {
+    setChatInput(value);
+    requestAnimationFrame(resizeComposer);
+  };
+
+  useEffect(() => {
+    requestAnimationFrame(resizeComposer);
+  }, [chatInput, attachedImages.length]);
+
+  const stopBuild = () => {
+    buildAbortRef.current?.abort();
   };
 
   const onPickImages = (files: FileList | null) => {
@@ -864,26 +1872,19 @@ export function ProjectWorkspace() {
 
     void (async () => {
       try {
-        const files: Record<string, string> = { ...fileContents };
-        // Flatten keys that are basenames into src/ paths when needed
-        const payloadFiles: Record<string, string> = {};
-        for (const [k, v] of Object.entries(files)) {
-          if (k.includes('/')) payloadFiles[k] = v;
-          else if (k.endsWith('.tsx') || k.endsWith('.ts') || k.endsWith('.css')) {
-            payloadFiles[`src/${k}`] = v;
-          } else {
-            payloadFiles[k] = v;
-          }
+        if (isNativeMobileTree(fileContents)) {
+          setPreviewReady(true);
+          setBuildProgress(100);
+          return;
         }
+        const payloadFiles = packDiskFiles(fileContents, messagesRef.current);
         if (!payloadFiles['index.html']) {
-          payloadFiles['index.html'] = `<!DOCTYPE html>
+          payloadFiles['index.html'] = composePreviewHtml(fileContents) || `<!DOCTYPE html>
 <html><head><meta charset="utf-8"/><title>${project?.name ?? 'ARK'}</title>
-<style>body{margin:0;font-family:system-ui;background:#0b1220;color:#e8eefc;padding:24px}
-pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;overflow:auto}</style>
+<style>body{margin:0;font-family:system-ui;background:#0b1220;color:#e8eefc;padding:24px}</style>
 </head><body>
 <h1>${(project?.name ?? 'Project').replace(/</g, '')}</h1>
-<p>ARK Build &amp; Run local preview</p>
-<pre>${(payloadFiles['src/App.tsx'] || payloadFiles['App.tsx'] || '// App').replace(/</g, '&lt;').slice(0, 4000)}</pre>
+<p>ARK local preview</p>
 </body></html>`;
         }
 
@@ -899,7 +1900,7 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
           setBuildProgress(100);
         } else {
           // Browser fallback: blob URL from generated HTML
-          const html = payloadFiles['index.html'];
+          const html = composePreviewHtml(fileContents) || payloadFiles['index.html'];
           const blob = new Blob([html], { type: 'text/html' });
           const url = URL.createObjectURL(blob);
           setLivePreviewUrl(url);
@@ -967,6 +1968,7 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
   };
 
   const commitCreate = () => {
+    if (!canEdit) return;
     if (!creating) return;
     const raw = createName.trim().replace(/[\\/]/g, '');
     if (!raw) {
@@ -991,10 +1993,16 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
     }
     if (creating.kind === 'file') {
       const fullPath = creating.parentPath ? `${creating.parentPath}/${name}` : name;
+      const seed = name.endsWith('.css')
+        ? `/* ${fullPath} */\n`
+        : name.endsWith('.html')
+          ? `<!DOCTYPE html>\n<html lang="en">\n<head><meta charset="UTF-8" /><title>New page</title></head>\n<body></body>\n</html>\n`
+          : `// ${fullPath}\n`;
       setSelectedFile(fullPath);
       setFileContents(prev => ({
         ...prev,
-        [name]: `// ${fullPath}\n// New file\n`,
+        [fullPath]: seed,
+        [name]: seed,
       }));
       setRightTab('code');
       setCodeOpen(true);
@@ -1004,13 +2012,20 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
   };
 
   const startCreate = (kind: 'file' | 'folder') => {
+    if (!canEdit) return;
     const parentPath = selectedFile.includes('.')
       ? selectedFile.split('/').slice(0, -1).join('/')
-      : (expandedFolders.has(selectedFile) || selectedFile === 'src' ? selectedFile : 'src');
-    const folderParent = parentPath || 'src';
-    setExpandedFolders(prev => new Set(prev).add(folderParent));
-    setCreating({ kind, parentPath: folderParent });
-    setCreateName(kind === 'folder' ? 'new-folder' : 'NewFile.tsx');
+      : (selectedFile && !selectedFile.includes('.') ? selectedFile : '');
+    if (parentPath) {
+      setExpandedFolders(prev => new Set(prev).add(parentPath));
+    }
+    setCreating({ kind, parentPath });
+    const defaultFile = parentPath === 'css'
+      ? 'styles.css'
+      : parentPath === 'js'
+        ? 'app.js'
+        : 'index.html';
+    setCreateName(kind === 'folder' ? 'css' : defaultFile);
   };
 
   const openPreviewInBrowser = () => {
@@ -1059,16 +2074,18 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
           type="button"
           onClick={() => {
             setSelectedFile(fullPath);
-            const key = fullPath.split('/').pop() ?? fullPath;
-            setFileContents(prev => {
-              if (prev[fullPath] || prev[key]) return prev;
-              const seed = `// ${fullPath}\n`;
-              return {
-                ...prev,
-                [fullPath]: seed,
-                [key]: seed,
-              };
-            });
+            if (canEdit) {
+              const key = fullPath.split('/').pop() ?? fullPath;
+              setFileContents(prev => {
+                if (prev[fullPath] || prev[key]) return prev;
+                const seed = `// ${fullPath}\n`;
+                return {
+                  ...prev,
+                  [fullPath]: seed,
+                  [key]: seed,
+                };
+              });
+            }
             setRightTab('code');
           }}
           className={`flex items-center gap-1 w-full px-2 py-1 text-xs rounded transition-colors ${
@@ -1077,8 +2094,8 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
         >
           <ChevronRight className="w-3 h-3 opacity-0 shrink-0" />
           {node.language === 'md'
-            ? <FileText className="w-3.5 h-3.5 shrink-0" />
-            : <FileCode className="w-3.5 h-3.5 shrink-0" />}
+            ? <FileText className="w-3.5 h-3.5 shrink-0 text-content-tertiary" />
+            : <FileCode className={`w-3.5 h-3.5 shrink-0 ${fileTintClass(node.name)}`} />}
           <span className="truncate">{node.name}</span>
         </button>
       );
@@ -1092,47 +2109,13 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
     );
   }
 
-  const hasFiles = fileTree.length > 0 || Object.keys(fileContents).length > 0;
   const explorerTree = fileTree.length > 0 ? fileTree : buildFileTreeFromPaths(fileContents);
   const fileKey = selectedFile ? (selectedFile.split('/').pop() ?? selectedFile) : '';
   const codeBody = selectedFile
     ? (fileContents[selectedFile] ?? fileContents[fileKey] ?? '')
     : '';
-  const showBrowserChrome = Boolean(livePreviewUrl || previewReady);
-
-  const previewHtml = (() => {
-    const name = (project?.name ?? 'Project').replace(/</g, '');
-    const prompt = (project?.last_prompt ?? 'Ready when you are').replace(/</g, '').slice(0, 160);
-    const snippet = codeBody
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .split('\n')
-      .slice(0, 18)
-      .join('\n');
-    return `<!DOCTYPE html>
-<html><head><meta charset="utf-8"/><style>
-  :root{color-scheme:dark}
-  body{margin:0;font-family:ui-sans-serif,system-ui,sans-serif;background:radial-gradient(1200px 600px at 20% -10%,#1a2744,transparent),#0b1220;color:#e8eefc;min-height:100vh}
-  .wrap{max-width:720px;margin:0 auto;padding:28px 20px 40px}
-  .badge{display:inline-flex;align-items:center;gap:8px;font-size:11px;color:#34d399;margin-bottom:14px}
-  .dot{width:8px;height:8px;border-radius:50%;background:#34d399;box-shadow:0 0 0 4px rgba(52,211,153,.12)}
-  h1{margin:0 0 8px;font-size:28px;letter-spacing:-.02em}
-  .sub{margin:0 0 18px;color:#9fb0cc;font-size:14px;line-height:1.5}
-  .panel{border:1px solid #243047;border-radius:16px;background:#121a2b;overflow:hidden}
-  .panel h2{margin:0;padding:12px 14px;font-size:12px;color:#9fb0cc;border-bottom:1px solid #243047;text-transform:uppercase;letter-spacing:.08em}
-  pre{margin:0;padding:14px;font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#d7e3ff;white-space:pre-wrap;word-break:break-word}
-</style></head><body>
-  <div class="wrap">
-    <div class="badge"><span class="dot"></span> Build &amp; Run preview</div>
-    <h1>${name}</h1>
-    <p class="sub">${prompt}</p>
-    <div class="panel">
-      <h2>${fileKey}</h2>
-      <pre>${snippet}</pre>
-    </div>
-  </div>
-</body></html>`;
-  })();
+  const livePageHtml = composePreviewHtml(fileContents).trim();
+  const showBrowserChrome = Boolean(livePreviewUrl || previewReady) && !isNativeMobileTree(fileContents);
 
   const buildLabel = buildRunning
     ? `Building ${buildProgress}%`
@@ -1141,7 +2124,7 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
       : null;
 
   return (
-    <div className="h-full flex flex-col min-h-0">
+    <div className="h-full flex flex-col min-h-0 relative">
       {/* Header */}
       <div className="shrink-0 border-b border-surface-border px-4 py-2 flex items-center justify-between gap-3 bg-ark-navy-900/30 pr-28">
         <div className="flex items-center gap-2 min-w-0">
@@ -1150,6 +2133,16 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
           </button>
           <ChevronRight className="w-3 h-3 text-content-tertiary shrink-0" />
           <span className="text-sm font-medium text-content-primary truncate">{project.name}</span>
+          {myAccess === 'read' && (
+            <span className="text-[10px] rounded-full border border-amber-500/30 bg-amber-500/10 text-amber-200 px-1.5 py-0.5 shrink-0">
+              Read
+            </span>
+          )}
+          {myAccess === 'write' && gitInfo?.remote && (
+            <span className="text-[10px] rounded-full border border-surface-border text-content-tertiary px-1.5 py-0.5 shrink-0">
+              Write
+            </span>
+          )}
           {diskRoot ? (
             <span className="text-[10px] text-content-tertiary truncate max-w-[220px]" title={diskRoot}>
               {diskRoot}
@@ -1158,6 +2151,55 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
         </div>
 
         <div className="flex items-center gap-1.5 shrink-0">
+          <button
+            type="button"
+            onClick={() => void openProjectFolder()}
+            title="Open folder"
+            className="h-8 px-2 rounded-lg flex items-center gap-1 text-[11px] text-content-secondary hover:text-content-primary hover:bg-surface-hover"
+          >
+            <FolderOpen className="w-3.5 h-3.5" />
+            Open folder
+          </button>
+          <button
+            type="button"
+            onClick={() => setFindOpen(v => !v)}
+            title="Find in files"
+            className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
+              findOpen ? 'bg-surface-hover text-content-primary' : 'text-content-tertiary hover:text-content-primary hover:bg-surface-hover'
+            }`}
+            aria-label="Find in files"
+          >
+            <Search className="w-4 h-4" />
+          </button>
+          {gitInfo?.git ? (
+            <div className="flex items-center gap-1 pl-1 ml-0.5 border-l border-surface-border/70">
+              <span className="flex items-center gap-1 text-[11px] text-content-tertiary px-1" title={gitInfo.remote || 'Local git'}>
+                <GitBranch className="w-3 h-3" />
+                {gitInfo.branch || 'HEAD'}
+                {gitInfo.dirty
+                  ? <span className="text-amber-400/90">· {gitInfo.dirty} file{gitInfo.dirty === 1 ? '' : 's'} changed</span>
+                  : <span className="text-content-tertiary/80">· saved</span>}
+              </span>
+              <button
+                type="button"
+                onClick={() => void headerPush()}
+                disabled={gitBusy || !canEdit}
+                title={canEdit ? 'Save a commit if needed, then push to GitHub' : 'Read access — you cannot push'}
+                className="h-8 px-2 rounded-lg flex items-center gap-1 text-[11px] text-content-secondary hover:text-content-primary hover:bg-surface-hover disabled:opacity-50"
+              >
+                <Upload className="w-3.5 h-3.5" />
+                Push
+              </button>
+            </div>
+          ) : projectId ? (
+            <button
+              type="button"
+              onClick={() => setGithubPickerOpen(true)}
+              className="hidden sm:inline text-[10px] text-content-tertiary pl-1 hover:text-content-secondary"
+            >
+              Connect GitHub
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={() => setExplorerOpen(v => !v)}
@@ -1180,22 +2222,6 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
           >
             <PanelRight className="w-4 h-4" />
           </button>
-          <button
-            type="button"
-            onClick={handleBuild}
-            disabled={!hasFiles && !buildRunning}
-            title={hasFiles ? (buildRunning ? 'Stop preview' : 'Start preview') : 'Ask ARK to create files first'}
-            className={`inline-flex items-center gap-1 h-8 px-2.5 rounded-lg text-xs font-medium ml-1 mr-1 transition-colors ${
-              buildRunning
-                ? 'border border-rose-400/35 bg-rose-500/15 text-rose-200 hover:bg-rose-500/25'
-                : hasFiles
-                  ? 'bg-sky-500/90 text-white hover:bg-sky-500'
-                  : 'bg-surface-hover text-content-tertiary cursor-not-allowed'
-            }`}
-          >
-            {buildRunning ? <Square className="w-3 h-3" /> : <Play className="w-3 h-3" />}
-            {buildRunning ? 'Stop' : 'Start'}
-          </button>
         </div>
       </div>
 
@@ -1208,7 +2234,11 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
                 {buildLive ? (
                   <div className="min-w-0">
                     <p className="text-[10px] uppercase tracking-wider text-amber-400/90 font-semibold px-1">
-                      Building
+                      {buildLive.kind === 'inspect'
+                        ? 'Inspecting'
+                        : buildLive.kind === 'fix'
+                          ? 'Writing'
+                          : 'Building'}
                     </p>
                     <p className="text-sm font-semibold text-content-primary truncate px-1 mt-0.5">
                       {buildLive.label}
@@ -1228,17 +2258,29 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
               <div className="shrink-0 px-2 py-1.5 flex items-center justify-end gap-0.5">
                   <button
                     type="button"
+                    onClick={() => setFindOpen(v => !v)}
+                    title="Find in files"
+                    className={`w-6 h-6 rounded-md flex items-center justify-center ${
+                      findOpen ? 'text-sky-300 bg-sky-500/10' : 'text-content-tertiary hover:text-content-primary hover:bg-surface-hover'
+                    }`}
+                  >
+                    <Search className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => startCreate('file')}
-                    title="New file"
-                    className="w-6 h-6 rounded-md flex items-center justify-center text-content-tertiary hover:text-content-primary hover:bg-surface-hover"
+                    title={canEdit ? 'New file' : 'Read access — you cannot add files'}
+                    disabled={!canEdit}
+                    className="w-6 h-6 rounded-md flex items-center justify-center text-content-tertiary hover:text-content-primary hover:bg-surface-hover disabled:opacity-40"
                   >
                     <FilePlus2 className="w-3.5 h-3.5" />
                   </button>
                   <button
                     type="button"
                     onClick={() => startCreate('folder')}
-                    title="New folder"
-                    className="w-6 h-6 rounded-md flex items-center justify-center text-content-tertiary hover:text-content-primary hover:bg-surface-hover"
+                    title={canEdit ? 'New folder' : 'Read access — you cannot add folders'}
+                    disabled={!canEdit}
+                    className="w-6 h-6 rounded-md flex items-center justify-center text-content-tertiary hover:text-content-primary hover:bg-surface-hover disabled:opacity-40"
                   >
                     <FolderPlus className="w-3.5 h-3.5" />
                   </button>
@@ -1250,6 +2292,34 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
                     Hide
                   </button>
                 </div>
+              {findOpen && (
+                <div className="px-2 pb-2 border-b border-surface-border/50">
+                  <input
+                    value={findQuery}
+                    onChange={e => setFindQuery(e.target.value)}
+                    placeholder="Find in files"
+                    className="w-full bg-transparent text-xs text-content-primary outline-none border border-surface-border rounded-md px-2 py-1.5"
+                    autoFocus
+                  />
+                  <div className="mt-1.5 max-h-40 overflow-auto space-y-0.5">
+                    {findQuery.trim() && findHits.length === 0 ? (
+                      <p className="text-[10px] text-content-tertiary px-1 py-2">No matches</p>
+                    ) : (
+                      findHits.slice(0, 40).map(hit => (
+                        <button
+                          key={`${hit.path}:${hit.line}:${hit.text.slice(0, 24)}`}
+                          type="button"
+                          onClick={() => openPathInEditor(hit.path, hit.line)}
+                          className="w-full text-left px-1.5 py-1 rounded-md hover:bg-surface-hover"
+                        >
+                          <p className="text-[10px] text-sky-300 truncate">{hit.path}:{hit.line}</p>
+                          <p className="text-[10px] text-content-tertiary truncate">{hit.text}</p>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
               {creating && (
                 <div className="px-2 pb-2">
                   <div className="rounded-lg border border-surface-border bg-ark-navy-950/80 p-2">
@@ -1282,9 +2352,19 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
               )}
               <div className="flex-1 overflow-auto p-2">
                 {explorerTree.length === 0 ? (
-                  <p className="px-2 py-6 text-[11px] text-content-tertiary leading-relaxed text-center">
-                    No files yet. Ask ARK in chat to create your project.
-                  </p>
+                  myAccess === 'read' ? (
+                    <p className="text-[11px] text-content-tertiary px-2 py-6 leading-relaxed text-center">
+                      You have Read on this project. You can inspect and discuss in chat — you cannot add files.
+                    </p>
+                  ) : (
+                  <StudioEmptyState
+                    onOpenFolder={() => void openProjectFolder()}
+                    onOpenGithub={() => setGithubPickerOpen(true)}
+                    onStartBlank={startBlankProject}
+                    onStartIphone={() => startNativeProject('ios')}
+                    onStartAndroid={() => startNativeProject('android')}
+                  />
+                  )
                 ) : (
                   renderFileTree(explorerTree)
                 )}
@@ -1401,7 +2481,9 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
               <div className="text-center py-10 px-4">
                 <p className="text-sm text-content-secondary mb-1">Start building with chat</p>
                 <p className="text-xs text-content-tertiary max-w-sm mx-auto">
-                  Ask ARK to add a page, fix a bug, or redesign a component. Fresh builds show progress briefly, then in History.
+                  {canEdit
+                    ? 'Ask ARK to add a page, fix a bug, or build an iPhone / Android app. Fresh builds show progress briefly, then in History.'
+                    : 'You have Read on this project — you can inspect and discuss the code, but you cannot edit or push.'}
                 </p>
               </div>
             )}
@@ -1420,9 +2502,128 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
                       label={buildLive.label}
                       step={buildLive.step}
                       plannedFiles={buildLive.plannedFiles}
+                      startedAt={buildLive.startedAt}
                     />
+                  ) : msg.role === 'user' && editingUserId === msg.id ? (
+                    <textarea
+                      value={editDraft}
+                      onChange={e => setEditDraft(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          const next = editDraft.trim();
+                          if (!next || next === msg.content) {
+                            setEditingUserId(null);
+                            return;
+                          }
+                          setRevertPrompt({ userId: msg.id, content: next });
+                        }
+                        if (e.key === 'Escape') setEditingUserId(null);
+                      }}
+                      rows={Math.min(8, editDraft.split('\n').length + 1)}
+                      className="w-full bg-transparent text-sm text-content-primary outline-none resize-none leading-relaxed"
+                      autoFocus
+                    />
+                  ) : msg.role === 'user' ? (
+                    <button
+                      type="button"
+                      className="text-left w-full"
+                      title="Click to edit this prompt"
+                      onClick={() => {
+                        setEditingUserId(msg.id);
+                        setEditDraft(msg.content);
+                      }}
+                    >
+                      <p className="whitespace-pre-wrap leading-relaxed">{msg.content}</p>
+                    </button>
                   ) : (
-                    msg.content || <Loader2 className="w-3.5 h-3.5 animate-spin text-content-tertiary" />
+                    <div>
+                    {msg.content
+                      ? <AssistantBuildReply content={msg.content} onOpenPath={openPathInEditor} />
+                      : <Loader2 className="w-3.5 h-3.5 animate-spin text-content-tertiary" />}
+                    {inspectOfferId === msg.id && (
+                      <div className="flex flex-wrap gap-1 mt-2">
+                        {canEdit && (
+                          <button type="button" className="text-[10px] rounded-full bg-sky-600 text-white px-2.5 py-1" onClick={() => void handleSendChat('yes, fix these')}>
+                            Fix this
+                          </button>
+                        )}
+                        {canEdit && (
+                          <button type="button" className="text-[10px] rounded-full border border-surface-border px-2.5 py-1 text-content-secondary" onClick={() => { setChatInput('Add '); textareaRef.current?.focus(); }}>
+                            Add something
+                          </button>
+                        )}
+                        <button type="button" className="text-[10px] rounded-full border border-surface-border px-2.5 py-1 text-content-tertiary" onClick={() => setInspectOfferId(null)}>
+                          Only list
+                        </button>
+                      </div>
+                    )}
+                    {mobileOfferId === msg.id && canEdit && (
+                      <div className="flex flex-wrap gap-1 mt-2">
+                        <button
+                          type="button"
+                          className="text-[10px] rounded-full bg-sky-600 text-white px-2.5 py-1"
+                          onClick={() => {
+                            setMobileOfferId(null);
+                            void handleSendChat(`${mobileOfferPrompt}\n\nBuild this as a native iPhone app for ${deviceLine(defaultDeviceForTarget('ios'))} for the Apple App Store (SwiftUI + Xcode).`);
+                          }}
+                        >
+                          iPhone
+                        </button>
+                        <button
+                          type="button"
+                          className="text-[10px] rounded-full border border-surface-border px-2.5 py-1 text-content-secondary"
+                          onClick={() => {
+                            setMobileOfferId(null);
+                            void handleSendChat(`${mobileOfferPrompt}\n\nBuild this as a native Android app for ${deviceLine(defaultDeviceForTarget('android'))} for Google Play (Kotlin + Android Studio).`);
+                          }}
+                        >
+                          Android
+                        </button>
+                        <button
+                          type="button"
+                          className="text-[10px] rounded-full border border-surface-border px-2.5 py-1 text-content-secondary"
+                          onClick={() => {
+                            setMobileOfferId(null);
+                            void handleSendChat(`${mobileOfferPrompt}\n\nBuild this for both iPhone (${deviceLine(defaultDeviceForTarget('ios'))}) and Android (${deviceLine(defaultDeviceForTarget('android'))}) as native projects.`);
+                          }}
+                        >
+                          Both
+                        </button>
+                      </div>
+                    )}
+                    {deviceOfferId === msg.id && canEdit && (
+                      <div className="flex flex-wrap gap-1 mt-2">
+                        {devicesForChips(
+                          inferMobileTargetFromFiles(fileContents)
+                            || classifyMobileTarget(msg.content)
+                            || 'ios',
+                        ).map(device => (
+                          <button
+                            key={device.id}
+                            type="button"
+                            className="text-[10px] rounded-full border border-surface-border px-2.5 py-1 text-content-secondary"
+                            onClick={() => {
+                              setDeviceOfferId(null);
+                              void handleSendChat(layoutLockPrompt(device));
+                            }}
+                          >
+                            {device.label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {shipOfferId === msg.id && canEdit && (
+                      <div className="flex flex-wrap gap-1 mt-2">
+                        <button type="button" className="text-[10px] rounded-full border border-surface-border px-2.5 py-1 text-content-secondary" onClick={() => void headerPush()}>
+                          Push to GitHub?
+                        </button>
+                        <button type="button" className="text-[10px] rounded-full border border-surface-border px-2.5 py-1 text-content-secondary" onClick={() => void handleSendChat('Summarize this fix to #dev')}>
+                          Post to Slack
+                        </button>
+                      </div>
+                    )}
+                    </div>
                   )}
                 </div>
               </div>
@@ -1465,7 +2666,14 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
                 e.target.value = '';
               }}
             />
-            <div className="rounded-2xl border border-surface-border bg-ark-navy-900/50 focus-within:border-content-tertiary/50 transition-colors">
+            <div className={`flex gap-2 min-w-0 ${composerTall ? 'items-end' : 'items-center'}`}>
+            <div
+              className={`flex-1 min-w-0 border border-surface-border bg-ark-navy-900/90 ${
+                composerTall
+                  ? 'flex flex-col rounded-2xl overflow-hidden'
+                  : 'flex items-center gap-1 rounded-full h-11 pl-1 pr-1.5'
+              }`}
+            >
               {attachedImages.length > 0 && (
                 <div className="flex flex-wrap gap-2 px-3 pt-3">
                   {attachedImages.map(img => (
@@ -1501,6 +2709,80 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
                   </span>
                 </div>
               )}
+              <input
+                ref={codeFileInputRef}
+                type="file"
+                multiple
+                className="hidden"
+                accept=".ts,.tsx,.js,.jsx,.mjs,.cjs,.py,.go,.rs,.java,.css,.html,.json,.md,.toml,.yaml,.yml,image/*,text/*"
+                onChange={async e => {
+                  const list = e.target.files;
+                  e.target.value = '';
+                  if (!list?.length) return;
+                  const next: Record<string, string> = {};
+                  for (const f of [...list].slice(0, 20)) {
+                    try {
+                      next[f.name] = await f.text();
+                    } catch {
+                      /* skip */
+                    }
+                  }
+                  if (!Object.keys(next).length) return;
+                  setFileContents(prev => {
+                    const mapped = { ...prev };
+                    const treeExtra: FileNode[] = [];
+                    for (const [name, body] of Object.entries(next)) {
+                      const rel = name.includes('/') ? name : `src/${name}`;
+                      mapped[rel] = body;
+                      mapped[name] = body;
+                      treeExtra.push({
+                        name: name.includes('/') ? name.split('/').pop()! : name,
+                        type: 'file',
+                        language: name.split('.').pop(),
+                      });
+                    }
+                    if (treeExtra.length) {
+                      setFileTree(prevTree => {
+                        if (!prevTree.length) {
+                          return [{
+                            name: 'src',
+                            type: 'folder',
+                            children: treeExtra,
+                          }];
+                        }
+                        const clone = structuredClone(prevTree);
+                        const src = clone.find(n => n.name === 'src' && n.type === 'folder');
+                        if (src?.children) {
+                          for (const f of treeExtra) {
+                            if (!src.children.some(c => c.name === f.name)) src.children.push(f);
+                          }
+                        }
+                        return clone;
+                      });
+                      const first = Object.keys(next)[0];
+                      if (first) setSelectedFile(first.includes('/') ? first : `src/${first}`);
+                    }
+                    return mapped;
+                  });
+                }}
+              />
+              {!composerTall && (
+                <ComposerPlusMenu
+                  buttonClassName="w-8 h-8 rounded-full flex items-center justify-center text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors shrink-0"
+                  onAction={(action: ComposerPlusAction) => {
+                    if (action === 'file' || action === 'image') {
+                      codeFileInputRef.current?.click();
+                      return;
+                    }
+                    if (action === 'folder') {
+                      void openProjectFolder();
+                      return;
+                    }
+                    setComposerMode(action);
+                    requestAnimationFrame(() => textareaRef.current?.focus());
+                  }}
+                />
+              )}
               <textarea
                 ref={textareaRef}
                 value={chatInput}
@@ -1508,85 +2790,41 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
                 onKeyDown={e => {
                   if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault();
-                    void handleSendChat();
+                    if (buildLive) stopBuild();
+                    else void handleSendChat();
                   }
                 }}
-                placeholder="Ask ARK to build or edit files in this project…"
+                placeholder="Build, add, remove, upgrade, or fix files in this project…"
                 rows={1}
-                className="w-full bg-transparent text-sm text-content-primary placeholder:text-content-tertiary px-3.5 pt-3 pb-2 resize-none outline-none max-h-[220px] overflow-y-auto leading-relaxed"
+                className={`bg-transparent border-none resize-none overflow-hidden text-sm text-content-primary placeholder:text-content-tertiary focus:outline-none leading-5 ${
+                  composerTall ? 'w-full px-3.5 pt-3.5 pb-2' : 'flex-1 min-w-0 px-1 py-0'
+                }`}
               />
-              <div className="flex items-center justify-between px-2 pb-2 gap-1">
-                <div className="flex items-center gap-0.5 min-w-0">
-                  <input
-                    ref={codeFileInputRef}
-                    type="file"
-                    multiple
-                    className="hidden"
-                    accept=".ts,.tsx,.js,.jsx,.mjs,.cjs,.py,.go,.rs,.java,.css,.html,.json,.md,.toml,.yaml,.yml,image/*,text/*"
-                    onChange={async e => {
-                      const list = e.target.files;
-                      e.target.value = '';
-                      if (!list?.length) return;
-                      const next: Record<string, string> = {};
-                      for (const f of [...list].slice(0, 20)) {
-                        try {
-                          next[f.name] = await f.text();
-                        } catch {
-                          /* skip */
-                        }
-                      }
-                      if (!Object.keys(next).length) return;
-                      setFileContents(prev => {
-                        const mapped = { ...prev };
-                        const treeExtra: FileNode[] = [];
-                        for (const [name, body] of Object.entries(next)) {
-                          const rel = name.includes('/') ? name : `src/${name}`;
-                          mapped[rel] = body;
-                          mapped[name] = body;
-                          treeExtra.push({
-                            name: name.includes('/') ? name.split('/').pop()! : name,
-                            type: 'file',
-                            language: name.split('.').pop(),
-                          });
-                        }
-                        if (treeExtra.length) {
-                          setFileTree(prevTree => {
-                            if (!prevTree.length) {
-                              return [{
-                                name: 'src',
-                                type: 'folder',
-                                children: treeExtra,
-                              }];
-                            }
-                            const clone = structuredClone(prevTree);
-                            const src = clone.find(n => n.name === 'src' && n.type === 'folder');
-                            if (src?.children) {
-                              for (const f of treeExtra) {
-                                if (!src.children.some(c => c.name === f.name)) src.children.push(f);
-                              }
-                            }
-                            return clone;
-                          });
-                          const first = Object.keys(next)[0];
-                          if (first) setSelectedFile(first.includes('/') ? first : `src/${first}`);
-                        }
-                        return mapped;
-                      });
-                    }}
-                  />
+              <div
+                className={
+                  composerTall
+                    ? 'flex items-center justify-between gap-2 px-2 pb-2 pt-1'
+                    : 'flex items-center shrink-0 gap-1'
+                }
+              >
+                {composerTall && (
                   <ComposerPlusMenu
-                    buttonClassName="w-8 h-8 rounded-lg flex items-center justify-center text-content-tertiary hover:text-content-primary hover:bg-surface-hover transition-colors"
+                    buttonClassName="w-8 h-8 rounded-full flex items-center justify-center text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors shrink-0"
                     onAction={(action: ComposerPlusAction) => {
                       if (action === 'file' || action === 'image') {
                         codeFileInputRef.current?.click();
+                        return;
+                      }
+                      if (action === 'folder') {
+                        void openProjectFolder();
                         return;
                       }
                       setComposerMode(action);
                       requestAnimationFrame(() => textareaRef.current?.focus());
                     }}
                   />
-                </div>
-                <div className="flex items-center gap-1.5 shrink-0 self-center">
+                )}
+                <div className="flex items-center gap-1.5 shrink-0">
                   <button
                     ref={modelButtonRef}
                     type="button"
@@ -1608,19 +2846,6 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
                     </span>
                     <ChevronDown className={`w-3 h-3 text-content-tertiary shrink-0 ${modelMenuOpen ? 'rotate-180' : ''}`} />
                   </button>
-                  <TokenUsageRing
-                    ratio={tokenRatio}
-                    size={16}
-                    className="text-content-primary"
-                    modelName={activeModel.source === 'auto' ? autoPillLabel(threadBrain) : activeModel.name}
-                    modelDetail={
-                      activeModel.source === 'auto'
-                        ? autoRingDetail(threadBrain, 'coding')
-                        : activeModel.source === 'local'
-                          ? 'Local · ARK Engine'
-                          : 'Cloud · connected key'
-                    }
-                  />
                   {modelMenuOpen && menuPos && createPortal(
                     <div
                       ref={modelMenuRef}
@@ -1642,7 +2867,6 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
                             if (model.source === 'auto') {
                               setLocalPrefs({ defaultModelId: 'ark-auto', aiMode: 'automatic', autoFailover: true });
                             } else {
-                              setLocalPrefs({ defaultModelId: model.id, lastChatModelId: model.id });
                               if (projectId) clearThreadBrain(projectId, 'coding');
                               setThreadBrain(null);
                               if (model.source === 'local') void setEngineModel(model.id).catch(() => undefined);
@@ -1670,16 +2894,44 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
                     </div>,
                     document.body,
                   )}
-                  <button
-                    type="button"
-                    onClick={() => void handleSendChat()}
-                    disabled={!chatInput.trim() && attachedImages.length === 0}
-                    className="w-8 h-8 rounded-full bg-content-primary text-ark-navy-950 flex items-center justify-center hover:opacity-90 transition-opacity disabled:opacity-30 disabled:cursor-not-allowed"
-                  >
-                    <ArrowUp className="w-4 h-4" strokeWidth={2.5} />
-                  </button>
+                  {buildLive ? (
+                    <button
+                      type="button"
+                      onClick={stopBuild}
+                      title="Stop building"
+                      aria-label="Stop building"
+                      className="w-8 h-8 rounded-full bg-rose-500/20 text-rose-300 flex items-center justify-center hover:bg-rose-500/30 transition-colors"
+                    >
+                      <Square className="w-3.5 h-3.5 fill-current" />
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => void handleSendChat()}
+                      disabled={!chatInput.trim() && attachedImages.length === 0}
+                      className="w-8 h-8 rounded-full bg-content-primary text-ark-navy-950 flex items-center justify-center hover:opacity-90 transition-opacity disabled:opacity-30 disabled:cursor-not-allowed"
+                    >
+                      <ArrowUp className="w-4 h-4" strokeWidth={2.5} />
+                    </button>
+                  )}
                 </div>
               </div>
+            </div>
+            <div className={`flex items-center gap-1.5 shrink-0 ${composerTall ? 'pb-2' : ''}`}>
+              <TokenUsageRing
+                ratio={tokenRatio}
+                size={16}
+                className="text-content-primary"
+                modelName={activeModel.source === 'auto' ? autoPillLabel(threadBrain) : activeModel.name}
+                modelDetail={
+                  activeModel.source === 'auto'
+                    ? autoRingDetail(threadBrain, 'coding')
+                    : activeModel.source === 'local'
+                      ? 'Local · ARK Engine'
+                      : 'Cloud · connected key'
+                }
+              />
+            </div>
             </div>
           </div>
         </div>
@@ -1702,19 +2954,47 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
                       rightTab === 'code' ? 'bg-surface-hover text-content-primary' : 'text-content-tertiary hover:text-content-secondary'
                     }`}
                   >
-                    <FileCode className="w-3 h-3" />
-                    {fileKey}
+                    <FileCode className={`w-3 h-3 ${fileTintClass(fileKey)}`} />
+                    <span className="truncate max-w-[160px]" title={selectedFile}>
+                      {selectedFile || fileKey}
+                    </span>
+                    {selectedFile && (
+                      <span className="text-[10px] uppercase tracking-wide text-content-tertiary">
+                        {languageFromPath(selectedFile)}
+                      </span>
+                    )}
                     {fileFlash && <span className="w-1.5 h-1.5 rounded-full bg-sky-400 animate-pulse" />}
                   </button>
                   <button
                     type="button"
                     onClick={() => setRightTab('preview')}
                     className={`inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded-md transition-colors ${
-                      rightTab === 'preview' ? 'bg-surface-hover text-content-primary' : 'text-content-tertiary hover:text-content-secondary'
+                      rightTab === 'preview' ? 'bg-sky-500/90 text-white' : 'text-content-tertiary hover:text-content-secondary'
                     }`}
                   >
-                    <Eye className="w-3 h-3" />
-                    Preview
+                    <Play className="w-3 h-3" />
+                    Start
+                  </button>
+                  {undoReady && canEdit && (
+                    <button
+                      type="button"
+                      onClick={undoLastEdit}
+                      title="Undo last ARK edit"
+                      className="inline-flex items-center gap-1 text-[11px] text-content-tertiary hover:text-content-primary px-1"
+                    >
+                      <Undo2 className="w-3 h-3" />
+                      Undo
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setFileFindOpen(v => !v)}
+                    title="Find in this file"
+                    className={`w-7 h-7 rounded-md flex items-center justify-center ${
+                      fileFindOpen ? 'bg-surface-hover text-content-primary' : 'text-content-tertiary hover:text-content-primary'
+                    }`}
+                  >
+                    <Search className="w-3.5 h-3.5" />
                   </button>
                 </div>
                 <button
@@ -1726,6 +3006,21 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
                 </button>
               </div>
 
+              {fileFindOpen && rightTab === 'code' && (
+                <div className="shrink-0 px-3 py-1.5 border-b border-surface-border/50 flex gap-2">
+                  <input
+                    value={fileFind}
+                    onChange={e => setFileFind(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') findNextInFile(); }}
+                    placeholder="Find in this file"
+                    className="flex-1 bg-transparent text-xs text-content-primary outline-none border border-surface-border rounded-md px-2 py-1"
+                    autoFocus
+                  />
+                  <button type="button" onClick={findNextInFile} className="text-[10px] text-content-secondary px-2">
+                    Next
+                  </button>
+                </div>
+              )}
               {buildRunning && (
                 <div className="shrink-0 px-3 py-2">
                   <div className="flex items-center justify-between mb-1.5">
@@ -1739,7 +3034,7 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
               )}
 
               {rightTab === 'code' ? (
-                <div className="flex-1 min-h-0 overflow-hidden p-2">
+                <div className="flex-1 min-h-0 overflow-hidden">
                   {!selectedFile ? (
                     <div className="h-full flex flex-col items-center justify-center text-center px-6 gap-2">
                       <FileCode className="w-5 h-5 text-content-tertiary" />
@@ -1749,46 +3044,63 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
                       </p>
                     </div>
                   ) : (
-                    <textarea
+                    <CodeEditor
                       ref={codeEditorRef}
+                      path={selectedFile || fileKey}
                       value={codeBody}
-                      onChange={e => {
-                        const next = e.target.value;
+                      readOnly={!canEdit}
+                      jumpLine={jumpLine}
+                      onChange={next => {
+                        if (!canEdit) return;
+                        fileContentsRef.current = {
+                          ...fileContentsRef.current,
+                          [fileKey]: next,
+                          [selectedFile]: next,
+                        };
                         setFileContents(prev => ({
                           ...prev,
                           [fileKey]: next,
                           [selectedFile]: next,
                         }));
                       }}
-                      spellCheck={false}
-                      className="w-full h-full resize-none bg-transparent font-mono text-xs text-content-primary leading-relaxed outline-none p-2 rounded-lg focus:bg-ark-navy-900/40"
+                      onSave={() => {
+                        if (!canEdit || !projectId) return;
+                        void window.arkDesktop?.projectWrite?.({
+                          projectId,
+                          projectName: project?.name,
+                          files: packDiskFiles(fileContentsRef.current, messagesRef.current),
+                        });
+                      }}
                     />
                   )}
                 </div>
               ) : (
                 <div className="flex-1 min-h-0 bg-ark-navy-950 relative">
-                  {previewReady || buildProgress >= 100 ? (
-                    livePreviewUrl ? (
-                      <iframe
-                        title="Project preview"
-                        src={livePreviewUrl}
-                        className="w-full h-full border-0 bg-white"
-                        sandbox="allow-scripts allow-same-origin"
-                      />
-                    ) : (
-                      <iframe
-                        title="Project preview"
-                        srcDoc={previewHtml}
-                        className="w-full h-full border-0 bg-white"
-                        sandbox="allow-scripts"
-                      />
-                    )
+                  {isNativeMobileTree(fileContents) ? (
+                    <div className="h-full flex flex-col items-center justify-center text-center px-8 gap-2">
+                      <Smartphone className="w-5 h-5 text-sky-400" />
+                      <p className="text-sm text-content-secondary">Native phone project</p>
+                      <p className="text-xs text-content-tertiary max-w-sm leading-relaxed">
+                        This isn’t a website preview. Push to GitHub, then open
+                        {fileContents['README.md']?.includes('ios/') ? ' `ios/*.xcodeproj` on a Mac' : ''}
+                        {fileContents['README.md']?.includes('ios/') && fileContents['README.md']?.includes('android') ? ' and/or' : ''}
+                        {Object.keys(fileContents).some(p => p.startsWith('android/')) ? ' the `android` folder in Android Studio' : ''}
+                        {' '}to run and ship.
+                      </p>
+                    </div>
+                  ) : livePageHtml ? (
+                    <iframe
+                      title="Project preview"
+                      srcDoc={livePageHtml}
+                      className="w-full h-full border-0 bg-white"
+                      sandbox="allow-scripts"
+                    />
                   ) : (
                     <div className="h-full flex flex-col items-center justify-center text-center px-6 gap-2">
-                      <Globe className="w-5 h-5 text-sky-400" />
-                      <p className="text-sm text-content-secondary">No preview yet</p>
+                      <Play className="w-5 h-5 text-sky-400" />
+                      <p className="text-sm text-content-secondary">Nothing to run yet</p>
                       <p className="text-xs text-content-tertiary max-w-xs">
-                        Create files with chat, then hit Start for a local preview.
+                        Ask ARK in chat to create the page, then hit Start.
                       </p>
                     </div>
                   )}
@@ -1807,6 +3119,86 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
           </>
         )}
       </div>
+
+      <TeammateBar
+        people={teamPeople}
+        assignments={teamState.assignments}
+        myAccess={myAccess}
+        canInvite={myAccess === 'full'}
+        onInvite={(username, access) => {
+          const arkId = normalizeArkId(username);
+          if (isArkUserId(arkId)) {
+            void lookupArkUser(arkId).then(found => {
+              const member = {
+                arkId,
+                displayName: found?.displayName || formatArkId(arkId),
+                access,
+              };
+              const arkMembers = [
+                ...(teamState.arkMembers || []).filter(m => m.arkId !== arkId),
+                member,
+              ];
+              const trusted = teamState.trusted.includes(arkId)
+                ? teamState.trusted
+                : [...teamState.trusted, arkId];
+              const next = { ...teamState, arkMembers, trusted };
+              setTeamState(next);
+              saveTeamState(projectId, next);
+              void inviteByArkId(arkId, member.displayName);
+            });
+            return;
+          }
+          const parsed = parseGithubRemote(gitInfo?.remote || '');
+          const token = getPluginRuntime('github', loadPluginState()).token?.trim();
+          if (!parsed || !token) {
+            setMessages(prev => [...prev, {
+              id: crypto.randomUUID(),
+              user_id: user?.id ?? 'guest',
+              project_id: projectId,
+              role: 'assistant',
+              content: 'Use their 7-digit ARK ID to add them. GitHub usernames need a connected GitHub repo.',
+              provider_used: 'Team',
+              created_at: new Date().toISOString(),
+            }]);
+            return;
+          }
+          void inviteGitHubCollaborator(token, parsed.owner, parsed.repo, username, access)
+            .then(() => listGitHubCollaborators(token, parsed.owner, parsed.repo))
+            .then(setTeammates)
+            .catch(err => {
+              setMessages(prev => [...prev, {
+                id: crypto.randomUUID(),
+                user_id: user?.id ?? 'guest',
+                project_id: projectId,
+                role: 'assistant',
+                content: err instanceof Error ? err.message : 'Could not invite that GitHub user.',
+                provider_used: 'GitHub',
+                created_at: new Date().toISOString(),
+              }]);
+            });
+          const trusted = teamState.trusted.includes(username)
+            ? teamState.trusted
+            : [...teamState.trusted, username];
+          const next = { ...teamState, trusted };
+          setTeamState(next);
+          saveTeamState(projectId, next);
+        }}
+        onAssign={(login, area) => {
+          const assignments = [
+            ...teamState.assignments.filter(a => a.login.toLowerCase() !== login.toLowerCase()),
+            ...(area ? [{ login, area }] : []),
+          ];
+          const next = { ...teamState, assignments };
+          setTeamState(next);
+          saveTeamState(projectId, next);
+        }}
+      />
+
+      <GitHubRepoPicker
+        open={githubPickerOpen}
+        onClose={() => setGithubPickerOpen(false)}
+        onPick={repo => void clonePickedRepo(repo)}
+      />
 
       {/* Status strip — only meaningful activity */}
       {(buildLabel || showBrowserChrome || !explorerOpen || !codeOpen) ? (
@@ -1849,6 +3241,36 @@ pre{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;
           </div>
         </div>
       ) : null}
+
+      <Modal
+        isOpen={Boolean(revertPrompt)}
+        onClose={() => setRevertPrompt(null)}
+        title="Would you like to revert your response?"
+        size="sm"
+      >
+        <p className="text-sm text-content-secondary leading-relaxed">
+          Revert replaces that prompt and rebuilds the files on the right from the new message.
+        </p>
+        <div className="mt-4 flex justify-end gap-2">
+          <button type="button" className="ark-btn-ghost text-xs" onClick={() => setRevertPrompt(null)}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="inline-flex items-center rounded-lg bg-sky-500/90 hover:bg-sky-500 text-white text-xs font-medium px-3 py-1.5"
+            onClick={() => {
+              if (!revertPrompt) return;
+              const { userId, content } = revertPrompt;
+              setRevertPrompt(null);
+              setEditingUserId(null);
+              setReviseUserMsgId(userId);
+              void handleSendChat(content);
+            }}
+          >
+            Revert
+          </button>
+        </div>
+      </Modal>
     </div>
   );
 }

@@ -332,17 +332,18 @@ export function mediaMessageMarkdown(
   alt: string,
   libraryId: string,
   dataUrl?: string,
-  opts?: { real?: boolean; kind?: 'image' | 'video' },
+  opts?: { real?: boolean; kind?: 'image' | 'video'; source?: string },
 ): string {
   const safe = (alt || 'ARK generation').slice(0, 80).replace(/[\[\]]/g, '');
   const body = dataUrl ? `![${safe}](${dataUrl})` : `![${safe}](ark-media:${libraryId})`;
+  const sourceLine = opts?.source ? `Source: ${opts.source}` : '';
   if (opts?.real === false) {
     const label = opts.kind === 'video'
       ? 'Video preview · not a finished MP4'
       : 'Image preview · not a finished generation';
-    return `${label}\n\n${body}`;
+    return [label, sourceLine, body].filter(Boolean).join('\n\n');
   }
-  return body;
+  return [sourceLine, body].filter(Boolean).join('\n\n');
 }
 
 export function feedbackKey(id: string) {

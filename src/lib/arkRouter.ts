@@ -12,6 +12,7 @@
 import {
   packHistoryPrompt,
   sanitizeAssistantReply,
+  usableAssistantText,
   type RouterChatTurn,
 } from '@/lib/chatHistory';
 import { honestNoLiveChatReply } from '@/lib/arkCapacity';
@@ -86,6 +87,8 @@ function modePrefersCloud(mode: AiModePref) {
   return mode === 'cloud_when_available' || mode === 'local_fallback';
 }
 
+import { isTemplateEngineReply } from '@/lib/codeBuildHonesty';
+
 function isStrongLocal(source?: string) {
   return source === 'ark-gguf' || source === 'ark-media';
 }
@@ -119,18 +122,20 @@ async function tryLocalChat(
   const runOne = async (id: string | undefined): Promise<ArkRouterResult | null> => {
     attempted.push(id ? `ARK Engine · ${id}` : 'ARK Engine');
     try {
-      const brain = await probeBrain();
-      if (!brain.ok && !window.arkDesktop?.engineGenerate) {
-        return null;
+      if (!window.arkDesktop?.engineGenerate) {
+        const brain = await probeBrain();
+        if (!brain.ok) return null;
       }
       const prompt = packHistoryPrompt(history, message);
       const result = onChunk
         ? await brainGenerateStream(prompt, id, onChunk, kind)
         : await brainGenerate(prompt, id, kind);
       const prevAsst = [...history].reverse().find(t => t.role === 'assistant')?.content;
-      const cleaned = sanitizeAssistantReply(result.reply, message, prevAsst);
+      const reply = usableAssistantText(result.reply, message, prevAsst) || String(result.reply || '').trim();
+      if (!reply || isTemplateEngineReply(reply)) return null;
+      if (result.source === 'ark-engine' && !result.media) return null;
       return {
-        reply: cleaned || result.reply,
+        reply,
         media: result.media,
         modelName: result.modelName || 'ARK Engine',
         modelId: id || result.modelName,
@@ -145,9 +150,10 @@ async function tryLocalChat(
   };
 
   const first = await runOne(modelId);
-  if (first && isStrongLocal(first.source)) return first;
+  if (first?.reply?.trim() && isStrongLocal(first.source)) return first;
 
-  if (!failover) return null;
+  // Coding must not hop through every weak chat GGUF (each can take minutes).
+  if (!failover || kind === 'coding') return null;
 
   const extras: string[] = [];
   if (failoverIds?.length) {
@@ -477,7 +483,7 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
       }
     }
 
-    if (picked) {
+    if (picked && !(brainKind === 'coding' && !capableLocal)) {
       const local = await tryLocalChat(
         history,
         opts.message,

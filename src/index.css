@@ -301,4 +301,69 @@
   }
 }
 
+/* VS Code–style code pane (Code workspace editor) */
+.ark-code-editor {
+  background: #1e1e1e;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+  font-size: 12.5px;
+  line-height: 20px;
+  color: #d4d4d4;
+}
+.ark-code-gutter {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 3rem;
+  overflow: hidden;
+  padding: 8px 8px 8px 0;
+  text-align: right;
+  color: #858585;
+  background: #1e1e1e;
+  border-right: 1px solid #2d2d2d;
+  user-select: none;
+}
+.ark-code-highlight,
+.ark-code-input {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 3rem;
+  margin: 0;
+  padding: 8px 12px;
+  font: inherit;
+  line-height: 20px;
+  white-space: pre;
+  tab-size: 2;
+  overflow: auto;
+}
+.ark-code-highlight {
+  pointer-events: none;
+  color: #d4d4d4;
+  scrollbar-width: none;
+}
+.ark-code-highlight::-webkit-scrollbar {
+  display: none;
+}
+.ark-code-input {
+  background: transparent;
+  color: transparent;
+  caret-color: #ffffff;
+  outline: none;
+  border: 0;
+  resize: none;
+}
+.ark-tok-comment { color: #6a9955; }
+.ark-tok-string { color: #ce9178; }
+.ark-tok-keyword { color: #569cd6; }
+.ark-tok-number { color: #b5cea8; }
+.ark-tok-tag { color: #569cd6; }
+.ark-tok-attr { color: #9cdcfe; }
+.ark-tok-fn { color: #dcdcaa; }
+.ark-tok-type { color: #4ec9b0; }
+.ark-tok-punct { color: #808080; }
+.ark-tok-plain { color: #d4d4d4; }
+
+
 

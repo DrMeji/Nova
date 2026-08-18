@@ -387,6 +387,30 @@ export function sanitizeAssistantReply(
   return text;
 }
 
+/** Prefer sanitized text, but never hide a real answer behind prompt-echo stripping. */
+export function usableAssistantText(
+  raw: string,
+  lastUserMessage?: string,
+  previousAssistant?: string,
+): string {
+  const cleaned = sanitizeAssistantReply(raw, lastUserMessage, previousAssistant);
+  if (cleaned.trim()) return cleaned.trim();
+
+  let light = String(raw || '').replace(/\r\n/g, '\n').trim();
+  if (!light) return '';
+  const markRe = /(?:^|\n)\s*(?:ARK|Assistant)\s*:\s*/gi;
+  let lastMark: RegExpExecArray | null = null;
+  let m: RegExpExecArray | null;
+  while ((m = markRe.exec(light)) !== null) lastMark = m;
+  if (lastMark && typeof lastMark.index === 'number') {
+    light = light.slice(lastMark.index + lastMark[0].length).trim();
+  }
+  light = light.replace(/^You are ARK[\s\S]*?(?:\n\n|User:\s*)/i, '').trim();
+  light = light.replace(/^>\s*/gm, '').trim();
+  if (light.length >= 2 && !/^You are ARK\b/i.test(light)) return light;
+  return '';
+}
+
 function firstSentence(text: string) {
   const m = String(text || '').match(/^[\s\S]{8,280}?(?:[.!?](?=\s|$)|$)/);
   return (m?.[0] || text.split('\n')[0] || '').trim();

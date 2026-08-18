@@ -29,6 +29,10 @@ export type LocalPrefs = {
   autoFailover: boolean;
   streamResponses: boolean;
   rememberContext: boolean;
+  /** Search Hugging Face for GGUF brains that fit this PC. */
+  huntInternetModels: boolean;
+  /** Install the best coding GGUF found online when no coder is on disk. */
+  autoInstallHuntModels: boolean;
   // Privacy
   shareUsageStats: boolean;
   clearClipboardAfterPaste: boolean;
@@ -65,6 +69,8 @@ const DEFAULT_PREFS: LocalPrefs = {
   autoFailover: true,
   streamResponses: true,
   rememberContext: true,
+  huntInternetModels: true,
+  autoInstallHuntModels: true,
   shareUsageStats: false,
   clearClipboardAfterPaste: false,
   defaultProjectType: 'web',

@@ -4,6 +4,7 @@ import {
   SquarePen, Briefcase, Blocks, Database, Bot,
   Settings, Search, PanelLeft, ChevronDown, History, Clock3,
   ImageIcon, Video, MessageSquare, Archive, Trash2, Code2, Pencil,
+  Globe, Phone, Copy,
 } from 'lucide-react';
 import { Modal } from './Modal';
 import { SettingsContent } from './SettingsContent';
@@ -11,6 +12,8 @@ import { SearchPanel } from './SearchPanel';
 import { useRecentProjects } from '@/context/RecentProjectsContext';
 import { useAuth } from '@/context/AuthContext';
 import { getLocalPrefs } from '@/lib/localPrefs';
+import { formatArkId } from '@/lib/arkUserId';
+import { useSocial } from '@/context/SocialContext';
 import {
   clearActivity,
   getActivityFlags,
@@ -23,18 +26,22 @@ import { reattachEngineDownloads } from '@/lib/engineDownloads';
 const NAV_ITEMS: {
   label: string;
   icon: React.ComponentType<{ className?: string }>;
-  route: Route;
+  route?: Route;
   activity?: ActivityKey;
+  comingSoon?: boolean;
 }[] = [
   { label: 'New Chat', icon: SquarePen, route: { name: 'chat' }, activity: 'chat' },
   { label: 'Image', icon: ImageIcon, route: { name: 'chat', mode: 'image' }, activity: 'image' },
   { label: 'Video', icon: Video, route: { name: 'chat', mode: 'video' }, activity: 'video' },
-  { label: 'Code', icon: Code2, route: { name: 'projects' }, activity: 'code' },
+  { label: 'Code', icon: Code2, route: { name: 'code' }, activity: 'code' },
   { label: 'Projects', icon: Briefcase, route: { name: 'projects' } },
   { label: 'History', icon: History, route: { name: 'dashboard' } },
   { label: 'Plugins', icon: Blocks, route: { name: 'build' }, activity: 'plugins' },
   { label: 'Models', icon: Database, route: { name: 'models' }, activity: 'models' },
   { label: 'Local AI', icon: Bot, route: { name: 'local-ai' }, activity: 'local-ai' },
+  { label: 'Networking', icon: Globe, route: { name: 'networking' }, activity: 'networking' },
+  { label: 'Message', icon: MessageSquare, route: { name: 'message' }, activity: 'message' },
+  { label: 'Call', icon: Phone, route: { name: 'call' }, activity: 'call' },
 ];
 
 function resolveDisplayName(
@@ -51,6 +58,7 @@ function resolveDisplayName(
 export function AppShell({ children }: { children: ReactNode }) {
   const { route, navigate } = useRouter();
   const { user, profile } = useAuth();
+  const { incoming, acceptCall, declineCall } = useSocial();
   const { recent, activeChats, archiveChat, deleteChatForever, renameRecent, renameChat, removeRecent } = useRecentProjects();
   const [collapsed, setCollapsed] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -105,11 +113,13 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   const inRecentChat = route.name === 'chat' && Boolean(route.chatId);
 
-  const isActive = (item: { route: Route; label: string }) => {
+  const isActive = (item: { route?: Route; label: string }) => {
+    if (!item.route) return false;
     if (route.name === 'project' || route.name === 'creation') {
       if (item.route.name === 'chat') return false;
-      // Projects list stays inactive while inside a Code workspace; Code stays active.
+      // Projects list stays inactive while inside a Code workspace; Recent row is the highlight.
       if (item.label === 'Projects') return false;
+      if (item.label === 'Code') return false;
     }
     // Once a conversation is in Recent, highlight that item — not New Chat / Image / Video.
     if (inRecentChat && item.route.name === 'chat') return false;
@@ -124,7 +134,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       return route.name === 'chat' && route.mode === 'video' && !route.chatId;
     }
     if (item.label === 'Code') {
-      return route.name === 'project';
+      return route.name === 'code';
     }
     if (item.label === 'Projects') {
       return route.name === 'projects';
@@ -237,6 +247,25 @@ export function AppShell({ children }: { children: ReactNode }) {
             {NAV_ITEMS.map(item => {
               const active = isActive(item);
               const busy = Boolean(item.activity && activity[item.activity]);
+              if (item.comingSoon) {
+                return (
+                  <button
+                    key={item.label}
+                    type="button"
+                    disabled
+                    title={`${item.label} · coming soon`}
+                    className={`ark-nav-item w-full opacity-45 cursor-not-allowed pointer-events-none ${collapsed ? '!justify-center' : ''}`}
+                  >
+                    <item.icon className="w-4 h-4 shrink-0" />
+                    {!collapsed && (
+                      <>
+                        <span className="flex-1 text-left">{item.label}</span>
+                        <span className="text-[9px] uppercase tracking-wide text-content-tertiary">Coming soon</span>
+                      </>
+                    )}
+                  </button>
+                );
+              }
               return (
                 <button
                   key={item.label}
@@ -259,15 +288,12 @@ export function AppShell({ children }: { children: ReactNode }) {
                       }
                       return;
                     }
-                    // Code: reopen latest project if any — never mint a Recent row just by visiting Code.
+                    // Code: blank workspace like New Chat. Recent rows reopen a project.
                     if (item.label === 'Code') {
-                      const latest = [...recent].sort((a, b) =>
-                        (b.updatedAt || '').localeCompare(a.updatedAt || ''),
-                      )[0];
-                      navigate({ name: 'project', id: latest?.id || 'proj-scratch' });
+                      navigate({ name: 'code', session: crypto.randomUUID() });
                       return;
                     }
-                    navigate(item.route);
+                    if (item.route) navigate(item.route);
                   }}
                   title={collapsed ? item.label : undefined}
                   className={`ark-nav-item w-full relative ${collapsed ? '!justify-center' : ''} ${active ? 'active' : ''} ${busy ? 'ark-nav-activity' : ''}`}
@@ -457,24 +483,15 @@ export function AppShell({ children }: { children: ReactNode }) {
 
           <div className={`mt-auto flex-none shrink-0 ${collapsed ? 'p-2 pb-3' : 'p-3 pt-2 pb-3'}`}>
             {collapsed ? (
-              <div className="flex flex-col items-center gap-2">
-                <span
-                  className="w-8 h-8 rounded-lg bg-surface-hover border border-surface-border flex items-center justify-center text-xs font-semibold text-content-primary"
-                  title={displayName}
-                  aria-label={displayName}
-                >
-                  {initial}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setSettingsOpen(true)}
-                  title="Open Settings"
-                  className="w-9 h-9 rounded-xl border border-surface-border bg-ark-navy-900/80 flex items-center justify-center text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors"
-                  aria-label="Open Settings"
-                >
-                  <Settings className="w-4 h-4" />
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={() => setSettingsOpen(true)}
+                title="Open Settings"
+                className="w-9 h-9 rounded-xl border border-surface-border bg-ark-navy-900/80 flex items-center justify-center text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors mx-auto"
+                aria-label="Open Settings"
+              >
+                <Settings className="w-4 h-4" />
+              </button>
             ) : (
               <div className="flex items-center gap-2 rounded-xl border border-surface-border bg-ark-navy-950/80 px-2.5 py-2">
                 <span
@@ -483,12 +500,27 @@ export function AppShell({ children }: { children: ReactNode }) {
                 >
                   {initial}
                 </span>
-                <span
-                  className="flex-1 min-w-0 text-xs font-medium text-content-primary truncate select-none"
-                  title={displayName}
-                >
-                  {displayName}
-                </span>
+                <div className="flex-1 min-w-0">
+                  <span
+                    className="block text-xs font-medium text-content-primary truncate select-none"
+                    title={displayName}
+                  >
+                    {displayName}
+                  </span>
+                  {profile?.ark_id ? (
+                    <button
+                      type="button"
+                      className="flex items-center gap-1 text-[10px] font-mono tracking-[0.22em] text-content-tertiary hover:text-content-secondary truncate"
+                      title="Copy your ARK ID"
+                      onClick={() => {
+                        void navigator.clipboard.writeText(profile.ark_id || '').catch(() => undefined);
+                      }}
+                    >
+                      {formatArkId(profile.ark_id)}
+                      <Copy className="w-2.5 h-2.5 shrink-0" />
+                    </button>
+                  ) : null}
+                </div>
                 <button
                   type="button"
                   onClick={() => setSettingsOpen(true)}
@@ -503,7 +535,21 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
       </aside>
 
-        <main className="flex-1 min-h-0 min-w-0 overflow-hidden m-2 ml-2">
+        <main className="flex-1 min-h-0 min-w-0 overflow-hidden m-2 ml-2 relative">
+          {incoming && (
+            <div className="absolute top-3 left-1/2 -translate-x-1/2 z-30 flex items-center gap-3 rounded-2xl border border-surface-border bg-ark-navy-950/95 px-4 py-2.5 shadow-xl">
+              <Phone className="w-4 h-4 text-emerald-400" />
+              <p className="text-sm text-content-primary">
+                Incoming call from {incoming.fromName || formatArkId(incoming.from)}
+              </p>
+              <button type="button" onClick={acceptCall} className="text-xs rounded-full bg-emerald-600 text-white px-3 py-1">
+                Accept
+              </button>
+              <button type="button" onClick={declineCall} className="text-xs rounded-full border border-surface-border px-3 py-1 text-content-secondary">
+                Decline
+              </button>
+            </div>
+          )}
           {children}
         </main>
 

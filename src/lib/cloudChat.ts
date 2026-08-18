@@ -543,8 +543,10 @@ async function runAttempt(
       model: attempt.model,
       cost: attempt.cost,
     };
-  } catch {
-    // Rate limit or any error — skip so the router can try the next host
+  } catch (err) {
+    if (isRateLimited(err)) {
+      void import('@/lib/arkHuntBootstrap').then(m => m.installNextWhenCurrentRanOut()).catch(() => undefined);
+    }
     return null;
   }
 }

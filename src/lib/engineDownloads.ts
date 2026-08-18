@@ -96,7 +96,9 @@ function ensurePolling(id: string) {
 
 export function subscribeEngineDownloads(listener: Listener) {
   listeners.add(listener);
-  return () => listeners.delete(listener);
+  return () => {
+    listeners.delete(listener);
+  };
 }
 
 export function getEngineDownloadJobs(): EngineDownloadJob[] {
@@ -129,6 +131,7 @@ export async function startEngineDownload(opts: {
   id: string;
   name: string;
   source: 'models' | 'local-ai';
+  hunt?: { url: string; sizeGb: number; detail?: string; category?: 'coding' | 'chat' };
 }) {
   const existing = jobs.get(opts.id);
   if (existing && existing.progress < 100 && !existing.error) {
@@ -146,6 +149,19 @@ export async function startEngineDownload(opts: {
   emit();
 
   try {
+    if (opts.hunt) {
+      const registered = await window.arkDesktop?.engineRegisterHunt?.({
+        id: opts.id,
+        name: opts.name,
+        url: opts.hunt.url,
+        sizeGb: opts.hunt.sizeGb,
+        detail: opts.hunt.detail,
+        category: opts.hunt.category,
+      });
+      if (registered && registered.ok === false) {
+        throw new Error(registered.error || 'Could not register hunted model');
+      }
+    }
     await downloadEngineModel(opts.id);
     ensurePolling(opts.id);
   } catch (err) {

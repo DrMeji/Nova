@@ -34,7 +34,7 @@ export function requirePluginPermission(
 export function intentPermission(pluginId: string, userText: string): PluginPerm {
   const lower = userText.toLowerCase();
   if (pluginId === 'github') {
-    if (/\b(comment|post|create|write|close)\b/.test(lower)) return 'write';
+    if (/\b(comment|post|create|write|close|push|clone)\b/.test(lower)) return 'write';
     if (/\b(search|find|look up)\b/.test(lower)) return 'search';
     return 'read';
   }

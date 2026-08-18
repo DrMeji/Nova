@@ -4,6 +4,7 @@ const arkEngine = require('./arkEngine.cjs');
 const arkPreview = require('./arkPreview.cjs');
 const arkMedia = require('./arkMedia.cjs');
 const arkProjects = require('./arkProjects.cjs');
+const arkGit = require('./arkGit.cjs');
 const arkSecrets = require('./arkSecrets.cjs');
 const arkSystem = require('./arkSystem.cjs');
 const arkSetup = require('./arkSetup.cjs');
@@ -313,6 +314,7 @@ async function handleHttpRequest(_event, payload) {
       ...headers,
     },
     body: method === 'GET' || method === 'HEAD' ? undefined : body,
+    signal: AbortSignal.timeout(25_000),
   });
 
   const buf = Buffer.from(await res.arrayBuffer());
@@ -372,6 +374,7 @@ async function handleHttpStream(event, payload) {
         ...headers,
       },
       body: method === 'GET' || method === 'HEAD' ? undefined : body,
+      signal: AbortSignal.timeout(25_000),
     });
 
     if (!res.ok) {
@@ -566,6 +569,14 @@ ipcMain.handle('ark:engine-start', async () => arkEngine.start());
 ipcMain.handle('ark:engine-stop', async () => arkEngine.stop());
 ipcMain.handle('ark:engine-set-model', async (_e, id) => arkEngine.setActiveModel(id));
 ipcMain.handle('ark:engine-download', async (_e, id) => arkEngine.beginDownload(id));
+ipcMain.handle('ark:engine-register-hunt', async (_e, meta) => {
+  try {
+    const model = arkEngine.registerHunt(meta);
+    return { ok: true, model };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+});
 ipcMain.handle('ark:engine-download-progress', async (_e, id) => arkEngine.downloadProgress(id));
 ipcMain.handle('ark:engine-download-error', async (_e, id) => arkEngine.downloadError?.(id) ?? null);
 ipcMain.handle('ark:engine-download-cancel', async (_e, id) => arkEngine.cancelDownload?.(id) ?? { ok: false });
@@ -710,6 +721,91 @@ ipcMain.handle('ark:project-path', async (_e, projectId) => {
     return arkProjects.getProjectPath(projectId);
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'path failed' };
+  }
+});
+
+ipcMain.handle('ark:project-import-folder', async (_e, payload) => {
+  try {
+    const win = BrowserWindow.getFocusedWindow() || mainWindow;
+    let sourceDir = payload?.sourceDir;
+    if (!sourceDir) {
+      const result = await dialog.showOpenDialog(win || undefined, {
+        title: 'Open folder in ARK Code',
+        properties: ['openDirectory'],
+      });
+      if (result.canceled || !result.filePaths?.[0]) {
+        return { ok: false, canceled: true };
+      }
+      sourceDir = result.filePaths[0];
+    }
+    return arkProjects.importFolder(payload?.projectId, payload?.projectName, sourceDir);
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'import failed' };
+  }
+});
+
+ipcMain.handle('ark:project-search', async (_e, payload) => {
+  try {
+    return arkProjects.searchProjectFiles(payload?.projectId, payload?.query, payload?.limit);
+  } catch (err) {
+    return { ok: false, hits: [], error: err instanceof Error ? err.message : 'search failed' };
+  }
+});
+
+function projectCwd(projectId) {
+  return arkProjects.getProjectPath(projectId).root;
+}
+
+ipcMain.handle('ark:git-status', async (_e, projectId) => {
+  try {
+    return await arkGit.status(projectCwd(projectId));
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'git status failed' };
+  }
+});
+
+ipcMain.handle('ark:git-clone', async (_e, payload) => {
+  try {
+    return await arkGit.cloneRepo(projectCwd(payload?.projectId), payload?.url, payload?.token);
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'clone failed' };
+  }
+});
+
+ipcMain.handle('ark:git-commit', async (_e, payload) => {
+  try {
+    return await arkGit.commitAll(projectCwd(payload?.projectId), payload?.message);
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'commit failed' };
+  }
+});
+
+ipcMain.handle('ark:git-push', async (_e, payload) => {
+  try {
+    return await arkGit.push(projectCwd(payload?.projectId), payload?.token);
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'push failed' };
+  }
+});
+
+ipcMain.handle('ark:git-diff', async (_e, projectId) => {
+  try {
+    return await arkGit.diffSummary(projectCwd(projectId));
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'diff failed' };
+  }
+});
+
+ipcMain.handle('ark:git-set-origin', async (_e, payload) => {
+  try {
+    const cwd = projectCwd(payload?.projectId);
+    await arkGit.initIfNeeded(cwd);
+    const set = await arkGit.setOrigin(cwd, payload?.remoteUrl);
+    if (!set.ok) return set;
+    const st = await arkGit.status(cwd);
+    return { ok: true, ...st };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'remote failed' };
   }
 });
 

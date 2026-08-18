@@ -37,7 +37,7 @@ export const ENGINE_DOWNLOADABLE_IDS = [
 ] as const;
 
 export function isEngineDownloadable(id: string) {
-  return (ENGINE_DOWNLOADABLE_IDS as readonly string[]).includes(id);
+  return (ENGINE_DOWNLOADABLE_IDS as readonly string[]).includes(id) || id.startsWith('hunt-');
 }
 
 export function detectHardware(): HardwareInfo {

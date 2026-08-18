@@ -88,8 +88,12 @@ function rankedReadyEngineIds(models, intent, ramGb) {
   );
   if (!ready.size) return [];
 
+  const extraCoders = [...ready].filter((id) =>
+    /coder|starcoder|codestral|codellama|devstral|deepseek-coder/i.test(id)
+    && !CODER_ENGINE_RANK.includes(id),
+  );
   const rank = intent === 'coding'
-    ? CODER_ENGINE_RANK.concat(CHAT_ENGINE_RANK)
+    ? extraCoders.concat(CODER_ENGINE_RANK, CHAT_ENGINE_RANK)
     : CHAT_ENGINE_RANK.slice();
 
   const ordered = [];

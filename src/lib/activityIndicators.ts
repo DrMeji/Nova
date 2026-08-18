@@ -7,7 +7,10 @@ export type ActivityKey =
   | 'code'
   | 'models'
   | 'local-ai'
-  | 'plugins';
+  | 'plugins'
+  | 'networking'
+  | 'message'
+  | 'call';
 
 type Listener = () => void;
 
@@ -19,6 +22,9 @@ const flags: Record<ActivityKey, boolean> = {
   models: false,
   'local-ai': false,
   plugins: false,
+  networking: false,
+  message: false,
+  call: false,
 };
 
 const listeners = new Set<Listener>();
@@ -73,7 +79,10 @@ export function notifyWorkDone(key: ActivityKey) {
     || (key === 'code' && (viewing.route === 'project' || viewing.route === 'projects'))
     || (key === 'models' && viewing.route === 'models')
     || (key === 'local-ai' && viewing.route === 'local-ai')
-    || (key === 'plugins' && viewing.route === 'build');
+    || (key === 'plugins' && viewing.route === 'build')
+    || (key === 'networking' && viewing.route === 'networking')
+    || (key === 'message' && viewing.route === 'message')
+    || (key === 'call' && viewing.route === 'call');
 
   if (onSurface) return;
   if (flags[key]) return;

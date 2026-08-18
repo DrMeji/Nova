@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   Search, Plus, Check, Download, Loader2, Cpu, Cloud, Monitor,
-  Code, Boxes, Brain, Eye, Zap, Image as ImageIcon, Video, Gauge, Sparkles, Rocket, X, KeyRound,
+  Code, Boxes, Brain, Eye, Zap, Image as ImageIcon, Video, Gauge, Sparkles, Rocket, X, KeyRound, Globe,
 } from 'lucide-react';
 import { detectHardware, getAccurateHardware, getHardwareClass, isEngineDownloadable, loadHardwareSnapshot, parseRamGb, type HardwareClass } from '@/lib/api';
 import {
@@ -30,6 +30,8 @@ import {
   type OllamaModel,
 } from '@/lib/ollamaOptional';
 import { FREE_SOURCES } from '@/lib/freeSources';
+import { huntModelsForPc, type HuntedModel } from '@/lib/arkModelHunt';
+import { probeLiveCapacity, type LiveCapacity } from '@/lib/arkCapacity';
 
 type TabId = 'for-pc' | 'local' | 'cloud';
 type Tier = 'free' | 'pro';
@@ -284,7 +286,7 @@ const FIT_SECTIONS: {
   { id: 'performance', title: 'Best performance', icon: Rocket },
 ];
 
-function modelSizeGb(model: LocalModel) {
+function modelSizeGb(model: { size: string }) {
   return parseFloat(model.size) || 0;
 }
 
@@ -438,10 +440,17 @@ export function ModelsView() {
   const [ollamaOnline, setOllamaOnline] = useState(false);
   const [ollamaModels, setOllamaModels] = useState<OllamaModel[]>([]);
   const [ollamaNote, setOllamaNote] = useState('');
+  const [hunted, setHunted] = useState<HuntedModel[]>([]);
+  const [huntNote, setHuntNote] = useState('');
+  const [liveCapacity, setLiveCapacity] = useState<LiveCapacity | null>(null);
   const pcClass = useMemo(() => getHardwareClass(hw), [hw]);
   const ramGb = useMemo(() => parseRamGb(hw), [hw]);
   const fitLists = useMemo(() => buildFitLists(pcClass, ramGb), [pcClass, ramGb]);
 
+
+  useEffect(() => {
+    void probeLiveCapacity().then(setLiveCapacity);
+  }, [keyedProviders, ollamaOn, installed]);
 
   useEffect(() => {
     const sync = () => {
@@ -509,6 +518,28 @@ export function ModelsView() {
       );
       setInstalled(ready);
     }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    setHuntNote('Searching online for brains that fit this PC…');
+    void (async () => {
+      try {
+        const info = await getAccurateHardware(true);
+        if (cancelled) return;
+        const found = await huntModelsForPc(info);
+        if (cancelled) return;
+        setHunted(found);
+        setHuntNote(
+          found.length
+            ? `${found.length} online ${found.length === 1 ? 'fit' : 'fits'} — install when you want, or when the current model runs out`
+            : 'No new online fits right now — pinned catalog still applies',
+        );
+      } catch {
+        if (!cancelled) setHuntNote('Could not reach Hugging Face right now');
+      }
+    })();
     return () => { cancelled = true; };
   }, []);
 
@@ -684,7 +715,30 @@ export function ModelsView() {
     })).filter(cat => cat.models.length > 0);
   }, [q]);
 
-  const toggleInstall = (id: string) => {
+  const toggleInstall = (id: string, hunt?: HuntedModel) => {
+    if (hunt) {
+      if (installed.has(id) || isEngineDownloading(id)) return;
+      const needGb = hunt.sizeGb * 1.15;
+      void engineDiskSpace().then(disk => {
+        if (disk?.freeGb != null && needGb > 0 && disk.freeGb < needGb) {
+          setOllamaNote(`Need ~${needGb.toFixed(1)} GB free (have ${disk.freeGb.toFixed(1)} GB)`);
+          return;
+        }
+        setOllamaNote(`Downloading ${hunt.name}…`);
+        void startEngineDownload({
+          id: hunt.id,
+          name: hunt.name,
+          source: 'models',
+          hunt: {
+            url: hunt.url,
+            sizeGb: hunt.sizeGb,
+            detail: hunt.detail,
+            category: hunt.category,
+          },
+        });
+      });
+      return;
+    }
     if (!isEngineDownloadable(id)) {
       setOllamaNote('Not downloadable in ARK Engine yet — search shows discovery only.');
       return;
@@ -741,6 +795,24 @@ export function ModelsView() {
             </div>
           </div>
 
+          {liveCapacity && !liveCapacity.liveChat && (
+            <div className="mb-4 rounded-xl border border-amber-500/25 bg-amber-500/10 px-4 py-3 text-sm text-amber-100/90 leading-relaxed">
+              <span className="font-medium text-amber-200">No live brain yet</span>
+              {' — '}
+              {liveCapacity.summary}
+              {liveCapacity.suggestedFreeKeys.length > 0 && (
+                <>
+                  {' '}
+                  Try free keys:
+                  {' '}
+                  {liveCapacity.suggestedFreeKeys.map(k => k.name).join(', ')}
+                  {' '}
+                  in Settings → Connect.
+                </>
+              )}
+            </div>
+          )}
+
           <div className="flex items-center gap-1 mb-4 flex-wrap">
             {([
               { id: 'for-pc' as const, label: 'For your PC', icon: Monitor },
@@ -785,6 +857,58 @@ export function ModelsView() {
                   </div>
                 </div>
               </section>
+
+              {hunted.length > 0 && (
+                <section className="mb-10">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Globe className="w-4 h-4 text-content-secondary" />
+                    <h2 className="text-base font-semibold text-content-primary">Found online for this PC</h2>
+                  </div>
+                  <p className="text-xs text-content-tertiary mb-4">
+                    {huntNote || 'Live search on Hugging Face · GGUF · sized for your RAM'}
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1">
+                    {hunted.map(model => {
+                      const isOn = installed.has(model.id);
+                      const isBusy = installing.has(model.id);
+                      return (
+                        <div
+                          key={model.id}
+                          className="flex items-center gap-3 py-3 rounded-xl px-1 hover:bg-surface-hover/50 transition-colors"
+                        >
+                          <span className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-400 to-sky-700 flex items-center justify-center text-[10px] font-bold text-white shrink-0">
+                            HF
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="flex items-center gap-2 min-w-0 flex-wrap">
+                              <span className="text-sm font-medium text-content-primary truncate">{model.name}</span>
+                              <span className="inline-flex items-center rounded-full bg-emerald-500/15 text-emerald-300 px-2 py-0.5 text-[10px] font-medium leading-none">
+                                Online
+                              </span>
+                            </span>
+                            <span className="block text-xs text-content-tertiary truncate mt-0.5">
+                              {model.detail}
+                            </span>
+                          </span>
+                          <ModelInstallControl
+                            modelId={model.id}
+                            name={model.name}
+                            isOn={isOn}
+                            isBusy={isBusy}
+                            progress={installProgress[model.id]}
+                            onInstall={() => toggleInstall(model.id, model)}
+                            onCancel={() => cancelInstall(model.id)}
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                </section>
+              )}
+
+              {hunted.length === 0 && huntNote ? (
+                <p className="text-xs text-content-tertiary mb-8">{huntNote}</p>
+              ) : null}
 
               <div className="space-y-10">
                 {FIT_SECTIONS.map(section => {

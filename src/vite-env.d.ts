@@ -166,6 +166,14 @@ declare global {
       engineStop?: () => Promise<import('@/lib/arkEngine').ArkEngineStatus>;
       engineSetModel?: (id: string) => Promise<import('@/lib/arkEngine').ArkEngineStatus>;
       engineDownload?: (id: string) => Promise<import('@/lib/arkEngine').ArkEngineStatus>;
+      engineRegisterHunt?: (meta: {
+        id: string;
+        name: string;
+        url: string;
+        sizeGb: number;
+        detail?: string;
+        category?: 'coding' | 'chat';
+      }) => Promise<{ ok: boolean; error?: string; model?: unknown }>;
       engineDownloadProgress?: (id: string) => Promise<number>;
       engineDownloadError?: (id: string) => Promise<string | null>;
       engineDownloadCancel?: (id: string) => Promise<{ ok: boolean; canceled?: boolean; canceling?: boolean; error?: string }>;
@@ -277,6 +285,75 @@ declare global {
         error?: string;
       }>;
       projectPath?: (projectId: string) => Promise<{ ok: boolean; root?: string; error?: string }>;
+      projectImportFolder?: (payload?: {
+        projectId: string;
+        projectName?: string;
+        sourceDir?: string;
+      }) => Promise<{
+        ok: boolean;
+        canceled?: boolean;
+        root?: string;
+        files?: Record<string, string>;
+        copied?: number;
+        name?: string;
+        error?: string;
+      }>;
+      projectSearch?: (payload: {
+        projectId: string;
+        query: string;
+        limit?: number;
+      }) => Promise<{
+        ok: boolean;
+        hits?: { path: string; line: number; text: string }[];
+        error?: string;
+      }>;
+      gitStatus?: (projectId: string) => Promise<{
+        ok: boolean;
+        git?: boolean;
+        branch?: string | null;
+        dirty?: number;
+        files?: string[];
+        log?: string[];
+        diff?: string;
+        remote?: string;
+        error?: string;
+      }>;
+      gitClone?: (payload: {
+        projectId: string;
+        url: string;
+        token?: string;
+      }) => Promise<{
+        ok: boolean;
+        git?: boolean;
+        branch?: string | null;
+        dirty?: number;
+        remote?: string;
+        message?: string;
+        error?: string;
+      }>;
+      gitCommit?: (payload: {
+        projectId: string;
+        message?: string;
+      }) => Promise<{ ok: boolean; message?: string; dirty?: number; branch?: string | null; error?: string }>;
+      gitPush?: (payload: {
+        projectId: string;
+        token?: string;
+      }) => Promise<{ ok: boolean; message?: string; remote?: string; error?: string }>;
+      gitDiff?: (projectId: string) => Promise<{
+        ok: boolean;
+        text?: string;
+        git?: boolean;
+        branch?: string | null;
+        dirty?: number;
+        log?: string[];
+        diff?: string;
+        remote?: string;
+        error?: string;
+      }>;
+      gitSetOrigin?: (payload: {
+        projectId: string;
+        remoteUrl: string;
+      }) => Promise<{ ok: boolean; remote?: string; error?: string }>;
       secretsStatus?: () => Promise<{ ok: boolean; encrypted?: boolean }>;
       secretsLoad?: () => Promise<{
         ok: boolean;

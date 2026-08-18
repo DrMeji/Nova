@@ -98,8 +98,10 @@ export const PLUGIN_CATALOG: PluginDef[] = [
     ],
     actions: [
       { id: 'list-repos', label: 'List my repos', prompt: 'Using GitHub, list my repositories.' },
+      { id: 'open-latest', label: 'Open latest in Code', prompt: 'Open my latest GitHub repo in Code' },
       { id: 'open-prs', label: 'Open PRs', prompt: 'Using GitHub, show my open pull requests.' },
       { id: 'recent-issues', label: 'Recent issues', prompt: 'Using GitHub, summarize recent issues.' },
+      { id: 'create-repo', label: 'Create a repo', prompt: 'Using GitHub, create a private repo named ark-studio.' },
     ],
   },
   {
@@ -150,7 +152,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
   // —— Rest of catalog (installable; connect later) ——
   { id: 'gdrive', name: 'Google Drive', description: 'Browse Drive files.', longDescription: 'List and search recent Drive files from ARK.', tone: 'from-yellow-500 to-blue-600', initial: 'D', category: 'featured', hero: true, live: true, authKind: 'token', permissions: [{ id: 'read', label: 'Read files', detail: 'List and search Drive files', required: true }], actions: [{ id: 'recent', label: 'Recent files', prompt: 'Using Google Drive, list my recent files.' }] },
   { id: 'gcal', name: 'Google Calendar', description: 'View and create events.', longDescription: 'See upcoming events and create calendar events.', tone: 'from-blue-500 to-blue-700', initial: 'C', category: 'featured', hero: true, live: true, authKind: 'token', permissions: [{ id: 'read', label: 'Read events', detail: 'View schedule', required: true }, { id: 'write', label: 'Create events', detail: 'Add calendar events', required: false }], actions: [{ id: 'upcoming', label: 'Upcoming', prompt: 'Using Google Calendar, list my upcoming events.' }] },
-  { id: 'slack', name: 'Slack', description: 'Read and post in Slack.', longDescription: 'Bring Slack threads into ARK chat.', tone: 'from-purple-500 to-pink-600', initial: 'S', category: 'featured', hero: true, live: true, authKind: 'token', permissions: [{ id: 'read', label: 'Read channels', detail: 'Read messages', required: true }, { id: 'search', label: 'Search', detail: 'Search messages', required: false }, { id: 'write', label: 'Post messages', detail: 'Post to channels the bot can see', required: false }], actions: [{ id: 'unread', label: 'Unread channels', prompt: 'Using Slack, summarize unread channels.' }] },
+  { id: 'slack', name: 'Slack', description: 'Read and post in Slack.', longDescription: 'Bring Slack threads into ARK chat.', tone: 'from-purple-500 to-pink-600', initial: 'S', category: 'featured', hero: true, live: true, authKind: 'token', permissions: [{ id: 'read', label: 'Read channels', detail: 'Read messages', required: true }, { id: 'search', label: 'Search', detail: 'Search messages', required: false }, { id: 'write', label: 'Post messages', detail: 'Post to channels the bot can see', required: false }], actions: [{ id: 'unread', label: 'Unread channels', prompt: 'Using Slack, summarize unread channels.' }, { id: 'post-fix', label: 'Post a summary', prompt: 'Summarize this fix to #dev' }] },
   { id: 'outlook-mail', name: 'Outlook Email', description: 'Read and send Outlook mail.', longDescription: 'Outlook mail in ARK.', tone: 'from-sky-500 to-blue-700', initial: 'Oe', category: 'featured', authKind: 'oauth', permissions: [{ id: 'read', label: 'Read mail', detail: 'Open Outlook mail', required: true }], actions: [] },
   { id: 'granola', name: 'Granola', description: 'Add your meeting context.', longDescription: 'Meeting notes context for ARK.', tone: 'from-emerald-500 to-teal-700', initial: 'Gr', category: 'featured', authKind: 'token', permissions: [{ id: 'read', label: 'Read notes', detail: 'Access meeting notes', required: true }], actions: [] },
 

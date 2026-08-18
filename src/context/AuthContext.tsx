@@ -10,6 +10,8 @@ import {
   prepareLaunchForTesting,
 } from '@/lib/setup';
 import { hydrateProviderApiKeys } from '@/lib/localPrefs';
+import { ensureArkId, readLocalArkId } from '@/lib/arkUserId';
+import { mergeGuestSocialToCloud } from '@/lib/arkSocial';
 
 // Guest identity used when login is bypassed (dev / testing only).
 const BYPASS_KEY = 'ark:bypass-enabled';
@@ -35,6 +37,7 @@ function guestProfile(): Profile {
     id: 'guest-local',
     display_name: 'Guest',
     avatar_url: null,
+    ark_id: readLocalArkId('guest-local'),
     onboarding_completed: isSetupCompleted(),
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
@@ -92,6 +95,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // Machine install flag wins — never skip first-run because of a cloud profile.
         onboarding_completed: setupDone,
       });
+      const arkId = await ensureArkId(userId);
+      setProfile(prev => prev ? { ...prev, ark_id: arkId } : prev);
       if (display) {
         try {
           const { getLocalPrefs, setLocalPrefs } = await import('@/lib/localPrefs');
@@ -108,6 +113,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         id: userId,
         display_name: null,
         avatar_url: null,
+        ark_id: await ensureArkId(userId),
         onboarding_completed: setupDone,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
@@ -165,6 +171,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setProfile(guestProfile());
         setSettings(null);
         setLoading(false);
+        void ensureArkId('guest-local').then(id => {
+          if (!cancelled) setProfile(prev => prev ? { ...prev, ark_id: id } : prev);
+        });
         return;
       }
 
@@ -205,19 +214,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signIn = async (email: string, password: string) => {
     await ensureFirstRunGate();
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    const wasGuest = isBypassEnabled();
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (!error) {
       localStorage.setItem('ark:last-auth', JSON.stringify({
         method: 'supabase',
         email,
         at: new Date().toISOString(),
       }));
+      if (wasGuest && data.user?.id) {
+        localStorage.removeItem(BYPASS_KEY);
+        setBypass(false);
+        void mergeGuestSocialToCloud(data.user.id);
+      }
     }
     return { error: error?.message ?? null };
   };
 
   const signUp = async (email: string, password: string, displayName?: string) => {
     await ensureFirstRunGate();
+    const wasGuest = isBypassEnabled();
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
@@ -231,6 +247,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           // Cloud flag is informational; local install setup still gates the UI.
           onboarding_completed: isSetupCompleted(),
         });
+        await ensureArkId(data.user.id);
       } catch {
         /* profile row may be created by trigger */
       }
@@ -241,6 +258,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         } catch {
           /* ignore */
         }
+      }
+      if (wasGuest && data.user?.id) {
+        localStorage.removeItem(BYPASS_KEY);
+        setBypass(false);
+        void mergeGuestSocialToCloud(data.user.id);
       }
     }
     return { error: error?.message ?? null };
@@ -271,6 +293,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setProfile(guestProfile());
     setSettings(null);
     setLoading(false);
+    void ensureArkId('guest-local').then(id => {
+      setProfile(prev => prev ? { ...prev, ark_id: id } : prev);
+    });
   };
 
   const signOut = async () => {
@@ -289,7 +314,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const refreshProfile = async () => {
     if (user?.id === 'guest-local' || bypass) {
-      setProfile(guestProfile());
+      const id = await ensureArkId('guest-local');
+      setProfile({ ...guestProfile(), ark_id: id });
       return;
     }
     if (user) await loadProfileAndSettings(user.id);

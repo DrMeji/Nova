@@ -6,10 +6,26 @@ const fs = require('fs');
 const path = require('path');
 const { app } = require('electron');
 
+const SKIP_DIRS = new Set([
+  'node_modules', '.git', 'dist', 'build', 'out', '.next', 'coverage',
+  '.cache', '.turbo', '.venv', 'venv', '__pycache__', 'target', 'vendor',
+  '.ark', '.idea', '.vscode', 'Pods', '.gradle',
+]);
+
+const SKIP_EXT = new Set([
+  'png', 'jpg', 'jpeg', 'gif', 'webp', 'ico', 'icns', 'bmp', 'psd',
+  'woff', 'woff2', 'ttf', 'otf', 'eot',
+  'mp4', 'webm', 'mp3', 'wav', 'ogg',
+  'zip', 'gz', '7z', 'rar', 'exe', 'dll', 'so', 'dylib', 'wasm',
+  'pdf', 'bin', 'lock',
+]);
+
+const MAX_FILE_BYTES = 400_000;
+const MAX_IMPORT_FILES = 450;
+
 function projectsRoot() {
   const root = path.join(app.getPath('userData'), 'ark-projects');
   fs.mkdirSync(root, { recursive: true });
-  // Category folders — code builds land under ark-projects/code/
   for (const cat of ['code', 'uploads']) {
     fs.mkdirSync(path.join(root, cat), { recursive: true });
   }
@@ -39,6 +55,30 @@ function metaPath(projectId) {
   return path.join(projectDir(projectId), 'ark-meta.json');
 }
 
+function shouldSkipDir(name) {
+  const n = String(name || '');
+  if (n === '.' || n === '..') return true;
+  return SKIP_DIRS.has(n.toLowerCase());
+}
+
+function shouldSkipFile(name, size) {
+  const base = String(name || '');
+  if (/^\.env($|\.)/i.test(base) && !/\.example$/i.test(base)) return true;
+  const ext = base.split('.').pop()?.toLowerCase() || '';
+  if (SKIP_EXT.has(ext)) return true;
+  if (/^(package-lock|yarn\.lock|pnpm-lock)/i.test(base)) return true;
+  if (size > MAX_FILE_BYTES) return true;
+  return false;
+}
+
+function isProbablyBinary(buf) {
+  const n = Math.min(buf.length, 800);
+  for (let i = 0; i < n; i++) {
+    if (buf[i] === 0) return true;
+  }
+  return false;
+}
+
 function writeProjectFiles(projectId, projectName, files) {
   const root = projectDir(projectId);
   const written = [];
@@ -62,21 +102,49 @@ function writeProjectFiles(projectId, projectName, files) {
   return { ok: true, root, files: written };
 }
 
-function readProjectFiles(projectId) {
-  const root = projectDir(projectId);
+function walkProjectFiles(root) {
   const files = {};
   function walk(dir, prefix) {
     if (!fs.existsSync(dir)) return;
-    for (const name of fs.readdirSync(dir)) {
-      if (name === 'ark-meta.json') continue;
+    let entries = [];
+    try {
+      entries = fs.readdirSync(dir);
+    } catch {
+      return;
+    }
+    for (const name of entries) {
+      if (name === 'ark-meta.json' || name === 'ark-chat.json') continue;
+      if (shouldSkipDir(name)) continue;
       const full = path.join(dir, name);
       const rel = prefix ? `${prefix}/${name}` : name;
-      const st = fs.statSync(full);
-      if (st.isDirectory()) walk(full, rel);
-      else files[rel] = fs.readFileSync(full, 'utf8');
+      let st;
+      try {
+        st = fs.statSync(full);
+      } catch {
+        continue;
+      }
+      if (st.isDirectory()) {
+        walk(full, rel);
+        continue;
+      }
+      if (shouldSkipFile(name, st.size)) continue;
+      if (Object.keys(files).length >= MAX_IMPORT_FILES) return;
+      try {
+        const buf = fs.readFileSync(full);
+        if (isProbablyBinary(buf)) continue;
+        files[rel] = buf.toString('utf8');
+      } catch {
+        /* skip unreadable */
+      }
     }
   }
   walk(root, '');
+  return files;
+}
+
+function readProjectFiles(projectId) {
+  const root = projectDir(projectId);
+  const files = walkProjectFiles(root);
   let meta = null;
   try {
     if (fs.existsSync(metaPath(projectId))) {
@@ -88,6 +156,100 @@ function readProjectFiles(projectId) {
   return { ok: true, root, files, meta };
 }
 
+function copyTree(srcRoot, destRoot) {
+  const copied = [];
+  function walk(dir, prefix) {
+    if (copied.length >= MAX_IMPORT_FILES) return;
+    let entries = [];
+    try {
+      entries = fs.readdirSync(dir);
+    } catch {
+      return;
+    }
+    for (const name of entries) {
+      if (copied.length >= MAX_IMPORT_FILES) return;
+      if (shouldSkipDir(name)) continue;
+      const from = path.join(dir, name);
+      const rel = prefix ? `${prefix}/${name}` : name;
+      let st;
+      try {
+        st = fs.statSync(from);
+      } catch {
+        continue;
+      }
+      const to = path.join(destRoot, ...rel.split('/'));
+      if (st.isDirectory()) {
+        fs.mkdirSync(to, { recursive: true });
+        walk(from, rel);
+        continue;
+      }
+      if (shouldSkipFile(name, st.size)) continue;
+      try {
+        const buf = fs.readFileSync(from);
+        if (isProbablyBinary(buf)) continue;
+        fs.mkdirSync(path.dirname(to), { recursive: true });
+        fs.writeFileSync(to, buf);
+        copied.push(rel.replace(/\\/g, '/'));
+      } catch {
+        /* skip */
+      }
+    }
+  }
+  fs.mkdirSync(destRoot, { recursive: true });
+  walk(srcRoot, '');
+  const gitSrc = path.join(srcRoot, '.git');
+  const gitDest = path.join(destRoot, '.git');
+  if (fs.existsSync(gitSrc) && !fs.existsSync(gitDest)) {
+    try {
+      fs.cpSync(gitSrc, gitDest, { recursive: true });
+    } catch {
+      /* Explorer still works without history */
+    }
+  }
+  return copied;
+}
+
+function importFolder(projectId, projectName, sourceDir) {
+  const src = path.resolve(String(sourceDir || ''));
+  if (!src || !fs.existsSync(src) || !fs.statSync(src).isDirectory()) {
+    return { ok: false, error: 'That folder could not be opened.' };
+  }
+  const root = projectDir(projectId);
+  const copied = copyTree(src, root);
+  const meta = {
+    id: projectId,
+    name: projectName || path.basename(src),
+    category: 'code',
+    root,
+    importedFrom: src,
+    updatedAt: new Date().toISOString(),
+    files: copied,
+  };
+  fs.writeFileSync(metaPath(projectId), JSON.stringify(meta, null, 2), 'utf8');
+  const files = walkProjectFiles(root);
+  return { ok: true, root, files, copied: copied.length, name: meta.name };
+}
+
+function searchProjectFiles(projectId, query, limit = 50) {
+  const q = String(query || '').trim().toLowerCase();
+  if (!q) return { ok: true, hits: [] };
+  const { files } = readProjectFiles(projectId);
+  const hits = [];
+  for (const [rel, content] of Object.entries(files)) {
+    const lines = String(content || '').split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      if (!lines[i].toLowerCase().includes(q)) continue;
+      hits.push({
+        path: rel,
+        line: i + 1,
+        text: lines[i].trim().slice(0, 220),
+      });
+      if (hits.length >= limit) return { ok: true, hits };
+    }
+  }
+  return { ok: true, hits };
+}
+
 function getProjectPath(projectId) {
   return { ok: true, root: projectDir(projectId) };
 }
@@ -97,5 +259,8 @@ module.exports = {
   projectDir,
   writeProjectFiles,
   readProjectFiles,
+  importFolder,
+  searchProjectFiles,
   getProjectPath,
+  walkProjectFiles,
 };

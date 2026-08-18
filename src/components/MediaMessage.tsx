@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Copy, Download, Check } from 'lucide-react';
 import { resolveMediaRef } from '@/lib/recentStore';
-import { sanitizeAssistantReply } from '@/lib/chatHistory';
+import { usableAssistantText } from '@/lib/chatHistory';
 
 export function GeneratingPlaceholder({
   kind,
@@ -189,10 +189,11 @@ export function MessageContent({ content }: { content: string }) {
   }
 
   if (!content.includes('ark-media:')) {
-    content = sanitizeAssistantReply(content);
-    if (!content) {
-      return <GeneratingPlaceholder kind="chat" label="Thinking…" />;
+    const shown = usableAssistantText(content) || content.trim();
+    if (!shown) {
+      return <p className="text-sm text-content-tertiary">(no response)</p>;
     }
+    content = shown;
   }
 
   const mediaRe = /!\[([^\]]*)\]\(([^)]+)\)/g;
@@ -238,6 +239,13 @@ export function MessageContent({ content }: { content: string }) {
         }
         const text = chunk.value.trim();
         if (!text) return null;
+        if (/^Source:\s/i.test(text)) {
+          return (
+            <p key={i} className="text-[10px] uppercase tracking-wider text-content-tertiary">
+              {text}
+            </p>
+          );
+        }
         // Keep preview lines visible; soft-style them
         if (/preview|not a finished|motion still|offline fallback/i.test(text) && text.length < 200) {
           return (

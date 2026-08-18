@@ -6,7 +6,7 @@
 export type ChatIntent = 'chat' | 'coding' | 'media';
 
 const BUILD_ASK =
-  /\b(build|create|make|scaffold|implement|refactor|debug|fix)\b[\s\S]{0,48}\b(app|website|component|function|api|project|calculator|tool|page|ui)\b/i;
+  /\b(build|create|make|scaffold|implement|refactor|debug|fix|add|upgrade)\b[\s\S]{0,80}\b(app|website|site|component|function|api|project|calculator|tool|page|ui|chat\s*gpt)\b/i;
 const CODE_FILE =
   /\b(look (at|into)|review|open|edit|read)\b[\s\S]{0,40}\b(file|code|repo|project|source)\b/i;
 
@@ -15,7 +15,8 @@ export function looksLikeCodeAsk(text: string): boolean {
   if (!t) return false;
   if (/```[\w]*\n/.test(t)) return true;
   if (BUILD_ASK.test(t)) return true;
-  if (/\b(write|create|build|make)\b[\s\S]{0,64}\b(calculator|html|website|app|component|page)\b/i.test(t)) return true;
+  if (/\b(write|create|build|make)\b[\s\S]{0,64}\b(calculator|html|website|app|component|page|iphone|ipad|ios|android)\b/i.test(t)) return true;
+  if (/\b(iphone|ipad|ios|android|app store|play store)\b/i.test(t) && /\b(build|create|make|want|app)\b/i.test(t)) return true;
   if (CODE_FILE.test(t)) return true;
   if (/\b(typescript|javascript|python|react|node\.?js|html|css)\b/i.test(t) && /\b(build|write|create|fix|add)\b/i.test(t)) {
     return true;

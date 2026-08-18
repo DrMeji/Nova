@@ -26,8 +26,9 @@ import {
   User, Palette, Zap, Boxes, Cloud, Shield, HardDrive,
   FolderKanban, Lock, RefreshCw, Check, Cpu, KeyRound,
   Smartphone, Bell, Sparkles, FlaskConical,
-  Mail, BadgeCheck, Trash2, Download, Info, Monitor,
+  Mail, BadgeCheck, Trash2, Download, Info, Monitor, Copy,
 } from 'lucide-react';
+import { formatArkId } from '@/lib/arkUserId';
 
 const SECTIONS: { id: string; label: string; icon: typeof User; disabled?: boolean }[] = [
   { id: 'account', label: 'Account', icon: User },
@@ -118,6 +119,7 @@ export function SettingsContent({ onClose }: { onClose?: () => void } = {}) {
   const [hw, setHw] = useState<HardwareInfo>(() => loadHardwareSnapshot() || detectHardware());
   const [hwScanning, setHwScanning] = useState(false);
   const [hwFlash, setHwFlash] = useState('');
+  const [arkCopied, setArkCopied] = useState(false);
 
   useEffect(() => {
     void window.arkDesktop?.appMeta?.()
@@ -335,8 +337,34 @@ export function SettingsContent({ onClose }: { onClose?: () => void } = {}) {
                   onChange={setDisplayName}
                   onBlur={saveDisplayName}
                 />
+                <div>
+                  <label className="block text-xs font-medium text-content-secondary mb-1.5">ARK ID</label>
+                  <div className="flex items-center gap-2">
+                    <p className="flex-1 rounded-lg border border-surface-border bg-ark-navy-900/80 px-3 py-2 text-sm font-mono tracking-[0.28em] text-content-primary">
+                      {profile?.ark_id ? formatArkId(profile.ark_id) : '•••••••'}
+                    </p>
+                    <button
+                      type="button"
+                      disabled={!profile?.ark_id}
+                      onClick={() => {
+                        if (!profile?.ark_id) return;
+                        void navigator.clipboard.writeText(profile.ark_id).then(() => {
+                          setArkCopied(true);
+                          window.setTimeout(() => setArkCopied(false), 1600);
+                        }).catch(() => undefined);
+                      }}
+                      className="ark-btn-secondary shrink-0"
+                      title="Copy ARK ID"
+                    >
+                      {arkCopied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                      {arkCopied ? 'Copied' : 'Copy'}
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-content-tertiary mt-1.5 leading-relaxed">
+                    This 7-digit ID belongs to this account only. Friends add you with this — not your email.
+                  </p>
+                </div>
                 <Field label="Email" value={user?.email ?? 'guest@ark.local'} onChange={() => {}} disabled />
-                <Field label="Account ID" value={user?.id ?? 'guest-local'} onChange={() => {}} disabled />
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <InfoCard
@@ -512,6 +540,18 @@ export function SettingsContent({ onClose }: { onClose?: () => void } = {}) {
                   description="Carry recent files and chat into the next request in a project"
                   value={prefs.rememberContext}
                   onChange={v => patchPrefs({ rememberContext: v })}
+                />
+                <ToggleRow
+                  label="Hunt new models online"
+                  description="Use this PC’s specs to search Hugging Face for GGUF brains that fit"
+                  value={prefs.huntInternetModels}
+                  onChange={v => patchPrefs({ huntInternetModels: v })}
+                />
+                <ToggleRow
+                  label="Download next when a model runs out"
+                  description="Keep online finds in Models / Local AI. Only auto-download when the current model hits a limit"
+                  value={prefs.autoInstallHuntModels}
+                  onChange={v => patchPrefs({ autoInstallHuntModels: v })}
                 />
                 </div>
               </div>

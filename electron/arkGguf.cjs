@@ -219,10 +219,29 @@ function runGguf(modelId, prompt, timeoutMs = 90000) {
 let activeChild = null;
 let cancelRequested = false;
 
+function killLlamaChild(child) {
+  if (!child) return;
+  const pid = child.pid;
+  if (process.platform === 'win32' && pid) {
+    try {
+      spawn('taskkill', ['/pid', String(pid), '/t', '/f'], {
+        windowsHide: true,
+        stdio: 'ignore',
+      });
+    } catch {
+      try { child.kill(); } catch { /* ignore */ }
+    }
+    return;
+  }
+  try { child.kill('SIGKILL'); } catch {
+    try { child.kill(); } catch { /* ignore */ }
+  }
+}
+
 function cancelGguf() {
   cancelRequested = true;
   if (activeChild) {
-    try { activeChild.kill(); } catch { /* ignore */ }
+    killLlamaChild(activeChild);
     activeChild = null;
   }
   return { ok: true };
@@ -404,7 +423,7 @@ function runGgufStream(modelId, prompt, onChunk, timeoutMs = 120000) {
 
     cancelRequested = false;
     if (activeChild) {
-      try { activeChild.kill(); } catch { /* ignore */ }
+      killLlamaChild(activeChild);
       activeChild = null;
     }
 
@@ -422,9 +441,8 @@ function runGgufStream(modelId, prompt, onChunk, timeoutMs = 120000) {
     let out = '';
     let err = '';
     let emitted = '';
-    let echoSkipped = false;
     const timer = setTimeout(() => {
-      try { child.kill(); } catch { /* ignore */ }
+      killLlamaChild(child);
       reject(new Error('GGUF generation timed out'));
     }, timeoutMs);
 
@@ -432,19 +450,9 @@ function runGgufStream(modelId, prompt, onChunk, timeoutMs = 120000) {
       const piece = d.toString();
       out += piece;
       if (typeof onChunk !== 'function') return;
-      // Hold early output until we can strip banners + leading prompt echo.
-      if (!echoSkipped) {
-        const cleaned = cleanGgufReply(promptStr, out);
-        if (cleaned.length < out.trim().length || out.length > promptStr.length + 16) {
-          echoSkipped = true;
-          emitted = cleaned;
-          if (cleaned) {
-            try { onChunk(cleaned); } catch { /* ignore */ }
-          }
-        }
-        return;
-      }
       const cleaned = cleanGgufReply(promptStr, out);
+      // Hold only while stdout is still banners / prompt echo (cleaned still empty).
+      if (!cleaned) return;
       if (cleaned.length > emitted.length) {
         const delta = cleaned.slice(emitted.length);
         emitted = cleaned;

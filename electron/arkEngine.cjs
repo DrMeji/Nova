@@ -14,6 +14,7 @@ const arkSd = require('./arkSd.cjs');
 const arkFetch = require('./arkFetch.cjs');
 const arkPaths = require('./arkPaths.cjs');
 const arkModelRank = require('./arkModelRank.cjs');
+const arkHunt = require('./arkHunt.cjs');
 const os = require('os');
 
 /** Default zero-key brain for new installs (~1 GB Q4). */
@@ -204,6 +205,11 @@ const CATALOG = [
   },
 ];
 
+function catalogAll() {
+  const hunt = arkHunt.list().filter((h) => !CATALOG.some((c) => c.id === h.id));
+  return CATALOG.concat(hunt);
+}
+
 function modelsDir() {
   return arkPaths.modelsDir();
 }
@@ -227,7 +233,7 @@ function hasRealGguf(id) {
 }
 
 function hasRealWeights(id) {
-  const meta = CATALOG.find((m) => m.id === id);
+  const meta = catalogAll().find((m) => m.id === id);
   if (meta?.runtime === 'flux') {
     return arkSd.hasFluxBundle();
   }
@@ -266,7 +272,7 @@ const MAX_PARALLEL_DOWNLOADS = 2;
 
 function listModels() {
   const ggufs = arkGguf.listGgufFiles();
-  return CATALOG.map((m) => {
+  return catalogAll().map((m) => {
     if (m.builtin) {
       return { ...m, status: 'ready', gguf: false };
     }
@@ -282,7 +288,7 @@ function listModels() {
     };
   }).concat(
     ggufs
-      .filter((g) => !CATALOG.some((c) => !c.builtin && arkGguf.findGgufForModel(c.id) === g.path))
+      .filter((g) => !catalogAll().some((c) => !c.builtin && arkGguf.findGgufForModel(c.id) === g.path))
       .map((g) => ({
         id: `gguf:${g.file}`,
         name: g.file.replace(/\.gguf$/i, ''),
@@ -377,7 +383,7 @@ function diskSpaceForModels() {
 }
 
 function beginDownload(id) {
-  const meta = CATALOG.find((m) => m.id === id);
+  const meta = catalogAll().find((m) => m.id === id);
   if (!meta) throw new Error('Unknown model');
   if (meta.builtin) return getStatus();
   if (!meta.url && !(meta.bundle && meta.bundle.length)) throw new Error('No download URL for this model');
@@ -421,7 +427,7 @@ function beginDownload(id) {
 function pumpDownloadQueue() {
   while (activeDownloadCount() < MAX_PARALLEL_DOWNLOADS && downloadQueue.length > 0) {
     const nextId = downloadQueue.shift();
-    const meta = CATALOG.find((m) => m.id === nextId);
+    const meta = catalogAll().find((m) => m.id === nextId);
     if (!meta || (!meta.url && !(meta.bundle && meta.bundle.length))) {
       delete downloads[nextId];
       continue;
@@ -699,7 +705,8 @@ async function generate(message, opts = {}) {
   if (arkGguf.findGgufForModel(ggufId) && arkGguf.findLlamaBinary()) {
     try {
       const onChunk = typeof opts.onChunk === 'function' ? opts.onChunk : null;
-      const gguf = await arkGguf.runGgufStream(ggufId, message, onChunk);
+      const timeoutMs = kind === 'coding' ? 45_000 : 120_000;
+      const gguf = await arkGguf.runGgufStream(ggufId, message, onChunk, timeoutMs);
       return {
         ok: true,
         reply: gguf.reply,
@@ -740,14 +747,13 @@ async function generate(message, opts = {}) {
     }
   }
 
-  const reply = arkCoreGenerate(message, model.name);
-  return {
-    ok: true,
-    reply,
-    modelId: model.id,
-    modelName: model.name,
-    source: 'ark-engine',
-  };
+  throw new Error(
+    'No local GGUF brain is loaded. Open Local AI to install one, or add a free cloud key in Settings.',
+  );
+}
+
+function registerHunt(meta) {
+  return arkHunt.register(meta);
 }
 
 module.exports = {
@@ -756,6 +762,7 @@ module.exports = {
   stop,
   setActiveModel,
   beginDownload,
+  registerHunt,
   downloadProgress,
   downloadError,
   cancelDownload,

@@ -20,6 +20,8 @@ export interface Profile {
   id: string;
   display_name: string | null;
   avatar_url: string | null;
+  /** Unique 7-digit ARK ID for adding this account (not email). */
+  ark_id?: string | null;
   onboarding_completed: boolean;
   created_at: string;
   updated_at: string;

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  Plus, FilePlus2, ListTree, MessageCircleQuestion, Bug, Layers2,
+  Plus, FilePlus2, ListTree, MessageCircleQuestion, Bug, Layers2, FolderOpen,
 } from 'lucide-react';
 
 export type ComposerPlusAction =
@@ -10,6 +10,7 @@ export type ComposerPlusAction =
   | 'debug'
   | 'multitask'
   | 'file'
+  | 'folder'
   | 'image';
 
 type Props = {
@@ -30,7 +31,8 @@ const ITEMS: {
   { id: 'ask', label: 'Ask', hint: 'Answer a question', icon: MessageCircleQuestion },
   { id: 'debug', label: 'Debug', hint: 'Find and fix a problem', icon: Bug },
   { id: 'multitask', label: 'Multitask', hint: 'Split into parallel tasks', icon: Layers2 },
-  { id: 'file', label: 'Add file', hint: 'Attach a file or image', icon: FilePlus2 },
+  { id: 'file', label: 'Add file', hint: 'Attach a file to inspect in chat', icon: FilePlus2 },
+  { id: 'folder', label: 'Open folder', hint: 'Inspect a project, then continue in Code', icon: FolderOpen },
 ];
 
 export function ComposerPlusMenu({

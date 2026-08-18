@@ -17,6 +17,8 @@ export type GitHubRepo = {
   description: string | null;
   updated_at: string;
   language: string | null;
+  size?: number;
+  created_at?: string;
 };
 
 export type GitHubIssueLike = {
@@ -77,19 +79,19 @@ async function githubGet<T>(token: string, path: string): Promise<T> {
   return data as T;
 }
 
-async function githubPost<T>(token: string, path: string, body: unknown): Promise<T> {
+async function githubSend<T>(token: string, path: string, method: string, body?: unknown): Promise<T> {
   const url = path.startsWith('http') ? path : `https://api.github.com${path}`;
-  const headers = {
+  const headers: Record<string, string> = {
     Authorization: `Bearer ${token}`,
     Accept: 'application/vnd.github+json',
-    'Content-Type': 'application/json',
     'X-GitHub-Api-Version': '2022-11-28',
   };
+  if (body !== undefined) headers['Content-Type'] = 'application/json';
   if (window.arkDesktop?.httpRequest) {
     const res = await window.arkDesktop.httpRequest(url, {
-      method: 'POST',
+      method,
       headers,
-      body: JSON.stringify(body),
+      body: body !== undefined ? JSON.stringify(body) : undefined,
     });
     if (!res.ok) {
       const msg =
@@ -98,12 +100,12 @@ async function githubPost<T>(token: string, path: string, body: unknown): Promis
           : `GitHub error ${res.status}`;
       throw new Error(msg);
     }
-    return res.data as T;
+    return (res.data || {}) as T;
   }
   const res = await fetch(url, {
-    method: 'POST',
+    method,
     headers,
-    body: JSON.stringify(body),
+    body: body !== undefined ? JSON.stringify(body) : undefined,
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
@@ -119,10 +121,49 @@ export async function commentOnIssue(
   number: number,
   body: string,
 ) {
-  return githubPost<{ html_url?: string; id?: number }>(
+  return githubSend<{ html_url?: string; id?: number }>(
     token,
     `/repos/${owner}/${repo}/issues/${number}/comments`,
+    'POST',
     { body: body.slice(0, 65000) },
+  );
+}
+
+export async function createGitHubRepo(
+  token: string,
+  name: string,
+  opts?: { private?: boolean; description?: string },
+) {
+  return githubSend<{
+    html_url?: string;
+    clone_url?: string;
+    full_name?: string;
+    private?: boolean;
+    name?: string;
+  }>(token, '/user/repos', 'POST', {
+    name: name.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-|-$/g, '').slice(0, 100) || 'ark-project',
+    private: opts?.private !== false,
+    description: opts?.description?.slice(0, 350) || 'Created from ARK',
+    auto_init: false,
+  });
+}
+
+export async function createGitHubPullRequest(
+  token: string,
+  owner: string,
+  repo: string,
+  opts: { title: string; head: string; base?: string; body?: string },
+) {
+  return githubSend<{ html_url?: string; number?: number; title?: string }>(
+    token,
+    `/repos/${owner}/${repo}/pulls`,
+    'POST',
+    {
+      title: opts.title.slice(0, 256),
+      head: opts.head,
+      base: opts.base || 'main',
+      body: opts.body?.slice(0, 65000) || undefined,
+    },
   );
 }
 
@@ -133,14 +174,79 @@ export async function createGitHubIssue(
   title: string,
   body?: string,
 ) {
-  return githubPost<{ html_url?: string; number?: number; title?: string }>(
+  return githubSend<{ html_url?: string; number?: number; title?: string }>(
     token,
     `/repos/${owner}/${repo}/issues`,
+    'POST',
     {
       title: title.slice(0, 256),
       body: body?.slice(0, 65000) || undefined,
     },
   );
+}
+
+export type TeamAccess = 'read' | 'write' | 'full';
+
+export type GitHubCollaborator = {
+  login: string;
+  avatar_url: string;
+  html_url: string;
+  role_name?: string;
+  permissions?: { admin?: boolean; maintain?: boolean; push?: boolean; pull?: boolean };
+};
+
+export function githubPermissionToAccess(c: GitHubCollaborator): TeamAccess {
+  if (c.permissions?.admin || c.role_name === 'admin') return 'full';
+  if (c.permissions?.push || c.role_name === 'write' || c.role_name === 'maintain') return 'write';
+  return 'read';
+}
+
+export function accessToGithubPermission(access: TeamAccess): 'pull' | 'push' | 'admin' {
+  if (access === 'full') return 'admin';
+  if (access === 'write') return 'push';
+  return 'pull';
+}
+
+export async function listGitHubCollaborators(
+  token: string,
+  owner: string,
+  repo: string,
+): Promise<GitHubCollaborator[]> {
+  const people = await githubGet<GitHubCollaborator[]>(
+    token,
+    `/repos/${owner}/${repo}/collaborators?per_page=50`,
+  );
+  return Array.isArray(people) ? people : [];
+}
+
+export async function inviteGitHubCollaborator(
+  token: string,
+  owner: string,
+  repo: string,
+  username: string,
+  access: TeamAccess,
+) {
+  const permission = accessToGithubPermission(access);
+  return githubSend<{ id?: number; html_url?: string }>(
+    token,
+    `/repos/${owner}/${repo}/collaborators/${encodeURIComponent(username)}`,
+    'PUT',
+    { permission },
+  );
+}
+
+export async function getGitHubRepoAccess(
+  token: string,
+  owner: string,
+  repo: string,
+): Promise<{ access: TeamAccess; full_name: string }> {
+  const data = await githubGet<{
+    full_name?: string;
+    permissions?: { admin?: boolean; push?: boolean; pull?: boolean };
+  }>(token, `/repos/${owner}/${repo}`);
+  const p = data.permissions || {};
+  const access: TeamAccess = p.admin ? 'full' : p.push ? 'write' : 'read';
+  return { access, full_name: data.full_name || `${owner}/${repo}` };
 }
 
 export async function verifyGitHubToken(token: string): Promise<GitHubUser> {
@@ -149,7 +255,7 @@ export async function verifyGitHubToken(token: string): Promise<GitHubUser> {
   return githubGet<GitHubUser>(trimmed, '/user');
 }
 
-export async function listGitHubRepos(token: string, limit = 12): Promise<GitHubRepo[]> {
+export async function listGitHubRepos(token: string, limit = 20): Promise<GitHubRepo[]> {
   const repos = await githubGet<GitHubRepo[]>(
     token,
     `/user/repos?sort=updated&per_page=${limit}&affiliation=owner,collaborator,organization_member`,
@@ -234,6 +340,44 @@ export async function runGitHubLive(
       '',
       'Live write via GitHub issues comments API.',
     ].filter(Boolean).join('\n');
+  }
+
+  const createRepoMatch = userText.match(
+    /create\s+(?:a\s+)?(public|private)?\s*(?:github\s+)?repo(?:sitory)?(?:\s+(?:named|called)\s+)?[:\s]+([\w.-]+)/i,
+  );
+  if (createRepoMatch || /\bcreate (a )?(public |private )?(github )?repo\b/.test(lower)) {
+    if (perms.length > 0 && !perms.includes('write')) {
+      return [
+        'GitHub · permission needed',
+        '',
+        'Creating a repository needs Write. Enable it under Plugins → GitHub → Permissions.',
+      ].join('\n');
+    }
+    const vis = /public/i.test(userText) ? false : true;
+    const named = createRepoMatch?.[2] || userText.match(/repo(?:sitory)?\s+(?:named|called)\s+([\w.-]+)/i)?.[1];
+    const name = (named || 'ark-project').replace(/[^A-Za-z0-9._-]+/g, '-');
+    const user = await verifyGitHubToken(token);
+    const created = await createGitHubRepo(token, name, { private: vis, description: 'Created from ARK' });
+    return [
+      `GitHub · created ${vis ? 'private' : 'public'} repo (@${user.login})`,
+      '',
+      created.full_name || `${user.login}/${name}`,
+      created.html_url || '',
+      '',
+      'In Code, say “push this folder” to send the local files here.',
+    ].filter(Boolean).join('\n');
+  }
+
+  const createPrMatch = userText.match(
+    /(?:create|open|make)\s+(?:a\s+)?(?:pr|pull request)\s+(?:on|in|for)\s+([\w.-]+)\/([\w.-]+)/i,
+  );
+  if (createPrMatch) {
+    return [
+      'GitHub · pull request',
+      '',
+      'Open this project in Code, then say “create a pull request” so ARK can use the local branch and diff.',
+      `Repo: ${createPrMatch[1]}/${createPrMatch[2]}`,
+    ].join('\n');
   }
 
   if (/pull|\bpr\b/.test(lower)) {
@@ -331,11 +475,13 @@ export async function runGitHubLive(
       return `• ${repo.full_name} — ${vis}${lang} · updated ${formatDate(repo.updated_at)}\n  ${repo.html_url}`;
     }),
     '',
+    'Say **open owner/repo in Code** to clone it and start adding, removing, or upgrading files. Empty repos are fine — we start from a blank page.',
+    '',
     'Ask about open PRs or issues next. Live data from your GitHub account.',
   ].join('\n');
 }
 
 export function isGitHubIntent(userText: string) {
   const lower = userText.toLowerCase();
-  return /github|repo|repositor|pull request|\bpr\b|issue/.test(lower);
+  return /github|repo|repositor|pull request|\bpr\b|issue|clone |commit |git push/.test(lower);
 }

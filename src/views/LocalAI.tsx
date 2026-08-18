@@ -33,7 +33,7 @@ import {
   Cpu, MemoryStick, HardDrive, Zap, Monitor, MonitorCog,
   Power, Activity, Check, Download, Shield,
   Gauge, Boxes, Wifi, Loader2, FolderOpen, FileBox,
-  Code, Brain, Image as ImageIcon,
+  Code, Brain, Image as ImageIcon, Globe,
 } from 'lucide-react';
 
 import {
@@ -42,6 +42,7 @@ import {
   LOCAL_CATEGORY_ORDER,
   sortModelsByCategoryThenSizeDesc,
 } from '@/lib/modelSort';
+import { huntModelsForPc, type HuntedModel } from '@/lib/arkModelHunt';
 
 type TabId = 'overview' | 'speed' | 'hardware' | 'storage' | 'advanced';
 
@@ -303,6 +304,8 @@ export function LocalAI() {
   const [downloadProgressMap, setDownloadProgressMap] = useState<Record<string, number>>(() => getEngineDownloadMap());
   const [downloadPhaseMap, setDownloadPhaseMap] = useState<Record<string, string>>(() => getEngineDownloadPhaseMap());
   const [diskNote, setDiskNote] = useState('');
+  const [hunted, setHunted] = useState<HuntedModel[]>([]);
+  const [huntNote, setHuntNote] = useState('');
   const downloadingIds = Object.keys(downloadProgressMap).filter(id => (downloadProgressMap[id] ?? 0) < 100);
   const [statusNote, setStatusNote] = useState('Starting ARK Engine…');
   const [engineMeta, setEngineMeta] = useState<ArkEngineStatus | null>(null);
@@ -347,6 +350,29 @@ export function LocalAI() {
       setHw(info);
       setRecommendation(getRecommendedChatModel(info));
     });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const info = await getAccurateHardware(true);
+        if (cancelled) return;
+        const found = await huntModelsForPc(info);
+        if (cancelled) return;
+        setHunted(found);
+        setHuntNote(
+          found.length
+            ? `${found.length} online ${found.length === 1 ? 'fit' : 'fits'} — waiting here until you install, or until the current model runs out`
+            : '',
+        );
+      } catch {
+        if (!cancelled) setHuntNote('');
+      }
+    })();
     return () => {
       cancelled = true;
     };
@@ -443,7 +469,7 @@ export function LocalAI() {
       });
   };
 
-  const downloadModel = (model: typeof CATALOG[number]) => {
+  const downloadModel = (model: { id: string; name: string; sizeGb: number; hunt?: HuntedModel }) => {
     if (isEngineDownloading(model.id)) return;
     void engineDiskSpace().then(disk => {
       const needGb = model.sizeGb * 1.15;
@@ -454,7 +480,19 @@ export function LocalAI() {
       }
       setDiskNote(disk?.freeGb != null ? `${disk.freeGb.toFixed(0)} GB free` : '');
       setStatusNote(`Downloading ${model.name}…`);
-      void startEngineDownload({ id: model.id, name: model.name, source: 'local-ai' }).then(() => {
+      void startEngineDownload({
+        id: model.id,
+        name: model.name,
+        source: 'local-ai',
+        hunt: model.hunt
+          ? {
+              url: model.hunt.url,
+              sizeGb: model.hunt.sizeGb,
+              detail: model.hunt.detail,
+              category: model.hunt.category,
+            }
+          : undefined,
+      }).then(() => {
         const watch = window.setInterval(async () => {
           if (!isEngineDownloading(model.id) && getEngineDownloadMap()[model.id] == null) {
             window.clearInterval(watch);
@@ -762,6 +800,57 @@ export function LocalAI() {
                   </ModelGrid>
                 )}
               </section>
+
+              {hunted.filter(m => !installed.some(i => i.id === m.id)).length > 0 && (
+                <section>
+                  <div className="flex items-center gap-2 mb-1">
+                    <Globe className="w-4 h-4 text-content-secondary" />
+                    <h2 className="text-base font-semibold text-content-primary">Found online for this PC</h2>
+                  </div>
+                  {huntNote ? (
+                    <p className="text-xs text-content-tertiary mb-4 px-1">{huntNote}</p>
+                  ) : (
+                    <div className="mb-4" />
+                  )}
+                  <ModelGrid>
+                    {hunted.filter(m => !installed.some(i => i.id === m.id)).map(model => {
+                      const pct = downloadProgressMap[model.id];
+                      const isDownloading = pct != null && pct < 100;
+                      return (
+                        <div
+                          key={model.id}
+                          className="flex items-center gap-3 py-3 px-1 rounded-xl hover:bg-surface-hover/50 transition-colors min-w-0"
+                        >
+                          <span className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-400 to-sky-700 flex items-center justify-center text-[10px] font-bold text-white shrink-0">
+                            HF
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="flex items-center gap-2 min-w-0 flex-wrap">
+                              <span className="text-sm font-medium text-content-primary truncate">{model.name}</span>
+                              <FreeBadge />
+                            </span>
+                            <span className="block text-xs text-content-tertiary truncate mt-0.5">
+                              {isDownloading ? `Downloading… ${Math.round(pct)}%` : model.detail}
+                            </span>
+                          </span>
+                          <LocalDownloadControl
+                            name={model.name}
+                            isDownloading={isDownloading}
+                            progress={pct}
+                            onDownload={() => downloadModel({
+                              id: model.id,
+                              name: model.name,
+                              sizeGb: model.sizeGb,
+                              hunt: model,
+                            })}
+                            onCancel={() => cancelModelDownload(model.id)}
+                          />
+                        </div>
+                      );
+                    })}
+                  </ModelGrid>
+                </section>
+              )}
 
               <div className="space-y-10">
                 {availableByCategory.map(cat => (
