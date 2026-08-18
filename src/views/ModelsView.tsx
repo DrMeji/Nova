@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Search, Plus, Check, Download, Loader2, Cpu, Cloud, Monitor,
-  Code, Boxes, Brain, Eye, Zap, Image as ImageIcon, Video, Gauge, Sparkles, Rocket, X, KeyRound, Globe,
+  Code, Boxes, Brain, Eye, Zap, Image as ImageIcon, Video, Gauge, Sparkles, Rocket, X, KeyRound, Globe, RefreshCw,
 } from 'lucide-react';
 import { detectHardware, getAccurateHardware, getHardwareClass, isEngineDownloadable, loadHardwareSnapshot, parseRamGb, type HardwareClass } from '@/lib/api';
 import {
@@ -23,6 +23,17 @@ import {
   hasProviderApiKey,
   setProviderApiKey,
 } from '@/lib/localPrefs';
+import {
+  addEnabledCloudModels,
+  isCloudModelEnabled,
+  isCloudProviderEnabled,
+  listConnectedProviderIds,
+  providerIdFromName,
+  providerNeedsKey,
+  removeEnabledCloudModels,
+  setCloudModelEnabled,
+  setCloudProviderEnabled,
+} from '@/lib/cloudSources';
 import {
   isOllamaEnabled,
   probeOllamaOptional,
@@ -257,12 +268,21 @@ const LIVE_MODEL_PROVIDERS = new Set([
   'Fireworks',
   'DeepSeek',
   'Mistral',
+  'Cerebras',
+  'SambaNova',
+  'Fireworks AI',
 ]);
 
 function cloudModelAvailability(model: CloudModel): 'live' | 'coming_soon' | 'retired' {
   if (model.provider === 'GitHub Models') return 'retired';
   if (LIVE_MODEL_PROVIDERS.has(model.provider)) return 'live';
   return 'coming_soon';
+}
+
+function liveEnabledCloudIds() {
+  return CLOUD_MODELS
+    .filter(m => isCloudModelEnabled(m.id, providerIdFromName(m.provider), cloudModelAvailability(m) === 'live'))
+    .map(m => m.id);
 }
 
 const CATEGORY_LABEL: Record<string, string> = {
@@ -423,14 +443,9 @@ export function ModelsView() {
     Object.keys(getEngineDownloadMap()).filter(id => isEngineDownloading(id)),
   ));
   const [installProgress, setInstallProgress] = useState<Record<string, number>>(() => getEngineDownloadMap());
-  const [connected, setConnected] = useState<Set<string>>(() => {
-    const s = new Set<string>();
-    if (isOllamaEnabled()) s.add('ollama');
-    return s;
-  });
-  const [enabledCloud, setEnabledCloud] = useState<Set<string>>(new Set());
+  const [connected, setConnected] = useState<Set<string>>(() => new Set(listConnectedProviderIds()));
+  const [enabledCloud, setEnabledCloud] = useState<Set<string>>(() => new Set(liveEnabledCloudIds()));
   const [hw, setHw] = useState(() => loadHardwareSnapshot() || detectHardware());
-  const [hwNote, setHwNote] = useState(() => (loadHardwareSnapshot()?.accurate ? '' : 'Scanning…'));
   const [connectTarget, setConnectTarget] = useState<CloudProvider | null>(null);
   const [apiKeyDraft, setApiKeyDraft] = useState('');
   const [keyedProviders, setKeyedProviders] = useState<Set<string>>(
@@ -442,10 +457,27 @@ export function ModelsView() {
   const [ollamaNote, setOllamaNote] = useState('');
   const [hunted, setHunted] = useState<HuntedModel[]>([]);
   const [huntNote, setHuntNote] = useState('');
+  const [huntBusy, setHuntBusy] = useState(false);
   const [liveCapacity, setLiveCapacity] = useState<LiveCapacity | null>(null);
   const pcClass = useMemo(() => getHardwareClass(hw), [hw]);
   const ramGb = useMemo(() => parseRamGb(hw), [hw]);
   const fitLists = useMemo(() => buildFitLists(pcClass, ramGb), [pcClass, ramGb]);
+
+  useEffect(() => {
+    const hydrate = () => {
+      setKeyedProviders(new Set(Object.keys(getProviderApiKeys())));
+      setConnected(new Set(listConnectedProviderIds()));
+      setEnabledCloud(new Set(liveEnabledCloudIds()));
+      setOllamaOn(isOllamaEnabled());
+    };
+    hydrate();
+    window.addEventListener('ark:cloud-sources-changed', hydrate);
+    window.addEventListener('ark:provider-keys-changed', hydrate);
+    return () => {
+      window.removeEventListener('ark:cloud-sources-changed', hydrate);
+      window.removeEventListener('ark:provider-keys-changed', hydrate);
+    };
+  }, []);
 
 
   useEffect(() => {
@@ -502,7 +534,6 @@ export function ModelsView() {
     void getAccurateHardware(true).then(info => {
       if (cancelled) return;
       setHw(info);
-      setHwNote(info.accurate ? '' : 'Approximate');
     });
     void getEngineStatus().then(status => {
       if (cancelled) return;
@@ -521,27 +552,28 @@ export function ModelsView() {
     return () => { cancelled = true; };
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-    setHuntNote('Searching online for brains that fit this PC…');
-    void (async () => {
-      try {
-        const info = await getAccurateHardware(true);
-        if (cancelled) return;
-        const found = await huntModelsForPc(info);
-        if (cancelled) return;
-        setHunted(found);
-        setHuntNote(
-          found.length
-            ? `${found.length} online ${found.length === 1 ? 'fit' : 'fits'} from Hugging Face + ModelScope — install when you want, or when the current model runs out`
-            : 'No new online fits right now — pinned catalog still applies',
-        );
-      } catch {
-        if (!cancelled) setHuntNote('Could not reach Hugging Face right now');
-      }
-    })();
-    return () => { cancelled = true; };
+  const runHunt = useCallback(async () => {
+    setHuntBusy(true);
+    setHuntNote('Searching online for models that fit this PC…');
+    try {
+      const info = await getAccurateHardware(true);
+      const found = await huntModelsForPc(info);
+      setHunted(found);
+      setHuntNote(
+        found.length
+          ? `${found.length} online ${found.length === 1 ? 'model' : 'models'} from Hugging Face + ModelScope`
+          : 'No extra online models right now — catalog below still applies',
+      );
+    } catch {
+      setHuntNote('Could not reach model hosts right now');
+    } finally {
+      setHuntBusy(false);
+    }
   }, []);
+
+  useEffect(() => {
+    void runHunt();
+  }, [runHunt]);
 
   useEffect(() => {
     if (!ollamaOn) {
@@ -580,6 +612,14 @@ export function ModelsView() {
       if (apiKeyDraft.trim()) next.add(connectTarget.id);
       return next;
     });
+    if (apiKeyDraft.trim()) {
+      setCloudProviderEnabled(connectTarget.id, true);
+      const ids = CLOUD_MODELS
+        .filter(m => providerIdFromName(m.provider) === connectTarget.id && cloudModelAvailability(m) === 'live')
+        .map(m => m.id);
+      const currentlyOn = liveEnabledCloudIds();
+      setEnabledCloud(addEnabledCloudModels(ids, currentlyOn));
+    }
     setConnectTarget(null);
     setApiKeyDraft('');
   };
@@ -588,10 +628,16 @@ export function ModelsView() {
     const provider = CLOUD_PROVIDERS.find(p => p.id === id);
     if (!provider) return;
 
+    const currentlyOn = liveEnabledCloudIds();
+    const modelIds = CLOUD_MODELS
+      .filter(m => providerIdFromName(m.provider) === id && cloudModelAvailability(m) === 'live')
+      .map(m => m.id);
+
     if (id === 'ollama') {
       const next = !ollamaOn;
       setOllamaEnabled(next);
       setOllamaOn(next);
+      setCloudProviderEnabled('ollama', next);
       setConnected(prev => {
         const copy = new Set(prev);
         if (next) copy.add('ollama');
@@ -601,20 +647,43 @@ export function ModelsView() {
       return;
     }
 
-    if (connected.has(id)) {
+    if (connected.has(id) || isCloudProviderEnabled(id)) {
+      setCloudProviderEnabled(id, false);
       setConnected(prev => {
         const next = new Set(prev);
         next.delete(id);
         return next;
       });
+      setEnabledCloud(removeEnabledCloudModels(modelIds, currentlyOn));
       return;
     }
-    // First-time connect asks for an API key (stored locally only).
-    if (!hasProviderApiKey(id) && id !== 'github-models') {
+    if (providerNeedsKey(id) && !hasProviderApiKey(id)) {
       openConnect(provider);
       return;
     }
+    setCloudProviderEnabled(id, true);
     setConnected(prev => new Set(prev).add(id));
+    setEnabledCloud(addEnabledCloudModels(modelIds, currentlyOn));
+  };
+
+  const toggleCloudModel = (id: string) => {
+    const model = CLOUD_MODELS.find(m => m.id === id);
+    if (!model) return;
+    const providerId = providerIdFromName(model.provider);
+    const currentlyOn = liveEnabledCloudIds();
+    const on = isCloudModelEnabled(id, providerId, cloudModelAvailability(model) === 'live')
+      || enabledCloud.has(id);
+
+    if (!on && providerId && providerNeedsKey(providerId) && !hasProviderApiKey(providerId)) {
+      const provider = CLOUD_PROVIDERS.find(p => p.id === providerId);
+      if (provider) openConnect(provider);
+      return;
+    }
+    if (!on && providerId && !isCloudProviderEnabled(providerId)) {
+      setCloudProviderEnabled(providerId, true);
+      setConnected(prev => new Set(prev).add(providerId));
+    }
+    setEnabledCloud(setCloudModelEnabled(id, !on, currentlyOn));
   };
   const q = query.trim().toLowerCase();
 
@@ -766,15 +835,6 @@ export function ModelsView() {
     });
   };
 
-  const toggleCloudModel = (id: string) => {
-    setEnabledCloud(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-
   return (
     <div className="h-full flex flex-col overflow-hidden animate-fade-in bg-ark-navy-950">
       <div className="shrink-0 px-6 pt-[min(12vh,6rem)] bg-ark-navy-950">
@@ -841,22 +901,21 @@ export function ModelsView() {
         <div className="w-full max-w-4xl mx-auto">
           {tab === 'for-pc' ? (
             <>
-              <section className="mb-8 rounded-2xl border border-surface-border bg-surface-hover/30 px-4 py-3.5">
-                <div className="flex items-center gap-3">
-                  <span className="w-10 h-10 rounded-xl bg-surface-hover flex items-center justify-center shrink-0">
-                    <Monitor className="w-5 h-5 text-content-secondary" />
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm text-content-primary truncate">
-                      {hw.cpu} · {hw.ram} · {hw.gpu}
-                    </p>
-                    <p className="text-xs text-content-tertiary mt-0.5 truncate">
-                      {hw.os} · {hw.acceleration}
-                      {hwNote ? ` · ${hwNote}` : ''}
-                    </p>
-                  </div>
-                </div>
-              </section>
+              <div className="flex items-center justify-between gap-3 mb-8">
+                <p className="text-xs text-content-tertiary truncate min-w-0">
+                  {huntNote || 'Find more models that fit this PC'}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => void runHunt()}
+                  disabled={huntBusy}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-surface-border bg-surface-hover/40 hover:bg-surface-hover px-3 py-1.5 text-xs text-content-secondary hover:text-content-primary transition-colors shrink-0 disabled:opacity-50"
+                  title="Search Hugging Face and ModelScope for new models"
+                >
+                  {huntBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                  Refresh
+                </button>
+              </div>
 
               {hunted.length > 0 && (
                 <section className="mb-10">
@@ -908,9 +967,7 @@ export function ModelsView() {
                 </section>
               )}
 
-              {hunted.length === 0 && huntNote ? (
-                <p className="text-xs text-content-tertiary mb-8">{huntNote}</p>
-              ) : null}
+              )}
 
               <div className="space-y-10">
                 {FIT_SECTIONS.map(section => {
@@ -1057,11 +1114,19 @@ export function ModelsView() {
             </>
           ) : (
             <>
+              <p className="text-sm text-content-tertiary mb-8 leading-relaxed">
+                Cloud AI does not download a file. A checkmark means “ARK may use this in Chat.”
+                Providers are the companies (OpenRouter, Groq, NVIDIA…). Chat / Coding / Fast rows
+                are the models on those companies. If a Key badge is showing, that source is already
+                saved from Settings and stays checked when you leave this page.
+              </p>
               {!q && (
                 <section className="mb-10">
                   <h2 className="text-base font-semibold text-content-primary mb-4">Connected</h2>
                   {connectedProviders.length === 0 ? (
-                    <p className="text-sm text-content-tertiary">No providers connected yet.</p>
+                    <p className="text-sm text-content-tertiary">
+                      None on yet. If you already saved keys in Settings, they should appear checked here after this page loads.
+                    </p>
                   ) : (
                     <div className="flex flex-col">
                       {connectedProviders.map(provider => (
@@ -1153,13 +1218,17 @@ export function ModelsView() {
               </section>
 
               <section className="mb-10">
-                <h2 className="text-base font-semibold text-content-primary mb-4">Providers</h2>
+                <h2 className="text-base font-semibold text-content-primary mb-1">Providers</h2>
+                <p className="text-xs text-content-tertiary mb-4">
+                  Turn a source on for Chat Auto. Plus asks for a key only if one is not saved yet.
+                  Pollinations and Ollama have no cloud key — plus just enables them.
+                </p>
                 {filteredProviders.length === 0 ? (
                   <EmptySearch />
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1">
                     {filteredProviders.map(provider => {
-                      const isOn = connected.has(provider.id);
+                      const isOn = connected.has(provider.id) || isCloudProviderEnabled(provider.id);
                       return (
                         <div
                           key={provider.id}
@@ -1217,8 +1286,12 @@ export function ModelsView() {
                               provider.availability !== 'live' && provider.id !== 'ollama'
                                 ? 'Coming soon'
                                 : isOn
-                                  ? 'Connected'
-                                  : 'Connect'
+                                  ? 'On for Chat — click to turn off (your key stays saved)'
+                                  : keyedProviders.has(provider.id)
+                                    ? 'Turn on for Chat'
+                                    : providerNeedsKey(provider.id)
+                                      ? 'Add API key to use in Chat'
+                                      : 'Turn on for Chat'
                             }
                             aria-label={isOn ? `Disconnect ${provider.name}` : `Connect ${provider.name}`}
                           >
@@ -1232,6 +1305,10 @@ export function ModelsView() {
               </section>
 
               <div className="space-y-10">
+                <p className="text-xs text-content-tertiary -mt-4">
+                  Chat, Coding, Reasoning, Vision, and Fast are cloud models — not files you download.
+                  Checkmark = this model is available in Chat. It stays selected when you leave this page.
+                </p>
                 {cloudCategories.map(cat => (
                   <section key={cat.id}>
                     <div className="flex items-center gap-2 mb-4">
@@ -1240,8 +1317,10 @@ export function ModelsView() {
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1">
                       {cat.models.map(model => {
-                        const isOn = enabledCloud.has(model.id);
+                        const providerId = providerIdFromName(model.provider);
                         const avail = cloudModelAvailability(model);
+                        const isOn = isCloudModelEnabled(model.id, providerId, avail === 'live')
+                          || enabledCloud.has(model.id);
                         return (
                           <div
                             key={model.id}
@@ -1285,7 +1364,7 @@ export function ModelsView() {
                                     ? 'bg-surface-hover text-ark-accent-green'
                                     : 'text-content-secondary hover:text-content-primary hover:bg-surface-hover'
                               }`}
-                              title={avail !== 'live' ? 'Not wired in ARK yet' : isOn ? 'Enabled' : 'Enable'}
+                              title={avail !== 'live' ? 'Not wired in ARK yet' : isOn ? 'On in Chat — click to turn off' : 'Enable in Chat'}
                               aria-label={isOn ? `Disable ${model.name}` : `Enable ${model.name}`}
                             >
                               {isOn ? <Check className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
@@ -1319,7 +1398,8 @@ export function ModelsView() {
               <div>
                 <h2 className="text-lg font-semibold text-content-primary">Connect {connectTarget.name}</h2>
                 <p className="text-xs text-content-tertiary mt-1">
-                  Paste an API key. It stays on this device only (local storage). Real calls come later.
+                  Paste an API key. It stays on this device. After you save, this provider stays checked
+                  and Chat Auto can use it — same as adding it in Settings.
                 </p>
               </div>
               <button

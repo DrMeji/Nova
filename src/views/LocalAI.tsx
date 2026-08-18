@@ -645,23 +645,6 @@ export function LocalAI() {
 
       <div className="flex-1 min-h-0 overflow-y-auto px-6 pb-10">
         <div className="w-full max-w-4xl mx-auto">
-          {/* Hardware strip always visible */}
-          <section className="mb-8 rounded-2xl border border-surface-border bg-surface-hover/30 px-4 py-3.5">
-            <div className="flex items-center gap-3">
-              <span className="w-10 h-10 rounded-xl bg-surface-hover flex items-center justify-center shrink-0">
-                <Monitor className="w-5 h-5 text-content-secondary" />
-              </span>
-              <div className="min-w-0">
-                <p className="text-sm text-content-primary truncate">
-                  {hw.cpu} · {hw.ram} · {hw.gpu}
-                </p>
-                <p className="text-xs text-content-tertiary mt-0.5 truncate">
-                  {hw.os} · {hw.acceleration}
-                </p>
-              </div>
-            </div>
-          </section>
-
           {tab === 'overview' && (
             <div className="space-y-10">
               {/* Engine */}

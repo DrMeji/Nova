@@ -30,7 +30,7 @@ import {
 } from 'lucide-react';
 import { formatArkId } from '@/lib/arkUserId';
 
-const SECTIONS: { id: string; label: string; icon: typeof User; disabled?: boolean }[] = [
+const SECTIONS: { id: string; label: string; icon: typeof User; disabled?: boolean; comingSoon?: boolean }[] = [
   { id: 'account', label: 'Account', icon: User },
   { id: 'appearance', label: 'Appearance', icon: Palette },
   { id: 'ai', label: 'AI', icon: Zap },
@@ -42,7 +42,7 @@ const SECTIONS: { id: string; label: string; icon: typeof User; disabled?: boole
   { id: 'projects', label: 'Projects', icon: FolderKanban },
   { id: 'security', label: 'Security', icon: Lock },
   { id: 'updates', label: 'Updates', icon: RefreshCw },
-  { id: 'testers', label: 'Testers', icon: FlaskConical },
+  { id: 'testers', label: 'Testers', icon: FlaskConical, comingSoon: true },
   { id: 'beta', label: 'Beta', icon: Sparkles, disabled: true },
 ];
 
@@ -269,21 +269,23 @@ export function SettingsContent({ onClose }: { onClose?: () => void } = {}) {
             <button
               key={section.id}
               type="button"
-              disabled={Boolean(section.disabled)}
+              disabled={Boolean(section.disabled || section.comingSoon)}
               onClick={() => {
-                if (section.disabled) return;
+                if (section.disabled || section.comingSoon) return;
                 setActiveSection(section.id);
               }}
               className={`ark-nav-item ${activeSection === section.id ? 'active' : ''} ${
-                section.disabled ? 'opacity-35 cursor-not-allowed pointer-events-none' : ''
+                section.disabled || section.comingSoon ? 'opacity-45 cursor-not-allowed pointer-events-none' : ''
               }`}
-              title={section.disabled ? 'Locked' : undefined}
+              title={section.comingSoon ? `${section.label} · coming soon` : section.disabled ? 'Locked' : undefined}
             >
               <section.icon className="w-4 h-4 shrink-0" />
-              <span>{section.label}</span>
-              {section.disabled && (
+              <span className="flex-1 text-left">{section.label}</span>
+              {section.comingSoon ? (
+                <span className="text-[9px] uppercase tracking-wide text-content-tertiary">Coming soon</span>
+              ) : section.disabled ? (
                 <Lock className="w-3 h-3 ml-auto shrink-0 opacity-70" />
-              )}
+              ) : null}
             </button>
           ))}
         </nav>

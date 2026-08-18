@@ -163,12 +163,22 @@ export async function hydrateProviderApiKeys(): Promise<{
     if (Object.keys(legacy).length > 0) {
       await persistProviderKeys(merged);
     }
+    try {
+      window.dispatchEvent(new Event('ark:provider-keys-changed'));
+    } catch {
+      /* ignore */
+    }
     return { encrypted: keysEncrypted, count: Object.keys(merged).length };
   }
 
   providerKeyCache = readLegacyLocalKeys();
   keysEncrypted = false;
   keysHydrated = true;
+  try {
+    window.dispatchEvent(new Event('ark:provider-keys-changed'));
+  } catch {
+    /* ignore */
+  }
   return { encrypted: false, count: Object.keys(providerKeyCache).length };
 }
 
@@ -193,6 +203,11 @@ export function setProviderApiKey(providerId: string, apiKey: string) {
   }
   providerKeyCache = map;
   void persistProviderKeys(map);
+  try {
+    window.dispatchEvent(new Event('ark:provider-keys-changed'));
+  } catch {
+    /* ignore */
+  }
   return map;
 }
 
@@ -203,6 +218,11 @@ export function setProviderApiKeys(map: ProviderKeyMap) {
   }
   providerKeyCache = clean;
   void persistProviderKeys(clean);
+  try {
+    window.dispatchEvent(new Event('ark:provider-keys-changed'));
+  } catch {
+    /* ignore */
+  }
   return clean;
 }
 
@@ -228,6 +248,18 @@ export function clearPluginToken(pluginId: string) {
 
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
+  {
+    version: '0.1.69',
+    channel: 'stable' as const,
+    date: 'Aug 18, 2026',
+    title: 'Device-target apps + tighter Cloud AI',
+    notes: [
+      'Code chat asks which device after it notices iOS or Android: iPhone / iPad / Mac, or phone / tablet / laptop',
+      'Start opens a device-sized preview in ARK; Xcode and Android Studio still ship the real app',
+      'Saved provider keys stay checked on Models, Cloud plus/check persists, and Image / Video / Networking / Message / Call / Testers are Coming soon',
+      'PC specs stay on Local AI → Hardware only; Models has a Refresh hunt instead of the hardware banner',
+    ],
+  },
   {
     version: '0.1.68',
     channel: 'stable' as const,

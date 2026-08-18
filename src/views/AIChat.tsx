@@ -5,6 +5,7 @@ import { useRouter, type ChatMode } from '@/context/RouterContext';
 import { useRecentProjects } from '@/context/RecentProjectsContext';
 import { saveChatMessage } from '@/lib/api';
 import { getLocalPrefs, hasProviderApiKey, setLocalPrefs } from '@/lib/localPrefs';
+import { isCloudProviderEnabled } from '@/lib/cloudSources';
 import { honestNoLiveChatReply, probeLiveCapacity, type LiveCapacity } from '@/lib/arkCapacity';
 import {
   BACKUP_DOWNLOAD_EVENT,
@@ -273,12 +274,6 @@ const CODE_IDEAS = [
   { id: 'convert', label: 'Convert language', tone: 'from-sky-800/70 to-indigo-950' },
   { id: 'debug', label: 'Debug crash', tone: 'from-red-800/70 to-orange-950' },
 ];
-
-const MODE_META: Record<Exclude<ChatMode, 'general'>, { icon: typeof ImageIcon; title: string }> = {
-  image: { icon: ImageIcon, title: 'Image' },
-  video: { icon: Video, title: 'Video' },
-  code: { icon: Code2, title: 'Code' },
-};
 
 function isMediaOnlyContent(content: string) {
   if (!content) return false;
@@ -1593,15 +1588,6 @@ export function AIChat() {
     requestAnimationFrame(resizeComposer);
   }, [input]);
 
-  const setModeAndFocus = (next: ChatMode) => {
-    setMode(next);
-    setMessages([]);
-    navigate({ name: 'chat', mode: next === 'general' ? undefined : next });
-    requestAnimationFrame(() => textareaRef.current?.focus());
-  };
-
-  const clearMode = () => setModeAndFocus('general');
-
   const applyIdea = (label: string) => {
     setInput(label);
     textareaRef.current?.focus();
@@ -1611,11 +1597,11 @@ export function AIChat() {
   // Explore / idea grid only for brand-new chats — never when a Recent thread is open.
   const showEmpty = !loading && messages.length === 0 && !viewingChatId;
   const showOpenThread = !loading && Boolean(viewingChatId);
-  const activeMode = mode !== 'general' ? MODE_META[mode] : null;
-  const ModeIcon = activeMode?.icon;
   const ModelSourceIcon = activeModel.source === 'cloud' ? Cloud : Cpu;
   const kind = kindForMode(mode);
-  const keyedCloud = CLOUD_CHAT_WHEN_KEYED.filter(m => hasProviderApiKey(m.keyId));
+  const keyedCloud = CLOUD_CHAT_WHEN_KEYED.filter(
+    m => hasProviderApiKey(m.keyId) && isCloudProviderEnabled(m.keyId),
+  );
   const modelsForTab: ChatModelOption[] = kind === 'chat'
     ? [
         ...CHAT_MODELS.filter(m => m.kind === 'chat'),
@@ -2066,18 +2052,6 @@ export function AIChat() {
                     : 'Cloud · connected key'
           }
         />
-
-        {ModeIcon && (
-          <button
-            type="button"
-            onClick={clearMode}
-            title={`${activeMode.title} mode · click to clear`}
-            aria-label={`${activeMode.title} mode`}
-            className="w-8 h-8 rounded-full border border-sky-400/40 bg-sky-500/15 text-sky-300 flex items-center justify-center shrink-0 hover:bg-sky-500/25 transition-colors"
-          >
-            <ModeIcon className="w-3.5 h-3.5" />
-          </button>
-        )}
 
         {(mode === 'general' || mode === 'code') && looksLikeCodeAsk(input) && !codeSwitchDismissed && (
           <button

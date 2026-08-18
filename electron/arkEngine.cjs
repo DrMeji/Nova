@@ -339,12 +339,18 @@ function start() {
   phase = 'starting';
   setTimeout(() => {
     phase = 'online';
+    const ready = listModels().find((m) => m.gguf && m.status === 'ready' && m.id !== 'ark-core');
+    if (ready) {
+      const ggufId = String(ready.id).startsWith('gguf:') ? String(ready.id).slice(5) : ready.id;
+      void arkGguf.warmServer(ggufId);
+    }
   }, 400);
   return getStatus();
 }
 
 function stop() {
   phase = 'offline';
+  arkGguf.stopServer();
   return getStatus();
 }
 
@@ -353,6 +359,8 @@ function setActiveModel(id) {
   const found = models.find((m) => m.id === id && m.status === 'ready');
   if (!found) throw new Error('Model not installed in ARK Engine');
   activeModelId = id;
+  const ggufId = String(id).startsWith('gguf:') ? String(id).slice(5) : id;
+  void arkGguf.warmServer(ggufId);
   return getStatus();
 }
 

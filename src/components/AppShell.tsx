@@ -31,17 +31,17 @@ const NAV_ITEMS: {
   comingSoon?: boolean;
 }[] = [
   { label: 'New Chat', icon: SquarePen, route: { name: 'chat' }, activity: 'chat' },
-  { label: 'Image', icon: ImageIcon, route: { name: 'chat', mode: 'image' }, activity: 'image' },
-  { label: 'Video', icon: Video, route: { name: 'chat', mode: 'video' }, activity: 'video' },
+  { label: 'Image', icon: ImageIcon, route: { name: 'chat', mode: 'image' }, activity: 'image', comingSoon: true },
+  { label: 'Video', icon: Video, route: { name: 'chat', mode: 'video' }, activity: 'video', comingSoon: true },
   { label: 'Code', icon: Code2, route: { name: 'code' }, activity: 'code' },
   { label: 'Projects', icon: Briefcase, route: { name: 'projects' } },
   { label: 'History', icon: History, route: { name: 'dashboard' } },
   { label: 'Plugins', icon: Blocks, route: { name: 'build' }, activity: 'plugins' },
   { label: 'Models', icon: Database, route: { name: 'models' }, activity: 'models' },
   { label: 'Local AI', icon: Bot, route: { name: 'local-ai' }, activity: 'local-ai' },
-  { label: 'Networking', icon: Globe, route: { name: 'networking' }, activity: 'networking' },
-  { label: 'Message', icon: MessageSquare, route: { name: 'message' }, activity: 'message' },
-  { label: 'Call', icon: Phone, route: { name: 'call' }, activity: 'call' },
+  { label: 'Networking', icon: Globe, route: { name: 'networking' }, activity: 'networking', comingSoon: true },
+  { label: 'Message', icon: MessageSquare, route: { name: 'message' }, activity: 'message', comingSoon: true },
+  { label: 'Call', icon: Phone, route: { name: 'call' }, activity: 'call', comingSoon: true },
 ];
 
 function resolveDisplayName(

@@ -1,6 +1,7 @@
 /** Cloud chat completions using keys stored in local prefs. */
 
 import { getProviderApiKeys } from '@/lib/localPrefs';
+import { isCloudProviderEnabled } from '@/lib/cloudSources';
 import { apiErrorMessage, desktopRequest, desktopStreamRequest } from '@/lib/httpDesktop';
 import {
   latestUserMessage,
@@ -532,6 +533,7 @@ async function runAttempt(
   keys: Record<string, string>,
   onChunk?: (text: string) => void,
 ): Promise<CloudChatHit | null> {
+  if (!isCloudProviderEnabled(attempt.id)) return null;
   const key = keys[attempt.id];
   if (!key) return null;
   try {
@@ -629,22 +631,12 @@ export async function cloudChatPreferredThenCascade(opts: {
 }
 
 export function hasAnyCloudChatKey() {
+  const ids = [
+    'groq', 'google', 'openrouter', 'huggingface', 'nvidia', 'together',
+    'fireworks', 'deepseek', 'mistral', 'cerebras', 'sambanova', 'openai', 'anthropic',
+  ];
   const keys = getProviderApiKeys();
-  return Boolean(
-    keys.groq
-    || keys.google
-    || keys.openrouter
-    || keys.huggingface
-    || keys.nvidia
-    || keys.together
-    || keys.fireworks
-    || keys.deepseek
-    || keys.mistral
-    || keys.cerebras
-    || keys.sambanova
-    || keys.openai
-    || keys.anthropic,
-  );
+  return ids.some(id => Boolean(keys[id]) && isCloudProviderEnabled(id));
 }
 
 /** Exported for callers that only have a single string today. */

@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ComponentType } from 'react';
 import {
   Search, Clock3, Settings, Briefcase, Database, Bot, Blocks, SquarePen, ArrowLeft,
-  ImageIcon, Video,
 } from 'lucide-react';
 import { useRouter, type Route } from '@/context/RouterContext';
 
@@ -17,8 +16,6 @@ type SearchItem = {
 
 const CATALOG: SearchItem[] = [
   { id: 'new-chat', label: 'New Chat', group: 'Navigate', description: 'General chat tab', icon: SquarePen, route: { name: 'chat' } },
-  { id: 'image', label: 'Image', group: 'Navigate', description: 'Image generation tab', icon: ImageIcon, route: { name: 'chat', mode: 'image' } },
-  { id: 'video', label: 'Video', group: 'Navigate', description: 'Video generation tab', icon: Video, route: { name: 'chat', mode: 'video' } },
   { id: 'projects', label: 'Projects', group: 'Navigate', description: 'Browse your projects', icon: Briefcase, route: { name: 'projects' } },
   { id: 'history', label: 'History', group: 'Navigate', description: 'Recent work and prompts', icon: Clock3, route: { name: 'dashboard' } },
   { id: 'plugins', label: 'Plugins', group: 'Navigate', description: 'Integrations and tools', icon: Blocks, route: { name: 'build' } },

@@ -66,7 +66,21 @@ import {
 } from '@/lib/projectCodeEdit';
 import { classifyMobileTarget, inferMobileTargetFromFiles, isNativeMobileTree, needsMobileTargetChoice } from '@/lib/mobileTarget';
 import { finalizeMobileEdits, formatNativeBuildReply, formatNativePushReply, mobileTemplateEdits, preferredMobileFocus } from '@/lib/mobileTemplates';
-import { defaultDeviceForTarget, devicesForChips, deviceLine, isLayoutLockAsk, layoutLockPrompt } from '@/lib/mobileDevices';
+import {
+  defaultDeviceForTarget,
+  devicesForChips,
+  deviceLine,
+  familyBuildPrompt,
+  isLayoutLockAsk,
+  layoutLockPrompt,
+  needsDeviceFamilyChoice,
+  resolveDevices,
+  type DeviceFamilyKind,
+  type MobilePlatform,
+  type PhoneDevice,
+} from '@/lib/mobileDevices';
+import { DeviceFamilyChips } from '@/components/DeviceFamilyChips';
+import { DevicePreview } from '@/components/DevicePreview';
 import { ComposerPlusMenu, type ComposerPlusAction } from '@/components/ComposerPlusMenu';
 import { CodeEditor } from '@/components/CodeEditor';
 import { fileTintClass, languageFromPath } from '@/lib/syntaxHighlight';
@@ -397,6 +411,9 @@ export function ProjectWorkspace() {
   const [shipOfferId, setShipOfferId] = useState<string | null>(null);
   const [mobileOfferId, setMobileOfferId] = useState<string | null>(null);
   const [mobileOfferPrompt, setMobileOfferPrompt] = useState('');
+  const [mobileOfferStep, setMobileOfferStep] = useState<'platform' | 'family'>('platform');
+  const [familyPlatform, setFamilyPlatform] = useState<MobilePlatform | null>(null);
+  const [previewDevice, setPreviewDevice] = useState<PhoneDevice | null>(null);
   const [deviceOfferId, setDeviceOfferId] = useState<string | null>(null);
   const [reviseUserMsgId, setReviseUserMsgId] = useState<string | null>(null);
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
@@ -540,6 +557,9 @@ export function ProjectWorkspace() {
     const edits = mobileTemplateEdits(target, prompt, label);
     const files = Object.fromEntries(edits.map(e => [e.path, e.content]));
     applyProjectFiles(files);
+    setPreviewDevice(device);
+    setRightTab('preview');
+    setCodeOpen(true);
     const assistantId = crypto.randomUUID();
     const userMsg: ChatMessage = {
       id: crypto.randomUUID(),
@@ -1176,7 +1196,7 @@ export function ProjectWorkspace() {
         user_id: uid,
         project_id: pid,
         role: 'assistant',
-        content: 'Which devices is this for? I’ll write a real iPhone (Xcode) or Android (Android Studio) project — not a website. You push to GitHub, then open it on a Mac or in Android Studio to ship.',
+        content: 'Which platform is this for? I’ll write a real Apple (Xcode) or Android (Android Studio) project — not a website.',
         provider_used: 'ARK',
         created_at: new Date().toISOString(),
       };
@@ -1187,6 +1207,46 @@ export function ProjectWorkspace() {
       });
       setMobileOfferId(assistantId);
       setMobileOfferPrompt(rawContent);
+      setMobileOfferStep('platform');
+      setFamilyPlatform(null);
+      return;
+    }
+
+    const knownTarget = classifyMobileTarget(rawContent);
+    if (canEdit && knownTarget && needsDeviceFamilyChoice(rawContent, knownTarget)) {
+      const userMsg: ChatMessage = {
+        id: crypto.randomUUID(),
+        user_id: uid,
+        project_id: pid,
+        role: 'user',
+        content: rawContent,
+        provider_used: null,
+        created_at: new Date().toISOString(),
+      };
+      const assistantId = crypto.randomUUID();
+      const familyAsk = knownTarget === 'android'
+        ? 'Which Android device is this for — phone, tablet, or laptop?'
+        : knownTarget === 'ios'
+          ? 'Which Apple device is this for — iPhone, iPad, or Mac?'
+          : 'Should the layout be for a phone, a tablet, or a computer?';
+      const assistantMsg: ChatMessage = {
+        id: assistantId,
+        user_id: uid,
+        project_id: pid,
+        role: 'assistant',
+        content: familyAsk,
+        provider_used: 'ARK',
+        created_at: new Date().toISOString(),
+      };
+      setMessages(prev => {
+        const next = [...prev, userMsg, assistantMsg];
+        persistLocalThread(next);
+        return next;
+      });
+      setMobileOfferId(assistantId);
+      setMobileOfferPrompt(rawContent);
+      setMobileOfferStep('family');
+      setFamilyPlatform(knownTarget);
       return;
     }
 
@@ -1327,7 +1387,13 @@ export function ProjectWorkspace() {
         window.setTimeout(() => setFileFlash(false), 1400);
       }
       if (opts?.openPreview && !native) setRightTab('preview');
-      if (native) setRightTab('code');
+      if (native) {
+        const mapped = classifyMobileTarget(content) || inferMobileTargetFromFiles(applied.files) || 'ios';
+        const picked = resolveDevices(mapped, content);
+        setPreviewDevice(picked.ios || picked.android || null);
+        setRightTab('preview');
+        setCodeOpen(true);
+      }
       if (window.arkDesktop?.projectWrite) {
         void window.arkDesktop.projectWrite({
           projectId: pid,
@@ -2161,26 +2227,6 @@ export function ProjectWorkspace() {
         </div>
 
         <div className="flex items-center gap-1.5 shrink-0">
-          <button
-            type="button"
-            onClick={() => void openProjectFolder()}
-            title="Open folder"
-            className="h-8 px-2 rounded-lg flex items-center gap-1 text-[11px] text-content-secondary hover:text-content-primary hover:bg-surface-hover"
-          >
-            <FolderOpen className="w-3.5 h-3.5" />
-            Open folder
-          </button>
-          <button
-            type="button"
-            onClick={() => setFindOpen(v => !v)}
-            title="Find in files"
-            className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
-              findOpen ? 'bg-surface-hover text-content-primary' : 'text-content-tertiary hover:text-content-primary hover:bg-surface-hover'
-            }`}
-            aria-label="Find in files"
-          >
-            <Search className="w-4 h-4" />
-          </button>
           {gitInfo?.git ? (
             <div className="flex items-center gap-1 pl-1 ml-0.5 border-l border-surface-border/70">
               <span className="flex items-center gap-1 text-[11px] text-content-tertiary px-1" title={gitInfo.remote || 'Local git'}>
@@ -2266,6 +2312,8 @@ export function ProjectWorkspace() {
                 )}
               </div>
               <div className="shrink-0 px-2 py-1.5 flex items-center justify-end gap-0.5">
+                  {explorerTree.length > 0 && (
+                    <>
                   <button
                     type="button"
                     onClick={() => setFindOpen(v => !v)}
@@ -2294,6 +2342,8 @@ export function ProjectWorkspace() {
                   >
                     <FolderPlus className="w-3.5 h-3.5" />
                   </button>
+                    </>
+                  )}
                   <button
                     type="button"
                     onClick={() => setExplorerOpen(false)}
@@ -2367,13 +2417,7 @@ export function ProjectWorkspace() {
                       You have Read on this project. You can inspect and discuss in chat — you cannot add files.
                     </p>
                   ) : (
-                  <StudioEmptyState
-                    onOpenFolder={() => void openProjectFolder()}
-                    onOpenGithub={() => setGithubPickerOpen(true)}
-                    onStartBlank={startBlankProject}
-                    onStartIphone={() => startNativeProject('ios')}
-                    onStartAndroid={() => startNativeProject('android')}
-                  />
+                  <StudioEmptyState />
                   )
                 ) : (
                   renderFileTree(explorerTree)
@@ -2568,24 +2612,24 @@ export function ProjectWorkspace() {
                         </button>
                       </div>
                     )}
-                    {mobileOfferId === msg.id && canEdit && (
+                    {mobileOfferId === msg.id && canEdit && mobileOfferStep === 'platform' && (
                       <div className="flex flex-wrap gap-1 mt-2">
                         <button
                           type="button"
                           className="text-[10px] rounded-full bg-sky-600 text-white px-2.5 py-1"
                           onClick={() => {
-                            setMobileOfferId(null);
-                            void handleSendChat(`${mobileOfferPrompt}\n\nBuild this as a native iPhone app for ${deviceLine(defaultDeviceForTarget('ios'))} for the Apple App Store (SwiftUI + Xcode).`);
+                            setMobileOfferStep('family');
+                            setFamilyPlatform('ios');
                           }}
                         >
-                          iPhone
+                          Apple
                         </button>
                         <button
                           type="button"
                           className="text-[10px] rounded-full border border-surface-border px-2.5 py-1 text-content-secondary"
                           onClick={() => {
-                            setMobileOfferId(null);
-                            void handleSendChat(`${mobileOfferPrompt}\n\nBuild this as a native Android app for ${deviceLine(defaultDeviceForTarget('android'))} for Google Play (Kotlin + Android Studio).`);
+                            setMobileOfferStep('family');
+                            setFamilyPlatform('android');
                           }}
                         >
                           Android
@@ -2594,13 +2638,22 @@ export function ProjectWorkspace() {
                           type="button"
                           className="text-[10px] rounded-full border border-surface-border px-2.5 py-1 text-content-secondary"
                           onClick={() => {
-                            setMobileOfferId(null);
-                            void handleSendChat(`${mobileOfferPrompt}\n\nBuild this for both iPhone (${deviceLine(defaultDeviceForTarget('ios'))}) and Android (${deviceLine(defaultDeviceForTarget('android'))}) as native projects.`);
+                            setMobileOfferStep('family');
+                            setFamilyPlatform('both');
                           }}
                         >
                           Both
                         </button>
                       </div>
+                    )}
+                    {mobileOfferId === msg.id && canEdit && mobileOfferStep === 'family' && familyPlatform && (
+                      <DeviceFamilyChips
+                        platform={familyPlatform}
+                        onPick={(family: DeviceFamilyKind) => {
+                          setMobileOfferId(null);
+                          void handleSendChat(`${mobileOfferPrompt}\n\n${familyBuildPrompt(familyPlatform, family)}`);
+                        }}
+                      />
                     )}
                     {deviceOfferId === msg.id && canEdit && (
                       <div className="flex flex-wrap gap-1 mt-2">
@@ -2615,6 +2668,7 @@ export function ProjectWorkspace() {
                             className="text-[10px] rounded-full border border-surface-border px-2.5 py-1 text-content-secondary"
                             onClick={() => {
                               setDeviceOfferId(null);
+                              setPreviewDevice(device);
                               void handleSendChat(layoutLockPrompt(device));
                             }}
                           >
@@ -2973,7 +3027,7 @@ export function ProjectWorkspace() {
                         {languageFromPath(selectedFile)}
                       </span>
                     )}
-                    {fileFlash && <span className="w-1.5 h-1.5 rounded-full bg-sky-400 animate-pulse" />}
+                    {fileFlash && <span className="w-1.5 h-1.5 rounded-full bg-sky-400" />}
                   </button>
                   <button
                     type="button"
@@ -3087,17 +3141,22 @@ export function ProjectWorkspace() {
               ) : (
                 <div className="flex-1 min-h-0 bg-ark-navy-950 relative">
                   {isNativeMobileTree(fileContents) ? (
+                    previewDevice && livePageHtml ? (
+                      <DevicePreview device={previewDevice} html={livePageHtml} />
+                    ) : previewDevice ? (
+                      <DevicePreview
+                        device={previewDevice}
+                        html={`<!doctype html><html><body style="margin:0;background:#070b14;color:#e8eef8;font-family:sans-serif;padding:24px"><p>${previewDevice.label}</p><p>Ask ARK to rebuild if this preview is empty.</p></body></html>`}
+                      />
+                    ) : (
                     <div className="h-full flex flex-col items-center justify-center text-center px-8 gap-2">
                       <Smartphone className="w-5 h-5 text-sky-400" />
-                      <p className="text-sm text-content-secondary">Native phone project</p>
+                      <p className="text-sm text-content-secondary">Native project</p>
                       <p className="text-xs text-content-tertiary max-w-sm leading-relaxed">
-                        This isn’t a website preview. Push to GitHub, then open
-                        {fileContents['README.md']?.includes('ios/') ? ' `ios/*.xcodeproj` on a Mac' : ''}
-                        {fileContents['README.md']?.includes('ios/') && fileContents['README.md']?.includes('android') ? ' and/or' : ''}
-                        {Object.keys(fileContents).some(p => p.startsWith('android/')) ? ' the `android` folder in Android Studio' : ''}
-                        {' '}to run and ship.
+                        Pick a device in chat to see a sized preview here. Ship from Xcode or Android Studio after you push to GitHub.
                       </p>
                     </div>
+                    )
                   ) : livePageHtml ? (
                     <iframe
                       title="Project preview"
@@ -3130,7 +3189,7 @@ export function ProjectWorkspace() {
         )}
       </div>
 
-      <TeammateBar
+      {false && <TeammateBar
         people={teamPeople}
         assignments={teamState.assignments}
         myAccess={myAccess}
@@ -3202,7 +3261,7 @@ export function ProjectWorkspace() {
           setTeamState(next);
           saveTeamState(projectId, next);
         }}
-      />
+      />}
 
       <GitHubRepoPicker
         open={githubPickerOpen}

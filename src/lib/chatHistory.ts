@@ -28,21 +28,31 @@ const CONTINUITY =
   + 'Do not start with leftover fragments like “c. Is there anything…”.';
 
 const CHAT_CODE_OUTPUT =
-  'The user wants working source code they can copy and paste in chat (not the Code workspace). '
-  + 'Reply with: (1) one short intro sentence, (2) a complete markdown code fence with the FULL file — no placeholders, no "..." omissions. '
-  + 'Pick the right fence tag (html, javascript, tsx, etc.). Do not repeat system instructions.';
+  'Give one short intro sentence, then one complete markdown code fence. No placeholders.';
 
 const SYSTEM_ECHO_RE =
   /^You are ARK(?:,|\s)[\s\S]*?(?:Do not echo the prompt\.|Never continue a previous sentence[^.\n]*\.|Answer only the latest user message[^.\n]*\.)/i;
 const PROMPT_FRAGMENT_RE =
   /^(?:You are ARK\b|Answer the latest user request clearly\.?|Do not echo the prompt\.?|Do not correct the spelling of ARK\.?|Answer only the latest user message with a brand-new reply\.?|Never continue a previous sentence, list item, or closing question\.?)$/i;
+const INSTRUCTION_LEAD_RES = [
+  /^Never continue a previous sentence[^\n]*\.?\s*/i,
+  /^The user wants working source code[^\n]*\.?\s*/i,
+  /^Reply with:\s*\(1\)[^\n]*\s*/i,
+  /^Give one short intro sentence[^\n]*\.?\s*/i,
+  /^Answer only the latest user message[^\n]*\.?\s*/i,
+  /^Do not (?:echo the prompt|correct the spelling of ARK|repeat system instructions)[^\n]*\.?\s*/i,
+  /^Pick the right fence tag[^\n]*\.?\s*/i,
+  /^You are ARK, the assistant[^\n]*(?:\n(?!```)[^\n]{0,240})*\n+/i,
+];
 
 
 const CODING_WORKSPACE_ECHO_RE =
   /^You are ARK inside a developer project workspace[\s\S]*?(?:WITHOUT @@@FILE blocks\.|answer normally WITHOUT @@@FILE blocks\.)/i;
 
 const BUILD_HINT =
-  /\b(build|create|make|code|app|apps|calculator|website|project|implement|develop|program|software|ui|api|write)\b/i;
+  /\b(build|create|make|implement|develop)\b.{0,48}\b(app|apps|website|site|calculator|program|game|page|ui)\b|\b(write|give|paste|show)\b.{0,32}\b(code|html|css|javascript|python|script|source)\b|\bfull (file|source)\b|\bcopy and paste\b/i;
+const TEACH_HINT =
+  /\b(teach|learn|tutorial|explain how|how (do i|to|can i) (learn|code|program|start))\b/i;
 
 const FACT_HINT =
   /\b(weather|temperature|forecast|rain|humid|capital of|who is|what is|when did|population|india|history of)\b/i;
@@ -197,51 +207,38 @@ export function routerSystemPrompt(history: RouterChatTurn[]): string {
   return hasPrior ? `${BASE_SYSTEM}\n\n${CONTINUITY}` : BASE_SYSTEM;
 }
 
-const GGUF_IDENTITY =
-  'You are ARK, the assistant in the ARK desktop creation studio (chat, Code, image, video, local AI). '
-  + 'You are not the video game Ark: Survival Evolved. Do not mention that game unless the user asks about it. '
-  + 'Do not correct the spelling of ARK. Answer only the latest user message with a brand-new reply. '
-  + 'Never continue a previous sentence, list item, or closing question.';
+function wantsChatCode(latest: string) {
+  return BUILD_HINT.test(latest) && !TEACH_HINT.test(latest);
+}
 
 /** Pack history into one prompt for engines that only take a single string (GGUF / Core / Ollama generate). */
 export function packHistoryPrompt(history: RouterChatTurn[], latestFallback?: string): string {
   const latest = latestUserMessage(history, latestFallback || '').trim();
   if (!latest) return latestFallback || '';
 
-  const instruct = (body: string) => `${GGUF_IDENTITY}\n\n${body}\nARK:`;
-
+  // Keep identity in the ChatML system turn (arkGguf wrapChatPrompt). Stuffing it into
+  // the user text makes Qwen parrot “Never continue a previous sentence…” in the bubble.
   if (history.length <= 1 || !history.some(t => t.role === 'assistant') || isTopicShift(history, latest)) {
-    if (BUILD_HINT.test(latest)) {
-      return instruct(`${CHAT_CODE_OUTPUT}\n\nRequest:\n${latest}`);
-    }
-    return instruct(`User: ${latest}`);
+    return wantsChatCode(latest) ? `${CHAT_CODE_OUTPUT}\n\n${latest}` : latest;
   }
 
-  // Follow-up: give user-ask context only — never dump prior ARK answers (local models continue those).
   const priorUsers = history
     .filter(t => t.role === 'user' && t.content.trim() && t.content.trim() !== latest)
     .slice(-3)
     .map(t => `- ${t.content.replace(/\s+/g, ' ').slice(0, 160)}`);
 
-  if (BUILD_HINT.test(latest)) {
-    const lastArk = [...history].reverse().find(t => t.role === 'assistant')?.content || '';
-    const gist = lastArk.replace(/\s+/g, ' ').slice(0, 280);
-    return instruct(
-      [
-        CHAT_CODE_OUTPUT,
-        priorUsers.length ? `Earlier user asks:\n${priorUsers.join('\n')}` : '',
-        gist ? `ARK already wrote (do not repeat or finish this): ${gist}` : '',
-        `Latest build request:\n${latest}`,
-      ].filter(Boolean).join('\n\n'),
-    );
+  if (wantsChatCode(latest)) {
+    return [
+      CHAT_CODE_OUTPUT,
+      priorUsers.length ? `Earlier user asks:\n${priorUsers.join('\n')}` : '',
+      `Latest:\n${latest}`,
+    ].filter(Boolean).join('\n\n');
   }
 
-  return instruct(
-    [
-      priorUsers.length ? `Earlier user asks (already answered — do not repeat):\n${priorUsers.join('\n')}` : '',
-      `Latest user message:\n${latest}`,
-    ].filter(Boolean).join('\n\n'),
-  );
+  return [
+    priorUsers.length ? `Earlier user asks (already answered):\n${priorUsers.join('\n')}` : '',
+    `Latest:\n${latest}`,
+  ].filter(Boolean).join('\n\n');
 }
 
 export function latestUserMessage(history: RouterChatTurn[], fallback: string): string {
@@ -266,6 +263,11 @@ export function sanitizeAssistantReply(
   // Drop full system-prompt echoes from GGUF / packed prompts.
   text = text.replace(SYSTEM_ECHO_RE, '').trim();
   text = text.replace(CODING_WORKSPACE_ECHO_RE, '').trim();
+  let peeled = '';
+  while (text !== peeled) {
+    peeled = text;
+    for (const re of INSTRUCTION_LEAD_RES) text = text.replace(re, '').trim();
+  }
   if (/^You are ARK[\s\S]{20,400}$/i.test(text.trim())) return '';
 
   text = text.replace(/^\(?\s*truncated\s*\)?\s*/i, '').trim();
@@ -400,6 +402,9 @@ export function looksLikePromptEcho(reply: string): boolean {
   }
   if (/^You are ARK, the assistant in the ARK desktop creation studio/i.test(t)) {
     return /Never continue a previous sentence/i.test(t) || /Answer only the latest user message/i.test(t);
+  }
+  if (/^Never continue a previous sentence/i.test(t) && /The user wants working source code/i.test(t)) {
+    return !/```/.test(t);
   }
   // Weaker fallback: if it starts like the system prompt, and contains typical system phrases.
   if (/^You are ARK(?:,|\s)/i.test(t) && /Do not echo the prompt\./i.test(t)) return true;

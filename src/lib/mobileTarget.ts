@@ -5,7 +5,7 @@
 export type MobileTarget = 'ios' | 'android' | 'both';
 
 const IOS_RE =
-  /\b(iphones?|ipads?|ipods?|ios|xcode|swiftui|app store|testflight|apple (app|device|phone|tablet)s?)\b/i;
+  /\b(iphones?|ipads?|ipods?|ios|macos|macbook|imac|macs?|xcode|swiftui|app store|testflight|apple (app|device|phone|tablet)s?)\b/i;
 const ANDROID_RE =
   /\b(android|samsung|galaxy|pixel|play store|google play|kotlin|jetpack compose)\b/i;
 const MOBILE_ASK_RE =

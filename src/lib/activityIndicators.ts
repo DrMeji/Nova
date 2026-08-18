@@ -1,4 +1,4 @@
-/** Sidebar / nav “something finished while you were away” pulses. */
+/** Sidebar / nav “something finished while you were away” highlight (no pulse). */
 
 export type ActivityKey =
   | 'chat'

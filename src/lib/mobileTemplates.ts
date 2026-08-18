@@ -413,6 +413,7 @@ enum Devices {
     static let iPadMini = CGSize(width: 744, height: 1133)
     static let iPadPro11 = CGSize(width: 834, height: 1194)
     static let iPadPro13 = CGSize(width: 1024, height: 1366)
+    static let mac14 = CGSize(width: 1440, height: 900)
 }
 `,
     },
@@ -654,6 +655,42 @@ function ideaFromMessage(message: string, name: string) {
   return `${name} phone app`;
 }
 
+function htmlEscape(s: string) {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function previewHtml(name: string, idea: string, device: PhoneDevice): string {
+  return `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>${htmlEscape(name)}</title>
+<style>
+  html,body{margin:0;height:100%;background:#070b14;color:#e8eef8;font-family:ui-sans-serif,system-ui,sans-serif}
+  .wrap{min-height:100%;padding:28px 22px;display:flex;flex-direction:column;box-sizing:border-box}
+  .kicker{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:#7dd3fc;opacity:.9}
+  h1{font-size:22px;margin:14px 0 8px;font-weight:650}
+  p{color:#94a3b8;line-height:1.45;font-size:14px;margin:0}
+  .cta{margin-top:auto;background:#38bdf8;color:#0b1220;border:0;border-radius:999px;padding:12px 18px;font-weight:650;font-size:14px}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="kicker">${htmlEscape(device.label)}</div>
+    <h1>${htmlEscape(name)}</h1>
+    <p>${htmlEscape(idea)}</p>
+    <button class="cta" type="button">Continue</button>
+  </div>
+</body>
+</html>
+`;
+}
+
 export function planMobileFiles(target: MobileTarget, message: string, projectName?: string): string[] {
   return mobileTemplateEdits(target, message, projectName).map(e => e.path);
 }
@@ -670,6 +707,7 @@ export function mobileTemplateEdits(
   const edits: ParsedFileEdit[] = [
     { path: '.gitignore', content: gitignore() },
     { path: 'README.md', content: readme({ name, target, bundle, ios: devices.ios, android: devices.android }) },
+    { path: 'ark-preview.html', content: previewHtml(name, idea, devices.ios || devices.android!) },
   ];
   if (target === 'ios' || target === 'both') {
     edits.push(...iosFiles(name, bundle, idea, devices.ios!));
@@ -712,6 +750,7 @@ enum Devices {
     static let iPadMini = CGSize(width: 744, height: 1133)
     static let iPadPro11 = CGSize(width: 834, height: 1194)
     static let iPadPro13 = CGSize(width: 1024, height: 1366)
+    static let mac14 = CGSize(width: 1440, height: 900)
 }
 `,
     });
@@ -772,7 +811,7 @@ export function formatNativeBuildReply(label: string, message: string, files: Re
   return [
     `I wrote a native **${label}**${size ? ` for ${size}` : ''}.`,
     '',
-    'This is not a website — Start will not run it here.',
+    'This is not a website in a browser — Start shows a device-sized preview in ARK.',
     ios ? 'On a Mac: clone from GitHub and open `ios/*.xcodeproj` in Xcode, then Archive for the App Store.' : '',
     android ? 'Anywhere: open the `android` folder in Android Studio, then ship an AAB to Play Console.' : '',
     '',

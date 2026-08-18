@@ -53,16 +53,12 @@ function findGgufForModel(modelId) {
   return null;
 }
 
-function findLlamaBinary() {
+function findNamedBinary(names) {
   ensureDirs();
-  const names = process.platform === 'win32'
-    ? ['llama-cli.exe', 'llama.exe', 'main.exe']
-    : ['llama-cli', 'main'];
   for (const name of names) {
     const full = path.join(binDir(), name);
     if (fs.existsSync(full)) return full;
   }
-  // Shallow search one level under bin (extracted release folders)
   try {
     for (const entry of fs.readdirSync(binDir(), { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;
@@ -70,6 +66,39 @@ function findLlamaBinary() {
         const full = path.join(binDir(), entry.name, name);
         if (fs.existsSync(full)) return full;
       }
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+function cliNames() {
+  return process.platform === 'win32'
+    ? ['llama-cli.exe', 'llama.exe', 'main.exe']
+    : ['llama-cli', 'main'];
+}
+
+function serverNames() {
+  return process.platform === 'win32' ? ['llama-server.exe'] : ['llama-server'];
+}
+
+function findLlamaBinary() {
+  return findNamedBinary(cliNames());
+}
+
+function findLlamaServer() {
+  const existing = findNamedBinary(serverNames());
+  if (existing) return existing;
+  try {
+    const leftover = path.join(binDir(), `_extract_${LLAMA_TAG}`);
+    const found = findFileRecursive(leftover, serverNames())
+      || findFileRecursive(binDir(), serverNames());
+    if (found) {
+      const dest = path.join(binDir(), process.platform === 'win32' ? 'llama-server.exe' : 'llama-server');
+      if (path.resolve(found) !== path.resolve(dest)) fs.copyFileSync(found, dest);
+      try { fs.chmodSync(dest, 0o755); } catch { /* ignore */ }
+      return dest;
     }
   } catch {
     /* ignore */
@@ -149,7 +178,10 @@ function extractArchive(archivePath, destDir) {
  */
 async function ensureLlamaBinary(onProgress) {
   const existing = findLlamaBinary();
-  if (existing) return existing;
+  if (existing) {
+    findLlamaServer();
+    return existing;
+  }
 
   ensureDirs();
   const url = llamaReleaseUrl();
@@ -171,9 +203,7 @@ async function ensureLlamaBinary(onProgress) {
   if (onProgress) onProgress(88);
   await extractArchive(archivePath, extractDir);
 
-  const names = process.platform === 'win32'
-    ? ['llama-cli.exe', 'llama.exe', 'main.exe']
-    : ['llama-cli', 'main'];
+  const names = cliNames();
   const found = findFileRecursive(extractDir, names);
   if (!found) {
     throw new Error('llama-cli not found inside release archive');
@@ -186,6 +216,17 @@ async function ensureLlamaBinary(onProgress) {
     fs.chmodSync(dest, 0o755);
   } catch {
     /* ignore on Windows */
+  }
+
+  const foundServer = findFileRecursive(extractDir, serverNames());
+  if (foundServer) {
+    const destServer = path.join(binDir(), process.platform === 'win32' ? 'llama-server.exe' : 'llama-server');
+    try {
+      fs.copyFileSync(foundServer, destServer);
+      try { fs.chmodSync(destServer, 0o755); } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }
 
   // Copy sibling DLLs next to the binary (Windows)
@@ -219,6 +260,10 @@ function runGguf(modelId, prompt, timeoutMs = 90000) {
 /** Active llama-cli child — cancelled via cancelGguf(). */
 let activeChild = null;
 let cancelRequested = false;
+let activeAbort = null;
+let serverChild = null;
+let serverGguf = null;
+const SERVER_PORT = 8788;
 
 function killLlamaChild(child) {
   if (!child) return;
@@ -241,11 +286,161 @@ function killLlamaChild(child) {
 
 function cancelGguf() {
   cancelRequested = true;
+  try { activeAbort?.abort(); } catch { /* ignore */ }
+  activeAbort = null;
   if (activeChild) {
     killLlamaChild(activeChild);
     activeChild = null;
   }
   return { ok: true };
+}
+
+function stopServer() {
+  if (serverChild) {
+    killLlamaChild(serverChild);
+    serverChild = null;
+    serverGguf = null;
+  }
+}
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function pingServer() {
+  try {
+    const res = await fetch(`http://127.0.0.1:${SERVER_PORT}/health`, {
+      signal: AbortSignal.timeout(1500),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Keep llama-server loaded so follow-up chats skip the 8–12s model reload.
+ */
+async function ensureLlamaServer(modelId) {
+  const gguf = findGgufForModel(modelId);
+  const bin = findLlamaServer();
+  if (!gguf || !bin) return false;
+  if (serverChild && serverGguf === gguf && !serverChild.killed && await pingServer()) {
+    return true;
+  }
+  stopServer();
+  const child = spawn(bin, [
+    '-m', gguf,
+    '--host', '127.0.0.1',
+    '--port', String(SERVER_PORT),
+    '-c', '2048',
+    '--parallel', '1',
+  ], { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
+  serverChild = child;
+  serverGguf = gguf;
+  child.on('exit', () => {
+    if (serverChild === child) {
+      serverChild = null;
+      serverGguf = null;
+    }
+  });
+  const deadline = Date.now() + 45_000;
+  while (Date.now() < deadline) {
+    if (child.killed || child.exitCode != null) return false;
+    if (await pingServer()) return true;
+    await wait(250);
+  }
+  stopServer();
+  return false;
+}
+
+async function warmServer(modelId) {
+  try {
+    await ensureLlamaServer(modelId);
+  } catch {
+    /* warmup is best-effort */
+  }
+}
+
+async function runGgufServerStream(modelId, prompt, onChunk, timeoutMs) {
+  const promptStr = wrapChatPrompt(modelId, prompt);
+  const started = Date.now();
+  cancelRequested = false;
+  const ac = new AbortController();
+  activeAbort = ac;
+  const timer = setTimeout(() => ac.abort(), timeoutMs);
+  let out = '';
+  try {
+    const res = await fetch(`http://127.0.0.1:${SERVER_PORT}/completion`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        prompt: promptStr,
+        n_predict: 256,
+        temperature: 0.55,
+        stream: true,
+        cache_prompt: true,
+        stop: [stopToken(modelId)],
+      }),
+      signal: ac.signal,
+    });
+    if (!res.ok || !res.body) throw new Error(`llama-server ${res.status}`);
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    let emitted = '';
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split(/\n/);
+      buf = lines.pop() || '';
+      for (const line of lines) {
+        const raw = line.replace(/^data:\s*/, '').trim();
+        if (!raw || raw === '[DONE]') continue;
+        try {
+          const json = JSON.parse(raw);
+          const piece = String(json.content || json.delta || '');
+          if (piece) out += piece;
+        } catch {
+          /* ignore partial json */
+        }
+      }
+      if (typeof onChunk === 'function') {
+        const cleaned = cleanGgufReply(promptStr, out);
+        if (cleaned && cleaned.length > emitted.length) {
+          const delta = cleaned.slice(emitted.length);
+          emitted = cleaned;
+          if (delta) {
+            try { onChunk(delta); } catch { /* ignore */ }
+          }
+        }
+      }
+    }
+    const text = cleanGgufReply(promptStr, out);
+    writeGgufDebug({
+      at: new Date().toISOString(),
+      ms: Date.now() - started,
+      modelId,
+      gguf: path.basename(findGgufForModel(modelId) || ''),
+      via: 'llama-server',
+      cancelled: Boolean(cancelRequested),
+      outLen: out.length,
+      cleanedLen: text.length,
+      cleanedPreview: text.slice(0, 240),
+    });
+    return {
+      ok: true,
+      reply: text.slice(-6000) || (cancelRequested ? '(stopped)' : ''),
+      modelFile: path.basename(findGgufForModel(modelId) || ''),
+      source: 'ark-gguf',
+      streamed: Boolean(onChunk),
+      cancelled: Boolean(cancelRequested),
+    };
+  } finally {
+    clearTimeout(timer);
+    if (activeAbort === ac) activeAbort = null;
+  }
 }
 
 const ARK_SYSTEM =
@@ -453,6 +648,20 @@ function writeGgufDebug(payload) {
  * onChunk(textDelta) may be called many times; final resolve still returns full reply.
  */
 function runGgufStream(modelId, prompt, onChunk, timeoutMs = 120000) {
+  return (async () => {
+    if (await ensureLlamaServer(modelId)) {
+      try {
+        const hit = await runGgufServerStream(modelId, prompt, onChunk, timeoutMs);
+        if (hit?.reply) return hit;
+      } catch {
+        /* fall through to one-shot llama-cli */
+      }
+    }
+    return runGgufCliStream(modelId, prompt, onChunk, timeoutMs);
+  })();
+}
+
+function runGgufCliStream(modelId, prompt, onChunk, timeoutMs = 120000) {
   return new Promise((resolve, reject) => {
     const gguf = findGgufForModel(modelId);
     const bin = findLlamaBinary();
@@ -487,6 +696,7 @@ function runGgufStream(modelId, prompt, onChunk, timeoutMs = 120000) {
       '-f', promptFile,
       '-n', '256',
       '-c', '2048',
+      '-t', String(Math.max(4, os.cpus().length)),
       '--temp', '0.55',
       '--no-conversation',
       '--single-turn',
@@ -588,6 +798,9 @@ module.exports = {
   runGgufStream,
   cancelGguf,
   ensureLlamaBinary,
+  findLlamaServer,
+  warmServer,
+  stopServer,
   modelsDir,
   binDir,
   LLAMA_TAG,
