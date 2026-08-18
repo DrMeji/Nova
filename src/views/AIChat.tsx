@@ -47,7 +47,12 @@ import { ComposerPlusMenu, type ComposerPlusAction } from '@/components/Composer
 import { TokenUsageRing } from '@/components/TokenUsageRing';
 import { activityKeyForChatMode, notifyWorkDone } from '@/lib/activityIndicators';
 import { getTokenUsageRatio, recordTokenUsage } from '@/lib/tokenUsage';
-import { buildRouterHistory, sanitizeAssistantReply, usableAssistantText } from '@/lib/chatHistory';
+import {
+  buildRouterHistory,
+  looksLikePromptEcho,
+  sanitizeAssistantReply,
+  usableAssistantText,
+} from '@/lib/chatHistory';
 import {
   autoPillLabel,
   autoRingDetail,
@@ -1159,7 +1164,8 @@ export function AIChat() {
           abandoned = true;
           void engineGenerateCancel();
           clearGeneratingIfMine();
-          earlyResolve?.({ reply: cleaned || streamedPartial.trim() });
+              const echoFallback = looksLikePromptEcho(streamedPartial) ? '' : streamedPartial.trim();
+              earlyResolve?.({ reply: cleaned || echoFallback || 'Model echoed its system prompt. Try switching models and send again.' });
         }, 8_000);
       };
 
@@ -1412,7 +1418,8 @@ export function AIChat() {
               setMessages(prev => {
                 const next = prev.map(m => {
                   if (m.id !== assistantId) return m;
-                  return { ...m, content: live || '__generating__:chat:Writing…' };
+                  const liveClean = live && !looksLikePromptEcho(live) ? live : '';
+                  return { ...m, content: liveClean || '__generating__:chat:Writing…' };
                 });
                 messagesRef.current = next;
                 if (persistTimerRef.current) window.clearTimeout(persistTimerRef.current);
@@ -1440,9 +1447,10 @@ export function AIChat() {
           const rawReply = stopRequestedRef.current && streamedPartial
             ? streamedPartial
             : routed.reply;
+          const candidate = String(rawReply || streamedPartial || '').trim();
           response = usableAssistantText(rawReply, content, previousAssistant)
             || usableAssistantText(streamedPartial, content, previousAssistant)
-            || String(rawReply || streamedPartial || '').trim();
+            || (looksLikePromptEcho(candidate) ? '' : candidate);
           if (
             looksLikeCodeAsk(content)
             && mode !== 'image'
@@ -1487,7 +1495,7 @@ export function AIChat() {
           response = stopRequestedRef.current && streamedPartial
             ? usableAssistantText(streamedPartial, content, previousAssistant) || streamedPartial.trim()
             : streamedPartial.trim().length > 8
-              ? usableAssistantText(streamedPartial, content, previousAssistant) || streamedPartial.trim()
+              ? usableAssistantText(streamedPartial, content, previousAssistant) || (looksLikePromptEcho(streamedPartial) ? '' : streamedPartial.trim())
               : (timedOut
                 ? 'Response timed out. Try again or pick another model.'
                 : (err instanceof Error ? err.message : 'ARK Router failed'));
@@ -1502,7 +1510,9 @@ export function AIChat() {
       if (mySeq !== genSeqRef.current) return;
 
       if (!isMediaMode && !pluginId) {
-        response = usableAssistantText(response, content, previousAssistant) || String(response || '').trim();
+        const cleaned = usableAssistantText(response, content, previousAssistant);
+        const candidate = String(cleaned || response || '').trim();
+        response = looksLikePromptEcho(candidate) ? '' : (cleaned || candidate);
       }
       if (stopRequestedRef.current && !response.trim()) {
         response = '(stopped)';

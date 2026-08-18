@@ -12,6 +12,7 @@
 import {
   packHistoryPrompt,
   sanitizeAssistantReply,
+  looksLikePromptEcho,
   usableAssistantText,
   type RouterChatTurn,
 } from '@/lib/chatHistory';
@@ -131,7 +132,12 @@ async function tryLocalChat(
         ? await brainGenerateStream(prompt, id, onChunk, kind)
         : await brainGenerate(prompt, id, kind);
       const prevAsst = [...history].reverse().find(t => t.role === 'assistant')?.content;
-      const reply = usableAssistantText(result.reply, message, prevAsst) || String(result.reply || '').trim();
+      const cleaned = usableAssistantText(result.reply, message, prevAsst);
+      const rawText = String(result.reply || '').trim();
+      // If a local GGUF echoes the system prompt, we must fail this attempt so failover
+      // can hop to a model that returns a real answer.
+      if (!cleaned.trim() && looksLikePromptEcho(rawText)) return null;
+      const reply = cleaned || rawText;
       if (!reply || isTemplateEngineReply(reply)) return null;
       if (result.source === 'ark-engine' && !result.media) return null;
       return {

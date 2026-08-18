@@ -229,6 +229,16 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.65',
+    channel: 'stable' as const,
+    date: 'Aug 17, 2026',
+    title: 'Fix system-prompt echo in text chat (test)',
+    notes: [
+      'Chat now detects and rejects “system prompt echo” replies from models',
+      'Router will failover when a local model re-emits the ARK system instruction block',
+    ],
+  },
+  {
     version: '0.1.64',
     channel: 'stable' as const,
     date: 'Aug 17, 2026',

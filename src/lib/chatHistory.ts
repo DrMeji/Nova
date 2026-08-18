@@ -387,6 +387,18 @@ export function sanitizeAssistantReply(
   return text;
 }
 
+export function looksLikePromptEcho(reply: string): boolean {
+  const t = String(reply || '').trim();
+  if (!t) return false;
+  // Strong signal: models sometimes re-emit the exact system instruction block.
+  if (/^You are ARK, the assistant inside the ARK desktop creation studio on this computer\./i.test(t)) {
+    return /Do not echo the prompt\./i.test(t) || /Answer the latest user request clearly\./i.test(t);
+  }
+  // Weaker fallback: if it starts like the system prompt, and contains typical system phrases.
+  if (/^You are ARK(?:,|\s)/i.test(t) && /Do not echo the prompt\./i.test(t)) return true;
+  return false;
+}
+
 /** Prefer sanitized text, but never hide a real answer behind prompt-echo stripping. */
 export function usableAssistantText(
   raw: string,
