@@ -545,7 +545,9 @@ async function runAttempt(
     };
   } catch (err) {
     if (isRateLimited(err)) {
-      void import('@/lib/arkHuntBootstrap').then(m => m.installNextWhenCurrentRanOut()).catch(() => undefined);
+      void import('@/lib/arkHuntBootstrap').then(m =>
+        m.installNextWhenCurrentRanOut({ kind: 'chat', reason: 'quota' }),
+      ).catch(() => undefined);
     }
     return null;
   }

@@ -98,6 +98,17 @@ declare global {
         downMBps?: number;
         upMBps?: number;
         source?: string;
+        host?: string;
+        preferredHost?: string;
+        preferredHostName?: string;
+        hosts?: Array<{
+          id: string;
+          name: string;
+          ok: boolean;
+          MBps: number;
+          rttMs?: number;
+          error?: string;
+        }>;
         samples?: number;
         bytes?: number;
         ms?: number;

@@ -8,6 +8,7 @@ const path = require('path');
 const https = require('https');
 const http = require('http');
 const { URL } = require('url');
+const arkHostPick = require('./arkHostPick.cjs');
 
 function requestOnce(url, redirectsLeft = 8) {
   return new Promise((resolve, reject) => {
@@ -50,7 +51,7 @@ function requestOnce(url, redirectsLeft = 8) {
  * @param {string} destPath
  * @param {(pct: number, received: number, total: number) => void} [onProgress]
  */
-async function downloadToFile(url, destPath, onProgress) {
+async function downloadOnce(url, destPath, onProgress) {
   fs.mkdirSync(path.dirname(destPath), { recursive: true });
   const partial = `${destPath}.partial`;
   try {
@@ -81,6 +82,19 @@ async function downloadToFile(url, destPath, onProgress) {
   fs.renameSync(partial, destPath);
   if (onProgress) onProgress(100, received, total || received);
   return { path: destPath, bytes: received };
+}
+
+async function downloadToFile(url, destPath, onProgress) {
+  const urls = arkHostPick.candidateUrls(url);
+  let lastErr = new Error('Download failed');
+  for (const candidate of urls) {
+    try {
+      return await downloadOnce(candidate, destPath, onProgress);
+    } catch (err) {
+      lastErr = err instanceof Error ? err : new Error(String(err));
+    }
+  }
+  throw lastErr;
 }
 
 module.exports = {

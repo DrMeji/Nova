@@ -5,6 +5,7 @@
 const fs = require('fs');
 const path = require('path');
 const arkPaths = require('./arkPaths.cjs');
+const arkHostPick = require('./arkHostPick.cjs');
 
 function huntPath() {
   return path.join(arkPaths.modelsDir(), 'ark-hunt.json');
@@ -32,11 +33,7 @@ function save(models) {
 function register(meta) {
   const id = String(meta?.id || '').replace(/[^a-zA-Z0-9._-]+/g, '-').slice(0, 72);
   const url = String(meta?.url || '').split('?')[0];
-  if (
-    !id.startsWith('hunt-')
-    || !/^https:\/\/huggingface\.co\/[^/]+\/[^/]+\/resolve\//i.test(url)
-    || !url.toLowerCase().endsWith('.gguf')
-  ) {
+  if (!id.startsWith('hunt-') || !arkHostPick.isAllowedModelUrl(url)) {
     throw new Error('Invalid hunted model');
   }
   const row = {

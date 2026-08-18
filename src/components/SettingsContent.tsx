@@ -549,7 +549,7 @@ export function SettingsContent({ onClose }: { onClose?: () => void } = {}) {
                 />
                 <ToggleRow
                   label="Download next when a model runs out"
-                  description="Keep online finds in Models / Local AI. Only auto-download when the current model hits a limit"
+                  description="If the current chat, image, or video path hits a limit, ARK starts the next local brain that fits this PC"
                   value={prefs.autoInstallHuntModels}
                   onChange={v => patchPrefs({ autoInstallHuntModels: v })}
                 />

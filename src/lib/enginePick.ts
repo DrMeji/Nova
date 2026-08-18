@@ -5,6 +5,7 @@
  */
 
 import type { ChatIntent } from '@/lib/chatIntent';
+import { isEngineDownloadable } from '@/lib/api';
 
 /** Instruct / general chat — skip coder weights for “hello / what can you do”. */
 export const CHAT_ENGINE_RANK = [
@@ -42,6 +43,9 @@ const MIN_RAM_GB: Record<string, number> = {
   'deepseek-coder-v2-lite': 12,
   'starcoder2-7b': 10,
   'llama32-3b': 6,
+  'sd15-local': 8,
+  'sdxl-turbo-local': 12,
+  'flux-schnell-local': 18,
 };
 
 type EngineRow = { id?: string; status?: string };
@@ -108,4 +112,37 @@ export function pickReadyEngineId(
   ramGb = 8,
 ): string | undefined {
   return rankedReadyEngineIds(models, intent, ramGb)[0];
+}
+
+const IMAGE_BACKUP_RANK = ['sd15-local', 'sdxl-turbo-local', 'flux-schnell-local'] as const;
+
+/** Next Engine catalog brain to download when the current one is exhausted. */
+export function pickNextBackupId(
+  models: EngineRow[] | undefined,
+  kind: 'chat' | 'coding' | 'image' | 'video',
+  ramGb = 8,
+  currentId?: string,
+): string | undefined {
+  const blocked = new Set(
+    (models || [])
+      .filter(m => m.status === 'ready' || m.status === 'downloading')
+      .map(m => String(m.id || ''))
+      .filter(Boolean),
+  );
+  if (currentId) blocked.add(currentId);
+
+  const rank: string[] =
+    kind === 'image' || kind === 'video'
+      ? [...IMAGE_BACKUP_RANK]
+      : kind === 'coding'
+        ? [...CODER_ENGINE_RANK, ...CHAT_ENGINE_RANK]
+        : [...CHAT_ENGINE_RANK, 'llama32-3b', 'qwen25-15b'];
+
+  for (const id of rank) {
+    if (blocked.has(id)) continue;
+    if (!fitsRam(id, ramGb)) continue;
+    if (!isEngineDownloadable(id)) continue;
+    return id;
+  }
+  return undefined;
 }

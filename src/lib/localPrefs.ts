@@ -229,6 +229,18 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.68',
+    channel: 'stable' as const,
+    date: 'Aug 18, 2026',
+    title: 'Multi-host model hunt and speed test',
+    notes: [
+      'Hunt GGUF brains from Hugging Face and ModelScope, with HF Mirror as a download fallback',
+      'Speed test measures this PC to each host and back, then installs from the fastest path',
+      'Connected API keys are pinged in the same run for chat latency, not file downloads',
+      'Local GGUF chat answers more reliably, and a backup brain can download when the current one runs out',
+    ],
+  },
+  {
     version: '0.1.67',
     channel: 'stable' as const,
     date: 'Aug 18, 2026',

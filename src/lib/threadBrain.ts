@@ -115,8 +115,13 @@ export function threadBrainFromResult(
 }
 
 /** Pill label when ARK Auto has a sticky brain for this thread. */
-export function autoPillLabel(brain: ThreadBrain | null): string {
-  if (!brain?.modelName) return 'ARK';
+export function autoPillLabel(_brain?: ThreadBrain | null): string {
+  return 'ARK';
+}
+
+/** Short line for the Auto menu row — Auto stays selected; this is the brain it picked. */
+export function autoEquippedCaption(brain: ThreadBrain | null): string {
+  if (!brain?.modelName) return 'Picks the best brain for this chat';
   const short = brain.modelName
     .replace(/^Local · /i, '')
     .replace(/^Free · /i, '')
@@ -124,8 +129,8 @@ export function autoPillLabel(brain: ThreadBrain | null): string {
     .replace(/^Optional · /i, '')
     .replace(/ · switched$/i, '')
     .trim();
-  const name = short.length > 22 ? `${short.slice(0, 20).trim()}…` : short;
-  return name ? `ARK · ${name}` : 'ARK';
+  const name = short.length > 28 ? `${short.slice(0, 26).trim()}…` : short;
+  return name ? `Using ${name} for this chat` : 'Picks the best brain for this chat';
 }
 
 export function autoRingDetail(brain: ThreadBrain | null, kind?: ThreadBrainKind): string {

@@ -1,10 +1,13 @@
 /**
- * Hunt Hugging Face for GGUF brains that fit this PC.
+ * Hunt GGUF brains from more than one file host.
  * ARK Engine remains the runtime — this only finds and downloads weights.
  */
 
 import { getHardwareClass, parseRamGb, type HardwareInfo } from '@/lib/api';
 import { getLocalPrefs, getProviderApiKeys } from '@/lib/localPrefs';
+import { loadSavedSpeed } from '@/lib/speedTest';
+
+export type HuntSource = 'huggingface' | 'modelscope';
 
 export type HuntedModel = {
   id: string;
@@ -14,10 +17,11 @@ export type HuntedModel = {
   sizeGb: number;
   category: 'coding' | 'chat';
   detail: string;
+  source: HuntSource;
   downloads?: number;
 };
 
-const CACHE_KEY = 'ark:model-hunt-cache';
+const CACHE_KEY = 'ark:model-hunt-cache-v2';
 const CACHE_MS = 6 * 60 * 60 * 1000;
 
 const QUANT_PREF = [/q4_k_m/i, /q4_k_s/i, /q5_k_m/i, /iq4_xs/i, /q4_0/i, /q5_0/i];
@@ -46,6 +50,23 @@ const SEARCHES = [
   'StarCoder2-GGUF',
   'code instruct GGUF',
 ];
+
+const MS_SEEDS = [
+  'Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF',
+  'Qwen/Qwen2.5-Coder-3B-Instruct-GGUF',
+  'Qwen/Qwen2.5-3B-Instruct-GGUF',
+  'Qwen/Qwen3-1.7B-GGUF',
+  'Qwen/Qwen3-4B-GGUF',
+  'Qwen/Qwen2.5-Coder-7B-Instruct-GGUF',
+];
+
+export function huntSourceLabel(source?: HuntSource) {
+  return source === 'modelscope' ? 'ModelScope' : 'Hugging Face';
+}
+
+export function huntSourceBadge(source?: HuntSource) {
+  return source === 'modelscope' ? 'MS' : 'HF';
+}
 
 function slugId(repo: string, file: string) {
   const base = `${repo}-${file}`
@@ -83,15 +104,48 @@ function hfHeaders(): Record<string, string> {
   return headers;
 }
 
-async function hfGet(url: string): Promise<unknown> {
+async function jsonGet(url: string, headers?: Record<string, string>): Promise<unknown> {
+  const merged = { Accept: 'application/json', ...headers };
   if (window.arkDesktop?.httpGet) {
-    const res = await window.arkDesktop.httpGet(url, hfHeaders());
-    if (!res.ok) throw new Error(`Hugging Face ${res.status}`);
+    const res = await window.arkDesktop.httpGet(url, merged);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return res.data;
   }
-  const res = await fetch(url, { headers: hfHeaders() });
-  if (!res.ok) throw new Error(`Hugging Face ${res.status}`);
+  const res = await fetch(url, { headers: merged });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
+}
+
+async function jsonRequest(url: string, method: string, body?: unknown): Promise<unknown> {
+  if (window.arkDesktop?.httpRequest) {
+    const res = await window.arkDesktop.httpRequest(url, {
+      method,
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: body == null ? undefined : JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.data;
+  }
+  const res = await fetch(url, {
+    method,
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    body: body == null ? undefined : JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+async function hfApi(path: string): Promise<unknown> {
+  const bases = ['https://huggingface.co', 'https://hf-mirror.com'];
+  let lastErr: Error | null = null;
+  for (const base of bases) {
+    try {
+      return await jsonGet(`${base}${path}`, hfHeaders());
+    } catch (err) {
+      lastErr = err instanceof Error ? err : new Error(String(err));
+    }
+  }
+  throw lastErr || new Error('Hugging Face API failed');
 }
 
 function pickGgufFile(
@@ -100,6 +154,7 @@ function pickGgufFile(
 ): { file: string; bytes: number } | null {
   const files = (siblings || [])
     .filter(s => /\.gguf$/i.test(s.rfilename || '') && !/mmproj|encoder|vision/i.test(s.rfilename || ''))
+    .filter(s => !/\d+-of-\d+/i.test(s.rfilename || ''))
     .map(s => ({ file: String(s.rfilename), bytes: Number(s.size) || 0 }))
     .filter(s => s.bytes > 50 * 1024 * 1024 && s.bytes <= capBytes);
   if (!files.length) return null;
@@ -115,9 +170,41 @@ function isCodingRepo(repo: string, tags: string[]) {
   return /coder|coding|code-|starcoder|codellama|codestral|devstral|deepseek-coder/.test(blob);
 }
 
-function resolveUrl(repo: string, file: string) {
+function resolveHfUrl(repo: string, file: string) {
   const encoded = file.split('/').map(encodeURIComponent).join('/');
-  return `https://huggingface.co/${repo}/resolve/main/${encoded}`;
+  const host = loadSavedSpeed()?.preferredHost === 'hf-mirror'
+    ? 'https://hf-mirror.com'
+    : 'https://huggingface.co';
+  return `${host}/${repo}/resolve/main/${encoded}`;
+}
+
+function resolveMsUrl(repo: string, file: string) {
+  const encoded = file.split('/').map(encodeURIComponent).join('/');
+  return `https://www.modelscope.cn/models/${repo}/resolve/master/${encoded}`;
+}
+
+function toHunted(
+  repo: string,
+  file: { file: string; bytes: number },
+  tags: string[],
+  downloads: number,
+  source: HuntSource,
+): HuntedModel | null {
+  if (isKnownCatalog(repo, file.file)) return null;
+  const sizeGb = Math.round((file.bytes / 1024 ** 3) * 10) / 10;
+  const category = isCodingRepo(repo, tags) ? 'coding' : 'chat';
+  const label = huntSourceLabel(source);
+  return {
+    id: slugId(repo, file.file),
+    name: repo.split('/')[1] || repo,
+    repo,
+    url: source === 'modelscope' ? resolveMsUrl(repo, file.file) : resolveHfUrl(repo, file.file),
+    sizeGb,
+    category,
+    downloads,
+    source,
+    detail: `${category === 'coding' ? 'Coding' : 'Chat'} · ${sizeGb} GB · ${label} · ${repo}`,
+  };
 }
 
 export function loadHuntCache(): { at: number; models: HuntedModel[] } | null {
@@ -141,17 +228,7 @@ function saveHuntCache(models: HuntedModel[]) {
   }
 }
 
-export async function huntModelsForPc(hw: HardwareInfo, opts?: { force?: boolean }): Promise<HuntedModel[]> {
-  if (!getLocalPrefs().huntInternetModels && !opts?.force) {
-    return loadHuntCache()?.models || [];
-  }
-  if (!opts?.force) {
-    const cached = loadHuntCache();
-    if (cached?.models.length) return cached.models.filter(m => fits(m.sizeGb, hw));
-  }
-
-  const capGb = maxSizeGb(hw);
-  const capBytes = capGb * 1024 ** 3;
+async function huntHuggingFace(hw: HardwareInfo, capBytes: number): Promise<HuntedModel[]> {
   const rows: Record<string, {
     id: string;
     tags: string[];
@@ -160,9 +237,10 @@ export async function huntModelsForPc(hw: HardwareInfo, opts?: { force?: boolean
   }> = {};
 
   for (const q of SEARCHES) {
-    const url = `https://huggingface.co/api/models?search=${encodeURIComponent(q)}&filter=gguf&sort=downloads&direction=-1&limit=10`;
     try {
-      const data = await hfGet(url);
+      const data = await hfApi(
+        `/api/models?search=${encodeURIComponent(q)}&filter=gguf&sort=downloads&direction=-1&limit=10`,
+      );
       const list = Array.isArray(data) ? data : [];
       for (const row of list) {
         const id = String(row.id || row.modelId || '');
@@ -187,7 +265,7 @@ export async function huntModelsForPc(hw: HardwareInfo, opts?: { force?: boolean
     const chunk = await Promise.all(ranked.slice(i, i + 4).map(async (row) => {
       if (row.siblings?.length) return row;
       try {
-        const detail = await hfGet(`https://huggingface.co/api/models/${row.id}`) as {
+        const detail = await hfApi(`/api/models/${row.id}`) as {
           siblings?: { rfilename?: string; size?: number }[];
           gated?: boolean;
         };
@@ -205,26 +283,122 @@ export async function huntModelsForPc(hw: HardwareInfo, opts?: { force?: boolean
     if (!row) continue;
     const file = pickGgufFile(row.siblings, capBytes);
     if (!file) continue;
-    if (isKnownCatalog(row.id, file.file)) continue;
-    const sizeGb = Math.round((file.bytes / 1024 ** 3) * 10) / 10;
-    if (!fits(sizeGb, hw)) continue;
-    const category = isCodingRepo(row.id, row.tags) ? 'coding' : 'chat';
-    found.push({
-      id: slugId(row.id, file.file),
-      name: row.id.split('/')[1] || row.id,
-      repo: row.id,
-      url: resolveUrl(row.id, file.file),
-      sizeGb,
-      category,
-      downloads: row.downloads,
-      detail: `${category === 'coding' ? 'Coding' : 'Chat'} · ${sizeGb} GB · ${row.id}`,
-    });
+    const hit = toHunted(row.id, file, row.tags, row.downloads, 'huggingface');
+    if (!hit || !fits(hit.sizeGb, hw)) continue;
+    found.push(hit);
     if (found.length >= 8) break;
   }
+  return found;
+}
 
-  const fitted = found.filter(m => fits(m.sizeGb, hw));
-  saveHuntCache(fitted);
-  return fitted;
+function msModelId(row: Record<string, unknown>) {
+  const path = String(row.Path || row.path || '');
+  const name = String(row.Name || row.name || row.ChineseName || '');
+  if (path && name) return `${path}/${name}`;
+  return String(row.Id || row.id || row.modelId || '');
+}
+
+async function huntModelScopeIds(): Promise<string[]> {
+  const ids = new Set<string>(MS_SEEDS);
+  for (const q of ['GGUF coder', 'Qwen3-Coder GGUF', 'Qwen2.5-Coder GGUF']) {
+    try {
+      const data = await jsonRequest('https://www.modelscope.cn/api/v1/dolphin/models', 'PUT', {
+        PageSize: 12,
+        PageNumber: 1,
+        SortBy: 'DownloadCount',
+        Target: '',
+        Name: q,
+        SingleCriterion: [],
+      }) as { Data?: { Model?: { Models?: Record<string, unknown>[] }; Models?: Record<string, unknown>[] } };
+      const list = data?.Data?.Model?.Models || data?.Data?.Models || [];
+      for (const row of list) {
+        const id = msModelId(row);
+        if (id.includes('/')) ids.add(id);
+      }
+    } catch {
+      /* try GET name search */
+      try {
+        const data = await jsonGet(
+          `https://www.modelscope.cn/api/v1/models?Name=${encodeURIComponent(q)}&PageSize=8&PageNumber=1`,
+        ) as { Data?: { Models?: Record<string, unknown>[] } | Record<string, unknown>[] };
+        const list = Array.isArray(data?.Data) ? data.Data : data?.Data?.Models || [];
+        for (const row of list) {
+          const id = msModelId(row);
+          if (id.includes('/')) ids.add(id);
+        }
+      } catch {
+        /* keep seeds */
+      }
+    }
+  }
+  return [...ids];
+}
+
+async function huntModelScope(hw: HardwareInfo, capBytes: number): Promise<HuntedModel[]> {
+  const ids = await huntModelScopeIds();
+  const found: HuntedModel[] = [];
+  for (let i = 0; i < ids.length && found.length < 8; i += 3) {
+    const chunk = ids.slice(i, i + 3);
+    const rows = await Promise.all(chunk.map(async (id) => {
+      try {
+        const data = await jsonGet(
+          `https://www.modelscope.cn/api/v1/models/${id}/repo/files?Revision=master&Recursive=1`,
+        ) as {
+          Data?: { Files?: { Name?: string; Path?: string; Size?: number; Type?: string }[] };
+        };
+        const files = (data?.Data?.Files || [])
+          .filter(f => f.Type !== 'tree')
+          .map(f => ({ rfilename: f.Path || f.Name, size: f.Size }));
+        const file = pickGgufFile(files, capBytes);
+        if (!file) return null;
+        return toHunted(id, file, [id], 0, 'modelscope');
+      } catch {
+        return null;
+      }
+    }));
+    for (const hit of rows) {
+      if (!hit || !fits(hit.sizeGb, hw)) continue;
+      found.push(hit);
+      if (found.length >= 8) break;
+    }
+  }
+  return found;
+}
+
+function dedupe(models: HuntedModel[]) {
+  const seen = new Set<string>();
+  const out: HuntedModel[] = [];
+  for (const row of models) {
+    const key = row.name.toLowerCase().replace(/-gguf$/i, '');
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(row);
+  }
+  return out;
+}
+
+export async function huntModelsForPc(hw: HardwareInfo, opts?: { force?: boolean }): Promise<HuntedModel[]> {
+  if (!getLocalPrefs().huntInternetModels && !opts?.force) {
+    return loadHuntCache()?.models || [];
+  }
+  if (!opts?.force) {
+    const cached = loadHuntCache();
+    if (cached?.models.length) return cached.models.filter(m => fits(m.sizeGb, hw));
+  }
+
+  const capBytes = maxSizeGb(hw) * 1024 ** 3;
+  const [hf, ms] = await Promise.all([
+    huntHuggingFace(hw, capBytes).catch(() => [] as HuntedModel[]),
+    huntModelScope(hw, capBytes).catch(() => [] as HuntedModel[]),
+  ]);
+
+  const preferred = loadSavedSpeed()?.preferredHost;
+  const merged = dedupe(preferred === 'modelscope' ? [...ms, ...hf] : [...hf, ...ms])
+    .filter(m => fits(m.sizeGb, hw))
+    .slice(0, 10);
+
+  saveHuntCache(merged);
+  return merged;
 }
 
 export function bestCodingHunt(models: HuntedModel[]) {

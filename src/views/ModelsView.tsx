@@ -30,7 +30,7 @@ import {
   type OllamaModel,
 } from '@/lib/ollamaOptional';
 import { FREE_SOURCES } from '@/lib/freeSources';
-import { huntModelsForPc, type HuntedModel } from '@/lib/arkModelHunt';
+import { huntModelsForPc, huntSourceBadge, type HuntedModel } from '@/lib/arkModelHunt';
 import { probeLiveCapacity, type LiveCapacity } from '@/lib/arkCapacity';
 
 type TabId = 'for-pc' | 'local' | 'cloud';
@@ -533,7 +533,7 @@ export function ModelsView() {
         setHunted(found);
         setHuntNote(
           found.length
-            ? `${found.length} online ${found.length === 1 ? 'fit' : 'fits'} — install when you want, or when the current model runs out`
+            ? `${found.length} online ${found.length === 1 ? 'fit' : 'fits'} from Hugging Face + ModelScope — install when you want, or when the current model runs out`
             : 'No new online fits right now — pinned catalog still applies',
         );
       } catch {
@@ -865,7 +865,7 @@ export function ModelsView() {
                     <h2 className="text-base font-semibold text-content-primary">Found online for this PC</h2>
                   </div>
                   <p className="text-xs text-content-tertiary mb-4">
-                    {huntNote || 'Live search on Hugging Face · GGUF · sized for your RAM'}
+                    {huntNote || 'Live search on Hugging Face + ModelScope · GGUF · sized for your RAM'}
                   </p>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1">
                     {hunted.map(model => {
@@ -876,8 +876,10 @@ export function ModelsView() {
                           key={model.id}
                           className="flex items-center gap-3 py-3 rounded-xl px-1 hover:bg-surface-hover/50 transition-colors"
                         >
-                          <span className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-400 to-sky-700 flex items-center justify-center text-[10px] font-bold text-white shrink-0">
-                            HF
+                          <span className={`w-10 h-10 rounded-xl bg-gradient-to-br ${
+                            model.source === 'modelscope' ? 'from-sky-500 to-indigo-700' : 'from-emerald-400 to-sky-700'
+                          } flex items-center justify-center text-[10px] font-bold text-white shrink-0`}>
+                            {huntSourceBadge(model.source)}
                           </span>
                           <span className="min-w-0 flex-1">
                             <span className="flex items-center gap-2 min-w-0 flex-wrap">

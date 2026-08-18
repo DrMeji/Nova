@@ -1,11 +1,23 @@
 /** Network speed helpers for proactive model preload planning. */
 
+export type HostSpeed = {
+  id: string;
+  name: string;
+  ok: boolean;
+  MBps: number;
+  rttMs?: number;
+  error?: string;
+};
+
 export type SpeedSample = {
   /** Download throughput in megabytes per second */
   MBps: number;
   /** Upload throughput when measured */
   upMBps?: number;
-  source: 'measured' | 'browser' | 'estimate';
+  source: 'measured' | 'huggingface' | 'browser' | 'estimate' | 'multi';
+  preferredHost?: string;
+  preferredHostName?: string;
+  hosts?: HostSpeed[];
   samples?: number;
 };
 
@@ -50,43 +62,86 @@ export function formatMBps(MBps: number) {
   return mbLabel;
 }
 
+const SPEED_STORE_KEY = 'ark:network-speed';
+
+export type SavedSpeed = SpeedSample & {
+  at: number;
+  startAtPercent: number;
+};
+
+export function loadSavedSpeed(): SavedSpeed | null {
+  try {
+    const raw = localStorage.getItem(SPEED_STORE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as SavedSpeed;
+    if (!parsed || !(parsed.MBps > 0)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+export function saveSpeedSample(sample: SpeedSample, plan?: PreloadPlan) {
+  try {
+    const payload: SavedSpeed = {
+      ...sample,
+      at: Date.now(),
+      startAtPercent: plan?.startAtPercent ?? computePreloadPlan(sample.MBps).startAtPercent,
+    };
+    localStorage.setItem(SPEED_STORE_KEY, JSON.stringify(payload));
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Session usage 0–1 when a backup download should start. Fast links wait; slow links start early. */
+export function preloadStartRatio(nextModel?: { name: string; sizeGb: number }): number {
+  const saved = loadSavedSpeed();
+  if (!saved) return 0.8;
+  return computePreloadPlan(saved.MBps, nextModel).startAtPercent / 100;
+}
+
 /**
- * Plan when to start downloading the next model so it finishes
- * before the user needs to switch (with a safety buffer).
- *
- * Slower links → start much earlier (e.g. ~20% usage).
- * Faster links → can wait longer (e.g. ~70%+ usage).
+ * Plan when to start downloading the next model so it is ready before a switch.
+ * Slow Wi-Fi starts around 20–40% usage. Fast links wait until 90–95%.
  */
 export function computePreloadPlan(
   MBps: number,
-  nextModel: { name: string; sizeGb: number },
+  nextModel?: { name: string; sizeGb: number },
   opts?: { sessionMinutes?: number; bufferMinutes?: number; readyByPercent?: number },
 ): PreloadPlan {
+  const model = nextModel || { name: 'Next local brain', sizeGb: 4.7 };
   const sessionMinutes = opts?.sessionMinutes ?? 45;
-  const bufferMinutes = opts?.bufferMinutes ?? 4;
-  const readyByPercent = opts?.readyByPercent ?? 90;
+  const bufferMinutes = opts?.bufferMinutes ?? 3;
+  const readyByPercent = opts?.readyByPercent ?? 95;
 
-  const sizeMb = nextModel.sizeGb * 1024;
+  const sizeMb = model.sizeGb * 1024;
   const downloadSeconds = MBps > 0 ? (sizeMb / MBps) : Infinity;
   const downloadMinutes = downloadSeconds / 60;
-
-  // Fraction of a typical session the download will consume
   const downloadShare = downloadMinutes / sessionMinutes;
   const bufferShare = bufferMinutes / sessionMinutes;
 
-  // Start early enough that download + buffer finish by readyByPercent
-  const startAtPercent = clamp(
-    Math.round(readyByPercent - (downloadShare + bufferShare) * 100),
-    5,
-    85,
-  );
+  let startAtPercent = Math.round(readyByPercent - (downloadShare + bufferShare) * 100);
+
+  if (MBps >= 25) {
+    startAtPercent = Math.max(startAtPercent, 90);
+    startAtPercent = Math.min(startAtPercent, 95);
+  } else if (MBps >= 12) {
+    startAtPercent = clamp(startAtPercent, 70, 88);
+  } else if (MBps >= 5) {
+    startAtPercent = clamp(startAtPercent, 40, 70);
+  } else {
+    startAtPercent = clamp(startAtPercent, 15, 40);
+  }
+
+  startAtPercent = clamp(startAtPercent, 15, 95);
 
   let rating: PreloadPlan['rating'] = 'ok';
   let ratingLabel = 'Okay';
-  if (MBps < 5 || startAtPercent <= 25) {
+  if (MBps < 5 || startAtPercent <= 40) {
     rating = 'slow';
     ratingLabel = 'Slow, preload early';
-  } else if (MBps >= 25 && startAtPercent >= 55) {
+  } else if (MBps >= 25 && startAtPercent >= 90) {
     rating = 'fast';
     ratingLabel = 'Fast, late preload is fine';
   }
@@ -99,8 +154,8 @@ export function computePreloadPlan(
         : `ARK should begin preloading around ${startAtPercent}% usage so the next model is ready when you need it.`;
 
   return {
-    nextModelName: nextModel.name,
-    nextModelSizeGb: nextModel.sizeGb,
+    nextModelName: model.name,
+    nextModelSizeGb: model.sizeGb,
     downloadSeconds,
     startAtPercent,
     rating,
@@ -109,38 +164,30 @@ export function computePreloadPlan(
   };
 }
 
-/** Best-effort speed sample. Desktop: warmup + 3×40MB download median + upload. */
+/** Best-effort speed sample from Hugging Face (same CDN as GGUF installs). */
 export async function runSpeedTest(): Promise<SpeedSample> {
   try {
     const desktop = await window.arkDesktop?.speedTest?.();
     if (desktop?.ok && (desktop.MBps > 0 || (desktop.downMBps ?? 0) > 0)) {
       const down = desktop.downMBps ?? desktop.MBps;
+      const hosts = Array.isArray(desktop.hosts) ? desktop.hosts : undefined;
       return {
         MBps: down,
         upMBps: desktop.upMBps,
-        source: 'measured',
+        source: desktop.source === 'multi' || hosts?.length ? 'multi' : desktop.source === 'huggingface' ? 'huggingface' : 'measured',
+        preferredHost: desktop.preferredHost || desktop.host,
+        preferredHostName: desktop.preferredHostName,
+        hosts,
         samples: desktop.samples,
       };
     }
   } catch {
-    /* fall through to browser probe */
+    /* fall through */
   }
 
-  try {
-    const bytes = 25_000_000;
-    const url = `https://speed.cloudflare.com/__down?bytes=${bytes}&measId=${Date.now()}`;
-    const t0 = performance.now();
-    const res = await fetch(url, { cache: 'no-store', mode: 'cors' });
-    if (!res.ok) throw new Error('speed fetch failed');
-    await res.arrayBuffer();
-    const seconds = Math.max((performance.now() - t0) / 1000, 0.05);
-    const MBps = bytes / (1024 * 1024) / seconds;
-    return { MBps, source: 'measured' };
-  } catch {
-    const conn = (navigator as Navigator & { connection?: { downlink?: number } }).connection;
-    if (conn?.downlink && conn.downlink > 0) {
-      return { MBps: conn.downlink / 8, source: 'browser' };
-    }
-    return { MBps: 8, source: 'estimate' };
+  const conn = (navigator as Navigator & { connection?: { downlink?: number } }).connection;
+  if (conn?.downlink && conn.downlink > 0) {
+    return { MBps: conn.downlink / 8, source: 'browser' };
   }
+  return { MBps: 8, source: 'estimate' };
 }

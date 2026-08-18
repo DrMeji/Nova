@@ -7,6 +7,11 @@ import { saveChatMessage } from '@/lib/api';
 import { getLocalPrefs, hasProviderApiKey, setLocalPrefs } from '@/lib/localPrefs';
 import { honestNoLiveChatReply, probeLiveCapacity, type LiveCapacity } from '@/lib/arkCapacity';
 import {
+  BACKUP_DOWNLOAD_EVENT,
+  installNextWhenCurrentRanOut,
+} from '@/lib/arkHuntBootstrap';
+import { preloadStartRatio } from '@/lib/speedTest';
+import {
   chatThreadKey,
   mediaMessageMarkdown,
   rememberThumb,
@@ -54,6 +59,7 @@ import {
   usableAssistantText,
 } from '@/lib/chatHistory';
 import {
+  autoEquippedCaption,
   autoPillLabel,
   autoRingDetail,
   brainKindForChatMode,
@@ -276,7 +282,10 @@ const MODE_META: Record<Exclude<ChatMode, 'general'>, { icon: typeof ImageIcon; 
 
 function isMediaOnlyContent(content: string) {
   if (!content) return false;
-  if (content.startsWith('__generating__:') || content.startsWith('__progress__:')) return true;
+  if (content.startsWith('__progress__:')) return true;
+  if (content.startsWith('__generating__:')) {
+    return !content.startsWith('__generating__:chat:');
+  }
   const stripped = content
     .replace(/!\[[^\]]*\]\([^)]+\)/g, '')
     .replace(/Generated (image|video|fallback|motion|cinematic)[^\n]*/gi, '')
@@ -420,6 +429,15 @@ export function AIChat() {
   useEffect(() => {
     threadBrainRef.current = threadBrain;
   }, [threadBrain]);
+
+  useEffect(() => {
+    const onBackup = (event: Event) => {
+      const detail = (event as CustomEvent<{ name?: string }>).detail;
+      if (detail?.name) setFailoverNote(`Downloading backup · ${detail.name}`);
+    };
+    window.addEventListener(BACKUP_DOWNLOAD_EVENT, onBackup);
+    return () => window.removeEventListener(BACKUP_DOWNLOAD_EVENT, onBackup);
+  }, []);
 
   useEffect(() => {
     setLocalPrefs({ defaultModelId: 'ark-auto', aiMode: 'automatic', autoFailover: true });
@@ -1005,8 +1023,17 @@ export function AIChat() {
     routeChatIdRef.current = activeChatId;
     activeGenChatIdRef.current = activeChatId;
     setTokenRatio(recordTokenUsage(activeChatId, content));
-
     const pinnedModel = activeModelRef.current;
+    const usage = getTokenUsageRatio(activeChatId);
+    if (usage >= preloadStartRatio()) {
+      const runOutKind = mode === 'image' ? 'image' : mode === 'video' ? 'video' : mode === 'code' ? 'coding' : 'chat';
+      void installNextWhenCurrentRanOut({
+        kind: runOutKind,
+        reason: 'context',
+        currentModelId: threadBrainRef.current?.modelId || pinnedModel.id,
+      }).catch(() => undefined);
+    }
+
     const userMsg: ChatMessage = {
       id: crypto.randomUUID(),
       user_id: user.id,
@@ -1434,7 +1461,7 @@ export function AIChat() {
               armStreamIdleFinish();
             },
           });
-          const timeoutMs = 90_000;
+          const timeoutMs = 35_000;
           const routed = await Promise.race([
             routePromise.then(r => ({ reply: r.reply, full: r as Awaited<typeof routePromise> })),
             earlyDone.then(r => ({ reply: r.reply, full: null })),
@@ -1649,7 +1676,9 @@ export function AIChat() {
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="block text-sm text-content-primary truncate">{model.name}</span>
-                  <span className="block text-[11px] text-content-tertiary truncate">{model.detail}</span>
+                  <span className="block text-[11px] text-content-tertiary truncate">
+                    {autoEquippedCaption(threadBrain)}
+                  </span>
                 </span>
                 {activeModel.id === model.id && <Check className="w-4 h-4 text-ark-accent-green shrink-0" />}
               </button>
@@ -1972,7 +2001,7 @@ export function AIChat() {
             className="inline-flex items-center gap-1 rounded-full border border-surface-border/80 bg-surface-hover/60 hover:bg-surface-hover px-2.5 py-1 text-xs text-content-primary transition-colors max-w-[9rem]"
             title={`Active model · ${
               activeModel.source === 'auto'
-                ? (threadBrain ? `${autoModelLabel} · equipped for this chat` : 'ARK Auto · picks best brain')
+                ? (threadBrain ? autoEquippedCaption(threadBrain) : 'ARK Auto · picks best brain')
                 : activeModel.name
             }`}
             aria-label="Select model"

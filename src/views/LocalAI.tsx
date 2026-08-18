@@ -25,10 +25,18 @@ import {
   computePreloadPlan,
   formatDuration,
   formatMBps,
+  loadSavedSpeed,
   runSpeedTest,
+  saveSpeedSample,
   type PreloadPlan,
   type SpeedSample,
 } from '@/lib/speedTest';
+import {
+  formatMs,
+  loadSavedApiProbes,
+  probeConnectedApis,
+  type ProviderProbe,
+} from '@/lib/providerSpeed';
 import {
   Cpu, MemoryStick, HardDrive, Zap, Monitor, MonitorCog,
   Power, Activity, Check, Download, Shield,
@@ -42,7 +50,7 @@ import {
   LOCAL_CATEGORY_ORDER,
   sortModelsByCategoryThenSizeDesc,
 } from '@/lib/modelSort';
-import { huntModelsForPc, type HuntedModel } from '@/lib/arkModelHunt';
+import { huntModelsForPc, huntSourceBadge, type HuntedModel } from '@/lib/arkModelHunt';
 
 type TabId = 'overview' | 'speed' | 'hardware' | 'storage' | 'advanced';
 
@@ -311,8 +319,12 @@ export function LocalAI() {
   const [engineMeta, setEngineMeta] = useState<ArkEngineStatus | null>(null);
   const [brainNote, setBrainNote] = useState('Brain API · checking');
   const [speedTesting, setSpeedTesting] = useState(false);
-  const [speedSample, setSpeedSample] = useState<SpeedSample | null>(null);
-  const [preloadPlan, setPreloadPlan] = useState<PreloadPlan | null>(null);
+  const [speedSample, setSpeedSample] = useState<SpeedSample | null>(() => loadSavedSpeed());
+  const [apiProbes, setApiProbes] = useState<ProviderProbe[]>(() => loadSavedApiProbes()?.results ?? []);
+  const [preloadPlan, setPreloadPlan] = useState<PreloadPlan | null>(() => {
+    const saved = loadSavedSpeed();
+    return saved ? computePreloadPlan(saved.MBps, NEXT_PRELOAD_MODEL) : null;
+  });
   const pcClass = useMemo(() => getHardwareClass(hw), [hw]);
 
   const availableByCategory = useMemo(() => {
@@ -366,7 +378,7 @@ export function LocalAI() {
         setHunted(found);
         setHuntNote(
           found.length
-            ? `${found.length} online ${found.length === 1 ? 'fit' : 'fits'} — waiting here until you install, or until the current model runs out`
+            ? `${found.length} online ${found.length === 1 ? 'fit' : 'fits'} from Hugging Face + ModelScope — waiting here until you install, or until the current model runs out`
             : '',
         );
       } catch {
@@ -437,9 +449,12 @@ export function LocalAI() {
   const handleSpeedTest = async () => {
     setSpeedTesting(true);
     try {
-      const sample = await runSpeedTest();
+      const [sample, probes] = await Promise.all([runSpeedTest(), probeConnectedApis()]);
+      const plan = computePreloadPlan(sample.MBps, NEXT_PRELOAD_MODEL);
       setSpeedSample(sample);
-      setPreloadPlan(computePreloadPlan(sample.MBps, NEXT_PRELOAD_MODEL));
+      setApiProbes(probes);
+      setPreloadPlan(plan);
+      saveSpeedSample(sample, plan);
     } finally {
       setSpeedTesting(false);
     }
@@ -821,8 +836,10 @@ export function LocalAI() {
                           key={model.id}
                           className="flex items-center gap-3 py-3 px-1 rounded-xl hover:bg-surface-hover/50 transition-colors min-w-0"
                         >
-                          <span className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-400 to-sky-700 flex items-center justify-center text-[10px] font-bold text-white shrink-0">
-                            HF
+                          <span className={`w-10 h-10 rounded-xl bg-gradient-to-br ${
+                            model.source === 'modelscope' ? 'from-sky-500 to-indigo-700' : 'from-emerald-400 to-sky-700'
+                          } flex items-center justify-center text-[10px] font-bold text-white shrink-0`}>
+                            {huntSourceBadge(model.source)}
                           </span>
                           <span className="min-w-0 flex-1">
                             <span className="flex items-center gap-2 min-w-0 flex-wrap">
@@ -961,28 +978,38 @@ export function LocalAI() {
                   </button>
                 </div>
                 <p className="text-xs text-content-tertiary mb-4 px-1 leading-relaxed">
-                  This measures <span className="text-content-secondary">download throughput</span> for model installs —
-                  not how fast the AI replies. Use it to plan when to preload the next GGUF.
+                  One run measures the path from this PC to each model host and back:
+                  Hugging Face, HF Mirror, and ModelScope. ARK then hunts and installs
+                  from the fastest one. Plugged-in API keys are pinged separately for chat latency.
                 </p>
                 <div className="flex flex-col">
                   <div className="flex items-center gap-3 py-3 px-1">
-                    <span className="w-40 shrink-0 text-sm text-content-secondary">Download speed</span>
+                    <span className="w-40 shrink-0 text-sm text-content-secondary">Fastest download</span>
                     <span className="text-sm text-content-primary">
                       {speedSample ? formatMBps(speedSample.MBps) : 'Not tested yet'}
                     </span>
                   </div>
                   <div className="flex items-center gap-3 py-3 px-1">
-                    <span className="w-40 shrink-0 text-sm text-content-secondary">Source</span>
-                    <span className="text-sm text-content-primary capitalize">
-                      {speedSample
-                        ? speedSample.source === 'measured'
-                          ? 'Live measurement'
-                          : speedSample.source === 'browser'
-                            ? 'Browser estimate'
-                            : 'Fallback estimate'
-                        : 'n/a'}
+                    <span className="w-40 shrink-0 text-sm text-content-secondary">Preferred host</span>
+                    <span className="text-sm text-content-primary">
+                      {speedSample?.preferredHostName
+                        || (speedSample?.source === 'huggingface' ? 'Hugging Face' : speedSample ? 'Measured' : 'n/a')}
                     </span>
                   </div>
+                  {(speedSample?.hosts || []).map(host => (
+                    <div key={host.id} className="flex items-center gap-3 py-3 px-1">
+                      <span className="w-40 shrink-0 text-sm text-content-secondary">{host.name}</span>
+                      <span className={`text-sm tabular-nums ${host.ok ? 'text-content-primary' : 'text-amber-400'}`}>
+                        {host.ok ? formatMBps(host.MBps) : host.error || 'Failed'}
+                      </span>
+                      {host.ok && host.rttMs != null && (
+                        <span className="text-xs text-content-tertiary">RTT {formatMs(host.rttMs)}</span>
+                      )}
+                      {host.ok && host.id === speedSample?.preferredHost && (
+                        <span className="text-xs text-ark-accent-green">fastest</span>
+                      )}
+                    </div>
+                  ))}
                   {preloadPlan && (
                     <div className="flex items-center gap-3 py-3 px-1">
                       <span className="w-40 shrink-0 text-sm text-content-secondary">Connection</span>
@@ -1031,7 +1058,9 @@ export function LocalAI() {
                       <div className="flex items-center gap-3 py-3 px-1">
                         <span className="w-44 shrink-0 text-sm text-content-secondary">Measured speed</span>
                         <span className="text-sm text-content-primary">
-                          {speedSample ? `${formatMBps(speedSample.MBps)} · ${speedSample.source}` : '—'}
+                          {speedSample
+                            ? `${formatMBps(speedSample.MBps)} · ${speedSample.preferredHostName || 'fastest host'}`
+                            : '—'}
                         </span>
                       </div>
                     </div>
@@ -1059,14 +1088,46 @@ export function LocalAI() {
 
               <section>
                 <div className="flex items-center gap-2 mb-4">
+                  <Globe className="w-4 h-4 text-content-secondary" />
+                  <h2 className="text-base font-semibold text-content-primary">Connected APIs</h2>
+                </div>
+                <p className="text-xs text-content-tertiary mb-4 px-1 leading-relaxed">
+                  These are the keys you plugged in on Models. ARK chats through them — it does not
+                  download their weights. Latency is time to list models / authenticate, not MB/s.
+                </p>
+                {apiProbes.length === 0 ? (
+                  <p className="text-sm text-content-tertiary px-1">
+                    {speedSample
+                      ? 'No API keys connected yet. Add Groq, OpenRouter, NVIDIA, and others on Models, then run the test again.'
+                      : 'Run a speed test to ping every plugged-in API key.'}
+                  </p>
+                ) : (
+                  <div className="flex flex-col">
+                    {apiProbes.map(probe => (
+                      <div key={probe.id} className="flex items-center gap-3 py-3 px-1">
+                        <span className="w-40 shrink-0 text-sm text-content-secondary">{probe.name}</span>
+                        <span className={`text-sm tabular-nums ${probe.ok ? 'text-ark-accent-green' : 'text-amber-400'}`}>
+                          {probe.ok ? formatMs(probe.ms) : probe.error || 'Failed'}
+                        </span>
+                        {probe.ok && (
+                          <span className="text-xs text-content-tertiary">reachable</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              <section>
+                <div className="flex items-center gap-2 mb-4">
                   <Zap className="w-4 h-4 text-content-secondary" />
                   <h2 className="text-base font-semibold text-content-primary">How it works</h2>
                 </div>
                 <div className="flex flex-col text-sm">
                   <div className="py-3 px-1">
-                    <p className="text-content-primary font-medium">1. Measure the line</p>
+                    <p className="text-content-primary font-medium">1. Measure every model host</p>
                     <p className="text-xs text-content-tertiary mt-1">
-                      Know how fast models can download on this connection.
+                      Hugging Face, HF Mirror, and ModelScope — plus a ping to each connected API key.
                     </p>
                   </div>
                   <div className="py-3 px-1">

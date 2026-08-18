@@ -25,6 +25,7 @@ import {
 import { arkRoute, routerProviderLabel } from '@/lib/arkRouter';
 import { buildRouterHistory } from '@/lib/chatHistory';
 import {
+  autoEquippedCaption,
   autoPillLabel,
   autoRingDetail,
   clearThreadBrain,
@@ -41,6 +42,8 @@ import {
   serializeProjectThread,
 } from '@/lib/projectThread';
 import { getLocalPrefs, hasProviderApiKey, setLocalPrefs } from '@/lib/localPrefs';
+import { installNextWhenCurrentRanOut } from '@/lib/arkHuntBootstrap';
+import { preloadStartRatio } from '@/lib/speedTest';
 import { loadRecentProjects } from '@/lib/recentStore';
 import {
   applyFileEdits,
@@ -1142,6 +1145,13 @@ export function ProjectWorkspace() {
       return buildDoneSummary(buildLabel, opts);
     };
     setTokenRatio(recordTokenUsage(pid, content));
+    if (getTokenUsageRatio(pid) >= preloadStartRatio()) {
+      void installNextWhenCurrentRanOut({
+        kind: 'coding',
+        reason: 'context',
+        currentModelId: threadBrainRef.current?.modelId,
+      }).catch(() => undefined);
+    }
     const revisingId = reviseUserMsgId;
     setReviseUserMsgId(null);
     setEditingUserId(null);
@@ -2831,7 +2841,7 @@ export function ProjectWorkspace() {
                     onClick={() => setModelMenuOpen(o => !o)}
                     className="inline-flex items-center gap-1 rounded-full border border-surface-border/80 bg-surface-hover/60 hover:bg-surface-hover px-2 py-1 text-[11px] text-content-primary transition-colors max-w-[8.5rem]"
                     title={activeModel.source === 'auto'
-                      ? (threadBrain ? `${autoPillLabel(threadBrain)} · equipped` : 'ARK Auto · picks best coder')
+                      ? (threadBrain ? autoEquippedCaption(threadBrain) : 'ARK Auto · picks best coder')
                       : activeModel.name}
                     aria-label="Select model"
                     aria-expanded={modelMenuOpen}

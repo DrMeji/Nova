@@ -5,6 +5,7 @@
 
 const os = require('os');
 const { execFile } = require('child_process');
+const arkHostPick = require('./arkHostPick.cjs');
 
 function execText(cmd, args, timeoutMs = 8000) {
   return new Promise((resolve) => {
@@ -67,11 +68,10 @@ async function windowsVramGb() {
     '-NoProfile',
     '-NonInteractive',
     '-Command',
-    "(Get-CimInstance Win32_VideoController | Where-Object { $_.AdapterRAM -and $_.AdapterRAM -gt 0 } | Sort-Object AdapterRAM -Descending | Select-Object -First 1 -ExpandProperty AdapterRAM)",
+    '(Get-CimInstance Win32_VideoController | Where-Object { $_.AdapterRAM -and $_.AdapterRAM -gt 0 } | Sort-Object AdapterRAM -Descending | Select-Object -First 1 -ExpandProperty AdapterRAM)',
   ]);
   const bytes = parseInt(raw, 10);
   if (!Number.isFinite(bytes) || bytes <= 0) return null;
-  // Some drivers report AdapterRAM capped; still useful when present
   return Math.round((bytes / (1024 ** 3)) * 10) / 10;
 }
 
@@ -85,7 +85,6 @@ function accelerationFromGpu(gpu) {
 }
 
 function snapRamGb(ramGb) {
-  // Round to nearest common DIMM total when within ~6% (handles ~63.9 → 64)
   const common = [4, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256];
   for (const n of common) {
     if (Math.abs(ramGb - n) / n <= 0.06) return n;
@@ -149,109 +148,154 @@ async function probeSystemInfo() {
   };
 }
 
+const SPEED_HOSTS = [
+  {
+    id: 'huggingface',
+    name: 'Hugging Face',
+    url: 'https://huggingface.co/bartowski/Qwen2.5-7B-Instruct-GGUF/resolve/main/Qwen2.5-7B-Instruct-Q4_K_M.gguf',
+  },
+  {
+    id: 'hf-mirror',
+    name: 'HF Mirror',
+    url: 'https://hf-mirror.com/bartowski/Qwen2.5-7B-Instruct-GGUF/resolve/main/Qwen2.5-7B-Instruct-Q4_K_M.gguf',
+  },
+  {
+    id: 'modelscope',
+    name: 'ModelScope',
+    url: 'https://www.modelscope.cn/models/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/master/qwen2.5-1.5b-instruct-q4_k_m.gguf',
+  },
+];
+
 /**
- * Measure download + upload via Cloudflare Speed endpoints (warmup + median of 3 downs).
- * Same public measurement approach many tools use — Ookla Speedtest.net is proprietary
- * and cannot be embedded; this is the accurate open alternative.
- * @returns {{ ok: boolean, MBps: number, downMBps?: number, upMBps?: number, source: string, samples?: number, error?: string }}
+ * Measure PC ↔ each GGUF host: handshake RTT, then Range-download throughput.
+ * Sequential so hosts do not steal bandwidth from each other.
  */
 async function probeSpeedTest() {
   const https = require('https');
+  const http = require('http');
+  const { URL } = require('url');
 
-  function downloadOnce(bytes, timeoutMs = 90_000) {
-    const url = `https://speed.cloudflare.com/__down?bytes=${bytes}&measId=${Date.now()}-${Math.random()}`;
-    return new Promise((resolve) => {
-      const t0 = Date.now();
-      let received = 0;
-      const req = https.get(url, { headers: { 'User-Agent': 'ARK-Engine/0.4' } }, (res) => {
-        if ((res.statusCode || 0) < 200 || (res.statusCode || 0) >= 300) {
+  const WARM_BYTES = 2 * 1024 * 1024;
+  const MEASURE_BYTES = 16 * 1024 * 1024;
+
+  function openRange(url, start, end, redirectsLeft = 8) {
+    return new Promise((resolve, reject) => {
+      const parsed = new URL(url);
+      const lib = parsed.protocol === 'http:' ? http : https;
+      const req = lib.get(url, {
+        headers: {
+          'User-Agent': 'ARK-Engine/0.4',
+          Accept: '*/*',
+          Range: `bytes=${start}-${end}`,
+        },
+      }, (res) => {
+        const status = res.statusCode || 0;
+        if ([301, 302, 303, 307, 308].includes(status) && res.headers.location) {
           res.resume();
-          resolve({ ok: false, MBps: 0 });
+          if (redirectsLeft <= 0) {
+            reject(new Error('Too many redirects'));
+            return;
+          }
+          const next = new URL(res.headers.location, url).toString();
+          resolve(openRange(next, start, end, redirectsLeft - 1));
           return;
         }
-        res.on('data', (chunk) => { received += chunk.length; });
-        res.on('end', () => {
-          const ms = Math.max(Date.now() - t0, 1);
-          resolve({ ok: true, MBps: received / (1024 * 1024) / (ms / 1000) });
-        });
-        res.on('error', () => resolve({ ok: false, MBps: 0 }));
-      });
-      req.on('error', () => resolve({ ok: false, MBps: 0 }));
-      req.setTimeout(timeoutMs, () => {
-        req.destroy();
-        resolve({ ok: false, MBps: 0 });
-      });
-    });
-  }
-
-  function uploadOnce(bytes, timeoutMs = 90_000) {
-    const payload = Buffer.alloc(bytes, 0x61);
-    return new Promise((resolve) => {
-      const t0 = Date.now();
-      const req = https.request(
-        {
-          hostname: 'speed.cloudflare.com',
-          path: `/__up?measId=${Date.now()}`,
-          method: 'POST',
-          headers: {
-            'User-Agent': 'ARK-Engine/0.4',
-            'Content-Type': 'application/octet-stream',
-            'Content-Length': payload.length,
-          },
-        },
-        (res) => {
+        if (status !== 200 && status !== 206) {
           res.resume();
-          res.on('end', () => {
-            const ms = Math.max(Date.now() - t0, 1);
-            if ((res.statusCode || 0) < 200 || (res.statusCode || 0) >= 300) {
-              resolve({ ok: false, MBps: 0 });
-              return;
-            }
-            resolve({ ok: true, MBps: bytes / (1024 * 1024) / (ms / 1000) });
-          });
-          res.on('error', () => resolve({ ok: false, MBps: 0 }));
-        },
-      );
-      req.on('error', () => resolve({ ok: false, MBps: 0 }));
-      req.setTimeout(timeoutMs, () => {
-        req.destroy();
-        resolve({ ok: false, MBps: 0 });
+          reject(new Error(`Speed probe failed (${status})`));
+          return;
+        }
+        resolve(res);
       });
-      req.write(payload);
-      req.end();
+      req.on('error', reject);
+      req.setTimeout(45_000, () => {
+        req.destroy();
+        reject(new Error('Speed probe timed out'));
+      });
     });
   }
 
-  function median(values) {
-    const sorted = values.filter((n) => Number.isFinite(n) && n > 0).sort((a, b) => a - b);
-    if (!sorted.length) return 0;
-    const mid = Math.floor(sorted.length / 2);
-    return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+  function sampleHost(url) {
+    const total = WARM_BYTES + MEASURE_BYTES;
+    const tOpen = Date.now();
+    return openRange(url, 0, total - 1).then((res) => new Promise((resolve) => {
+      const rttMs = Math.max(1, Date.now() - tOpen);
+      let received = 0;
+      let timed = 0;
+      let t0 = 0;
+      let settled = false;
+      const finish = (ok) => {
+        if (settled) return;
+        settled = true;
+        try { res.destroy(); } catch { /* ignore */ }
+        const ms = Math.max(Date.now() - t0, 1);
+        if (!ok || !t0 || timed < 1024 * 1024) {
+          resolve({ ok: false, MBps: 0, rttMs });
+          return;
+        }
+        resolve({ ok: true, MBps: timed / (1024 * 1024) / (ms / 1000), rttMs });
+      };
+      res.on('data', (chunk) => {
+        received += chunk.length;
+        if (received <= WARM_BYTES) return;
+        if (!t0) t0 = Date.now();
+        timed = received - WARM_BYTES;
+        if (received >= total) finish(true);
+      });
+      res.on('end', () => finish(timed >= 1024 * 1024));
+      res.on('error', () => finish(false));
+    })).catch((err) => ({
+      ok: false,
+      MBps: 0,
+      rttMs: Math.max(1, Date.now() - tOpen),
+      error: err instanceof Error ? err.message : String(err),
+    }));
   }
 
-  await downloadOnce(2_000_000, 30_000);
-
-  const downSamples = [];
-  for (let i = 0; i < 3; i++) {
-    const sample = await downloadOnce(40_000_000, 90_000);
-    if (sample.ok) downSamples.push(sample.MBps);
+  const hosts = [];
+  for (const host of SPEED_HOSTS) {
+    const sample = await sampleHost(host.url);
+    hosts.push({
+      id: host.id,
+      name: host.name,
+      ok: Boolean(sample.ok && sample.MBps > 0),
+      MBps: sample.ok ? Math.round(sample.MBps * 100) / 100 : 0,
+      rttMs: sample.rttMs || undefined,
+      error: sample.ok ? undefined : (sample.error || 'Unreachable'),
+    });
   }
 
-  const upSample = await uploadOnce(15_000_000, 90_000);
-  const downMBps = median(downSamples);
-  const upMBps = upSample.ok ? upSample.MBps : 0;
+  const winners = hosts.filter((h) => h.ok).sort((a, b) => b.MBps - a.MBps);
+  const best = winners[0] || null;
 
-  if (downMBps <= 0 && upMBps <= 0) {
-    return { ok: false, MBps: 0, downMBps: 0, upMBps: 0, source: 'failed', error: 'Speed test failed' };
+  if (!best) {
+    return {
+      ok: false,
+      MBps: 0,
+      downMBps: 0,
+      source: 'failed',
+      host: 'multi',
+      hosts,
+      error: 'Could not measure download speed from any model host',
+    };
   }
+
+  arkHostPick.save({
+    preferredId: best.id,
+    MBps: best.MBps,
+    hosts,
+  });
 
   return {
     ok: true,
-    MBps: Math.round(downMBps * 100) / 100,
-    downMBps: Math.round(downMBps * 100) / 100,
-    upMBps: Math.round(upMBps * 100) / 100,
-    source: 'measured',
-    samples: downSamples.length,
+    MBps: best.MBps,
+    downMBps: best.MBps,
+    source: 'multi',
+    host: best.id,
+    preferredHost: best.id,
+    preferredHostName: best.name,
+    hosts,
+    samples: 1,
   };
 }
 

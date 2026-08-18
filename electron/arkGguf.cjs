@@ -5,6 +5,7 @@
  */
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { spawn, execFile } = require('child_process');
 const { app } = require('electron');
@@ -359,16 +360,44 @@ const NOISE_LINE = new RegExp(
   'i',
 );
 
+function lastMatchEnd(text, re) {
+  const flags = re.flags.includes('g') ? re.flags : `${re.flags}g`;
+  const r = new RegExp(re.source, flags);
+  let end = -1;
+  let m;
+  while ((m = r.exec(text)) !== null) end = m.index + m[0].length;
+  return end;
+}
+
+function stripCliFooter(text) {
+  let t = String(text || '');
+  t = t.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
+  t = t.replace(/\n?\s*\[\s*Prompt:[^\]]*\][\s\S]*$/i, '');
+  t = t.replace(/\nExiting\.\.\.[\s\S]*$/i, '');
+  t = t.replace(/<\|im_end\|>[\s\S]*$/g, '');
+  t = t.replace(/<\|eot_id\|>[\s\S]*$/g, '');
+  t = t.replace(/\n?\s*>\s*$/g, '');
+  return t.trim();
+}
+
 /**
- * Drop llama-cli banners, help text, paths, and perf footers so only the
- * model reply reaches chat. Never treat stderr dumps as assistant content.
+ * llama-cli reprints the ChatML prompt on stdout. Never strip from the first
+ * `<|im_start|>` / `<|im_end|>` in that echo — that deletes the real answer.
+ * Take text after the last assistant header, then drop banners/footers.
  */
 function stripLlamaCliNoise(text) {
   let t = String(text || '').replace(/\r\n/g, '\n');
   if (!t.trim()) return '';
 
-  // Prefer the completion after the *last* ARK: / Assistant: marker (packed prompt).
-  const markRe = /(?:^|\n)\s*(?:ARK|Assistant)\s*:\s*/gi;
+  const afterAssistant = Math.max(
+    lastMatchEnd(t, /<\|im_start\|>assistant\s*\n/),
+    lastMatchEnd(t, /<\|start_header_id\|>assistant<\|end_header_id\|>\s*\n+/),
+  );
+  if (afterAssistant >= 0) {
+    return stripCliFooter(t.slice(afterAssistant));
+  }
+
+  const markRe = /(?:^|\n)\s*(?:ARK|Assistant)\s*:\s+(?!<\|)/gi;
   let lastMark = null;
   let mm;
   while ((mm = markRe.exec(t)) !== null) lastMark = mm;
@@ -381,7 +410,6 @@ function stripLlamaCliNoise(text) {
   let sawCommands = false;
   for (const line of lines) {
     const trimmed = line.trim();
-    // Interactive / echoed prompt lines: "> hello"
     if (/^>\s+\S/.test(trimmed)) continue;
     if (/^\s*User\s*:/i.test(trimmed)) continue;
     if (/^available commands/i.test(trimmed)) {
@@ -390,35 +418,34 @@ function stripLlamaCliNoise(text) {
     }
     if (sawCommands && (/^\s*\/\w+/.test(trimmed) || trimmed === '')) {
       if (/^\s*\/\w+/.test(trimmed)) continue;
-      // blank line after command list → resume keeping
       if (trimmed === '' && kept.length === 0) continue;
       sawCommands = false;
       continue;
     }
     sawCommands = false;
     if (NOISE_LINE.test(trimmed)) continue;
-    // Absolute Windows/Unix model paths
     if (/^[A-Za-z]:\\.*\.gguf\b/i.test(trimmed) || /^\/.*\.gguf\b/i.test(trimmed)) continue;
     if (/ark-engine[\\/]+models/i.test(trimmed)) continue;
-    // llama.cpp ASCII wordmark rows often contain only "llama" fragments with spaces
     if (/^[\s]*l[\s]*l[\s]*a[\s]*m[\s]*a/i.test(trimmed) && trimmed.length < 80) continue;
     kept.push(line);
   }
 
-  t = kept.join('\n').trim();
-  // Trailing interactive prompt / stats
-  t = t.replace(/\n?\s*\[\s*Prompt:[^\]]*\]\s*$/i, '');
-  t = t.replace(/\n?\s*>\s*$/g, '');
-  t = t.replace(/<\|im_end\|>[\s\S]*$/g, '');
-  t = t.replace(/<\|eot_id\|>[\s\S]*$/g, '');
-  t = t.replace(/<\|im_start\|>[\s\S]*$/g, '');
-  t = t.replace(/<\|start_header_id\|>[\s\S]*$/g, '');
-  return t.trim();
+  return stripCliFooter(kept.join('\n'));
 }
 
 function cleanGgufReply(prompt, text) {
   const noNoise = stripLlamaCliNoise(text);
   return stripPromptEcho(prompt, noNoise);
+}
+
+function writeGgufDebug(payload) {
+  try {
+    const file = path.join(app.getPath('userData'), 'ark-engine', 'last-gguf-chat.log');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
+  } catch {
+    /* ignore */
+  }
 }
 
 /**
@@ -447,19 +474,38 @@ function runGgufStream(modelId, prompt, onChunk, timeoutMs = 120000) {
     }
 
     const promptStr = wrapChatPrompt(modelId, prompt);
+    const started = Date.now();
+    const promptFile = path.join(os.tmpdir(), `ark-gguf-prompt-${process.pid}-${started}.txt`);
+    try {
+      fs.writeFileSync(promptFile, promptStr, 'utf8');
+    } catch (err) {
+      reject(err);
+      return;
+    }
     const args = [
       '-m', gguf,
-      '-p', promptStr,
-      '-n', '768',
-      '-c', '4096',
+      '-f', promptFile,
+      '-n', '256',
+      '-c', '2048',
       '--temp', '0.55',
-      '-r', stopToken(modelId),
+      '--no-conversation',
+      '--single-turn',
+      '--no-display-prompt',
+      '--simple-io',
     ];
     const child = spawn(bin, args, { windowsHide: true });
+    try {
+      child.stdin?.end();
+    } catch {
+      /* ignore */
+    }
     activeChild = child;
     let out = '';
     let err = '';
     let emitted = '';
+    const cleanupPrompt = () => {
+      try { fs.unlinkSync(promptFile); } catch { /* ignore */ }
+    };
     const timer = setTimeout(() => {
       killLlamaChild(child);
       reject(new Error('GGUF generation timed out'));
@@ -470,7 +516,6 @@ function runGgufStream(modelId, prompt, onChunk, timeoutMs = 120000) {
       out += piece;
       if (typeof onChunk !== 'function') return;
       const cleaned = cleanGgufReply(promptStr, out);
-      // Hold only while stdout is still banners / prompt echo (cleaned still empty).
       if (!cleaned) return;
       if (cleaned.length > emitted.length) {
         const delta = cleaned.slice(emitted.length);
@@ -483,17 +528,31 @@ function runGgufStream(modelId, prompt, onChunk, timeoutMs = 120000) {
     child.stderr.on('data', (d) => { err += d.toString(); });
     child.on('error', (e) => {
       clearTimeout(timer);
+      cleanupPrompt();
       if (activeChild === child) activeChild = null;
       reject(e);
     });
     child.on('close', (code) => {
       clearTimeout(timer);
+      cleanupPrompt();
       if (activeChild === child) activeChild = null;
+      const text = cleanGgufReply(promptStr, out);
+      writeGgufDebug({
+        at: new Date().toISOString(),
+        ms: Date.now() - started,
+        modelId,
+        gguf: path.basename(gguf),
+        code,
+        cancelled: Boolean(cancelRequested),
+        outLen: out.length,
+        cleanedLen: text.length,
+        cleanedPreview: text.slice(0, 240),
+        errTail: stripLlamaCliNoise(err).slice(-240),
+      });
       if (cancelRequested) {
-        const partial = cleanGgufReply(promptStr, out).slice(-6000);
         resolve({
           ok: true,
-          reply: partial || '(stopped)',
+          reply: text.slice(-6000) || '(stopped)',
           modelFile: path.basename(gguf),
           source: 'ark-gguf',
           streamed: Boolean(onChunk),
@@ -501,8 +560,6 @@ function runGgufStream(modelId, prompt, onChunk, timeoutMs = 120000) {
         });
         return;
       }
-      // Never fall back to stderr — that is where llama.cpp prints banners/help.
-      const text = cleanGgufReply(promptStr, out);
       if (!text) {
         const errHint = stripLlamaCliNoise(err).slice(0, 240);
         reject(new Error(
@@ -534,4 +591,5 @@ module.exports = {
   modelsDir,
   binDir,
   LLAMA_TAG,
+  stripLlamaCliNoise,
 };

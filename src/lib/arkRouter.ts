@@ -139,7 +139,16 @@ async function tryLocalChat(
       if (!cleaned.trim() && looksLikePromptEcho(rawText)) return null;
       const reply = cleaned || rawText;
       if (!reply || isTemplateEngineReply(reply)) return null;
-      if (result.source === 'ark-engine' && !result.media) return null;
+      if (result.source === 'ark-engine' && !result.media) {
+        void import('@/lib/arkHuntBootstrap').then(m =>
+          m.installNextWhenCurrentRanOut({
+            kind,
+            reason: 'empty',
+            currentModelId: id,
+          }),
+        ).catch(() => undefined);
+        return null;
+      }
       return {
         reply,
         media: result.media,
@@ -150,7 +159,17 @@ async function tryLocalChat(
         attempted,
         continued: hasContinuity(history),
       };
-    } catch {
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (/timed out|Empty GGUF|not ready|No GGUF|llama-cli|No local GGUF/i.test(msg)) {
+        void import('@/lib/arkHuntBootstrap').then(m =>
+          m.installNextWhenCurrentRanOut({
+            kind,
+            reason: /timed out/i.test(msg) ? 'timeout' : 'empty',
+            currentModelId: id,
+          }),
+        ).catch(() => undefined);
+      }
       return null;
     }
   };
@@ -183,7 +202,9 @@ async function tryLocalChat(
     }
   }
 
-  for (const id of extras) {
+  // Chat: one brain attempt — hopping local GGUFs can stall for minutes with no answer.
+  const maxLocalFailover = modelId ? 0 : 1;
+  for (const id of extras.slice(0, maxLocalFailover)) {
     const hit = await runOne(id);
     if (hit && isStrongLocal(hit.source)) return hit;
   }
@@ -824,6 +845,13 @@ async function routeImage(opts: ArkRouteOpts): Promise<ArkRouterResult> {
 
   // Last resort: labeled preview only — never treat SVG fallback as finished art.
   if (local?.media?.dataUrl && !local.media.real) {
+    void import('@/lib/arkHuntBootstrap').then(m =>
+      m.installNextWhenCurrentRanOut({
+        kind: 'image',
+        reason: 'media',
+        currentModelId: opts.preferredModelId,
+      }),
+    ).catch(() => undefined);
     return {
       ...local,
       reply: [
@@ -837,6 +865,14 @@ async function routeImage(opts: ArkRouteOpts): Promise<ArkRouterResult> {
   }
 
   if (local) return local;
+
+  void import('@/lib/arkHuntBootstrap').then(m =>
+    m.installNextWhenCurrentRanOut({
+      kind: 'image',
+      reason: 'media',
+      currentModelId: opts.preferredModelId,
+    }),
+  ).catch(() => undefined);
 
   return {
     reply: 'Image generation failed. Check ARK Engine / network, or add a Hugging Face / OpenAI key.',
@@ -880,6 +916,13 @@ async function routeVideo(opts: ArkRouteOpts): Promise<ArkRouterResult> {
         '',
         result.reply,
       ].join('\n');
+      void import('@/lib/arkHuntBootstrap').then(m =>
+        m.installNextWhenCurrentRanOut({
+          kind: 'video',
+          reason: 'media',
+          currentModelId: modelId,
+        }),
+      ).catch(() => undefined);
     }
     return {
       reply,
@@ -891,6 +934,13 @@ async function routeVideo(opts: ArkRouteOpts): Promise<ArkRouterResult> {
       attempted,
     };
   } catch (err) {
+    void import('@/lib/arkHuntBootstrap').then(m =>
+      m.installNextWhenCurrentRanOut({
+        kind: 'video',
+        reason: 'media',
+        currentModelId: modelId,
+      }),
+    ).catch(() => undefined);
     return {
       reply: err instanceof Error ? err.message : 'Video generation failed',
       modelName: 'ARK Video Core',
