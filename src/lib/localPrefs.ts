@@ -229,6 +229,16 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.61',
+    channel: 'stable' as const,
+    date: 'Aug 17, 2026',
+    title: 'Cleaner Updating screen + Message Coming soon',
+    notes: [
+      'Update splash uses the ARK icon in the window and taskbar, one status line, and a clearer progress bar',
+      'Message is disabled in the sidebar with Coming soon (Networking stays Coming soon)',
+    ],
+  },
+  {
     version: '0.1.60',
     channel: 'stable' as const,
     date: 'Aug 17, 2026',

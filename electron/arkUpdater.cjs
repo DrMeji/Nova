@@ -275,12 +275,12 @@ function downloadFile(url, dest, onProgress) {
 
 function resolveUpdateIcon() {
   const candidates = [
-    path.join(process.resourcesPath || '', 'app.asar', 'dist', 'ark-icon.png'),
-    path.join(app.getAppPath(), 'dist', 'ark-icon.png'),
-    path.join(__dirname, '..', 'dist', 'ark-icon.png'),
+    path.join(__dirname, '..', 'build', 'icon.png'),
     path.join(__dirname, '..', 'public', 'ark-icon.png'),
     path.join(app.getAppPath(), 'build', 'icon.png'),
-    path.join(__dirname, '..', 'build', 'icon.png'),
+    path.join(app.getAppPath(), 'dist', 'ark-icon.png'),
+    path.join(process.resourcesPath || '', 'app.asar', 'dist', 'ark-icon.png'),
+    path.join(process.resourcesPath || '', 'app.asar.unpacked', 'build', 'icon.png'),
   ];
   for (const src of candidates) {
     try {
@@ -292,12 +292,52 @@ function resolveUpdateIcon() {
   return null;
 }
 
-/** Inline mark so the splash never shows a broken image icon. */
-function splashIconMarkup(iconFileUrl) {
-  if (iconFileUrl) {
-    return `<img src="${iconFileUrl}" alt="ARK" width="72" height="72" draggable="false" style="object-fit:contain;display:block;margin:0 auto;user-select:none;" />`;
+function resolveUpdateIco() {
+  const candidates = [
+    path.join(__dirname, '..', 'build', 'icon.ico'),
+    path.join(app.getAppPath(), 'build', 'icon.ico'),
+    path.join(process.resourcesPath || '', 'app.asar.unpacked', 'build', 'icon.ico'),
+    path.join(process.resourcesPath || '', 'icon.ico'),
+  ];
+  for (const src of candidates) {
+    try {
+      if (src && fs.existsSync(src)) return src;
+    } catch {
+      /* try next */
+    }
   }
-  return `<div style="width:72px;height:72px;margin:0 auto 0;border-radius:16px;background:#141416;display:flex;align-items:center;justify-content:center;color:#f2f2f3;font:700 20px Segoe UI,system-ui,sans-serif;">ARK</div>`;
+  return null;
+}
+
+function splashIconDataUri() {
+  const src = resolveUpdateIcon();
+  if (!src) return '';
+  try {
+    return `data:image/png;base64,${fs.readFileSync(src).toString('base64')}`;
+  } catch {
+    return '';
+  }
+}
+
+/** Logo always inlined so HTA/Electron never show a broken-image box. */
+function splashIconMarkup() {
+  const data = splashIconDataUri();
+  if (data) {
+    return `<img src="${data}" alt="" width="64" height="64" draggable="false" style="object-fit:contain;display:block;margin:0 auto;user-select:none;" />`;
+  }
+  return `<div style="width:64px;height:64px;margin:0 auto;border-radius:14px;background:#1a1a1e;display:flex;align-items:center;justify-content:center;color:#f2f2f3;font:700 15px Segoe UI,system-ui,sans-serif;">ARK</div>`;
+}
+
+function splashShellCss() {
+  return `
+  html,body{margin:0;height:100%;background:#0a0a0c;color:#f2f2f3;font-family:"Segoe UI",system-ui,sans-serif;overflow:hidden;user-select:none;}
+  .wrap{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:36px 32px 40px;box-sizing:border-box;}
+  .logo-wrap{margin:0 0 20px;}
+  #label{font-size:16px;font-weight:600;letter-spacing:0.01em;margin:0 0 8px;text-align:center;color:#f2f2f3;}
+  #pct{font-size:13px;font-weight:500;color:#a8a8b3;margin:0 0 18px;text-align:center;font-variant-numeric:tabular-nums;}
+  .track{width:260px;height:10px;border-radius:999px;background:#3a3a44;overflow:hidden;}
+  #fill{height:100%;width:8%;min-width:12px;border-radius:999px;background:#f2f2f4;}
+`;
 }
 
 function pidAlive(pid) {
@@ -336,41 +376,31 @@ function killParentTree(parentPid, writeLog) {
   }
 }
 
-/** Small centered Updating card — logo, status, percent, thin bar. */
-function splashHtml(iconFileUrl) {
-  const icon = splashIconMarkup(iconFileUrl);
+/** Small centered card — logo, one status line, percent, bar. */
+function splashHtml() {
+  const icon = splashIconMarkup();
   return `<!DOCTYPE html>
 <html><head><meta charset="utf-8" />
 <style>
-  html,body{margin:0;height:100%;background:#0a0a0c;color:#f2f2f3;font-family:"Segoe UI",system-ui,sans-serif;overflow:hidden;user-select:none;-webkit-app-region:drag;}
-  .wrap{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:36px 40px 40px;box-sizing:border-box;}
-  .logo-wrap{margin:0 0 24px;animation:pulse 1.8s ease-in-out infinite;}
-  @keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:0.88;transform:scale(1.03)}}
-  #label{font-size:17px;font-weight:600;letter-spacing:0.01em;margin:0 0 8px;text-align:center;}
-  #pct{font-size:13px;font-weight:500;color:rgba(255,255,255,0.55);margin:0 0 16px;text-align:center;font-variant-numeric:tabular-nums;min-height:1.2em;}
-  #sub{font-size:12px;font-weight:400;color:rgba(255,255,255,0.38);margin:0 0 18px;text-align:center;min-height:1.1em;}
-  .track{width:280px;height:5px;border-radius:999px;background:#1c1c20;overflow:hidden;}
-  #fill{height:100%;width:4%;border-radius:999px;background:linear-gradient(90deg,#9aa3b2,#e8eaed);transition:width 0.22s ease-out;}
+${splashShellCss()}
+  html,body{-webkit-app-region:drag;}
 </style></head>
 <body>
   <div class="wrap">
     <div class="logo-wrap">${icon}</div>
-    <div id="label">Updating ARK</div>
+    <div id="label">Installing update</div>
     <div id="pct">0%</div>
-    <div id="sub">Preparing</div>
     <div class="track"><div id="fill"></div></div>
   </div>
   <script>
-    window.__arkSet = function(pct, text, sub) {
+    window.__arkSet = function(pct, text) {
       var n = Math.max(0, Math.min(100, Math.round(Number(pct) || 0)));
       var f = document.getElementById('fill');
       var l = document.getElementById('label');
       var p = document.getElementById('pct');
-      var s = document.getElementById('sub');
-      if (f) f.style.width = Math.max(4, n) + '%';
+      if (f) f.style.width = Math.max(8, n) + '%';
       if (p) p.textContent = n + '%';
       if (l && text) l.textContent = text;
-      if (s) s.textContent = sub || '';
     };
   </script>
 </body></html>`;
@@ -380,16 +410,17 @@ function splashHtml(iconFileUrl) {
  * Independent HTML splash via mshta — not ARK.exe, so NSIS can replace the install
  * without killing this window. Stays up until main.cjs writes ark-ui-shown.flag.
  */
-function splashHtaHtml({ iconFileUrl, statusPath, shownPath, alivePath }) {
-  const icon = splashIconMarkup(iconFileUrl);
+function splashHtaHtml({ statusPath, shownPath, alivePath, icoName }) {
+  const icon = splashIconMarkup();
   const jsStr = (s) => JSON.stringify(String(s || ''));
+  const icoAttr = icoName ? `\n  icon="${icoName}"` : '';
   return `<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8" />
 <hta:application
   id="ArkUpdateSplash"
-  applicationname="Updating ARK"
+  applicationname="ARK"
   border="none"
   caption="no"
   showintaskbar="yes"
@@ -397,27 +428,18 @@ function splashHtaHtml({ iconFileUrl, statusPath, shownPath, alivePath }) {
   scroll="no"
   innerborder="no"
   selection="no"
-  contextmenu="no"
+  contextmenu="no"${icoAttr}
 />
-<title>Updating ARK</title>
+<title>ARK</title>
 <style>
-  html,body{margin:0;height:100%;background:#0a0a0c;color:#f2f2f3;font-family:"Segoe UI",system-ui,sans-serif;overflow:hidden;user-select:none;}
-  .wrap{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:36px 40px 40px;box-sizing:border-box;}
-  .logo-wrap{margin:0 0 24px;animation:pulse 1.8s ease-in-out infinite;}
-  @keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:0.88;transform:scale(1.03)}}
-  #label{font-size:17px;font-weight:600;letter-spacing:0.01em;margin:0 0 8px;text-align:center;}
-  #pct{font-size:13px;font-weight:500;color:rgba(255,255,255,0.55);margin:0 0 16px;text-align:center;font-variant-numeric:tabular-nums;min-height:1.2em;}
-  #sub{font-size:12px;font-weight:400;color:rgba(255,255,255,0.38);margin:0 0 18px;text-align:center;min-height:1.1em;}
-  .track{width:280px;height:5px;border-radius:999px;background:#1c1c20;overflow:hidden;}
-  #fill{height:100%;width:8%;border-radius:999px;background:linear-gradient(90deg,#9aa3b2,#e8eaed);}
+${splashShellCss()}
 </style>
 </head>
 <body>
   <div class="wrap">
     <div class="logo-wrap">${icon}</div>
-    <div id="label">Updating ARK</div>
+    <div id="label">Installing update</div>
     <div id="pct">8%</div>
-    <div id="sub">Keeping this screen open</div>
     <div class="track"><div id="fill"></div></div>
   </div>
   <script language="JScript">
@@ -444,16 +466,14 @@ function splashHtaHtml({ iconFileUrl, statusPath, shownPath, alivePath }) {
         return s;
       } catch (e) { return ""; }
     }
-    function setUi(n, text, sub) {
+    function setUi(n, text) {
       n = Math.max(0, Math.min(100, Math.round(n || 0)));
       var fill = document.getElementById("fill");
       var pct = document.getElementById("pct");
       var lab = document.getElementById("label");
-      var s = document.getElementById("sub");
       if (fill) fill.style.width = Math.max(8, n) + "%";
       if (pct) pct.innerText = n + "%";
       if (lab && text) lab.innerText = text;
-      if (s) s.innerText = sub || "";
     }
     function parseStatus(raw) {
       var map = {};
@@ -470,17 +490,18 @@ function splashHtaHtml({ iconFileUrl, statusPath, shownPath, alivePath }) {
       if (closing) return;
       if ((new Date()).getTime() - started > 600000) { window.close(); return; }
       var map = parseStatus(readText(STATUS));
-      if (map.pct) setUi(parseInt(map.pct, 10) || 0, map.label || "Updating ARK", map.sub || "");
+      var line = map.sub || map.label || "Installing update";
+      if (map.pct) setUi(parseInt(map.pct, 10) || 0, line);
       try { window.focus(); } catch (e2) {}
       if (readText(SHOWN)) {
         closing = true;
-        setUi(100, "ARK is opening", "Almost there");
+        setUi(100, "Opening ARK");
         setTimeout(function () { window.close(); }, 450);
       }
     }
-    window.resizeTo(460, 300);
+    window.resizeTo(420, 280);
     try {
-      window.moveTo(Math.max(0, (screen.width - 460) / 2), Math.max(0, (screen.height - 300) / 2));
+      window.moveTo(Math.max(0, (screen.width - 420) / 2), Math.max(0, (screen.height - 280) / 2));
     } catch (e) {}
     writeAlive();
     setInterval(tick, 350);
@@ -490,33 +511,42 @@ function splashHtaHtml({ iconFileUrl, statusPath, shownPath, alivePath }) {
 </html>`;
 }
 
-function copySplashIconToTemp() {
-  const src = resolveUpdateIcon();
-  if (!src) return null;
-  const dest = path.join(app.getPath('temp'), 'ark-update-icon.png');
-  try {
-    fs.copyFileSync(src, dest);
-    return dest;
-  } catch {
-    return src;
+function copySplashIcoToTemp(tempDir, destName = 'ark-update.ico') {
+  const dest = path.join(tempDir, destName);
+  const candidates = [
+    resolveUpdateIco(),
+    path.join(process.resourcesPath || '', 'icon.ico'),
+    process.execPath,
+  ].filter(Boolean);
+  for (const src of candidates) {
+    try {
+      if (!src || src === dest) continue;
+      if (!fs.existsSync(src)) continue;
+      if (/\.exe$/i.test(src)) continue;
+      fs.copyFileSync(src, dest);
+      if (fs.existsSync(dest)) return dest;
+    } catch {
+      /* try next */
+    }
   }
+  return fs.existsSync(dest) ? dest : null;
 }
 
 function launchHtaSplash({ statusPath, shownPath }) {
   const temp = app.getPath('temp');
-  const htaPath = path.join(temp, `ark-update-splash-${Date.now()}.hta`);
+  const stamp = Date.now();
+  const base = `ark-update-splash-${stamp}`;
+  const htaPath = path.join(temp, `${base}.hta`);
   const alivePath = splashAliveFlagPath();
-  clearSplashAlive();
-  const iconFile = copySplashIconToTemp();
-  const iconUrl = iconFile ? `file:///${iconFile.replace(/\\/g, '/')}` : '';
+  const icoPath = copySplashIcoToTemp(temp, `${base}.ico`);
   try {
     fs.writeFileSync(
       htaPath,
       splashHtaHtml({
-        iconFileUrl: iconUrl,
         statusPath,
         shownPath,
         alivePath,
+        icoName: icoPath ? `${base}.ico` : '',
       }),
       'utf8',
     );
@@ -549,12 +579,12 @@ function launchHtaSplash({ statusPath, shownPath }) {
 
 async function setSplash(win, pct, text, sub) {
   if (!win || win.isDestroyed()) return;
+  const line = String(sub || text || 'Installing update');
   const esc = (v) => String(v || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
   try {
-    // Hard timeout — never block install if the renderer was killed or hung.
     await Promise.race([
       win.webContents.executeJavaScript(
-        `window.__arkSet && window.__arkSet(${Number(pct) || 0}, '${esc(text)}', '${esc(sub)}')`,
+        `window.__arkSet && window.__arkSet(${Number(pct) || 0}, '${esc(line)}')`,
       ),
       sleep(600),
     ]);
@@ -624,6 +654,11 @@ async function runStandaloneSplash(argv) {
   };
   writeLog(`argv=${JSON.stringify(argv)}`);
   writeLog(`pid=${process.pid} exec=${process.execPath}`);
+  try {
+    app.setAppUserModelId('com.ark.studio');
+  } catch {
+    /* ignore */
+  }
 
   const idx = argv.indexOf('--ark-updater');
   const payload = argv[idx + 1];
@@ -641,13 +676,11 @@ async function runStandaloneSplash(argv) {
     ? payload
     : path.join(app.getPath('temp'), `ARK-Setup-${expectedVersion || 'update'}.exe`);
 
-  const iconPath = resolveUpdateIcon();
-  const iconUrl = iconPath ? `file:///${iconPath.replace(/\\/g, '/')}` : '';
+  const iconPath = resolveUpdateIco() || resolveUpdateIcon();
 
-  // loadFile is reliable; data: URLs can leave a blank black frame on Electron 43.
   const splashPath = path.join(app.getPath('temp'), `ark-update-splash-${process.pid}.html`);
   try {
-    fs.writeFileSync(splashPath, splashHtml(iconUrl), 'utf8');
+    fs.writeFileSync(splashPath, splashHtml(), 'utf8');
   } catch (err) {
     writeLog(`splash write failed: ${err}`);
   }
@@ -659,14 +692,11 @@ async function runStandaloneSplash(argv) {
     `ark-update-status-${process.pid}-${Date.now()}.txt`,
   );
   const shownPath = uiShownFlagPath();
-  writeUpdateStatus(statusPath, 'waiting', 8, 'Updating ARK', 'Preparing');
-
-  const hta = launchHtaSplash({ statusPath, shownPath });
-  writeLog(`hta splash launched ok=${hta.ok} path=${hta.htaPath || ''} err=${hta.error || ''}`);
+  writeUpdateStatus(statusPath, 'waiting', 8, 'Installing update', 'Installing update');
 
   const win = new BrowserWindow({
-    width: 460,
-    height: 300,
+    width: 420,
+    height: 280,
     frame: false,
     resizable: false,
     maximizable: false,
@@ -677,7 +707,7 @@ async function runStandaloneSplash(argv) {
     alwaysOnTop: true,
     center: true,
     autoHideMenuBar: true,
-    title: 'Updating ARK',
+    title: 'ARK',
     icon: iconPath || undefined,
     webPreferences: {
       contextIsolation: true,
@@ -691,11 +721,8 @@ async function runStandaloneSplash(argv) {
     await win.loadFile(splashPath);
   } catch (err) {
     writeLog(`loadFile failed: ${err}; falling back to data URL`);
-    await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(splashHtml(iconUrl))}`);
+    await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(splashHtml())}`);
   }
-
-  const htaAlive = await waitForFile(hta.alivePath, 3500);
-  writeLog(`hta alive=${htaAlive}`);
 
   const showElectronSplash = () => {
     try {
@@ -708,18 +735,31 @@ async function runStandaloneSplash(argv) {
     }
   };
 
-  if (!htaAlive) {
-    writeLog('hta splash did not paint; showing Electron splash + WinForms fallback');
-    showElectronSplash();
-    await setSplash(win, 4, 'Updating ARK', 'Preparing');
-    launchInstallHandoffSplash({
-      statusPath,
-      expectedVersion,
-      arkExe: path.join(process.env.LOCALAPPDATA || '', 'Programs', 'ARK', 'ARK.exe'),
-      shownPath,
-    });
+  const alivePath = splashAliveFlagPath();
+  const winforms = launchInstallHandoffSplash({
+    statusPath,
+    expectedVersion,
+    arkExe: process.execPath,
+    shownPath,
+    alivePath,
+  });
+  writeLog(`winforms splash launched ok=${winforms.ok} err=${winforms.error || ''}`);
+
+  const winformsAlive = await waitForFile(alivePath, 7000);
+  writeLog(`winforms alive=${winformsAlive}`);
+
+  if (!winformsAlive) {
+    const hta = launchHtaSplash({ statusPath, shownPath });
+    writeLog(`hta splash launched ok=${hta.ok} path=${hta.htaPath || ''} err=${hta.error || ''}`);
+    const htaAlive = await waitForFile(hta.alivePath, 3500);
+    writeLog(`hta alive=${htaAlive}`);
+    if (!htaAlive) {
+      writeLog('independent splash did not paint; showing Electron splash');
+      showElectronSplash();
+      await setSplash(win, 4, 'Installing update');
+    }
   } else {
-    writeLog('hta splash is up; Electron window stays hidden so the splash never blinks off');
+    writeLog('WinForms splash is up; Electron window stays hidden so the splash never blinks off');
   }
 
   // Only then tell the parent it can quit — splash is already on screen.
@@ -743,8 +783,8 @@ async function runStandaloneSplash(argv) {
     : path.join(installDir, 'ARK.exe');
 
   try {
-    await setSplash(win, 8, 'Updating ARK', 'Waiting for ARK to close');
-    writeUpdateStatus(statusPath, 'waiting', 12, 'Updating ARK', 'Waiting for ARK to close');
+    await setSplash(win, 8, 'Closing ARK');
+    writeUpdateStatus(statusPath, 'waiting', 12, 'Closing ARK', 'Closing ARK');
     // Give the parent a few seconds to exit on its own, then force-kill that PID tree only.
     const softDeadline = Date.now() + 8_000;
     while (pidAlive(parentPid) && Date.now() < softDeadline) {
@@ -758,13 +798,13 @@ async function runStandaloneSplash(argv) {
     writeLog(`parent exited alive=${pidAlive(parentPid)}`);
     await sleep(400);
 
-    await setSplash(win, 18, 'Updating ARK', 'Preparing installer');
-    writeUpdateStatus(statusPath, 'waiting', 18, 'Updating ARK', 'Preparing installer');
+    await setSplash(win, 18, 'Installing update');
+    writeUpdateStatus(statusPath, 'waiting', 18, 'Installing update', 'Installing update');
     writeLog('past waiting — starting install prep');
 
     if (isUrl) {
-      await setSplash(win, 12, 'Updating ARK', 'Downloading installer');
-      writeUpdateStatus(statusPath, 'downloading', 12, 'Updating ARK', 'Downloading installer');
+      await setSplash(win, 12, 'Downloading update');
+      writeUpdateStatus(statusPath, 'downloading', 12, 'Downloading update', 'Downloading update');
       try {
         if (fs.existsSync(localSetup)) fs.unlinkSync(localSetup);
       } catch {
@@ -772,13 +812,13 @@ async function runStandaloneSplash(argv) {
       }
       await downloadFile(payload, localSetup, async (pct) => {
         const n = Math.round((pct / 100) * 40);
-        await setSplash(win, n, 'Updating ARK', 'Downloading installer');
-        writeUpdateStatus(statusPath, 'downloading', n, 'Updating ARK', 'Downloading installer');
+        await setSplash(win, n, 'Downloading update');
+        writeUpdateStatus(statusPath, 'downloading', n, 'Downloading update', 'Downloading update');
       });
       writeLog('download done');
     } else {
-      await setSplash(win, 24, 'Updating ARK', 'Installer ready');
-      writeUpdateStatus(statusPath, 'waiting', 24, 'Updating ARK', 'Installer ready');
+      await setSplash(win, 24, 'Installing update');
+      writeUpdateStatus(statusPath, 'waiting', 24, 'Installing update', 'Installing update');
       const exists = fs.existsSync(localSetup);
       let size = 0;
       try {
@@ -806,8 +846,8 @@ async function runStandaloneSplash(argv) {
      * Do NOT run NSIS while this process still holds ARK.exe open.
      * Independent HTA/WinForms splash stays until the new ARK window is shown.
      */
-    writeUpdateStatus(statusPath, 'waiting', 40, 'Updating ARK', 'Starting installer');
-    await setSplash(win, 40, 'Updating ARK', 'Starting installer');
+    writeUpdateStatus(statusPath, 'waiting', 40, 'Installing update', 'Installing update');
+    await setSplash(win, 40, 'Installing update');
     writeLog(`delegate install ${setupToRun} → ${installDir}; reopen=${reopenExe}`);
     launchCmdApplyUpdate({
       setupPath: setupToRun,
@@ -818,8 +858,8 @@ async function runStandaloneSplash(argv) {
       statusPath,
     });
 
-    writeUpdateStatus(statusPath, 'waiting', 48, 'Updating ARK', 'Installing update');
-    await setSplash(win, 48, 'Updating ARK', 'Installing update');
+    writeUpdateStatus(statusPath, 'waiting', 48, 'Installing update', 'Installing update');
+    await setSplash(win, 48, 'Installing update');
 
     // Independent splash already painted — close this ARK.exe window so NSIS can replace the binary.
     try {
@@ -833,7 +873,7 @@ async function runStandaloneSplash(argv) {
   } catch (err) {
     writeLog(`error ${err instanceof Error ? err.stack || err.message : err}`);
     try {
-      await setSplash(win, 100, 'Update failed', 'You can reopen ARK manually');
+      await setSplash(win, 100, 'Update failed');
       await sleep(3200);
     } catch {
       /* ignore */
@@ -955,7 +995,7 @@ function writeUpdateStatus(statusPath, stage, pct, label, sub) {
       [
         `stage=${String(stage || '')}`,
         `pct=${Math.max(0, Math.min(100, Math.round(Number(pct) || 0)))}`,
-        `label=${String(label || 'Updating ARK')}`,
+        `label=${String(label || 'Installing update')}`,
         `sub=${String(sub || '')}`,
       ].join('\n') + '\n',
       'utf8',
@@ -969,67 +1009,98 @@ function writeUpdateStatus(statusPath, stage, pct, label, sub) {
  * Independent WinForms splash — not loaded from install-dir ARK.exe, so NSIS cannot kill it.
  * Stays up through install until ARK.exe is running again, then closes.
  */
-function launchInstallHandoffSplash({ statusPath, expectedVersion, arkExe, shownPath }) {
+function launchInstallHandoffSplash({ statusPath, expectedVersion, arkExe, shownPath, alivePath }) {
   const temp = app.getPath('temp');
   const stamp = Date.now();
   const ps1Path = path.join(temp, `ark-update-handoff-${stamp}.ps1`);
   const ver = normalizeVersion(expectedVersion) || 'update';
   const qPs = (s) => String(s).replace(/'/g, "''");
+  const splashAlive = alivePath || splashAliveFlagPath();
 
-  writeUpdateStatus(statusPath, 'waiting', 40, 'Updating ARK', 'Waiting to install…');
+  const icoForForm = copySplashIcoToTemp(temp, `ark-update-handoff-${stamp}.ico`);
+  const pngSrc = resolveUpdateIcon();
+  let pngForForm = '';
+  if (pngSrc) {
+    pngForForm = path.join(temp, `ark-update-handoff-${stamp}.png`);
+    try {
+      fs.copyFileSync(pngSrc, pngForForm);
+    } catch {
+      pngForForm = pngSrc;
+    }
+  }
 
   const ps1 = [
     '$ErrorActionPreference = "Continue"',
     'Add-Type -AssemblyName System.Windows.Forms | Out-Null',
     'Add-Type -AssemblyName System.Drawing | Out-Null',
+    'try {',
+    '  Add-Type -TypeDefinition @"',
+    'using System.Runtime.InteropServices;',
+    'public static class ArkSplashAppId {',
+    '  [DllImport("shell32.dll", CharSet = CharSet.Unicode)]',
+    '  public static extern int SetCurrentProcessExplicitAppUserModelID(string AppID);',
+    '}',
+    '"@',
+    '  [void][ArkSplashAppId]::SetCurrentProcessExplicitAppUserModelID("ARK.Studio.Update")',
+    '} catch {}',
     `$statusPath = '${qPs(statusPath)}'`,
     `$arkExe = '${qPs(arkExe || '')}'`,
     `$shownPath = '${qPs(shownPath || uiShownFlagPath())}'`,
+    `$alivePath = '${qPs(splashAlive)}'`,
+    `$icoPath = '${qPs(icoForForm || '')}'`,
+    `$pngPath = '${qPs(pngForForm || '')}'`,
     `$ver = '${qPs(ver)}'`,
+    'function Write-ArkAlive { try { Set-Content -LiteralPath $alivePath -Value "ok" -Encoding ASCII } catch {} }',
     '$form = New-Object System.Windows.Forms.Form',
-    `$form.Text = "Updating ARK $ver"`,
-    '$form.Size = New-Object System.Drawing.Size(460, 300)',
+    `$form.Text = "ARK"`,
+    '$form.Size = New-Object System.Drawing.Size(420, 280)',
     '$form.StartPosition = "CenterScreen"',
     '$form.FormBorderStyle = "None"',
     '$form.BackColor = [System.Drawing.Color]::FromArgb(10, 10, 12)',
     '$form.TopMost = $true',
     '$form.ShowInTaskbar = $true',
+    'if ($icoPath -and (Test-Path -LiteralPath $icoPath)) { try { $form.Icon = New-Object System.Drawing.Icon($icoPath) } catch {} }',
+    'if (-not $form.Icon) {',
+    '  try {',
+    '    $exeForIcon = $arkExe',
+    '    if (-not $exeForIcon -or -not (Test-Path -LiteralPath $exeForIcon)) { $exeForIcon = [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName }',
+    '    $form.Icon = [System.Drawing.Icon]::ExtractAssociatedIcon($exeForIcon)',
+    '  } catch {}',
+    '}',
+    '$pic = New-Object System.Windows.Forms.PictureBox',
+    '$pic.SizeMode = "Zoom"',
+    '$pic.Size = New-Object System.Drawing.Size(64, 64)',
+    '$pic.Location = New-Object System.Drawing.Point(178, 40)',
+    'if ($pngPath -and (Test-Path -LiteralPath $pngPath)) { try { $pic.Image = [System.Drawing.Image]::FromFile($pngPath) } catch {} }',
+    'if (-not $pic.Image -and $form.Icon) { try { $pic.Image = $form.Icon.ToBitmap() } catch {} }',
     '$label = New-Object System.Windows.Forms.Label',
-    '$label.Text = "Updating ARK"',
+    '$label.Text = "Installing update"',
     '$label.ForeColor = [System.Drawing.Color]::FromArgb(242, 242, 243)',
-    '$label.Font = New-Object System.Drawing.Font("Segoe UI", 14, [System.Drawing.FontStyle]::Bold)',
+    '$label.Font = New-Object System.Drawing.Font("Segoe UI", 12, [System.Drawing.FontStyle]::Bold)',
     '$label.AutoSize = $false',
     '$label.TextAlign = "MiddleCenter"',
-    '$label.Size = New-Object System.Drawing.Size(420, 32)',
-    '$label.Location = New-Object System.Drawing.Point(20, 78)',
+    '$label.Size = New-Object System.Drawing.Size(380, 28)',
+    '$label.Location = New-Object System.Drawing.Point(20, 118)',
     '$pct = New-Object System.Windows.Forms.Label',
-    '$pct.Text = "40%"',
-    '$pct.ForeColor = [System.Drawing.Color]::FromArgb(140, 140, 148)',
+    '$pct.Text = "8%"',
+    '$pct.ForeColor = [System.Drawing.Color]::FromArgb(168, 168, 179)',
     '$pct.Font = New-Object System.Drawing.Font("Segoe UI", 11)',
     '$pct.AutoSize = $false',
     '$pct.TextAlign = "MiddleCenter"',
-    '$pct.Size = New-Object System.Drawing.Size(420, 24)',
-    '$pct.Location = New-Object System.Drawing.Point(20, 114)',
-    '$sub = New-Object System.Windows.Forms.Label',
-    '$sub.Text = "Waiting to install…"',
-    '$sub.ForeColor = [System.Drawing.Color]::FromArgb(100, 100, 108)',
-    '$sub.Font = New-Object System.Drawing.Font("Segoe UI", 10)',
-    '$sub.AutoSize = $false',
-    '$sub.TextAlign = "MiddleCenter"',
-    '$sub.Size = New-Object System.Drawing.Size(420, 24)',
-    '$sub.Location = New-Object System.Drawing.Point(20, 140)',
+    '$pct.Size = New-Object System.Drawing.Size(380, 22)',
+    '$pct.Location = New-Object System.Drawing.Point(20, 148)',
     '$track = New-Object System.Windows.Forms.Panel',
-    '$track.BackColor = [System.Drawing.Color]::FromArgb(28, 28, 32)',
-    '$track.Size = New-Object System.Drawing.Size(280, 5)',
-    '$track.Location = New-Object System.Drawing.Point(90, 180)',
+    '$track.BackColor = [System.Drawing.Color]::FromArgb(58, 58, 68)',
+    '$track.Size = New-Object System.Drawing.Size(260, 10)',
+    '$track.Location = New-Object System.Drawing.Point(80, 186)',
     '$fill = New-Object System.Windows.Forms.Panel',
-    '$fill.BackColor = [System.Drawing.Color]::FromArgb(220, 224, 230)',
-    '$fill.Size = New-Object System.Drawing.Size(112, 5)',
+    '$fill.BackColor = [System.Drawing.Color]::FromArgb(242, 242, 244)',
+    '$fill.Size = New-Object System.Drawing.Size(21, 10)',
     '$fill.Location = New-Object System.Drawing.Point(0, 0)',
     '$track.Controls.Add($fill)',
+    '$form.Controls.Add($pic)',
     '$form.Controls.Add($label)',
     '$form.Controls.Add($pct)',
-    '$form.Controls.Add($sub)',
     '$form.Controls.Add($track)',
     '$script:baselinePids = @{}',
     'try { Get-Process -Name "ARK" -ErrorAction SilentlyContinue | ForEach-Object { $script:baselinePids[$_.Id] = $true } } catch {}',
@@ -1047,23 +1118,22 @@ function launchInstallHandoffSplash({ statusPath, expectedVersion, arkExe, shown
     '      Get-Content -LiteralPath $statusPath -ErrorAction SilentlyContinue | ForEach-Object {',
     '        if ($_ -match "^(.*?)=(.*)$") { $map[$matches[1]] = $matches[2] }',
     '      }',
-    '      if ($map.label) { $label.Text = [string]$map.label }',
+    '      if ($map.sub) { $label.Text = [string]$map.sub }',
+    '      elseif ($map.label) { $label.Text = [string]$map.label }',
     '      if ($map.pct) {',
     '        $n = [int]$map.pct',
     '        if ($n -lt 0) { $n = 0 }',
     '        if ($n -gt 100) { $n = 100 }',
     '        $pct.Text = "$n%"',
-    '        $w = [Math]::Max(8, [int](280 * $n / 100))',
+    '        $w = [Math]::Max(12, [int](260 * $n / 100))',
     '        $fill.Width = $w',
     '      }',
-    '      if ($map.sub -and -not $script:waitingReopen) { $sub.Text = [string]$map.sub }',
     '      $stage = [string]$map.stage',
     '      if ($stage -eq "opening" -or $stage -eq "done" -or $stage -eq "waiting_reopen") {',
     '        $script:installFinished = $true',
     '        if (-not $script:waitingReopen) {',
     '          $script:waitingReopen = $true',
     '          $label.Text = "Opening ARK"',
-    '          $sub.Text = "Waiting for the app window"',
     '        }',
     '      }',
     '    }',
@@ -1073,10 +1143,9 @@ function launchInstallHandoffSplash({ statusPath, expectedVersion, arkExe, shown
     '  if ($uiReady -and -not $script:closeArmed) {',
     '    $script:closeArmed = $true',
     '    $script:closeAt = [Environment]::TickCount + 400',
-    '    $label.Text = "ARK is opening"',
-    '    $sub.Text = "Almost there"',
+    '    $label.Text = "Opening ARK"',
     '    $pct.Text = "100%"',
-    '    $fill.Width = 280',
+    '    $fill.Width = 260',
     '  }',
     '  if (([Environment]::TickCount - $script:startedAt) -gt 600000) { $timer.Stop(); $form.Close() }',
     '  if ($script:closeArmed -and [Environment]::TickCount -ge $script:closeAt) {',
@@ -1085,7 +1154,8 @@ function launchInstallHandoffSplash({ statusPath, expectedVersion, arkExe, shown
     '  }',
     '})',
     '$timer.Start()',
-    '$form.Add_Shown({ $form.Activate(); $form.BringToFront() })',
+    '$form.Add_Shown({ Write-ArkAlive; $form.Activate(); $form.BringToFront() })',
+    'Write-ArkAlive',
     '[void]$form.ShowDialog()',
   ].join('\r\n');
 
@@ -1170,7 +1240,7 @@ function launchCmdApplyUpdate({ setupPath, installDir, expectedVersion, parentPi
     `title Updating ARK ${ver}`,
     `echo [%date% %time%] apply begin>> "${logPath}"`,
     `echo Waiting for updater pid ${parentPid} to exit...>> "${logPath}"`,
-    setStatus('waiting', 42, 'Updating ARK', 'Waiting for ARK to close'),
+    setStatus('waiting', 42, 'Closing ARK', 'Closing ARK'),
     'set /a waits=0',
     ':waitparent',
     `tasklist /FI "PID eq ${parentPid}" 2>nul | findstr /C:"${parentPid}" >nul`,
@@ -1185,22 +1255,22 @@ function launchCmdApplyUpdate({ setupPath, installDir, expectedVersion, parentPi
     ')',
     ':install',
     'timeout /t 1 /nobreak >nul',
-    setStatus('installing', 55, 'Updating ARK', 'Installing update'),
+    setStatus('installing', 55, 'Installing update', 'Installing update'),
     `echo Installing ${q(setupPath)} into ${q(installDir)}>> "${logPath}"`,
     `"${setupPath}" /S --updated /D=${installDir}`,
     'set EXITCODE=%ERRORLEVEL%',
     `echo installer exit=%EXITCODE%>> "${logPath}"`,
     'if not "%EXITCODE%"=="0" (',
     '  timeout /t 2 /nobreak >nul',
-    setStatus('installing', 68, 'Updating ARK', 'Retrying install'),
+    setStatus('installing', 68, 'Installing update', 'Installing update'),
     `  "${setupPath}" /S --updated /D=${installDir}`,
     '  set EXITCODE=%ERRORLEVEL%',
     `  echo installer retry exit=%EXITCODE%>> "${logPath}"`,
     ')',
-    setStatus('finishing', 85, 'Updating ARK', 'Finishing update'),
+    setStatus('finishing', 85, 'Installing update', 'Installing update'),
     `del /f /q "${q(uiShownFlagPath())}" >nul 2>nul`,
     'timeout /t 1 /nobreak >nul',
-    setStatus('opening', 88, 'Updating ARK', 'Opening ARK'),
+    setStatus('opening', 88, 'Opening ARK', 'Opening ARK'),
     `if exist "${arkExe}" (`,
     `  echo Starting ARK ${q(arkExe)}>> "${logPath}"`,
     `  start "" "${arkExe}"`,
@@ -1208,7 +1278,7 @@ function launchCmdApplyUpdate({ setupPath, installDir, expectedVersion, parentPi
     `  echo missing ${q(arkExe)}, trying install dir>> "${logPath}"`,
     `  start "" "${installDir}\\ARK.exe"`,
     ')',
-    setStatus('waiting_reopen', 94, 'Opening ARK', 'Waiting for the app window'),
+    setStatus('waiting_reopen', 94, 'Opening ARK', 'Opening ARK'),
     `echo done>> "${logPath}"`,
     'endlocal',
     'exit /b 0',

@@ -1,7 +1,7 @@
 {
   "name": "ark",
   "private": true,
-  "version": "0.1.60",
+  "version": "0.1.61",
   "type": "module",
   "main": "electron/main.cjs",
   "description": "ARK — AI Creation Studio desktop app",
@@ -70,6 +70,10 @@
       "package.json"
     ],
     "asar": true,
+    "asarUnpack": [
+      "build/icon.ico",
+      "build/icon.png"
+    ],
     "compression": "maximum",
     "win": {
       "target": [
