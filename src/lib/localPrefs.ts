@@ -229,6 +229,16 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.67',
+    channel: 'stable' as const,
+    date: 'Aug 18, 2026',
+    title: 'Ignore streamed instruction fragments in chat',
+    notes: [
+      'Chat no longer treats a single leaked instruction sentence as the model reply',
+      'Streaming waits for real answer text instead of latching onto prompt fragments',
+    ],
+  },
+  {
     version: '0.1.66',
     channel: 'stable' as const,
     date: 'Aug 18, 2026',

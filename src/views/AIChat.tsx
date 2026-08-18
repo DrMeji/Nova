@@ -1160,6 +1160,7 @@ export function AIChat() {
           if (mySeq !== genSeqRef.current || abandoned || stopRequestedRef.current) return;
           const cleaned = usableAssistantText(streamedPartial, content, previousAssistant);
           if (cleaned.trim().length < 8 && streamedPartial.trim().length < 12) return;
+              if (looksLikePromptEcho(cleaned || streamedPartial)) return;
           // GGUF often finishes streaming before llama-cli exits — release Stop quickly.
           abandoned = true;
           void engineGenerateCancel();

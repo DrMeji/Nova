@@ -34,6 +34,9 @@ const CHAT_CODE_OUTPUT =
 
 const SYSTEM_ECHO_RE =
   /^You are ARK(?:,|\s)[\s\S]*?(?:Do not echo the prompt\.|Never continue a previous sentence[^.\n]*\.|Answer only the latest user message[^.\n]*\.)/i;
+const PROMPT_FRAGMENT_RE =
+  /^(?:You are ARK\b|Answer the latest user request clearly\.?|Do not echo the prompt\.?|Do not correct the spelling of ARK\.?|Answer only the latest user message with a brand-new reply\.?|Never continue a previous sentence, list item, or closing question\.?)$/i;
+
 
 const CODING_WORKSPACE_ECHO_RE =
   /^You are ARK inside a developer project workspace[\s\S]*?(?:WITHOUT @@@FILE blocks\.|answer normally WITHOUT @@@FILE blocks\.)/i;
@@ -390,9 +393,13 @@ export function sanitizeAssistantReply(
 export function looksLikePromptEcho(reply: string): boolean {
   const t = String(reply || '').trim();
   if (!t) return false;
+  if (PROMPT_FRAGMENT_RE.test(t)) return true;
   // Strong signal: models sometimes re-emit the exact system instruction block.
   if (/^You are ARK, the assistant inside the ARK desktop creation studio on this computer\./i.test(t)) {
     return /Do not echo the prompt\./i.test(t) || /Answer the latest user request clearly\./i.test(t);
+  }
+  if (/^You are ARK, the assistant in the ARK desktop creation studio/i.test(t)) {
+    return /Never continue a previous sentence/i.test(t) || /Answer only the latest user message/i.test(t);
   }
   // Weaker fallback: if it starts like the system prompt, and contains typical system phrases.
   if (/^You are ARK(?:,|\s)/i.test(t) && /Do not echo the prompt\./i.test(t)) return true;
