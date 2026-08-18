@@ -229,6 +229,17 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.66',
+    channel: 'stable' as const,
+    date: 'Aug 18, 2026',
+    title: 'Fix Qwen prompt echo + balance update bar',
+    notes: [
+      'Local Qwen/GGUF chat no longer gets a double ARK system instruction block',
+      'Text chat keeps the neutral Thinking state until real text arrives',
+      'Update splash progress bar is wider and centered in both HTML and fallback UI',
+    ],
+  },
+  {
     version: '0.1.65',
     channel: 'stable' as const,
     date: 'Aug 17, 2026',

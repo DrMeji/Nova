@@ -1419,7 +1419,7 @@ export function AIChat() {
                 const next = prev.map(m => {
                   if (m.id !== assistantId) return m;
                   const liveClean = live && !looksLikePromptEcho(live) ? live : '';
-                  return { ...m, content: liveClean || '__generating__:chat:Writing…' };
+                  return { ...m, content: liveClean || '__generating__:chat:Thinking…' };
                 });
                 messagesRef.current = next;
                 if (persistTimerRef.current) window.clearTimeout(persistTimerRef.current);

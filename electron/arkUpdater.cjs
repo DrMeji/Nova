@@ -335,8 +335,8 @@ function splashShellCss() {
   .logo-wrap{margin:0 0 20px;}
   #label{font-size:16px;font-weight:600;letter-spacing:0.01em;margin:0 0 8px;text-align:center;color:#f2f2f3;}
   #pct{font-size:13px;font-weight:500;color:#a8a8b3;margin:0 0 18px;text-align:center;font-variant-numeric:tabular-nums;}
-  .track{width:260px;height:10px;border-radius:999px;background:#3a3a44;overflow:hidden;}
-  #fill{height:100%;width:8%;min-width:12px;border-radius:999px;background:#f2f2f4;}
+  .track{width:320px;max-width:100%;height:10px;margin:0 auto;border-radius:999px;background:#3a3a44;overflow:hidden;}
+  #fill{height:100%;width:0%;min-width:0;border-radius:999px;background:#f2f2f4;}
 `;
 }
 
@@ -1130,11 +1130,11 @@ function launchInstallHandoffSplash({ statusPath, expectedVersion, arkExe, shown
     '$pct.Location = New-Object System.Drawing.Point(20, 148)',
     '$track = New-Object System.Windows.Forms.Panel',
     '$track.BackColor = [System.Drawing.Color]::FromArgb(58, 58, 68)',
-    '$track.Size = New-Object System.Drawing.Size(260, 10)',
-    '$track.Location = New-Object System.Drawing.Point(80, 186)',
+    '$track.Size = New-Object System.Drawing.Size(320, 10)',
+    '$track.Location = New-Object System.Drawing.Point(50, 186)',
     '$fill = New-Object System.Windows.Forms.Panel',
     '$fill.BackColor = [System.Drawing.Color]::FromArgb(242, 242, 244)',
-    '$fill.Size = New-Object System.Drawing.Size(21, 10)',
+    '$fill.Size = New-Object System.Drawing.Size(0, 10)',
     '$fill.Location = New-Object System.Drawing.Point(0, 0)',
     '$track.Controls.Add($fill)',
     '$form.Controls.Add($pic)',
@@ -1164,7 +1164,7 @@ function launchInstallHandoffSplash({ statusPath, expectedVersion, arkExe, shown
     '        if ($n -lt 0) { $n = 0 }',
     '        if ($n -gt 100) { $n = 100 }',
     '        $pct.Text = "$n%"',
-    '        $w = [Math]::Max(12, [int](260 * $n / 100))',
+    '        $w = [Math]::Max(12, [int](320 * $n / 100))',
     '        $fill.Width = $w',
     '      }',
     '      $stage = [string]$map.stage',
@@ -1184,7 +1184,7 @@ function launchInstallHandoffSplash({ statusPath, expectedVersion, arkExe, shown
     '    $script:closeAt = [Environment]::TickCount + 400',
     '    $label.Text = "Opening ARK"',
     '    $pct.Text = "100%"',
-    '    $fill.Width = 260',
+    '    $fill.Width = 320',
     '  }',
     '  if (([Environment]::TickCount - $script:startedAt) -gt 600000) { $timer.Stop(); $form.Close() }',
     '  if ($script:closeArmed -and [Environment]::TickCount -ge $script:closeAt) {',

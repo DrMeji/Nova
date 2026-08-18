@@ -259,11 +259,30 @@ function promptBody(prompt) {
   return String(prompt || '').replace(/\nARK:\s*$/, '').trim();
 }
 
+function isPackedArkPrompt(body) {
+  return /^You are ARK(?:,|\s)/i.test(String(body || '').trim());
+}
+
 /** ChatML for Qwen/Mistral/Gemma; Llama 3 headers for llama3*. */
 function wrapChatPrompt(modelId, prompt) {
   const body = promptBody(prompt);
   if (/<\|im_start\|>/.test(body) || /<\|start_header_id\|>/.test(body)) {
     return body.endsWith('\n') ? body : `${body}\n`;
+  }
+  // packHistoryPrompt() already includes ARK's identity/instructions for local single-string
+  // engines. Wrapping that again as a second system message makes some GGUFs (notably Qwen)
+  // parrot the prompt instead of answering.
+  if (isPackedArkPrompt(body)) {
+    if (llamaFamily(modelId)) {
+      return (
+        `<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n${body}<|eot_id|>`
+        + `<|start_header_id|>assistant<|end_header_id|>\n\n`
+      );
+    }
+    return (
+      `<|im_start|>user\n${body}<|im_end|>\n`
+      + `<|im_start|>assistant\n`
+    );
   }
   if (llamaFamily(modelId)) {
     return (
