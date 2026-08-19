@@ -416,7 +416,7 @@ function ModelInstallControl({
           title="Installed in ARK Engine"
           aria-label={`Installed ${name}`}
         >
-          <Check className="w-4 h-4" />
+          <Check className="w-4 h-4 text-emerald-400" />
         </span>
         {onDelete && (
           <button
@@ -426,7 +426,7 @@ function ModelInstallControl({
             title={`Delete ${name}`}
             aria-label={`Delete ${name}`}
           >
-            <Trash2 className="w-4 h-4" />
+            <Trash2 className="w-4 h-4 text-rose-500" />
           </button>
         )}
       </span>

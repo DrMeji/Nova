@@ -287,6 +287,16 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.87',
+    channel: 'stable' as const,
+    date: 'Aug 19, 2026',
+    title: 'Installed icon color fix (Local AI)',
+    notes: [
+      'Installed checkmark/trash icons now force their explicit green/red colors',
+      'Prevents parent styles from making Local AI installed icons look grey',
+    ],
+  },
+  {
     version: '0.1.86',
     channel: 'stable' as const,
     date: 'Aug 19, 2026',
