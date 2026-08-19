@@ -1741,7 +1741,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                     </div>
                   </div>
                   <p className="text-[11px] text-content-tertiary leading-relaxed">
-                    Download stays in ARK. When it finishes, a small Updating window installs, then ARK reopens.
+                    Check looks at GitHub Releases for a newer ARK-Setup.exe. Pushing code to main is not enough — a <code className="text-[10px]">v*</code> tag has to publish the installer first.
                   </p>
                   {signingStatus ? (
                     <p className="text-[11px] text-content-tertiary leading-relaxed">

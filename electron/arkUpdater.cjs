@@ -967,12 +967,18 @@ async function checkForUpdate() {
     const hasBlockmap = assets.some((a) => /\.blockmap$/i.test(a.name || ''));
     const newer = tag ? isNewer(tag, currentVersion) : false;
     const setupUrl = setup?.browser_download_url || null;
+    const latestVer = normalizeVersion(tag);
+    const currentVer = normalizeVersion(currentVersion);
+    const aheadOfRelease = Boolean(tag) && isNewer(currentVersion, tag);
 
     if (!newer) {
+      const message = aheadOfRelease
+        ? `This copy is ${currentVer}. GitHub’s latest installer is still ${latestVer} — Check only sees published Releases, not commits on main.`
+        : `You are on the latest published release (${currentVer}).`;
       sendProgress({
         status: 'idle',
         percent: 0,
-        message: `You are on the latest release (${currentVersion}).`,
+        message,
         version: currentVersion,
       });
       return {
@@ -980,7 +986,7 @@ async function checkForUpdate() {
         newerAvailable: false,
         currentVersion,
         latestTag: tag,
-        message: `You are on the latest release (${currentVersion}).`,
+        message,
       };
     }
 
