@@ -24,8 +24,8 @@ const BASE_SYSTEM =
 const CONTINUITY =
   'This is a follow-up in the same ARK app chat. '
   + 'Answer the latest user message with a brand-new reply. '
-  + 'Do not repeat, finish, or continue a previous assistant sentence, list item (a. b. c.), or closing question. '
-  + 'Do not start with leftover fragments like “c. Is there anything…”.';
+  + 'If they ask to continue, tell more, or go on, finish the previous answer from where it stopped — do not restart the same list from item 1. '
+  + 'If they asked a new question, do not repeat an earlier list.';
 
 const CHAT_CODE_OUTPUT =
   'Give one short intro sentence, then one complete markdown code fence. No placeholders.';
@@ -59,7 +59,7 @@ const FACT_HINT =
 const STORY_HINT = /\b(story|joke|poem|song|riddle|fairytale)\b/i;
 const GREET_HINT = /^(hi|hello|hey|yo|sup|howdy)\b/i;
 const FOLLOW_UP_HINT =
-  /^(tell me more|more|go on|continue|why|how so|and\b|also\b|what about|ok but|please explain|elaborate)\b/i;
+  /^(?:(?:can you |could you |please )?(?:tell me more|say more|go on|continue|elaborate)|more|why|how so|and\b|also\b|what about|ok but|please explain)\b/i;
 
 function significantTokens(text: string): Set<string> {
   return new Set(
@@ -203,8 +203,13 @@ export function buildRouterHistory(
 }
 
 export function routerSystemPrompt(history: RouterChatTurn[]): string {
+  const latest = latestUserMessage(history, '');
   const hasPrior = history.some(t => t.role === 'assistant') || history.length > 1;
-  return hasPrior ? `${BASE_SYSTEM}\n\n${CONTINUITY}` : BASE_SYSTEM;
+  if (!hasPrior) return BASE_SYSTEM;
+  if (FOLLOW_UP_HINT.test(latest.trim())) {
+    return `${BASE_SYSTEM}\n\nThis is a follow-up. Continue the previous answer from where it stopped. Do not restart the same numbered list from 1.`;
+  }
+  return `${BASE_SYSTEM}\n\n${CONTINUITY}`;
 }
 
 function wantsChatCode(latest: string) {
@@ -226,17 +231,26 @@ export function packHistoryPrompt(history: RouterChatTurn[], latestFallback?: st
     .filter(t => t.role === 'user' && t.content.trim() && t.content.trim() !== latest)
     .slice(-3)
     .map(t => `- ${t.content.replace(/\s+/g, ' ').slice(0, 160)}`);
+  const lastAssistant = [...history].reverse().find(t => t.role === 'assistant')?.content
+    ?.replace(/\s+/g, ' ')
+    .trim()
+    .slice(-900);
 
   if (wantsChatCode(latest)) {
     return [
       CHAT_CODE_OUTPUT,
       priorUsers.length ? `Earlier user asks:\n${priorUsers.join('\n')}` : '',
+      lastAssistant ? `Previous answer (may be incomplete):\n${lastAssistant}` : '',
       `Latest:\n${latest}`,
     ].filter(Boolean).join('\n\n');
   }
 
+  const follow = FOLLOW_UP_HINT.test(latest.trim());
   return [
-    priorUsers.length ? `Earlier user asks (already answered):\n${priorUsers.join('\n')}` : '',
+    priorUsers.length ? `Earlier user asks${follow ? '' : ' (already answered)'}:\n${priorUsers.join('\n')}` : '',
+    lastAssistant
+      ? `${follow ? 'Previous answer — continue from the end, do not restart:\n' : 'Previous answer:\n'}${lastAssistant}`
+      : '',
     `Latest:\n${latest}`,
   ].filter(Boolean).join('\n\n');
 }

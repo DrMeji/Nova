@@ -362,7 +362,7 @@ async function warmServer(modelId) {
   }
 }
 
-async function runGgufServerStream(modelId, prompt, onChunk, timeoutMs) {
+async function runGgufServerStream(modelId, prompt, onChunk, timeoutMs, nPredict = 1536) {
   const promptStr = wrapChatPrompt(modelId, prompt);
   const started = Date.now();
   cancelRequested = false;
@@ -376,7 +376,7 @@ async function runGgufServerStream(modelId, prompt, onChunk, timeoutMs) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         prompt: promptStr,
-        n_predict: 256,
+        n_predict: nPredict,
         temperature: 0.55,
         stream: true,
         cache_prompt: true,
@@ -647,21 +647,21 @@ function writeGgufDebug(payload) {
  * Stream llama-cli stdout as it arrives.
  * onChunk(textDelta) may be called many times; final resolve still returns full reply.
  */
-function runGgufStream(modelId, prompt, onChunk, timeoutMs = 120000) {
+function runGgufStream(modelId, prompt, onChunk, timeoutMs = 120000, nPredict = 1536) {
   return (async () => {
     if (await ensureLlamaServer(modelId)) {
       try {
-        const hit = await runGgufServerStream(modelId, prompt, onChunk, timeoutMs);
+        const hit = await runGgufServerStream(modelId, prompt, onChunk, timeoutMs, nPredict);
         if (hit?.reply) return hit;
       } catch {
         /* fall through to one-shot llama-cli */
       }
     }
-    return runGgufCliStream(modelId, prompt, onChunk, timeoutMs);
+    return runGgufCliStream(modelId, prompt, onChunk, timeoutMs, nPredict);
   })();
 }
 
-function runGgufCliStream(modelId, prompt, onChunk, timeoutMs = 120000) {
+function runGgufCliStream(modelId, prompt, onChunk, timeoutMs = 120000, nPredict = 1536) {
   return new Promise((resolve, reject) => {
     const gguf = findGgufForModel(modelId);
     const bin = findLlamaBinary();
@@ -694,8 +694,8 @@ function runGgufCliStream(modelId, prompt, onChunk, timeoutMs = 120000) {
     const args = [
       '-m', gguf,
       '-f', promptFile,
-      '-n', '256',
-      '-c', '2048',
+      '-n', String(nPredict),
+      '-c', '4096',
       '-t', String(Math.max(4, os.cpus().length)),
       '--temp', '0.55',
       '--no-conversation',

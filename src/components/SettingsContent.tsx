@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { useTheme } from '@/context/ThemeContext';
 import { useRouter } from '@/context/RouterContext';
@@ -25,10 +25,12 @@ import {
 import {
   User, Palette, Zap, Boxes, Cloud, Shield, HardDrive,
   FolderKanban, Lock, RefreshCw, Check, Cpu, KeyRound,
-  Smartphone, Bell, Sparkles, FlaskConical,
+  Smartphone, Sparkles, FlaskConical,
   Mail, BadgeCheck, Trash2, Download, Info, Monitor, Copy,
 } from 'lucide-react';
 import { formatArkId } from '@/lib/arkUserId';
+import { clearLocalAppCaches, clearLocalChatCache } from '@/lib/clearSession';
+import { deleteEngineModel, engineDiskSpace, getEngineStatus, type ArkEngineModel, type ArkEngineStatus } from '@/lib/arkEngine';
 
 const SECTIONS: { id: string; label: string; icon: typeof User; disabled?: boolean; comingSoon?: boolean }[] = [
   { id: 'account', label: 'Account', icon: User },
@@ -45,11 +47,6 @@ const SECTIONS: { id: string; label: string; icon: typeof User; disabled?: boole
   { id: 'testers', label: 'Testers', icon: FlaskConical, comingSoon: true },
   { id: 'beta', label: 'Beta', icon: Sparkles, disabled: true },
 ];
-
-/** Tabs that rarely overflow — keep overflow locked so empty space doesn’t scroll. */
-const LOCKED_SCROLL_SECTIONS = new Set([
-  'account', 'appearance', 'security', 'ai', 'models', 'providers', 'testers', 'local-ai', 'storage',
-]);
 
 const AI_MODES = [
   { value: 'automatic', label: 'Automatic', description: 'ARK Router: local → free keys → paid' },
@@ -120,6 +117,12 @@ export function SettingsContent({ onClose }: { onClose?: () => void } = {}) {
   const [hwScanning, setHwScanning] = useState(false);
   const [hwFlash, setHwFlash] = useState('');
   const [arkCopied, setArkCopied] = useState(false);
+  const [navCompact, setNavCompact] = useState(false);
+  const [cacheBusy, setCacheBusy] = useState(false);
+  const [engineStatus, setEngineStatus] = useState<ArkEngineStatus | null>(null);
+  const [diskSpace, setDiskSpace] = useState<{ freeGb?: number | null; totalBytes?: number | null } | null>(null);
+  const [deletingModelId, setDeletingModelId] = useState<string | null>(null);
+  const settingsRootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     void window.arkDesktop?.appMeta?.()
@@ -130,8 +133,28 @@ export function SettingsContent({ onClose }: { onClose?: () => void } = {}) {
   }, []);
 
   useEffect(() => {
-    void getAccurateHardware().then(info => setHw(info));
+    const el = settingsRootRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(([entry]) => {
+      setNavCompact(entry.contentRect.width < 680);
+    });
+    ro.observe(el);
+    setNavCompact(el.clientWidth < 680);
+    return () => ro.disconnect();
   }, []);
+
+  const refreshStorage = () => {
+    void getEngineStatus().then(setEngineStatus).catch(() => undefined);
+    void engineDiskSpace().then(setDiskSpace).catch(() => undefined);
+  };
+
+  useEffect(() => {
+    if (activeSection !== 'storage') return;
+    refreshStorage();
+    const onModels = () => refreshStorage();
+    window.addEventListener('ark:engine-models-changed', onModels);
+    return () => window.removeEventListener('ark:engine-models-changed', onModels);
+  }, [activeSection]);
 
   useEffect(() => {
     void window.arkDesktop?.loginItemGet?.()
@@ -255,6 +278,83 @@ export function SettingsContent({ onClose }: { onClose?: () => void } = {}) {
     })();
   };
 
+  const installedModels = useMemo(
+    () =>
+      (engineStatus?.models ?? []).filter(
+        (m): m is ArkEngineModel =>
+          m.status === 'ready'
+          && m.id !== 'ark-core'
+          && m.id !== 'ark-image-core'
+          && m.id !== 'ark-video-core',
+      ),
+    [engineStatus],
+  );
+
+  const modelUsedGb = useMemo(() => {
+    const fromFiles = (engineStatus?.modelFiles ?? []).reduce((sum, f) => sum + (f.sizeMb || 0), 0) / 1024;
+    if (fromFiles > 0) return fromFiles;
+    return installedModels.reduce((sum, m) => sum + (m.sizeGb || 0), 0);
+  }, [engineStatus, installedModels]);
+
+  const diskTotalGb = typeof diskSpace?.totalBytes === 'number'
+    ? diskSpace.totalBytes / (1024 ** 3)
+    : 0;
+  const modelPercent = diskTotalGb > 0 ? Math.min(100, Math.round((modelUsedGb / diskTotalGb) * 100)) : 0;
+
+  const flashSaved = (msg: string) => {
+    setSavedFlash(msg);
+    window.setTimeout(() => setSavedFlash(''), 2200);
+  };
+
+  const runClearChatCache = async () => {
+    if (cacheBusy) return;
+    if (!window.confirm('Clear local chat cache on this PC? Conversations in Recent will be removed. Models and API keys stay.')) {
+      return;
+    }
+    setCacheBusy(true);
+    try {
+      clearLocalChatCache();
+      flashSaved('Chat cache cleared');
+    } finally {
+      setCacheBusy(false);
+    }
+  };
+
+  const runClearAppCaches = async () => {
+    if (cacheBusy) return;
+    if (!window.confirm('Clear local caches on this PC? Chat threads and diagnostic reports go. Downloaded models and API keys stay.')) {
+      return;
+    }
+    setCacheBusy(true);
+    try {
+      await clearLocalAppCaches();
+      flashSaved('Caches cleared');
+    } finally {
+      setCacheBusy(false);
+    }
+  };
+
+  const runDeleteModel = async (model: ArkEngineModel) => {
+    if (deletingModelId) return;
+    if (!window.confirm(`Delete “${model.name}” from this PC? This removes the downloaded file. You can install it again later.`)) {
+      return;
+    }
+    setDeletingModelId(model.id);
+    try {
+      const result = await deleteEngineModel(model.id);
+      if (!result.ok) {
+        flashSaved(result.error || 'Could not delete model');
+        return;
+      }
+      setEngineStatus(result);
+      flashSaved(`Deleted ${model.name}`);
+    } catch (err) {
+      flashSaved(err instanceof Error ? err.message : 'Could not delete model');
+    } finally {
+      setDeletingModelId(null);
+    }
+  };
+
   const visibleChangelog = ARK_CHANGELOG.filter(entry => {
     if (prefs.updateChannel !== 'beta' && entry.channel !== 'stable') return false;
     // Only show the entry for the version this install is running.
@@ -262,9 +362,9 @@ export function SettingsContent({ onClose }: { onClose?: () => void } = {}) {
   }).slice(0, 1);
 
   return (
-    <div className="flex h-full min-h-0 animate-fade-in">
-      <div className="w-56 shrink-0 border-r border-surface-border flex flex-col min-h-0">
-        <nav className="flex-1 min-h-0 overflow-y-auto p-3 flex flex-col gap-0.5">
+    <div ref={settingsRootRef} className="flex h-full min-h-0 min-w-0 animate-fade-in">
+      <div className={`${navCompact ? 'w-14' : 'w-56'} shrink-0 border-r border-surface-border flex flex-col min-h-0 min-w-0`}>
+        <nav className={`flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-2 sm:p-3 flex flex-col gap-0.5 ${navCompact ? 'items-center' : ''}`}>
           {SECTIONS.map(section => (
             <button
               key={section.id}
@@ -274,22 +374,22 @@ export function SettingsContent({ onClose }: { onClose?: () => void } = {}) {
                 if (section.disabled || section.comingSoon) return;
                 setActiveSection(section.id);
               }}
-              className={`ark-nav-item ${activeSection === section.id ? 'active' : ''} ${
+              className={`ark-nav-item ${navCompact ? '!px-2 !gap-0 !justify-center w-10' : ''} ${activeSection === section.id ? 'active' : ''} ${
                 section.disabled || section.comingSoon ? 'opacity-45 cursor-not-allowed pointer-events-none' : ''
               }`}
-              title={section.comingSoon ? `${section.label} · coming soon` : section.disabled ? 'Locked' : undefined}
+              title={section.comingSoon ? `${section.label} · coming soon` : section.disabled ? 'Locked' : section.label}
             >
               <section.icon className="w-4 h-4 shrink-0" />
-              <span className="flex-1 text-left">{section.label}</span>
-              {section.comingSoon ? (
+              {!navCompact && <span className="flex-1 text-left truncate">{section.label}</span>}
+              {!navCompact && section.comingSoon ? (
                 <span className="text-[9px] uppercase tracking-wide text-content-tertiary">Coming soon</span>
-              ) : section.disabled ? (
+              ) : !navCompact && section.disabled ? (
                 <Lock className="w-3 h-3 ml-auto shrink-0 opacity-70" />
               ) : null}
             </button>
           ))}
         </nav>
-        <div className="shrink-0 p-3">
+        <div className="shrink-0 p-2 sm:p-3">
           {savedFlash && (
             <p className="text-[10px] text-emerald-400 mb-2 truncate flex items-center gap-1">
               <Check className="w-3 h-3 shrink-0" />
@@ -298,21 +398,18 @@ export function SettingsContent({ onClose }: { onClose?: () => void } = {}) {
           )}
           <button
             type="button"
-            className="ark-btn-primary w-full justify-center"
+            className={`ark-btn-primary w-full justify-center ${navCompact ? '!px-2' : ''}`}
             onClick={saveAllVisible}
+            title="Save"
           >
             <Check className="w-4 h-4" />
-            Save
+            {!navCompact && 'Save'}
           </button>
         </div>
       </div>
 
-      <div
-        className={`flex-1 min-h-0 p-8 ${
-          LOCKED_SCROLL_SECTIONS.has(activeSection) ? 'overflow-hidden' : 'overflow-y-auto'
-        }`}
-      >
-        <div className={activeSection === 'providers' || activeSection === 'models' ? 'max-w-4xl' : 'max-w-2xl'}>
+      <div className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden p-4 sm:p-6 lg:p-8">
+        <div className={`min-w-0 ${activeSection === 'providers' || activeSection === 'models' ? 'max-w-4xl' : 'max-w-2xl'}`}>
           {activeSection === 'account' && (
             <SettingsSection title="Account" description="Profile, sign in, and session controls">
               <div className="space-y-5">
@@ -341,8 +438,8 @@ export function SettingsContent({ onClose }: { onClose?: () => void } = {}) {
                 />
                 <div>
                   <label className="block text-xs font-medium text-content-secondary mb-1.5">ARK ID</label>
-                  <div className="flex items-center gap-2">
-                    <p className="flex-1 rounded-lg border border-surface-border bg-ark-navy-900/80 px-3 py-2 text-sm font-mono tracking-[0.28em] text-content-primary">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <p className="flex-1 min-w-0 rounded-lg border border-surface-border bg-ark-navy-900/80 px-3 py-2 text-sm font-mono tracking-[0.18em] sm:tracking-[0.28em] text-content-primary overflow-x-auto">
                       {profile?.ark_id ? formatArkId(profile.ark_id) : '•••••••'}
                     </p>
                     <button
@@ -405,7 +502,7 @@ export function SettingsContent({ onClose }: { onClose?: () => void } = {}) {
               <div className="space-y-6">
                 <div>
                   <label className="block text-xs font-medium text-content-secondary mb-2">Theme</label>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 min-[420px]:grid-cols-2 gap-3">
                     <ThemeCard label="Dark" active={theme === 'dark'} onClick={() => setTheme('dark')} />
                     <ThemeCard label="Cream" active={theme === 'light'} onClick={() => setTheme('light')} />
                   </div>
@@ -413,7 +510,7 @@ export function SettingsContent({ onClose }: { onClose?: () => void } = {}) {
 
                 <div>
                   <label className="block text-xs font-medium text-content-secondary mb-2">Accent</label>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 min-w-0">
                     {ACCENTS.map(a => (
                       <button
                         key={a.id}
@@ -434,7 +531,7 @@ export function SettingsContent({ onClose }: { onClose?: () => void } = {}) {
 
                 <div>
                   <label className="block text-xs font-medium text-content-secondary mb-2">Density</label>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-1 min-[420px]:grid-cols-2 gap-2">
                     {([
                       { id: 'comfortable' as DensityPref, label: 'Comfortable', hint: 'More spacing' },
                       { id: 'compact' as DensityPref, label: 'Compact', hint: 'Tighter layout' },
@@ -616,7 +713,7 @@ export function SettingsContent({ onClose }: { onClose?: () => void } = {}) {
                   <KeyRound className="w-4 h-4 text-content-tertiary" />
                 </div>
 
-                <div className="grid grid-cols-2 lg:grid-cols-3 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                   {PROVIDER_ROWS.map(p => {
                     const hasKey = Boolean(providerKeys[p.id]);
                     const editing = editingProvider === p.id;
@@ -779,9 +876,14 @@ export function SettingsContent({ onClose }: { onClose?: () => void } = {}) {
                   value={prefs.clearClipboardAfterPaste}
                   onChange={v => patchPrefs({ clearClipboardAfterPaste: v })}
                 />
-                <button type="button" className="ark-btn-secondary w-full !text-ark-accent-red mt-2">
+                <button
+                  type="button"
+                  className="ark-btn-secondary w-full !text-ark-accent-red mt-2"
+                  disabled={cacheBusy}
+                  onClick={() => void runClearChatCache()}
+                >
                   <Trash2 className="w-4 h-4" />
-                  Clear local chat cache
+                  {cacheBusy ? 'Clearing…' : 'Clear local chat cache'}
                 </button>
               </div>
             </SettingsSection>
@@ -789,20 +891,84 @@ export function SettingsContent({ onClose }: { onClose?: () => void } = {}) {
 
           {activeSection === 'storage' && (
             <SettingsSection title="Storage" description="Models, projects, and cache on this PC">
-              <div className="space-y-4">
-                <StorageBar label="Model storage" used="6.7 GB" total="20 GB" percent={34} tone="bg-sky-500" />
-                <StorageBar label="Project storage" used="124 MB" total="10 GB" percent={5} tone="bg-emerald-500" />
-                <StorageBar label="Cache and temp" used="890 MB" total="5 GB" percent={18} tone="bg-amber-500" />
+              <div className="space-y-4 min-w-0">
+                <StorageBar
+                  label="Model storage"
+                  used={`${modelUsedGb >= 10 ? modelUsedGb.toFixed(0) : modelUsedGb.toFixed(1)} GB`}
+                  total={diskTotalGb > 0 ? `${diskTotalGb.toFixed(0)} GB disk` : 'this PC'}
+                  percent={modelPercent}
+                  tone="bg-sky-500"
+                />
+                <StorageBar
+                  label="Free space"
+                  used={typeof diskSpace?.freeGb === 'number' ? `${diskSpace.freeGb.toFixed(1)} GB free` : 'Unknown'}
+                  total={engineStatus?.modelsDir ? 'Models folder' : 'Desktop only'}
+                  percent={typeof diskSpace?.freeGb === 'number' && diskTotalGb > 0
+                    ? Math.min(100, Math.round((diskSpace.freeGb / diskTotalGb) * 100))
+                    : 0}
+                  tone="bg-emerald-500"
+                />
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <InfoCard title="Installed models" value="3" hint="Managed in Local AI" />
-                  <InfoCard title="Cached previews" value="12" hint="Safe to clear anytime" />
+                  <InfoCard
+                    title="Installed models"
+                    value={String(installedModels.length)}
+                    hint="Delete from the list below or Local AI"
+                  />
+                  <InfoCard
+                    title="Models folder"
+                    value={engineStatus?.modelsDirIsCustom ? 'Custom' : 'Default'}
+                    hint={engineStatus?.modelsDir ? 'Open Local AI → Storage to change' : 'Open ARK Desktop to manage files'}
+                  />
+                </div>
+
+                <div>
+                  <p className="text-xs font-medium text-content-secondary mb-2">Downloaded models</p>
+                  {installedModels.length === 0 ? (
+                    <p className="text-xs text-content-tertiary rounded-xl border border-surface-border px-3.5 py-3">
+                      No GGUF brains on this PC yet. Install from Models or Local AI.
+                    </p>
+                  ) : (
+                    <div className="rounded-xl border border-surface-border divide-y divide-surface-border/80 overflow-hidden">
+                      {installedModels.map(model => (
+                        <div key={model.id} className="flex items-center gap-3 px-3.5 py-2.5 min-w-0">
+                          <span
+                            className="w-8 h-8 rounded-full bg-surface-hover text-ark-accent-green flex items-center justify-center shrink-0"
+                            title="Installed in ARK Engine"
+                          >
+                            <Check className="w-4 h-4" />
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-medium text-content-primary truncate">{model.name}</p>
+                            <p className="text-[11px] text-content-tertiary truncate">
+                              {model.detail || (model.sizeGb ? `${model.sizeGb} GB` : 'ARK Engine')}
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 text-content-tertiary hover:text-rose-300 hover:bg-rose-500/10 transition-colors disabled:opacity-40"
+                            title={`Delete ${model.name}`}
+                            aria-label={`Delete ${model.name}`}
+                            disabled={deletingModelId === model.id}
+                            onClick={() => void runDeleteModel(model)}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex flex-wrap gap-2">
-                  <button type="button" className="ark-btn-secondary">
+                  <button
+                    type="button"
+                    className="ark-btn-secondary"
+                    disabled={cacheBusy}
+                    onClick={() => void runClearAppCaches()}
+                  >
                     <Trash2 className="w-4 h-4" />
-                    Clear cache
+                    {cacheBusy ? 'Clearing…' : 'Clear cache'}
                   </button>
                   <button type="button" className="ark-btn-secondary" onClick={() => { onClose?.(); navigate({ name: 'local-ai' }); }}>
                     Manage models
@@ -818,23 +984,23 @@ export function SettingsContent({ onClose }: { onClose?: () => void } = {}) {
                 <div className="rounded-xl border border-surface-border px-4 py-3 space-y-2">
                   <div className="flex justify-between gap-3 text-sm">
                     <span className="text-content-secondary">OS</span>
-                    <span className="text-content-primary text-right">{hw.os}</span>
+                    <span className="text-content-primary text-right min-w-0 truncate">{hw.os}</span>
                   </div>
                   <div className="flex justify-between gap-3 text-sm">
                     <span className="text-content-secondary">CPU</span>
-                    <span className="text-content-primary text-right">{hw.cpu}</span>
+                    <span className="text-content-primary text-right min-w-0 truncate">{hw.cpu}</span>
                   </div>
                   <div className="flex justify-between gap-3 text-sm">
                     <span className="text-content-secondary">RAM</span>
-                    <span className="text-content-primary text-right">{hw.ram}</span>
+                    <span className="text-content-primary text-right min-w-0 truncate">{hw.ram}</span>
                   </div>
                   <div className="flex justify-between gap-3 text-sm">
                     <span className="text-content-secondary">GPU</span>
-                    <span className="text-content-primary text-right">{hw.gpu}</span>
+                    <span className="text-content-primary text-right min-w-0 truncate">{hw.gpu}</span>
                   </div>
                   <div className="flex justify-between gap-3 text-sm">
                     <span className="text-content-secondary">Acceleration</span>
-                    <span className="text-content-primary text-right">{hw.acceleration}</span>
+                    <span className="text-content-primary text-right min-w-0 truncate">{hw.acceleration}</span>
                   </div>
                   <div className="flex justify-between gap-3 text-sm">
                     <span className="text-content-secondary">Profile</span>
@@ -886,7 +1052,7 @@ export function SettingsContent({ onClose }: { onClose?: () => void } = {}) {
 
                 <div>
                   <label className="block text-xs font-medium text-content-secondary mb-2">Default project type</label>
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                     {([
                       { id: 'web' as const, label: 'Web' },
                       { id: 'api' as const, label: 'API' },
@@ -927,15 +1093,19 @@ export function SettingsContent({ onClose }: { onClose?: () => void } = {}) {
           {activeSection === 'security' && (
             <SettingsSection title="Security" description="Protect this account and keep agent work sandboxed">
               <div className="space-y-4">
-                <div className="rounded-xl border border-surface-border p-4">
-                  <div className="flex items-start gap-3">
+                <div className="rounded-xl border border-surface-border p-4 opacity-55 pointer-events-none select-none">
+                  <div className="flex items-start gap-3 min-w-0">
                     <div className="w-10 h-10 rounded-lg bg-sky-500/10 flex items-center justify-center shrink-0">
                       <Smartphone className="w-5 h-5 text-sky-400" />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-content-primary">Two-factor authentication</p>
-                      <p className="text-xs text-content-tertiary mt-0.5">Not available yet.</p>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="text-sm font-medium text-content-primary">Two-factor authentication</p>
+                        <span className="text-[9px] uppercase tracking-wide text-content-tertiary">Coming soon</span>
+                      </div>
+                      <p className="text-xs text-content-tertiary mt-0.5">Not available yet — this stays off until we ship 2FA.</p>
                     </div>
+                    <Lock className="w-3.5 h-3.5 text-content-tertiary shrink-0 mt-1" />
                   </div>
                 </div>
 
@@ -973,15 +1143,15 @@ export function SettingsContent({ onClose }: { onClose?: () => void } = {}) {
                   onChange={v => patchPrefs({ sandboxAgent: v })}
                 />
 
-                <div className="flex items-center gap-3 p-4 ark-card">
+                <div className="flex items-center gap-3 p-4 ark-card min-w-0">
                   <div className="w-9 h-9 rounded-lg bg-ark-accent-green/10 flex items-center justify-center shrink-0">
                     <Lock className="w-4 h-4 text-ark-accent-green" />
                   </div>
-                  <div className="flex-1">
+                  <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-content-primary">Credential storage</p>
                     <p className="text-xs text-content-tertiary">API keys stored locally on this device</p>
                   </div>
-                  <span className="text-xs text-ark-accent-green">Active</span>
+                  <span className="text-xs text-ark-accent-green shrink-0">Active</span>
                 </div>
               </div>
             </SettingsSection>
@@ -991,7 +1161,7 @@ export function SettingsContent({ onClose }: { onClose?: () => void } = {}) {
             <SettingsSection title="Updates" description="Check for new ARK builds and install them in-app">
               <div className="space-y-5">
                 <div className="ark-card p-4 flex flex-col gap-3">
-                  <div className="flex items-center justify-between gap-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <div className="min-w-0">
                       <p className="text-sm font-medium text-content-primary">ARK v{appVersion}</p>
                       <p className="text-xs text-content-tertiary mt-0.5">{updateMsg}</p>
@@ -1004,7 +1174,7 @@ export function SettingsContent({ onClose }: { onClose?: () => void } = {}) {
                         </div>
                       )}
                     </div>
-                    <div className="flex items-center gap-2 shrink-0">
+                    <div className="flex flex-wrap items-center gap-2 shrink-0">
                       <button
                         type="button"
                         onClick={checkForUpdates}
@@ -1168,7 +1338,7 @@ export function SettingsContent({ onClose }: { onClose?: () => void } = {}) {
 
 function SettingsSection({ title, description, children }: { title: string; description: string; children: React.ReactNode }) {
   return (
-    <div className="animate-fade-in">
+    <div className="animate-fade-in min-w-0">
       <h1 className="text-xl font-bold text-content-primary mb-1">{title}</h1>
       <p className="text-sm text-content-secondary mb-4">{description}</p>
       {children}
@@ -1289,10 +1459,10 @@ function ToggleRow({
   onChange: (v: boolean) => void;
 }) {
   return (
-    <div className="flex items-center justify-between p-4 ark-card">
-      <div className="flex-1 mr-4">
+    <div className="flex items-center justify-between gap-3 p-4 ark-card min-w-0">
+      <div className="flex-1 min-w-0">
         <p className="text-sm font-medium text-content-primary">{label}</p>
-        <p className="text-xs text-content-tertiary mt-0.5">{description}</p>
+        <p className="text-xs text-content-tertiary mt-0.5 leading-snug">{description}</p>
       </div>
       <button
         type="button"
@@ -1349,10 +1519,10 @@ function StorageBar({
   tone: string;
 }) {
   return (
-    <div className="ark-card p-4">
-      <div className="flex justify-between mb-2">
-        <span className="text-sm text-content-primary">{label}</span>
-        <span className="text-xs text-content-tertiary">{used} / {total}</span>
+    <div className="ark-card p-4 min-w-0">
+      <div className="flex justify-between gap-3 mb-2 min-w-0">
+        <span className="text-sm text-content-primary truncate">{label}</span>
+        <span className="text-xs text-content-tertiary shrink-0">{used} / {total}</span>
       </div>
       <div className="h-2 bg-ark-navy-800 rounded-full overflow-hidden">
         <div className={`h-full rounded-full ${tone}`} style={{ width: `${percent}%` }} />

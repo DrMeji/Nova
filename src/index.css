@@ -80,12 +80,28 @@
 
   html {
     font-family: var(--ark-font);
+    height: 100%;
+    min-width: 0;
+    overflow: hidden;
   }
 
   body {
     margin: 0;
+    height: 100%;
+    min-width: 0;
+    overflow: hidden;
     background-color: rgb(var(--color-bg-primary));
     color: rgb(var(--color-content-primary));
+  }
+
+  #root {
+    height: 100%;
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  main {
+    min-width: 0;
   }
 
   ::-webkit-scrollbar {
@@ -151,7 +167,7 @@
   }
 
   .ark-nav-item {
-    @apply flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150 cursor-pointer;
+    @apply flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150 cursor-pointer min-w-0;
     color: rgb(var(--color-content-secondary));
   }
   .ark-nav-item:hover {

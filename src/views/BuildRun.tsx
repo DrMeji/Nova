@@ -253,14 +253,14 @@ export function BuildRun() {
   };
 
   return (
-    <div className="h-full flex flex-col overflow-hidden animate-fade-in bg-ark-navy-950 relative">
-      <div className="shrink-0 px-6 pt-[min(12vh,6rem)] bg-ark-navy-950">
-        <div className="w-full max-w-4xl mx-auto">
-          <div className="flex items-center justify-between gap-4 mb-6">
-            <div>
-              <h1 className="text-3xl font-semibold text-content-primary tracking-tight">Plugins</h1>
+    <div className="h-full min-w-0 flex flex-col overflow-hidden animate-fade-in bg-ark-navy-950 relative">
+      <div className="shrink-0 px-4 sm:px-6 pt-[min(12vh,6rem)] bg-ark-navy-950">
+        <div className="w-full max-w-4xl mx-auto min-w-0">
+          <div className="flex items-center justify-between gap-3 mb-6 min-w-0">
+            <div className="min-w-0">
+              <h1 className="text-2xl sm:text-3xl font-semibold text-content-primary tracking-tight">Plugins</h1>
             </div>
-            <div className="flex items-center gap-2 rounded-full bg-surface-hover px-3.5 py-2 w-52 sm:w-64 shrink-0">
+            <div className="flex items-center gap-2 rounded-full bg-surface-hover px-3 py-2 w-36 sm:w-52 md:w-64 shrink-0 min-w-0">
               <Search className="w-4 h-4 text-content-tertiary shrink-0" />
               <input
                 type="text"
@@ -274,7 +274,7 @@ export function BuildRun() {
         </div>
       </div>
 
-      <div className="flex-1 min-h-0 overflow-y-auto px-6 pb-10">
+      <div className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden px-4 sm:px-6 pb-10">
         <div className="w-full max-w-4xl mx-auto">
           {!query && (
             <>

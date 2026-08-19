@@ -58,7 +58,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const { route, navigate } = useRouter();
   const { user, profile } = useAuth();
   const { recent, activeChats, archiveChat, deleteChatForever, renameRecent, renameChat, removeRecent } = useRecentProjects();
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => getLocalPrefs().compactSidebar);
+  const [narrowForced, setNarrowForced] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [recentOpen, setRecentOpen] = useState(true);
@@ -76,9 +77,25 @@ export function AppShell({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    const onPrefs = () => setPrefsName(getLocalPrefs().displayName);
+    const onPrefs = () => {
+      setPrefsName(getLocalPrefs().displayName);
+      if (!narrowForced) setCollapsed(getLocalPrefs().compactSidebar);
+    };
     window.addEventListener('ark:prefs-changed', onPrefs);
     return () => window.removeEventListener('ark:prefs-changed', onPrefs);
+  }, [narrowForced]);
+
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 980px)');
+    const apply = () => {
+      const narrow = mq.matches;
+      setNarrowForced(narrow);
+      if (narrow) setCollapsed(true);
+      else setCollapsed(getLocalPrefs().compactSidebar);
+    };
+    apply();
+    mq.addEventListener('change', apply);
+    return () => mq.removeEventListener('change', apply);
   }, []);
 
   useEffect(() => {
@@ -188,10 +205,10 @@ export function AppShell({ children }: { children: ReactNode }) {
   };
 
   return (
-    <div className="h-full flex bg-ark-navy-950 overflow-hidden">
+    <div className="h-full min-w-0 flex bg-ark-navy-950 overflow-hidden">
       <aside
-        className={`shrink-0 m-2 mr-0 flex flex-col rounded-2xl border border-surface-border bg-ark-navy-900/70 shadow-[0_8px_32px_rgba(0,0,0,0.35)] transition-all duration-300 ${
-          collapsed ? 'w-16' : 'w-64'
+        className={`shrink-0 m-2 mr-0 flex flex-col min-w-0 rounded-2xl border border-surface-border bg-ark-navy-900/70 shadow-[0_8px_32px_rgba(0,0,0,0.35)] transition-all duration-300 ${
+          collapsed ? 'w-16' : 'w-64 max-w-[min(16rem,42vw)]'
         }`}
       >
           <div className={`flex-none ${collapsed ? 'px-2 pt-3 pb-2' : 'px-3 pt-3 pb-3'}`}>

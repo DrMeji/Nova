@@ -13,14 +13,14 @@ interface ModalProps {
 }
 
 const sizeClasses = {
-  sm: 'w-full max-w-md max-h-[85vh]',
-  md: 'w-full max-w-lg max-h-[85vh]',
-  lg: 'w-full max-w-2xl max-h-[85vh]',
-  xl: 'w-full max-w-4xl max-h-[85vh]',
-  full: 'w-[min(92vw,90rem)] max-h-[90vh]',
-  settings: 'w-[78vw] h-[78vh]',
+  sm: 'w-full max-w-md max-h-[min(85vh,calc(100vh-1.5rem))]',
+  md: 'w-full max-w-lg max-h-[min(85vh,calc(100vh-1.5rem))]',
+  lg: 'w-full max-w-2xl max-h-[min(85vh,calc(100vh-1.5rem))]',
+  xl: 'w-full max-w-4xl max-h-[min(85vh,calc(100vh-1.5rem))]',
+  full: 'w-[min(92vw,90rem)] max-w-[calc(100vw-1.5rem)] max-h-[min(90vh,calc(100vh-1.5rem))]',
+  settings: 'w-[min(78vw,56rem)] h-[min(78vh,calc(100vh-1.5rem))] max-w-[calc(100vw-1.5rem)]',
   // Wider panel, same height feel
-  search: 'w-[min(58rem,62vw)] h-[min(36rem,60vh)]',
+  search: 'w-[min(58rem,calc(100vw-1.5rem))] h-[min(36rem,calc(100vh-1.5rem))]',
 };
 
 export function Modal({
@@ -54,7 +54,7 @@ export function Modal({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center animate-fade-in">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 animate-fade-in">
       <div
         className="absolute inset-0 bg-ark-navy-950/70 backdrop-blur-md"
         onClick={onClose}
@@ -62,7 +62,7 @@ export function Modal({
       />
 
       <div
-        className={`z-10 flex flex-col rounded-2xl border border-surface-border bg-ark-navy-900 shadow-2xl shadow-black/40 overflow-hidden animate-slide-up ${sizeClasses[size]} ${className}`}
+        className={`z-10 flex flex-col min-w-0 rounded-2xl border border-surface-border bg-ark-navy-900 shadow-2xl shadow-black/40 overflow-hidden animate-slide-up ${sizeClasses[size]} ${className}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby={!hideHeader && title ? 'modal-title' : undefined}

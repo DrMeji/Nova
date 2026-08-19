@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Search, Plus, Check, Download, Loader2, Cpu, Cloud, Monitor,
-  Code, Boxes, Brain, Eye, Zap, Image as ImageIcon, Video, Gauge, Sparkles, Rocket, X, KeyRound, Globe, RefreshCw,
+  Code, Boxes, Brain, Eye, Zap, Image as ImageIcon, Video, Gauge, Sparkles, Rocket, X, KeyRound, Globe, RefreshCw, Trash2,
 } from 'lucide-react';
 import { detectHardware, getAccurateHardware, getHardwareClass, isEngineDownloadable, loadHardwareSnapshot, parseRamGb, type HardwareClass } from '@/lib/api';
 import {
@@ -9,7 +9,7 @@ import {
   LOCAL_CATEGORY_ORDER,
   sortModelsByCategoryThenSizeDesc,
 } from '@/lib/modelSort';
-import { engineDiskSpace, getEngineStatus } from '@/lib/arkEngine';
+import { engineDiskSpace, getEngineStatus, deleteEngineModel } from '@/lib/arkEngine';
 import {
   cancelEngineDownload,
   getEngineDownloadMap,
@@ -360,6 +360,7 @@ function ModelInstallControl({
   progress,
   onInstall,
   onCancel,
+  onDelete,
 }: {
   modelId: string;
   name: string;
@@ -368,16 +369,30 @@ function ModelInstallControl({
   progress?: number;
   onInstall: () => void;
   onCancel?: () => void;
+  onDelete?: () => void;
 }) {
   const canInstall = isEngineDownloadable(modelId);
   if (isOn) {
     return (
-      <span
-        className="w-8 h-8 rounded-full bg-surface-hover text-ark-accent-green flex items-center justify-center shrink-0"
-        title="Installed in ARK Engine"
-        aria-label={`Installed ${name}`}
-      >
-        <Check className="w-4 h-4" />
+      <span className="inline-flex items-center gap-0.5 shrink-0">
+        <span
+          className="w-8 h-8 rounded-full bg-surface-hover text-ark-accent-green flex items-center justify-center"
+          title="Installed in ARK Engine"
+          aria-label={`Installed ${name}`}
+        >
+          <Check className="w-4 h-4" />
+        </span>
+        {onDelete && (
+          <button
+            type="button"
+            onClick={onDelete}
+            className="w-8 h-8 rounded-full flex items-center justify-center text-content-tertiary hover:text-rose-300 hover:bg-rose-500/10 transition-colors"
+            title={`Delete ${name} from this PC`}
+            aria-label={`Delete ${name}`}
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
+        )}
       </span>
     );
   }
@@ -835,15 +850,37 @@ export function ModelsView() {
     });
   };
 
+  const removeInstall = (id: string, name: string) => {
+    if (!window.confirm(`Delete “${name}” from this PC? This removes the downloaded file. You can install it again later.`)) {
+      return;
+    }
+    void deleteEngineModel(id)
+      .then(result => {
+        if (!result.ok) {
+          setOllamaNote(result.error || 'Could not delete model');
+          return;
+        }
+        setInstalled(prev => {
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
+        setOllamaNote(`Deleted ${name}`);
+      })
+      .catch(err => {
+        setOllamaNote(err instanceof Error ? err.message : 'Could not delete model');
+      });
+  };
+
   return (
-    <div className="h-full flex flex-col overflow-hidden animate-fade-in bg-ark-navy-950">
-      <div className="shrink-0 px-6 pt-[min(12vh,6rem)] bg-ark-navy-950">
-        <div className="w-full max-w-4xl mx-auto">
-          <div className="flex items-center justify-between gap-4 mb-5">
-            <div>
-              <h1 className="text-3xl font-semibold text-content-primary tracking-tight">Models</h1>
+    <div className="h-full min-w-0 flex flex-col overflow-hidden animate-fade-in bg-ark-navy-950">
+      <div className="shrink-0 px-4 sm:px-6 pt-[min(12vh,6rem)] bg-ark-navy-950">
+        <div className="w-full max-w-4xl mx-auto min-w-0">
+          <div className="flex items-center justify-between gap-3 mb-5 min-w-0">
+            <div className="min-w-0">
+              <h1 className="text-2xl sm:text-3xl font-semibold text-content-primary tracking-tight">Models</h1>
             </div>
-            <div className="flex items-center gap-2 rounded-full bg-surface-hover px-3.5 py-2 w-52 sm:w-64 shrink-0">
+            <div className="flex items-center gap-2 rounded-full bg-surface-hover px-3 py-2 w-36 sm:w-52 md:w-64 shrink-0 min-w-0">
               <Search className="w-4 h-4 text-content-tertiary shrink-0" />
               <input
                 type="text"
@@ -897,8 +934,8 @@ export function ModelsView() {
         </div>
       </div>
 
-      <div className="flex-1 min-h-0 overflow-y-auto px-6 pb-10">
-        <div className="w-full max-w-4xl mx-auto">
+      <div className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden px-4 sm:px-6 pb-10">
+        <div className="w-full max-w-4xl mx-auto min-w-0">
           {tab === 'for-pc' ? (
             <>
               <div className="flex items-center justify-between gap-3 mb-8">
@@ -959,6 +996,7 @@ export function ModelsView() {
                             progress={installProgress[model.id]}
                             onInstall={() => toggleInstall(model.id, model)}
                             onCancel={() => cancelInstall(model.id)}
+                            onDelete={() => removeInstall(model.id, model.name)}
                           />
                         </div>
                       );
@@ -1008,6 +1046,7 @@ export function ModelsView() {
                                   progress={installProgress[model.id]}
                                   onInstall={() => toggleInstall(model.id)}
                                   onCancel={() => cancelInstall(model.id)}
+                                  onDelete={() => removeInstall(model.id, model.name)}
                                 />
                               </div>
                             );
@@ -1033,11 +1072,9 @@ export function ModelsView() {
                   ) : (
                     <div className="flex flex-col">
                       {installedModels.map(model => (
-                        <button
+                        <div
                           key={model.id}
-                          type="button"
-                          onClick={() => toggleInstall(model.id)}
-                          className="w-full flex items-center gap-3 py-3 px-1 rounded-xl text-left hover:bg-surface-hover/50 transition-colors"
+                          className="w-full flex items-center gap-3 py-3 px-1 rounded-xl hover:bg-surface-hover/50 transition-colors min-w-0"
                         >
                           <span className={`w-10 h-10 rounded-xl bg-gradient-to-br ${model.tone} flex items-center justify-center text-[10px] font-bold text-white shrink-0`}>
                             {model.initial}
@@ -1051,10 +1088,15 @@ export function ModelsView() {
                               {categoryDisplayLabel(model.category, model.id)} · {model.size}
                             </span>
                           </span>
-                          <span className="w-8 h-8 rounded-full bg-surface-hover text-ark-accent-green flex items-center justify-center shrink-0">
-                            <Check className="w-4 h-4" />
-                          </span>
-                        </button>
+                          <ModelInstallControl
+                            modelId={model.id}
+                            name={model.name}
+                            isOn
+                            isBusy={false}
+                            onInstall={() => undefined}
+                            onDelete={() => removeInstall(model.id, model.name)}
+                          />
+                        </div>
                       ))}
                     </div>
                   )}
@@ -1099,6 +1141,7 @@ export function ModelsView() {
                               progress={installProgress[model.id]}
                               onInstall={() => toggleInstall(model.id)}
                               onCancel={() => cancelInstall(model.id)}
+                              onDelete={() => removeInstall(model.id, model.name)}
                             />
                           </div>
                         );

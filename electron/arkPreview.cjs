@@ -6,10 +6,12 @@
 const fs = require('fs');
 const path = require('path');
 const http = require('http');
-const { app } = require('electron');
+const { app, BrowserWindow } = require('electron');
 
 /** @type {Map<string, { server: import('http').Server, port: number, root: string }>} */
 const sessions = new Map();
+/** @type {Map<string, import('electron').BrowserWindow>} */
+const previewWindows = new Map();
 
 function previewRoot(projectId) {
   const root = path.join(app.getPath('userData'), 'ark-previews', String(projectId || 'default'));
@@ -30,6 +32,11 @@ function writeTree(root, files) {
 
 function ensureIndex(root, projectName) {
   const indexPath = path.join(root, 'index.html');
+  const arkPrev = path.join(root, 'ark-preview.html');
+  if (!fs.existsSync(indexPath) && fs.existsSync(arkPrev)) {
+    fs.copyFileSync(arkPrev, indexPath);
+    return;
+  }
   if (fs.existsSync(indexPath)) return;
   const appTsx = path.join(root, 'src', 'App.tsx');
   const snippet = fs.existsSync(appTsx)
@@ -137,6 +144,101 @@ async function stopPreview(projectId) {
   return { ok: true };
 }
 
+function deviceShellHtml(url, device) {
+  const label = String(device?.label || 'Preview').replace(/</g, '');
+  const family = String(device?.family || 'iphone');
+  const landscape = family === 'mac' || family === 'android-laptop' || family === 'computer';
+  const radius = family === 'ipad' || family === 'android-tablet' || family === 'tablet' ? '28px' : landscape ? '12px' : '36px';
+  const border = landscape ? '8px' : '12px';
+  const w = Number(device?.width) || (landscape ? 1100 : 393);
+  const h = Number(device?.height) || (landscape ? 720 : 852);
+  const frameW = landscape ? Math.min(w, 1100) : Math.min(w, 430);
+  const frameH = Math.round(frameW * (h / w));
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>${label} · ARK Preview</title>
+  <style>
+    html,body{margin:0;height:100%;background:#050608;color:#e8eef8;font-family:ui-sans-serif,system-ui,sans-serif}
+    body{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px}
+    .label{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#94a3b8}
+    .phone{position:relative;background:#111827;border:${border} solid #27272a;border-radius:${radius};overflow:hidden;box-shadow:0 30px 80px rgba(0,0,0,.55)}
+    .notch{position:absolute;top:8px;left:50%;transform:translateX(-50%);width:72px;height:8px;border-radius:999px;background:#3f3f46;z-index:2}
+    iframe{border:0;width:100%;height:100%;background:#fff}
+  </style>
+</head>
+<body>
+  <div class="label">${label} · ${w}×${h}</div>
+  <div class="phone" style="width:${frameW}px;height:${frameH}px">
+    ${landscape ? '' : '<span class="notch"></span>'}
+    <iframe src="${String(url).replace(/"/g, '')}"></iframe>
+  </div>
+</body>
+</html>`;
+}
+
+async function openPreviewWindow(payload) {
+  const id = String(payload?.projectId || 'default');
+  const url = String(payload?.url || '');
+  if (!url) return { ok: false, error: 'No preview URL' };
+
+  const existing = previewWindows.get(id);
+  if (existing && !existing.isDestroyed()) {
+    existing.focus();
+    try {
+      await existing.loadURL(url);
+    } catch {
+      /* keep existing */
+    }
+    return { ok: true };
+  }
+
+  const kind = payload?.kind === 'device' ? 'device' : 'web';
+  const device = payload?.device || null;
+  const landscape = device && /mac|laptop|computer/i.test(String(device.family || ''));
+  const width = kind === 'device' && device
+    ? Math.min((Number(device.width) || 393) + (landscape ? 80 : 64), landscape ? 1280 : 520)
+    : 1100;
+  const height = kind === 'device' && device
+    ? Math.min((Number(device.height) || 852) + 120, landscape ? 860 : 980)
+    : 780;
+
+  const win = new BrowserWindow({
+    width: Math.round(width),
+    height: Math.round(height),
+    title: String(payload?.title || 'ARK Preview'),
+    backgroundColor: '#050608',
+    autoHideMenuBar: true,
+    webPreferences: {
+      sandbox: true,
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  previewWindows.set(id, win);
+  win.on('closed', () => {
+    if (previewWindows.get(id) === win) previewWindows.delete(id);
+  });
+
+  if (kind === 'device' && device) {
+    const session = sessions.get(id);
+    if (session?.root) {
+      const shellPath = path.join(session.root, '__ark-device.html');
+      fs.writeFileSync(shellPath, deviceShellHtml(url, device), 'utf8');
+      await win.loadURL(`http://127.0.0.1:${session.port}/__ark-device.html`);
+    } else {
+      await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(deviceShellHtml(url, device))}`);
+    }
+  } else {
+    await win.loadURL(url);
+  }
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+  return { ok: true };
+}
+
 function previewStatus(projectId) {
   const session = sessions.get(String(projectId || 'default'));
   if (!session) return { ok: false, running: false };
@@ -149,4 +251,4 @@ function previewStatus(projectId) {
   };
 }
 
-module.exports = { startPreview, stopPreview, previewStatus };
+module.exports = { startPreview, stopPreview, previewStatus, openPreviewWindow };

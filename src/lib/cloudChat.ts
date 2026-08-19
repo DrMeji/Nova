@@ -68,6 +68,7 @@ async function openaiCompatible(
           model,
           messages,
           temperature: 0.7,
+          max_tokens: 4096,
           stream: true,
         }),
       },
@@ -88,6 +89,7 @@ async function openaiCompatible(
       model,
       messages,
       temperature: 0.7,
+      max_tokens: 4096,
     }),
   });
   if (!res.ok) throw new Error(apiErrorMessage(res, 'Cloud chat error'));
@@ -124,7 +126,7 @@ async function chatAnthropic(
     },
     body: JSON.stringify({
       model,
-      max_tokens: 2048,
+      max_tokens: 4096,
       system,
       messages,
     }),
@@ -176,6 +178,7 @@ async function chatGoogle(
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: routerSystemPrompt(history) }] },
       contents,
+      generationConfig: { maxOutputTokens: 4096, temperature: 0.7 },
     }),
   });
   if (!res.ok) throw new Error(apiErrorMessage(res, 'Google AI error'));

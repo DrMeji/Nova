@@ -3,6 +3,7 @@ import { useRouter } from '@/context/RouterContext';
 import { detectHardware, getAccurateHardware, getHardwareClass, getRecommendedChatModel, loadHardwareSnapshot, type HardwareInfo } from '@/lib/api';
 import { getLocalPrefs, setLocalPrefs } from '@/lib/localPrefs';
 import {
+  deleteEngineModel,
   engineDiskSpace,
   getEngineStatus,
   importGgufPick,
@@ -41,7 +42,7 @@ import {
   Cpu, MemoryStick, HardDrive, Zap, Monitor, MonitorCog,
   Power, Activity, Check, Download, Shield,
   Gauge, Boxes, Wifi, Loader2, FolderOpen, FileBox,
-  Code, Brain, Image as ImageIcon, Globe,
+  Code, Brain, Image as ImageIcon, Globe, Trash2,
 } from 'lucide-react';
 
 import {
@@ -230,6 +231,7 @@ function LocalDownloadControl({
   progress,
   onDownload,
   onCancel,
+  onDelete,
 }: {
   name: string;
   isActive?: boolean;
@@ -238,17 +240,34 @@ function LocalDownloadControl({
   progress?: number;
   onDownload?: () => void;
   onCancel?: () => void;
+  onDelete?: () => void;
 }) {
   if (isInstalled) {
     return (
-      <span
-        className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${
-          isActive ? 'bg-surface-hover text-ark-accent-green' : 'text-content-tertiary'
-        }`}
-        title={isActive ? 'Active model' : 'Installed'}
-        aria-label={isActive ? `Active ${name}` : `Installed ${name}`}
-      >
-        <Check className="w-4 h-4" />
+      <span className="inline-flex items-center gap-0.5 shrink-0">
+        <span
+          className={`w-8 h-8 rounded-full flex items-center justify-center ${
+            isActive ? 'bg-surface-hover text-ark-accent-green' : 'text-content-tertiary'
+          }`}
+          title={isActive ? 'Active model' : 'Installed'}
+          aria-label={isActive ? `Active ${name}` : `Installed ${name}`}
+        >
+          <Check className="w-4 h-4" />
+        </span>
+        {onDelete && (
+          <button
+            type="button"
+            onClick={e => {
+              e.stopPropagation();
+              onDelete();
+            }}
+            className="w-8 h-8 rounded-full flex items-center justify-center text-content-tertiary hover:text-rose-300 hover:bg-rose-500/10 transition-colors"
+            title={`Delete ${name} from this PC`}
+            aria-label={`Delete ${name}`}
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
+        )}
       </span>
     );
   }
@@ -424,6 +443,12 @@ export function LocalAI() {
 
   useEffect(() => {
     let cancelled = false;
+    const onModels = () => {
+      void getEngineStatus().then(status => {
+        if (!cancelled) applyEngine(status);
+      }).catch(() => undefined);
+    };
+    window.addEventListener('ark:engine-models-changed', onModels);
     void (async () => {
       try {
         const status = await startEngine();
@@ -443,7 +468,10 @@ export function LocalAI() {
         );
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      window.removeEventListener('ark:engine-models-changed', onModels);
+    };
   }, []);
 
   const handleSpeedTest = async () => {
@@ -531,6 +559,24 @@ export function LocalAI() {
     });
   };
 
+  const removeInstalledModel = (id: string, name: string) => {
+    if (!window.confirm(`Delete “${name}” from this PC? This removes the downloaded file. You can install it again later.`)) {
+      return;
+    }
+    void deleteEngineModel(id)
+      .then(result => {
+        if (!result.ok) {
+          setStatusNote(result.error || 'Could not delete model');
+          return;
+        }
+        applyEngine(result);
+        setStatusNote(`Deleted ${name}`);
+      })
+      .catch(err => {
+        setStatusNote(err instanceof Error ? err.message : 'Could not delete model');
+      });
+  };
+
   const activeModel = installed.find(m => m.id === activeId) ?? (() => {
     const hit = CATALOG.find(m => m.id === recommendation.id) || CATALOG[0];
     return {
@@ -596,12 +642,12 @@ export function LocalAI() {
   ];
 
   return (
-    <div className="h-full flex flex-col overflow-hidden animate-fade-in bg-ark-navy-950">
-      <div className="shrink-0 px-6 pt-[min(12vh,6rem)] bg-ark-navy-950">
-        <div className="w-full max-w-4xl mx-auto">
-          <div className="flex items-center justify-between gap-4 mb-5">
-            <div>
-              <h1 className="text-3xl font-semibold text-content-primary tracking-tight">Local AI</h1>
+    <div className="h-full min-w-0 flex flex-col overflow-hidden animate-fade-in bg-ark-navy-950">
+      <div className="shrink-0 px-4 sm:px-6 pt-[min(12vh,6rem)] bg-ark-navy-950">
+        <div className="w-full max-w-4xl mx-auto min-w-0">
+          <div className="flex items-center justify-between gap-3 mb-5 min-w-0">
+            <div className="min-w-0">
+              <h1 className="text-2xl sm:text-3xl font-semibold text-content-primary tracking-tight">Local AI</h1>
             </div>
             <button
               type="button"
@@ -643,8 +689,8 @@ export function LocalAI() {
         </div>
       </div>
 
-      <div className="flex-1 min-h-0 overflow-y-auto px-6 pb-10">
-        <div className="w-full max-w-4xl mx-auto">
+      <div className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden px-4 sm:px-6 pb-10">
+        <div className="w-full max-w-4xl mx-auto min-w-0">
           {tab === 'overview' && (
             <div className="space-y-10">
               {/* Engine */}
@@ -766,12 +812,15 @@ export function LocalAI() {
                     {installed.map(model => {
                     const isActive = model.id === activeId;
                     return (
-                      <button
+                      <div
                         key={model.id}
-                        type="button"
-                        onClick={() => switchModel(model.id)}
                         className="flex items-center gap-3 py-3 px-1 rounded-xl text-left hover:bg-surface-hover/50 transition-colors min-w-0"
                       >
+                        <button
+                          type="button"
+                          onClick={() => switchModel(model.id)}
+                          className="flex items-center gap-3 min-w-0 flex-1 text-left"
+                        >
                         <span className={`w-10 h-10 rounded-xl bg-gradient-to-br ${model.tone} flex items-center justify-center text-[10px] font-bold text-white shrink-0`}>
                           {model.initial}
                         </span>
@@ -787,12 +836,14 @@ export function LocalAI() {
                           </span>
                           <span className="block text-xs text-content-tertiary truncate mt-0.5">{model.detail}</span>
                         </span>
+                        </button>
                         <LocalDownloadControl
                           name={model.name}
                           isInstalled
                           isActive={isActive}
+                          onDelete={() => removeInstalledModel(model.id, model.name)}
                         />
-                      </button>
+                      </div>
                     );
                   })}
                   </ModelGrid>
@@ -1284,13 +1335,22 @@ export function LocalAI() {
                 ) : (
                   <div className="flex flex-col">
                     {engineMeta?.modelFiles?.map(f => (
-                      <div key={f.path} className="flex items-start gap-3 py-3 border-b border-surface-border/60 last:border-0">
+                      <div key={f.path} className="flex items-start gap-3 py-3 border-b border-surface-border/60 last:border-0 min-w-0">
                         <FileBox className="w-4 h-4 text-content-secondary shrink-0 mt-0.5" />
                         <div className="min-w-0 flex-1">
-                          <p className="text-sm text-content-primary font-medium">{f.file}</p>
+                          <p className="text-sm text-content-primary font-medium truncate">{f.file}</p>
                           <p className="text-xs text-content-tertiary mt-0.5">{f.sizeMb} MB</p>
                           <p className="text-[11px] text-content-tertiary font-mono break-all mt-1">{f.path}</p>
                         </div>
+                        <button
+                          type="button"
+                          className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 text-content-tertiary hover:text-rose-300 hover:bg-rose-500/10 transition-colors"
+                          title={`Delete ${f.file}`}
+                          aria-label={`Delete ${f.file}`}
+                          onClick={() => removeInstalledModel(`gguf:${f.file}`, f.file)}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
                       </div>
                     ))}
                   </div>

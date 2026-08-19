@@ -195,6 +195,9 @@ declare global {
         count?: number;
         status?: import('@/lib/arkEngine').ArkEngineStatus;
       }>;
+      engineDeleteModel?: (id: string) => Promise<
+        import('@/lib/arkEngine').ArkEngineStatus & { ok: boolean; error?: string; deleted?: string; removed?: number }
+      >;
       engineDiskSpace?: () => Promise<{
         ok: boolean;
         freeBytes?: number | null;
@@ -250,6 +253,13 @@ declare global {
         url?: string;
         port?: number;
       }>;
+      previewOpenWindow?: (payload: {
+        projectId: string;
+        url: string;
+        title?: string;
+        kind?: 'web' | 'device';
+        device?: { label: string; width: number; height: number; family?: string };
+      }) => Promise<{ ok: boolean; error?: string }>;
       mediaLibrary?: () => Promise<{
         ok: boolean;
         items: Array<{

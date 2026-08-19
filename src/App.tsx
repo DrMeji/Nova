@@ -129,7 +129,7 @@ function App() {
   return (
     <ThemeProvider>
       {/* Full-bleed shell; title controls overlay so sidebar padding is even top/bottom */}
-      <div className="h-screen relative overflow-hidden bg-ark-navy-950">
+      <div className="h-screen min-w-0 relative overflow-hidden bg-ark-navy-950">
         <TitleBar />
         <div className="h-full overflow-hidden">
           <AuthProvider>

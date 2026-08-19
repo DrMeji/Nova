@@ -568,6 +568,78 @@ function cancelDownload(id) {
   return { ok: false, error: 'No active download' };
 }
 
+function tryUnlink(filePath) {
+  try {
+    if (filePath && fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+      return true;
+    }
+  } catch {
+    /* ignore */
+  }
+  return false;
+}
+
+function deleteInstalledModel(id) {
+  const raw = String(id || '').trim();
+  if (!raw) return { ok: false, error: 'No model selected' };
+  const meta = catalogAll().find((m) => m.id === raw);
+  if (meta?.builtin || raw === 'ark-core' || raw === 'ark-image-core' || raw === 'ark-video-core') {
+    return { ok: false, error: 'Cannot delete a built-in model' };
+  }
+
+  if (downloads[raw] || downloadQueue.includes(raw)) {
+    cancelDownload(raw);
+  }
+
+  const targets = [];
+  if (raw.startsWith('gguf:')) {
+    targets.push(path.join(modelsDir(), raw.slice(5)));
+  } else {
+    const gguf = arkGguf.findGgufForModel(raw);
+    if (gguf) targets.push(gguf);
+    targets.push(modelMarkerPath(raw));
+    if (meta?.runtime === 'flux' || raw === 'flux-schnell-local') {
+      targets.push(...Object.values(arkSd.fluxPaths()));
+    } else if (meta?.runtime === 'sd' || meta?.format === 'safetensors') {
+      const weights = arkSd.weightsPathForId(raw);
+      if (weights) targets.push(weights);
+    }
+  }
+
+  const activeGguf = String(activeModelId).startsWith('gguf:')
+    ? path.join(modelsDir(), String(activeModelId).slice(5))
+    : arkGguf.findGgufForModel(activeModelId);
+  if (raw === activeModelId || (activeGguf && targets.includes(activeGguf))) {
+    try { arkGguf.stopServer(); } catch { /* ignore */ }
+    activeModelId = 'ark-core';
+  }
+
+  try {
+    for (const f of fs.readdirSync(modelsDir())) {
+      if (
+        f === `${raw}.arkmodel`
+        || (f.startsWith(`${raw}.`) && f.endsWith('.partial'))
+        || (raw.startsWith('gguf:') && f === raw.slice(5))
+      ) {
+        targets.push(path.join(modelsDir(), f));
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+
+  let removed = 0;
+  for (const p of [...new Set(targets)]) {
+    if (tryUnlink(p)) removed += 1;
+  }
+
+  if (removed === 0) {
+    return { ...getStatus(), ok: false, error: 'No files found for that model' };
+  }
+  return { ...getStatus(), ok: true, deleted: raw, removed };
+}
+
 function importGgufFile(filePath) {
   if (!filePath || typeof filePath !== 'string') throw new Error('No file path');
   const src = path.resolve(filePath);
@@ -713,8 +785,9 @@ async function generate(message, opts = {}) {
   if (arkGguf.findGgufForModel(ggufId) && arkGguf.findLlamaBinary()) {
     try {
       const onChunk = typeof opts.onChunk === 'function' ? opts.onChunk : null;
-      const timeoutMs = kind === 'coding' ? 45_000 : 30_000;
-      const gguf = await arkGguf.runGgufStream(ggufId, message, onChunk, timeoutMs);
+      const timeoutMs = kind === 'coding' ? 180_000 : 90_000;
+      const nPredict = kind === 'coding' ? 2048 : 1536;
+      const gguf = await arkGguf.runGgufStream(ggufId, message, onChunk, timeoutMs, nPredict);
       return {
         ok: true,
         reply: gguf.reply,
@@ -775,6 +848,7 @@ module.exports = {
   downloadError,
   cancelDownload,
   importGgufFile,
+  deleteInstalledModel,
   diskSpaceForModels,
   ensureRuntime,
   generate,

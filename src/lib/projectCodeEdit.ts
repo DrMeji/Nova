@@ -1141,11 +1141,15 @@ createRoot(document.getElementById('root')!).render(
 /** Offline fallback when the brain times out or returns no file blocks. */
 export function scaffoldFallbackEdits(userMessage: string, files?: ProjectFileMap): ParsedFileEdit[] {
   const mobile = classifyMobileTarget(userMessage);
-  if (mobile && isLayoutLockAsk(userMessage) && files) {
+  const nativeTree = files && Object.keys(files).some(p =>
+    /ios\/[^/]+\/ContentView\.swift$/i.test(p) || /MainActivity\.kt$/i.test(p),
+  );
+  if (mobile && files && nativeTree) {
     const locked = layoutLockEdits(files, userMessage, mobile);
     if (locked.length) return locked;
+    return [];
   }
-  if (mobile) return mobileTemplateEdits(mobile, userMessage, inferBuildLabel(userMessage));
+  if (mobile) return mobileTemplateEdits(mobile, userMessage, inferBuildLabel(userMessage), files);
   const planned = planFilesForBuild(userMessage);
   if (planned.length === 1 && planned[0].endsWith('.py')) {
     return [{ path: 'main.py', content: pythonFallback(userMessage) }];
@@ -1159,9 +1163,11 @@ export function scaffoldFallbackEdits(userMessage: string, files?: ProjectFileMa
 /** Inline linked CSS/JS so the Start tab works from local files. */
 export function composePreviewHtml(files: ProjectFileMap): string {
   const flat = flattenProjectFiles(files);
-  let html = flat['index.html'] || '';
+  let html = '';
+  if (flat['ark-preview.html']?.trim()) html = flat['ark-preview.html'];
+  if (!html.trim()) html = flat['index.html'] || '';
   if (!html.trim()) {
-    const htmlPath = Object.keys(flat).find(p => /\.html?$/i.test(p));
+    const htmlPath = Object.keys(flat).find(p => /\.html?$/i.test(p) && !/node_modules/.test(p));
     html = htmlPath ? flat[htmlPath] : '';
   }
   if (!html.trim()) return '';

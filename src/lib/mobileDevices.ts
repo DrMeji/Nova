@@ -22,6 +22,8 @@ export const PHONE_DEVICES: PhoneDevice[] = [
   { id: 'iphone-se', label: 'iPhone SE', platform: 'ios', family: 'iphone', width: 375, height: 667, unit: 'pt', xcodePreview: 'iPhone SE (3rd generation)' },
   { id: 'iphone-16', label: 'iPhone 16', platform: 'ios', family: 'iphone', width: 393, height: 852, unit: 'pt', xcodePreview: 'iPhone 16' },
   { id: 'iphone-16-pro-max', label: 'iPhone 16 Pro Max', platform: 'ios', family: 'iphone', width: 440, height: 956, unit: 'pt', xcodePreview: 'iPhone 16 Pro Max' },
+  { id: 'iphone-18', label: 'iPhone 18', platform: 'ios', family: 'iphone', width: 393, height: 852, unit: 'pt', xcodePreview: 'iPhone 16' },
+  { id: 'iphone-18-pro-max', label: 'iPhone 18 Pro Max', platform: 'ios', family: 'iphone', width: 440, height: 956, unit: 'pt', xcodePreview: 'iPhone 16 Pro Max' },
   { id: 'ipad-mini', label: 'iPad mini', platform: 'ios', family: 'ipad', width: 744, height: 1133, unit: 'pt', xcodePreview: 'iPad mini (6th generation)' },
   { id: 'ipad-pro-11', label: 'iPad Pro 11', platform: 'ios', family: 'ipad', width: 834, height: 1194, unit: 'pt', xcodePreview: 'iPad Pro 11-inch (M4)' },
   { id: 'ipad-pro-13', label: 'iPad Pro 13', platform: 'ios', family: 'ipad', width: 1024, height: 1366, unit: 'pt', xcodePreview: 'iPad Pro 13-inch (M4)' },
@@ -119,10 +121,14 @@ export function resolveDevices(target: MobilePlatform, message: string): { ios?:
 
 export function classifyMobileDevice(message: string, target?: MobilePlatform | null): PhoneDevice | null {
   const t = String(message || '').toLowerCase();
+  if (/iphone\s*1[78]\s*pro\s*max/.test(t)) {
+    return PHONE_DEVICES.find(d => d.id === 'iphone-18-pro-max')!;
+  }
   if (/iphone\s*16\s*pro\s*max|iphone\s*16\s*plus/.test(t)) {
     return PHONE_DEVICES.find(d => d.id === 'iphone-16-pro-max')!;
   }
   if (/iphone\s*se\b/.test(t)) return PHONE_DEVICES.find(d => d.id === 'iphone-se')!;
+  if (/iphone\s*1[78]\b/.test(t)) return PHONE_DEVICES.find(d => d.id === 'iphone-18')!;
   if (/iphone\s*16\b|iphone\s*15\b/.test(t)) return PHONE_DEVICES.find(d => d.id === 'iphone-16')!;
   if (/ipad\s*pro\s*13|ipad\s*pro\s*12/.test(t)) return PHONE_DEVICES.find(d => d.id === 'ipad-pro-13')!;
   if (/ipad\s*mini/.test(t)) return PHONE_DEVICES.find(d => d.id === 'ipad-mini')!;
@@ -145,7 +151,9 @@ export function classifyMobileDevice(message: string, target?: MobilePlatform | 
 }
 
 export function isLayoutLockAsk(message: string) {
-  return /\block (the )?layout\b/i.test(message) || /\btarget layout\b/i.test(message);
+  return /\block (the )?layout\b/i.test(message)
+    || /\btarget layout\b/i.test(message)
+    || /\bkeep the same native project\b/i.test(message);
 }
 
 export function deviceLine(device: PhoneDevice) {

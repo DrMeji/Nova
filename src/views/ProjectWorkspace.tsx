@@ -64,8 +64,10 @@ import {
   type BuildLiveStep,
 } from '@/lib/projectCodeEdit';
 import { classifyMobileTarget, inferMobileTargetFromFiles, isNativeMobileTree, needsMobileTargetChoice } from '@/lib/mobileTarget';
-import { finalizeMobileEdits, formatNativeBuildReply, formatNativePushReply, mobileTemplateEdits, preferredMobileFocus } from '@/lib/mobileTemplates';
+import { finalizeMobileEdits, formatNativeBuildReply, formatNativePushReply, preferredMobileFocus, simpleVisualPatchEdits, layoutLockEdits } from '@/lib/mobileTemplates';
 import {
+  classifyMobileDevice,
+  defaultDeviceForFamily,
   devicesForChips,
   familyBuildPrompt,
   isLayoutLockAsk,
@@ -90,6 +92,7 @@ import {
   buildNamedPatchPrompt,
   filterEditsToPaths,
   formatLocalFindings,
+  isExplainAsk,
   isFindInFilesAsk,
   pathsMentionedInText,
   pickFilesForInspect,
@@ -162,8 +165,8 @@ interface FileNode {
   language?: string;
 }
 
-const CODE_ROUTE_TIMEOUT_MS = 25_000;
-const CODE_STALL_MS = 6_000;
+const CODE_ROUTE_TIMEOUT_MS = 120_000;
+const CODE_STALL_MS = 45_000;
 const BUILD_STEP_ORDER: BuildLiveStep[] = ['understand', 'plan', 'generate', 'apply', 'done'];
 
 function packDiskFiles(files: Record<string, string>, messages?: ChatMessage[]) {
@@ -360,8 +363,8 @@ export function ProjectWorkspace() {
   const [expandedFolders, setExpandedFolders] = useState(new Set<string>());
   const [buildRunning, setBuildRunning] = useState(false);
   const [buildProgress, setBuildProgress] = useState(0);
-  const [explorerOpen, setExplorerOpen] = useState(true);
-  const [codeOpen, setCodeOpen] = useState(true);
+  const [explorerOpen, setExplorerOpen] = useState(() => typeof window === 'undefined' || window.innerWidth >= 900);
+  const [codeOpen, setCodeOpen] = useState(() => typeof window === 'undefined' || window.innerWidth >= 900);
   const [explorerWidth, setExplorerWidth] = useState(220);
   const [codeWidth, setCodeWidth] = useState(380);
   const [buildLive, setBuildLive] = useState<{
@@ -411,6 +414,7 @@ export function ProjectWorkspace() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const codeFileInputRef = useRef<HTMLInputElement>(null);
+  const codeFolderInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const codeEditorRef = useRef<HTMLTextAreaElement>(null);
   const modelButtonRef = useRef<HTMLButtonElement>(null);
@@ -443,17 +447,17 @@ export function ProjectWorkspace() {
     fileTreeRef.current = tree;
     setFileContents(mapped);
     setFileTree(tree);
+    setExplorerOpen(true);
+    setCodeOpen(true);
+    setExpandedFolders(prev => {
+      const next = new Set(prev);
+      Object.keys(mapped).forEach(p => foldersToExpand([p]).forEach(f => next.add(f)));
+      return next;
+    });
     const entry = preferredEntryPath(mapped);
     if (entry) {
       setSelectedFile(entry);
-      setExpandedFolders(prev => {
-        const next = new Set(prev);
-        foldersToExpand([entry]).forEach(p => next.add(p));
-        return next;
-      });
       setRightTab('code');
-      setCodeOpen(true);
-      setExplorerOpen(true);
     }
   }, []);
 
@@ -469,6 +473,58 @@ export function ProjectWorkspace() {
   }, [projectId]);
 
   const canEdit = myAccess !== 'read';
+
+  const postAssistantNote = useCallback((text: string) => {
+    const uid = user?.id ?? 'guest';
+    const pid = project?.id || projectId || '';
+    const note: ChatMessage = {
+      id: crypto.randomUUID(),
+      user_id: uid,
+      project_id: pid,
+      role: 'assistant',
+      content: text,
+      provider_used: 'ARK',
+      created_at: new Date().toISOString(),
+    };
+    setMessages(prev => {
+      const next = [...prev, note];
+      if (pid) saveProjectThread(pid, next);
+      return next;
+    });
+  }, [project?.id, projectId, user?.id]);
+
+  const applyWorkspaceEdits = useCallback((edits: { path: string; content: string }[]) => {
+    if (!canEdit || !edits.length) return { changedPaths: [] as string[] };
+    undoSnapshotRef.current = { ...fileContentsRef.current };
+    setUndoReady(true);
+    const applied = applyFileEdits(fileContentsRef.current, fileTreeRef.current, edits);
+    fileContentsRef.current = applied.files;
+    fileTreeRef.current = applied.tree.length ? applied.tree : buildFileTreeFromPaths(applied.files);
+    setFileContents(applied.files);
+    setFileTree(fileTreeRef.current);
+    setDiffStats(prev => ({
+      added: prev.added + applied.addedLines,
+      removed: prev.removed + applied.removedLines,
+    }));
+    setExpandedFolders(prev => {
+      const next = new Set(prev);
+      foldersToExpand(applied.changedPaths).forEach(p => next.add(p));
+      return next;
+    });
+    const focus = preferredMobileFocus(applied.changedPaths) || applied.changedPaths[0];
+    if (focus) setSelectedFile(focus);
+    const pid = project?.id || projectId;
+    if (pid && window.arkDesktop?.projectWrite) {
+      void window.arkDesktop.projectWrite({
+        projectId: pid,
+        projectName: project?.name,
+        files: packDiskFiles(applied.files, messagesRef.current),
+      }).then(res => {
+        if (res.root) setDiskRoot(res.root);
+      });
+    }
+    return { changedPaths: applied.changedPaths };
+  }, [canEdit, project?.id, project?.name, projectId]);
 
   const openPathInEditor = useCallback((path: string, line?: number) => {
     const flat = fileContentsRef.current;
@@ -543,6 +599,18 @@ export function ProjectWorkspace() {
     if (!projectId) return;
     setTokenRatio(getTokenUsageRatio(projectId));
   }, [projectId]);
+
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 900px)');
+    const apply = () => {
+      if (mq.matches) {
+        setExplorerOpen(false);
+        setCodeOpen(false);
+      }
+    };
+    mq.addEventListener('change', apply);
+    return () => mq.removeEventListener('change', apply);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -876,20 +944,36 @@ export function ProjectWorkspace() {
       setProject(active);
       navigate({ name: 'project', id: created.id });
     }
-    if (!window.arkDesktop?.projectImportFolder) return;
+    const applyImported = (files: Record<string, string>, name?: string) => {
+      applyProjectFiles(files);
+      const count = Object.keys(files).length;
+      if (name) touchRecentProject(pid, name);
+      postAssistantNote(
+        count
+          ? `Opened ${count} file${count === 1 ? '' : 's'}${name ? ` from ${name}` : ''}. They’re in Explorer — ask me to debug, explain, or edit them.`
+          : 'That folder opened, but I could not read any text files from it.',
+      );
+    };
+    if (!window.arkDesktop?.projectImportFolder) {
+      codeFolderInputRef.current?.click();
+      return;
+    }
     const res = await window.arkDesktop.projectImportFolder({
       projectId: pid,
       projectName: active?.name,
     });
-    if (!res?.ok || res.canceled) return;
+    if (!res?.ok || res.canceled) {
+      if (!res?.canceled) codeFolderInputRef.current?.click();
+      return;
+    }
     if (res.root) setDiskRoot(res.root);
-    if (res.files) applyProjectFiles(res.files);
+    if (res.files && Object.keys(res.files).length) applyImported(res.files, res.name);
     else {
       const read = await window.arkDesktop.projectRead?.(pid);
-      if (read?.files) applyProjectFiles(read.files);
+      if (read?.files && Object.keys(read.files).length) applyImported(read.files, res.name);
+      else codeFolderInputRef.current?.click();
       if (read?.root) setDiskRoot(read.root);
     }
-    if (res.name) touchRecentProject(pid, res.name);
     void refreshGit(pid);
   };
 
@@ -1029,10 +1113,15 @@ export function ProjectWorkspace() {
       }
     };
 
-    const buildLabel = inferBuildLabel(rawContent, activeProject.name);
-    touchRecentProject(pid, buildLabel);
-
     const composerWasDebug = composerMode === 'debug';
+    const explainOnly = isExplainAsk(rawContent);
+    const keepName = Boolean(activeProject.name && !/^code$/i.test(activeProject.name))
+      && (explainOnly || wantsInspectOnly(rawContent, composerWasDebug) || wantsNamedPatch(rawContent, true));
+    const buildLabel = keepName
+      ? activeProject.name
+      : inferBuildLabel(rawContent, activeProject.name);
+    if (!keepName) touchRecentProject(pid, buildLabel);
+
     let content = rawContent;
     if (composerMode && COMPOSER_MODE_PREFIX[composerMode]) {
       content = `${COMPOSER_MODE_PREFIX[composerMode]}${content}`;
@@ -1060,7 +1149,7 @@ export function ProjectWorkspace() {
     setAttachedImages([]);
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
 
-    if (canEdit && needsMobileTargetChoice(rawContent)) {
+    if (canEdit && needsMobileTargetChoice(rawContent) && !isNativeMobileTree(fileContentsRef.current)) {
       const userMsg: ChatMessage = {
         id: crypto.randomUUID(),
         user_id: uid,
@@ -1093,7 +1182,7 @@ export function ProjectWorkspace() {
     }
 
     const knownTarget = classifyMobileTarget(rawContent);
-    if (canEdit && knownTarget && needsDeviceFamilyChoice(rawContent, knownTarget)) {
+    if (canEdit && knownTarget && needsDeviceFamilyChoice(rawContent, knownTarget) && !isNativeMobileTree(fileContentsRef.current)) {
       const userMsg: ChatMessage = {
         id: crypto.randomUUID(),
         user_id: uid,
@@ -1143,10 +1232,11 @@ export function ProjectWorkspace() {
     const hadExistingFiles = !revisingId && Object.values(fileContentsRef.current)
       .some(v => String(v || '').trim().length > 40);
     const inspectOnly = !canEdit
-      || (hadExistingFiles && wantsInspectOnly(rawContent, composerWasDebug));
+      || (hadExistingFiles && (wantsInspectOnly(rawContent, composerWasDebug) || explainOnly));
     const patchOnlyNamed = canEdit && hadExistingFiles && wantsNamedPatch(rawContent, true) && !inspectOnly;
     const mobileAsk = Boolean(classifyMobileTarget(content));
-    const allowScaffold = canEdit && !inspectOnly && !patchOnlyNamed && (!hadExistingFiles || mobileAsk);
+    const allowScaffold = canEdit && !inspectOnly && !patchOnlyNamed
+      && (!hadExistingFiles || /\b(start over|from scratch|new app|rebuild everything)\b/i.test(rawContent));
     const plannedFiles = inspectOnly || patchOnlyNamed
       ? pickFilesForInspect(fileContentsRef.current, rawContent)
       : planFilesForBuild(content);
@@ -1271,7 +1361,6 @@ export function ProjectWorkspace() {
         const mapped = classifyMobileTarget(content) || inferMobileTargetFromFiles(applied.files) || 'ios';
         const picked = resolveDevices(mapped, content);
         setPreviewDevice(picked.ios || picked.android || null);
-        setRightTab('preview');
         setCodeOpen(true);
       }
       if (window.arkDesktop?.projectWrite) {
@@ -1298,7 +1387,9 @@ export function ProjectWorkspace() {
         }).catch(() => undefined);
       }
       setShipOfferId(assistantId);
-      if (isNativeMobileTree(applied.files)) setDeviceOfferId(assistantId);
+      if (isNativeMobileTree(applied.files) && !classifyMobileDevice(content)) {
+        setDeviceOfferId(assistantId);
+      }
       return applied;
     };
 
@@ -1439,7 +1530,14 @@ export function ProjectWorkspace() {
           if (patchOnlyNamed && allowedPatchPaths.length) lastInspectPathsRef.current = allowedPatchPaths;
 
           const codingMessage = inspectOnly
-            ? buildInspectPrompt(rawContent, fileContentsRef.current, inspectPaths, findings, buildLabel)
+            ? buildInspectPrompt(
+              rawContent,
+              fileContentsRef.current,
+              inspectPaths,
+              findings,
+              buildLabel,
+              explainOnly ? 'explain' : 'debug',
+            )
             : patchOnlyNamed
               ? buildNamedPatchPrompt(rawContent, fileContentsRef.current, allowedPatchPaths, buildLabel)
               : buildProjectCodingPrompt(content, fileContentsRef.current, buildLabel);
@@ -1520,11 +1618,11 @@ export function ProjectWorkspace() {
             }
             snapshotChanged();
             if (changedPaths.length || streamed || inspectOnly) finishWait('Stalled');
-          }, inspectOnly || patchOnlyNamed ? 14_000 : CODE_STALL_MS);
+          }, inspectOnly || patchOnlyNamed ? 40_000 : CODE_STALL_MS);
 
           hardTimer = window.setTimeout(() => {
             finishWait('Code generation timed out');
-          }, inspectOnly || patchOnlyNamed ? 40_000 : CODE_ROUTE_TIMEOUT_MS);
+          }, inspectOnly || patchOnlyNamed ? 90_000 : CODE_ROUTE_TIMEOUT_MS);
 
           const sticky = activeModel.source === 'auto' ? threadBrainRef.current : null;
           streamDraftRef.current = '';
@@ -1598,15 +1696,17 @@ export function ProjectWorkspace() {
           if (inspectOnly) {
             const local = formatLocalFindings(findings);
             const spoken = stripFileBlocks(routed.reply);
-            replyText = [spoken, !spoken.includes('`') && local ? local : '']
+            replyText = [spoken, !explainOnly && !spoken.includes('`') && local ? local : '']
               .filter(Boolean)
               .join('\n\n')
-              || `${local || 'I looked through the project files.'}\n\nWould you like me to fix these, or only list the rest?`;
-            if (canEdit && !/would you like/i.test(replyText)) {
+              || (explainOnly
+                ? (local || 'This looks like a local project. Ask me about a specific file if you want more detail.')
+                : `${local || 'I looked through the project files.'}\n\nWould you like me to fix these, or only list the rest?`);
+            if (canEdit && !explainOnly && !/would you like/i.test(replyText)) {
               replyText = `${replyText.trim()}\n\nWould you like me to fix these, or only list the rest?`;
             }
             lastInspectPathsRef.current = inspectPaths;
-            setInspectOfferId(assistantId);
+            if (!explainOnly) setInspectOfferId(assistantId);
             if (!canEdit) {
               replyText = `${replyText.trim()}\n\nYou have Read on this repo — you can look and discuss, not edit or push.`;
             }
@@ -1629,21 +1729,31 @@ export function ProjectWorkspace() {
               }
             }
             if (patchOnlyNamed) edits = filterEditsToPaths(edits, allowedPatchPaths);
+            const spoken = stripFileBlocks(routed.reply);
 
             if (edits.length > 0) {
               const applied = commitEdits(edits);
               changedPaths = applied.changedPaths;
             } else {
               snapshotChanged();
-              if (!changedPaths.length && allowScaffold) {
+              if (!changedPaths.length && patchOnlyNamed) {
+                const visual = simpleVisualPatchEdits(fileContentsRef.current, rawContent);
+                if (visual.length) {
+                  const applied = commitEdits(visual);
+                  changedPaths = applied.changedPaths;
+                }
+              } else if (!changedPaths.length && allowScaffold) {
                 usedScaffold = true;
                 const applied = commitEdits(scaffoldFallbackEdits(content, fileContentsRef.current));
                 changedPaths = applied.changedPaths;
               }
             }
-            const spoken = stripFileBlocks(routed.reply);
-            replyText = spoken
-              || nativeDoneReply({ continued: hadExistingFiles || Boolean(revisingId) });
+            if (!replyText) {
+              replyText = spoken
+                || (patchOnlyNamed && changedPaths.length
+                  ? `Updated ${changedPaths.join(', ')}.`
+                  : nativeDoneReply({ continued: hadExistingFiles || Boolean(revisingId) }));
+            }
           }
 
           bumpStep('done');
@@ -1683,11 +1793,13 @@ export function ProjectWorkspace() {
           if (inspectOnly) {
             const local = formatLocalFindings(scanProjectFindings(fileContentsRef.current, rawContent));
             const spoken = stripFileBlocks(streamDraftRef.current);
-            replyText = spoken || local || 'I looked through the files I could open.';
-            if (canEdit && !/would you like/i.test(replyText)) {
+            replyText = spoken || local || (explainOnly
+              ? 'This looks like a local project. Ask me about a specific file if you want more detail.'
+              : 'I looked through the files I could open.');
+            if (canEdit && !explainOnly && !/would you like/i.test(replyText)) {
               replyText = `${replyText.trim()}\n\nWould you like me to fix these, or only list the rest?`;
             }
-            setInspectOfferId(assistantId);
+            if (!explainOnly) setInspectOfferId(assistantId);
             if (!canEdit) {
               replyText = `${replyText.trim()}\n\nYou have Read on this repo — you can look and discuss, not edit or push.`;
             }
@@ -1699,7 +1811,13 @@ export function ProjectWorkspace() {
             });
             bumpStep('done');
           } else {
-            if (!changedPaths.length && allowScaffold && !patchOnlyNamed) {
+            if (!changedPaths.length && patchOnlyNamed) {
+              const visual = simpleVisualPatchEdits(fileContentsRef.current, rawContent);
+              if (visual.length) {
+                const applied = commitEdits(visual);
+                changedPaths = applied.changedPaths;
+              }
+            } else if (!changedPaths.length && allowScaffold && !patchOnlyNamed) {
               bumpStep('apply');
               usedScaffold = true;
               const applied = commitEdits(scaffoldFallbackEdits(content, fileContentsRef.current));
@@ -1819,7 +1937,6 @@ export function ProjectWorkspace() {
     setBuildRunning(true);
     setBuildProgress(0);
     setCodeOpen(true);
-    setRightTab('preview');
     setPreviewReady(false);
 
     const interval = setInterval(() => {
@@ -1828,14 +1945,15 @@ export function ProjectWorkspace() {
 
     void (async () => {
       try {
-        if (isNativeMobileTree(fileContents)) {
-          setPreviewReady(true);
-          setBuildProgress(100);
-          return;
-        }
+        const native = isNativeMobileTree(fileContents);
         const payloadFiles = packDiskFiles(fileContents, messagesRef.current);
+        const composed = composePreviewHtml(fileContents);
+        if (!payloadFiles['index.html'] && composed) payloadFiles['index.html'] = composed;
+        if (!payloadFiles['index.html'] && payloadFiles['ark-preview.html']) {
+          payloadFiles['index.html'] = payloadFiles['ark-preview.html'];
+        }
         if (!payloadFiles['index.html']) {
-          payloadFiles['index.html'] = composePreviewHtml(fileContents) || `<!DOCTYPE html>
+          payloadFiles['index.html'] = `<!DOCTYPE html>
 <html><head><meta charset="utf-8"/><title>${project?.name ?? 'ARK'}</title>
 <style>body{margin:0;font-family:system-ui;background:#0b1220;color:#e8eefc;padding:24px}</style>
 </head><body>
@@ -1844,25 +1962,40 @@ export function ProjectWorkspace() {
 </body></html>`;
         }
 
+        let url = '';
         if (window.arkDesktop?.previewStart && project) {
           const res = await window.arkDesktop.previewStart({
             projectId: project.id,
             projectName: project.name,
             files: payloadFiles,
           });
-          setLivePreviewUrl(res.url);
-          setPreviewUrl(res.url);
-          setPreviewReady(true);
-          setBuildProgress(100);
+          url = res.url;
         } else {
-          // Browser fallback: blob URL from generated HTML
-          const html = composePreviewHtml(fileContents) || payloadFiles['index.html'];
+          const html = composed || payloadFiles['index.html'];
           const blob = new Blob([html], { type: 'text/html' });
-          const url = URL.createObjectURL(blob);
-          setLivePreviewUrl(url);
-          setPreviewUrl(url);
-          setPreviewReady(true);
-          setBuildProgress(100);
+          url = URL.createObjectURL(blob);
+        }
+        setLivePreviewUrl(url);
+        setPreviewUrl(url);
+        setPreviewReady(true);
+        setBuildProgress(100);
+
+        const device = previewDevice
+          || (native
+            ? (resolveDevices(inferMobileTargetFromFiles(fileContents) || 'ios', '').ios || null)
+            : null);
+        if (window.arkDesktop?.previewOpenWindow && project && url) {
+          await window.arkDesktop.previewOpenWindow({
+            projectId: project.id,
+            url,
+            title: `${project.name || 'ARK'} preview`,
+            kind: native && device ? 'device' : 'web',
+            device: device
+              ? { label: device.label, width: device.width, height: device.height, family: device.family }
+              : undefined,
+          });
+        } else if (url) {
+          window.open(url, 'ark-preview');
         }
       } catch (err) {
         setPreviewReady(false);
@@ -2080,9 +2213,9 @@ export function ProjectWorkspace() {
       : null;
 
   return (
-    <div className="h-full flex flex-col min-h-0 relative">
+    <div className="h-full min-w-0 flex flex-col min-h-0 relative overflow-hidden">
       {/* Header */}
-      <div className="shrink-0 border-b border-surface-border px-4 py-2 flex items-center justify-between gap-3 bg-ark-navy-900/30 pr-28">
+      <div className="shrink-0 border-b border-surface-border px-3 sm:px-4 py-2 flex items-center justify-between gap-2 sm:gap-3 bg-ark-navy-900/30 pr-24 sm:pr-28 min-w-0">
         <div className="flex items-center gap-2 min-w-0">
           <button type="button" onClick={() => navigate({ name: 'projects' })} className="ark-btn-ghost text-xs shrink-0">
             Projects
@@ -2108,7 +2241,7 @@ export function ProjectWorkspace() {
 
         <div className="flex items-center gap-1.5 shrink-0">
           {gitInfo?.git ? (
-            <div className="flex items-center gap-1 pl-1 ml-0.5 border-l border-surface-border/70">
+            <div className="hidden md:flex items-center gap-1 pl-1 ml-0.5 border-l border-surface-border/70">
               <span className="flex items-center gap-1 text-[11px] text-content-tertiary px-1" title={gitInfo.remote || 'Local git'}>
                 <GitBranch className="w-3 h-3" />
                 {gitInfo.branch || 'HEAD'}
@@ -2165,7 +2298,7 @@ export function ProjectWorkspace() {
       <div className="flex-1 flex min-h-0 overflow-hidden">
         {explorerOpen && (
           <>
-            <div className="shrink-0 flex flex-col bg-ark-navy-900/20 overflow-hidden" style={{ width: explorerWidth }}>
+            <div className="shrink-0 flex flex-col bg-ark-navy-900/20 overflow-hidden min-w-0 max-w-[38vw]" style={{ width: explorerWidth }}>
               <div className="shrink-0 px-2 py-2 border-b border-surface-border/60">
                 {buildLive ? (
                   <div className="min-w-0">
@@ -2531,6 +2664,24 @@ export function ProjectWorkspace() {
                         platform={familyPlatform}
                         onPick={(family: DeviceFamilyKind) => {
                           setMobileOfferId(null);
+                          const platform = familyPlatform === 'android' ? 'android' : 'ios';
+                          const device = defaultDeviceForFamily(platform, family);
+                          setPreviewDevice(device);
+                          if (isNativeMobileTree(fileContentsRef.current)) {
+                            const target = inferMobileTargetFromFiles(fileContentsRef.current)
+                              || familyPlatform
+                              || 'ios';
+                            const locked = layoutLockEdits(
+                              fileContentsRef.current,
+                              layoutLockPrompt(device),
+                              target === 'both' ? 'ios' : target,
+                            );
+                            if (locked.length) {
+                              applyWorkspaceEdits(locked);
+                              postAssistantNote(`Locked the layout to ${device.label}. I edited the existing project instead of creating a new folder.`);
+                              return;
+                            }
+                          }
                           void handleSendChat(`${mobileOfferPrompt}\n\n${familyBuildPrompt(familyPlatform, family)}`);
                         }}
                       />
@@ -2549,6 +2700,18 @@ export function ProjectWorkspace() {
                             onClick={() => {
                               setDeviceOfferId(null);
                               setPreviewDevice(device);
+                              const native = isNativeMobileTree(fileContentsRef.current);
+                              if (native) {
+                                const target = inferMobileTargetFromFiles(fileContentsRef.current)
+                                  || classifyMobileTarget(mobileOfferPrompt || msg.content)
+                                  || 'ios';
+                                const locked = layoutLockEdits(fileContentsRef.current, layoutLockPrompt(device), target);
+                                if (locked.length) {
+                                  applyWorkspaceEdits(locked);
+                                  postAssistantNote(`Locked the layout to ${device.label}. Same project files — no extra folders.`);
+                                  return;
+                                }
+                              }
                               void handleSendChat(layoutLockPrompt(device));
                             }}
                           >
@@ -2610,6 +2773,45 @@ export function ProjectWorkspace() {
                 e.target.value = '';
               }}
             />
+            {composerMode && (
+              <div className="flex items-center gap-2 px-1">
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-surface-border bg-surface-hover/60 px-2.5 py-0.5 text-[11px] leading-none text-content-secondary capitalize">
+                  {composerMode}
+                  <button
+                    type="button"
+                    onClick={() => setComposerMode(null)}
+                    className="text-content-tertiary hover:text-content-primary"
+                    aria-label="Clear mode"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              </div>
+            )}
+            {Object.keys(fileContents).length > 0 && (
+              <div className="flex flex-wrap items-center gap-1.5 px-1">
+                {Object.keys(fileContents).slice(0, 8).map(name => (
+                  <button
+                    key={name}
+                    type="button"
+                    title={name}
+                    onClick={() => {
+                      setSelectedFile(name);
+                      setExplorerOpen(true);
+                      setRightTab('code');
+                    }}
+                    className="inline-flex items-center max-w-[10rem] truncate rounded-full border border-surface-border bg-ark-navy-900/80 px-2 py-0.5 text-[10px] text-content-secondary hover:text-content-primary"
+                  >
+                    {name.split('/').pop()}
+                  </button>
+                ))}
+                {Object.keys(fileContents).length > 8 ? (
+                  <span className="text-[10px] text-content-tertiary">
+                    +{Object.keys(fileContents).length - 8}
+                  </span>
+                ) : null}
+              </div>
+            )}
             <div className={`flex gap-2 min-w-0 ${composerTall ? 'items-end' : 'items-center'}`}>
             <div
               className={`flex-1 min-w-0 border border-surface-border bg-ark-navy-900/90 ${
@@ -2636,21 +2838,6 @@ export function ProjectWorkspace() {
                       </button>
                     </div>
                   ))}
-                </div>
-              )}
-              {composerMode && (
-                <div className="flex items-center gap-2 px-3.5 pt-2">
-                  <span className="inline-flex items-center gap-1.5 rounded-full border border-surface-border bg-surface-hover/60 px-2.5 py-0.5 text-[11px] text-content-secondary capitalize">
-                    {composerMode}
-                    <button
-                      type="button"
-                      onClick={() => setComposerMode(null)}
-                      className="text-content-tertiary hover:text-content-primary"
-                      aria-label="Clear mode"
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
-                  </span>
                 </div>
               )}
               <input
@@ -2708,6 +2895,32 @@ export function ProjectWorkspace() {
                     }
                     return mapped;
                   });
+                }}
+              />
+              <input
+                ref={codeFolderInputRef}
+                type="file"
+                multiple
+                className="hidden"
+                {...{ webkitdirectory: '', directory: '' } as Record<string, string>}
+                onChange={async e => {
+                  const list = e.target.files;
+                  e.target.value = '';
+                  if (!list?.length) return;
+                  const next: Record<string, string> = {};
+                  for (const f of [...list].slice(0, 80)) {
+                    try {
+                      const rel = (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name;
+                      next[rel.replace(/\\/g, '/')] = await f.text();
+                    } catch {
+                      /* skip */
+                    }
+                  }
+                  if (!Object.keys(next).length) return;
+                  applyProjectFiles(next);
+                  postAssistantNote(
+                    `Opened ${Object.keys(next).length} files from that folder. They’re in Explorer — ask me to debug, explain, or edit them.`,
+                  );
                 }}
               />
               {!composerTall && (
@@ -2884,7 +3097,7 @@ export function ProjectWorkspace() {
           <>
             <ResizeHandle onDrag={dragCode} />
             <div
-              className={`shrink-0 flex flex-col min-h-0 bg-ark-navy-900/15 overflow-hidden transition-shadow ${
+              className={`shrink-0 flex flex-col min-h-0 min-w-0 max-w-[48vw] bg-ark-navy-900/15 overflow-hidden transition-shadow ${
                 fileFlash ? 'ring-2 ring-sky-400/50 ring-inset' : ''
               }`}
               style={{ width: codeWidth }}
@@ -2911,9 +3124,9 @@ export function ProjectWorkspace() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setRightTab('preview')}
+                    onClick={() => handleBuild()}
                     className={`inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded-md transition-colors ${
-                      rightTab === 'preview' ? 'bg-sky-500/90 text-white' : 'text-content-tertiary hover:text-content-secondary'
+                      buildRunning ? 'bg-sky-500/90 text-white' : 'text-content-tertiary hover:text-content-secondary'
                     }`}
                   >
                     <Play className="w-3 h-3" />

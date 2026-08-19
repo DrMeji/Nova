@@ -1181,14 +1181,17 @@ export function AIChat() {
           if (mySeq !== genSeqRef.current || abandoned || stopRequestedRef.current) return;
           const cleaned = usableAssistantText(streamedPartial, content, previousAssistant);
           if (cleaned.trim().length < 8 && streamedPartial.trim().length < 12) return;
-              if (looksLikePromptEcho(cleaned || streamedPartial)) return;
-          // GGUF often finishes streaming before llama-cli exits — release Stop quickly.
+          if (looksLikePromptEcho(cleaned || streamedPartial)) return;
+          const draft = (cleaned || streamedPartial).trim();
+          const incomplete = /[:;,—–-]\s*$/.test(draft)
+            || /\n\s*(?:\d+\.|[-*])\s+[^\n]{0,80}:\s*$/.test(draft)
+            || /\b(and|or|the|to|of|for|with|a|an)\s*$/i.test(draft);
+          if (incomplete && draft.length < 1200) return;
           abandoned = true;
-          void engineGenerateCancel();
           clearGeneratingIfMine();
-              const echoFallback = looksLikePromptEcho(streamedPartial) ? '' : streamedPartial.trim();
-              earlyResolve?.({ reply: cleaned || echoFallback || 'Model echoed its system prompt. Try switching models and send again.' });
-        }, 8_000);
+          const echoFallback = looksLikePromptEcho(streamedPartial) ? '' : streamedPartial.trim();
+          earlyResolve?.({ reply: cleaned || echoFallback || 'Model echoed its system prompt. Try switching models and send again.' });
+        }, 22_000);
       };
 
       try {
@@ -1455,7 +1458,7 @@ export function AIChat() {
               armStreamIdleFinish();
             },
           });
-          const timeoutMs = 35_000;
+          const timeoutMs = 120_000;
           const routed = await Promise.race([
             routePromise.then(r => ({ reply: r.reply, full: r as Awaited<typeof routePromise> })),
             earlyDone.then(r => ({ reply: r.reply, full: null })),
@@ -2217,7 +2220,7 @@ export function AIChat() {
   );
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="h-full min-w-0 flex flex-col overflow-hidden">
       {loading ? (
         <div className="flex-1 flex items-center justify-center text-content-tertiary">
           <Loader2 className="w-5 h-5 animate-spin" />

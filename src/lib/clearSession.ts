@@ -54,6 +54,27 @@ export function clearArkSessionHistory() {
   window.dispatchEvent(new Event('ark:chats-changed'));
 }
 
+/** User-initiated: wipe chat threads and drafts. Does not delete models or API keys. */
+export function clearLocalChatCache() {
+  clearArkSessionHistory();
+  try {
+    localStorage.removeItem('ark:skip-library-sync');
+  } catch {
+    /* ignore */
+  }
+}
+
+/** User-initiated: chat cache plus local reports. Models and keys stay. */
+export async function clearLocalAppCaches() {
+  clearLocalChatCache();
+  try {
+    await window.arkDesktop?.localReportsClear?.();
+  } catch {
+    /* ignore */
+  }
+  window.dispatchEvent(new Event('ark:cache-cleared'));
+}
+
 /** Run once per token so reopen is empty for testing. Skip in packaged installs. */
 export function runCleanBootIfNeeded() {
   try {

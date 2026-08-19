@@ -104,6 +104,15 @@ export async function importGgufPick() {
   throw new Error('Import needs the desktop app');
 }
 
+export async function deleteEngineModel(id: string): Promise<ArkEngineStatus & { ok: boolean; error?: string; deleted?: string }> {
+  if (!window.arkDesktop?.engineDeleteModel) {
+    throw new Error('Deleting models needs the desktop app');
+  }
+  const result = await window.arkDesktop.engineDeleteModel(id);
+  window.dispatchEvent(new Event('ark:engine-models-changed'));
+  return result;
+}
+
 export async function engineDiskSpace() {
   if (window.arkDesktop?.engineDiskSpace) {
     return window.arkDesktop.engineDiskSpace();

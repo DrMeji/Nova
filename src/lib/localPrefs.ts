@@ -249,6 +249,30 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.72',
+    channel: 'stable' as const,
+    date: 'Aug 18, 2026',
+    title: 'Chat finishes answers; Code edits the same app; Start opens a preview window',
+    notes: [
+      'Chat and Code wait long enough to finish lists instead of stopping mid-sentence or repeating the same answer',
+      'Simple edits (background, device name) update the existing iOS/Android files instead of spawning ArkApp / Calculator / IphoneApp folders',
+      'Start opens a separate preview window — phone frame for native apps, full page for websites',
+      'Code Plus → Open folder loads files like New Chat, and Plan / Ask / Debug / Multitask chips sit above the input so they stay aligned',
+    ],
+  },
+  {
+    version: '0.1.71',
+    channel: 'stable' as const,
+    date: 'Aug 18, 2026',
+    title: 'Settings that shrink, caches that clear, models you can delete',
+    notes: [
+      'Every tab reflows when you shrink the window: sidebar collapses, Settings stacks, grids wrap instead of overflowing',
+      'Clear local chat cache and Storage → Clear cache actually wipe local threads and reports (keys and models stay)',
+      'Installed models get a trash control next to the check — Settings Storage, Models, and Local AI can delete the GGUF from this PC',
+      'Security 2FA is blanketed as Coming soon until that feature ships',
+    ],
+  },
+  {
     version: '0.1.70',
     channel: 'stable' as const,
     date: 'Aug 18, 2026',

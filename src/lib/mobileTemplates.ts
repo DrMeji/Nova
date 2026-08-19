@@ -5,6 +5,7 @@
 
 import { classifyMobileTarget, type MobileTarget } from '@/lib/mobileTarget';
 import {
+  classifyMobileDevice,
   deviceLine,
   isLayoutLockAsk,
   resolveDevices,
@@ -13,7 +14,11 @@ import {
 
 type ParsedFileEdit = { path: string; content: string };
 
-function productName(message: string, fallback = 'ArkApp') {
+function productName(message: string, fallback = 'ArkApp', files?: Record<string, string>) {
+  const existing = files
+    ? Object.keys(files).find(p => /ios\/[^/]+\/ContentView\.swift$/i.test(p))?.split('/')[1]
+    : undefined;
+  if (existing) return existing;
   const called = String(message || '').match(/\bcalled\s+([a-z0-9][a-z0-9 '-]{1,40})/i)?.[1];
   const raw = (called || fallback).replace(/[^a-zA-Z0-9]+/g, ' ').trim();
   const pascal = raw
@@ -372,14 +377,16 @@ struct ${name}App: App {
     },
     {
       path: `${prefix}/ContentView.swift`,
-      content: `import SwiftUI
+      content: wantsCalculator(idea, name)
+        ? calculatorSwift(name, device)
+        : `import SwiftUI
 
 /// Layout canvas: ${device.label} (${device.width}×${device.height} ${device.unit}). See Devices.design.
 struct ContentView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 16) {
-                Text(${JSON.stringify(idea.slice(0, 80) || name)})
+                Text(${JSON.stringify(name)})
                     .font(.title2.weight(.semibold))
                     .multilineTextAlignment(.center)
                 Text(${JSON.stringify(deviceLine(device))})
@@ -390,6 +397,7 @@ struct ContentView: View {
             .padding()
             .frame(maxWidth: Devices.design.width, maxHeight: Devices.design.height)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color(red: 0.03, green: 0.04, blue: 0.08))
             .navigationTitle(${JSON.stringify(name)})
         }
     }
@@ -590,6 +598,10 @@ import androidx.compose.ui.unit.dp
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        setContent { AppRoot() }
+    }
+}
+
 @Composable
 fun AppRoot() {
     MaterialTheme {
@@ -600,7 +612,7 @@ fun AppRoot() {
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Text(${JSON.stringify(name)}, style = MaterialTheme.typography.headlineSmall)
-                Text(${JSON.stringify(idea.slice(0, 80) || 'Android app')}, style = MaterialTheme.typography.bodyMedium)
+                Text(${JSON.stringify(idea)}, style = MaterialTheme.typography.bodyMedium)
                 Text(${JSON.stringify(deviceLine(device))}, style = MaterialTheme.typography.bodySmall)
             }
         }
@@ -647,12 +659,72 @@ fun PreviewApp() {
 }
 
 function ideaFromMessage(message: string, name: string) {
-  const t = String(message || '')
-    .replace(/\n+/g, ' ')
-    .replace(/build this as a native.*/i, '')
-    .trim();
-  if (t.length > 12) return t.slice(0, 120);
-  return `${name} phone app`;
+  if (/\bcalculator\b/i.test(message)) return 'Basic calculator';
+  return name;
+}
+
+function wantsCalculator(message: string, name: string) {
+  return /\bcalculator\b/i.test(message) || /^calculator$/i.test(name);
+}
+
+function calculatorSwift(name: string, device: PhoneDevice): string {
+  return `import SwiftUI
+
+/// Layout canvas: ${device.label} (${device.width}×${device.height} ${device.unit}). See Devices.design.
+struct ContentView: View {
+    @State private var display = "0"
+
+    let keys = [
+        ["C", "÷", "×", "−"],
+        ["7", "8", "9", "+"],
+        ["4", "5", "6", "="],
+        ["1", "2", "3", "0"],
+    ]
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Text(${JSON.stringify(device.label)})
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(display)
+                .font(.system(size: 42, weight: .semibold, design: .rounded))
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .padding(.horizontal, 8)
+            ForEach(keys, id: \\.self) { row in
+                HStack(spacing: 10) {
+                    ForEach(row, id: \\.self) { key in
+                        Button(key) { tap(key) }
+                            .frame(maxWidth: .infinity, minHeight: 56)
+                            .background(op(key) ? Color.orange : Color(white: 0.18))
+                            .foregroundStyle(op(key) ? Color.black : Color.white)
+                            .clipShape(Capsule())
+                    }
+                }
+            }
+        }
+        .padding()
+        .frame(maxWidth: Devices.design.width, maxHeight: Devices.design.height)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.black)
+    }
+
+    func op(_ key: String) -> Bool { ["C","÷","×","−","+","="].contains(key) }
+
+    func tap(_ key: String) {
+        if key == "C" { display = "0"; return }
+        if key == "=" {
+            let expr = display.replacingOccurrences(of: "÷", with: "/").replacingOccurrences(of: "×", with: "*").replacingOccurrences(of: "−", with: "-")
+            display = NSExpression(format: expr).expressionValue(with: nil, context: nil).map { "\\($0)" } ?? display
+            return
+        }
+        display = display == "0" ? key : display + key
+    }
+}
+
+#Preview(${JSON.stringify(device.label)}) {
+    ContentView()${device.xcodePreview ? `\n        .previewDevice(PreviewDevice(rawValue: ${JSON.stringify(device.xcodePreview)}))` : ''}
+}
+`;
 }
 
 function htmlEscape(s: string) {
@@ -664,6 +736,9 @@ function htmlEscape(s: string) {
 }
 
 function previewHtml(name: string, idea: string, device: PhoneDevice): string {
+  if (wantsCalculator('', name) || /calculator/i.test(idea)) {
+    return calculatorPreviewHtml(name, device);
+  }
   return `<!doctype html>
 <html>
 <head>
@@ -691,6 +766,56 @@ function previewHtml(name: string, idea: string, device: PhoneDevice): string {
 `;
 }
 
+function calculatorPreviewHtml(name: string, device: PhoneDevice): string {
+  return `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>${htmlEscape(name)}</title>
+<style>
+  html,body{margin:0;height:100%;background:#050608;color:#f8fafc;font-family:ui-sans-serif,system-ui,sans-serif}
+  .shell{min-height:100%;display:flex;flex-direction:column;padding:18px 14px 22px;box-sizing:border-box}
+  .kicker{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:#94a3b8}
+  .screen{margin:18px 4px 16px;font-size:42px;font-weight:650;text-align:right;min-height:52px;word-break:break-all}
+  .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:auto}
+  button{border:0;border-radius:999px;height:58px;font-size:22px;font-weight:600;cursor:pointer;color:#f8fafc;background:#27272a}
+  button.op{background:#f59e0b;color:#111}
+  button.eq{background:#38bdf8;color:#082f49}
+  button.wide{grid-column:span 2}
+</style>
+</head>
+<body>
+  <div class="shell">
+    <div class="kicker">${htmlEscape(device.label)}</div>
+    <div class="screen" id="out">0</div>
+    <div class="grid">
+      ${['C','÷','×','-','7','8','9','+','4','5','6','=','1','2','3','0'].map(key => {
+        const cls = key === '=' ? 'eq' : /[÷×+\-]/.test(key) ? 'op' : key === '0' ? 'wide' : '';
+        return `<button class="${cls}" data-k="${key}">${key === '0' ? '0' : key}</button>`;
+      }).join('')}
+    </div>
+  </div>
+  <script>
+    const out = document.getElementById('out');
+    let cur = '0';
+    document.querySelectorAll('button').forEach(btn => btn.addEventListener('click', () => {
+      const k = btn.getAttribute('data-k');
+      if (k === 'C') { cur = '0'; }
+      else if (k === '=') {
+        try { cur = String(eval(cur.replace(/÷/g,'/').replace(/×/g,'*'))); }
+        catch { cur = 'Error'; }
+      } else {
+        cur = (cur === '0' || cur === 'Error') ? k : cur + k;
+      }
+      out.textContent = cur;
+    }));
+  </script>
+</body>
+</html>
+`;
+}
+
 export function planMobileFiles(target: MobileTarget, message: string, projectName?: string): string[] {
   return mobileTemplateEdits(target, message, projectName).map(e => e.path);
 }
@@ -699,8 +824,9 @@ export function mobileTemplateEdits(
   target: MobileTarget,
   message: string,
   projectName?: string,
+  files?: Record<string, string>,
 ): ParsedFileEdit[] {
-  const name = productName(message, projectName || 'ArkApp');
+  const name = productName(message, projectName || 'ArkApp', files);
   const bundle = bundleId(name);
   const idea = ideaFromMessage(message, name);
   const devices = resolveDevices(target, message);
@@ -760,6 +886,7 @@ enum Devices {
         path: `${iosDir}/ContentView.swift`,
         content: view
           .replace(/Text\("[^"]*·[^"]*"\)/, `Text(${JSON.stringify(deviceLine(d))})`)
+          .replace(/Text\("(iPhone|iPad|Mac|Pixel|Galaxy)[^"]*"\)/, `Text(${JSON.stringify(d.label)})`)
           .replace(/#Preview\("[^"]*"\)/, `#Preview(${JSON.stringify(d.label)})`)
           .replace(
             /PreviewDevice\(rawValue: "[^"]*"\)/,
@@ -767,6 +894,11 @@ enum Devices {
           ),
       });
     }
+    const previewName = iosDir.split('/')[1] || 'App';
+    out.push({
+      path: 'ark-preview.html',
+      content: previewHtml(previewName, ideaFromMessage(message, previewName), d),
+    });
   }
   const activity = androidMainActivity(files);
   if (devices.android && activity && files[activity]) {
@@ -845,6 +977,98 @@ function hasNative(edits: ParsedFileEdit[]) {
   );
 }
 
+function remapNativeEdits(edits: ParsedFileEdit[], files: Record<string, string>): ParsedFileEdit[] {
+  const iosDir = iosAppDir(files);
+  if (!iosDir) return edits;
+  const prefix = iosDir; // ios/ExistingName
+  return edits.map(e => {
+    const path = e.path.replace(/\\/g, '/');
+    if (/^ios\/[^/]+\//.test(path) && !path.includes('.xcodeproj')) {
+      return { ...e, path: path.replace(/^ios\/[^/]+/, prefix) };
+    }
+    return e;
+  });
+}
+
+function swiftColor(name: string): string | null {
+  if (/black|dark/i.test(name)) return 'Color.black';
+  if (/white/i.test(name)) return 'Color.white';
+  if (/blue/i.test(name)) return 'Color.blue';
+  if (/red/i.test(name)) return 'Color.red';
+  if (/green/i.test(name)) return 'Color.green';
+  return null;
+}
+
+function cssColor(name: string): string | null {
+  if (/black|dark/i.test(name)) return '#000000';
+  if (/white/i.test(name)) return '#ffffff';
+  if (/blue/i.test(name)) return '#2563eb';
+  if (/red/i.test(name)) return '#dc2626';
+  if (/green/i.test(name)) return '#16a34a';
+  return null;
+}
+
+/** Cheap local patches so “change the background” doesn’t spawn a new app folder. */
+export function simpleVisualPatchEdits(files: Record<string, string>, message: string): ParsedFileEdit[] {
+  const out: ParsedFileEdit[] = [];
+  const t = String(message || '');
+  const iosDir = iosAppDir(files);
+  const viewPath = iosDir ? `${iosDir}/ContentView.swift` : null;
+  const colorWord = t.match(/\b(black|white|blue|dark|red|green)\b/i)?.[1];
+  const wantsBg = /\bbackground\b/i.test(t) && Boolean(colorWord);
+  const renameTo = t.match(/(?:change|rename|set).{0,48}(?:to|into)\s+["']?([A-Za-z0-9][A-Za-z0-9 .+-]{1,40})/i)?.[1]?.trim();
+
+  if (wantsBg && colorWord && viewPath && files[viewPath]) {
+    const color = swiftColor(colorWord);
+    if (color) {
+      let view = files[viewPath];
+      if (/\.background\([^)]*\)/.test(view)) {
+        view = view.replace(/\.background\([^)]*\)/, `.background(${color})`);
+      } else {
+        view = view.replace(
+          /(\.frame\(maxWidth: \.infinity, maxHeight: \.infinity\))/,
+          `$1\n            .background(${color})`,
+        );
+      }
+      out.push({ path: viewPath, content: view });
+    }
+    const htmlColor = cssColor(colorWord);
+    if (htmlColor && files['ark-preview.html']) {
+      out.push({
+        path: 'ark-preview.html',
+        content: files['ark-preview.html'].replace(/background:#[0-9a-fA-F]{3,8}/g, `background:${htmlColor}`),
+      });
+    }
+    if (htmlColor && files['index.html']) {
+      out.push({
+        path: 'index.html',
+        content: files['index.html'].replace(/background(?:-color)?:\s*[^;]+/gi, `background: ${htmlColor}`),
+      });
+    }
+  }
+
+  if (renameTo && viewPath && files[viewPath] && !classifyMobileDevice(t)) {
+    const view = files[viewPath].replace(/Text\("[^"]+"\)/, `Text(${JSON.stringify(renameTo)})`);
+    out.push({ path: viewPath, content: view });
+  }
+
+  const namedDevice = classifyMobileDevice(t);
+  if (namedDevice && files && (iosDir || androidMainActivity(files))) {
+    const target = iosDir ? 'ios' : 'android';
+    const locked = layoutLockEdits(files, t, target);
+    for (const edit of locked) {
+      if (!out.some(e => e.path === edit.path)) out.push(edit);
+    }
+  }
+
+  return out;
+}
+
+function hasExistingNative(files?: Record<string, string>) {
+  if (!files) return false;
+  return Boolean(iosAppDir(files) || androidMainActivity(files));
+}
+
 /** If chat asked for a store app but the brain returned a website, use the native template. */
 export function finalizeMobileEdits(
   message: string,
@@ -852,13 +1076,27 @@ export function finalizeMobileEdits(
   files?: Record<string, string>,
 ): ParsedFileEdit[] {
   const target = classifyMobileTarget(message);
-  if (!target) return edits;
-  if (isLayoutLockAsk(message) && files && Object.keys(files).length) {
-    const locked = layoutLockEdits(files, message, target);
-    if (locked.length) return locked;
+  const existing = hasExistingNative(files);
+  if (existing && files) {
+    if (isLayoutLockAsk(message) || classifyMobileDevice(message)) {
+      const lockTarget = target || (iosAppDir(files) ? 'ios' : 'android');
+      const locked = layoutLockEdits(files, message, lockTarget);
+      const visual = simpleVisualPatchEdits(files, message);
+      const merged = [...locked];
+      for (const edit of visual) {
+        if (!merged.some(e => e.path === edit.path)) merged.push(edit);
+      }
+      if (merged.length) return merged;
+    }
+    const visual = simpleVisualPatchEdits(files, message);
+    if (visual.length && (!edits.length || isWebOnly(edits))) return visual;
+    if (edits.length && hasNative(edits)) return remapNativeEdits(edits, files);
+    if (visual.length) return visual;
+    return edits;
   }
+  if (!target) return edits;
   if (!hasNative(edits) || isWebOnly(edits)) {
-    return mobileTemplateEdits(target, message);
+    return mobileTemplateEdits(target, message, undefined, files);
   }
   return edits;
 }

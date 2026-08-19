@@ -186,8 +186,8 @@ function createWindow() {
   const win = new BrowserWindow({
     width: 1440,
     height: 900,
-    minWidth: 940,
-    minHeight: 600,
+    minWidth: 720,
+    minHeight: 520,
     title: 'ARK',
     backgroundColor: '#0a0a0b',
     autoHideMenuBar: true,
@@ -590,6 +590,13 @@ ipcMain.handle('ark:engine-download-progress', async (_e, id) => arkEngine.downl
 ipcMain.handle('ark:engine-download-error', async (_e, id) => arkEngine.downloadError?.(id) ?? null);
 ipcMain.handle('ark:engine-download-cancel', async (_e, id) => arkEngine.cancelDownload?.(id) ?? { ok: false });
 ipcMain.handle('ark:engine-import-gguf', async (_e, filePath) => arkEngine.importGgufFile?.(filePath));
+ipcMain.handle('ark:engine-delete-model', async (_e, id) => {
+  try {
+    return arkEngine.deleteInstalledModel?.(id) ?? { ok: false, error: 'Delete not available' };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+});
 ipcMain.handle('ark:engine-import-gguf-pick', async () => {
   const win = BrowserWindow.getFocusedWindow() || mainWindow;
   const result = await dialog.showOpenDialog(win || undefined, {
@@ -670,6 +677,12 @@ ipcMain.handle('ark:preview-start', async (_e, payload) =>
 );
 ipcMain.handle('ark:preview-stop', async (_e, projectId) =>
   arkPreview.stopPreview(projectId),
+);
+ipcMain.handle('ark:preview-open-window', async (_e, payload) =>
+  arkPreview.openPreviewWindow(payload || {}),
+);
+ipcMain.handle('ark:preview-status', async (_e, projectId) =>
+  arkPreview.previewStatus(projectId),
 );
 ipcMain.handle('ark:media-library', async () => {
   try {

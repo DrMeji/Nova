@@ -47,9 +47,15 @@ export function preferredEntryPath(files: ProjectFileMap): string {
 }
 
 export function isInspectAsk(message: string): boolean {
-  return /\b(look at (this|it|the code|the app|the project)|take a look|debug( this)?|inspect|what do you see|what'?s (wrong|broken)|what is broken|find (the |a )?(bug|problem|issue|issues)|review (this|the (code|app|project))|audit|tell me what you see)\b/i.test(
+  return /\b(look at (this|it|the code|the app|the project)|take a look|debug( this)?|inspect|what do you see|what'?s (wrong|broken)|what is broken|find (the |a )?(bug|problem|issue|issues)|review (this|the (code|app|project))|audit|tell me what you see|what (is|are) (this|the) (file|files|project|app|code|folder)|what (is it|is this) about|explain (this|the (code|project|app|file))|summarize (this|the (code|project|app))|tell me (exactly )?what .{0,40}(is about|this (file|project|app) is))\b/i.test(
     message,
   );
+}
+
+export function isExplainAsk(message: string): boolean {
+  return /\b(what (is|are) (this|the) (file|files|project|app|code|folder)|what (is it|is this) about|explain (this|the (code|project|app|file))|summarize (this|the (code|project|app))|tell me (exactly )?what .{0,80}(is about|this (file|project|app) is)|what (is|are) these files)\b/i.test(
+    message,
+  ) && !/\b(debug|fix|bug|issue|broken|crash)\b/i.test(message);
 }
 
 export function isPatchAsk(message: string): boolean {
@@ -57,9 +63,11 @@ export function isPatchAsk(message: string): boolean {
   if (/^(yes|yep|yeah|ok|okay|sure|please|do it|go ahead|fix it|fix them|wire it)([.!]*)?$/i.test(t)) {
     return true;
   }
-  return /\b(fix (it|them|that|this|the \w+)|wire (it|up|the)|apply (the )?(fix|change)|please fix|go ahead and (fix|wire))\b/i.test(
-    t,
-  );
+  if (/\b(fix (it|them|that|this|the \w+)|wire (it|up|the)|apply (the )?(fix|change)|please fix|go ahead and (fix|wire))\b/i.test(t)) {
+    return true;
+  }
+  return /\b(change|rename|update|set|make|turn|edit|switch)\b.{0,48}\b(background|color|title|name|text|label|header|button)\b/i.test(t)
+    || /\b(background|title|name|header|color)\b.{0,32}\b(to|black|white|blue|dark|red)\b/i.test(t);
 }
 
 export function isFindInFilesAsk(message: string): boolean {
@@ -76,13 +84,17 @@ export function wantsInspectOnly(message: string, composerDebug: boolean): boole
 
 export function wantsNamedPatch(message: string, hasFiles: boolean): boolean {
   if (!hasFiles) return false;
+  if (/\b(start over|from scratch|new app|another app|rebuild everything)\b/i.test(message)) {
+    return false;
+  }
   if (/\b(add|remove|delete|upgrade|rewrite|build|create|make|implement|extend)\b/i.test(message)
-    && !/^(yes|yep|yeah|ok|okay|sure|fix it|wire it)/i.test(message.trim())) {
+    && !/^(yes|yep|yeah|ok|okay|sure|fix it|wire it)/i.test(message.trim())
+    && !isPatchAsk(message)) {
     return false;
   }
   if (isPatchAsk(message)) return true;
-  return /\b(fix|wire|repair|patch)\b/i.test(message)
-    && !/\b(add|remove|upgrade|build|create)\b/i.test(message);
+  return /\b(fix|wire|repair|patch|change|rename|edit|update)\b/i.test(message)
+    && !/\b(add a new|remove all|upgrade|build a new|create a new)\b/i.test(message);
 }
 
 export function findQueryFromMessage(message: string): string {
@@ -244,6 +256,7 @@ export function buildInspectPrompt(
   picked: string[],
   findings: InspectFinding[],
   projectName?: string,
+  mode: 'debug' | 'explain' = 'debug',
 ): string {
   const flat = flattenProjectFiles(files);
   let used = 0;
@@ -265,13 +278,21 @@ export function buildInspectPrompt(
     ? `Local scan hints (verify, do not copy blindly):\n${findings.map(f => `- ${f.path}: ${f.detail}`).join('\n')}`
     : '';
 
-  return `You are ARK reviewing a local project on this PC. Report findings — do NOT write @@@FILE blocks and do NOT dump whole files.
-
-Rules:
+  const rules = mode === 'explain'
+    ? `Rules:
+- In 4–8 sentences, say what this project is and what the main files do.
+- Do not ask whether to fix anything unless they asked for a review.
+- Do NOT write @@@FILE blocks and do NOT dump whole files.
+- Do not repeat the user's wording as the answer.`
+    : `Rules:
 - Name 2–5 concrete issues with file paths in backticks.
 - Be specific (missing onClick, dead button, TODO, broken import).
 - End with: Would you like me to fix these, or only list the rest?
-- If nothing looks broken, say what the app appears to do and one improvement.
+- If nothing looks broken, say what the app appears to do and one improvement.`;
+
+  return `You are ARK reviewing a local project on this PC. ${mode === 'explain' ? 'Explain the project clearly.' : 'Report findings'} — do NOT write @@@FILE blocks and do NOT dump whole files.
+
+${rules}
 
 Project: ${projectName || 'ARK project'}
 

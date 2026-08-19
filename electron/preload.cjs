@@ -72,6 +72,7 @@ contextBridge.exposeInMainWorld('arkDesktop', {
   engineDownloadCancel: (id) => ipcRenderer.invoke('ark:engine-download-cancel', id),
   engineImportGguf: (filePath) => ipcRenderer.invoke('ark:engine-import-gguf', filePath),
   engineImportGgufPick: () => ipcRenderer.invoke('ark:engine-import-gguf-pick'),
+  engineDeleteModel: (id) => ipcRenderer.invoke('ark:engine-delete-model', id),
   engineDiskSpace: () => ipcRenderer.invoke('ark:engine-disk-space'),
   engineEnsureRuntime: () => ipcRenderer.invoke('ark:engine-ensure-runtime'),
   engineGenerate: (message, modelId, kind) =>
@@ -83,6 +84,7 @@ contextBridge.exposeInMainWorld('arkDesktop', {
   previewStart: (payload) => ipcRenderer.invoke('ark:preview-start', payload),
   previewStop: (projectId) => ipcRenderer.invoke('ark:preview-stop', projectId),
   previewStatus: (projectId) => ipcRenderer.invoke('ark:preview-status', projectId),
+  previewOpenWindow: (payload) => ipcRenderer.invoke('ark:preview-open-window', payload),
   mediaLibrary: () => ipcRenderer.invoke('ark:media-library'),
   mediaClear: () => ipcRenderer.invoke('ark:media-clear'),
   mediaGet: (id) => ipcRenderer.invoke('ark:media-get', id),
