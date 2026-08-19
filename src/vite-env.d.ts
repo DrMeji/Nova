@@ -20,6 +20,7 @@ declare global {
       windowMaximizeToggle?: () => Promise<boolean>;
       windowIsMaximized?: () => Promise<boolean>;
       windowClose?: () => Promise<boolean>;
+      onWindowMaximized?: (handler: (payload: { maximized?: boolean }) => void) => () => void;
       appMeta?: () => Promise<{
         ok: boolean;
         isPackaged?: boolean;
@@ -297,7 +298,8 @@ declare global {
         projectId: string;
         projectName?: string;
         files: Record<string, string>;
-      }) => Promise<{ ok: boolean; root?: string; files?: string[]; error?: string }>;
+        sandbox?: boolean;
+      }) => Promise<{ ok: boolean; root?: string; files?: string[]; error?: string; sandboxBlocked?: string[] }>;
       projectRead?: (projectId: string) => Promise<{
         ok: boolean;
         root?: string;

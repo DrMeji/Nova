@@ -1,4 +1,5 @@
 import type { ChatMessage } from '@/types';
+import { safeProjectWrite } from '@/lib/projectWriteSafe';
 
 export const PROJECT_CHAT_FILE = 'ark-chat.json';
 
@@ -58,11 +59,11 @@ export async function persistProjectThreadToDisk(
   messages: ChatMessage[],
   files?: Record<string, string>,
 ): Promise<void> {
-  if (!projectId || !window.arkDesktop?.projectWrite) return;
+  if (!projectId) return;
   const payload: Record<string, string> = { ...(files || {}) };
   payload[PROJECT_CHAT_FILE] = serializeProjectThread(messages);
   delete payload['ark-meta.json'];
-  await window.arkDesktop.projectWrite({
+  await safeProjectWrite({
     projectId,
     projectName: projectName || 'Code',
     files: payload,

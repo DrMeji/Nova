@@ -3,7 +3,7 @@
  * Pick files by intent instead of stuffing the whole tree into the model.
  */
 
-import { flattenProjectFiles, type ProjectFileMap } from '@/lib/projectCodeEdit';
+import { flattenProjectFiles, stripFileBlocks as stripCodeFileBlocks, type ProjectFileMap } from '@/lib/projectCodeEdit';
 
 export type SearchHit = {
   path: string;
@@ -25,13 +25,14 @@ const ENTRY_CANDIDATES = [
   'src/index.tsx',
   'App.tsx',
   'main.py',
+  'engine.py',
   'README.md',
   'package.json',
 ];
 
-const INSPECT_BUDGET = 10_000;
-const INSPECT_FILE_CHARS = 2_800;
-const INSPECT_MAX_FILES = 8;
+const INSPECT_BUDGET = 14_000;
+const INSPECT_FILE_CHARS = 3_600;
+const INSPECT_MAX_FILES = 16;
 
 export function preferredEntryPath(files: ProjectFileMap): string {
   const flat = flattenProjectFiles(files);
@@ -42,20 +43,43 @@ export function preferredEntryPath(files: ProjectFileMap): string {
   if (native) return native;
   for (const p of ENTRY_CANDIDATES) {
     if (flat[p]) return p;
+    const nested = keys.find(k => k.endsWith(`/${p}`));
+    if (nested) return nested;
   }
   return keys.sort((a, b) => a.length - b.length)[0] || '';
 }
 
-export function isInspectAsk(message: string): boolean {
-  return /\b(look at (this|it|the code|the app|the project)|take a look|debug( this)?|inspect|what do you see|what'?s (wrong|broken)|what is broken|find (the |a )?(bug|problem|issue|issues)|review (this|the (code|app|project))|audit|tell me what you see|what (is|are) (this|the) (file|files|project|app|code|folder)|what (is it|is this) about|explain (this|the (code|project|app|file))|summarize (this|the (code|project|app))|tell me (exactly )?what .{0,40}(is about|this (file|project|app) is))\b/i.test(
-    message,
-  );
+export function isImproveAsk(message: string): boolean {
+  const t = String(message || '').trim();
+  if (isPatchAsk(t)) return false;
+  return /\b((make|do).{0,48}better|improv(e|ing|ements?)|what can (we|i) do|how can (we|i)|suggestions?|next steps?|what should (we|i) (do|work on)|how (do we|to) (improve|upgrade)|make this (app|project|code) better|what next)\b/i.test(t);
 }
 
+export function isInspectAsk(message: string): boolean {
+  return isExplainAsk(message)
+    || isImproveAsk(message)
+    || /\b(look at (this|it|the code|the app|the project)|take a look|debug( this)?|inspect|what do you see|what'?s (wrong|broken)|what is broken|find (the |a )?(bug|problem|issue|issues)|review (this|the (code|app|project))|audit|tell me what you see)\b/i.test(
+      message,
+    );
+}
+
+/** First-time “what is this repo?” — not “how do we make it better.” */
 export function isExplainAsk(message: string): boolean {
-  return /\b(what (is|are) (this|the) (file|files|project|app|code|folder)|what (is it|is this) about|explain (this|the (code|project|app|file))|summarize (this|the (code|project|app))|tell me (exactly )?what .{0,80}(is about|this (file|project|app) is)|what (is|are) these files)\b/i.test(
-    message,
-  ) && !/\b(debug|fix|bug|issue|broken|crash)\b/i.test(message);
+  const t = String(message || '').trim();
+  if (isImproveAsk(t)) return false;
+  if (/\b(debug|fix the|find the (bug|issue)|crash|better|improv)\b/i.test(t)
+    && !/\bwhat is this (project|app|code|folder) about\b/i.test(t)) {
+    return false;
+  }
+  return /\bwhat is this(\s+(project|app|code|folder|repo))?\b/i.test(t)
+    || /\bwhat (is|are) this (project|app|code|folder|repo) about\b/i.test(t)
+    || /\bwhat does this (project|app|code|folder) do\b/i.test(t)
+    || /\btell me (exactly )?what this (project|app|code|folder|repo) is(\s+about)?\b/i.test(t)
+    || /\btell me about this (project|app|code|folder|repo)\b/i.test(t)
+    || /\bexplain (this|the) (project|app|code|folder|repo)\b/i.test(t)
+    || /\bsummarize (this|the) (project|app|code)\b/i.test(t)
+    || /\bwalk me through (this|the) (project|app|code|folder|repo)\b/i.test(t)
+    || /\bwhat'?s going on (here|in this (project|app|code|folder|repo))\b/i.test(t);
 }
 
 export function isPatchAsk(message: string): boolean {
@@ -78,6 +102,7 @@ export function isFindInFilesAsk(message: string): boolean {
 
 export function wantsInspectOnly(message: string, composerDebug: boolean): boolean {
   if (isPatchAsk(message)) return false;
+  if (isImproveAsk(message) || isExplainAsk(message)) return true;
   if (/\b(fix|wire|upgrade|apply)\b/i.test(message) && isInspectAsk(message)) return false;
   return composerDebug || isInspectAsk(message);
 }
@@ -181,7 +206,10 @@ export function pickFilesForInspect(files: ProjectFileMap, message: string): str
   }
   for (const path of keys) {
     const lower = path.toLowerCase();
+    if (/\.(pbxproj|plist)$|Assets\.xcassets|\.xcodeproj\//.test(path)) continue;
     const body = String(flat[path] || '').toLowerCase();
+    if (/(^|\/)readme(\.md)?$/i.test(path)) bump(path, 22);
+    if (/(engine|models|main|app|crypto|stocks|risk|paper)\.(py|ts|js|swift|kt)$/i.test(lower)) bump(path, 14);
     for (const w of words) {
       if (lower.includes(w)) bump(path, 12);
       if (body.includes(w)) bump(path, 4);
@@ -256,7 +284,7 @@ export function buildInspectPrompt(
   picked: string[],
   findings: InspectFinding[],
   projectName?: string,
-  mode: 'debug' | 'explain' = 'debug',
+  mode: 'debug' | 'explain' | 'improve' = 'debug',
 ): string {
   const flat = flattenProjectFiles(files);
   let used = 0;
@@ -280,17 +308,29 @@ export function buildInspectPrompt(
 
   const rules = mode === 'explain'
     ? `Rules:
-- In 4–8 sentences, say what this project is and what the main files do.
-- Do not ask whether to fix anything unless they asked for a review.
-- Do NOT write @@@FILE blocks and do NOT dump whole files.
+- Read the files. In 5–10 sentences, say what this project is, how it is structured, and what the main files do.
+- Then offer 2–3 concrete next steps (debug a real issue, a specific improvement, or a file to edit). Use file paths in backticks.
+- Do NOT start editing. Do NOT write @@@FILE blocks and do NOT dump whole files.
 - Do not repeat the user's wording as the answer.`
-    : `Rules:
+    : mode === 'improve'
+      ? `Rules:
+- Give 4–7 concrete ways to improve this project. Each point: what to change, which file in backticks, and why.
+- Do not repeat a full project summary. One short sentence of context is enough.
+- Do NOT write @@@FILE blocks and do NOT dump whole files.
+- End with: Which of these should I start on?`
+      : `Rules:
 - Name 2–5 concrete issues with file paths in backticks.
 - Be specific (missing onClick, dead button, TODO, broken import).
 - End with: Would you like me to fix these, or only list the rest?
 - If nothing looks broken, say what the app appears to do and one improvement.`;
 
-  return `You are ARK reviewing a local project on this PC. ${mode === 'explain' ? 'Explain the project clearly.' : 'Report findings'} — do NOT write @@@FILE blocks and do NOT dump whole files.
+  const job = mode === 'explain'
+    ? 'Explain the project, then suggest what to do next. Do not edit yet.'
+    : mode === 'improve'
+      ? 'Propose concrete upgrades from the files.'
+      : 'Report findings';
+
+  return `You are ARK reviewing a local project on this PC. ${job} Do NOT write @@@FILE blocks and do NOT dump whole files.
 
 ${rules}
 
@@ -356,11 +396,7 @@ export function filterEditsToPaths<T extends { path: string }>(edits: T[], allow
 }
 
 export function stripFileBlocks(text: string): string {
-  return String(text || '')
-    .replace(/@@@FILE[^\n]*\n```[\s\S]*?```/g, '')
-    .replace(/```[\s\S]*?```/g, (block) => (block.length > 400 ? '' : block))
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
+  return stripCodeFileBlocks(text);
 }
 
 export function parseReplyFindings(text: string): { path: string; line?: number }[] {
@@ -377,4 +413,50 @@ export function parseReplyFindings(text: string): { path: string; line?: number 
     found.push({ path, line });
   }
   return found.slice(0, 8);
+}
+
+/** Honest local summary from the files on disk — does not need the brain. */
+export function describeProjectFromFiles(files: ProjectFileMap, projectName?: string): string {
+  const flat = flattenProjectFiles(files);
+  const keys = Object.keys(flat).sort();
+  const count = keys.length;
+  if (!count) {
+    return 'I do not see any files in Explorer yet. Open a folder with +, then ask again.';
+  }
+  const readmeKey = keys.find(k => /(^|\/)readme(\.md)?$/i.test(k));
+  const readme = readmeKey ? String(flat[readmeKey] || '').replace(/^#+\s+/gm, '').trim() : '';
+  const first = readme.split(/\n\n+/).map(p => p.replace(/\s+/g, ' ').trim()).find(p => p.length > 40)?.slice(0, 520);
+  const engineKey = keys.find(k => /(^|\/)(engine|main|app|models)\.py$/i.test(k));
+  const engineRaw = engineKey ? String(flat[engineKey] || '') : '';
+  const engineDoc = (
+    engineRaw.match(/"""([\s\S]*?)"""/)?.[1]
+    || engineRaw.match(/'''([\s\S]*?)'''/)?.[1]
+    || engineRaw.split('\n').filter(line => /^\s*#/.test(line)).slice(0, 6).join(' ')
+  ).replace(/\s+/g, ' ').trim().slice(0, 420);
+
+  const swift = keys.some(k => k.endsWith('.swift'));
+  const kotlin = keys.some(k => k.endsWith('.kt'));
+  const py = keys.filter(k => k.endsWith('.py')).length;
+  const html = keys.some(k => /\.html?$/i.test(k) && !/ark-preview/i.test(k));
+  const trading = keys.some(k => /(crypto|stock|trade|engine\.py|paper\.py|risk\.py|ingame)/i.test(k));
+  let kind = 'a local project';
+  if (trading && py) kind = 'a trading / markets app written in Python';
+  else if (swift) kind = 'a native iPhone/iPad app (SwiftUI + Xcode)';
+  else if (kotlin) kind = 'a native Android app (Kotlin)';
+  else if (py) kind = 'a Python project';
+  else if (html) kind = 'a website';
+
+  const sample = keys
+    .filter(k => !/(^|\/)(\.git|node_modules|__pycache__)\//.test(k))
+    .slice(0, 10)
+    .map(k => `\`${k}\``)
+    .join(', ');
+
+  return [
+    `I read ${count} file${count === 1 ? '' : 's'}${projectName && !/^code$/i.test(projectName) ? ` in **${projectName}**` : ''}. This looks like ${kind}.`,
+    '',
+    first || engineDoc || `Key files: ${sample}.`,
+    '',
+    'Would you like me to debug it, or start working on a change?',
+  ].join('\n');
 }

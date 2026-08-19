@@ -5,7 +5,7 @@ import { useRecentProjects } from '@/context/RecentProjectsContext';
 import { useRouter } from '@/context/RouterContext';
 import { useSocial } from '@/context/SocialContext';
 import { gitClone, githubCloneUrl, parseGithubRepoRef } from '@/lib/arkGitClient';
-import { listNetworkPosts, publishNetworkPost, type NetworkPost } from '@/lib/arkSocial';
+import { listNetworkPosts, publishNetworkPost, deleteNetworkPost, type NetworkPost } from '@/lib/arkSocial';
 import { formatArkId, isArkUserId, normalizeArkId } from '@/lib/arkUserId';
 import { getPluginRuntime, loadPluginState } from '@/lib/plugins';
 import { GuestSocialBanner } from '@/components/GuestSocialBanner';
@@ -74,8 +74,9 @@ export function NetworkingView() {
   };
 
   const openInCode = async (post: NetworkPost) => {
-    const project = addRecent(post.title);
-    touchRecentProject(project.id, post.title);
+    const existing = recent.find(p => p.name === post.title);
+    const project = existing || addRecent(post.title);
+    if (!existing) touchRecentProject(project.id, post.title);
     const ref = post.githubUrl ? parseGithubRepoRef(post.githubUrl) : null;
     if (ref) {
       const token = getPluginRuntime('github', loadPluginState()).token?.trim();
@@ -197,12 +198,40 @@ export function NetworkingView() {
                 </button>
               </div>
               {visibility === 'private' && (
-                <input
-                  value={allowed}
-                  onChange={e => setAllowed(e.target.value)}
-                  placeholder="Allowed ARK IDs, comma separated"
-                  className="w-full bg-ark-navy-950 border border-surface-border rounded-lg px-3 py-2 text-sm text-content-primary"
-                />
+                <div className="space-y-1.5">
+                  <p className="text-[11px] text-content-tertiary">Who can see this</p>
+                  {contacts.length === 0 ? (
+                    <p className="text-[11px] text-content-tertiary">Add contacts in Message first, or paste ARK IDs below.</p>
+                  ) : (
+                    <div className="flex flex-wrap gap-1.5">
+                      {contacts.map(c => {
+                        const on = allowed.split(/[,\s]+/).map(normalizeArkId).includes(c.arkId);
+                        return (
+                          <button
+                            key={c.arkId}
+                            type="button"
+                            onClick={() => {
+                              const ids = allowed.split(/[,\s]+/).map(normalizeArkId).filter(isArkUserId);
+                              const next = on ? ids.filter(id => id !== c.arkId) : [...ids, c.arkId];
+                              setAllowed(next.join(', '));
+                            }}
+                            className={`rounded-full border px-2 py-0.5 text-[11px] ${
+                              on ? 'border-sky-400 text-sky-300' : 'border-surface-border text-content-tertiary'
+                            }`}
+                          >
+                            {c.displayName}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                  <input
+                    value={allowed}
+                    onChange={e => setAllowed(e.target.value)}
+                    placeholder="Or paste ARK IDs"
+                    className="w-full bg-ark-navy-950 border border-surface-border rounded-lg px-3 py-2 text-sm text-content-primary"
+                  />
+                </div>
               )}
               <div className="flex justify-end gap-2 pt-1">
                 <button type="button" className="text-xs text-content-tertiary" onClick={() => setComposer(false)}>Cancel</button>
@@ -238,13 +267,24 @@ export function NetworkingView() {
                     </p>
                     {post.summary && <p className="text-xs text-content-secondary mt-2 leading-relaxed">{post.summary}</p>}
                   </div>
-                  <button
+                  <div className="flex items-center gap-2 shrink-0">
+                    {post.ownerArkId === myArkId && (
+                      <button
+                        type="button"
+                        className="text-[11px] text-rose-300"
+                        onClick={() => void deleteNetworkPost(post.id, user?.id).then(() => refresh())}
+                      >
+                        Delete
+                      </button>
+                    )}
+                    <button
                     type="button"
                     onClick={() => void openInCode(post)}
                     className="shrink-0 text-xs rounded-full border border-surface-border px-3 py-1.5 text-content-secondary hover:text-content-primary"
                   >
                     Open in Code
                   </button>
+                  </div>
                 </div>
                 {post.ownerArkId && post.ownerArkId !== myArkId && (
                   <button

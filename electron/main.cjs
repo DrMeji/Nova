@@ -206,6 +206,18 @@ function createWindow() {
 
   mainWindow = win;
 
+  const sendMaximized = () => {
+    if (win.isDestroyed()) return;
+    try {
+      win.webContents.send('ark:window-maximized', { maximized: win.isMaximized() });
+    } catch {
+      /* ignore */
+    }
+  };
+  win.on('maximize', sendMaximized);
+  win.on('unmaximize', sendMaximized);
+  win.on('restore', sendMaximized);
+
   const reveal = () => {
     if (win.isDestroyed()) return;
     if (packaged || !isDev) {
@@ -383,7 +395,7 @@ async function handleHttpStream(event, payload) {
         ...headers,
       },
       body: method === 'GET' || method === 'HEAD' ? undefined : body,
-      signal: AbortSignal.timeout(25_000),
+      signal: AbortSignal.timeout(180_000),
     });
 
     if (!res.ok) {
@@ -422,10 +434,14 @@ async function handleHttpStream(event, payload) {
         if (!data || data === '[DONE]') continue;
         try {
           const json = JSON.parse(data);
+          const geminiText = Array.isArray(json?.candidates?.[0]?.content?.parts)
+            ? json.candidates[0].content.parts.map((p) => p?.text || '').join('')
+            : '';
           const delta =
             json?.choices?.[0]?.delta?.content
             ?? json?.choices?.[0]?.message?.content
             ?? json?.delta?.text
+            ?? geminiText
             ?? '';
           if (typeof delta === 'string' && delta) {
             full += delta;
@@ -724,6 +740,7 @@ ipcMain.handle('ark:project-write', async (_e, payload) => {
       payload?.projectId,
       payload?.projectName,
       payload?.files || {},
+      Boolean(payload?.sandbox),
     );
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'write failed' };

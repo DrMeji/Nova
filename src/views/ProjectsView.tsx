@@ -2,25 +2,26 @@ import { useMemo, useState, useEffect } from 'react';
 import { useRouter } from '@/context/RouterContext';
 import { useRecentProjects } from '@/context/RecentProjectsContext';
 import { fetchProjects, createProject } from '@/lib/api';
+import { getLocalPrefs } from '@/lib/localPrefs';
 import type { Project } from '@/types';
-import { Search, Folder, Loader2, Plus, MessageSquare, ImageIcon, Code2 } from 'lucide-react';
+import { Search, Folder, Loader2, Plus, FolderOpen, Pencil, Trash2, MoreHorizontal } from 'lucide-react';
 
-type TabId = 'all' | 'mine' | 'shared';
+type TabId = 'all' | 'local' | 'remote';
 
 type ListItem = {
   id: string;
   name: string;
   modified: Date;
-  owned: boolean;
-  shared: boolean;
+  source: 'local' | 'remote';
+  typeLabel: string;
 };
 
-type ProjectRow = Project & { id: string };
+type ProjectRow = Project & { id: string; project_type?: string };
 
 const TABS: { id: TabId; label: string }[] = [
   { id: 'all', label: 'All' },
-  { id: 'mine', label: 'Created by you' },
-  { id: 'shared', label: 'Shared with you' },
+  { id: 'local', label: 'This PC' },
+  { id: 'remote', label: 'Signed-in' },
 ];
 
 function formatModified(date: Date) {
@@ -29,14 +30,19 @@ function formatModified(date: Date) {
 
 export function ProjectsView() {
   const { navigate } = useRouter();
-  const { recent, addRecent } = useRecentProjects();
+  const { recent, addRecent, renameRecent, removeRecent } = useRecentProjects();
   const [remote, setRemote] = useState<ProjectRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
   const [tab, setTab] = useState<TabId>('all');
   const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState('');
+  const [newType, setNewType] = useState<'web' | 'api' | 'desktop'>(() => getLocalPrefs().defaultProjectType);
   const [creating, setCreating] = useState(false);
+  const [menuId, setMenuId] = useState<string | null>(null);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [openingFolder, setOpeningFolder] = useState(false);
 
   useEffect(() => {
     setLoading(true);
@@ -51,19 +57,19 @@ export function ProjectsView() {
       id: p.id,
       name: p.name,
       modified: new Date(p.updated_at),
-      owned: true,
-      shared: false,
+      source: 'remote',
+      typeLabel: p.project_type || 'web',
     }));
 
     const remoteIds = new Set(fromRemote.map(p => p.id));
     const fromRecent: ListItem[] = recent
       .filter(p => !remoteIds.has(p.id))
-      .map((p, index) => ({
+      .map(p => ({
         id: p.id,
         name: p.name,
-        modified: new Date(Date.now() - index * 86_400_000),
-        owned: true,
-        shared: false,
+        modified: p.updatedAt ? new Date(p.updatedAt) : new Date(),
+        source: 'local',
+        typeLabel: 'this PC',
       }));
 
     return [...fromRemote, ...fromRecent].sort((a, b) => b.modified.getTime() - a.modified.getTime());
@@ -72,8 +78,8 @@ export function ProjectsView() {
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return items.filter(item => {
-      if (tab === 'mine' && !item.owned) return false;
-      if (tab === 'shared' && !item.shared) return false;
+      if (tab === 'local' && item.source !== 'local') return false;
+      if (tab === 'remote' && item.source !== 'remote') return false;
       if (q && !item.name.toLowerCase().includes(q)) return false;
       return true;
     });
@@ -81,11 +87,13 @@ export function ProjectsView() {
 
   const handleCreate = async () => {
     const name = newName.trim() || 'Untitled';
+    const type = newType || getLocalPrefs().defaultProjectType;
     setCreating(true);
     try {
-      const project = await createProject(name, '', 'web') as ProjectRow;
+      const project = await createProject(name, '', type) as ProjectRow;
       setShowCreate(false);
       setNewName('');
+      setCreating(false);
       navigate({ name: 'project', id: project.id });
     } catch {
       const local = addRecent(name);
@@ -94,6 +102,37 @@ export function ProjectsView() {
       setCreating(false);
       navigate({ name: 'project', id: local.id });
     }
+  };
+
+  const openFolder = async () => {
+    setOpeningFolder(true);
+    try {
+      if (!window.arkDesktop?.projectImportFolder) {
+        const local = addRecent('New project');
+        navigate({ name: 'project', id: local.id });
+        return;
+      }
+      const project = addRecent('Opened folder');
+      const res = await window.arkDesktop.projectImportFolder({
+        projectId: project.id,
+        projectName: project.name,
+      });
+      if (!res?.ok || res.canceled) {
+        removeRecent(project.id);
+        return;
+      }
+      if (res.name) renameRecent(project.id, res.name);
+      navigate({ name: 'project', id: project.id });
+    } finally {
+      setOpeningFolder(false);
+    }
+  };
+
+  const commitRename = (id: string) => {
+    const name = renameValue.trim();
+    if (name) renameRecent(id, name);
+    setRenamingId(null);
+    setRenameValue('');
   };
 
   return (
@@ -115,9 +154,22 @@ export function ProjectsView() {
               </div>
               <button
                 type="button"
-                onClick={() => setShowCreate(true)}
-                title="Add project"
-                aria-label="Add project"
+                onClick={() => void openFolder()}
+                disabled={openingFolder}
+                title="Open a folder on this PC"
+                className="h-9 rounded-full px-3 inline-flex items-center gap-1.5 text-xs font-medium border border-surface-border text-content-secondary hover:text-content-primary hover:bg-surface-hover disabled:opacity-50"
+              >
+                {openingFolder ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FolderOpen className="w-3.5 h-3.5" />}
+                Open folder
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setNewType(getLocalPrefs().defaultProjectType);
+                  setShowCreate(true);
+                }}
+                title="New blank project"
+                aria-label="New project"
                 className="w-9 h-9 rounded-full flex items-center justify-center hover:opacity-90 transition-opacity"
                 style={{ backgroundColor: 'rgb(var(--color-accent))', color: 'rgb(var(--color-accent-fg))' }}
               >
@@ -143,46 +195,10 @@ export function ProjectsView() {
             ))}
           </div>
 
-          <div className="mb-5 rounded-2xl border border-surface-border bg-ark-navy-900/40 px-4 py-3.5">
-            <p className="text-sm font-medium text-content-primary mb-1">Create your first thing</p>
-            <p className="text-xs text-content-tertiary mb-3">Pick a path. You can always open a blank project too.</p>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-              <button
-                type="button"
-                onClick={() => navigate({ name: 'chat' })}
-                className="text-left rounded-xl border border-surface-border hover:bg-surface-hover/80 px-3 py-2.5 transition-colors"
-              >
-                <MessageSquare className="w-4 h-4 text-content-secondary mb-1.5" />
-                <span className="block text-sm text-content-primary">Chat app idea</span>
-                <span className="block text-[11px] text-content-tertiary mt-0.5">Start in New Chat</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => navigate({ name: 'chat', mode: 'image' })}
-                className="text-left rounded-xl border border-surface-border hover:bg-surface-hover/80 px-3 py-2.5 transition-colors"
-              >
-                <ImageIcon className="w-4 h-4 text-content-secondary mb-1.5" />
-                <span className="block text-sm text-content-primary">Image set</span>
-                <span className="block text-[11px] text-content-tertiary mt-0.5">Jump into Image mode</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const project = addRecent('First Code Project');
-                  navigate({ name: 'project', id: project.id });
-                }}
-                className="text-left rounded-xl border border-surface-border hover:bg-surface-hover/80 px-3 py-2.5 transition-colors"
-              >
-                <Code2 className="w-4 h-4 text-content-secondary mb-1.5" />
-                <span className="block text-sm text-content-primary">Code project</span>
-                <span className="block text-[11px] text-content-tertiary mt-0.5">Open the build workspace</span>
-              </button>
-            </div>
-          </div>
-
           {!loading && filtered.length > 0 && (
-            <div className="grid grid-cols-[1fr_7.5rem] gap-4 px-1 pb-2 text-xs text-content-tertiary">
+            <div className="grid grid-cols-[1fr_6rem_7.5rem] gap-4 px-1 pb-2 text-xs text-content-tertiary">
               <span>Name</span>
+              <span>Where</span>
               <span className="text-right">Modified</span>
             </div>
           )}
@@ -200,28 +216,94 @@ export function ProjectsView() {
               <div className="w-11 h-11 rounded-xl bg-surface-hover flex items-center justify-center mb-4">
                 <Folder className="w-5 h-5 text-content-secondary" />
               </div>
-              <p className="text-base font-semibold text-content-primary mb-1">No matching projects</p>
-              <p className="text-sm text-content-tertiary">Try a different search or tab.</p>
+              <p className="text-base font-semibold text-content-primary mb-1">No projects here</p>
+              <p className="text-sm text-content-tertiary max-w-sm">
+                Open a folder on this PC, or create a blank project. Templates live in Code after you open one.
+              </p>
             </div>
           ) : (
             <div className="flex flex-col">
               {filtered.map(item => (
-                <button
+                <div
                   key={item.id}
-                  type="button"
-                  onClick={() => navigate({ name: 'project', id: item.id })}
-                  className="w-full grid grid-cols-[1fr_7.5rem] gap-4 items-center px-1 py-3 text-left rounded-xl hover:bg-surface-hover/70 transition-colors"
+                  className="w-full grid grid-cols-[1fr_6rem_7.5rem] gap-4 items-center px-1 py-3 rounded-xl hover:bg-surface-hover/70 transition-colors group"
                 >
                   <span className="flex items-center gap-3 min-w-0">
-                    <span className="w-9 h-9 rounded-lg bg-surface-hover flex items-center justify-center shrink-0">
-                      <Folder className="w-4 h-4 text-content-secondary" strokeWidth={1.75} />
-                    </span>
-                    <span className="text-sm font-medium text-content-primary truncate">{item.name}</span>
+                    <button
+                      type="button"
+                      onClick={() => navigate({ name: 'project', id: item.id })}
+                      className="flex items-center gap-3 min-w-0 flex-1 text-left"
+                    >
+                      <span className="w-9 h-9 rounded-lg bg-surface-hover flex items-center justify-center shrink-0">
+                        <Folder className="w-4 h-4 text-content-secondary" strokeWidth={1.75} />
+                      </span>
+                      {renamingId === item.id ? (
+                        <input
+                          value={renameValue}
+                          autoFocus
+                          onChange={e => setRenameValue(e.target.value)}
+                          onClick={e => e.stopPropagation()}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') commitRename(item.id);
+                            if (e.key === 'Escape') setRenamingId(null);
+                          }}
+                          onBlur={() => commitRename(item.id)}
+                          className="flex-1 min-w-0 bg-transparent border-b border-surface-border text-sm text-content-primary outline-none"
+                        />
+                      ) : (
+                        <span className="text-sm font-medium text-content-primary truncate">{item.name}</span>
+                      )}
+                    </button>
+                    <div className="relative shrink-0 opacity-0 group-hover:opacity-100">
+                      <button
+                        type="button"
+                        className="w-7 h-7 rounded-md flex items-center justify-center text-content-tertiary hover:text-content-primary"
+                        onClick={e => {
+                          e.stopPropagation();
+                          setMenuId(menuId === item.id ? null : item.id);
+                        }}
+                        aria-label="Project actions"
+                      >
+                        <MoreHorizontal className="w-4 h-4" />
+                      </button>
+                      {menuId === item.id && (
+                        <div className="absolute right-0 top-8 z-20 w-36 rounded-lg border border-surface-border bg-ark-navy-900 shadow-xl py-1">
+                          <button
+                            type="button"
+                            className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-content-secondary hover:bg-surface-hover"
+                            onClick={() => {
+                              setRenamingId(item.id);
+                              setRenameValue(item.name);
+                              setMenuId(null);
+                            }}
+                          >
+                            <Pencil className="w-3 h-3" />
+                            Rename
+                          </button>
+                          <button
+                            type="button"
+                            className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-rose-300 hover:bg-rose-500/10"
+                            onClick={() => {
+                              if (window.confirm(`Remove “${item.name}” from this list? Files on disk stay.`)) {
+                                removeRecent(item.id);
+                              }
+                              setMenuId(null);
+                            }}
+                          >
+                            <Trash2 className="w-3 h-3" />
+                            Remove
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </span>
+                  <span className="text-xs text-content-tertiary capitalize truncate">
+                    {item.source === 'remote' ? item.typeLabel : 'This PC'}
                   </span>
                   <span className="text-right text-sm text-content-secondary tabular-nums">
                     {formatModified(item.modified)}
                   </span>
-                </button>
+                </div>
               ))}
             </div>
           )}
@@ -237,25 +319,48 @@ export function ProjectsView() {
             className="w-full max-w-md rounded-2xl border border-surface-border bg-ark-navy-900 p-6 shadow-2xl animate-slide-up"
             onClick={e => e.stopPropagation()}
           >
-            <h2 className="text-lg font-semibold text-content-primary mb-4">Add project</h2>
+            <h2 className="text-lg font-semibold text-content-primary mb-1">New project</h2>
+            <p className="text-xs text-content-tertiary mb-4">
+              Blank project. Type comes from Settings → Projects (you can change it here).
+            </p>
             <input
               type="text"
               value={newName}
               onChange={e => setNewName(e.target.value)}
               onKeyDown={e => {
-                if (e.key === 'Enter') handleCreate();
+                if (e.key === 'Enter') void handleCreate();
               }}
               placeholder="Project name"
               className="ark-input"
               autoFocus
             />
+            <div className="grid grid-cols-3 gap-2 mt-3">
+              {([
+                { id: 'web' as const, label: 'Web' },
+                { id: 'api' as const, label: 'API' },
+                { id: 'desktop' as const, label: 'Desktop' },
+              ]).map(t => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => setNewType(t.id)}
+                  className={`rounded-xl border px-3 py-2 text-xs ${
+                    newType === t.id
+                      ? 'border-content-primary bg-surface-hover text-content-primary'
+                      : 'border-surface-border text-content-secondary'
+                  }`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
             <div className="flex gap-2 mt-5">
               <button type="button" onClick={() => setShowCreate(false)} className="ark-btn-secondary flex-1">
                 Cancel
               </button>
               <button
                 type="button"
-                onClick={handleCreate}
+                onClick={() => void handleCreate()}
                 disabled={creating}
                 className="ark-btn-primary flex-1"
               >

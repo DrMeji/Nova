@@ -35,6 +35,11 @@ contextBridge.exposeInMainWorld('arkDesktop', {
   windowMaximizeToggle: () => ipcRenderer.invoke('ark:window-maximize-toggle'),
   windowIsMaximized: () => ipcRenderer.invoke('ark:window-is-maximized'),
   windowClose: () => ipcRenderer.invoke('ark:window-close'),
+  onWindowMaximized: (handler) => {
+    const listener = (_event, payload) => handler?.(payload);
+    ipcRenderer.on('ark:window-maximized', listener);
+    return () => ipcRenderer.removeListener('ark:window-maximized', listener);
+  },
   httpGet: (url, headers) => ipcRenderer.invoke('ark:http-get', { url, headers }),
   httpRequest: (url, options) => ipcRenderer.invoke('ark:http-request', { url, ...(options || {}) }),
   httpStream: (url, options) =>

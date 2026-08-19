@@ -22,6 +22,7 @@ import {
   cloudChatFreeKeys,
   cloudChatPaidKeys,
   cloudChatPreferredThenCascade,
+  cloudChatVisionKeys,
   hasAnyCloudChatKey,
 } from '@/lib/cloudChat';
 import { cloudGenerateImage } from '@/lib/cloudMedia';
@@ -74,6 +75,8 @@ export type ArkRouteOpts = {
   history?: RouterChatTurn[];
   /** When set, local GGUF tokens stream into this callback. */
   onChunk?: (text: string) => void;
+  /** Clear a failed attempt’s stream before hopping to the next provider. */
+  onAttemptReset?: () => void;
   /** Auto: reuse this equipped brain for the thread until it fails. */
   stickyModelId?: string;
   stickyModelName?: string;
@@ -89,6 +92,7 @@ function modePrefersCloud(mode: AiModePref) {
 }
 
 import { isTemplateEngineReply } from '@/lib/codeBuildHonesty';
+import { codingOutputIncomplete } from '@/lib/projectCodeEdit';
 
 function isStrongLocal(source?: string) {
   return source === 'ark-gguf' || source === 'ark-media';
@@ -119,6 +123,7 @@ async function tryLocalChat(
   failover = true,
   failoverIds?: string[],
   kind: 'chat' | 'coding' = 'chat',
+  onAttemptReset?: () => void,
 ): Promise<ArkRouterResult | null> {
   const runOne = async (id: string | undefined): Promise<ArkRouterResult | null> => {
     attempted.push(id ? `ARK Engine · ${id}` : 'ARK Engine');
@@ -139,6 +144,10 @@ async function tryLocalChat(
       if (!cleaned.trim() && looksLikePromptEcho(rawText)) return null;
       const reply = cleaned || rawText;
       if (!reply || isTemplateEngineReply(reply)) return null;
+      if (kind === 'coding' && codingOutputIncomplete(rawText, message)) {
+        onAttemptReset?.();
+        return null;
+      }
       if (result.source === 'ark-engine' && !result.media) {
         void import('@/lib/arkHuntBootstrap').then(m =>
           m.installNextWhenCurrentRanOut({
@@ -170,6 +179,7 @@ async function tryLocalChat(
           }),
         ).catch(() => undefined);
       }
+      onAttemptReset?.();
       return null;
     }
   };
@@ -256,6 +266,7 @@ async function tryStickyBrain(
   onChunk: ((text: string) => void) | undefined,
   brainKind: 'chat' | 'coding',
   mode: AiModePref,
+  onAttemptReset?: () => void,
 ): Promise<ArkRouterResult | null> {
   if (pinnedSource === 'local') {
     const hit = await tryLocalChat(
@@ -267,6 +278,7 @@ async function tryStickyBrain(
       false,
       undefined,
       brainKind,
+      onAttemptReset,
     );
     if (hit && isStrongLocal(hit.source)) {
       return { ...hit, modelId };
@@ -328,6 +340,15 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
   const history = historyFor(opts);
   const intent = classifyChatIntent(opts.message, opts.kind);
   const brainKind: 'chat' | 'coding' = intent === 'coding' ? 'coding' : 'chat';
+  const acceptCodingReply = (reply: string) =>
+    brainKind !== 'coding' || !codingOutputIncomplete(reply, opts.message);
+  const tryFreeCloud = () => cloudChatFreeKeys(
+    opts.message,
+    attempted,
+    history,
+    opts.onChunk,
+    { acceptReply: acceptCodingReply, onHop: opts.onAttemptReset },
+  );
 
   // ── Pinned cloud model (skipped for ARK Auto) ──────────────────────
   if (pinnedCloud && modeAllowsCloud(mode) && !isAuto) {
@@ -386,6 +407,7 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
       failover,
       undefined,
       brainKind,
+      opts.onAttemptReset,
     );
     if (localPinned && isStrongLocal(localPinned.source)) return localPinned;
     if (!failover) {
@@ -401,7 +423,7 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
 
   // ── Cloud-preferring modes ─────────────────────────────────────────
   if (modePrefersCloud(mode) && modeAllowsCloud(mode) && hasAnyCloudChatKey()) {
-    const free = await cloudChatFreeKeys(opts.message, attempted, history, opts.onChunk);
+    const free = await tryFreeCloud();
     if (free) {
       return withContinued({
         reply: free.reply,
@@ -438,7 +460,21 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
 
   // ── ARK Auto: Engine is the brain; Ollama is last-resort optional ──
   if (isAuto) {
-    if (opts.stickyModelId && opts.stickyPinnedSource) {
+    const hasVision = history.some(t => Boolean(t.images?.length));
+    if (hasVision && modeAllowsCloud(mode)) {
+      const vis = await cloudChatVisionKeys(opts.message, attempted, history, opts.onChunk);
+      if (vis) {
+        return withContinued({
+          reply: vis.reply,
+          modelName: `${vis.provider} · ${vis.model}`,
+          source: hitSource(vis.provider),
+          tier: vis.cost,
+          attempted,
+        }, history);
+      }
+    }
+
+    if (opts.stickyModelId && opts.stickyPinnedSource && !(hasVision && opts.stickyPinnedSource === 'local')) {
       const sticky = await tryStickyBrain(
         history,
         opts.message,
@@ -449,6 +485,7 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
         opts.onChunk,
         brainKind,
         mode,
+        opts.onAttemptReset,
       );
       if (sticky && sticky.source !== 'none') return sticky;
     }
@@ -463,6 +500,7 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
         failover,
         rest,
         brainKind,
+        opts.onAttemptReset,
       );
       if (local && isStrongLocal(local.source)) return local;
     }
@@ -478,6 +516,7 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
           failover,
           rest,
           brainKind,
+          opts.onAttemptReset,
         );
         if (weak && isStrongLocal(weak.source)) return weak;
       }
@@ -498,7 +537,7 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
 
     // Tiny 1.5B-only (or no GGUF): free cloud for quality, then weak Engine.
     if (modeAllowsCloud(mode) && hasAnyCloudChatKey() && !capableLocal) {
-      const free = await cloudChatFreeKeys(opts.message, attempted, history, opts.onChunk);
+      const free = await tryFreeCloud();
       if (free) {
         return withContinued({
           reply: free.reply,
@@ -510,7 +549,7 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
       }
     }
 
-    if (picked && !(brainKind === 'coding' && !capableLocal)) {
+    if (picked && brainKind !== 'coding') {
       const local = await tryLocalChat(
         history,
         opts.message,
@@ -520,13 +559,14 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
         failover,
         rest,
         brainKind,
+        opts.onAttemptReset,
       );
       if (local && isStrongLocal(local.source)) return local;
     }
 
     if (modeAllowsCloud(mode)) {
       if (hasAnyCloudChatKey()) {
-        const free = await cloudChatFreeKeys(opts.message, attempted, history, opts.onChunk);
+        const free = await tryFreeCloud();
         if (free) {
           return withContinued({
             reply: free.reply,
@@ -571,6 +611,7 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
     failover,
     undefined,
     brainKind,
+    opts.onAttemptReset,
   );
 
   if (local && isStrongLocal(local.source)) {
@@ -596,7 +637,7 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
 
   // ── Free-key → paid, then optional Ollama ─────────────────────────
   if (modeAllowsCloud(mode)) {
-    const free = await cloudChatFreeKeys(opts.message, attempted, history, opts.onChunk);
+    const free = await tryFreeCloud();
     if (free) {
       return withContinued({
         reply: free.reply,

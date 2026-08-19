@@ -38,6 +38,17 @@ ARK should **find and lock in free coding / creation capacity** so users are not
 - Generations are **saved into Recent → Creations** (and ARK Engine media storage) so users can reopen them.
 - Be honest in UI if only a preview/fallback was produced.
 
+## How ARK should feel (product bar)
+
+ARK is meant to feel like opening ChatGPT or Cursor: the user types what they want, and the app **does it** — chat, code, image, later video / message / call — in one place. Fancy empty chrome is a failure.
+
+- **Free models are the default.** Slow is OK. Sitting idle for tens of minutes, or returning a fake “done” (stub plugin data, gradient placeholder, half file) is not.
+- Aim for a useful result in **under a few minutes**. Start the real request immediately — do not pad with fake wait stages before work begins.
+- **Simple over theatrical.** One send → progress that matches real work → a real answer, file, or image. If something cannot run, say so in one line.
+- Code should behave like a coding partner: read the repo, explain it, suggest what to do next, then edit — not a regex that guesses the job and pastes a template.
+- Networking, Message, and Call exist so people stay in ARK instead of leaving for another app. Do not ship those as live nav until they actually connect people.
+- Users should download ARK and **start working**, not hunt which buttons are Coming soon vs secretly wired.
+
 ## Lindsay / brain API
 
 - External clients (Lindsay, other assistants, agents) talk to **ARK’s** brain API / engine on `127.0.0.1:8787`.

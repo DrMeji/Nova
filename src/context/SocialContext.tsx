@@ -10,11 +10,13 @@ import {
   type DirectMessage,
 } from '@/lib/arkSocial';
 import { sendCallSignal, subscribeUserSignals, type IncomingCall } from '@/lib/arkCall';
+import { isRevealed, isSocialParked } from '@/lib/featurePark';
 import { notifyWorkDone } from '@/lib/activityIndicators';
 
 type SocialContextValue = {
   contacts: ArkContact[];
   incoming: IncomingCall | null;
+  unreadFrom: string[];
   refreshContacts: () => Promise<void>;
   inviteByArkId: (arkId: string, displayName?: string) => Promise<ArkContact | null>;
   acceptCall: () => void;
@@ -25,9 +27,10 @@ const SocialContext = createContext<SocialContextValue | undefined>(undefined);
 
 export function SocialProvider({ children }: { children: ReactNode }) {
   const { user, profile } = useAuth();
-  const { route, navigate } = useRouter();
+  const { navigate, route } = useRouter();
   const [contacts, setContacts] = useState<ArkContact[]>([]);
   const [incoming, setIncoming] = useState<IncomingCall | null>(null);
+  const [unreadFrom, setUnreadFrom] = useState<string[]>([]);
   const myArkId = profile?.ark_id || '';
 
   const refreshContacts = async () => {
@@ -43,17 +46,32 @@ export function SocialProvider({ children }: { children: ReactNode }) {
     if (!myArkId) return;
     const unsub = subscribeMessages(myArkId, (msg: DirectMessage) => {
       if (msg.recipientArkId !== myArkId) return;
-      if (route.name !== 'message') notifyWorkDone('message');
-    });
+      const viewing = route.name === 'message' && route.peer === msg.senderArkId;
+      if (!viewing) {
+        setUnreadFrom(prev => (prev.includes(msg.senderArkId) ? prev : [...prev, msg.senderArkId]));
+      }
+      if (isRevealed('message')) {
+        notifyWorkDone('message');
+      }
+    }, user?.id);
     return unsub;
-  }, [myArkId, route.name]);
+  }, [myArkId, route, user?.id]);
+
+  useEffect(() => {
+    if (route.name === 'message' && route.peer) {
+      setUnreadFrom(prev => prev.filter(id => id !== route.peer));
+    }
+  }, [route]);
 
   useEffect(() => {
     if (!myArkId) return;
     const unsub = subscribeUserSignals(myArkId, signal => {
       if (signal.kind === 'ring' && signal.to === myArkId) {
-        setIncoming({ from: signal.from, fromName: String(signal.payload?.name || '') });
-        if (route.name !== 'call') notifyWorkDone('call');
+        setIncoming({
+          from: signal.from,
+          fromName: typeof signal.payload?.name === 'string' ? signal.payload.name : signal.from,
+        });
+        if (isRevealed('call')) notifyWorkDone('call');
       }
       if (signal.kind === 'hangup' || signal.kind === 'decline') {
         setIncoming(prev => (prev && (signal.from === prev.from || signal.to === myArkId) ? null : prev));
@@ -61,7 +79,7 @@ export function SocialProvider({ children }: { children: ReactNode }) {
       window.dispatchEvent(new CustomEvent('ark:call-signal', { detail: signal }));
     });
     return unsub;
-  }, [myArkId, route.name]);
+  }, [myArkId]);
 
   const inviteByArkId = async (arkId: string, displayName?: string) => {
     const contact = await addContact(arkId, displayName);
@@ -72,9 +90,10 @@ export function SocialProvider({ children }: { children: ReactNode }) {
   };
 
   const acceptCall = () => {
-    if (!incoming || !myArkId) return;
+    if (!incoming) return;
     const peer = incoming.from;
     setIncoming(null);
+    if (isSocialParked('call')) return;
     navigate({ name: 'call', peer, incoming: true });
   };
 
@@ -85,8 +104,8 @@ export function SocialProvider({ children }: { children: ReactNode }) {
   };
 
   const value = useMemo(
-    () => ({ contacts, incoming, refreshContacts, inviteByArkId, acceptCall, declineCall }),
-    [contacts, incoming],
+    () => ({ contacts, incoming, unreadFrom, refreshContacts, inviteByArkId, acceptCall, declineCall }),
+    [contacts, incoming, unreadFrom],
   );
 
   return <SocialContext.Provider value={value}>{children}</SocialContext.Provider>;

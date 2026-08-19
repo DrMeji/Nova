@@ -72,10 +72,44 @@ export function detectDeviceFamily(message: string): DeviceFamilyKind | null {
   return null;
 }
 
+/** Only when the user named a specific model (iPhone 16, 18 Pro Max, Pixel 8, …). */
+export function classifyNamedDevice(message: string): PhoneDevice | null {
+  const t = String(message || '').toLowerCase();
+  if (/iphone\s*1[78]\s*pro\s*max/.test(t)) {
+    return PHONE_DEVICES.find(d => d.id === 'iphone-18-pro-max')!;
+  }
+  if (/iphone\s*16\s*pro\s*max|iphone\s*16\s*plus/.test(t)) {
+    return PHONE_DEVICES.find(d => d.id === 'iphone-16-pro-max')!;
+  }
+  if (/iphone\s*se\b/.test(t)) return PHONE_DEVICES.find(d => d.id === 'iphone-se')!;
+  if (/iphone\s*1[78]\b/.test(t)) return PHONE_DEVICES.find(d => d.id === 'iphone-18')!;
+  if (/iphone\s*16\b|iphone\s*15\b/.test(t)) return PHONE_DEVICES.find(d => d.id === 'iphone-16')!;
+  if (/ipad\s*pro\s*13|ipad\s*pro\s*12/.test(t)) return PHONE_DEVICES.find(d => d.id === 'ipad-pro-13')!;
+  if (/ipad\s*mini/.test(t)) return PHONE_DEVICES.find(d => d.id === 'ipad-mini')!;
+  if (/ipad\s*pro/.test(t)) return PHONE_DEVICES.find(d => d.id === 'ipad-pro-11')!;
+  if (/pixel\s*8\b/.test(t)) return PHONE_DEVICES.find(d => d.id === 'pixel-8')!;
+  if (/galaxy\s*s24/.test(t)) return PHONE_DEVICES.find(d => d.id === 'galaxy-s24')!;
+  if (/pixel\s*tab/.test(t)) return PHONE_DEVICES.find(d => d.id === 'pixel-tablet')!;
+  return null;
+}
+
 export function needsDeviceFamilyChoice(message: string, target: MobilePlatform | null): boolean {
   if (!target) return false;
   if (isLayoutLockAsk(message)) return false;
-  return detectDeviceFamily(message) == null;
+  return !classifyNamedDevice(message);
+}
+
+export function sizedBuildPrompt(device: PhoneDevice): string {
+  const store = device.platform === 'android'
+    ? 'as a native Android app for Google Play (Kotlin + Android Studio)'
+    : device.family === 'mac'
+      ? 'as a native Mac app using SwiftUI'
+      : 'as a native Apple app for the App Store (SwiftUI + Xcode)';
+  return `Build this ${store} for ${deviceLine(device)}. Lock the canvas to ${device.width}×${device.height} ${device.unit}. Do not make the device preview resizable.`;
+}
+
+export function deviceChipLabel(device: PhoneDevice): string {
+  return `${device.label} · ${device.width}×${device.height}`;
 }
 
 export function familyBuildPrompt(platform: MobilePlatform, family: DeviceFamilyKind): string {
@@ -96,7 +130,9 @@ export function familyBuildPrompt(platform: MobilePlatform, family: DeviceFamily
 
 export function devicesForChips(target: MobilePlatform): PhoneDevice[] {
   if (target === 'ios') {
-    return PHONE_DEVICES.filter(d => d.platform === 'ios' && ['iphone-16', 'ipad-pro-11', 'mac-14'].includes(d.id));
+    return PHONE_DEVICES.filter(d => d.platform === 'ios' && [
+      'iphone-16', 'iphone-16-pro-max', 'iphone-18-pro-max', 'ipad-pro-11', 'mac-14',
+    ].includes(d.id));
   }
   if (target === 'android') {
     return PHONE_DEVICES.filter(d => ['galaxy-s24', 'pixel-tablet', 'android-laptop'].includes(d.id));
@@ -120,18 +156,9 @@ export function resolveDevices(target: MobilePlatform, message: string): { ios?:
 }
 
 export function classifyMobileDevice(message: string, target?: MobilePlatform | null): PhoneDevice | null {
+  const named = classifyNamedDevice(message);
+  if (named) return named;
   const t = String(message || '').toLowerCase();
-  if (/iphone\s*1[78]\s*pro\s*max/.test(t)) {
-    return PHONE_DEVICES.find(d => d.id === 'iphone-18-pro-max')!;
-  }
-  if (/iphone\s*16\s*pro\s*max|iphone\s*16\s*plus/.test(t)) {
-    return PHONE_DEVICES.find(d => d.id === 'iphone-16-pro-max')!;
-  }
-  if (/iphone\s*se\b/.test(t)) return PHONE_DEVICES.find(d => d.id === 'iphone-se')!;
-  if (/iphone\s*1[78]\b/.test(t)) return PHONE_DEVICES.find(d => d.id === 'iphone-18')!;
-  if (/iphone\s*16\b|iphone\s*15\b/.test(t)) return PHONE_DEVICES.find(d => d.id === 'iphone-16')!;
-  if (/ipad\s*pro\s*13|ipad\s*pro\s*12/.test(t)) return PHONE_DEVICES.find(d => d.id === 'ipad-pro-13')!;
-  if (/ipad\s*mini/.test(t)) return PHONE_DEVICES.find(d => d.id === 'ipad-mini')!;
   if (/ipad/.test(t)) return PHONE_DEVICES.find(d => d.id === 'ipad-pro-11')!;
   if (/pixel\s*tab|android\s*tablet/.test(t)) return PHONE_DEVICES.find(d => d.id === 'pixel-tablet')!;
   if (/galaxy\s*s24|samsung/.test(t) || (/\bgalaxy\b/.test(t) && !/ipad/.test(t))) {

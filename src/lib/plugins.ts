@@ -34,7 +34,7 @@ export type PluginDef = {
   actions: { id: string; label: string; prompt: string }[];
 };
 
-/** Plugins with real verify + chat runners today. */
+/** Plugins with real verify + chat runners today. Default Plugins list. */
 export const LIVE_PLUGIN_IDS = [
   'github',
   'notion',
@@ -48,8 +48,19 @@ export const LIVE_PLUGIN_IDS = [
   'discord',
 ] as const;
 
+/** Extra APIs that work when connected, but stay off the default list until Testers reveals them. */
+export const WIRED_PLUGIN_IDS = [
+  ...LIVE_PLUGIN_IDS,
+  'telegram',
+  'stripe',
+] as const;
+
 export function isPluginLive(id: string): boolean {
   return (LIVE_PLUGIN_IDS as readonly string[]).includes(id);
+}
+
+export function isPluginWired(id: string): boolean {
+  return (WIRED_PLUGIN_IDS as readonly string[]).includes(id);
 }
 
 export type PluginRuntimeState = {
@@ -191,9 +202,9 @@ export const PLUGIN_CATALOG: PluginDef[] = [
   { id: 'salesforce', name: 'Salesforce', description: 'CRM and customer workflows.', longDescription: 'Salesforce CRM.', tone: 'from-sky-400 to-blue-700', initial: 'Sf', category: 'business', authKind: 'oauth', permissions: [{ id: 'read', label: 'Read CRM', detail: 'View records', required: true }], actions: [] },
   { id: 'asana', name: 'Asana', description: 'Organize work across teams.', longDescription: 'Asana tasks.', tone: 'from-rose-400 to-red-700', initial: 'As', category: 'business', authKind: 'oauth', permissions: [{ id: 'read', label: 'Read tasks', detail: 'View tasks', required: true }], actions: [] },
 
-  { id: 'teams', name: 'Teams', description: 'Collaborate in Microsoft Teams.', longDescription: 'Teams chat.', tone: 'from-purple-500 to-indigo-700', initial: 'T', category: 'communication', hero: true, authKind: 'oauth', permissions: [{ id: 'read', label: 'Read chats', detail: 'Read messages', required: true }], actions: [] },
+  { id: 'teams', name: 'Teams', description: 'Collaborate in Microsoft Teams.', longDescription: 'Teams chat.', tone: 'from-purple-500 to-indigo-700', initial: 'T', category: 'communication', authKind: 'oauth', permissions: [{ id: 'read', label: 'Read chats', detail: 'Read messages', required: true }], actions: [] },
   { id: 'discord', name: 'Discord', description: 'Community and chat workflows.', longDescription: 'Discord servers.', tone: 'from-indigo-500 to-violet-700', initial: 'Dc', category: 'communication', hero: true, live: true, authKind: 'token', permissions: [{ id: 'read', label: 'Read channels', detail: 'Read messages', required: true }, { id: 'write', label: 'Post messages', detail: 'Post to a channel by id', required: false }], actions: [{ id: 'servers', label: 'My servers', prompt: 'Using Discord, list my servers.' }] },
-  { id: 'zoom', name: 'Zoom', description: 'Meetings and recordings.', longDescription: 'Zoom meetings.', tone: 'from-blue-400 to-blue-700', initial: 'Zm', category: 'communication', hero: true, authKind: 'oauth', permissions: [{ id: 'read', label: 'Read meetings', detail: 'View meetings', required: true }], actions: [] },
+  { id: 'zoom', name: 'Zoom', description: 'Meetings and recordings.', longDescription: 'Zoom meetings.', tone: 'from-blue-400 to-blue-700', initial: 'Zm', category: 'communication', authKind: 'oauth', permissions: [{ id: 'read', label: 'Read meetings', detail: 'View meetings', required: true }], actions: [] },
   { id: 'telegram', name: 'Telegram', description: 'Message and bot integrations.', longDescription: 'Telegram bots.', tone: 'from-sky-400 to-cyan-700', initial: 'Tg', category: 'communication', authKind: 'token', permissions: [{ id: 'send', label: 'Send', detail: 'Send messages', required: true }], actions: [] },
   { id: 'whatsapp', name: 'WhatsApp', description: 'Business messaging support.', longDescription: 'WhatsApp business.', tone: 'from-emerald-400 to-green-700', initial: 'Wa', category: 'communication', authKind: 'oauth', permissions: [{ id: 'send', label: 'Send', detail: 'Send messages', required: true }], actions: [] },
   { id: 'superhuman', name: 'Superhuman Mail', description: 'Fast email triage and replies.', longDescription: 'Superhuman mail.', tone: 'from-violet-500 to-purple-800', initial: 'Su', category: 'communication', authKind: 'oauth', permissions: [{ id: 'read', label: 'Read mail', detail: 'Open mail', required: true }], actions: [] },
@@ -281,6 +292,7 @@ export function getInstalledPlugins(map: PluginStateMap) {
 
 export function getChatEnabledPlugins(map: PluginStateMap) {
   return PLUGIN_CATALOG.filter(p => {
+    if (!isPluginWired(p.id)) return false;
     const s = getPluginRuntime(p.id, map);
     return s.installed && s.connected && s.enabledInChat;
   });
@@ -305,7 +317,9 @@ export async function runPluginAction(
     (pluginId === 'gdrive' && /drive|google drive|docs|sheets|slides/.test(lower)) ||
     (pluginId === 'gcal' && /calendar|schedule|meeting|agenda|gcal/.test(lower)) ||
     (pluginId === 'vercel' && /vercel|deploy/.test(lower)) ||
-    (pluginId === 'discord' && /discord|server|guild/.test(lower));
+    (pluginId === 'discord' && /discord|server|guild/.test(lower)) ||
+    (pluginId === 'telegram' && /telegram|bot/.test(lower)) ||
+    (pluginId === 'stripe' && /stripe|charge|payment/.test(lower));
 
   if (!mentions) return null;
 
@@ -487,151 +501,62 @@ export async function runPluginAction(
     return runPluginStub(pluginId, userText);
   }
 
+  if (pluginId === 'telegram') {
+    if (token) {
+      try {
+        const { runTelegramLive } = await import('@/lib/telegram');
+        return await runTelegramLive(token, userText);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Telegram request failed';
+        return ['Telegram · error', '', msg].join('\n');
+      }
+    }
+    return runPluginStub(pluginId, userText);
+  }
+
+  if (pluginId === 'stripe') {
+    if (token) {
+      try {
+        const { runStripeLive } = await import('@/lib/stripe');
+        return await runStripeLive(token, userText);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Stripe request failed';
+        return ['Stripe · error', '', msg].join('\n');
+      }
+    }
+    return runPluginStub(pluginId, userText);
+  }
+
   return runPluginStub(pluginId, userText);
 }
 
-/** Stub responses so chat can demo plugin actions before real APIs. */
+/** Honest reply when a plugin is named but not connected — never invent account data. */
 export function runPluginStub(pluginId: string, userText: string): string | null {
   const lower = userText.toLowerCase();
   const mentions =
-    lower.includes(pluginId) ||
-    (pluginId === 'github' && /github|repo|repositor|pull request|\bpr\b|issue/.test(lower)) ||
-    (pluginId === 'notion' && /notion|spec|brief|workspace/.test(lower)) ||
-    (pluginId === 'gmail' && /gmail|inbox|email|mail|unread/.test(lower)) ||
-    (pluginId === 'slack' && /slack|channel|dm/.test(lower)) ||
-    (pluginId === 'linear' && /linear|ticket|issue/.test(lower)) ||
-    (pluginId === 'figma' && /figma|design file|frame/.test(lower)) ||
-    (pluginId === 'gdrive' && /drive|google drive|docs|sheets|slides/.test(lower)) ||
-    (pluginId === 'gcal' && /calendar|schedule|meeting|agenda|gcal/.test(lower)) ||
-    (pluginId === 'vercel' && /vercel|deploy/.test(lower)) ||
-    (pluginId === 'discord' && /discord|server|guild/.test(lower));
+    lower.includes(pluginId.replace(/-/g, ' ')) ||
+    (pluginId === 'github' && /\bgithub\b/.test(lower)) ||
+    (pluginId === 'notion' && /\bnotion\b/.test(lower)) ||
+    (pluginId === 'gmail' && /\bgmail\b|\binbox\b/.test(lower)) ||
+    (pluginId === 'slack' && /\bslack\b/.test(lower)) ||
+    (pluginId === 'linear' && /\blinear\b/.test(lower)) ||
+    (pluginId === 'figma' && /\bfigma\b/.test(lower)) ||
+    (pluginId === 'gdrive' && /google drive|\bgdrive\b/.test(lower)) ||
+    (pluginId === 'gcal' && /google calendar|\bgcal\b/.test(lower)) ||
+    (pluginId === 'vercel' && /\bvercel\b/.test(lower)) ||
+    (pluginId === 'discord' && /\bdiscord\b/.test(lower)) ||
+    (pluginId === 'telegram' && /\btelegram\b/.test(lower)) ||
+    (pluginId === 'stripe' && /\bstripe\b/.test(lower));
 
   if (!mentions) return null;
 
-  if (pluginId === 'github') {
-    if (/pull|pr/.test(lower)) {
-      return [
-        'GitHub · open pull requests (demo)',
-        '',
-        '1. ark/studio — #42 “Preview pane polish” · review requested',
-        '2. ark/engine — #18 “Local API scaffold” · draft',
-        '3. mejia/lindsay — #7 “Voice wake” · changes requested',
-        '',
-        'This is placeholder data until real GitHub auth is wired. Your token stays on this device.',
-      ].join('\n');
-    }
-    if (/issue/.test(lower)) {
-      return [
-        'GitHub · recent issues (demo)',
-        '',
-        '• #101 Plugin connect sheet · open',
-        '• #98 Hot reload launcher · closed',
-        '• #91 Settings updates changelog · open',
-        '',
-        'Connect a real token later to pull live issues.',
-      ].join('\n');
-    }
-    return [
-      'GitHub · repositories (demo)',
-      '',
-      '• ARK — private · updated today',
-      '• Lindsay — private · updated yesterday',
-      '• mejia-media — private · updated last week',
-      '',
-      'Ask me about open PRs or issues next. Real API calls come after OAuth/token wiring.',
-    ].join('\n');
-  }
-
-  if (pluginId === 'notion') {
-    if (/brief|spec/.test(lower)) {
-      return [
-        'Notion · project brief (demo)',
-        '',
-        'Title: ARK Plugins v1',
-        'Goal: Install → Connect → Permissions → Use in chat',
-        'Hero plugins: GitHub, Notion, Gmail',
-        'Next: real OAuth and action runners',
-        '',
-        'Pulled from a placeholder page. Live Notion comes after connect is real.',
-      ].join('\n');
-    }
-    return [
-      'Notion · search (demo)',
-      '',
-      '1. ARK Master Spec',
-      '2. Lindsay Voice Notes',
-      '3. Q3 Launch Checklist',
-      '',
-      'Say “pull a brief” for a longer summary.',
-    ].join('\n');
-  }
-
-  if (pluginId === 'gmail') {
-    if (/draft|reply/.test(lower)) {
-      return [
-        'Gmail · draft reply (demo)',
-        '',
-        'Subject: Re: ARK demo walkthrough',
-        '',
-        'Hi,',
-        '',
-        'Thanks for sending this over. I can walk you through the plugin connect flow this week — happy to share a short loom or jump on a call.',
-        '',
-        'Best,',
-        'You',
-        '',
-        'Draft only. Send permission is optional and not used yet.',
-      ].join('\n');
-    }
-    return [
-      'Gmail · unread summary (demo)',
-      '',
-      '• 3 unread · 1 starred',
-      '• Acme — “Contract revision” · 2h ago',
-      '• GitHub — “[ARK] CI failed on main” · 5h ago',
-      '• Notion — “Shared: Plugins v1” · yesterday',
-      '',
-      'Ask me to draft a reply to any of these.',
-    ].join('\n');
-  }
-
-  if (pluginId === 'slack') {
-    return [
-      'Slack · unread (demo)',
-      '',
-      '• #ark-build — 4 unread',
-      '• #design — 1 unread',
-      '• @you — “Can you review the plugin sheet?”',
-      '',
-      'Connect a Slack bot token later for live channels.',
-    ].join('\n');
-  }
-
-  if (pluginId === 'linear') {
-    return [
-      'Linear · my issues (demo)',
-      '',
-      '• ARK-12 Plugin connect flow · In Progress',
-      '• ARK-19 Local AI probe · Todo',
-      '• ARK-21 Brain API · Done',
-      '',
-      'Connect a Linear API key for live issues.',
-    ].join('\n');
-  }
-
-  if (pluginId === 'figma') {
-    return [
-      'Figma · recent files (demo)',
-      '',
-      '• ARK Desktop Shell',
-      '• Plugin Connect Sheet',
-      '• Lindsay Voice UI',
-      '',
-      'Connect a Figma token for live files.',
-    ].join('\n');
-  }
-
-  return null;
+  const name = getPluginById(pluginId)?.name || pluginId;
+  return [
+    `${name} is not connected.`,
+    '',
+    `Open Plugins, connect ${name} with a real token, then ask again.`,
+    'I will not invent inbox, repo, or calendar data.',
+  ].join('\n');
 }
 
 export function detectPluginIntent(text: string, enabledIds: string[]): string | null {

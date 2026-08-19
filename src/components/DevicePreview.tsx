@@ -9,10 +9,8 @@ export function DevicePreview({
 }) {
   const kind = familyOfDevice(device);
   const landscape = kind === 'computer';
-  const frameW = landscape ? Math.min(device.width, 720) : Math.min(device.width, 420);
-  const frameH = landscape
-    ? Math.round(frameW * (device.height / device.width))
-    : Math.round(frameW * (device.height / device.width));
+  const frameW = device.width;
+  const frameH = device.height;
 
   const shell =
     kind === 'computer'

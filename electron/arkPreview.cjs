@@ -149,28 +149,27 @@ function deviceShellHtml(url, device) {
   const family = String(device?.family || 'iphone');
   const landscape = family === 'mac' || family === 'android-laptop' || family === 'computer';
   const radius = family === 'ipad' || family === 'android-tablet' || family === 'tablet' ? '28px' : landscape ? '12px' : '36px';
-  const border = landscape ? '8px' : '12px';
+  const border = landscape ? '10px' : '12px';
   const w = Number(device?.width) || (landscape ? 1100 : 393);
   const h = Number(device?.height) || (landscape ? 720 : 852);
-  const frameW = landscape ? Math.min(w, 1100) : Math.min(w, 430);
-  const frameH = Math.round(frameW * (h / w));
+  const size = `${w}×${h}`;
   return `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8"/>
-  <title>${label} · ARK Preview</title>
+  <title>${label} · ${size}</title>
   <style>
-    html,body{margin:0;height:100%;background:#050608;color:#e8eef8;font-family:ui-sans-serif,system-ui,sans-serif}
-    body{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px}
-    .label{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#94a3b8}
-    .phone{position:relative;background:#111827;border:${border} solid #27272a;border-radius:${radius};overflow:hidden;box-shadow:0 30px 80px rgba(0,0,0,.55)}
-    .notch{position:absolute;top:8px;left:50%;transform:translateX(-50%);width:72px;height:8px;border-radius:999px;background:#3f3f46;z-index:2}
-    iframe{border:0;width:100%;height:100%;background:#fff}
+    html,body{margin:0;background:#050608;overflow:hidden;width:${w + (landscape ? 20 : 24)}px;height:${h + (landscape ? 48 : 52)}px}
+    body{display:flex;flex-direction:column;align-items:center}
+    .chrome{flex:none;width:100%;height:28px;display:flex;align-items:center;justify-content:center;font:11px/1 ui-sans-serif,system-ui,sans-serif;letter-spacing:.04em;color:#94a3b8;background:#0b1220;border-bottom:1px solid #1e293b}
+    .phone{position:relative;background:#111827;border:${border} solid #1c1917;border-radius:${radius};overflow:hidden;width:${w}px;height:${h}px;flex:none}
+    .notch{position:absolute;top:7px;left:50%;transform:translateX(-50%);width:78px;height:7px;border-radius:999px;background:#3f3f46;z-index:2}
+    iframe{border:0;width:${w}px;height:${h}px;background:#000;display:block}
   </style>
 </head>
 <body>
-  <div class="label">${label} · ${w}×${h}</div>
-  <div class="phone" style="width:${frameW}px;height:${frameH}px">
+  <div class="chrome">${label} · ${size}</div>
+  <div class="phone">
     ${landscape ? '' : '<span class="notch"></span>'}
     <iframe src="${String(url).replace(/"/g, '')}"></iframe>
   </div>
@@ -178,38 +177,114 @@ function deviceShellHtml(url, device) {
 </html>`;
 }
 
+function lockDeviceWindow(win, device) {
+  const size = deviceWindowSize(device);
+  try {
+    win.setResizable(false);
+    win.setMaximizable(false);
+    win.setMinimizable(true);
+    win.setMinimumSize(size.width, size.height);
+    win.setMaximumSize(size.width, size.height);
+    win.setContentSize(size.width, size.height);
+  } catch {
+    win.setSize(size.width, size.height);
+  }
+  win.removeAllListeners('will-resize');
+  win.on('will-resize', (event) => {
+    event.preventDefault();
+  });
+}
+
+function enableDeviceZoom(win) {
+  try {
+    win.webContents.setVisualZoomLevelLimits(1, 3);
+  } catch {
+    /* ignore */
+  }
+  win.webContents.on('before-input-event', (event, input) => {
+    if (!(input.control || input.meta) || input.type !== 'keyDown') return;
+    if (input.key === '=' || input.key === '+') {
+      event.preventDefault();
+      win.webContents.setZoomFactor(Math.min(3, win.webContents.getZoomFactor() + 0.1));
+    } else if (input.key === '-') {
+      event.preventDefault();
+      win.webContents.setZoomFactor(Math.max(0.5, win.webContents.getZoomFactor() - 0.1));
+    } else if (input.key === '0') {
+      event.preventDefault();
+      win.webContents.setZoomFactor(1);
+    }
+  });
+}
+
+function deviceWindowSize(device) {
+  const family = String(device?.family || '');
+  const landscape = /mac|laptop|computer/i.test(family);
+  const bezel = landscape ? 20 : 24;
+  const chrome = 28;
+  return {
+    width: Math.round((Number(device?.width) || 393) + bezel),
+    height: Math.round((Number(device?.height) || 852) + bezel + chrome),
+  };
+}
+
+async function loadDeviceIntoWindow(win, id, url, device, title) {
+  try {
+    win.setTitle(String(title || `${device.label} · ARK Preview`));
+  } catch {
+    /* ignore */
+  }
+  lockDeviceWindow(win, device);
+  const session = sessions.get(id);
+  if (session?.root) {
+    fs.writeFileSync(path.join(session.root, '__ark-device.html'), deviceShellHtml(url, device), 'utf8');
+  }
+  const shellUrl = session?.port
+    ? `http://127.0.0.1:${session.port}/__ark-device.html?t=${Date.now()}`
+    : `data:text/html;charset=utf-8,${encodeURIComponent(deviceShellHtml(url, device))}`;
+  await win.loadURL(shellUrl);
+}
+
 async function openPreviewWindow(payload) {
   const id = String(payload?.projectId || 'default');
   const url = String(payload?.url || '');
   if (!url) return { ok: false, error: 'No preview URL' };
 
+  const kind = payload?.kind === 'device' ? 'device' : 'web';
+  const device = payload?.device || null;
+  const title = String(payload?.title || (device ? `${device.label} · ARK Preview` : 'ARK Preview'));
+  const size = kind === 'device' && device ? deviceWindowSize(device) : { width: 1100, height: 780 };
+
   const existing = previewWindows.get(id);
   if (existing && !existing.isDestroyed()) {
-    existing.focus();
-    try {
-      await existing.loadURL(url);
-    } catch {
-      /* keep existing */
+    if (kind === 'device' && device) {
+      await loadDeviceIntoWindow(existing, id, url, device, title);
+    } else {
+      try {
+        existing.setResizable(true);
+        existing.setMaximizable(true);
+        existing.setMinimumSize(480, 360);
+        existing.setMaximumSize(4000, 3000);
+        existing.setTitle(title);
+        await existing.loadURL(url);
+      } catch {
+        /* keep */
+      }
     }
+    if (existing.isMinimized()) existing.restore();
+    existing.show();
+    existing.focus();
     return { ok: true };
   }
 
-  const kind = payload?.kind === 'device' ? 'device' : 'web';
-  const device = payload?.device || null;
-  const landscape = device && /mac|laptop|computer/i.test(String(device.family || ''));
-  const width = kind === 'device' && device
-    ? Math.min((Number(device.width) || 393) + (landscape ? 80 : 64), landscape ? 1280 : 520)
-    : 1100;
-  const height = kind === 'device' && device
-    ? Math.min((Number(device.height) || 852) + 120, landscape ? 860 : 980)
-    : 780;
-
   const win = new BrowserWindow({
-    width: Math.round(width),
-    height: Math.round(height),
-    title: String(payload?.title || 'ARK Preview'),
+    width: size.width,
+    height: size.height,
+    title,
     backgroundColor: '#050608',
     autoHideMenuBar: true,
+    resizable: kind !== 'device',
+    maximizable: kind !== 'device',
+    useContentSize: true,
     webPreferences: {
       sandbox: true,
       contextIsolation: true,
@@ -220,16 +295,9 @@ async function openPreviewWindow(payload) {
   win.on('closed', () => {
     if (previewWindows.get(id) === win) previewWindows.delete(id);
   });
-
   if (kind === 'device' && device) {
-    const session = sessions.get(id);
-    if (session?.root) {
-      const shellPath = path.join(session.root, '__ark-device.html');
-      fs.writeFileSync(shellPath, deviceShellHtml(url, device), 'utf8');
-      await win.loadURL(`http://127.0.0.1:${session.port}/__ark-device.html`);
-    } else {
-      await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(deviceShellHtml(url, device))}`);
-    }
+    enableDeviceZoom(win);
+    await loadDeviceIntoWindow(win, id, url, device, title);
   } else {
     await win.loadURL(url);
   }

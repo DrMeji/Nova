@@ -263,7 +263,9 @@ let cancelRequested = false;
 let activeAbort = null;
 let serverChild = null;
 let serverGguf = null;
+let serverCtx = 0;
 const SERVER_PORT = 8788;
+const GGUF_CTX = 8192;
 
 function killLlamaChild(child) {
   if (!child) return;
@@ -300,6 +302,7 @@ function stopServer() {
     killLlamaChild(serverChild);
     serverChild = null;
     serverGguf = null;
+    serverCtx = 0;
   }
 }
 
@@ -325,7 +328,7 @@ async function ensureLlamaServer(modelId) {
   const gguf = findGgufForModel(modelId);
   const bin = findLlamaServer();
   if (!gguf || !bin) return false;
-  if (serverChild && serverGguf === gguf && !serverChild.killed && await pingServer()) {
+  if (serverChild && serverGguf === gguf && serverCtx === GGUF_CTX && !serverChild.killed && await pingServer()) {
     return true;
   }
   stopServer();
@@ -333,15 +336,17 @@ async function ensureLlamaServer(modelId) {
     '-m', gguf,
     '--host', '127.0.0.1',
     '--port', String(SERVER_PORT),
-    '-c', '2048',
+    '-c', String(GGUF_CTX),
     '--parallel', '1',
   ], { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
   serverChild = child;
   serverGguf = gguf;
+  serverCtx = GGUF_CTX;
   child.on('exit', () => {
     if (serverChild === child) {
       serverChild = null;
       serverGguf = null;
+      serverCtx = 0;
     }
   });
   const deadline = Date.now() + 45_000;
@@ -695,7 +700,7 @@ function runGgufCliStream(modelId, prompt, onChunk, timeoutMs = 120000, nPredict
       '-m', gguf,
       '-f', promptFile,
       '-n', String(nPredict),
-      '-c', '4096',
+      '-c', String(GGUF_CTX),
       '-t', String(Math.max(4, os.cpus().length)),
       '--temp', '0.55',
       '--no-conversation',

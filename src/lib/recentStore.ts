@@ -1,6 +1,12 @@
 /** Persisted Recent: projects + creation metadata (media bytes stay in Engine). */
 
-export type RecentProject = { id: string; name: string; kind?: 'project'; updatedAt?: string };
+export type RecentProject = {
+  id: string;
+  name: string;
+  kind?: 'project';
+  updatedAt?: string;
+  pinnedAt?: string;
+};
 
 export type RecentCreation = {
   id: string;
@@ -21,6 +27,9 @@ export type RecentChat = {
   mode: 'general' | 'image' | 'video' | 'code';
   title: string;
   updatedAt: string;
+  /** Last message snippet for the sidebar. */
+  preview?: string;
+  pinnedAt?: string;
   /** Optional link to media library item for image/video threads */
   creationId?: string;
   /** When set, chat left Recent and lives in History only */
@@ -40,6 +49,20 @@ export function rememberThumb(id: string, dataUrl?: string) {
 
 export function getMemoryThumb(id: string) {
   return memoryThumbs.get(id);
+}
+
+/** Pixels for vision APIs from ark-media ids already stored via rememberThumb. */
+export function extractVisionImages(content: string): { mime: string; data: string }[] {
+  const ids = [...String(content || '').matchAll(/!\[[^\]]*]\(ark-media:([^)]+)\)/g)]
+    .map(m => m[1].trim())
+    .filter(Boolean);
+  const out: { mime: string; data: string }[] = [];
+  for (const id of ids) {
+    const url = getMemoryThumb(id);
+    const m = url?.match(/^data:([^;]+);base64,(.+)$/);
+    if (m) out.push({ mime: m[1], data: m[2] });
+  }
+  return out;
 }
 
 export function loadRecentProjects(): RecentProject[] {
@@ -102,6 +125,7 @@ export function ensureRecentProject(id: string, name?: string): RecentProject[] 
     name: existing?.name || label,
     kind: 'project',
     updatedAt: new Date().toISOString(),
+    pinnedAt: existing?.pinnedAt,
   };
   const next = [nextEntry, ...list.filter(p => p.id !== id)].slice(0, 30);
   saveRecentProjects(next);
@@ -169,11 +193,50 @@ export function saveRecentChats(list: RecentChat[]) {
 }
 
 export function upsertRecentChat(entry: RecentChat) {
+  const prev = loadRecentChats().find(c => c.id === entry.id);
+  const merged: RecentChat = {
+    ...prev,
+    ...entry,
+    pinnedAt: entry.pinnedAt ?? prev?.pinnedAt,
+    preview: entry.preview ?? prev?.preview,
+  };
   const list = loadRecentChats().filter(c => c.id !== entry.id);
-  list.unshift(entry);
+  list.unshift(merged);
   saveRecentChats(list);
   window.dispatchEvent(new Event('ark:chats-changed'));
   return list;
+}
+
+export function togglePinnedChat(chatId: string): RecentChat[] {
+  const list = loadRecentChats().map(c =>
+    c.id === chatId
+      ? { ...c, pinnedAt: c.pinnedAt ? undefined : new Date().toISOString() }
+      : c,
+  );
+  saveRecentChats(list);
+  window.dispatchEvent(new Event('ark:chats-changed'));
+  return list;
+}
+
+export function togglePinnedProject(id: string): RecentProject[] {
+  const list = loadRecentProjects().map(p =>
+    p.id === id
+      ? { ...p, pinnedAt: p.pinnedAt ? undefined : new Date().toISOString() }
+      : p,
+  );
+  saveRecentProjects(list);
+  window.dispatchEvent(new Event('ark:projects-changed'));
+  return list;
+}
+
+export function comparePinnedThenRecent(
+  a: { pinnedAt?: string; updatedAt?: string },
+  b: { pinnedAt?: string; updatedAt?: string },
+) {
+  const ap = Boolean(a.pinnedAt);
+  const bp = Boolean(b.pinnedAt);
+  if (ap !== bp) return ap ? -1 : 1;
+  return (b.updatedAt || '').localeCompare(a.updatedAt || '');
 }
 
 /** Active Recent sidebar list (excludes archived). */
@@ -337,6 +400,13 @@ export function mediaMessageMarkdown(
   const safe = (alt || 'ARK generation').slice(0, 80).replace(/[\[\]]/g, '');
   const body = dataUrl ? `![${safe}](${dataUrl})` : `![${safe}](ark-media:${libraryId})`;
   const sourceLine = opts?.source ? `Source: ${opts.source}` : '';
+  if (opts?.source?.includes('motion-still')) {
+    return [
+      'Short motion clip · MP4 from a still (not generative video)',
+      sourceLine,
+      body,
+    ].filter(Boolean).join('\n\n');
+  }
   if (opts?.real === false) {
     const label = opts.kind === 'video'
       ? 'Video preview · not a finished MP4'

@@ -1,5 +1,5 @@
-import { classifyMobileTarget, mobileCodingRules } from '@/lib/mobileTarget';
-import { layoutLockEdits, mobileTemplateEdits, planMobileFiles } from '@/lib/mobileTemplates';
+import { classifyMobileTarget, looksLikeWebsiteBuild, mobileCodingRules } from '@/lib/mobileTarget';
+import { layoutLockEdits, planMobileFiles, simpleVisualPatchEdits } from '@/lib/mobileTemplates';
 import { isLayoutLockAsk } from '@/lib/mobileDevices';
 
 export type ProjectFileMap = Record<string, string>;
@@ -23,6 +23,7 @@ export type ApplyEditsResult = {
   addedLines: number;
   removedLines: number;
   summary: string;
+  fileDiffs: { path: string; added: number; removed: number }[];
 };
 
 const MAX_CONTEXT_CHARS = 14_000;
@@ -70,7 +71,11 @@ function codingInstructionsFor(userMessage: string, files: ProjectFileMap): stri
         : Object.keys(files).some(p => /\.kt$|androidmanifest/i.test(p))
           ? 'android'
           : null);
-  const extra = target ? `\n\n${mobileCodingRules(target)}` : '';
+  const extra = target
+    ? `\n\n${mobileCodingRules(target)}`
+    : looksLikeWebsiteBuild(userMessage)
+      ? `\n\nThis is a website for the browser, not a native phone app. Write index.html + css/styles.css + js/app.js. Do NOT write Swift, Xcode, Kotlin, or Android Studio files.`
+      : '';
   return `${CODING_INSTRUCTIONS}${extra}`;
 }
 
@@ -165,7 +170,11 @@ Rules: for web UIs write index.html + css/styles.css + js/app.js (not one giant 
 /** Shorter prompt for empty projects — faster on local GGUF. */
 export function buildProjectCodingPromptLite(userMessage: string, projectName?: string): string {
   const target = classifyMobileTarget(userMessage);
-  const extra = target ? `\n\n${mobileCodingRules(target)}` : '';
+  const extra = target
+    ? `\n\n${mobileCodingRules(target)}`
+    : looksLikeWebsiteBuild(userMessage)
+      ? `\n\nThis is a website for the browser. Write index.html + css/styles.css + js/app.js. Do not write Swift or Kotlin.`
+      : '';
   return `${LITE_CODING}${extra}
 
 Project: ${projectName || 'ARK project'}
@@ -385,647 +394,6 @@ export function buildFileTreeFromPaths(files: ProjectFileMap): ProjectFileNode[]
   return root;
 }
 
-const CALCULATOR_SCAFFOLD = `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Calculator</title>
-  <style>
-    * { box-sizing: border-box; }
-    body { font-family: system-ui, sans-serif; background: #0f172a; color: #e2e8f0; display: grid; place-items: center; min-height: 100vh; margin: 0; }
-    .calc { width: min(320px, 92vw); background: #1e293b; border-radius: 16px; padding: 16px; box-shadow: 0 12px 40px rgba(0,0,0,.35); }
-    #display { width: 100%; font-size: 1.75rem; text-align: right; padding: 12px; border: none; border-radius: 10px; margin-bottom: 12px; background: #0f172a; color: #f8fafc; }
-    .keys { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
-    button { font-size: 1.1rem; padding: 14px; border: none; border-radius: 10px; cursor: pointer; background: #334155; color: #f1f5f9; }
-    button.op { background: #0369a1; }
-    button.eq { background: #059669; grid-column: span 2; }
-    button.clear { background: #b91c1c; }
-  </style>
-</head>
-<body>
-  <div class="calc">
-    <input id="display" type="text" readonly value="0" />
-    <div class="keys">
-      <button class="clear" data-a="C">C</button>
-      <button class="op" data-a="/">÷</button>
-      <button class="op" data-a="*">×</button>
-      <button class="op" data-a="-">−</button>
-      <button data-a="7">7</button><button data-a="8">8</button><button data-a="9">9</button>
-      <button class="op" data-a="+">+</button>
-      <button data-a="4">4</button><button data-a="5">5</button><button data-a="6">6</button>
-      <button data-a="1">1</button><button data-a="2">2</button><button data-a="3">3</button>
-      <button data-a="0">0</button><button data-a=".">.</button>
-      <button class="eq" data-a="=">=</button>
-    </div>
-  </div>
-  <script>
-    const display = document.getElementById('display');
-    let current = '0', pending = null, op = null;
-    function render() { display.value = current; }
-    function inputDigit(d) { current = current === '0' && d !== '.' ? d : current + d; render(); }
-    function compute(a, b, op) {
-      const x = parseFloat(a), y = parseFloat(b);
-      if (op === '+') return String(x + y);
-      if (op === '-') return String(x - y);
-      if (op === '*') return String(x * y);
-      if (op === '/') return y === 0 ? 'Error' : String(x / y);
-      return b;
-    }
-    document.querySelector('.keys').addEventListener('click', (e) => {
-      const btn = e.target.closest('button'); if (!btn) return;
-      const a = btn.dataset.a;
-      if (a === 'C') { current = '0'; pending = null; op = null; render(); return; }
-      if ('0123456789.'.includes(a)) { inputDigit(a); return; }
-      if ('+-*/'.includes(a)) { pending = current; op = a; current = '0'; return; }
-      if (a === '=' && pending != null && op) { current = compute(pending, current, op); pending = op = null; render(); }
-    });
-  </script>
-</body>
-</html>`;
-
-const CLICK_COUNTER_SCAFFOLD = `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Click counter</title>
-  <style>
-    * { box-sizing: border-box; }
-    body { font-family: system-ui, sans-serif; background: #0f172a; color: #e2e8f0; display: grid; place-items: center; min-height: 100vh; margin: 0; }
-    .card { text-align: center; background: #1e293b; border-radius: 16px; padding: 32px 40px; box-shadow: 0 12px 40px rgba(0,0,0,.35); }
-    p { margin: 0 0 8px; color: #94a3b8; font-size: 0.95rem; }
-    #count { font-size: 3rem; font-weight: 700; margin: 8px 0 20px; color: #f8fafc; }
-    button { font-size: 1rem; padding: 12px 28px; border: none; border-radius: 999px; cursor: pointer; background: #6366f1; color: #fff; font-weight: 600; }
-    button:hover { background: #4f46e5; }
-  </style>
-</head>
-<body>
-  <div class="card">
-    <p>Clicks</p>
-    <div id="count">0</div>
-    <div style="display:flex;gap:10px;justify-content:center">
-      <button id="btn" type="button">Add</button>
-      <button id="reset" type="button" style="background:#334155">Reset</button>
-    </div>
-  </div>
-  <script>
-    let n = 0;
-    const count = document.getElementById('count');
-    document.getElementById('btn').addEventListener('click', () => {
-      n += 1;
-      count.textContent = String(n);
-    });
-    document.getElementById('reset').addEventListener('click', () => {
-      n = 0;
-      count.textContent = '0';
-    });
-  </script>
-</body>
-</html>`;
-
-const TODO_SCAFFOLD = `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>To-do list</title>
-  <style>
-    * { box-sizing: border-box; }
-    body { font-family: system-ui, sans-serif; background: #0f172a; color: #e2e8f0; margin: 0; min-height: 100vh; display: grid; place-items: start center; padding: 40px 16px; }
-    .card { width: min(420px, 100%); background: #1e293b; border-radius: 16px; padding: 22px; box-shadow: 0 12px 40px rgba(0,0,0,.35); }
-    h1 { margin: 0 0 16px; font-size: 1.25rem; }
-    form { display: flex; gap: 8px; margin-bottom: 14px; }
-    input { flex: 1; border: 0; border-radius: 10px; padding: 10px 12px; background: #0f172a; color: #f8fafc; }
-    button.add { border: 0; border-radius: 10px; padding: 10px 14px; background: #6366f1; color: #fff; font-weight: 600; cursor: pointer; }
-    ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
-    li { display: flex; align-items: center; gap: 10px; background: #0f172a; border-radius: 10px; padding: 10px 12px; }
-    li.done span { text-decoration: line-through; color: #64748b; }
-    li span { flex: 1; }
-    button.del { border: 0; background: transparent; color: #94a3b8; cursor: pointer; }
-  </style>
-</head>
-<body>
-  <div class="card">
-    <h1>To-do</h1>
-    <form id="form">
-      <input id="task" placeholder="Add a task" autocomplete="off" />
-      <button class="add" type="submit">Add</button>
-    </form>
-    <ul id="list"></ul>
-  </div>
-  <script>
-    const list = document.getElementById('list');
-    const form = document.getElementById('form');
-    const input = document.getElementById('task');
-    form.addEventListener('submit', (e) => {
-      e.preventDefault();
-      const text = input.value.trim();
-      if (!text) return;
-      const li = document.createElement('li');
-      li.innerHTML = '<input type="checkbox"><span></span><button class="del" type="button">Delete</button>';
-      li.querySelector('span').textContent = text;
-      li.querySelector('input').addEventListener('change', (ev) => li.classList.toggle('done', ev.target.checked));
-      li.querySelector('.del').addEventListener('click', () => li.remove());
-      list.appendChild(li);
-      input.value = '';
-      input.focus();
-    });
-  </script>
-</body>
-</html>`;
-
-export function buildDoneSummary(
-  label: string,
-  opts?: { continued?: boolean; stopped?: boolean; hadFiles?: boolean },
-): string {
-  if (opts?.stopped) {
-    return opts.hadFiles
-      ? `Stopped. I kept what was already in Explorer. Edit your prompt and send — I’ll continue from those files.`
-      : `Stopped. Edit your prompt and send when you’re ready.`;
-  }
-  if (opts?.continued) {
-    return `Updated **${label}** from your latest notes. Let me know if you want to change anything else.`;
-  }
-  return `I built **${label}**. It’s in Explorer — hit Start when you want to try it, or tell me what to change.`;
-}
-
-function escapeHtml(s: string) {
-  return String(s || '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
-
-function titleFromAsk(message: string) {
-  const called = String(message || '').match(/\bcalled\s+([A-Za-z0-9][A-Za-z0-9 '-]{1,40})/);
-  if (called?.[1]) return called[1].trim();
-  return inferBuildLabel(message);
-}
-
-function pomodoroHtml() {
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Pomodoro</title>
-  <style>
-    body { margin: 0; min-height: 100vh; display: grid; place-items: center; font-family: system-ui, sans-serif; background: #14080a; color: #ffe4e6; }
-    .card { text-align: center; background: #1f1014; border: 1px solid #7f1d1d; border-radius: 20px; padding: 36px 40px; box-shadow: 0 20px 50px rgba(0,0,0,.45); }
-    h1 { margin: 0 0 8px; font-size: 1.1rem; letter-spacing: .12em; text-transform: uppercase; color: #fb7185; }
-    #time { font-size: 4rem; font-weight: 700; margin: 12px 0 22px; }
-    .row { display: flex; gap: 10px; justify-content: center; }
-    button { border: 0; border-radius: 999px; padding: 10px 18px; font-weight: 600; cursor: pointer; background: #be123c; color: #fff; }
-    button.ghost { background: #3f1d24; color: #fecdd3; }
-  </style>
-</head>
-<body>
-  <div class="card">
-    <h1>Focus</h1>
-    <div id="time">25:00</div>
-    <div class="row">
-      <button id="start" type="button">Start</button>
-      <button id="pause" class="ghost" type="button">Pause</button>
-      <button id="reset" class="ghost" type="button">Reset</button>
-    </div>
-  </div>
-  <script>
-    let left = 25 * 60, tick = null;
-    const el = document.getElementById('time');
-    function render() {
-      const m = String(Math.floor(left / 60)).padStart(2, '0');
-      const s = String(left % 60).padStart(2, '0');
-      el.textContent = m + ':' + s;
-    }
-    document.getElementById('start').onclick = () => {
-      if (tick) return;
-      tick = setInterval(() => { if (left > 0) { left -= 1; render(); } else { clearInterval(tick); tick = null; } }, 1000);
-    };
-    document.getElementById('pause').onclick = () => { clearInterval(tick); tick = null; };
-    document.getElementById('reset').onclick = () => { clearInterval(tick); tick = null; left = 25 * 60; render(); };
-    render();
-  </script>
-</body>
-</html>`;
-}
-
-function quizHtml(message: string) {
-  const space = /\bspace\b|\bnasa\b|\bplanet\b/i.test(message);
-  const qs: Array<[string, string[], number]> = space
-    ? [
-      ['Which planet is known as the Red Planet?', ['Mars', 'Venus', 'Jupiter'], 0],
-      ['What is the hottest planet in our solar system?', ['Mercury', 'Venus', 'Mars'], 1],
-      ['How many planets are in our solar system?', ['7', '8', '9'], 1],
-      ['What does a light-year measure?', ['Time', 'Distance', 'Brightness'], 1],
-      ['Which is the largest planet?', ['Saturn', 'Neptune', 'Jupiter'], 2],
-    ]
-    : [
-      ['What does HTML stand for?', ['HyperText Markup Language', 'Home Tool Markup', 'Hyperlinks Text'], 0],
-      ['Which one is a JavaScript keyword?', ['const', 'document-only', 'stylesheet'], 0],
-      ['CSS is used for?', ['Structure', 'Styling', 'Databases'], 1],
-      ['2 + 2 equals?', ['3', '4', '22'], 1],
-      ['Which is a heading tag?', ['<p>', '<h1>', '<span>'], 1],
-    ];
-  const items = qs.map((q, i) => `
-    <section class="q" data-a="${q[2]}">
-      <p>${i + 1}. ${q[0]}</p>
-      ${q[1].map((c, ci) => `<label><input type="radio" name="q${i}" value="${ci}" /> ${c}</label>`).join('')}
-    </section>`).join('');
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Quiz</title>
-  <style>
-    body { margin: 0; font-family: system-ui, sans-serif; background: #050505; color: #f4f4f5; }
-    main { max-width: 640px; margin: 0 auto; padding: 32px 18px 48px; }
-    h1 { margin: 0 0 18px; }
-    .q { background: #18181b; border: 1px solid #27272a; border-radius: 14px; padding: 14px 16px; margin-bottom: 12px; display: grid; gap: 8px; }
-    label { display: flex; gap: 8px; align-items: center; color: #d4d4d8; }
-    button { border: 0; border-radius: 10px; padding: 12px 16px; background: #6366f1; color: #fff; font-weight: 600; cursor: pointer; }
-    #score { margin-top: 14px; font-size: 1.15rem; }
-  </style>
-</head>
-<body>
-  <main>
-    <h1>${space ? 'Space quiz' : 'Quiz'}</h1>
-    ${items}
-    <button id="go" type="button">See score</button>
-    <p id="score"></p>
-  </main>
-  <script>
-    document.getElementById('go').onclick = () => {
-      const blocks = [...document.querySelectorAll('.q')];
-      let n = 0;
-      blocks.forEach(b => {
-        const pick = b.querySelector('input:checked');
-        if (pick && pick.value === b.dataset.a) n += 1;
-      });
-      document.getElementById('score').textContent = 'Score: ' + n + ' / ' + blocks.length;
-    };
-  </script>
-</body>
-</html>`;
-}
-
-function landingHtml(message: string) {
-  const name = escapeHtml(titleFromAsk(message) || 'Nightshift');
-  const coffee = /\bcoffee\b|\bcafe\b|\bshop\b/i.test(message);
-  const drinks = coffee
-    ? ['Nightshift Drip', 'Oat latte', 'Espresso', 'Mocha', 'Cold brew', 'House chai']
-    : ['Signature one', 'House favorite', 'Seasonal', 'Classic', 'Sparkling', 'Dessert'];
-  const hours = coffee ? 'Mon–Thu 7am–8pm · Fri–Sat 7am–11pm · Sun 8am–4pm' : 'Open daily 9am–9pm';
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>${name}</title>
-  <style>
-    :root { color-scheme: dark; }
-    body { margin: 0; font-family: Georgia, 'Times New Roman', serif; background: #0c0a09; color: #f5f0e8; }
-    header { min-height: 70vh; display: grid; place-items: center; text-align: center; padding: 48px 20px; background:
-      radial-gradient(900px 420px at 50% -10%, #3f2a1c, transparent), #0c0a09; }
-    h1 { font-size: clamp(2.4rem, 6vw, 4.2rem); margin: 0 0 10px; letter-spacing: .04em; }
-    .sub { color: #d6c7b5; font-size: 1.1rem; }
-    section { max-width: 820px; margin: 0 auto; padding: 28px 20px 8px; }
-    h2 { font-size: 1.1rem; letter-spacing: .14em; text-transform: uppercase; color: #e7b989; }
-    .hours { background: #1c1410; border: 1px solid #3f2e22; border-radius: 14px; padding: 16px 18px; }
-    .menu { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
-    .item { background: #17110e; border: 1px solid #3f2e22; border-radius: 12px; padding: 14px; }
-  </style>
-</head>
-<body>
-  <header>
-    <div>
-      <h1>${name}</h1>
-      <p class="sub">${coffee ? 'Coffee after dark.' : 'A dark landing page, built for this brief.'}</p>
-    </div>
-  </header>
-  <section>
-    <h2>Hours</h2>
-    <p class="hours">${hours}</p>
-  </section>
-  <section>
-    <h2>${coffee ? 'Menu' : 'Highlights'}</h2>
-    <div class="menu">${drinks.map(d => `<div class="item">${d}</div>`).join('')}</div>
-  </section>
-</body>
-</html>`;
-}
-
-function themedPageHtml(message: string) {
-  const title = escapeHtml(titleFromAsk(message));
-  const blurb = escapeHtml(String(message || '').replace(/\s+/g, ' ').slice(0, 180));
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>${title}</title>
-  <style>
-    body { margin: 0; min-height: 100vh; font-family: system-ui, sans-serif; background: #0b1220; color: #e8eefc; display: grid; place-items: center; padding: 24px; }
-    main { max-width: 560px; width: 100%; background: #121a2b; border: 1px solid #243047; border-radius: 18px; padding: 28px; }
-    h1 { margin: 0 0 10px; }
-    p { margin: 0; color: #9fb0cc; line-height: 1.55; }
-  </style>
-</head>
-<body>
-  <main>
-    <h1>${title}</h1>
-    <p>${blurb}</p>
-  </main>
-</body>
-</html>`;
-}
-
-function recipeHtml(message: string) {
-  const ramen = /\bramen\b/i.test(message);
-  const title = ramen ? 'Spicy ramen' : escapeHtml(titleFromAsk(message) || 'Recipe');
-  const ingredients = ramen
-    ? ['Noodles', 'Chili oil', 'Garlic', 'Soft egg', 'Green onion', 'Broth']
-    : ['Main ingredient', 'Aromatics', 'Salt', 'Oil', 'Garnish', 'Side'];
-  const steps = ramen
-    ? ['Boil noodles until springy.', 'Warm chili oil and garlic.', 'Pour broth, add noodles and egg.', 'Finish with green onion.']
-    : ['Prep ingredients.', 'Cook the base.', 'Season to taste.', 'Plate and serve.'];
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>${title}</title>
-  <style>
-    body { margin: 0; font-family: system-ui, sans-serif; background: #1c100c; color: #fde8d0; }
-    main { max-width: 560px; margin: 0 auto; padding: 28px 18px 48px; }
-    h1 { margin: 0 0 6px; }
-    .sub { color: #e7b989; margin: 0 0 18px; }
-    .card { background: #2a1812; border: 1px solid #5c331f; border-radius: 16px; padding: 16px; margin-bottom: 12px; }
-    ul, ol { margin: 8px 0 0; padding-left: 18px; line-height: 1.6; }
-    #time { font-size: 2.2rem; font-weight: 700; margin: 8px 0; }
-    button { border: 0; border-radius: 999px; padding: 8px 14px; margin-right: 8px; background: #c2410c; color: #fff; font-weight: 600; cursor: pointer; }
-  </style>
-</head>
-<body>
-  <main>
-    <h1>${title}</h1>
-    <p class="sub">20-minute cook timer</p>
-    <div class="card">
-      <div id="time">20:00</div>
-      <button id="start" type="button">Start</button>
-      <button id="reset" type="button">Reset</button>
-    </div>
-    <div class="card"><strong>Ingredients</strong><ul>${ingredients.map(i => `<li>${i}</li>`).join('')}</ul></div>
-    <div class="card"><strong>Steps</strong><ol>${steps.map(s => `<li>${s}</li>`).join('')}</ol></div>
-  </main>
-  <script>
-    let left = 20 * 60, tick = null;
-    const el = document.getElementById('time');
-    function render() {
-      el.textContent = String(Math.floor(left / 60)).padStart(2,'0') + ':' + String(left % 60).padStart(2,'0');
-    }
-    document.getElementById('start').onclick = () => {
-      if (tick) return;
-      tick = setInterval(() => { if (left > 0) { left--; render(); } else { clearInterval(tick); tick = null; } }, 1000);
-    };
-    document.getElementById('reset').onclick = () => { clearInterval(tick); tick = null; left = 20 * 60; render(); };
-    render();
-  </script>
-</body>
-</html>`;
-}
-
-function habitHtml() {
-  const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Habit tracker</title>
-  <style>
-    body { margin: 0; font-family: system-ui, sans-serif; background: #052e16; color: #dcfce7; }
-    main { max-width: 720px; margin: 0 auto; padding: 28px 16px; }
-    h1 { margin: 0 0 16px; }
-    .grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; }
-    .cell { background: #14532d; border: 1px solid #166534; border-radius: 12px; min-height: 88px; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; }
-    .cell.on { background: #22c55e; color: #052e16; font-weight: 700; }
-  </style>
-</head>
-<body>
-  <main>
-    <h1>This week</h1>
-    <div class="grid" id="grid">
-      ${days.map(d => `<button class="cell" type="button" data-d="${d}"><span>${d}</span><span class="mark">○</span></button>`).join('')}
-    </div>
-  </main>
-  <script>
-    document.getElementById('grid').onclick = (e) => {
-      const cell = e.target.closest('.cell'); if (!cell) return;
-      cell.classList.toggle('on');
-      cell.querySelector('.mark').textContent = cell.classList.contains('on') ? '✓' : '○';
-    };
-  </script>
-</body>
-</html>`;
-}
-
-function pixelPetHtml() {
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Pixel pet</title>
-  <style>
-    body { margin: 0; min-height: 100vh; display: grid; place-items: center; font-family: ui-monospace, monospace; background: #0b1020; color: #e2e8f0; }
-    .card { width: min(340px, 92vw); background: #111827; border: 3px solid #22d3ee; border-radius: 8px; padding: 18px; text-align: center; }
-    #pet { font-size: 4rem; margin: 8px 0; image-rendering: pixelated; }
-    .bar { height: 16px; background: #1f2937; border: 2px solid #334155; }
-    .fill { height: 100%; width: 70%; background: #22c55e; }
-    button { margin: 8px 4px 0; border: 2px solid #22d3ee; background: #0f172a; color: #67e8f9; padding: 8px 12px; cursor: pointer; font-weight: 700; }
-  </style>
-</head>
-<body>
-  <div class="card">
-    <div id="pet">🐱</div>
-    <p>Hunger</p>
-    <div class="bar"><div class="fill" id="fill"></div></div>
-    <button id="feed" type="button">Feed</button>
-    <button id="play" type="button">Play</button>
-  </div>
-  <script>
-    let hunger = 70;
-    const fill = document.getElementById('fill');
-    const pet = document.getElementById('pet');
-    function draw() { fill.style.width = hunger + '%'; fill.style.background = hunger < 30 ? '#ef4444' : '#22c55e'; }
-    document.getElementById('feed').onclick = () => { hunger = Math.min(100, hunger + 18); pet.textContent = '😺'; draw(); };
-    document.getElementById('play').onclick = () => { hunger = Math.max(0, hunger - 12); pet.textContent = '🙀'; draw(); };
-    setInterval(() => { hunger = Math.max(0, hunger - 1); draw(); }, 2000);
-    draw();
-  </script>
-</body>
-</html>`;
-}
-
-function expenseHtml() {
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Expense splitter</title>
-  <style>
-    body { margin: 0; font-family: system-ui, sans-serif; background: #020617; color: #e2e8f0; }
-    main { max-width: 520px; margin: 0 auto; padding: 24px 16px 48px; }
-    h1 { margin: 0 0 14px; }
-    form, .row { display: flex; gap: 8px; margin-bottom: 10px; }
-    input { flex: 1; border: 0; border-radius: 10px; padding: 10px; background: #0f172a; color: #f8fafc; }
-    button { border: 0; border-radius: 10px; padding: 10px 12px; background: #2563eb; color: #fff; font-weight: 600; cursor: pointer; }
-    .card { background: #0f172a; border: 1px solid #1e293b; border-radius: 12px; padding: 12px; margin-top: 12px; }
-    li { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #1e293b; }
-  </style>
-</head>
-<body>
-  <main>
-    <h1>Split a bill</h1>
-    <form id="person"><input id="pname" placeholder="Add a person" /><button type="submit">Add</button></form>
-    <form id="bill"><input id="bname" placeholder="Bill name" /><input id="bamt" type="number" min="0" step="0.01" placeholder="Amount" /><button type="submit">Add bill</button></form>
-    <div class="card"><strong>People</strong><ul id="people"></ul></div>
-    <div class="card"><strong>Who owes</strong><ul id="owes"></ul></div>
-  </main>
-  <script>
-    const people = [];
-    const bills = [];
-    function render() {
-      document.getElementById('people').innerHTML = people.map(p => '<li>' + p + '</li>').join('') || '<li>Add someone</li>';
-      const n = people.length || 1;
-      const total = bills.reduce((s, b) => s + b.amt, 0);
-      const share = total / n;
-      document.getElementById('owes').innerHTML = people.map(p => '<li><span>' + p + '</span><span>$' + share.toFixed(2) + '</span></li>').join('') || '<li>No bills yet</li>';
-    }
-    document.getElementById('person').onsubmit = (e) => {
-      e.preventDefault();
-      const v = document.getElementById('pname').value.trim();
-      if (!v) return;
-      people.push(v); document.getElementById('pname').value = ''; render();
-    };
-    document.getElementById('bill').onsubmit = (e) => {
-      e.preventDefault();
-      const amt = parseFloat(document.getElementById('bamt').value);
-      if (!amt) return;
-      bills.push({ name: document.getElementById('bname').value || 'Bill', amt });
-      document.getElementById('bname').value = ''; document.getElementById('bamt').value = ''; render();
-    };
-    render();
-  </script>
-</body>
-</html>`;
-}
-
-function musicHtml() {
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Music player</title>
-  <style>
-    body { margin: 0; min-height: 100vh; display: grid; place-items: center; font-family: system-ui, sans-serif; background: #0a0a0a; color: #fafafa; }
-    .card { width: min(380px, 92vw); background: #171717; border-radius: 18px; padding: 20px; }
-    h1 { font-size: 1.1rem; margin: 0 0 12px; }
-    .song { padding: 8px 10px; border-radius: 8px; cursor: pointer; }
-    .song.on { background: #262626; color: #a3e635; }
-    .bar { height: 8px; background: #262626; border-radius: 99px; overflow: hidden; margin: 14px 0; }
-    .fill { height: 100%; width: 20%; background: #a3e635; }
-    button { border: 0; border-radius: 999px; padding: 10px 18px; background: #a3e635; color: #052e16; font-weight: 700; cursor: pointer; }
-  </style>
-</head>
-<body>
-  <div class="card">
-    <h1>Playlist</h1>
-    <div id="list"></div>
-    <div class="bar"><div class="fill" id="fill"></div></div>
-    <button id="toggle" type="button">Play</button>
-  </div>
-  <script>
-    const songs = ['Night Drive', 'Glass Harbor', 'Low Battery', 'After Hours', 'Static Bloom'];
-    let i = 0, playing = false, p = 20;
-    const list = document.getElementById('list');
-    function draw() {
-      list.innerHTML = songs.map((s, n) => '<div class="song' + (n===i?' on':'') + '" data-i="'+n+'">'+(n+1)+'. '+s+'</div>').join('');
-      document.getElementById('fill').style.width = p + '%';
-      document.getElementById('toggle').textContent = playing ? 'Pause' : 'Play';
-    }
-    list.onclick = (e) => { const el = e.target.closest('.song'); if (!el) return; i = +el.dataset.i; p = 8; draw(); };
-    document.getElementById('toggle').onclick = () => { playing = !playing; draw(); };
-    setInterval(() => { if (playing) { p = Math.min(100, p + 2); draw(); } }, 400);
-    draw();
-  </script>
-</body>
-</html>`;
-}
-
-function portfolioHtml(message: string) {
-  const name = escapeHtml((message.match(/\bnamed\s+([A-Za-z][A-Za-z '-]{1,40})/)?.[1] || 'Vale').trim());
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>${name} — Portfolio</title>
-  <style>
-    body { margin: 0; font-family: system-ui, sans-serif; background: #09090b; color: #f4f4f5; }
-    header { padding: 64px 20px 28px; text-align: center; }
-    h1 { margin: 0 0 8px; font-size: 2.4rem; }
-    .grid { max-width: 860px; margin: 0 auto; padding: 0 16px 32px; display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
-    .tile { height: 120px; border-radius: 12px; background: linear-gradient(135deg, #27272a, #3f3f46); }
-    form { max-width: 420px; margin: 0 auto 48px; display: grid; gap: 8px; }
-    input, textarea { border: 0; border-radius: 10px; padding: 10px; background: #18181b; color: #fafafa; }
-    button { border: 0; border-radius: 10px; padding: 10px; background: #fafafa; color: #09090b; font-weight: 700; cursor: pointer; }
-  </style>
-</head>
-<body>
-  <header>
-    <h1>${name}</h1>
-    <p>Photographer · available for work</p>
-  </header>
-  <div class="grid">${Array.from({ length: 6 }, (_, i) => `<div class="tile" style="opacity:${0.55 + i * 0.07}"></div>`).join('')}</div>
-  <form onsubmit="event.preventDefault(); alert('Sent');">
-    <input placeholder="Your name" required />
-    <input type="email" placeholder="Email" required />
-    <textarea rows="3" placeholder="A note"></textarea>
-    <button type="submit">Contact</button>
-  </form>
-</body>
-</html>`;
-}
-
-/** Full working HTML for a build prompt — unique to the ask, never an empty stub. */
-export function htmlForBuildPrompt(userMessage: string): string {
-  const ask = String(userMessage || '').toLowerCase();
-  if (/\btodo\b|\bto-do\b|\bto do\b/.test(ask)) return TODO_SCAFFOLD;
-  if (/\bcalculator\b/.test(ask)) return CALCULATOR_SCAFFOLD;
-  if ((/\bcount(er|s)?\b/.test(ask) && /\bclick(s|ing)?\b/.test(ask)) || /\bclick counter\b/.test(ask)) {
-    return CLICK_COUNTER_SCAFFOLD;
-  }
-  if (/\brecipe\b|\bramen\b/.test(ask)) return recipeHtml(userMessage);
-  if (/\bhabit\b/.test(ask)) return habitHtml();
-  if (/\bpet\b/.test(ask)) return pixelPetHtml();
-  if (/\bexpense\b|\bsplitter\b|\bowes\b/.test(ask)) return expenseHtml();
-  if (/\bplaylist\b|\bmusic player\b/.test(ask)) return musicHtml();
-  if (/\bportfolio\b/.test(ask)) return portfolioHtml(userMessage);
-  if (/\bpomodoro\b/.test(ask) || (/\btimer\b/.test(ask) && /\b25\b/.test(ask) && !/\brecipe\b/.test(ask))) {
-    return pomodoroHtml();
-  }
-  if (/\bquiz\b/.test(ask)) return quizHtml(userMessage);
-  if (/\blanding page\b|\bcoffee\b|\bcafe\b/.test(ask) || (/\bmenu\b/.test(ask) && /\bhours\b/.test(ask) && !/\brecipe\b/.test(ask))) {
-    return landingHtml(userMessage);
-  }
-  return themedPageHtml(userMessage);
-}
 
 function splitWebScaffold(html: string): { html: string; css: string; js: string } {
   let css = '';
@@ -1066,6 +434,35 @@ export function editsFromWorkingHtml(html: string, planned: string[]): ParsedFil
   if (cssPath) edits.push({ path: cssPath, content: split.css || '/* styles */\n' });
   if (jsPath) edits.push({ path: jsPath, content: split.js || '// app\n' });
   return edits;
+}
+
+export function buildDoneSummary(
+  label: string,
+  opts?: { continued?: boolean; stopped?: boolean; hadFiles?: boolean },
+): string {
+  if (opts?.stopped) {
+    return opts.hadFiles
+      ? `Stopped. I kept what was already in Explorer. Edit your prompt and send — I’ll continue from those files.`
+      : `Stopped. Edit your prompt and send when you’re ready.`;
+  }
+  if (opts?.continued) {
+    return `Updated **${label}** from your latest notes. Let me know if you want to change anything else.`;
+  }
+  return `I built **${label}**. It’s in Explorer — hit Start when you want to try it, or tell me what to change.`;
+}
+
+function escapeHtml(s: string) {
+  return String(s || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function titleFromAsk(message: string) {
+  const called = String(message || '').match(/\bcalled\s+([A-Za-z0-9][A-Za-z0-9 '-]{1,40})/);
+  if (called?.[1]) return called[1].trim();
+  return inferBuildLabel(message);
 }
 
 function pythonFallback(userMessage: string): string {
@@ -1147,17 +544,9 @@ export function scaffoldFallbackEdits(userMessage: string, files?: ProjectFileMa
   if (mobile && files && nativeTree) {
     const locked = layoutLockEdits(files, userMessage, mobile);
     if (locked.length) return locked;
-    return [];
+    return simpleVisualPatchEdits(files, userMessage);
   }
-  if (mobile) return mobileTemplateEdits(mobile, userMessage, inferBuildLabel(userMessage), files);
-  const planned = planFilesForBuild(userMessage);
-  if (planned.length === 1 && planned[0].endsWith('.py')) {
-    return [{ path: 'main.py', content: pythonFallback(userMessage) }];
-  }
-  if (planned.some(p => p.endsWith('.tsx'))) {
-    return reactFallback(userMessage);
-  }
-  return editsFromWorkingHtml(htmlForBuildPrompt(userMessage), planned);
+  return [];
 }
 
 /** Inline linked CSS/JS so the Start tab works from local files. */
@@ -1214,13 +603,104 @@ export function extractStreamingHtml(partial: string): string | null {
   return null;
 }
 
-/** Strip file blocks from reply so the chat bubble stays readable. */
+export function fileContentLooksComplete(path: string, content: string): boolean {
+  const body = String(content || '').trim();
+  if (body.length < 24) return false;
+  if (/\.html?$/i.test(path)) {
+    return /<\/html>/i.test(body);
+  }
+  if (/\.swift$/i.test(path)) {
+    return /struct\s+\w+|class\s+\w+|func\s+\w+/.test(body) && body.length > 80;
+  }
+  if (/\.(kt|kts)$/i.test(path)) {
+    return /\b(fun|class|@Composable)\b/.test(body) && body.length > 80;
+  }
+  if (/\.css$/i.test(path)) {
+    return /\{/.test(body) && /\}/.test(body);
+  }
+  if (/\.(js|ts|tsx|jsx)$/i.test(path)) {
+    return body.length > 40 && !/(function|=>)\s*\{\s*$/.test(body);
+  }
+  return body.length > 40;
+}
+
+function lastFileBlockClosed(reply: string): boolean {
+  const text = reply || '';
+  const lastAt = text.lastIndexOf('@@@FILE');
+  if (lastAt < 0) {
+    const html = extractStreamingHtml(text);
+    if (html && /<html[\s>]/i.test(html)) return /<\/html>/i.test(html);
+    return true;
+  }
+  const tail = text.slice(lastAt);
+  const ticks = tail.match(/```/g) || [];
+  if (ticks.length >= 2) return true;
+  const path = tail.match(/^@@@FILE\s+([^\n\r]+)/)?.[1] || '';
+  const body = tail.replace(/^@@@FILE\s+[^\n\r]+\s*/, '').replace(/^```[\w.+-]*\s*\n?/, '');
+  return fileContentLooksComplete(normalizePath(path), body);
+}
+
+export function replyHasUnclosedFileBlock(reply: string): boolean {
+  return !lastFileBlockClosed(reply);
+}
+
+/** Final commit only — closed fences / finished HTML. Streaming preview may still show a draft. */
+export function parseClosedFileEdits(reply: string): ParsedFileEdit[] {
+  const all = parseFileEdits(reply);
+  const lastAt = (reply || '').lastIndexOf('@@@FILE');
+  const lastPath = lastAt >= 0
+    ? normalizePath((reply || '').slice(lastAt).match(/^@@@FILE\s+([^\n\r]+)/)?.[1] || '')
+    : '';
+  const dropLast = replyHasUnclosedFileBlock(reply) && lastPath;
+  return all.filter(e => {
+    if (dropLast && e.path === lastPath) return false;
+    return fileContentLooksComplete(e.path, e.content);
+  });
+}
+
+export function codingPromptWantsFiles(userMessage: string): boolean {
+  const t = String(userMessage || '');
+  if (/Do NOT write @@@FILE/i.test(t)) return false;
+  return /@@@FILE\s+path/i.test(t);
+}
+
+/** Local/cloud coding reply that asked for files but never closed them. */
+export function codingOutputIncomplete(reply: string, userMessage: string): boolean {
+  const text = String(reply || '');
+  if (replyHasUnclosedFileBlock(text)) return true;
+  if (!codingPromptWantsFiles(userMessage)) return false;
+  if (parseClosedFileEdits(text).length > 0) return false;
+  const html = extractStreamingHtml(text);
+  if (html && fileContentLooksComplete('index.html', html)) return false;
+  return true;
+}
+
+/** Strip file protocol from the chat bubble. Keeps English; drops closed and unclosed @@@FILE / HTML dumps. */
 export function stripFileBlocks(reply: string): string {
-  let text = reply || '';
+  let text = String(reply || '');
+
+  // Closed @@@FILE + fenced body
   text = text.replace(/@@@FILE\s+[^\n\r]+\s*```[\w.+-]*\s*\n[\s\S]*?```/gi, '');
-  text = text.replace(/@@@FILE\s+[^\n\r]+\n[\s\S]*?(?=\n@@@FILE\s+|$)/gi, '');
+  // Unclosed @@@FILE (no closing fence) through the next file or end of message
+  text = text.replace(/@@@FILE\b[\s\S]*?(?=\n@@@FILE\b|$)/gi, '');
+  text = text.replace(/^[ \t]*@@@FILE[^\n]*$/gim, '');
+
+  // Closed markdown fences that name a path
   text = text.replace(/```(?:[\w.+-]*)?(?:\s+|:)[A-Za-z0-9_./@+-]+\.[A-Za-z0-9]+\s*\n[\s\S]*?```/g, '');
   text = text.replace(/```[\w.+-]*\s+(?:file|path)=["'][^"']+["']\s*\n[\s\S]*?```/gi, '');
+
+  // Unclosed fence at the end of the bubble (truncated HTML/Swift/JS)
+  text = text.replace(/```[\w.+-]*[^\n]*\n[\s\S]*$/g, (block) => (
+    /```[\s\S]*```/.test(block.trim()) ? block : ''
+  ));
+
+  // Raw page dump if the model skipped @@@FILE
+  text = text.replace(/<!DOCTYPE html[\s\S]*$/i, '');
+  text = text.replace(/<html[\s>][\s\S]*$/i, '');
+
+  // Huge leftover fences (inspect / accidental dumps)
+  text = text.replace(/```[\s\S]*?```/g, block => (block.length > 400 ? '' : block));
+
   return text.replace(/\n{3,}/g, '\n\n').trim();
 }
 
@@ -1276,6 +756,7 @@ export function applyFileEdits(
   let addedLines = 0;
   let removedLines = 0;
   const changedPaths: string[] = [];
+  const fileDiffs: { path: string; added: number; removed: number }[] = [];
 
   for (const edit of edits) {
     const path = normalizePath(edit.path);
@@ -1286,8 +767,11 @@ export function applyFileEdits(
       ?? '';
     const next = edit.content;
 
-    addedLines += Math.max(0, countLines(next) - countLines(prev));
-    removedLines += Math.max(0, countLines(prev) - countLines(next));
+    const added = Math.max(0, countLines(next) - countLines(prev));
+    const removed = Math.max(0, countLines(prev) - countLines(next));
+    addedLines += added;
+    removedLines += removed;
+    fileDiffs.push({ path, added, removed });
 
     files[path] = next;
     if (!path.includes('/')) files[base] = next;
@@ -1305,6 +789,7 @@ export function applyFileEdits(
     changedPaths,
     addedLines,
     removedLines,
+    fileDiffs,
     summary,
   };
 }

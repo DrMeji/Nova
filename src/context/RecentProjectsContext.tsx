@@ -14,6 +14,8 @@ import {
   saveRecentProjects,
   upsertCreation,
   upsertRecentChat,
+  togglePinnedChat,
+  togglePinnedProject,
   type RecentChat,
   type RecentCreation,
   type RecentProject,
@@ -34,6 +36,8 @@ interface RecentProjectsContextValue {
   touchRecentProject: (id: string, name?: string) => void;
   addCreation: (entry: RecentCreation) => void;
   addChat: (entry: RecentChat) => void;
+  pinChat: (chatId: string) => void;
+  pinProject: (id: string) => void;
   archiveChat: (chatId: string) => void;
   deleteChatForever: (chatId: string) => void;
   deleteCreationForever: (creationId: string) => void;
@@ -166,6 +170,14 @@ export function RecentProjectsProvider({ children }: { children: ReactNode }) {
     setChats(loadRecentChats());
   }, []);
 
+  const pinChat = useCallback((chatId: string) => {
+    setChats(togglePinnedChat(chatId));
+  }, []);
+
+  const pinProject = useCallback((id: string) => {
+    setRecent(togglePinnedProject(id));
+  }, []);
+
   const archiveChat = useCallback((chatId: string) => {
     archiveRecentChat(chatId);
     setChats(loadRecentChats());
@@ -197,6 +209,8 @@ export function RecentProjectsProvider({ children }: { children: ReactNode }) {
         touchRecentProject,
         addCreation,
         addChat,
+        pinChat,
+        pinProject,
         archiveChat,
         deleteChatForever,
         deleteCreationForever,

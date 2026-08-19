@@ -756,7 +756,7 @@ function previewHtml(name: string, idea: string, device: PhoneDevice): string {
 </head>
 <body>
   <div class="wrap">
-    <div class="kicker">${htmlEscape(device.label)}</div>
+    <div class="kicker">${htmlEscape(deviceLine(device))}</div>
     <h1>${htmlEscape(name)}</h1>
     <p>${htmlEscape(idea)}</p>
     <button class="cta" type="button">Continue</button>
@@ -787,7 +787,7 @@ function calculatorPreviewHtml(name: string, device: PhoneDevice): string {
 </head>
 <body>
   <div class="shell">
-    <div class="kicker">${htmlEscape(device.label)}</div>
+    <div class="kicker">${htmlEscape(deviceLine(device))}</div>
     <div class="screen" id="out">0</div>
     <div class="grid">
       ${['C','÷','×','-','7','8','9','+','4','5','6','=','1','2','3','0'].map(key => {
@@ -895,10 +895,19 @@ enum Devices {
       });
     }
     const previewName = iosDir.split('/')[1] || 'App';
-    out.push({
-      path: 'ark-preview.html',
-      content: previewHtml(previewName, ideaFromMessage(message, previewName), d),
-    });
+    const existingPreview = files['ark-preview.html'];
+    if (existingPreview) {
+      const kicker = htmlEscape(deviceLine(d));
+      const next = existingPreview
+        .replace(/<div class="kicker">[^<]*<\/div>/, `<div class="kicker">${kicker}</div>`)
+        .replace(/IPHONE\s*1[0-9](?:\s+PRO\s+MAX)?[^<]*/i, kicker);
+      out.push({ path: 'ark-preview.html', content: next });
+    } else {
+      out.push({
+        path: 'ark-preview.html',
+        content: previewHtml(previewName, ideaFromMessage(message, previewName), d),
+      });
+    }
   }
   const activity = androidMainActivity(files);
   if (devices.android && activity && files[activity]) {
@@ -1022,8 +1031,10 @@ export function simpleVisualPatchEdits(files: Record<string, string>, message: s
     const color = swiftColor(colorWord);
     if (color) {
       let view = files[viewPath];
-      if (/\.background\([^)]*\)/.test(view)) {
-        view = view.replace(/\.background\([^)]*\)/, `.background(${color})`);
+      if (/\.background\(Color\.(black|white|clear)\)/.test(view)) {
+        view = view.replace(/\.background\(Color\.(black|white|clear)\)/, `.background(${color})`);
+      } else if (/\.background\(Color\(red:[^)]*\)\)/.test(view)) {
+        view = view.replace(/\.background\(Color\(red:[^)]*\)\)/, `.background(${color})`);
       } else {
         view = view.replace(
           /(\.frame\(maxWidth: \.infinity, maxHeight: \.infinity\))/,
@@ -1036,7 +1047,8 @@ export function simpleVisualPatchEdits(files: Record<string, string>, message: s
     if (htmlColor && files['ark-preview.html']) {
       out.push({
         path: 'ark-preview.html',
-        content: files['ark-preview.html'].replace(/background:#[0-9a-fA-F]{3,8}/g, `background:${htmlColor}`),
+        content: files['ark-preview.html']
+          .replace(/background(?:-color)?:\s*#[0-9a-fA-F]{3,8}/gi, `background:${htmlColor}`),
       });
     }
     if (htmlColor && files['index.html']) {
@@ -1093,10 +1105,6 @@ export function finalizeMobileEdits(
     if (edits.length && hasNative(edits)) return remapNativeEdits(edits, files);
     if (visual.length) return visual;
     return edits;
-  }
-  if (!target) return edits;
-  if (!hasNative(edits) || isWebOnly(edits)) {
-    return mobileTemplateEdits(target, message, undefined, files);
   }
   return edits;
 }

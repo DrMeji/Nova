@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  Plus, FilePlus2, ListTree, MessageCircleQuestion, Bug, Layers2, FolderOpen,
+  Plus, FilePlus2, ListTree, MessageCircleQuestion, Bug, Layers2, FolderOpen, ImagePlus,
 } from 'lucide-react';
 
 export type ComposerPlusAction =
@@ -27,13 +27,16 @@ const ITEMS: {
   hint: string;
   icon: typeof ListTree;
 }[] = [
-  { id: 'plan', label: 'Plan', hint: 'Outline steps before building', icon: ListTree },
-  { id: 'ask', label: 'Ask', hint: 'Answer a question', icon: MessageCircleQuestion },
-  { id: 'debug', label: 'Debug', hint: 'Find and fix a problem', icon: Bug },
-  { id: 'multitask', label: 'Multitask', hint: 'Split into parallel tasks', icon: Layers2 },
+  { id: 'plan', label: 'Plan', hint: 'Prefix: step-by-step plan before building', icon: ListTree },
+  { id: 'ask', label: 'Ask', hint: 'Prefix: direct Q&A, no code changes', icon: MessageCircleQuestion },
+  { id: 'debug', label: 'Debug', hint: 'Prefix: find and fix the problem', icon: Bug },
+  { id: 'multitask', label: 'Tasks', hint: 'Prefix: split work into a numbered list', icon: Layers2 },
   { id: 'file', label: 'Add file', hint: 'Attach a file to inspect in chat', icon: FilePlus2 },
-  { id: 'folder', label: 'Open folder', hint: 'Inspect a project, then continue in Code', icon: FolderOpen },
+  { id: 'image', label: 'Add photo', hint: 'Attach an image for vision models', icon: ImagePlus },
+  { id: 'folder', label: 'Open folder', hint: 'Inspect a folder, then continue in Code', icon: FolderOpen },
 ];
+
+const MODE_IDS = new Set<ComposerPlusAction>(['plan', 'ask', 'debug', 'multitask']);
 
 export function ComposerPlusMenu({
   onAction,
@@ -98,10 +101,28 @@ export function ComposerPlusMenu({
         }}
       >
         <p className="px-2.5 pt-2 pb-1 text-[10px] text-content-tertiary">
-          Add mode or file…
+          Message modes add a prefix to your next send
         </p>
         <div className="pb-1">
-          {ITEMS.map(m => (
+          {ITEMS.filter(m => MODE_IDS.has(m.id)).map(m => (
+            <button
+              key={m.id}
+              type="button"
+              onClick={() => pick(m.id)}
+              className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left hover:bg-surface-hover transition-colors"
+            >
+              <m.icon className="w-3.5 h-3.5 text-content-tertiary shrink-0" strokeWidth={1.75} />
+              <span className="min-w-0 flex-1">
+                <span className="block text-[13px] text-content-primary leading-tight">{m.label}</span>
+                <span className="block text-[10px] text-content-tertiary truncate leading-tight">{m.hint}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+        <div className="mx-2.5 border-t border-surface-border" />
+        <p className="px-2.5 pt-2 pb-1 text-[10px] text-content-tertiary">Attach or open</p>
+        <div className="pb-1">
+          {ITEMS.filter(m => !MODE_IDS.has(m.id)).map(m => (
             <button
               key={m.id}
               type="button"

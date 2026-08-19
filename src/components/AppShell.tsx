@@ -1,17 +1,21 @@
 ﻿import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useRouter, type Route } from '@/context/RouterContext';
 import {
-  SquarePen, Briefcase, Blocks, Database, Bot,
+  SquarePen, Briefcase, Blocks, Database,
   Settings, Search, PanelLeft, ChevronDown, History, Clock3,
   ImageIcon, Video, MessageSquare, Archive, Trash2, Code2, Pencil,
-  Globe, Phone, Copy,
+  Globe, Phone, Copy, Star,
 } from 'lucide-react';
 import { Modal } from './Modal';
 import { SettingsContent } from './SettingsContent';
 import { SearchPanel } from './SearchPanel';
 import { useRecentProjects } from '@/context/RecentProjectsContext';
 import { useAuth } from '@/context/AuthContext';
-import { getLocalPrefs } from '@/lib/localPrefs';
+import { isSocialParked, isRevealed } from '@/lib/featurePark';
+import { useSocial } from '@/context/SocialContext';
+import { getLocalPrefs, setLocalPrefs } from '@/lib/localPrefs';
+import { probeLiveCapacity, type LiveCapacity } from '@/lib/arkCapacity';
+import { comparePinnedThenRecent } from '@/lib/recentStore';
 import { formatArkId } from '@/lib/arkUserId';
 import {
   clearActivity,
@@ -22,26 +26,52 @@ import {
 } from '@/lib/activityIndicators';
 import { reattachEngineDownloads } from '@/lib/engineDownloads';
 
-const NAV_ITEMS: {
-  label: string;
-  icon: React.ComponentType<{ className?: string }>;
-  route?: Route;
-  activity?: ActivityKey;
-  comingSoon?: boolean;
-}[] = [
-  { label: 'New Chat', icon: SquarePen, route: { name: 'chat' }, activity: 'chat' },
-  { label: 'Image', icon: ImageIcon, route: { name: 'chat', mode: 'image' }, activity: 'image', comingSoon: true },
-  { label: 'Video', icon: Video, route: { name: 'chat', mode: 'video' }, activity: 'video', comingSoon: true },
-  { label: 'Code', icon: Code2, route: { name: 'code' }, activity: 'code' },
-  { label: 'Projects', icon: Briefcase, route: { name: 'projects' } },
-  { label: 'History', icon: History, route: { name: 'dashboard' } },
-  { label: 'Plugins', icon: Blocks, route: { name: 'build' }, activity: 'plugins' },
-  { label: 'Models', icon: Database, route: { name: 'models' }, activity: 'models' },
-  { label: 'Local AI', icon: Bot, route: { name: 'local-ai' }, activity: 'local-ai' },
-  { label: 'Networking', icon: Globe, route: { name: 'networking' }, activity: 'networking', comingSoon: true },
-  { label: 'Message', icon: MessageSquare, route: { name: 'message' }, activity: 'message', comingSoon: true },
-  { label: 'Call', icon: Phone, route: { name: 'call' }, activity: 'call', comingSoon: true },
-];
+function getNavGroups(): {
+  id: string;
+  label?: string;
+  items: {
+    label: string;
+    icon: React.ComponentType<{ className?: string }>;
+    route?: Route;
+    activity?: ActivityKey;
+    comingSoon?: boolean;
+  }[];
+}[] {
+  return [
+    {
+      id: 'create',
+      items: [
+        { label: 'Chat', icon: SquarePen, route: { name: 'chat' }, activity: 'chat' },
+      ],
+    },
+    {
+      id: 'work',
+      label: 'Work',
+      items: [
+        { label: 'Code', icon: Code2, route: { name: 'code' }, activity: 'code' },
+        { label: 'Projects', icon: Briefcase, route: { name: 'projects' } },
+        { label: 'History', icon: History, route: { name: 'dashboard' } },
+      ],
+    },
+    {
+      id: 'tools',
+      label: 'Tools',
+      items: [
+        { label: 'Plugins', icon: Blocks, route: { name: 'build' }, activity: 'plugins' },
+        { label: 'Models', icon: Database, route: { name: 'models' }, activity: 'models' },
+      ],
+    },
+    {
+      id: 'connect',
+      label: 'Connect',
+      items: [
+        { label: 'Networking', icon: Globe, route: { name: 'networking' }, activity: 'networking', comingSoon: isSocialParked('networking') },
+        { label: 'Message', icon: MessageSquare, route: { name: 'message' }, activity: 'message', comingSoon: isSocialParked('message') },
+        { label: 'Call', icon: Phone, route: { name: 'call' }, activity: 'call', comingSoon: isSocialParked('call') },
+      ],
+    },
+  ];
+}
 
 function resolveDisplayName(
   prefsName: string | undefined,
@@ -57,17 +87,36 @@ function resolveDisplayName(
 export function AppShell({ children }: { children: ReactNode }) {
   const { route, navigate } = useRouter();
   const { user, profile } = useAuth();
-  const { recent, activeChats, archiveChat, deleteChatForever, renameRecent, renameChat, removeRecent } = useRecentProjects();
+  const { recent, activeChats, archiveChat, deleteChatForever, renameRecent, renameChat, removeRecent, pinChat, pinProject } = useRecentProjects();
   const [collapsed, setCollapsed] = useState(() => getLocalPrefs().compactSidebar);
   const [narrowForced, setNarrowForced] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsSection, setSettingsSection] = useState('account');
   const [searchOpen, setSearchOpen] = useState(false);
   const [recentOpen, setRecentOpen] = useState(true);
+  const [chatsOpen, setChatsOpen] = useState(true);
+  const [projectsOpen, setProjectsOpen] = useState(true);
   const [prefsName, setPrefsName] = useState(() => getLocalPrefs().displayName);
+  const [avatarUrl, setAvatarUrl] = useState(() => getLocalPrefs().avatarDataUrl);
+  const [sidebarWidth, setSidebarWidth] = useState(() => {
+    const w = getLocalPrefs().sidebarWidth;
+    return Number.isFinite(w) ? Math.min(360, Math.max(200, w)) : 256;
+  });
+  const [capacity, setCapacity] = useState<LiveCapacity | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string; kind: 'chat' | 'project' } | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
   const [activity, setActivity] = useState(() => ({ ...getActivityFlags() }));
+  const [navTick, setNavTick] = useState(0);
+  const { incoming, acceptCall, declineCall, unreadFrom } = useSocial();
+
+  useEffect(() => {
+    const onFeat = () => setNavTick(t => t + 1);
+    window.addEventListener('ark:features-changed', onFeat);
+    return () => window.removeEventListener('ark:features-changed', onFeat);
+  }, []);
+
+  const NAV_GROUPS = useMemo(() => getNavGroups(), [navTick]);
 
   useEffect(() => {
     const unsub = subscribeActivity(() => setActivity({ ...getActivityFlags() }));
@@ -78,8 +127,10 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const onPrefs = () => {
-      setPrefsName(getLocalPrefs().displayName);
-      if (!narrowForced) setCollapsed(getLocalPrefs().compactSidebar);
+      const next = getLocalPrefs();
+      setPrefsName(next.displayName);
+      setAvatarUrl(next.avatarDataUrl);
+      if (!narrowForced) setCollapsed(next.compactSidebar);
     };
     window.addEventListener('ark:prefs-changed', onPrefs);
     return () => window.removeEventListener('ark:prefs-changed', onPrefs);
@@ -136,23 +187,20 @@ export function AppShell({ children }: { children: ReactNode }) {
       if (item.label === 'Projects') return false;
       if (item.label === 'Code') return false;
     }
-    // Once a conversation is in Recent, highlight that item — not New Chat / Image / Video.
+    // Once a conversation is in Recent, highlight that item — not Chat.
     if (inRecentChat && item.route.name === 'chat') return false;
 
-    if (item.label === 'New Chat') {
-      return route.name === 'chat' && !route.mode && !route.chatId;
-    }
-    if (item.label === 'Image') {
-      return route.name === 'chat' && route.mode === 'image' && !route.chatId;
-    }
-    if (item.label === 'Video') {
-      return route.name === 'chat' && route.mode === 'video' && !route.chatId;
+    if (item.label === 'Chat') {
+      return route.name === 'chat' && !route.chatId;
     }
     if (item.label === 'Code') {
       return route.name === 'code';
     }
     if (item.label === 'Projects') {
       return route.name === 'projects';
+    }
+    if (item.label === 'Models') {
+      return route.name === 'models' || route.name === 'local-ai';
     }
     return route.name === item.route.name;
   };
@@ -166,6 +214,8 @@ export function AppShell({ children }: { children: ReactNode }) {
       kind: 'chat' as const,
       id: c.id,
       title: c.title,
+      preview: c.preview,
+      pinned: Boolean(c.pinnedAt),
       mode: c.mode,
       updatedAt: c.updatedAt || '',
     }));
@@ -174,11 +224,20 @@ export function AppShell({ children }: { children: ReactNode }) {
       kind: 'project' as const,
       id: p.id,
       title: p.name,
+      preview: undefined as string | undefined,
+      pinned: Boolean(p.pinnedAt),
       updatedAt: p.updatedAt || '',
     }));
-    return [...chats, ...projects]
-      .sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''))
-      .slice(0, 28);
+    const byPin = (a: { pinned: boolean; updatedAt: string }, b: { pinned: boolean; updatedAt: string }) =>
+      comparePinnedThenRecent(
+        { pinnedAt: a.pinned ? '1' : undefined, updatedAt: a.updatedAt },
+        { pinnedAt: b.pinned ? '1' : undefined, updatedAt: b.updatedAt },
+      );
+    return {
+      chats: [...chats].sort(byPin).slice(0, 16),
+      projects: [...projects].sort(byPin).slice(0, 12),
+      mixed: [...chats, ...projects].sort(byPin).slice(0, 16),
+    };
   }, [activeChats, recent]);
 
   const commitRename = () => {
@@ -192,10 +251,46 @@ export function AppShell({ children }: { children: ReactNode }) {
     setRenameDraft('');
   };
 
-  const openSettings = () => {
+  const openSettings = (section = 'account') => {
     setSearchOpen(false);
+    setSettingsSection(section);
     setSettingsOpen(true);
   };
+
+  useEffect(() => {
+    const onOpen = (e: Event) => {
+      const section = (e as CustomEvent<{ section?: string }>).detail?.section || 'account';
+      openSettings(section);
+    };
+    window.addEventListener('ark:open-settings', onOpen);
+    return () => window.removeEventListener('ark:open-settings', onOpen);
+  }, []);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setSearchOpen(true);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    const refresh = () => {
+      void probeLiveCapacity().then(c => { if (alive) setCapacity(c); }).catch(() => undefined);
+    };
+    refresh();
+    window.addEventListener('ark:prefs-changed', refresh);
+    window.addEventListener('ark:engine-models-changed', refresh);
+    return () => {
+      alive = false;
+      window.removeEventListener('ark:prefs-changed', refresh);
+      window.removeEventListener('ark:engine-models-changed', refresh);
+    };
+  }, []);
 
   const chatIcon = (mode: string) => {
     if (mode === 'image') return ImageIcon;
@@ -204,12 +299,240 @@ export function AppShell({ children }: { children: ReactNode }) {
     return MessageSquare;
   };
 
+  type RecentRow = {
+    key: string;
+    kind: 'chat' | 'project';
+    id: string;
+    title: string;
+    preview?: string;
+    pinned: boolean;
+    mode?: string;
+    updatedAt: string;
+  };
+
+  const openRecent = (item: RecentRow) => {
+    if (item.kind === 'chat') {
+      navigate({
+        name: 'chat',
+        mode: item.mode === 'general' ? undefined : (item.mode as 'image' | 'video' | 'code' | undefined),
+        chatId: item.id,
+      });
+    } else {
+      navigate({ name: 'project', id: item.id });
+    }
+  };
+
+  const renderRecentRow = (item: RecentRow) => {
+    const active = item.kind === 'chat' ? activeChatId === item.id : activeRecentId === item.id;
+    const Icon = item.kind === 'project' ? Code2 : chatIcon(item.mode || 'general');
+    const renameKey = item.key;
+    const editing = renamingId === renameKey;
+    return (
+      <div
+        key={item.key}
+        className={`group flex items-center gap-0.5 rounded-lg ${active ? 'bg-surface-hover' : ''}`}
+      >
+        {editing ? (
+          <input
+            autoFocus
+            value={renameDraft}
+            onChange={e => setRenameDraft(e.target.value)}
+            onBlur={commitRename}
+            onKeyDown={e => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                commitRename();
+              }
+              if (e.key === 'Escape') {
+                setRenamingId(null);
+                setRenameDraft('');
+              }
+            }}
+            className="flex-1 min-w-0 mx-1 my-0.5 rounded-md bg-ark-navy-950 border border-surface-border px-2 py-1 text-xs text-content-primary outline-none focus:border-sky-500/50"
+          />
+        ) : (
+          <button
+            type="button"
+            onClick={() => openRecent(item)}
+            onDoubleClick={(e) => {
+              e.preventDefault();
+              setRenamingId(renameKey);
+              setRenameDraft(item.title);
+            }}
+            className={`ark-nav-item !py-1.5 !gap-2.5 flex-1 min-w-0 ${active ? 'active' : ''}`}
+            title={`${item.title} · double-click to rename`}
+          >
+            <Icon className="w-3.5 h-3.5 shrink-0 text-content-tertiary" strokeWidth={1.75} />
+            <span className="min-w-0 flex-1 text-left">
+              <span className="block truncate">{item.title}</span>
+              {item.preview ? (
+                <span className="block truncate text-[10px] text-content-tertiary font-normal">{item.preview}</span>
+              ) : null}
+            </span>
+            {item.pinned ? <Star className="w-2.5 h-2.5 text-amber-300 shrink-0 fill-amber-300" /> : null}
+          </button>
+        )}
+        {!editing && (
+          <>
+            <button
+              type="button"
+              title={item.pinned ? 'Unpin' : 'Pin'}
+              aria-label={item.pinned ? `Unpin ${item.title}` : `Pin ${item.title}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (item.kind === 'chat') pinChat(item.id);
+                else pinProject(item.id);
+              }}
+              className="opacity-0 group-hover:opacity-100 focus:opacity-100 w-7 h-7 rounded-md flex items-center justify-center text-content-tertiary hover:text-amber-300 hover:bg-surface-hover shrink-0 transition-opacity"
+            >
+              <Star className={`w-3.5 h-3.5 ${item.pinned ? 'fill-amber-300 text-amber-300' : ''}`} />
+            </button>
+            <button
+              type="button"
+              title="Rename"
+              aria-label={`Rename ${item.title}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                setRenamingId(renameKey);
+                setRenameDraft(item.title);
+              }}
+              className="opacity-0 group-hover:opacity-100 focus:opacity-100 w-7 h-7 rounded-md flex items-center justify-center text-content-tertiary hover:text-content-primary hover:bg-surface-hover shrink-0 transition-opacity"
+            >
+              <Pencil className="w-3.5 h-3.5" />
+            </button>
+            <button
+              type="button"
+              title={item.kind === 'chat' ? 'Archive to History' : 'Remove from Recent'}
+              aria-label={`Archive ${item.title}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (item.kind === 'chat') {
+                  archiveChat(item.id);
+                  if (activeChatId === item.id) navigate({ name: 'chat' });
+                } else {
+                  removeRecent(item.id);
+                  if (activeRecentId === item.id) navigate({ name: 'chat' });
+                }
+              }}
+              className="opacity-0 group-hover:opacity-100 focus:opacity-100 w-7 h-7 rounded-md flex items-center justify-center text-content-tertiary hover:text-sky-300 hover:bg-surface-hover shrink-0 transition-opacity"
+            >
+              <Archive className="w-3.5 h-3.5" />
+            </button>
+            <button
+              type="button"
+              title="Delete forever"
+              aria-label={`Delete ${item.title}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                setDeleteTarget({ id: item.id, title: item.title, kind: item.kind });
+              }}
+              className="opacity-0 group-hover:opacity-100 focus:opacity-100 w-7 h-7 rounded-md flex items-center justify-center text-content-tertiary hover:text-rose-400 hover:bg-surface-hover shrink-0 transition-opacity mr-0.5"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          </>
+        )}
+      </div>
+    );
+  };
+
+  const startSidebarResize = (e: { preventDefault: () => void; clientX: number }) => {
+    if (collapsed) return;
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = sidebarWidth;
+    let lastW = startW;
+    const onMove = (ev: MouseEvent) => {
+      lastW = Math.min(360, Math.max(200, startW + (ev.clientX - startX)));
+      setSidebarWidth(lastW);
+    };
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      setLocalPrefs({ sidebarWidth: lastW });
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  };
+
+  const handleNavClick = (item: { label: string; route?: Route; activity?: ActivityKey; comingSoon?: boolean }) => {
+    if (item.comingSoon && item.route) {
+      navigate(item.route);
+      return;
+    }
+    if (item.activity) clearActivity(item.activity);
+    if (item.label === 'Chat') {
+      navigate({ name: 'chat' });
+      return;
+    }
+    if (item.label === 'Code') {
+      navigate({ name: 'code', session: crypto.randomUUID() });
+      return;
+    }
+    if (item.route) navigate(item.route);
+  };
+
+  const renderNavItem = (item: {
+    label: string;
+    icon: React.ComponentType<{ className?: string }>;
+    route?: Route;
+    activity?: ActivityKey;
+    comingSoon?: boolean;
+  }) => {
+    const active = isActive(item);
+    const busy = Boolean(item.activity && activity[item.activity]);
+    const unreadCount = item.label === 'Message' && !item.comingSoon ? unreadFrom.length : 0;
+    if (item.comingSoon) {
+      return (
+        <button
+          key={item.label}
+          type="button"
+          title={`${item.label} · parked — Settings → Testers to reveal`}
+          onClick={() => handleNavClick(item)}
+          className={`ark-nav-item w-full opacity-55 ${collapsed ? '!justify-center' : ''}`}
+        >
+          <item.icon className="w-4 h-4 shrink-0" />
+          {!collapsed && (
+            <>
+              <span className="flex-1 text-left">{item.label}</span>
+              <span className="text-[9px] uppercase tracking-wide text-content-tertiary">Parked</span>
+            </>
+          )}
+        </button>
+      );
+    }
+    return (
+      <button
+        key={item.label}
+        type="button"
+        onClick={() => handleNavClick(item)}
+        title={collapsed ? item.label : undefined}
+        className={`ark-nav-item w-full relative ${collapsed ? '!justify-center' : ''} ${active ? 'active' : ''} ${busy ? 'ark-nav-activity' : ''}`}
+      >
+        <item.icon className="w-4 h-4 shrink-0" />
+        {!collapsed && <span>{item.label}</span>}
+        {!collapsed && unreadCount > 0 ? (
+          <span className="text-[10px] font-semibold rounded-full bg-sky-500/20 text-sky-300 px-1.5 py-0.5 min-w-[1.25rem] text-center">
+            {unreadCount > 9 ? '9+' : unreadCount}
+          </span>
+        ) : null}
+        {busy && (
+          <span
+            className={`absolute w-1.5 h-1.5 rounded-full bg-emerald-400 ${collapsed ? 'top-1.5 right-1.5' : 'top-2 right-2'}`}
+            aria-hidden
+          />
+        )}
+      </button>
+    );
+  };
+
   return (
     <div className="h-full min-w-0 flex bg-ark-navy-950 overflow-hidden">
       <aside
-        className={`shrink-0 m-2 mr-0 flex flex-col min-w-0 rounded-2xl border border-surface-border bg-ark-navy-900/70 shadow-[0_8px_32px_rgba(0,0,0,0.35)] transition-all duration-300 ${
-          collapsed ? 'w-16' : 'w-64 max-w-[min(16rem,42vw)]'
+        className={`relative shrink-0 m-2 mr-0 flex flex-col min-w-0 rounded-2xl border border-surface-border bg-ark-navy-900/70 shadow-[0_8px_32px_rgba(0,0,0,0.35)] ${
+          collapsed ? 'w-16' : ''
         }`}
+        style={collapsed ? undefined : { width: sidebarWidth, maxWidth: 'min(22rem, 42vw)' }}
       >
           <div className={`flex-none ${collapsed ? 'px-2 pt-3 pb-2' : 'px-3 pt-3 pb-3'}`}>
             <div className={`flex items-center gap-2 ${collapsed ? 'flex-col w-full' : 'justify-between'}`}>
@@ -240,7 +563,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                     type="button"
                     onClick={() => setSearchOpen(true)}
                     className="ark-btn-ghost !p-1.5"
-                    title="Search"
+                    title="Search (Ctrl+K)"
                     aria-label="Search"
                   >
                     <Search className="w-4 h-4" />
@@ -259,73 +582,16 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
 
           <nav className={`flex-1 min-h-0 flex flex-col gap-1 overflow-y-auto ${collapsed ? 'px-2 pt-4' : 'px-3 pt-4'}`}>
-            {NAV_ITEMS.map(item => {
-              const active = isActive(item);
-              const busy = Boolean(item.activity && activity[item.activity]);
-              if (item.comingSoon) {
-                return (
-                  <button
-                    key={item.label}
-                    type="button"
-                    disabled
-                    title={`${item.label} · coming soon`}
-                    className={`ark-nav-item w-full opacity-45 cursor-not-allowed pointer-events-none ${collapsed ? '!justify-center' : ''}`}
-                  >
-                    <item.icon className="w-4 h-4 shrink-0" />
-                    {!collapsed && (
-                      <>
-                        <span className="flex-1 text-left">{item.label}</span>
-                        <span className="text-[9px] uppercase tracking-wide text-content-tertiary">Coming soon</span>
-                      </>
-                    )}
-                  </button>
-                );
-              }
-              return (
-                <button
-                  key={item.label}
-                  type="button"
-                  onClick={() => {
-                    if (item.activity) clearActivity(item.activity);
-                    // New Chat is always a blank starter (never reopen last thread).
-                    if (item.label === 'New Chat') {
-                      navigate({ name: 'chat' });
-                      return;
-                    }
-                    // Image / Video: reopen the latest thread of that mode so nav doesn't mint duplicates.
-                    if (item.label === 'Image' || item.label === 'Video') {
-                      const mode = item.label === 'Image' ? 'image' : 'video';
-                      const last = activeChats.find(c => c.mode === mode);
-                      if (last) {
-                        navigate({ name: 'chat', mode, chatId: last.id, creationId: last.creationId });
-                      } else {
-                        navigate({ name: 'chat', mode });
-                      }
-                      return;
-                    }
-                    // Code: blank workspace like New Chat. Recent rows reopen a project.
-                    if (item.label === 'Code') {
-                      navigate({ name: 'code', session: crypto.randomUUID() });
-                      return;
-                    }
-                    if (item.route) navigate(item.route);
-                  }}
-                  title={collapsed ? item.label : undefined}
-                  className={`ark-nav-item w-full relative ${collapsed ? '!justify-center' : ''} ${active ? 'active' : ''} ${busy ? 'ark-nav-activity' : ''}`}
-                >
-                  <item.icon className="w-4 h-4 shrink-0" />
-                  {!collapsed && <span>{item.label}</span>}
-                  {busy && (
-                    <span
-                      className={`absolute w-1.5 h-1.5 rounded-full bg-emerald-400 ${collapsed ? 'top-1.5 right-1.5' : 'top-2 right-2'}`}
-                      aria-hidden
-                    />
-                  )}
-                </button>
-              );
-            })}
+            {NAV_GROUPS.map(group => (
+              <div key={group.id} className={group.label && !collapsed ? 'mt-3 first:mt-0' : ''}>
+                {group.label && !collapsed ? (
+                  <p className="px-2 pb-1 text-[10px] uppercase tracking-wider text-content-tertiary">{group.label}</p>
+                ) : null}
+                {group.items.map(renderNavItem)}
+              </div>
+            ))}
 
-            {/* Recent — always present, retractable list */}
+            {/* Recent — chats and projects stay separate */}
             <div className={`mt-4 ${collapsed ? '' : 'pt-2 border-t border-surface-border'}`}>
               <button
                 type="button"
@@ -345,145 +611,53 @@ export function AppShell({ children }: { children: ReactNode }) {
               </button>
 
               {recentOpen && !collapsed && (
-                <div className="mt-1 flex flex-col gap-0.5 pl-1">
-                  {recentFeed.length === 0 ? (
+                <div className="mt-1 flex flex-col gap-2 pl-1">
+                  {recentFeed.chats.length === 0 && recentFeed.projects.length === 0 ? (
                     <p className="px-3 py-2 text-[11px] text-content-tertiary leading-snug">
-                      Conversations and Code workspaces you start will show up here.
+                      Chats and Code workspaces you start will show up here.
                     </p>
                   ) : null}
-                  {recentFeed.map(item => {
-                    const active = item.kind === 'chat'
-                      ? activeChatId === item.id
-                      : activeRecentId === item.id;
-                    const Icon = item.kind === 'project'
-                      ? Code2
-                      : chatIcon(item.mode);
-                    const renameKey = item.key;
-                    const editing = renamingId === renameKey;
-                    return (
-                      <div
-                        key={item.key}
-                        className={`group flex items-center gap-0.5 rounded-lg ${active ? 'bg-surface-hover' : ''}`}
+                  {recentFeed.chats.length > 0 ? (
+                    <div>
+                      <button
+                        type="button"
+                        onClick={() => setChatsOpen(o => !o)}
+                        className="w-full flex items-center px-2 py-1 text-[10px] uppercase tracking-wider text-content-tertiary"
                       >
-                        {editing ? (
-                          <input
-                            autoFocus
-                            value={renameDraft}
-                            onChange={e => setRenameDraft(e.target.value)}
-                            onBlur={commitRename}
-                            onKeyDown={e => {
-                              if (e.key === 'Enter') {
-                                e.preventDefault();
-                                commitRename();
-                              }
-                              if (e.key === 'Escape') {
-                                setRenamingId(null);
-                                setRenameDraft('');
-                              }
-                            }}
-                            className="flex-1 min-w-0 mx-1 my-0.5 rounded-md bg-ark-navy-950 border border-surface-border px-2 py-1 text-xs text-content-primary outline-none focus:border-sky-500/50"
-                          />
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (item.kind === 'chat') {
-                                navigate({
-                                  name: 'chat',
-                                  mode: item.mode === 'general' ? undefined : item.mode,
-                                  chatId: item.id,
-                                });
-                              } else {
-                                navigate({ name: 'project', id: item.id });
-                              }
-                            }}
-                            onDoubleClick={(e) => {
-                              e.preventDefault();
-                              setRenamingId(renameKey);
-                              setRenameDraft(item.title);
-                            }}
-                            className={`ark-nav-item !py-1.5 !gap-2.5 flex-1 min-w-0 ${active ? 'active' : ''}`}
-                            title={`${item.title} · double-click to rename`}
-                          >
-                            <Icon className="w-3.5 h-3.5 shrink-0 text-content-tertiary" strokeWidth={1.75} />
-                            <span className="truncate">{item.title}</span>
-                          </button>
-                        )}
-                        {!editing && (
-                          <>
-                            <button
-                              type="button"
-                              title="Rename"
-                              aria-label={`Rename ${item.title}`}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setRenamingId(renameKey);
-                                setRenameDraft(item.title);
-                              }}
-                              className="opacity-0 group-hover:opacity-100 focus:opacity-100 w-7 h-7 rounded-md flex items-center justify-center text-content-tertiary hover:text-content-primary hover:bg-surface-hover shrink-0 transition-opacity"
-                            >
-                              <Pencil className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                              type="button"
-                              title={item.kind === 'chat' ? 'Archive to History' : 'Remove from Recent'}
-                              aria-label={`Archive ${item.title}`}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                if (item.kind === 'chat') {
-                                  archiveChat(item.id);
-                                  if (activeChatId === item.id) navigate({ name: 'chat' });
-                                } else {
-                                  removeRecent(item.id);
-                                  if (activeRecentId === item.id) navigate({ name: 'chat' });
-                                }
-                              }}
-                              className="opacity-0 group-hover:opacity-100 focus:opacity-100 w-7 h-7 rounded-md flex items-center justify-center text-content-tertiary hover:text-sky-300 hover:bg-surface-hover shrink-0 transition-opacity"
-                            >
-                              <Archive className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                              type="button"
-                              title="Delete forever"
-                              aria-label={`Delete ${item.title}`}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setDeleteTarget({ id: item.id, title: item.title, kind: item.kind });
-                              }}
-                              className="opacity-0 group-hover:opacity-100 focus:opacity-100 w-7 h-7 rounded-md flex items-center justify-center text-content-tertiary hover:text-rose-400 hover:bg-surface-hover shrink-0 transition-opacity mr-0.5"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    );
-                  })}
+                        <span className="flex-1 text-left">Chats</span>
+                        <ChevronDown className={`w-3 h-3 transition-transform ${chatsOpen ? '' : '-rotate-90'}`} />
+                      </button>
+                      {chatsOpen ? recentFeed.chats.map(renderRecentRow) : null}
+                    </div>
+                  ) : null}
+                  {recentFeed.projects.length > 0 ? (
+                    <div>
+                      <button
+                        type="button"
+                        onClick={() => setProjectsOpen(o => !o)}
+                        className="w-full flex items-center px-2 py-1 text-[10px] uppercase tracking-wider text-content-tertiary"
+                      >
+                        <span className="flex-1 text-left">Projects</span>
+                        <ChevronDown className={`w-3 h-3 transition-transform ${projectsOpen ? '' : '-rotate-90'}`} />
+                      </button>
+                      {projectsOpen ? recentFeed.projects.map(renderRecentRow) : null}
+                    </div>
+                  ) : null}
                 </div>
               )}
 
               {collapsed && recentOpen && (
                 <div className="mt-1 flex flex-col gap-0.5">
-                  {recentFeed.slice(0, 12).map(item => {
+                  {recentFeed.mixed.slice(0, 12).map(item => {
                     const active = item.kind === 'chat'
                       ? activeChatId === item.id
                       : activeRecentId === item.id;
-                    const Icon = item.kind === 'project' ? Code2 : chatIcon(item.mode);
+                    const Icon = item.kind === 'project' ? Code2 : chatIcon(item.mode || 'general');
                     return (
                       <button
                         key={item.key}
                         type="button"
-                        onClick={() => {
-                          if (item.kind === 'chat') {
-                            navigate({
-                              name: 'chat',
-                              mode: item.mode === 'general' ? undefined : item.mode,
-                              chatId: item.id,
-                            });
-                          } else {
-                            navigate({ name: 'project', id: item.id });
-                          }
-                        }}
+                        onClick={() => openRecent(item)}
                         className={`ark-nav-item !justify-center ${active ? 'active' : ''}`}
                         title={item.title}
                       >
@@ -500,7 +674,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             {collapsed ? (
               <button
                 type="button"
-                onClick={() => setSettingsOpen(true)}
+                onClick={() => openSettings('account')}
                 title="Open Settings"
                 className="w-9 h-9 rounded-xl border border-surface-border bg-ark-navy-900/80 flex items-center justify-center text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors mx-auto"
                 aria-label="Open Settings"
@@ -508,49 +682,94 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <Settings className="w-4 h-4" />
               </button>
             ) : (
-              <div className="flex items-center gap-2 rounded-xl border border-surface-border bg-ark-navy-950/80 px-2.5 py-2">
-                <span
-                  className="w-8 h-8 shrink-0 rounded-lg bg-surface-hover border border-surface-border flex items-center justify-center text-sm font-semibold text-content-primary"
-                  aria-hidden="true"
-                >
-                  {initial}
-                </span>
-                <div className="flex-1 min-w-0">
-                  <span
-                    className="block text-xs font-medium text-content-primary truncate select-none"
-                    title={displayName}
+              <div className="space-y-2">
+                {capacity ? (
+                  <p className="px-1 text-[10px] text-content-tertiary truncate" title={capacity.summary}>
+                    {capacity.liveChat
+                      ? (capacity.localGguf ? 'Free · Local brain ready' : 'Free · Cloud keys ready')
+                      : 'No live model'}
+                  </p>
+                ) : null}
+                <div className="flex items-center gap-2 rounded-xl border border-surface-border bg-ark-navy-950/80 px-2.5 py-2">
+                  <button
+                    type="button"
+                    onClick={() => openSettings('account')}
+                    className="w-8 h-8 shrink-0 rounded-lg bg-surface-hover border border-surface-border flex items-center justify-center text-sm font-semibold text-content-primary overflow-hidden"
+                    title="Account settings"
+                    aria-label="Open account settings"
                   >
-                    {displayName}
-                  </span>
+                    {avatarUrl ? (
+                      <img src={avatarUrl} alt="" className="w-full h-full object-cover" />
+                    ) : (
+                      initial
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openSettings('account')}
+                    className="flex-1 min-w-0 text-left"
+                    title="Account settings"
+                  >
+                    <span
+                      className="block text-xs font-medium text-content-primary truncate"
+                    >
+                      {displayName}
+                    </span>
+                    {profile?.ark_id ? (
+                      <span className="block text-[10px] font-mono tracking-[0.22em] text-content-tertiary truncate">
+                        {formatArkId(profile.ark_id)}
+                      </span>
+                    ) : null}
+                  </button>
                   {profile?.ark_id ? (
                     <button
                       type="button"
-                      className="flex items-center gap-1 text-[10px] font-mono tracking-[0.22em] text-content-tertiary hover:text-content-secondary truncate"
+                      className="p-1.5 rounded-lg shrink-0 text-content-tertiary hover:text-content-primary hover:bg-surface-hover"
                       title="Copy your ARK ID"
                       onClick={() => {
                         void navigator.clipboard.writeText(profile.ark_id || '').catch(() => undefined);
                       }}
                     >
-                      {formatArkId(profile.ark_id)}
-                      <Copy className="w-2.5 h-2.5 shrink-0" />
+                      <Copy className="w-3 h-3" />
                     </button>
                   ) : null}
+                  <button
+                    type="button"
+                    onClick={() => openSettings()}
+                    title="Open Settings"
+                    className="p-1.5 rounded-lg shrink-0 text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors"
+                    aria-label="Open Settings"
+                  >
+                    <Settings className="w-4 h-4" />
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setSettingsOpen(true)}
-                  title="Open Settings"
-                  className="p-1.5 rounded-lg shrink-0 text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors"
-                  aria-label="Open Settings"
-                >
-                  <Settings className="w-4 h-4" />
-                </button>
               </div>
             )}
           </div>
+          {!collapsed ? (
+            <button
+              type="button"
+              aria-label="Resize sidebar"
+              title="Drag to resize"
+              className="absolute top-8 bottom-8 -right-1 w-2 cursor-ew-resize z-10"
+              onMouseDown={startSidebarResize}
+            />
+          ) : null}
       </aside>
 
         <main className="flex-1 min-h-0 min-w-0 overflow-hidden m-2 ml-2 relative">
+          {incoming && isRevealed('call') ? (
+            <div className="absolute top-3 left-3 right-3 z-30 rounded-xl border border-sky-400/30 bg-ark-navy-900/95 backdrop-blur px-4 py-3 flex items-center justify-between gap-3 shadow-lg">
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-content-primary truncate">Incoming call</p>
+                <p className="text-xs text-content-tertiary truncate">{incoming.fromName || incoming.from}</p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <button type="button" className="ark-btn-secondary text-xs" onClick={declineCall}>Decline</button>
+                <button type="button" className="ark-btn-primary text-xs" onClick={acceptCall}>Accept</button>
+              </div>
+            </div>
+          ) : null}
           {children}
         </main>
 
@@ -563,7 +782,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       >
         <SearchPanel
           onClose={() => setSearchOpen(false)}
-          onOpenSettings={openSettings}
+          onOpenSettings={(section) => openSettings(section || 'account')}
         />
       </Modal>
 
@@ -573,7 +792,10 @@ export function AppShell({ children }: { children: ReactNode }) {
         title="Settings"
         size="settings"
       >
-        <SettingsContent onClose={() => setSettingsOpen(false)} />
+        <SettingsContent
+          onClose={() => setSettingsOpen(false)}
+          initialSection={settingsSection}
+        />
       </Modal>
 
       <Modal

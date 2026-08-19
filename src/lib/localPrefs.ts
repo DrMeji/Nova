@@ -10,9 +10,16 @@ export type UpdateChannel = 'stable' | 'beta';
 
 export type LocalPrefs = {
   displayName: string;
+  avatarDataUrl?: string;
   defaultModelId: string;
   /** Last model that successfully answered in Chat (for picker restore). */
   lastChatModelId?: string;
+  /** Default brain for Code workspace when Auto is not selected. */
+  defaultCodeModelId?: string;
+  /** Last provider/model that actually answered (Settings → AI). */
+  lastAnsweredLabel?: string;
+  /** UI font size in px (html root). */
+  fontSizePx: number;
   aiMode: AiModePref;
   keepFilesLocal: boolean;
   allowCloudSync: boolean;
@@ -24,6 +31,8 @@ export type LocalPrefs = {
   accent: AccentPref;
   reduceMotion: boolean;
   compactSidebar: boolean;
+  /** Expanded sidebar width in px (remembered per this PC). */
+  sidebarWidth: number;
   showStatusBar: boolean;
   // AI
   autoFailover: boolean;
@@ -55,6 +64,8 @@ export type LocalPrefs = {
 const DEFAULT_PREFS: LocalPrefs = {
   displayName: 'Guest',
   defaultModelId: 'ark-auto',
+  defaultCodeModelId: 'ark-auto',
+  fontSizePx: 15,
   aiMode: 'automatic',
   keepFilesLocal: true,
   allowCloudSync: false,
@@ -65,6 +76,7 @@ const DEFAULT_PREFS: LocalPrefs = {
   accent: 'sky',
   reduceMotion: false,
   compactSidebar: false,
+  sidebarWidth: 256,
   showStatusBar: true,
   autoFailover: true,
   streamResponses: true,
@@ -248,6 +260,18 @@ export function clearPluginToken(pluginId: string) {
 
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
+  {
+    version: '0.1.73',
+    channel: 'stable' as const,
+    date: 'Aug 18, 2026',
+    title: 'Code waits for Enter, reads your folder, and locks device size',
+    notes: [
+      'Yes from Chat opens Code with your prompt ready — nothing runs until you press Enter',
+      'If the brain does not finish, ARK says so instead of pasting an offline starter app',
+      '“What is this project about?” reads the opened files, describes them, then offers Debug / Work on this',
+      'While code is writing, the right editor follows the live file; device previews stay the real phone size (zoom only, no stretching)',
+    ],
+  },
   {
     version: '0.1.72',
     channel: 'stable' as const,

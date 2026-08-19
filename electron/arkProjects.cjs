@@ -79,16 +79,56 @@ function isProbablyBinary(buf) {
   return false;
 }
 
-function writeProjectFiles(projectId, projectName, files) {
+function isSandboxBlockedPath(rel) {
+  const safe = String(rel || '').replace(/\\/g, '/').replace(/^\/+/, '').replace(/^\.\//, '');
+  if (!safe || safe.includes('..')) return true;
+  if (/^[a-zA-Z]:[/\\]/.test(safe) || safe.startsWith('//')) return true;
+  const base = safe.split('/').pop() || safe;
+  if (/^\.env($|\.)/i.test(base) && !/\.example$/i.test(base)) return true;
+  if (/^(package-lock|yarn\.lock|pnpm-lock)/i.test(base)) return true;
+  const blocked = new Set([
+    'node_modules', '.git', '.svn', '.hg', 'dist', 'build', 'out', '.next', 'coverage',
+    '.cache', '.turbo', '.venv', 'venv', '__pycache__', 'target', 'vendor', 'Pods',
+    '.gradle', '.idea', '.vscode',
+  ]);
+  return safe.split('/').some(part => blocked.has(String(part || '').toLowerCase()));
+}
+
+function writeProjectFiles(projectId, projectName, files, sandbox) {
   const root = projectDir(projectId);
   const written = [];
+  const blocked = [];
   for (const [rel, content] of Object.entries(files || {})) {
     const safe = String(rel).replace(/\\/g, '/').replace(/^\/+/, '');
-    if (!safe || safe.includes('..')) continue;
+    if (!safe || safe.includes('..')) {
+      if (sandbox) blocked.push(safe || rel);
+      continue;
+    }
+    if (sandbox && isSandboxBlockedPath(safe)) {
+      blocked.push(safe);
+      continue;
+    }
     const full = path.join(root, ...safe.split('/'));
+    if (sandbox) {
+      const resolved = path.resolve(full);
+      const rootResolved = path.resolve(root);
+      if (!resolved.startsWith(rootResolved + path.sep) && resolved !== rootResolved) {
+        blocked.push(safe);
+        continue;
+      }
+    }
     fs.mkdirSync(path.dirname(full), { recursive: true });
     fs.writeFileSync(full, typeof content === 'string' ? content : String(content ?? ''), 'utf8');
     written.push(safe);
+  }
+  if (sandbox && blocked.length && written.length === 0) {
+    return {
+      ok: false,
+      error: `Sandbox blocked ${blocked.length} path(s): ${blocked.slice(0, 3).join(', ')}`,
+      sandboxBlocked: blocked,
+      root,
+      files: written,
+    };
   }
   const meta = {
     id: projectId,

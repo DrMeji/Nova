@@ -492,6 +492,9 @@ export function LocalAI() {
 
   const toggleEngine = () => {
     if (engineRunning) {
+      if (!window.confirm('Stop ARK Engine? In-flight Chat replies on this PC will fail or fall back to a cloud key.')) {
+        return;
+      }
       void stopEngine().then(applyEngine);
       return;
     }
@@ -647,7 +650,14 @@ export function LocalAI() {
         <div className="w-full max-w-4xl mx-auto min-w-0">
           <div className="flex items-center justify-between gap-3 mb-5 min-w-0">
             <div className="min-w-0">
-              <h1 className="text-2xl sm:text-3xl font-semibold text-content-primary tracking-tight">Local AI</h1>
+              <h1 className="text-2xl sm:text-3xl font-semibold text-content-primary tracking-tight">Engine</h1>
+              <button
+                type="button"
+                onClick={() => navigate({ name: 'models' })}
+                className="block mt-1 text-xs text-content-tertiary hover:text-content-secondary"
+              >
+                Back to Models
+              </button>
             </div>
             <button
               type="button"
@@ -667,7 +677,7 @@ export function LocalAI() {
           <div className="flex items-center gap-1 mb-4 flex-wrap">
             {([
               { id: 'overview' as const, label: 'Overview' },
-              { id: 'speed' as const, label: 'Speed' },
+              { id: 'speed' as const, label: 'Download speed' },
               { id: 'hardware' as const, label: 'Hardware' },
               { id: 'storage' as const, label: 'Storage' },
               { id: 'advanced' as const, label: 'Advanced' },

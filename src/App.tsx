@@ -1,7 +1,7 @@
 import { ThemeProvider } from '@/context/ThemeContext';
 import { AuthProvider, useAuth } from '@/context/AuthContext';
 import { RouterProvider, useRouter } from '@/context/RouterContext';
-import { RecentProjectsProvider } from '@/context/RecentProjectsContext';
+import { RecentProjectsProvider, useRecentProjects } from '@/context/RecentProjectsContext';
 import { AuthScreen } from '@/components/auth/AuthScreen';
 import { OnboardingScreen } from '@/components/onboarding/OnboardingScreen';
 import { AppShell } from '@/components/AppShell';
@@ -15,29 +15,25 @@ import { BuildRun } from '@/views/BuildRun';
 import { LocalAI } from '@/views/LocalAI';
 import { CreationViewer } from '@/views/CreationViewer';
 import { Settings } from '@/views/Settings';
+import { NetworkingView } from '@/views/NetworkingView';
+import { MessageView } from '@/views/MessageView';
+import { CallView } from '@/views/CallView';
 import { SocialProvider } from '@/context/SocialContext';
+import { ParkedNotice } from '@/components/ParkedNotice';
+import { PinLockGate } from '@/components/PinLockGate';
+import { isSocialParked } from '@/lib/featurePark';
 import { runCleanBootIfNeeded } from '@/lib/clearSession';
 import { getLocalPrefs } from '@/lib/localPrefs';
 import { startModelHuntCycle } from '@/lib/arkHuntBootstrap';
 import { needsFirstRunSetup } from '@/lib/setup';
 import { supabaseConfigError } from '@/lib/supabase';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 
 runCleanBootIfNeeded();
 
 function AppRoutes() {
-  const { route, navigate } = useRouter();
-
-  useEffect(() => {
-    if (route.name === 'networking' || route.name === 'message' || route.name === 'call') {
-      navigate({ name: 'chat' });
-      return;
-    }
-    if (route.name === 'chat' && (route.mode === 'image' || route.mode === 'video')) {
-      navigate({ name: 'chat', chatId: route.chatId, creationId: route.creationId });
-    }
-  }, [route, navigate]);
+  const { route } = useRouter();
 
   switch (route.name) {
     case 'dashboard': return <Dashboard />;
@@ -49,10 +45,9 @@ function AppRoutes() {
     case 'models': return <ModelsView />;
     case 'build': return <BuildRun />;
     case 'local-ai': return <LocalAI />;
-    case 'networking':
-    case 'message':
-    case 'call':
-      return <AIChat key="general" />;
+    case 'networking': return isSocialParked('networking') ? <ParkedNotice feature="networking" /> : <NetworkingView />;
+    case 'message': return isSocialParked('message') ? <ParkedNotice feature="message" /> : <MessageView />;
+    case 'call': return isSocialParked('call') ? <ParkedNotice feature="call" /> : <CallView />;
     case 'settings': return <Settings />;
     default: return <Dashboard />;
   }
@@ -61,6 +56,17 @@ function AppRoutes() {
 function AppContent() {
   const { user, profile, loading } = useAuth();
   const [setupTick, setSetupTick] = useState(0);
+
+  useEffect(() => {
+    const applyPrefs = () => {
+      const p = getLocalPrefs();
+      document.documentElement.style.fontSize = `${p.fontSizePx || 15}px`;
+      document.documentElement.dataset.density = p.density;
+    };
+    applyPrefs();
+    window.addEventListener('ark:prefs-changed', applyPrefs);
+    return () => window.removeEventListener('ark:prefs-changed', applyPrefs);
+  }, []);
 
   useEffect(() => {
     void window.arkDesktop?.appMeta?.().then((meta) => {
@@ -99,10 +105,13 @@ function AppContent() {
   return (
     <RecentProjectsProvider>
       <SocialProvider>
+        <PinLockGate>
         <AppShell>
           <HuntOnLaunch />
+          <OpenLastProjectOnLaunch />
           <AppRoutes />
         </AppShell>
+        </PinLockGate>
       </SocialProvider>
     </RecentProjectsProvider>
   );
@@ -110,6 +119,21 @@ function AppContent() {
 
 function HuntOnLaunch() {
   useEffect(() => startModelHuntCycle(), []);
+  return null;
+}
+
+function OpenLastProjectOnLaunch() {
+  const { recent } = useRecentProjects();
+  const { navigate } = useRouter();
+  const did = useRef(false);
+  useEffect(() => {
+    if (did.current) return;
+    if (!getLocalPrefs().openLastProjectOnLaunch) return;
+    const last = recent[0];
+    if (!last?.id) return;
+    did.current = true;
+    navigate({ name: 'project', id: last.id });
+  }, [recent, navigate]);
   return null;
 }
 
@@ -130,14 +154,14 @@ function App() {
     <ThemeProvider>
       {/* Full-bleed shell; title controls overlay so sidebar padding is even top/bottom */}
       <div className="h-screen min-w-0 relative overflow-hidden bg-ark-navy-950">
-        <TitleBar />
-        <div className="h-full overflow-hidden">
-          <AuthProvider>
-            <RouterProvider>
+        <AuthProvider>
+          <RouterProvider>
+            <TitleBar />
+            <div className="h-full overflow-hidden">
               <AppContent />
-            </RouterProvider>
-          </AuthProvider>
-        </div>
+            </div>
+          </RouterProvider>
+        </AuthProvider>
       </div>
     </ThemeProvider>
   );

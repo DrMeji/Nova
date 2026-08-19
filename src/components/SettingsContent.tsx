@@ -31,6 +31,25 @@ import {
 import { formatArkId } from '@/lib/arkUserId';
 import { clearLocalAppCaches, clearLocalChatCache } from '@/lib/clearSession';
 import { deleteEngineModel, engineDiskSpace, getEngineStatus, type ArkEngineModel, type ArkEngineStatus } from '@/lib/arkEngine';
+import { isRevealed, setRevealed, type ParkId } from '@/lib/featurePark';
+import { hasPinSet, setPin, clearPin } from '@/lib/pinLock';
+import { hasSecondFactorSet, setSecondFactor, clearSecondFactor } from '@/lib/twoFactor';
+import { probeProviderKey } from '@/lib/providerSpeed';
+import { setCloudProviderEnabled } from '@/lib/cloudSources';
+
+const REVEAL_FEATURES: { id: ParkId; label: string; description: string }[] = [
+  { id: 'networking', label: 'Networking', description: 'Social feed and contacts — shows Networking in the sidebar.' },
+  { id: 'message', label: 'Message', description: 'Direct messages between ARK users.' },
+  { id: 'call', label: 'Call', description: 'Voice calls (microphone + WebRTC). Video is not available yet.' },
+];
+
+const AUTO_LOCK_OPTIONS = [
+  { value: 0, label: 'Off' },
+  { value: 5, label: '5 minutes' },
+  { value: 15, label: '15 minutes' },
+  { value: 30, label: '30 minutes' },
+  { value: 60, label: '1 hour' },
+];
 
 const SECTIONS: { id: string; label: string; icon: typeof User; disabled?: boolean; comingSoon?: boolean }[] = [
   { id: 'account', label: 'Account', icon: User },
@@ -44,8 +63,8 @@ const SECTIONS: { id: string; label: string; icon: typeof User; disabled?: boole
   { id: 'projects', label: 'Projects', icon: FolderKanban },
   { id: 'security', label: 'Security', icon: Lock },
   { id: 'updates', label: 'Updates', icon: RefreshCw },
-  { id: 'testers', label: 'Testers', icon: FlaskConical, comingSoon: true },
-  { id: 'beta', label: 'Beta', icon: Sparkles, disabled: true },
+  { id: 'testers', label: 'Testers', icon: FlaskConical },
+  { id: 'beta', label: 'Beta', icon: Sparkles },
 ];
 
 const AI_MODES = [
@@ -90,11 +109,11 @@ const ACCENTS: { id: AccentPref; label: string; swatch: string }[] = [
   { id: 'rose', label: 'Rose', swatch: 'bg-rose-400' },
 ];
 
-export function SettingsContent({ onClose }: { onClose?: () => void } = {}) {
+export function SettingsContent({ onClose, initialSection }: { onClose?: () => void; initialSection?: string } = {}) {
   const { user, profile, settings, updateSettings, signOut, refreshProfile } = useAuth();
   const { theme, setTheme } = useTheme();
   const { navigate } = useRouter();
-  const [activeSection, setActiveSection] = useState('account');
+  const [activeSection, setActiveSection] = useState(initialSection || 'account');
   const [prefs, setPrefs] = useState<LocalPrefs>(() => getLocalPrefs());
   const [displayName, setDisplayName] = useState(
     () => getLocalPrefs().displayName || profile?.display_name || 'Guest',
@@ -122,7 +141,27 @@ export function SettingsContent({ onClose }: { onClose?: () => void } = {}) {
   const [engineStatus, setEngineStatus] = useState<ArkEngineStatus | null>(null);
   const [diskSpace, setDiskSpace] = useState<{ freeGb?: number | null; totalBytes?: number | null } | null>(null);
   const [deletingModelId, setDeletingModelId] = useState<string | null>(null);
+  const [pinNew, setPinNew] = useState('');
+  const [pinConfirm, setPinConfirm] = useState('');
+  const [pinMsg, setPinMsg] = useState('');
+  const [twoFaNew, setTwoFaNew] = useState('');
+  const [twoFaConfirm, setTwoFaConfirm] = useState('');
+  const [twoFaMsg, setTwoFaMsg] = useState('');
+  const [featureTick, setFeatureTick] = useState(0);
+  const [keyTestMsg, setKeyTestMsg] = useState('');
+  const [keyTestFor, setKeyTestFor] = useState<string | null>(null);
+  const [showLegacyProviders, setShowLegacyProviders] = useState(false);
   const settingsRootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const onFeat = () => setFeatureTick(t => t + 1);
+    window.addEventListener('ark:features-changed', onFeat);
+    return () => window.removeEventListener('ark:features-changed', onFeat);
+  }, []);
+
+  useEffect(() => {
+    if (initialSection) setActiveSection(initialSection);
+  }, [initialSection]);
 
   useEffect(() => {
     void window.arkDesktop?.appMeta?.()
@@ -149,7 +188,7 @@ export function SettingsContent({ onClose }: { onClose?: () => void } = {}) {
   };
 
   useEffect(() => {
-    if (activeSection !== 'storage') return;
+    if (activeSection !== 'storage' && activeSection !== 'models') return;
     refreshStorage();
     const onModels = () => refreshStorage();
     window.addEventListener('ark:engine-models-changed', onModels);
@@ -414,9 +453,26 @@ export function SettingsContent({ onClose }: { onClose?: () => void } = {}) {
             <SettingsSection title="Account" description="Profile, sign in, and session controls">
               <div className="space-y-5">
                 <div className="flex items-center gap-4">
-                  <div className="w-16 h-16 rounded-full bg-ark-blue-500/20 border border-ark-blue-500/30 flex items-center justify-center text-xl font-bold text-ark-blue-300">
-                    {(displayName || profile?.display_name || user?.email || '?')[0].toUpperCase()}
-                  </div>
+                  <label className="relative w-16 h-16 rounded-full overflow-hidden bg-ark-blue-500/20 border border-ark-blue-500/30 flex items-center justify-center text-xl font-bold text-ark-blue-300 cursor-pointer shrink-0">
+                    {prefs.avatarDataUrl
+                      ? <img src={prefs.avatarDataUrl} alt="" className="w-full h-full object-cover" />
+                      : (displayName || profile?.display_name || user?.email || '?')[0].toUpperCase()}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={e => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        const reader = new FileReader();
+                        reader.onload = () => {
+                          const url = typeof reader.result === 'string' ? reader.result : '';
+                          if (url) patchPrefs({ avatarDataUrl: url });
+                        };
+                        reader.readAsDataURL(file);
+                      }}
+                    />
+                  </label>
                   <div className="min-w-0">
                     <p className="text-sm font-medium text-content-primary truncate">{displayName || 'Guest'}</p>
                     <p className="text-xs text-content-tertiary truncate flex items-center gap-1.5 mt-0.5">
@@ -464,17 +520,20 @@ export function SettingsContent({ onClose }: { onClose?: () => void } = {}) {
                   </p>
                 </div>
                 <Field label="Email" value={user?.email ?? 'guest@ark.local'} onChange={() => {}} disabled />
+                <p className="text-[11px] text-content-tertiary -mt-3">
+                  Email is managed by sign-in (or guest@ark.local for a guest session). It is not editable here.
+                </p>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <InfoCard
                     title="Plan"
-                    value="Free starter"
-                    hint="Local AI included · cloud keys optional"
+                    value="Free on this PC"
+                    hint="No billing in ARK yet. Local brain + optional keys you add."
                   />
                   <InfoCard
                     title="Devices"
                     value="This PC"
-                    hint="Multi device sync arrives with cloud sync"
+                    hint="Multi-device sync is not live. This row is this machine only."
                   />
                 </div>
 
@@ -504,7 +563,7 @@ export function SettingsContent({ onClose }: { onClose?: () => void } = {}) {
                   <label className="block text-xs font-medium text-content-secondary mb-2">Theme</label>
                   <div className="grid grid-cols-1 min-[420px]:grid-cols-2 gap-3">
                     <ThemeCard label="Dark" active={theme === 'dark'} onClick={() => setTheme('dark')} />
-                    <ThemeCard label="Cream" active={theme === 'light'} onClick={() => setTheme('light')} />
+                    <ThemeCard label="Light" active={theme === 'light'} onClick={() => setTheme('light')} />
                   </div>
                 </div>
 
@@ -553,6 +612,21 @@ export function SettingsContent({ onClose }: { onClose?: () => void } = {}) {
                   </div>
                 </div>
 
+                <div>
+                  <label className="block text-xs font-medium text-content-secondary mb-2">Font size</label>
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="range"
+                      min={13}
+                      max={18}
+                      value={prefs.fontSizePx}
+                      onChange={e => patchPrefs({ fontSizePx: Number(e.target.value) })}
+                      className="flex-1"
+                    />
+                    <span className="text-xs text-content-tertiary tabular-nums w-10">{prefs.fontSizePx}px</span>
+                  </div>
+                </div>
+
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <ToggleRow
                   label="Compact sidebar"
@@ -588,6 +662,9 @@ export function SettingsContent({ onClose }: { onClose?: () => void } = {}) {
                     <p className="text-sm font-medium text-content-primary">Routing brain</p>
                     <p className="text-xs text-content-secondary">
                       Mode: {AI_MODES.find(m => m.value === aiMode)?.label ?? 'Automatic'}
+                    </p>
+                    <p className="text-[11px] text-content-tertiary mt-0.5">
+                      Last answer: {prefs.lastAnsweredLabel || 'None yet this session'}
                     </p>
                   </div>
                   <Sparkles className="w-4 h-4 text-sky-400" />
@@ -658,14 +735,27 @@ export function SettingsContent({ onClose }: { onClose?: () => void } = {}) {
           )}
 
           {activeSection === 'models' && (
-            <SettingsSection title="Models" description="Default model for new chats and builds">
+            <SettingsSection title="Models" description="Same library as the Models page. Cloud names need a saved key.">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {DEFAULT_MODELS.map(m => (
+                {DEFAULT_MODELS.map(m => {
+                  const providerId = m.source === 'cloud'
+                    ? (m.id.includes('claude') ? 'anthropic'
+                      : m.id.includes('gemini') ? 'google'
+                      : m.id.includes('deepseek') ? 'deepseek'
+                      : m.id.startsWith('gpt') ? 'openai'
+                      : null)
+                    : null;
+                  const locked = Boolean(providerId && !providerKeys[providerId]);
+                  const installed = m.source === 'local' && (engineStatus?.models || []).some(x => x.id === m.id && x.status === 'ready');
+                  return (
                   <button
                     key={m.id}
                     type="button"
+                    disabled={locked}
                     onClick={() => patchPrefs({ defaultModelId: m.id })}
                     className={`w-full text-left p-3 rounded-xl border transition-all ${
+                      locked ? 'opacity-40 cursor-not-allowed' : ''
+                    } ${
                       prefs.defaultModelId === m.id
                         ? 'border-ark-blue-400 bg-ark-blue-500/10'
                         : 'border-surface-border hover:border-surface-border-light'
@@ -674,12 +764,15 @@ export function SettingsContent({ onClose }: { onClose?: () => void } = {}) {
                     <div className="flex items-center justify-between gap-2">
                       <div className="min-w-0">
                         <p className="text-sm font-medium text-content-primary truncate">{m.label}</p>
-                        <p className="text-[11px] text-content-tertiary mt-0.5 line-clamp-2">{m.detail}</p>
+                        <p className="text-[11px] text-content-tertiary mt-0.5 line-clamp-2">
+                          {locked ? 'Save a key first' : installed ? `Installed · ${m.detail}` : m.detail}
+                        </p>
                       </div>
                       {prefs.defaultModelId === m.id && <Check className="w-4 h-4 text-ark-blue-400 shrink-0" />}
                     </div>
                   </button>
-                ))}
+                  );
+                })}
                 <button
                   type="button"
                   onClick={() => {
@@ -714,7 +807,7 @@ export function SettingsContent({ onClose }: { onClose?: () => void } = {}) {
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                  {PROVIDER_ROWS.map(p => {
+                  {PROVIDER_ROWS.filter(p => p.id !== 'github-models' || showLegacyProviders).map(p => {
                     const hasKey = Boolean(providerKeys[p.id]);
                     const editing = editingProvider === p.id;
                     return (
@@ -732,6 +825,21 @@ export function SettingsContent({ onClose }: { onClose?: () => void } = {}) {
                               <span className="text-[10px] rounded-full bg-emerald-500/15 text-emerald-400 px-1.5 py-0.5">
                                 Saved
                               </span>
+                            )}
+                            {hasKey && !editing && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setKeyTestFor(p.id);
+                                  setKeyTestMsg('Testing…');
+                                  void probeProviderKey(p.id, providerKeys[p.id] || '').then(res => {
+                                    setKeyTestMsg(res.ok ? `${p.name} · ${res.ms} ms` : `${p.name} · ${res.error || 'failed'}`);
+                                  });
+                                }}
+                                className="text-xs text-content-tertiary hover:text-content-secondary"
+                              >
+                                Test
+                              </button>
                             )}
                             <button
                               type="button"
@@ -776,21 +884,51 @@ export function SettingsContent({ onClose }: { onClose?: () => void } = {}) {
                                 onClick={() => {
                                   setProviderApiKey(p.id, keyDraft);
                                   setProviderKeys(getProviderApiKeys());
+                                  setCloudProviderEnabled(p.id, true);
                                   setEditingProvider(null);
                                   setKeyDraft('');
-                                  setSavedFlash('Key saved on this device');
+                                  setSavedFlash('Key saved — those models can appear in Chat now');
                                   window.setTimeout(() => setSavedFlash(''), 1600);
                                 }}
                               >
                                 Save key
                               </button>
+                              {(hasKey || keyDraft.trim()) && (
+                                <button
+                                  type="button"
+                                  className="ark-btn-secondary flex-1"
+                                  disabled={!keyDraft.trim() && !hasKey}
+                                  onClick={() => {
+                                    setKeyTestFor(p.id);
+                                    setKeyTestMsg('Testing…');
+                                    void probeProviderKey(p.id, keyDraft || providerKeys[p.id] || '').then(res => {
+                                      setKeyTestMsg(res.ok ? `${p.name} · ${res.ms} ms` : `${p.name} · ${res.error || 'failed'}`);
+                                    });
+                                  }}
+                                >
+                                  Test key
+                                </button>
+                              )}
                             </div>
+                            {keyTestMsg && keyTestFor === p.id && (
+                              <p className="text-[11px] text-content-tertiary">{keyTestMsg}</p>
+                            )}
                           </div>
+                        )}
+                        {keyTestMsg && keyTestFor === p.id && !editing && (
+                          <p className="text-[11px] text-content-tertiary mt-1.5">{keyTestMsg}</p>
                         )}
                       </div>
                     );
                   })}
                 </div>
+                <button
+                  type="button"
+                  className="text-[11px] text-content-tertiary hover:text-content-secondary"
+                  onClick={() => setShowLegacyProviders(v => !v)}
+                >
+                  {showLegacyProviders ? 'Hide retired sources' : 'Show retired (GitHub Models)'}
+                </button>
 
                 <div className="rounded-xl border border-surface-border p-3 space-y-2.5">
                   <div className="flex items-start justify-between gap-3">
@@ -848,7 +986,9 @@ export function SettingsContent({ onClose }: { onClose?: () => void } = {}) {
                 />
                 <ToggleRow
                   label="Allow optional cloud sync"
-                  description="Sync project metadata across your devices when signed in"
+                  description={prefs.allowCloudSync
+                    ? 'On — ARK still has no live multi-device sync. This toggle is saved for later.'
+                    : 'Off — not syncing. Multi-device project sync is not live yet.'}
                   value={allowSync}
                   onChange={v => {
                     patchPrefs({ allowCloudSync: v });
@@ -857,7 +997,7 @@ export function SettingsContent({ onClose }: { onClose?: () => void } = {}) {
                 />
                 <ToggleRow
                   label="Send anonymous diagnostics"
-                  description="Help improve ARK with crash and performance signals"
+                  description="Off by default. When on, crash-style notes would stay on this PC unless you add a backend — ARK does not send them today."
                   value={diagnostics}
                   onChange={v => {
                     patchPrefs({ sendDiagnostics: v });
@@ -884,6 +1024,29 @@ export function SettingsContent({ onClose }: { onClose?: () => void } = {}) {
                 >
                   <Trash2 className="w-4 h-4" />
                   {cacheBusy ? 'Clearing…' : 'Clear local chat cache'}
+                </button>
+                <p className="text-[11px] text-content-tertiary">
+                  Clear cache removes chat threads stored in this browser profile. Models, keys, and project folders stay.
+                </p>
+                <button
+                  type="button"
+                  className="ark-btn-secondary w-full"
+                  onClick={() => {
+                    const prefsOnly = { ...getLocalPrefs() };
+                    const blob = new Blob([JSON.stringify({
+                      exportedAt: new Date().toISOString(),
+                      prefs: prefsOnly,
+                      note: 'API keys are not included.',
+                    }, null, 2)], { type: 'application/json' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'ark-settings-export.json';
+                    a.click();
+                    URL.revokeObjectURL(url);
+                  }}
+                >
+                  Export my settings
                 </button>
               </div>
             </SettingsSection>
@@ -970,6 +1133,9 @@ export function SettingsContent({ onClose }: { onClose?: () => void } = {}) {
                     <Trash2 className="w-4 h-4" />
                     {cacheBusy ? 'Clearing…' : 'Clear cache'}
                   </button>
+                  <p className="text-[11px] text-content-tertiary w-full">
+                    Clears chat threads and local reports. Does not delete GGUF files, projects, or API keys.
+                  </p>
                   <button type="button" className="ark-btn-secondary" onClick={() => { onClose?.(); navigate({ name: 'local-ai' }); }}>
                     Manage models
                   </button>
@@ -1024,6 +1190,7 @@ export function SettingsContent({ onClose }: { onClose?: () => void } = {}) {
                       setHw(info);
                       setHwScanning(false);
                       setHwFlash(info.accurate ? 'Updated' : 'Approximate scan');
+                      window.dispatchEvent(new Event('ark:hardware-rescanned'));
                       window.setTimeout(() => setHwFlash(''), 2000);
                     });
                   }}
@@ -1032,6 +1199,13 @@ export function SettingsContent({ onClose }: { onClose?: () => void } = {}) {
                   {hwScanning ? 'Scanning…' : 'Rescan hardware'}
                 </button>
                 {hwFlash && <p className="text-xs text-emerald-400">{hwFlash}</p>}
+                <button
+                  type="button"
+                  className="text-xs text-sky-400 hover:text-sky-300"
+                  onClick={() => { onClose?.(); navigate({ name: 'models' }); }}
+                >
+                  Open Models · For your PC
+                </button>
               </div>
             </SettingsSection>
           )}
@@ -1044,6 +1218,9 @@ export function SettingsContent({ onClose }: { onClose?: () => void } = {}) {
                   value={prefs.projectLocation}
                   onChange={v => patchPrefs({ projectLocation: v })}
                 />
+                <p className="text-[11px] text-content-tertiary -mt-2">
+                  New projects and Open folder use this folder hint and the default type below.
+                </p>
                 <Field
                   label="Preferred language"
                   value={prefs.preferredLanguage}
@@ -1091,54 +1268,203 @@ export function SettingsContent({ onClose }: { onClose?: () => void } = {}) {
           )}
 
           {activeSection === 'security' && (
-            <SettingsSection title="Security" description="Protect this account and keep agent work sandboxed">
+            <SettingsSection title="Security" description="Protect this PC and keep agent file writes inside the project sandbox">
               <div className="space-y-4">
-                <div className="rounded-xl border border-surface-border p-4 opacity-55 pointer-events-none select-none">
+                <div className="rounded-xl border border-surface-border p-4 space-y-3">
+                  <div>
+                    <p className="text-sm font-medium text-content-primary">Local PIN</p>
+                    <p className="text-xs text-content-tertiary mt-0.5">
+                      {hasPinSet()
+                        ? 'PIN is set on this device. Change it or clear it below.'
+                        : 'Set a 4–8 digit PIN to lock ARK on this PC.'}
+                    </p>
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <input
+                      type="password"
+                      inputMode="numeric"
+                      autoComplete="off"
+                      placeholder="New PIN"
+                      value={pinNew}
+                      onChange={e => setPinNew(e.target.value.replace(/\D/g, '').slice(0, 8))}
+                      className="rounded-lg border border-surface-border bg-ark-navy-950 px-3 py-2 text-sm text-content-primary"
+                    />
+                    <input
+                      type="password"
+                      inputMode="numeric"
+                      autoComplete="off"
+                      placeholder="Confirm PIN"
+                      value={pinConfirm}
+                      onChange={e => setPinConfirm(e.target.value.replace(/\D/g, '').slice(0, 8))}
+                      className="rounded-lg border border-surface-border bg-ark-navy-950 px-3 py-2 text-sm text-content-primary"
+                    />
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      className="ark-btn-secondary text-xs"
+                      onClick={() => {
+                        void (async () => {
+                          setPinMsg('');
+                          if (pinNew !== pinConfirm) {
+                            setPinMsg('PINs do not match');
+                            return;
+                          }
+                          try {
+                            await setPin(pinNew);
+                            setPinNew('');
+                            setPinConfirm('');
+                            setPinMsg('PIN saved');
+                          } catch (err) {
+                            setPinMsg(err instanceof Error ? err.message : 'Could not save PIN');
+                          }
+                        })();
+                      }}
+                    >
+                      {hasPinSet() ? 'Change PIN' : 'Set PIN'}
+                    </button>
+                    {hasPinSet() ? (
+                      <button
+                        type="button"
+                        className="ark-btn-secondary text-xs"
+                        onClick={() => {
+                          void clearPin();
+                          patchPrefs({ requirePinOnLaunch: false });
+                          setPinNew('');
+                          setPinConfirm('');
+                          setPinMsg('PIN cleared');
+                        }}
+                      >
+                        Clear PIN
+                      </button>
+                    ) : null}
+                  </div>
+                  {pinMsg ? <p className="text-xs text-content-tertiary">{pinMsg}</p> : null}
+                  <p className="text-[11px] text-content-tertiary">
+                    Forgot the PIN? Use Clear PIN above. That unlocks this copy of ARK. There is no email recovery.
+                  </p>
+                </div>
+
+                <ToggleRow
+                  label="Require PIN on launch"
+                  description={hasPinSet() ? 'Lock ARK until you enter your PIN after opening the app' : 'Set a PIN first to enable launch lock'}
+                  value={prefs.requirePinOnLaunch}
+                  onChange={v => {
+                    if (v && !hasPinSet()) {
+                      setPinMsg('Set a PIN before enabling launch lock');
+                      return;
+                    }
+                    patchPrefs({ requirePinOnLaunch: v });
+                  }}
+                />
+
+                <div className="rounded-xl border border-surface-border p-4 flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-content-primary">Auto lock</p>
+                    <p className="text-xs text-content-tertiary mt-0.5">
+                      Lock after idle time when PIN on launch is enabled
+                    </p>
+                  </div>
+                  <select
+                    value={String(prefs.autoLockMinutes)}
+                    disabled={!prefs.requirePinOnLaunch || !hasPinSet()}
+                    onChange={e => patchPrefs({ autoLockMinutes: Number(e.target.value) })}
+                    className="rounded-lg border border-surface-border bg-ark-navy-950 px-2 py-1.5 text-xs text-content-primary disabled:opacity-45"
+                  >
+                    {AUTO_LOCK_OPTIONS.map(opt => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="rounded-xl border border-surface-border p-4 space-y-3">
                   <div className="flex items-start gap-3 min-w-0">
                     <div className="w-10 h-10 rounded-lg bg-sky-500/10 flex items-center justify-center shrink-0">
                       <Smartphone className="w-5 h-5 text-sky-400" />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <p className="text-sm font-medium text-content-primary">Two-factor authentication</p>
-                        <span className="text-[9px] uppercase tracking-wide text-content-tertiary">Coming soon</span>
-                      </div>
-                      <p className="text-xs text-content-tertiary mt-0.5">Not available yet — this stays off until we ship 2FA.</p>
+                      <p className="text-sm font-medium text-content-primary">Extra unlock code</p>
+                      <p className="text-xs text-content-tertiary mt-0.5">
+                        After PIN, require a local security code on this PC. This is not SMS or an authenticator app.
+                      </p>
                     </div>
-                    <Lock className="w-3.5 h-3.5 text-content-tertiary shrink-0 mt-1" />
                   </div>
-                </div>
-
-                <ToggleRow
-                  label="Require PIN on launch"
-                  description="Ask for a local PIN before opening ARK on this PC"
-                  value={prefs.requirePinOnLaunch}
-                  onChange={v => patchPrefs({ requirePinOnLaunch: v })}
-                />
-
-                <div className="ark-card p-4">
-                  <label className="block text-xs font-medium text-content-secondary mb-2">Auto lock</label>
+                  <ToggleRow
+                    label="Require second factor"
+                    description={hasSecondFactorSet() ? 'Enabled when a security code is saved below' : 'Set a security code before turning this on'}
+                    value={prefs.twoFactorEnabled}
+                    onChange={v => {
+                      if (v && !hasSecondFactorSet()) {
+                        setTwoFaMsg('Set a security code first');
+                        return;
+                      }
+                      patchPrefs({ twoFactorEnabled: v });
+                    }}
+                  />
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <input
+                      type="password"
+                      autoComplete="off"
+                      placeholder="Security code"
+                      value={twoFaNew}
+                      onChange={e => setTwoFaNew(e.target.value.slice(0, 32))}
+                      className="rounded-lg border border-surface-border bg-ark-navy-950 px-3 py-2 text-sm text-content-primary"
+                    />
+                    <input
+                      type="password"
+                      autoComplete="off"
+                      placeholder="Confirm code"
+                      value={twoFaConfirm}
+                      onChange={e => setTwoFaConfirm(e.target.value.slice(0, 32))}
+                      className="rounded-lg border border-surface-border bg-ark-navy-950 px-3 py-2 text-sm text-content-primary"
+                    />
+                  </div>
                   <div className="flex flex-wrap gap-2">
-                    {[5, 15, 30, 60].map(mins => (
+                    <button
+                      type="button"
+                      className="ark-btn-secondary text-xs"
+                      onClick={() => {
+                        void (async () => {
+                          setTwoFaMsg('');
+                          if (twoFaNew !== twoFaConfirm) {
+                            setTwoFaMsg('Codes do not match');
+                            return;
+                          }
+                          try {
+                            await setSecondFactor(twoFaNew);
+                            setTwoFaNew('');
+                            setTwoFaConfirm('');
+                            setTwoFaMsg('Security code saved');
+                          } catch (err) {
+                            setTwoFaMsg(err instanceof Error ? err.message : 'Could not save code');
+                          }
+                        })();
+                      }}
+                    >
+                      {hasSecondFactorSet() ? 'Change code' : 'Set code'}
+                    </button>
+                    {hasSecondFactorSet() ? (
                       <button
-                        key={mins}
                         type="button"
-                        onClick={() => patchPrefs({ autoLockMinutes: mins })}
-                        className={`rounded-full px-3 py-1.5 text-xs transition-colors ${
-                          prefs.autoLockMinutes === mins
-                            ? 'bg-surface-hover text-content-primary'
-                            : 'text-content-tertiary hover:text-content-secondary'
-                        }`}
+                        className="ark-btn-secondary text-xs"
+                        onClick={() => {
+                          void clearSecondFactor();
+                          patchPrefs({ twoFactorEnabled: false });
+                          setTwoFaNew('');
+                          setTwoFaConfirm('');
+                          setTwoFaMsg('Security code cleared');
+                        }}
                       >
-                        {mins} min
+                        Clear code
                       </button>
-                    ))}
+                    ) : null}
                   </div>
+                  {twoFaMsg ? <p className="text-xs text-content-tertiary">{twoFaMsg}</p> : null}
                 </div>
 
                 <ToggleRow
                   label="Sandbox agent actions"
-                  description="Keep file and terminal actions inside the open project"
+                  description="Block agent writes to .env, node_modules, lockfiles, and paths outside the project folder"
                   value={prefs.sandboxAgent}
                   onChange={v => patchPrefs({ sandboxAgent: v })}
                 />
@@ -1189,6 +1515,7 @@ export function SettingsContent({ onClose }: { onClose?: () => void } = {}) {
                           type="button"
                           onClick={downloadUpdate}
                           disabled={downloadingUpdate || !updateInfo.setupAssetUrl}
+                          title={!updateInfo.setupAssetUrl ? 'Update is disabled until GitHub publishes an installer file for this build' : 'Download and install'}
                           className="ark-btn-primary"
                         >
                           {downloadingUpdate ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
@@ -1274,14 +1601,32 @@ export function SettingsContent({ onClose }: { onClose?: () => void } = {}) {
           {activeSection === 'testers' && (
             <SettingsSection
               title="For testers"
-              description="Quick path to a first real reply, then tell us what to improve"
+              description="Quick path to a first real reply, reveal parked features, then tell us what to improve"
             >
               <div className="space-y-3">
+                <div className="rounded-xl border border-surface-border p-4 space-y-3">
+                  <p className="text-sm font-medium text-content-primary">Reveal parked features</p>
+                  <p className="text-xs text-content-tertiary leading-relaxed">
+                    These surfaces are wired and working. Toggles only affect this PC — sidebar items appear when turned on.
+                  </p>
+                  {REVEAL_FEATURES.map(opt => {
+                    void featureTick;
+                    return (
+                      <ToggleRow
+                        key={opt.id}
+                        label={opt.label}
+                        description={opt.description}
+                        value={isRevealed(opt.id)}
+                        onChange={v => setRevealed(opt.id, v)}
+                      />
+                    );
+                  })}
+                </div>
                 <div className="rounded-xl border border-surface-border p-4 space-y-2">
                   <p className="text-sm font-medium text-content-primary">First successful chat</p>
                   <ol className="text-xs text-content-tertiary space-y-1.5 list-decimal list-inside leading-relaxed">
                     <li>Connect a free key (Settings → Providers or the Chat “Connect free key” link), or</li>
-                    <li>Open Local AI → Install recommended (~1 GB) → wait until it says ready</li>
+                    <li>Open Models → Engine (or Local AI) → Install recommended → wait until it says ready</li>
                     <li>Chat with ARK Auto selected — try “Hello”</li>
                   </ol>
                 </div>
@@ -1326,6 +1671,26 @@ export function SettingsContent({ onClose }: { onClose?: () => void } = {}) {
                   >
                     Reset setup flag
                   </button>
+                </div>
+              </div>
+            </SettingsSection>
+          )}
+
+          {activeSection === 'beta' && (
+            <SettingsSection title="Beta channel" description="Opt into beta builds and changelog notes on this PC">
+              <div className="space-y-4">
+                <ToggleRow
+                  label="Beta updates"
+                  description="Show beta changelog entries and prefer beta builds when Updates finds them"
+                  value={prefs.updateChannel === 'beta'}
+                  onChange={v => patchPrefs({ updateChannel: v ? 'beta' : 'stable' })}
+                />
+                <div className="rounded-xl border border-surface-border p-4 space-y-2">
+                  <p className="text-sm font-medium text-content-primary">What this does</p>
+                  <p className="text-xs text-content-tertiary leading-relaxed">
+                    Stable stays the default. Updates checks GitHub Releases
+                    {prefs.updateChannel === 'beta' ? ' and prefers pre-release / beta tags on this PC.' : ' for the latest stable tag.'}
+                  </p>
                 </div>
               </div>
             </SettingsSection>

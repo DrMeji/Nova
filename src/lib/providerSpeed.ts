@@ -142,6 +142,10 @@ export function saveApiProbes(results: ProviderProbe[]) {
   }
 }
 
+export async function probeProviderKey(id: string, key: string): Promise<ProviderProbe> {
+  return probeOne(id, key);
+}
+
 async function probeOne(id: string, key: string): Promise<ProviderProbe> {
   const started = performance.now();
   if (id === 'github-models') {

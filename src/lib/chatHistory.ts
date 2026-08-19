@@ -7,6 +7,8 @@
 export type RouterChatTurn = {
   role: 'user' | 'assistant';
   content: string;
+  /** Base64 image parts for vision-capable providers (Gemini / GPT-4o). */
+  images?: { mime: string; data: string }[];
 };
 
 const MAX_TURNS = 16;
@@ -106,8 +108,9 @@ export function slimTurnContent(content: string): string {
   if (!raw) return '';
   if (raw.startsWith('__generating__:')) return '';
   if (raw.includes('ark-media:')) {
-    const title = raw.match(/^#+\s*(.+)$/m)?.[1]?.trim();
-    return title ? `[Prior media creation: ${title.slice(0, 120)}]` : '[Prior media creation in this chat]';
+    const text = raw.replace(/!\[[^\]]*]\(ark-media:[^)]+\)/g, '').trim();
+    const note = '[Attached image]';
+    return text ? `${text}\n\n${note}` : note;
   }
   // Drop giant data-URLs / markdown images
   let text = raw
@@ -158,6 +161,7 @@ type LooseMessage = {
 export function buildRouterHistory(
   prior: LooseMessage[],
   latestUserMessage: string,
+  images?: { mime: string; data: string }[],
 ): RouterChatTurn[] {
   const turns: RouterChatTurn[] = [];
   for (const m of prior) {
@@ -175,10 +179,13 @@ export function buildRouterHistory(
   }
 
   const latest = slimTurnContent(latestUserMessage) || latestUserMessage.trim();
+  const vision = images?.length ? images : undefined;
   if (latest) {
     const last = turns[turns.length - 1];
     if (!(last?.role === 'user' && last.content === latest)) {
-      turns.push({ role: 'user', content: latest });
+      turns.push({ role: 'user', content: latest, images: vision });
+    } else if (vision) {
+      last.images = vision;
     }
   }
 
@@ -191,12 +198,12 @@ export function buildRouterHistory(
   }
   // Ensure we still end on the latest user turn
   if (window.length === 0 && latest) {
-    window = [{ role: 'user', content: latest.slice(0, MAX_TURN_CHARS) }];
+    window = [{ role: 'user', content: latest.slice(0, MAX_TURN_CHARS), images: vision }];
   }
 
   // New task (e.g. weather → “build an app”): drop prior turns so GGUF cannot regurgitate them.
   if (latest && isTopicShift(window, latest)) {
-    return [{ role: 'user', content: latest.slice(0, MAX_TURN_CHARS) }];
+    return [{ role: 'user', content: latest.slice(0, MAX_TURN_CHARS), images: vision }];
   }
 
   return window;
@@ -204,12 +211,16 @@ export function buildRouterHistory(
 
 export function routerSystemPrompt(history: RouterChatTurn[]): string {
   const latest = latestUserMessage(history, '');
+  const hasVision = history.some(t => t.images?.length);
+  const visionNote = hasVision
+    ? '\n\nThe user attached a photo. If this request includes image pixels, describe what you see. If you cannot see the image, say so in one line and do not invent the contents.'
+    : '';
   const hasPrior = history.some(t => t.role === 'assistant') || history.length > 1;
-  if (!hasPrior) return BASE_SYSTEM;
+  if (!hasPrior) return `${BASE_SYSTEM}${visionNote}`;
   if (FOLLOW_UP_HINT.test(latest.trim())) {
-    return `${BASE_SYSTEM}\n\nThis is a follow-up. Continue the previous answer from where it stopped. Do not restart the same numbered list from 1.`;
+    return `${BASE_SYSTEM}\n\nThis is a follow-up. Continue the previous answer from where it stopped. Do not restart the same numbered list from 1.${visionNote}`;
   }
-  return `${BASE_SYSTEM}\n\n${CONTINUITY}`;
+  return `${BASE_SYSTEM}\n\n${CONTINUITY}${visionNote}`;
 }
 
 function wantsChatCode(latest: string) {
@@ -407,7 +418,7 @@ export function sanitizeAssistantReply(
 }
 
 export function looksLikePromptEcho(reply: string): boolean {
-  const t = String(reply || '').trim();
+  const t = String(reply || '').trim().replace(/^[,.;:\s]+/, '');
   if (!t) return false;
   if (PROMPT_FRAGMENT_RE.test(t)) return true;
   // Strong signal: models sometimes re-emit the exact system instruction block.

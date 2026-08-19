@@ -130,7 +130,12 @@ export function autoEquippedCaption(brain: ThreadBrain | null): string {
     .replace(/ · switched$/i, '')
     .trim();
   const name = short.length > 28 ? `${short.slice(0, 26).trim()}…` : short;
-  return name ? `Using ${name} for this chat` : 'Picks the best brain for this chat';
+  if (!name) return 'Picks the best brain for this chat';
+  if (brain.pinnedSource === 'local') return `Local · ${name}`;
+  if (brain.tier === 'free-key' || brain.tier === 'no-key-free' || brain.pinnedSource === 'optional') {
+    return `${name} · free`;
+  }
+  return `${name} · saved key`;
 }
 
 export function autoRingDetail(brain: ThreadBrain | null, kind?: ThreadBrainKind): string {

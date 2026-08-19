@@ -11,8 +11,10 @@ import {
   getPluginById,
   getPluginRuntime,
   isPluginLive,
+  isPluginWired,
   loadPluginState,
   upsertPluginRuntime,
+  runPluginAction,
   type PluginDef,
   type PluginPermission,
   type PluginStateMap,
@@ -27,6 +29,8 @@ import { verifyVercelToken } from '@/lib/vercel';
 import { verifyDiscordToken } from '@/lib/discord';
 import { verifyDriveToken } from '@/lib/gdrive';
 import { verifyCalendarToken } from '@/lib/gcal';
+import { verifyTelegramToken } from '@/lib/telegram';
+import { verifyStripeToken } from '@/lib/stripe';
 import { openInSystemBrowser } from '@/lib/openExternal';
 import { getPluginAuthLink } from '@/lib/pluginAuth';
 
@@ -40,6 +44,9 @@ export function BuildRun() {
   const [authBusy, setAuthBusy] = useState(false);
   const [authError, setAuthError] = useState('');
   const [verifiedLogin, setVerifiedLogin] = useState('');
+  const [pluginShelf, setPluginShelf] = useState<'installed' | 'catalog'>('catalog');
+  const [testBusy, setTestBusy] = useState(false);
+  const [testResult, setTestResult] = useState('');
 
   const selected = selectedId ? getPluginById(selectedId) ?? null : null;
   const selectedRuntime = selectedId ? getPluginRuntime(selectedId, state) : null;
@@ -50,6 +57,8 @@ export function BuildRun() {
       ...cat,
       plugins: PLUGIN_CATALOG.filter(p => {
         if (p.category !== cat.id) return false;
+        if (!q && pluginShelf === 'catalog' && !isPluginLive(p.id) && !isPluginWired(p.id)) return false;
+        if (pluginShelf === 'installed') return false;
         if (!q) return true;
         return (
           p.name.toLowerCase().includes(q)
@@ -88,7 +97,7 @@ export function BuildRun() {
 
   const install = (id: string) => {
     const plugin = getPluginById(id);
-    if (!plugin) return;
+    if (!plugin || !isPluginWired(id)) return;
     patch(id, {
       installed: true,
       permissions: plugin.permissions.filter(p => p.required).map(p => p.id),
@@ -110,7 +119,7 @@ export function BuildRun() {
 
   const startConnect = () => {
     if (!selected) return;
-    if (!isPluginLive(selected.id)) {
+    if (!isPluginWired(selected.id)) {
       setAuthError('Coming soon — not connected to a live API yet.');
       return;
     }
@@ -128,7 +137,7 @@ export function BuildRun() {
 
   const finishConnect = () => {
     if (!selected) return;
-    if (!isPluginLive(selected.id)) {
+    if (!isPluginWired(selected.id)) {
       setAuthError('Coming soon — not connected to a live API yet.');
       return;
     }
@@ -157,7 +166,7 @@ export function BuildRun() {
     if (!selected) return;
     setAuthError('');
 
-    if (!isPluginLive(selected.id)) {
+    if (!isPluginWired(selected.id)) {
       setAuthError('Coming soon — not connected to a live API yet.');
       return;
     }
@@ -198,6 +207,12 @@ export function BuildRun() {
         setVerifiedLogin(user.label);
       } else if (selected.id === 'gcal') {
         const user = await verifyCalendarToken(tokenDraft);
+        setVerifiedLogin(user.label);
+      } else if (selected.id === 'telegram') {
+        const user = await verifyTelegramToken(tokenDraft);
+        setVerifiedLogin(user.label);
+      } else if (selected.id === 'stripe') {
+        const user = await verifyStripeToken(tokenDraft);
         setVerifiedLogin(user.label);
       } else {
         setAuthError('Coming soon — not connected to a live API yet.');
@@ -260,15 +275,31 @@ export function BuildRun() {
             <div className="min-w-0">
               <h1 className="text-2xl sm:text-3xl font-semibold text-content-primary tracking-tight">Plugins</h1>
             </div>
-            <div className="flex items-center gap-2 rounded-full bg-surface-hover px-3 py-2 w-36 sm:w-52 md:w-64 shrink-0 min-w-0">
-              <Search className="w-4 h-4 text-content-tertiary shrink-0" />
-              <input
-                type="text"
-                value={query}
-                onChange={e => setQuery(e.target.value)}
-                placeholder="Search plugins"
-                className="flex-1 bg-transparent border-none text-sm text-content-primary placeholder:text-content-tertiary focus:outline-none min-w-0"
-              />
+            <div className="flex items-center gap-2">
+              <div className="flex rounded-full bg-surface-hover p-0.5">
+                {(['catalog', 'installed'] as const).map(id => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => setPluginShelf(id)}
+                    className={`rounded-full px-3 py-1 text-xs ${
+                      pluginShelf === id ? 'bg-ark-navy-900 text-content-primary' : 'text-content-tertiary'
+                    }`}
+                  >
+                    {id === 'catalog' ? 'Browse' : 'Installed'}
+                  </button>
+                ))}
+              </div>
+              <div className="flex items-center gap-2 rounded-full bg-surface-hover px-3 py-2 w-36 sm:w-52 md:w-64 shrink-0 min-w-0">
+                <Search className="w-4 h-4 text-content-tertiary shrink-0" />
+                <input
+                  type="text"
+                  value={query}
+                  onChange={e => setQuery(e.target.value)}
+                  placeholder="Search plugins"
+                  className="flex-1 bg-transparent border-none text-sm text-content-primary placeholder:text-content-tertiary focus:outline-none min-w-0"
+                />
+              </div>
             </div>
           </div>
         </div>
@@ -276,12 +307,16 @@ export function BuildRun() {
 
       <div className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden px-4 sm:px-6 pb-10">
         <div className="w-full max-w-4xl mx-auto">
-          {!query && (
+          {(pluginShelf === 'installed' || (pluginShelf === 'catalog' && !query)) && (
             <>
+              {pluginShelf === 'catalog' && (
               <section className="mb-8">
-                <h2 className="text-base font-semibold text-content-primary mb-3">Suggested</h2>
+                <h2 className="text-base font-semibold text-content-primary mb-1">Suggested</h2>
+                <p className="text-xs text-content-tertiary mb-3">
+                  Live connections. Search the catalog for the rest — those stay labeled Coming soon until they have an API.
+                </p>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                  {PLUGIN_CATALOG.filter(p => p.hero).map(plugin => {
+                  {PLUGIN_CATALOG.filter(p => isPluginLive(p.id)).map(plugin => {
                     const runtime = getPluginRuntime(plugin.id, state);
                     return (
                       <button
@@ -321,6 +356,7 @@ export function BuildRun() {
                   })}
                 </div>
               </section>
+              )}
 
               <section className="mb-10">
                 <h2 className="text-base font-semibold text-content-primary mb-2">Your library</h2>
@@ -380,9 +416,13 @@ export function BuildRun() {
                               <span className="text-[10px] rounded-full bg-emerald-500/15 text-emerald-400 px-1.5 py-0.5 shrink-0">
                                 Live
                               </span>
+                            ) : isPluginWired(plugin.id) ? (
+                              <span className="text-[10px] rounded-full bg-sky-500/15 text-sky-400 px-1.5 py-0.5 shrink-0">
+                                Ready
+                              </span>
                             ) : (
                               <span className="text-[10px] rounded-full bg-amber-500/15 text-amber-400/90 px-1.5 py-0.5 shrink-0">
-                                Coming soon
+                                Catalog only
                               </span>
                             )}
                           </span>
@@ -492,7 +532,7 @@ export function BuildRun() {
                   )}
 
                   <div className="flex flex-col gap-2 pt-1">
-                    {!isPluginLive(selected.id) ? (
+                    {!isPluginWired(selected.id) ? (
                       <p className="text-sm text-content-tertiary rounded-xl border border-surface-border px-3 py-3">
                         Coming soon — listed for discovery only. Not connected to a live API yet.
                       </p>
@@ -520,9 +560,39 @@ export function BuildRun() {
                           <Unplug className="w-4 h-4" />
                           Disconnect account
                         </button>
+                        <button
+                          type="button"
+                          className="ark-btn-secondary w-full"
+                          disabled={testBusy}
+                          onClick={() => {
+                            setTestBusy(true);
+                            setTestResult('');
+                            const action = selected.actions[0]?.prompt || `Using ${selected.name}, test the connection.`;
+                            void runPluginAction(
+                              selected.id,
+                              action,
+                              selectedRuntime.token,
+                              selectedRuntime.permissions,
+                            ).then(text => {
+                              setTestResult(text || 'No live response.');
+                              setTestBusy(false);
+                            }).catch(err => {
+                              setTestResult(err instanceof Error ? err.message : 'Test failed');
+                              setTestBusy(false);
+                            });
+                          }}
+                        >
+                          {testBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                          {testBusy ? 'Testing…' : 'Test connection'}
+                        </button>
+                        {testResult && (
+                          <pre className="text-[11px] text-content-secondary whitespace-pre-wrap rounded-xl border border-surface-border px-3 py-2 max-h-40 overflow-auto">
+                            {testResult.slice(0, 1200)}
+                          </pre>
+                        )}
                       </>
                     )}
-                    {selectedRuntime.installed && isPluginLive(selected.id) && (
+                    {selectedRuntime.installed && isPluginWired(selected.id) && (
                       <button
                         type="button"
                         className="ark-btn-secondary w-full !text-ark-accent-red"
@@ -552,7 +622,7 @@ export function BuildRun() {
                           <>
                             <p className="text-xs text-content-tertiary leading-relaxed">
                               {selected.authKind === 'oauth'
-                                ? `Browser-assisted connect: open ${selected.name}, sign in / authorize, then paste the access token below. ARK stores it in the OS vault.`
+                                ? `No in-app OAuth yet. Open ${selected.name} in the browser, copy a token, and paste it here. ARK stores it in the OS vault.`
                                 : link.hint}
                             </p>
                             <button

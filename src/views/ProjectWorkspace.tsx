@@ -22,7 +22,7 @@ import {
   runPluginAction,
 } from '@/lib/plugins';
 import { arkRoute, routerProviderLabel } from '@/lib/arkRouter';
-import { buildRouterHistory } from '@/lib/chatHistory';
+import { buildRouterHistory, looksLikePromptEcho } from '@/lib/chatHistory';
 import {
   autoEquippedCaption,
   autoPillLabel,
@@ -41,6 +41,7 @@ import {
   serializeProjectThread,
 } from '@/lib/projectThread';
 import { getLocalPrefs, hasProviderApiKey, setLocalPrefs } from '@/lib/localPrefs';
+import { safeProjectWrite } from '@/lib/projectWriteSafe';
 import { installNextWhenCurrentRanOut } from '@/lib/arkHuntBootstrap';
 import { preloadStartRatio } from '@/lib/speedTest';
 import { loadRecentProjects } from '@/lib/recentStore';
@@ -58,28 +59,31 @@ import {
   flattenProjectFiles,
   foldersToExpand,
   inferBuildLabel,
+  parseClosedFileEdits,
   parseFileEdits,
   planFilesForBuild,
-  scaffoldFallbackEdits,
+  fileContentLooksComplete,
+  replyHasUnclosedFileBlock,
   type BuildLiveStep,
 } from '@/lib/projectCodeEdit';
-import { classifyMobileTarget, inferMobileTargetFromFiles, isNativeMobileTree, needsMobileTargetChoice } from '@/lib/mobileTarget';
+import { classifyMobileTarget, inferMobileTargetFromFiles, isNativeMobileTree, looksLikeWebsiteBuild, needsMobileTargetChoice, WEBSITE_BUILD_MARK } from '@/lib/mobileTarget';
 import { finalizeMobileEdits, formatNativeBuildReply, formatNativePushReply, preferredMobileFocus, simpleVisualPatchEdits, layoutLockEdits } from '@/lib/mobileTemplates';
 import {
   classifyMobileDevice,
-  defaultDeviceForFamily,
+  classifyNamedDevice,
+  deviceChipLabel,
+  deviceLine,
   devicesForChips,
-  familyBuildPrompt,
   isLayoutLockAsk,
   layoutLockPrompt,
   needsDeviceFamilyChoice,
+  PHONE_DEVICES,
   resolveDevices,
-  type DeviceFamilyKind,
+  sizedBuildPrompt,
   type MobilePlatform,
   type PhoneDevice,
 } from '@/lib/mobileDevices';
 import { isCloudProviderEnabled } from '@/lib/cloudSources';
-import { DeviceFamilyChips } from '@/components/DeviceFamilyChips';
 import { DevicePreview } from '@/components/DevicePreview';
 import { ComposerPlusMenu, type ComposerPlusAction } from '@/components/ComposerPlusMenu';
 import { CodeEditor } from '@/components/CodeEditor';
@@ -90,10 +94,13 @@ import { getEngineStatus, setEngineModel, engineGenerateCancel } from '@/lib/ark
 import {
   buildInspectPrompt,
   buildNamedPatchPrompt,
+  describeProjectFromFiles,
   filterEditsToPaths,
   formatLocalFindings,
   isExplainAsk,
   isFindInFilesAsk,
+  isImproveAsk,
+  isPatchAsk,
   pathsMentionedInText,
   pickFilesForInspect,
   preferredEntryPath,
@@ -106,7 +113,6 @@ import {
   type SearchHit,
 } from '@/lib/projectInspect';
 import { gitPush, gitCommit, gitStatus, gitClone, githubCloneUrl, parseGithubRemote, type GitStatus } from '@/lib/arkGitClient';
-import { appendScaffoldHonesty } from '@/lib/codeBuildHonesty';
 import { runCodeStudioCommand } from '@/lib/studioCommands';
 import { StudioEmptyState } from '@/components/StudioEmptyState';
 import { GitHubRepoPicker } from '@/components/GitHubRepoPicker';
@@ -128,9 +134,12 @@ const CODE_MODELS: CodeModel[] = [
 ];
 
 const CLOUD_CODE_WHEN_KEYED: (CodeModel & { keyId: string })[] = [
-  { id: 'groq:llama-3.3-70b', name: 'Llama 3.3 70B', source: 'cloud', detail: 'Groq', keyId: 'groq' },
-  { id: 'google:gemini-2.0-flash', name: 'Gemini 2.0 Flash', source: 'cloud', detail: 'Google', keyId: 'google' },
-  { id: 'openrouter:auto', name: 'OpenRouter', source: 'cloud', detail: 'Free routes', keyId: 'openrouter' },
+  { id: 'groq-llama', name: 'Llama 3.3 70B', source: 'cloud', detail: 'Groq', keyId: 'groq' },
+  { id: 'gemini-flash', name: 'Gemini 2.0 Flash', source: 'cloud', detail: 'Google', keyId: 'google' },
+  { id: 'openrouter-free', name: 'OpenRouter', source: 'cloud', detail: 'Free routes', keyId: 'openrouter' },
+  { id: 'gpt-4o', name: 'GPT-4o', source: 'cloud', detail: 'OpenAI', keyId: 'openai' },
+  { id: 'claude-sonnet', name: 'Claude Sonnet', source: 'cloud', detail: 'Anthropic', keyId: 'anthropic' },
+  { id: 'deepseek-chat', name: 'DeepSeek Chat', source: 'cloud', detail: 'DeepSeek', keyId: 'deepseek' },
 ];
 
 const COMPOSER_MODE_PREFIX: Record<'plan' | 'ask' | 'debug' | 'multitask', string> = {
@@ -165,8 +174,9 @@ interface FileNode {
   language?: string;
 }
 
-const CODE_ROUTE_TIMEOUT_MS = 120_000;
-const CODE_STALL_MS = 45_000;
+const CODE_ROUTE_TIMEOUT_MS = 320_000;
+const CODE_STALL_MS = 25_000;
+const CODE_FIRST_TOKEN_MS = 60_000;
 const BUILD_STEP_ORDER: BuildLiveStep[] = ['understand', 'plan', 'generate', 'apply', 'done'];
 
 function packDiskFiles(files: Record<string, string>, messages?: ChatMessage[]) {
@@ -179,10 +189,24 @@ function packDiskFiles(files: Record<string, string>, messages?: ChatMessage[]) 
   return payloadFiles;
 }
 
-function sleep(ms: number) {
-  return new Promise<void>(resolve => {
-    window.setTimeout(resolve, ms);
-  });
+function preferredLiveEditPath(paths: string[]): string | undefined {
+  const skip = /\.(pbxproj|plist)$|Assets\.xcassets|\.xcodeproj\//;
+  const live = paths.filter(p => !skip.test(p));
+  return live.find(p => /ContentView\.swift$|MainActivity\.kt$/i.test(p))
+    || live.find(p => /\.(swift|kt)$/i.test(p))
+    || live.find(p => /\.(tsx|jsx|css|html|py|ts|js)$/i.test(p) && !/ark-preview/i.test(p))
+    || live.find(p => /ark-preview\.html$/i.test(p))
+    || live[0]
+    || paths[0];
+}
+
+function defaultCodeModel(): CodeModel {
+  const prefs = getLocalPrefs();
+  const pref = prefs.defaultCodeModelId || prefs.defaultModelId;
+  if (!pref || pref === 'ark-auto') return CODE_MODELS[0];
+  const cloud = CLOUD_CODE_WHEN_KEYED.find(m => m.id === pref);
+  if (cloud && hasProviderApiKey(cloud.keyId)) return cloud;
+  return { id: pref, name: pref, source: 'local', detail: 'Local · Settings default' };
 }
 
 function formatElapsed(ms: number) {
@@ -208,7 +232,7 @@ function AssistantBuildReply({
   onOpenPath?: (path: string, line?: number) => void;
 }) {
   const match = content.match(/^(.*?)\n\nWorked for (.+)\s*$/s);
-  const body = (match ? match[1] : content).trim();
+  const body = stripFileBlocks(match ? match[1] : content).trim();
   const worked = match?.[2]?.trim() || null;
   const findings = onOpenPath ? parseReplyFindings(body) : [];
   return (
@@ -240,14 +264,31 @@ function BuildProgressBubble({
   step,
   plannedFiles,
   startedAt,
+  kind,
+  focusFile,
 }: {
   label: string;
   step: BuildLiveStep;
   plannedFiles: string[];
   startedAt: number;
+  kind?: 'build' | 'inspect' | 'fix';
+  focusFile?: string;
 }) {
   const activeIdx = BUILD_PROGRESS_STEPS.findIndex(s => s.id === step);
   const [elapsedMs, setElapsedMs] = useState(() => Date.now() - startedAt);
+  const reading = kind === 'inspect';
+  const fixing = kind === 'fix';
+  const title = step === 'done'
+    ? (reading ? `Read ${label}` : fixing ? `Updated ${label}` : `Built ${label}`)
+    : (reading ? `Reading ${label}` : fixing ? `Editing ${label}` : `Building ${label}`);
+  const stepLabel = (id: BuildLiveStep, fallback: string) => {
+    if (!reading) return fallback;
+    if (id === 'understand') return 'Reading the files you opened';
+    if (id === 'plan') return 'Scanning the project';
+    if (id === 'generate') return 'Writing an answer';
+    if (id === 'apply') return 'Checking findings';
+    return 'Done';
+  };
 
   useEffect(() => {
     if (step === 'done') {
@@ -264,7 +305,7 @@ function BuildProgressBubble({
     <div className="space-y-2.5 text-xs min-w-[14rem]">
       <div className="flex items-start justify-between gap-3">
         <p className="text-sm font-medium text-content-primary">
-          {step === 'done' ? `Built ${label}` : `Building ${label}`}
+          {title}
         </p>
         <span className="text-[10px] text-content-tertiary tabular-nums shrink-0 pt-0.5">
           {formatElapsed(elapsedMs)}
@@ -288,15 +329,17 @@ function BuildProgressBubble({
                   : done ? 'text-content-secondary'
                     : 'text-content-tertiary'
               }>
-                {s.label}
+                {stepLabel(s.id, s.label)}
               </span>
             </li>
           );
         })}
       </ul>
-      {plannedFiles.length > 0 && activeIdx >= 1 && (
+      {(focusFile || plannedFiles.length > 0) && (
         <p className="text-[10px] text-content-tertiary border-t border-surface-border/60 pt-2 leading-relaxed">
-          {step === 'done' ? 'Saved' : 'Creating'}: {plannedFiles.join(' · ')}
+          {reading
+            ? `Looking at: ${focusFile || plannedFiles.slice(0, 4).join(' · ')}`
+            : `${step === 'done' ? 'Saved' : 'Editing'}: ${focusFile || plannedFiles.join(' · ')}`}
         </p>
       )}
     </div>
@@ -353,7 +396,7 @@ export function ProjectWorkspace() {
   const [composerMode, setComposerMode] = useState<'plan' | 'ask' | 'debug' | 'multitask' | null>(null);
   const [composerTall, setComposerTall] = useState(false);
   const [tokenRatio, setTokenRatio] = useState(0);
-  const [activeModel, setActiveModel] = useState<CodeModel>(() => CODE_MODELS[0]);
+  const [activeModel, setActiveModel] = useState<CodeModel>(() => defaultCodeModel());
   const [threadBrain, setThreadBrain] = useState<ThreadBrain | null>(null);
   const threadBrainRef = useRef<ThreadBrain | null>(null);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
@@ -374,12 +417,14 @@ export function ProjectWorkspace() {
     plannedFiles: string[];
     startedAt: number;
     kind?: 'build' | 'inspect' | 'fix';
+    focusFile?: string;
   } | null>(null);
   const [attachedImages, setAttachedImages] = useState<{ id: string; url: string; name: string }[]>([]);
   const [changesOpen, setChangesOpen] = useState(false);
-  const [diffStats, setDiffStats] = useState({ added: 0, removed: 0 });
+  const [fileChanges, setFileChanges] = useState<{ path: string; added: number; removed: number }[]>([]);
   const [showHistory, setShowHistory] = useState(false);
-  const [runHistory, setRunHistory] = useState<{ id: string; title: string; at: string }[]>([]);
+  const [runHistory, setRunHistory] = useState<{ id: string; title: string; at: string; steps: string }[]>([]);
+  const [sandboxNote, setSandboxNote] = useState<string | null>(null);
   const [fileContents, setFileContents] = useState<Record<string, string>>({});
   const [rightTab, setRightTab] = useState<'code' | 'preview'>('code');
   const [fileFlash, setFileFlash] = useState(false);
@@ -419,7 +464,6 @@ export function ProjectWorkspace() {
   const codeEditorRef = useRef<HTMLTextAreaElement>(null);
   const modelButtonRef = useRef<HTMLButtonElement>(null);
   const modelMenuRef = useRef<HTMLDivElement>(null);
-  const pendingAutoSendRef = useRef<string | null>(null);
   const streamDraftRef = useRef('');
   const buildAbortRef = useRef<{ abort: () => void } | null>(null);
   const fileContentsRef = useRef(fileContents);
@@ -430,9 +474,11 @@ export function ProjectWorkspace() {
   const runIdRef = useRef(0);
   const lastInspectPathsRef = useRef<string[]>([]);
   const undoSnapshotRef = useRef<Record<string, string> | null>(null);
+  const previewDeviceRef = useRef<PhoneDevice | null>(null);
   fileContentsRef.current = fileContents;
   fileTreeRef.current = fileTree;
   messagesRef.current = messages;
+  previewDeviceRef.current = previewDevice;
 
   const applyProjectFiles = useCallback((files: Record<string, string>) => {
     const mapped: Record<string, string> = {};
@@ -493,6 +539,51 @@ export function ProjectWorkspace() {
     });
   }, [project?.id, projectId, user?.id]);
 
+  const refreshLivePreview = useCallback(async (
+    files?: Record<string, string>,
+    device?: PhoneDevice | null,
+  ) => {
+    const pid = project?.id || projectId;
+    if (!pid || !window.arkDesktop?.previewStart) return;
+    const nextFiles = files || fileContentsRef.current;
+    const native = isNativeMobileTree(nextFiles);
+    const payloadFiles = packDiskFiles(nextFiles, messagesRef.current);
+    const composed = composePreviewHtml(nextFiles);
+    if (!payloadFiles['index.html'] && composed) payloadFiles['index.html'] = composed;
+    if (!payloadFiles['index.html'] && payloadFiles['ark-preview.html']) {
+      payloadFiles['index.html'] = payloadFiles['ark-preview.html'];
+    }
+    const res = await window.arkDesktop.previewStart({
+      projectId: pid,
+      projectName: project?.name,
+      files: payloadFiles,
+    });
+    if (!res?.url) return;
+    setLivePreviewUrl(res.url);
+    setPreviewUrl(res.url);
+    setPreviewReady(true);
+    const d = device
+      ?? previewDeviceRef.current
+      ?? (native
+        ? (resolveDevices(inferMobileTargetFromFiles(nextFiles) || 'ios', '').ios || null)
+        : null);
+    if (d) {
+      previewDeviceRef.current = d;
+      setPreviewDevice(d);
+    }
+    if (window.arkDesktop.previewOpenWindow) {
+      await window.arkDesktop.previewOpenWindow({
+        projectId: pid,
+        url: res.url,
+        title: d ? `${d.label} · ${d.width}×${d.height}` : `${project?.name || 'ARK'} preview`,
+        kind: native && d ? 'device' : 'web',
+        device: d
+          ? { label: d.label, width: d.width, height: d.height, family: d.family }
+          : undefined,
+      });
+    }
+  }, [project?.id, project?.name, projectId]);
+
   const applyWorkspaceEdits = useCallback((edits: { path: string; content: string }[]) => {
     if (!canEdit || !edits.length) return { changedPaths: [] as string[] };
     undoSnapshotRef.current = { ...fileContentsRef.current };
@@ -502,29 +593,47 @@ export function ProjectWorkspace() {
     fileTreeRef.current = applied.tree.length ? applied.tree : buildFileTreeFromPaths(applied.files);
     setFileContents(applied.files);
     setFileTree(fileTreeRef.current);
-    setDiffStats(prev => ({
-      added: prev.added + applied.addedLines,
-      removed: prev.removed + applied.removedLines,
-    }));
+    setFileChanges(prev => {
+      const map = new Map(prev.map(f => [f.path, f]));
+      for (const d of applied.fileDiffs) {
+        const cur = map.get(d.path);
+        map.set(d.path, {
+          path: d.path,
+          added: (cur?.added || 0) + d.added,
+          removed: (cur?.removed || 0) + d.removed,
+        });
+      }
+      return [...map.values()];
+    });
     setExpandedFolders(prev => {
       const next = new Set(prev);
       foldersToExpand(applied.changedPaths).forEach(p => next.add(p));
       return next;
     });
-    const focus = preferredMobileFocus(applied.changedPaths) || applied.changedPaths[0];
-    if (focus) setSelectedFile(focus);
+    const focus = preferredLiveEditPath(applied.changedPaths) || preferredMobileFocus(applied.changedPaths);
+    if (focus) {
+      setSelectedFile(focus);
+      setRightTab('code');
+      setCodeOpen(true);
+    }
     const pid = project?.id || projectId;
-    if (pid && window.arkDesktop?.projectWrite) {
-      void window.arkDesktop.projectWrite({
+    if (pid) {
+      void safeProjectWrite({
         projectId: pid,
         projectName: project?.name,
         files: packDiskFiles(applied.files, messagesRef.current),
       }).then(res => {
         if (res.root) setDiskRoot(res.root);
+        if (res.sandboxBlocked?.length) {
+          const note = `Sandbox blocked ${res.sandboxBlocked.length} path(s): ${res.sandboxBlocked.slice(0, 3).join(', ')}`;
+          setSandboxNote(note);
+          postAssistantNote(note);
+        }
       });
     }
-    return { changedPaths: applied.changedPaths };
-  }, [canEdit, project?.id, project?.name, projectId]);
+    void refreshLivePreview(applied.files);
+    return { changedPaths: applied.changedPaths, files: applied.files };
+  }, [canEdit, project?.id, project?.name, projectId, refreshLivePreview]);
 
   const openPathInEditor = useCallback((path: string, line?: number) => {
     const flat = fileContentsRef.current;
@@ -669,7 +778,6 @@ export function ProjectWorkspace() {
       const draft = localStorage.getItem(`ark:project-draft:${projectId}`);
       if (draft) {
         setChatInput(draft);
-        pendingAutoSendRef.current = draft;
         localStorage.removeItem(`ark:project-draft:${projectId}`);
         requestAnimationFrame(() => textareaRef.current?.focus());
       }
@@ -751,16 +859,6 @@ export function ProjectWorkspace() {
     if (!messages.length) return;
     saveProjectThread(projectId, messages);
   }, [messages, projectId]);
-
-  // Auto-send when opened from Chat "Yes" with a seeded prompt
-  useEffect(() => {
-    if (!project || !pendingAutoSendRef.current) return;
-    const msg = pendingAutoSendRef.current;
-    pendingAutoSendRef.current = null;
-    window.setTimeout(() => {
-      void handleSendChat(msg);
-    }, 350);
-  }, [project]);
 
   // Seed files dropped from Chat (code uploads)
   useEffect(() => {
@@ -882,11 +980,11 @@ export function ProjectWorkspace() {
   }, [projectId, applyProjectFiles, refreshGit]);
 
   useEffect(() => {
-    if (!project?.id || !window.arkDesktop?.projectWrite) return;
+    if (!project?.id) return;
     const t = window.setTimeout(() => {
       const payloadFiles = packDiskFiles(fileContents, messagesRef.current);
       if (!Object.keys(payloadFiles).length) return;
-      void window.arkDesktop!.projectWrite!({
+      void safeProjectWrite({
         projectId: project.id,
         projectName: project.name,
         files: payloadFiles,
@@ -1018,13 +1116,11 @@ export function ProjectWorkspace() {
     if (!projectId || gitBusy || !canEdit) return;
     setGitBusy(true);
     try {
-      if (window.arkDesktop?.projectWrite) {
-        await window.arkDesktop.projectWrite({
+      await safeProjectWrite({
           projectId,
           projectName: project?.name,
           files: packDiskFiles(fileContentsRef.current, messagesRef.current),
         });
-      }
       const token = getPluginRuntime('github', loadPluginState()).token?.trim();
       if (!gitInfo?.git || gitInfo.dirty) {
         await gitCommit(projectId, 'Update from ARK');
@@ -1102,19 +1198,18 @@ export function ProjectWorkspace() {
     const persistLocalThread = (msgs: ChatMessage[]) => {
       messagesRef.current = msgs;
       saveProjectThread(pid, msgs);
-      if (window.arkDesktop?.projectWrite) {
-        void window.arkDesktop.projectWrite({
+      void safeProjectWrite({
           projectId: pid,
           projectName: inferBuildLabel(rawContent, activeProject.name),
           files: packDiskFiles(fileContentsRef.current, msgs),
         }).then(res => {
           if (res.root) setDiskRoot(res.root);
         });
-      }
     };
 
     const composerWasDebug = composerMode === 'debug';
-    const explainOnly = isExplainAsk(rawContent);
+    const improveAsk = isImproveAsk(rawContent);
+    const explainOnly = isExplainAsk(rawContent) && !improveAsk;
     const keepName = Boolean(activeProject.name && !/^code$/i.test(activeProject.name))
       && (explainOnly || wantsInspectOnly(rawContent, composerWasDebug) || wantsNamedPatch(rawContent, true));
     const buildLabel = keepName
@@ -1149,7 +1244,16 @@ export function ProjectWorkspace() {
     setAttachedImages([]);
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
 
-    if (canEdit && needsMobileTargetChoice(rawContent) && !isNativeMobileTree(fileContentsRef.current)) {
+    const hasFilesNow = Object.values(fileContentsRef.current)
+      .some(v => String(v || '').trim().length > 40);
+    const skipPlatformAsk = explainOnly
+      || improveAsk
+      || isPatchAsk(rawContent)
+      || isFindInFilesAsk(rawContent)
+      || (hasFilesNow && wantsInspectOnly(rawContent, composerWasDebug))
+      || (hasFilesNow && wantsNamedPatch(rawContent, true));
+
+    if (canEdit && !skipPlatformAsk && needsMobileTargetChoice(rawContent) && !isNativeMobileTree(fileContentsRef.current)) {
       const userMsg: ChatMessage = {
         id: crypto.randomUUID(),
         user_id: uid,
@@ -1165,7 +1269,7 @@ export function ProjectWorkspace() {
         user_id: uid,
         project_id: pid,
         role: 'assistant',
-        content: 'Which platform is this for? I’ll write a real Apple (Xcode) or Android (Android Studio) project — not a website.',
+        content: 'Which should I build? Apple (Xcode), Android (Android Studio), or a website in the browser? I will not start writing files until you pick.',
         provider_used: 'ARK',
         created_at: new Date().toISOString(),
       };
@@ -1181,7 +1285,7 @@ export function ProjectWorkspace() {
       return;
     }
 
-    const knownTarget = classifyMobileTarget(rawContent);
+    const knownTarget = looksLikeWebsiteBuild(rawContent) ? null : classifyMobileTarget(rawContent);
     if (canEdit && knownTarget && needsDeviceFamilyChoice(rawContent, knownTarget) && !isNativeMobileTree(fileContentsRef.current)) {
       const userMsg: ChatMessage = {
         id: crypto.randomUUID(),
@@ -1194,10 +1298,10 @@ export function ProjectWorkspace() {
       };
       const assistantId = crypto.randomUUID();
       const familyAsk = knownTarget === 'android'
-        ? 'Which Android device is this for — phone, tablet, or laptop?'
+        ? 'Which Android size should I lock? The preview stays that width × height — zoom only, no stretching.'
         : knownTarget === 'ios'
-          ? 'Which Apple device is this for — iPhone, iPad, or Mac?'
-          : 'Should the layout be for a phone, a tablet, or a computer?';
+          ? 'Which Apple size should I lock? Example: iPhone 16 is 393×852. The preview stays that size — zoom only, no stretching.'
+          : 'Which canvas size should I lock? The preview stays that width × height — zoom only, no stretching.';
       const assistantMsg: ChatMessage = {
         id: assistantId,
         user_id: uid,
@@ -1232,11 +1336,10 @@ export function ProjectWorkspace() {
     const hadExistingFiles = !revisingId && Object.values(fileContentsRef.current)
       .some(v => String(v || '').trim().length > 40);
     const inspectOnly = !canEdit
-      || (hadExistingFiles && (wantsInspectOnly(rawContent, composerWasDebug) || explainOnly));
+      || explainOnly
+      || improveAsk
+      || (hadExistingFiles && wantsInspectOnly(rawContent, composerWasDebug));
     const patchOnlyNamed = canEdit && hadExistingFiles && wantsNamedPatch(rawContent, true) && !inspectOnly;
-    const mobileAsk = Boolean(classifyMobileTarget(content));
-    const allowScaffold = canEdit && !inspectOnly && !patchOnlyNamed
-      && (!hadExistingFiles || /\b(start over|from scratch|new app|rebuild everything)\b/i.test(rawContent));
     const plannedFiles = inspectOnly || patchOnlyNamed
       ? pickFilesForInspect(fileContentsRef.current, rawContent)
       : planFilesForBuild(content);
@@ -1283,7 +1386,12 @@ export function ProjectWorkspace() {
     setCodeOpen(true);
     setRightTab('code');
     setRunHistory(prev => [
-      { id: crypto.randomUUID(), title: content.slice(0, 48) || 'Project edit', at: new Date().toLocaleTimeString() },
+      {
+        id: crypto.randomUUID(),
+        title: content.slice(0, 48) || 'Project edit',
+        at: new Date().toLocaleTimeString(),
+        steps: BUILD_PROGRESS_STEPS.map(s => s.label).join(' → '),
+      },
       ...prev,
     ]);
 
@@ -1294,28 +1402,6 @@ export function ProjectWorkspace() {
         const next = BUILD_STEP_ORDER.indexOf(step);
         if (next < cur) return prev;
         return { ...prev, step };
-      });
-    };
-
-    const showPlannedFiles = () => {
-      const stubs: Record<string, string> = {};
-      for (const p of plannedFiles) stubs[p] = '';
-      setFileContents(prev => {
-        const next = { ...prev };
-        for (const [k, v] of Object.entries(stubs)) {
-          if (next[k] === undefined) next[k] = v;
-        }
-        fileContentsRef.current = next;
-        const tree = buildFileTreeFromPaths(next);
-        fileTreeRef.current = tree;
-        setFileTree(tree);
-        return next;
-      });
-      if (plannedFiles[0]) setSelectedFile(plannedFiles[0]);
-      setExpandedFolders(prev => {
-        const next = new Set(prev);
-        foldersToExpand(plannedFiles).forEach(p => next.add(p));
-        return next;
       });
     };
 
@@ -1339,10 +1425,18 @@ export function ProjectWorkspace() {
       fileTreeRef.current = applied.tree.length ? applied.tree : buildFileTreeFromPaths(applied.files);
       setFileContents(applied.files);
       setFileTree(fileTreeRef.current);
-      setDiffStats(prev => ({
-        added: prev.added + applied.addedLines,
-        removed: prev.removed + applied.removedLines,
-      }));
+      setFileChanges(prev => {
+        const map = new Map(prev.map(f => [f.path, f]));
+        for (const d of applied.fileDiffs) {
+          const cur = map.get(d.path);
+          map.set(d.path, {
+            path: d.path,
+            added: (cur?.added || 0) + d.added,
+            removed: (cur?.removed || 0) + d.removed,
+          });
+        }
+        return [...map.values()];
+      });
       const expand = foldersToExpand(applied.changedPaths);
       setExpandedFolders(prev => {
         const next = new Set(prev);
@@ -1350,28 +1444,36 @@ export function ProjectWorkspace() {
         return next;
       });
       const native = isNativeMobileTree(applied.files);
-      const focus = preferredMobileFocus(applied.changedPaths) || applied.changedPaths[0];
+      const focus = preferredLiveEditPath(applied.changedPaths)
+        || preferredMobileFocus(applied.changedPaths)
+        || applied.changedPaths[0];
       if (focus) {
         setSelectedFile(focus);
+        setRightTab('code');
+        setCodeOpen(true);
         setFileFlash(true);
         window.setTimeout(() => setFileFlash(false), 1400);
+        setBuildLive(prev => prev?.assistantId === assistantId ? { ...prev, focusFile: focus } : prev);
       }
       if (opts?.openPreview && !native) setRightTab('preview');
       if (native) {
         const mapped = classifyMobileTarget(content) || inferMobileTargetFromFiles(applied.files) || 'ios';
         const picked = resolveDevices(mapped, content);
-        setPreviewDevice(picked.ios || picked.android || null);
+        const nextDevice = classifyNamedDevice(content) || picked.ios || picked.android || null;
+        if (nextDevice) {
+          previewDeviceRef.current = nextDevice;
+          setPreviewDevice(nextDevice);
+        }
         setCodeOpen(true);
+        void refreshLivePreview(applied.files, nextDevice);
       }
-      if (window.arkDesktop?.projectWrite) {
-        void window.arkDesktop.projectWrite({
+      void safeProjectWrite({
           projectId: pid,
           projectName: buildLabel,
           files: packDiskFiles(applied.files, messagesRef.current),
         }).then(res => {
           if (res.root) setDiskRoot(res.root);
         });
-      }
       if (applied.changedPaths.length && !native && window.arkDesktop?.previewStart) {
         void window.arkDesktop.previewStart({
           projectId: pid,
@@ -1406,7 +1508,6 @@ export function ProjectWorkspace() {
       let replyText = '';
       let provider = 'ARK';
       let changedPaths: string[] = [];
-      let usedScaffold = false;
       let stallTimer: number | undefined;
       let hardTimer: number | undefined;
       let aborted = false;
@@ -1420,6 +1521,33 @@ export function ProjectWorkspace() {
           .filter(([, v]) => String(v || '').trim().length > 24)
           .map(([k]) => k);
       };
+      let filesBeforeGenerate: Record<string, string> | null = null;
+      let treeBeforeGenerate = fileTreeRef.current;
+      let hopAfterLocalStall = true;
+      const restoreGeneratedDraft = () => {
+        if (!filesBeforeGenerate) return;
+        fileContentsRef.current = { ...filesBeforeGenerate };
+        fileTreeRef.current = treeBeforeGenerate;
+        setFileContents(fileContentsRef.current);
+        setFileTree(fileTreeRef.current);
+      };
+      const collectFinishedEdits = (reply: string) => {
+        let edits = parseClosedFileEdits(reply);
+        if (!edits.length) {
+          edits = extractChatStyleFileEdits(reply, content)
+            .filter(e => fileContentLooksComplete(e.path, e.content));
+        }
+        if (!edits.length && !patchOnlyNamed) {
+          const html = extractStreamingHtml(reply);
+          if (html && fileContentLooksComplete('index.html', html)) {
+            edits = editsFromWorkingHtml(html, plannedFiles)
+              .filter(e => fileContentLooksComplete(e.path, e.content));
+          }
+        }
+        if (patchOnlyNamed) edits = filterEditsToPaths(edits, lastInspectPathsRef.current);
+        return edits;
+      };
+      const unfinishedNote = 'The brain stopped mid-file. I did not save a half-written app. Send again and let it finish.';
 
       const abortPromise = new Promise<never>((_, reject) => {
         abortReject = reject;
@@ -1448,29 +1576,23 @@ export function ProjectWorkspace() {
       };
 
       try {
-        await sleep(280);
-        if (aborted || runId !== runIdRef.current) throw new Error('Stopped');
         bumpStep('plan');
-        if (!inspectOnly && !patchOnlyNamed && !hadExistingFiles && canEdit) {
-          showPlannedFiles();
-        } else if (plannedFiles.length) {
+        if (plannedFiles.length) {
           setExpandedFolders(prev => {
             const next = new Set(prev);
             foldersToExpand(plannedFiles).forEach(p => next.add(p));
             return next;
           });
-          if (plannedFiles[0]) setSelectedFile(plannedFiles[0]);
+          const focus = preferredLiveEditPath(plannedFiles);
+          if (focus && (inspectOnly || fileContentsRef.current[focus])) setSelectedFile(focus);
         }
-        await sleep(220);
         if (aborted || runId !== runIdRef.current) throw new Error('Stopped');
 
-        if (window.arkDesktop?.projectWrite) {
-          await window.arkDesktop.projectWrite({
+        await safeProjectWrite({
             projectId: pid,
             projectName: buildLabel,
             files: packDiskFiles(fileContentsRef.current, messagesRef.current),
           });
-        }
         const studio = await runCodeStudioCommand({
           message: rawContent,
           projectId: pid,
@@ -1529,6 +1651,7 @@ export function ProjectWorkspace() {
           if (inspectOnly) lastInspectPathsRef.current = inspectPaths;
           if (patchOnlyNamed && allowedPatchPaths.length) lastInspectPathsRef.current = allowedPatchPaths;
 
+          const inspectMode = explainOnly ? 'explain' : improveAsk ? 'improve' : 'debug';
           const codingMessage = inspectOnly
             ? buildInspectPrompt(
               rawContent,
@@ -1536,7 +1659,7 @@ export function ProjectWorkspace() {
               inspectPaths,
               findings,
               buildLabel,
-              explainOnly ? 'explain' : 'debug',
+              inspectMode,
             )
             : patchOnlyNamed
               ? buildNamedPatchPrompt(rawContent, fileContentsRef.current, allowedPatchPaths, buildLabel)
@@ -1547,9 +1670,6 @@ export function ProjectWorkspace() {
               : turn,
           );
 
-          const fallbackEdits = allowScaffold ? scaffoldFallbackEdits(content, fileContentsRef.current) : [];
-          let fileIndex = 0;
-          let typed = 0;
           const paintFiles = (edits: ReturnType<typeof parseFileEdits>, focusLast = true) => {
             if (!canEdit) return;
             if (!edits.length || inspectOnly) return;
@@ -1560,69 +1680,60 @@ export function ProjectWorkspace() {
             fileTreeRef.current = applied.tree.length ? applied.tree : buildFileTreeFromPaths(applied.files);
             setFileContents(applied.files);
             setFileTree(fileTreeRef.current);
+            setFileChanges(prev => {
+              const map = new Map(prev.map(f => [f.path, f]));
+              for (const d of applied.fileDiffs) {
+                const cur = map.get(d.path);
+                map.set(d.path, {
+                  path: d.path,
+                  added: (cur?.added || 0) + d.added,
+                  removed: (cur?.removed || 0) + d.removed,
+                });
+              }
+              return [...map.values()];
+            });
             setExpandedFolders(prev => {
               const next = new Set(prev);
               foldersToExpand(applied.changedPaths).forEach(p => next.add(p));
               return next;
             });
-            const focus = focusLast
-              ? applied.changedPaths[applied.changedPaths.length - 1]
-              : applied.changedPaths[0];
-            if (focus) setSelectedFile(focus);
-            setRightTab('code');
+            const focus = preferredLiveEditPath(applied.changedPaths)
+              || (focusLast ? applied.changedPaths[applied.changedPaths.length - 1] : applied.changedPaths[0]);
+            if (focus) {
+              setSelectedFile(focus);
+              setRightTab('code');
+              setCodeOpen(true);
+              setBuildLive(prev => prev?.assistantId === assistantId ? { ...prev, focusFile: focus } : prev);
+            }
             bumpStep('generate');
           };
           if (typeTimerRef.current) window.clearInterval(typeTimerRef.current);
-          if (allowScaffold && fallbackEdits.length) usedScaffold = true;
-          if (allowScaffold) {
-            typeTimerRef.current = window.setInterval(() => {
-              if (aborted) {
-                window.clearInterval(typeTimerRef.current);
-                typeTimerRef.current = undefined;
-                return;
-              }
-              if (
-                extractStreamingFileEdits(streamDraftRef.current).length
-                || extractStreamingHtml(streamDraftRef.current)
-              ) {
-                window.clearInterval(typeTimerRef.current);
-                typeTimerRef.current = undefined;
-                return;
-              }
-              const edit = fallbackEdits[fileIndex];
-              if (!edit) {
-                window.clearInterval(typeTimerRef.current);
-                typeTimerRef.current = undefined;
-                return;
-              }
-              const step = Math.max(22, Math.ceil(edit.content.length / 36));
-              typed = Math.min(edit.content.length, typed + step);
-              paintFiles([{ path: edit.path, content: edit.content.slice(0, typed) }]);
-              if (typed >= edit.content.length) {
-                fileIndex += 1;
-                typed = 0;
-              }
-            }, 40);
-          }
 
-          stallTimer = window.setTimeout(() => {
-            if (aborted) return;
-            const streamed = extractStreamingHtml(streamDraftRef.current);
-            if (!streamed && allowScaffold) {
-              if (typeTimerRef.current) {
-                window.clearInterval(typeTimerRef.current);
-                typeTimerRef.current = undefined;
+          filesBeforeGenerate = { ...fileContentsRef.current };
+          treeBeforeGenerate = fileTreeRef.current;
+
+          let sawChunk = false;
+          const armStall = () => {
+            if (stallTimer) window.clearTimeout(stallTimer);
+            stallTimer = window.setTimeout(() => {
+              if (aborted) return;
+              if (hopAfterLocalStall && !inspectOnly && !patchOnlyNamed) {
+                hopAfterLocalStall = false;
+                void engineGenerateCancel();
+                streamDraftRef.current = '';
+                restoreGeneratedDraft();
+                sawChunk = false;
+                armStall();
+                return;
               }
-              usedScaffold = true;
-              commitEdits(scaffoldFallbackEdits(content, fileContentsRef.current));
-            }
-            snapshotChanged();
-            if (changedPaths.length || streamed || inspectOnly) finishWait('Stalled');
-          }, inspectOnly || patchOnlyNamed ? 40_000 : CODE_STALL_MS);
+              finishWait('Stalled');
+            }, sawChunk ? CODE_STALL_MS : CODE_FIRST_TOKEN_MS);
+          };
+          armStall();
 
           hardTimer = window.setTimeout(() => {
             finishWait('Code generation timed out');
-          }, inspectOnly || patchOnlyNamed ? 90_000 : CODE_ROUTE_TIMEOUT_MS);
+          }, inspectOnly || patchOnlyNamed ? 120_000 : CODE_ROUTE_TIMEOUT_MS);
 
           const sticky = activeModel.source === 'auto' ? threadBrainRef.current : null;
           streamDraftRef.current = '';
@@ -1643,8 +1754,21 @@ export function ProjectWorkspace() {
               stickyModelName: sticky?.modelName,
               stickyPinnedSource: sticky?.pinnedSource,
               history,
+              onAttemptReset: () => {
+                hopAfterLocalStall = false;
+                streamDraftRef.current = '';
+                restoreGeneratedDraft();
+                sawChunk = false;
+                armStall();
+                if (hardTimer) window.clearTimeout(hardTimer);
+                hardTimer = window.setTimeout(() => {
+                  finishWait('Code generation timed out');
+                }, inspectOnly || patchOnlyNamed ? 120_000 : CODE_ROUTE_TIMEOUT_MS);
+              },
               onChunk: (piece) => {
                 if (aborted) return;
+                sawChunk = true;
+                armStall();
                 streamDraftRef.current += piece;
                 bumpStep('generate');
                 if (inspectOnly) return;
@@ -1694,65 +1818,77 @@ export function ProjectWorkspace() {
           bumpStep(inspectOnly ? 'done' : 'apply');
 
           if (inspectOnly) {
-            const local = formatLocalFindings(findings);
             const spoken = stripFileBlocks(routed.reply);
-            replyText = [spoken, !explainOnly && !spoken.includes('`') && local ? local : '']
-              .filter(Boolean)
-              .join('\n\n')
-              || (explainOnly
-                ? (local || 'This looks like a local project. Ask me about a specific file if you want more detail.')
-                : `${local || 'I looked through the project files.'}\n\nWould you like me to fix these, or only list the rest?`);
-            if (canEdit && !explainOnly && !/would you like/i.test(replyText)) {
-              replyText = `${replyText.trim()}\n\nWould you like me to fix these, or only list the rest?`;
+            const usable = spoken && !looksLikePromptEcho(spoken) && spoken.length > 40
+              && !/get started with coding/i.test(spoken)
+              && !/^I read \d+ file/i.test(spoken);
+            if (usable) {
+              replyText = spoken.trim();
+            } else if (explainOnly) {
+              replyText = [
+                describeProjectFromFiles(fileContentsRef.current, buildLabel),
+                '',
+                'The coding brain did not finish a full read. This is a local file scan — ask again to try the model.',
+              ].join('\n');
+            } else {
+              replyText = [
+                formatLocalFindings(findings),
+                'I could not finish a full review from the brain. Ask again, or tap Debug this.',
+              ].filter(Boolean).join('\n\n');
+            }
+            if (canEdit && explainOnly && !/would you like/i.test(replyText)) {
+              replyText = `${replyText.trim()}\n\nWould you like me to debug it, or start working on a change?`;
             }
             lastInspectPathsRef.current = inspectPaths;
-            if (!explainOnly) setInspectOfferId(assistantId);
+            setInspectOfferId(assistantId);
+            const focus = preferredLiveEditPath(inspectPaths) || preferredEntryPath(fileContentsRef.current);
+            if (focus) {
+              setSelectedFile(focus);
+              setRightTab('code');
+              setCodeOpen(true);
+            }
             if (!canEdit) {
               replyText = `${replyText.trim()}\n\nYou have Read on this repo — you can look and discuss, not edit or push.`;
             }
           } else {
-            const parsedEdits = parseFileEdits(routed.reply);
-            let edits = parsedEdits.length
-              ? parsedEdits
-              : extractChatStyleFileEdits(routed.reply, content);
-            if (!patchOnlyNamed && edits.length === 1 && edits[0].path === 'index.html' && plannedFiles.length > 1) {
-              edits = editsFromWorkingHtml(edits[0].content, plannedFiles);
-            }
-            if (!edits.length) {
-              const streamedFiles = extractStreamingFileEdits(streamDraftRef.current);
-              if (streamedFiles.length) edits = streamedFiles;
-              else if (!patchOnlyNamed) {
-                const streamed = extractStreamingHtml(streamDraftRef.current);
-                if (streamed && streamed.length > 40) {
-                  edits = editsFromWorkingHtml(streamed, plannedFiles);
-                }
-              }
-            }
+            const draft = streamDraftRef.current || routed.reply || '';
+            let edits = collectFinishedEdits(draft);
+            const cutOff = replyHasUnclosedFileBlock(draft);
+            restoreGeneratedDraft();
             if (patchOnlyNamed) edits = filterEditsToPaths(edits, allowedPatchPaths);
             const spoken = stripFileBlocks(routed.reply);
 
             if (edits.length > 0) {
               const applied = commitEdits(edits);
               changedPaths = applied.changedPaths;
-            } else {
+            } else if (patchOnlyNamed) {
               snapshotChanged();
-              if (!changedPaths.length && patchOnlyNamed) {
+              if (!changedPaths.length) {
                 const visual = simpleVisualPatchEdits(fileContentsRef.current, rawContent);
                 if (visual.length) {
                   const applied = commitEdits(visual);
                   changedPaths = applied.changedPaths;
+                  if (changedPaths.length) {
+                    replyText = `Updated ${changedPaths.join(', ')} with a local color/name patch from your files — not a full model rewrite.`;
+                  }
                 }
-              } else if (!changedPaths.length && allowScaffold) {
-                usedScaffold = true;
-                const applied = commitEdits(scaffoldFallbackEdits(content, fileContentsRef.current));
-                changedPaths = applied.changedPaths;
               }
             }
+
             if (!replyText) {
-              replyText = spoken
-                || (patchOnlyNamed && changedPaths.length
-                  ? `Updated ${changedPaths.join(', ')}.`
-                  : nativeDoneReply({ continued: hadExistingFiles || Boolean(revisingId) }));
+              if (!changedPaths.length) {
+                replyText = spoken && spoken.length > 40 && !cutOff
+                  ? spoken
+                  : unfinishedNote;
+              } else if (cutOff) {
+                replyText = spoken
+                  || `Saved ${changedPaths.join(', ')}. The last file was cut off — send again to finish it.`;
+              } else {
+                replyText = spoken
+                  || (patchOnlyNamed
+                    ? `Updated ${changedPaths.join(', ')}.`
+                    : nativeDoneReply({ continued: hadExistingFiles || Boolean(revisingId) }));
+              }
             }
           }
 
@@ -1768,47 +1904,28 @@ export function ProjectWorkspace() {
         }
         void engineGenerateCancel();
         const stopped = err instanceof Error && /stopped/i.test(err.message);
+        const stalled = err instanceof Error && /stalled|timed out/i.test(err.message);
+        const draft = streamDraftRef.current || '';
 
-        const streamedFiles = inspectOnly ? [] : extractStreamingFileEdits(streamDraftRef.current);
-        const streamed = inspectOnly || patchOnlyNamed ? '' : extractStreamingHtml(streamDraftRef.current);
         if (runId !== runIdRef.current) {
           replyText = '';
-        } else if (streamedFiles.length) {
-          bumpStep('apply');
-          const applied = commitEdits(
-            patchOnlyNamed
-              ? filterEditsToPaths(streamedFiles, lastInspectPathsRef.current)
-              : streamedFiles,
-          );
-          changedPaths = applied.changedPaths;
-        } else if (streamed && streamed.length > 40) {
-          bumpStep('apply');
-          const applied = commitEdits(editsFromWorkingHtml(streamed, plannedFiles));
-          changedPaths = applied.changedPaths;
-        } else {
-          snapshotChanged();
-        }
-
-        if (runId === runIdRef.current) {
-          if (inspectOnly) {
-            const local = formatLocalFindings(scanProjectFindings(fileContentsRef.current, rawContent));
-            const spoken = stripFileBlocks(streamDraftRef.current);
-            replyText = spoken || local || (explainOnly
-              ? 'This looks like a local project. Ask me about a specific file if you want more detail.'
-              : 'I looked through the files I could open.');
-            if (canEdit && !explainOnly && !/would you like/i.test(replyText)) {
-              replyText = `${replyText.trim()}\n\nWould you like me to fix these, or only list the rest?`;
-            }
-            if (!explainOnly) setInspectOfferId(assistantId);
-            if (!canEdit) {
-              replyText = `${replyText.trim()}\n\nYou have Read on this repo — you can look and discuss, not edit or push.`;
-            }
-            bumpStep('done');
-          } else if (stopped) {
-            replyText = buildDoneSummary(buildLabel, {
-              stopped: true,
-              hadFiles: changedPaths.length > 0,
-            });
+        } else if (!inspectOnly) {
+          restoreGeneratedDraft();
+          const edits = collectFinishedEdits(draft);
+          const cutOff = replyHasUnclosedFileBlock(draft);
+          if (edits.length) {
+            bumpStep('apply');
+            const applied = commitEdits(
+              patchOnlyNamed ? filterEditsToPaths(edits, lastInspectPathsRef.current) : edits,
+            );
+            changedPaths = applied.changedPaths;
+          }
+          if (stopped) {
+            replyText = changedPaths.length
+              ? (cutOff
+                ? `Saved ${changedPaths.join(', ')}. Stopped before the last file finished.`
+                : buildDoneSummary(buildLabel, { stopped: true, hadFiles: true }))
+              : buildDoneSummary(buildLabel, { stopped: true, hadFiles: false });
             bumpStep('done');
           } else {
             if (!changedPaths.length && patchOnlyNamed) {
@@ -1816,22 +1933,65 @@ export function ProjectWorkspace() {
               if (visual.length) {
                 const applied = commitEdits(visual);
                 changedPaths = applied.changedPaths;
+                if (changedPaths.length) {
+                  replyText = `Updated ${changedPaths.join(', ')} with a local color/name patch from your files — not a full model rewrite.`;
+                }
               }
-            } else if (!changedPaths.length && allowScaffold && !patchOnlyNamed) {
-              bumpStep('apply');
-              usedScaffold = true;
-              const applied = commitEdits(scaffoldFallbackEdits(content, fileContentsRef.current));
-              changedPaths = applied.changedPaths;
             }
-            replyText = stripFileBlocks(streamDraftRef.current)
-              || nativeDoneReply({ continued: hadExistingFiles || Boolean(revisingId) });
+            if (!replyText) {
+            replyText = changedPaths.length
+              ? (cutOff
+                ? `Saved ${changedPaths.join(', ')}. The last file was cut off — send again to finish it.`
+                : (stripFileBlocks(draft) || nativeDoneReply({ continued: hadExistingFiles || Boolean(revisingId) })))
+              : (stalled || cutOff ? unfinishedNote : (stripFileBlocks(draft) || unfinishedNote));
+            }
+            bumpStep('done');
+          }
+        }
+
+        if (runId === runIdRef.current) {
+          if (inspectOnly) {
+            const spoken = stripFileBlocks(streamDraftRef.current);
+            const usable = spoken && !looksLikePromptEcho(spoken) && spoken.length > 40
+              && !/get started with coding/i.test(spoken)
+              && !/^I read \d+ file/i.test(spoken);
+            if (usable) {
+              replyText = spoken.trim();
+            } else if (explainOnly) {
+              replyText = [
+                describeProjectFromFiles(fileContentsRef.current, buildLabel),
+                '',
+                'The coding brain did not finish a full read. This is a local file scan — ask again to try the model.',
+              ].join('\n');
+            } else {
+              replyText = [
+                formatLocalFindings(scanProjectFindings(fileContentsRef.current, rawContent)),
+                stopped
+                  ? 'Stopped before the review finished.'
+                  : 'I could not finish a full review from the brain. Ask again, or tap Debug this.',
+              ].filter(Boolean).join('\n\n');
+            }
+            if (canEdit && explainOnly && !/would you like/i.test(replyText)) {
+              replyText = `${replyText.trim()}\n\nWould you like me to debug it, or start working on a change?`;
+            }
+            const focus = preferredLiveEditPath(
+              pickFilesForInspect(fileContentsRef.current, rawContent),
+            ) || preferredEntryPath(fileContentsRef.current);
+            if (focus) {
+              setSelectedFile(focus);
+              setRightTab('code');
+              setCodeOpen(true);
+            }
+            setInspectOfferId(assistantId);
+            if (!canEdit) {
+              replyText = `${replyText.trim()}\n\nYou have Read on this repo — you can look and discuss, not edit or push.`;
+            }
             bumpStep('done');
           }
         }
       }
 
       buildAbortRef.current = null;
-      if (replyText && usedScaffold) replyText = appendScaffoldHonesty(replyText);
       if (replyText) replyText = withTiming(replyText);
 
       if (runId !== runIdRef.current) {
@@ -1946,57 +2106,25 @@ export function ProjectWorkspace() {
     void (async () => {
       try {
         const native = isNativeMobileTree(fileContents);
-        const payloadFiles = packDiskFiles(fileContents, messagesRef.current);
-        const composed = composePreviewHtml(fileContents);
-        if (!payloadFiles['index.html'] && composed) payloadFiles['index.html'] = composed;
-        if (!payloadFiles['index.html'] && payloadFiles['ark-preview.html']) {
-          payloadFiles['index.html'] = payloadFiles['ark-preview.html'];
-        }
-        if (!payloadFiles['index.html']) {
-          payloadFiles['index.html'] = `<!DOCTYPE html>
-<html><head><meta charset="utf-8"/><title>${project?.name ?? 'ARK'}</title>
-<style>body{margin:0;font-family:system-ui;background:#0b1220;color:#e8eefc;padding:24px}</style>
-</head><body>
-<h1>${(project?.name ?? 'Project').replace(/</g, '')}</h1>
-<p>ARK local preview</p>
-</body></html>`;
-        }
-
-        let url = '';
-        if (window.arkDesktop?.previewStart && project) {
-          const res = await window.arkDesktop.previewStart({
-            projectId: project.id,
-            projectName: project.name,
-            files: payloadFiles,
-          });
-          url = res.url;
-        } else {
-          const html = composed || payloadFiles['index.html'];
-          const blob = new Blob([html], { type: 'text/html' });
-          url = URL.createObjectURL(blob);
-        }
-        setLivePreviewUrl(url);
-        setPreviewUrl(url);
-        setPreviewReady(true);
-        setBuildProgress(100);
-
         const device = previewDevice
           || (native
             ? (resolveDevices(inferMobileTargetFromFiles(fileContents) || 'ios', '').ios || null)
             : null);
-        if (window.arkDesktop?.previewOpenWindow && project && url) {
-          await window.arkDesktop.previewOpenWindow({
-            projectId: project.id,
-            url,
-            title: `${project.name || 'ARK'} preview`,
-            kind: native && device ? 'device' : 'web',
-            device: device
-              ? { label: device.label, width: device.width, height: device.height, family: device.family }
-              : undefined,
-          });
-        } else if (url) {
-          window.open(url, 'ark-preview');
+        if (window.arkDesktop?.previewStart && project) {
+          await refreshLivePreview(fileContents, device);
+          setBuildProgress(100);
+          return;
         }
+        const payloadFiles = packDiskFiles(fileContents, messagesRef.current);
+        const composed = composePreviewHtml(fileContents);
+        const html = composed || payloadFiles['ark-preview.html'] || payloadFiles['index.html'] || '';
+        const blob = new Blob([html], { type: 'text/html' });
+        const url = URL.createObjectURL(blob);
+        setLivePreviewUrl(url);
+        setPreviewUrl(url);
+        setPreviewReady(true);
+        setBuildProgress(100);
+        window.open(url, 'ark-preview');
       } catch (err) {
         setPreviewReady(false);
         setBuildProgress(0);
@@ -2163,19 +2291,8 @@ export function ProjectWorkspace() {
           type="button"
           onClick={() => {
             setSelectedFile(fullPath);
-            if (canEdit) {
-              const key = fullPath.split('/').pop() ?? fullPath;
-              setFileContents(prev => {
-                if (prev[fullPath] || prev[key]) return prev;
-                const seed = `// ${fullPath}\n`;
-                return {
-                  ...prev,
-                  [fullPath]: seed,
-                  [key]: seed,
-                };
-              });
-            }
             setRightTab('code');
+            setCodeOpen(true);
           }}
           className={`flex items-center gap-1 w-full px-2 py-1 text-xs rounded transition-colors ${
             isSelected ? 'bg-sky-500/10 text-sky-300' : 'text-content-secondary hover:text-content-primary hover:bg-surface-hover'
@@ -2186,6 +2303,9 @@ export function ProjectWorkspace() {
             ? <FileText className="w-3.5 h-3.5 shrink-0 text-content-tertiary" />
             : <FileCode className={`w-3.5 h-3.5 shrink-0 ${fileTintClass(node.name)}`} />}
           <span className="truncate">{node.name}</span>
+          {fileChanges.some(f => f.path === fullPath || f.path.endsWith(`/${node.name}`)) && (
+            <span className="ml-auto w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" title="Changed" />
+          )}
         </button>
       );
     });
@@ -2450,17 +2570,17 @@ export function ProjectWorkspace() {
                 type="button"
                 onClick={() => setChangesOpen(v => !v)}
                 className={`inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full text-[11px] font-medium transition-colors ${
-                  changesOpen || diffStats.added + diffStats.removed > 0
+                  changesOpen || fileChanges.length > 0
                     ? 'bg-surface-hover text-content-primary border border-surface-border'
                     : 'text-content-tertiary hover:text-content-secondary hover:bg-surface-hover'
                 }`}
                 title="View changes"
               >
                 <span>Changes</span>
-                {diffStats.added + diffStats.removed > 0 ? (
+                {fileChanges.length > 0 ? (
                   <span className="flex items-center gap-1 tabular-nums">
-                    <span className="text-emerald-400">+{diffStats.added}</span>
-                    <span className="text-red-400">-{diffStats.removed}</span>
+                    <span className="text-emerald-400">+{fileChanges.reduce((n, f) => n + f.added, 0)}</span>
+                    <span className="text-red-400">-{fileChanges.reduce((n, f) => n + f.removed, 0)}</span>
                   </span>
                 ) : (
                   <span className="text-content-tertiary/70">0</span>
@@ -2489,32 +2609,35 @@ export function ProjectWorkspace() {
                 <p className="text-[11px] text-content-secondary">Uncommitted file edits</p>
                 <button
                   type="button"
-                  onClick={() => setDiffStats({ added: 0, removed: 0 })}
+                  onClick={() => setFileChanges([])}
                   className="text-[10px] text-content-tertiary hover:text-content-secondary"
                 >
                   Clear
                 </button>
               </div>
-              {diffStats.added + diffStats.removed === 0 ? (
+              {fileChanges.length === 0 ? (
                 <p className="text-[11px] text-content-tertiary">No changes yet. Ask ARK to edit the project.</p>
               ) : (
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between text-[11px] px-2 py-1.5 rounded-md bg-surface-hover/60">
-                    <span className="text-content-primary font-mono truncate">{selectedFile.split('/').pop()}</span>
-                    <span className="tabular-nums shrink-0 ml-2">
-                      <span className="text-emerald-400">+{Math.max(1, Math.floor(diffStats.added * 0.6))}</span>
-                      {' '}
-                      <span className="text-red-400">-{Math.max(0, Math.floor(diffStats.removed * 0.5))}</span>
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between text-[11px] px-2 py-1.5 rounded-md bg-surface-hover/60">
-                    <span className="text-content-primary font-mono">TaskList.tsx</span>
-                    <span className="tabular-nums shrink-0 ml-2">
-                      <span className="text-emerald-400">+{Math.max(1, Math.floor(diffStats.added * 0.4))}</span>
-                      {' '}
-                      <span className="text-red-400">-{Math.max(0, Math.ceil(diffStats.removed * 0.5))}</span>
-                    </span>
-                  </div>
+                <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                  {fileChanges.map(file => (
+                    <button
+                      key={file.path}
+                      type="button"
+                      onClick={() => {
+                        setSelectedFile(file.path);
+                        setRightTab('code');
+                        setCodeOpen(true);
+                      }}
+                      className="w-full flex items-center justify-between text-[11px] px-2 py-1.5 rounded-md bg-surface-hover/60 hover:bg-surface-hover text-left"
+                    >
+                      <span className="text-content-primary font-mono truncate">{file.path}</span>
+                      <span className="tabular-nums shrink-0 ml-2">
+                        <span className="text-emerald-400">+{file.added}</span>
+                        {' '}
+                        <span className="text-red-400">-{file.removed}</span>
+                      </span>
+                    </button>
+                  ))}
                 </div>
               )}
             </div>
@@ -2534,7 +2657,7 @@ export function ProjectWorkspace() {
                       <CheckCircle2 className="w-3 h-3 text-emerald-400 mt-0.5 shrink-0" />
                       <div className="min-w-0">
                         <p className="text-content-primary truncate">{run.title}</p>
-                        <p className="text-content-tertiary">{run.at} · Analyzing → Planning → Structure → UI → Preview</p>
+                        <p className="text-content-tertiary">{run.at} · {run.steps}</p>
                       </div>
                     </div>
                   ))}
@@ -2570,6 +2693,8 @@ export function ProjectWorkspace() {
                       step={buildLive.step}
                       plannedFiles={buildLive.plannedFiles}
                       startedAt={buildLive.startedAt}
+                      kind={buildLive.kind}
+                      focusFile={buildLive.focusFile}
                     />
                   ) : msg.role === 'user' && editingUserId === msg.id ? (
                     <textarea
@@ -2611,17 +2736,17 @@ export function ProjectWorkspace() {
                     {inspectOfferId === msg.id && (
                       <div className="flex flex-wrap gap-1 mt-2">
                         {canEdit && (
-                          <button type="button" className="text-[10px] rounded-full bg-sky-600 text-white px-2.5 py-1" onClick={() => void handleSendChat('yes, fix these')}>
-                            Fix this
+                          <button type="button" className="text-[10px] rounded-full bg-sky-600 text-white px-2.5 py-1" onClick={() => void handleSendChat('Debug this project. Find issues in the files.')}>
+                            Debug this
                           </button>
                         )}
                         {canEdit && (
-                          <button type="button" className="text-[10px] rounded-full border border-surface-border px-2.5 py-1 text-content-secondary" onClick={() => { setChatInput('Add '); textareaRef.current?.focus(); }}>
-                            Add something
+                          <button type="button" className="text-[10px] rounded-full border border-surface-border px-2.5 py-1 text-content-secondary" onClick={() => { setChatInput('Change '); textareaRef.current?.focus(); }}>
+                            Work on this
                           </button>
                         )}
                         <button type="button" className="text-[10px] rounded-full border border-surface-border px-2.5 py-1 text-content-tertiary" onClick={() => setInspectOfferId(null)}>
-                          Only list
+                          Just looking
                         </button>
                       </div>
                     )}
@@ -2657,34 +2782,51 @@ export function ProjectWorkspace() {
                         >
                           Both
                         </button>
+                        <button
+                          type="button"
+                          className="text-[10px] rounded-full border border-surface-border px-2.5 py-1 text-content-secondary"
+                          onClick={() => {
+                            setMobileOfferId(null);
+                            void handleSendChat(`${mobileOfferPrompt}\n\n${WEBSITE_BUILD_MARK}`);
+                          }}
+                        >
+                          Website
+                        </button>
                       </div>
                     )}
                     {mobileOfferId === msg.id && canEdit && mobileOfferStep === 'family' && familyPlatform && (
-                      <DeviceFamilyChips
-                        platform={familyPlatform}
-                        onPick={(family: DeviceFamilyKind) => {
-                          setMobileOfferId(null);
-                          const platform = familyPlatform === 'android' ? 'android' : 'ios';
-                          const device = defaultDeviceForFamily(platform, family);
-                          setPreviewDevice(device);
-                          if (isNativeMobileTree(fileContentsRef.current)) {
-                            const target = inferMobileTargetFromFiles(fileContentsRef.current)
-                              || familyPlatform
-                              || 'ios';
-                            const locked = layoutLockEdits(
-                              fileContentsRef.current,
-                              layoutLockPrompt(device),
-                              target === 'both' ? 'ios' : target,
-                            );
-                            if (locked.length) {
-                              applyWorkspaceEdits(locked);
-                              postAssistantNote(`Locked the layout to ${device.label}. I edited the existing project instead of creating a new folder.`);
-                              return;
-                            }
-                          }
-                          void handleSendChat(`${mobileOfferPrompt}\n\n${familyBuildPrompt(familyPlatform, family)}`);
-                        }}
-                      />
+                      <div className="flex flex-wrap gap-1 mt-2">
+                        {devicesForChips(familyPlatform).map(device => (
+                          <button
+                            key={device.id}
+                            type="button"
+                            className="text-[10px] rounded-full border border-surface-border px-2.5 py-1 text-content-secondary"
+                            onClick={() => {
+                              setMobileOfferId(null);
+                              previewDeviceRef.current = device;
+                              setPreviewDevice(device);
+                              if (isNativeMobileTree(fileContentsRef.current)) {
+                                const target = inferMobileTargetFromFiles(fileContentsRef.current)
+                                  || familyPlatform
+                                  || 'ios';
+                                const locked = layoutLockEdits(
+                                  fileContentsRef.current,
+                                  layoutLockPrompt(device),
+                                  target === 'both' ? 'ios' : target,
+                                );
+                                if (locked.length) {
+                                  applyWorkspaceEdits(locked);
+                                  postAssistantNote(`Locked the canvas to ${deviceChipLabel(device)}. Zoom with Ctrl +/- — the window stays ${device.width}×${device.height}.`);
+                                  return;
+                                }
+                              }
+                              void handleSendChat(`${mobileOfferPrompt}\n\n${sizedBuildPrompt(device)}`);
+                            }}
+                          >
+                            {deviceChipLabel(device)}
+                          </button>
+                        ))}
+                      </div>
                     )}
                     {deviceOfferId === msg.id && canEdit && (
                       <div className="flex flex-wrap gap-1 mt-2">
@@ -2699,6 +2841,7 @@ export function ProjectWorkspace() {
                             className="text-[10px] rounded-full border border-surface-border px-2.5 py-1 text-content-secondary"
                             onClick={() => {
                               setDeviceOfferId(null);
+                              previewDeviceRef.current = device;
                               setPreviewDevice(device);
                               const native = isNativeMobileTree(fileContentsRef.current);
                               if (native) {
@@ -2708,14 +2851,14 @@ export function ProjectWorkspace() {
                                 const locked = layoutLockEdits(fileContentsRef.current, layoutLockPrompt(device), target);
                                 if (locked.length) {
                                   applyWorkspaceEdits(locked);
-                                  postAssistantNote(`Locked the layout to ${device.label}. Same project files — no extra folders.`);
+                                  postAssistantNote(`Locked the canvas to ${deviceChipLabel(device)}. Zoom with Ctrl +/- — the window stays ${device.width}×${device.height}.`);
                                   return;
                                 }
                               }
                               void handleSendChat(layoutLockPrompt(device));
                             }}
                           >
-                            {device.label}
+                            {deviceChipLabel(device)}
                           </button>
                         ))}
                       </div>
@@ -2725,9 +2868,11 @@ export function ProjectWorkspace() {
                         <button type="button" className="text-[10px] rounded-full border border-surface-border px-2.5 py-1 text-content-secondary" onClick={() => void headerPush()}>
                           Push to GitHub?
                         </button>
-                        <button type="button" className="text-[10px] rounded-full border border-surface-border px-2.5 py-1 text-content-secondary" onClick={() => void handleSendChat('Summarize this fix to #dev')}>
-                          Post to Slack
-                        </button>
+                        {chatPlugins.some(p => p.id === 'slack') && getPluginRuntime('slack', loadPluginState()).permissions.includes('write') && (
+                          <button type="button" className="text-[10px] rounded-full border border-surface-border px-2.5 py-1 text-content-secondary" onClick={() => void handleSendChat('Summarize this fix to #dev')}>
+                            Post to Slack
+                          </button>
+                        )}
                       </div>
                     )}
                     </div>
@@ -2740,6 +2885,14 @@ export function ProjectWorkspace() {
 
           {/* Composer: grows with text + image attach */}
           <div className="shrink-0 p-3 space-y-2">
+            {sandboxNote && (
+              <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-200/90 flex items-start justify-between gap-2">
+                <p>{sandboxNote}</p>
+                <button type="button" className="shrink-0" onClick={() => setSandboxNote(null)} aria-label="Dismiss">
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            )}
             {chatPlugins.length > 0 && (
               <div className="flex flex-wrap gap-1.5 px-0.5">
                 {chatPlugins.map(plugin => (
@@ -3022,8 +3175,9 @@ export function ProjectWorkspace() {
                           onClick={() => {
                             setActiveModel(model);
                             if (model.source === 'auto') {
-                              setLocalPrefs({ defaultModelId: 'ark-auto', aiMode: 'automatic', autoFailover: true });
+                              setLocalPrefs({ defaultModelId: 'ark-auto', defaultCodeModelId: 'ark-auto', aiMode: 'automatic', autoFailover: true });
                             } else {
+                              setLocalPrefs({ defaultCodeModelId: model.id, defaultModelId: model.id });
                               if (projectId) clearThreadBrain(projectId, 'coding');
                               setThreadBrain(null);
                               if (model.source === 'local') void setEngineModel(model.id).catch(() => undefined);
@@ -3125,12 +3279,13 @@ export function ProjectWorkspace() {
                   <button
                     type="button"
                     onClick={() => handleBuild()}
+                    title="Static HTML preview — not a running dev server"
                     className={`inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded-md transition-colors ${
                       buildRunning ? 'bg-sky-500/90 text-white' : 'text-content-tertiary hover:text-content-secondary'
                     }`}
                   >
                     <Play className="w-3 h-3" />
-                    Start
+                    Preview
                   </button>
                   {undoReady && canEdit && (
                     <button
@@ -3222,7 +3377,7 @@ export function ProjectWorkspace() {
                       }}
                       onSave={() => {
                         if (!canEdit || !projectId) return;
-                        void window.arkDesktop?.projectWrite?.({
+                        void safeProjectWrite({
                           projectId,
                           projectName: project?.name,
                           files: packDiskFiles(fileContentsRef.current, messagesRef.current),
@@ -3260,9 +3415,9 @@ export function ProjectWorkspace() {
                   ) : (
                     <div className="h-full flex flex-col items-center justify-center text-center px-6 gap-2">
                       <Play className="w-5 h-5 text-sky-400" />
-                      <p className="text-sm text-content-secondary">Nothing to run yet</p>
+                      <p className="text-sm text-content-secondary">No static preview yet</p>
                       <p className="text-xs text-content-tertiary max-w-xs">
-                        Ask ARK in chat to create the page, then hit Start.
+                        Ask ARK in chat to create the page, then open Preview. This is a local HTML preview, not a compiled app.
                       </p>
                     </div>
                   )}
@@ -3270,11 +3425,38 @@ export function ProjectWorkspace() {
               )}
 
               {showBrowserChrome && (
-                <div className="shrink-0 px-3 py-2 flex items-center gap-2 text-xs text-content-secondary">
+                <div className="shrink-0 px-3 py-2 flex items-center gap-2 text-xs text-content-secondary flex-wrap">
                   <Globe className="w-3.5 h-3.5 text-sky-400 shrink-0" />
                   <span className="truncate">
-                    {`ARK preview · ${livePreviewUrl || fileKey}${previewReady ? ' · ready' : ''}`}
+                    Live preview (static HTML) · {fileKey || 'index'}{previewReady ? ' · ready' : ''}
                   </span>
+                  <select
+                    className="ml-auto max-w-[11rem] bg-transparent border border-surface-border rounded-md px-1.5 py-0.5 text-[10px] text-content-secondary"
+                    value={previewDevice?.id || ''}
+                    onChange={e => {
+                      const next = PHONE_DEVICES.find(d => d.id === e.target.value) || null;
+                      previewDeviceRef.current = next;
+                      setPreviewDevice(next);
+                    }}
+                    title="Device frame for preview"
+                  >
+                    <option value="">Desktop</option>
+                    <optgroup label="iPhone">
+                      {PHONE_DEVICES.filter(d => d.family === 'iphone').map(d => (
+                        <option key={d.id} value={d.id}>{d.label}</option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="iPad / Mac">
+                      {PHONE_DEVICES.filter(d => d.family === 'ipad' || d.family === 'mac').map(d => (
+                        <option key={d.id} value={d.id}>{d.label}</option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="Android">
+                      {PHONE_DEVICES.filter(d => d.platform === 'android').map(d => (
+                        <option key={d.id} value={d.id}>{d.label}</option>
+                      ))}
+                    </optgroup>
+                  </select>
                 </div>
               )}
             </div>

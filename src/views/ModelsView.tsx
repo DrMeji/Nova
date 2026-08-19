@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useRouter } from '@/context/RouterContext';
 import {
   Search, Plus, Check, Download, Loader2, Cpu, Cloud, Monitor,
   Code, Boxes, Brain, Eye, Zap, Image as ImageIcon, Video, Gauge, Sparkles, Rocket, X, KeyRound, Globe, RefreshCw, Trash2,
@@ -21,6 +22,8 @@ import {
 import {
   getProviderApiKeys,
   hasProviderApiKey,
+  getLocalPrefs,
+  setLocalPrefs,
   setProviderApiKey,
 } from '@/lib/localPrefs';
 import {
@@ -67,13 +70,13 @@ type CloudProvider = {
   tiers: Tier[];
   tone: string;
   initial: string;
-  /** Placeholder health for UI until real provider checks exist. */
+  /** Catalog ping is not live — Key / Live / Retired badges are the honest status. */
   health: 'available' | 'limited' | 'offline';
   /** Live in ARK Router / media today vs catalog only */
   availability: 'live' | 'coming_soon' | 'retired';
 };
 
-type CloudModel = {
+export type CloudModel = {
   id: string;
   name: string;
   description: string;
@@ -175,7 +178,7 @@ const CLOUD_PROVIDERS: CloudProvider[] = [
   { id: 'github-models', name: 'GitHub Models', description: 'Retired by GitHub (July 2026).', tiers: ['free'], tone: 'from-zinc-500 to-zinc-900', initial: 'GH', health: 'offline', availability: 'retired' },
 ];
 
-const CLOUD_MODELS: CloudModel[] = [
+export const CLOUD_MODELS: CloudModel[] = [
   // Chat
   { id: 'gpt-4o', name: 'GPT-4o', description: 'Flagship multimodal chat and coding.', provider: 'OpenAI', category: 'chat', tiers: ['pro'], tone: 'from-emerald-400 to-green-800', initial: '4o' },
   { id: 'gpt-4o-mini', name: 'GPT-4o mini', description: 'Fast, affordable everyday chat.', provider: 'OpenAI', category: 'chat', tiers: ['pro'], tone: 'from-green-400 to-emerald-700', initial: '4m' },
@@ -230,11 +233,12 @@ const CLOUD_MODELS: CloudModel[] = [
   { id: 'gemini-flash-code', name: 'Gemini 2.0 Flash (Coding)', description: 'Free-tier Google coding assistant.', provider: 'Google', category: 'coding', tiers: ['free'], tone: 'from-blue-400 to-sky-700', initial: 'Gc' },
 
   // Video generation
+  { id: 'ark-pollinations-video', name: 'ARK Video (Pollinations)', description: 'Free short MP4 when the host answers. Otherwise a 4s motion clip from a still — labeled honestly.', provider: 'Pollinations', category: 'video', tiers: ['free'], tone: 'from-pink-500 to-violet-800', initial: 'Pv' },
   { id: 'runway-gen3', name: 'Runway Gen-3', description: 'Cloud video generation and editing.', provider: 'Runway', category: 'video', tiers: ['pro'], tone: 'from-emerald-400 to-teal-800', initial: 'Rw' },
   { id: 'luma-ray2', name: 'Luma Ray2', description: 'Text and image to video.', provider: 'Luma', category: 'video', tiers: ['pro'], tone: 'from-sky-400 to-indigo-800', initial: 'Lu' },
-  { id: 'kling-1', name: 'Kling', description: 'Short cinematic cloud clips.', provider: 'OpenRouter', category: 'video', tiers: ['free', 'pro'], tone: 'from-violet-500 to-purple-800', initial: 'Kl' },
-  { id: 'pika-2', name: 'Pika 2.0', description: 'Fast creative video drafts.', provider: 'OpenRouter', category: 'video', tiers: ['free', 'pro'], tone: 'from-pink-500 to-rose-800', initial: 'Pk' },
-  { id: 'sora', name: 'Sora', description: 'OpenAI video generation when available.', provider: 'OpenAI', category: 'video', tiers: ['pro'], tone: 'from-emerald-400 to-green-800', initial: 'So' },
+  { id: 'kling-1', name: 'Kling', description: 'Short cinematic cloud clips — not wired in ARK yet.', provider: 'OpenRouter', category: 'video', tiers: ['free', 'pro'], tone: 'from-violet-500 to-purple-800', initial: 'Kl' },
+  { id: 'pika-2', name: 'Pika 2.0', description: 'Fast creative video drafts — not wired in ARK yet.', provider: 'OpenRouter', category: 'video', tiers: ['free', 'pro'], tone: 'from-pink-500 to-rose-800', initial: 'Pk' },
+  { id: 'sora', name: 'Sora', description: 'OpenAI video generation — not wired in ARK yet.', provider: 'OpenAI', category: 'video', tiers: ['pro'], tone: 'from-emerald-400 to-green-800', initial: 'So' },
 
   // Fast
   { id: 'groq-llama', name: 'Llama 3.3 70B (Groq)', description: 'Very fast Llama responses on Groq.', provider: 'Groq', category: 'fast', tiers: ['free', 'pro'], tone: 'from-orange-500 to-red-700', initial: 'Gq' },
@@ -265,6 +269,7 @@ const LIVE_MODEL_PROVIDERS = new Set([
   'Hugging Face',
   'NVIDIA',
   'Together',
+  'Together AI',
   'Fireworks',
   'DeepSeek',
   'Mistral',
@@ -275,6 +280,27 @@ const LIVE_MODEL_PROVIDERS = new Set([
 
 function cloudModelAvailability(model: CloudModel): 'live' | 'coming_soon' | 'retired' {
   if (model.provider === 'GitHub Models') return 'retired';
+  if (model.category === 'video') {
+    // Router only calls ARK Engine video (Pollinations / HF / motion still).
+    if (model.provider === 'Pollinations' || model.provider === 'Hugging Face') return 'live';
+    return 'coming_soon';
+  }
+  if (model.category === 'image') {
+    if (
+      model.provider === 'Pollinations'
+      || model.provider === 'Hugging Face'
+      || model.id === 'dall-e-3'
+    ) return 'live';
+    return 'coming_soon';
+  }
+  if (model.category === 'vision') {
+    if (
+      model.provider === 'Google'
+      || model.provider === 'OpenAI'
+      || model.provider === 'Anthropic'
+    ) return 'live';
+    return 'coming_soon';
+  }
   if (LIVE_MODEL_PROVIDERS.has(model.provider)) return 'live';
   return 'coming_soon';
 }
@@ -371,6 +397,16 @@ function ModelInstallControl({
   onCancel?: () => void;
   onDelete?: () => void;
 }) {
+  const [prefTick, setPrefTick] = useState(0);
+  useEffect(() => {
+    const on = () => setPrefTick(t => t + 1);
+    window.addEventListener('ark:prefs-changed', on);
+    return () => window.removeEventListener('ark:prefs-changed', on);
+  }, []);
+  void prefTick;
+  const prefs = getLocalPrefs();
+  const isChatDefault = prefs.defaultModelId === modelId;
+  const isCodeDefault = prefs.defaultCodeModelId === modelId;
   const canInstall = isEngineDownloadable(modelId);
   if (isOn) {
     return (
@@ -386,13 +422,28 @@ function ModelInstallControl({
           <button
             type="button"
             onClick={onDelete}
-            className="w-8 h-8 rounded-full flex items-center justify-center text-content-tertiary hover:text-rose-300 hover:bg-rose-500/10 transition-colors"
-            title={`Delete ${name} from this PC`}
-            aria-label={`Delete ${name}`}
+            className="w-8 h-8 rounded-full text-content-tertiary hover:text-rose-300"
+            title={`Delete ${name}`}
           >
             <Trash2 className="w-4 h-4" />
           </button>
         )}
+        <button
+          type="button"
+          className={`rounded-md px-1.5 py-0.5 text-[10px] ${isChatDefault ? 'text-sky-200 bg-sky-500/15' : 'text-sky-300 hover:bg-sky-500/10'}`}
+          title={isChatDefault ? 'Default for new chats' : 'Use this as the default for Chat'}
+          onClick={() => setLocalPrefs({ defaultModelId: modelId, lastChatModelId: modelId })}
+        >
+          {isChatDefault ? 'Chat ✓' : 'Chat'}
+        </button>
+        <button
+          type="button"
+          className={`rounded-md px-1.5 py-0.5 text-[10px] ${isCodeDefault ? 'text-violet-200 bg-violet-500/15' : 'text-violet-300 hover:bg-violet-500/10'}`}
+          title={isCodeDefault ? 'Default for Code' : 'Use this as the default for Code'}
+          onClick={() => setLocalPrefs({ defaultCodeModelId: modelId })}
+        >
+          {isCodeDefault ? 'Code ✓' : 'Code'}
+        </button>
       </span>
     );
   }
@@ -451,6 +502,7 @@ function TierBadges({ tiers }: { tiers: Tier[] }) {
 }
 
 export function ModelsView() {
+  const { navigate } = useRouter();
   const [tab, setTab] = useState<TabId>('for-pc');
   const [query, setQuery] = useState('');
   const [installed, setInstalled] = useState<Set<string>>(() => new Set());
@@ -545,6 +597,10 @@ export function ModelsView() {
   }, []);
 
   useEffect(() => {
+    const onHw = () => {
+      void getAccurateHardware(true).then(setHw);
+    };
+    window.addEventListener('ark:hardware-rescanned', onHw);
     let cancelled = false;
     void getAccurateHardware(true).then(info => {
       if (cancelled) return;
@@ -564,7 +620,10 @@ export function ModelsView() {
       );
       setInstalled(ready);
     }).catch(() => undefined);
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      window.removeEventListener('ark:hardware-rescanned', onHw);
+    };
   }, []);
 
   const runHunt = useCallback(async () => {
@@ -915,11 +974,18 @@ export function ModelsView() {
               { id: 'for-pc' as const, label: 'For your PC', icon: Monitor },
               { id: 'local' as const, label: 'Local AI', icon: Cpu },
               { id: 'cloud' as const, label: 'Cloud AI', icon: Cloud },
+              { id: 'engine' as const, label: 'Engine', icon: Gauge },
             ]).map(t => (
               <button
                 key={t.id}
                 type="button"
-                onClick={() => setTab(t.id)}
+                onClick={() => {
+                  if (t.id === 'engine') {
+                    navigate({ name: 'local-ai' });
+                    return;
+                  }
+                  setTab(t.id);
+                }}
                 className={`inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 text-sm transition-colors ${
                   tab === t.id
                     ? 'bg-surface-hover text-content-primary'
@@ -1293,6 +1359,11 @@ export function ModelsView() {
                               ) : (
                                 <span className="inline-flex items-center rounded-full bg-amber-500/15 text-amber-400/90 px-2 py-0.5 text-[10px] font-medium leading-none">
                                   Coming soon
+                                </span>
+                              )}
+                              {provider.health === 'offline' && (
+                                <span className="inline-flex items-center rounded-full bg-rose-500/15 text-rose-300 px-2 py-0.5 text-[10px] font-medium leading-none">
+                                  Offline
                                 </span>
                               )}
                               {provider.id === 'ollama' && (

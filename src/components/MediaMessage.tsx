@@ -123,7 +123,9 @@ function ResolvedMedia({
     <div className="max-w-md">
       {showPreview && (
         <p className="mb-1.5 text-[10px] uppercase tracking-wider text-amber-400/90 font-semibold">
-          Preview · not finished
+          {/motion still/i.test(alt) || /motion still/i.test(src)
+            ? 'Motion still'
+            : 'Preview · not a finished generation'}
         </p>
       )}
       {isVideo ? (

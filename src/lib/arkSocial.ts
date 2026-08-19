@@ -231,6 +231,39 @@ export async function publishNetworkPost(opts: {
   return post;
 }
 
+export async function deleteNetworkPost(id: string, userId?: string | null): Promise<void> {
+  saveLocalPosts(loadLocalPosts().filter(p => p.id !== id));
+  if (canUseCloud(userId)) {
+    try {
+      await supabase.from('ark_network_posts').delete().eq('id', id);
+    } catch {
+      /* keep local */
+    }
+  }
+}
+
+export async function updateNetworkPost(
+  id: string,
+  patch: Partial<Pick<NetworkPost, 'title' | 'summary' | 'visibility' | 'allowedArkIds' | 'githubUrl'>>,
+  userId?: string | null,
+): Promise<void> {
+  const next = loadLocalPosts().map(p => (p.id === id ? { ...p, ...patch } : p));
+  saveLocalPosts(next);
+  if (canUseCloud(userId)) {
+    try {
+      await supabase.from('ark_network_posts').update({
+        title: patch.title,
+        summary: patch.summary,
+        visibility: patch.visibility,
+        github_url: patch.githubUrl,
+        allowed_ark_ids: patch.allowedArkIds,
+      }).eq('id', id);
+    } catch {
+      /* keep local */
+    }
+  }
+}
+
 export async function listThread(myArkId: string, peerArkId: string, userId?: string | null): Promise<DirectMessage[]> {
   const local = loadLocalMessages().filter(m =>
     (m.senderArkId === myArkId && m.recipientArkId === peerArkId)
@@ -309,7 +342,10 @@ export function threadPreview(myArkId: string, peerArkId: string): DirectMessage
 export function subscribeMessages(
   myArkId: string,
   onMessage: (msg: DirectMessage) => void,
+  userId?: string | null,
 ) {
+  if (!myArkId || !canUseCloud(userId)) return () => undefined;
+  try {
   const channel = supabase
     .channel(`ark-dm-${myArkId}`)
     .on(
@@ -335,6 +371,9 @@ export function subscribeMessages(
   return () => {
     void supabase.removeChannel(channel);
   };
+  } catch {
+    return () => undefined;
+  }
 }
 
 /** After guest signs in, upload local-only social data to Supabase. */

@@ -100,17 +100,14 @@ async function fetchRealImage(prompt, opts = {}) {
   const h = opts.height || 768;
   const urls = [
     `https://image.pollinations.ai/prompt/${encoded}?width=${w}&height=${h}&nologo=true&model=flux&enhance=true&seed=${seed}`,
-    `https://image.pollinations.ai/prompt/${encoded}?width=${w}&height=${h}&nologo=true&model=flux-realism&enhance=true&seed=${seed}`,
-    `https://gen.pollinations.ai/image/${encoded}?model=flux&width=${w}&height=${h}&nologo=true&seed=${seed}`,
     `https://image.pollinations.ai/prompt/${encoded}?width=${w}&height=${h}&nologo=true&model=turbo&seed=${seed}`,
     `https://image.pollinations.ai/prompt/${encoded}?width=${w}&height=${h}&nologo=true&seed=${seed + 1}`,
-    `https://pollinations.ai/p/${encoded}?width=${w}&height=${h}&nologo=true&model=flux&seed=${seed}`,
   ];
 
   for (const url of urls) {
     try {
       const ac = new AbortController();
-      const timer = setTimeout(() => ac.abort(), 45_000);
+      const timer = setTimeout(() => ac.abort(), 22_000);
       const res = await fetch(url, {
         method: 'GET',
         headers: { 'User-Agent': 'ARK-Desktop' },
@@ -132,50 +129,53 @@ async function fetchRealImage(prompt, opts = {}) {
   return null;
 }
 
-/** Try free Pollinations MP4 endpoints; fall back to motion still if blocked/paid. */
+function looksLikeMp4(buf, ctype) {
+  if (!buf || buf.length < 8000) return false;
+  if (ctype && (ctype.includes('json') || ctype.includes('text/html') || ctype.includes('text/plain'))) {
+    return false;
+  }
+  const head = buf.slice(0, 16).toString('utf8');
+  if (head.startsWith('<') || head.startsWith('{') || head.startsWith('[')) return false;
+  if (
+    ctype
+    && !ctype.includes('video')
+    && !ctype.includes('mp4')
+    && !ctype.includes('octet-stream')
+  ) return false;
+  return true;
+}
+
+async function fetchVideoUrl(url, timeoutMs) {
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: { 'User-Agent': 'ARK-Desktop' },
+      redirect: 'follow',
+      signal: ac.signal,
+    });
+    if (!res.ok) return null;
+    const ctype = res.headers.get('content-type') || '';
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (!looksLikeMp4(buf, ctype)) return null;
+    return { buf, ext: 'mp4', source: 'pollinations-mp4' };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Two free hosts in parallel, ~30s each — never walk a long URL list. */
 async function fetchRealVideo(prompt) {
   const encoded = encodeURIComponent(String(prompt || 'cinematic motion').slice(0, 400));
   const urls = [
     `https://gen.pollinations.ai/video/${encoded}?model=wan-fast&duration=4&aspectRatio=16:9`,
-    `https://gen.pollinations.ai/video/${encoded}?model=wan&duration=4&aspectRatio=16:9`,
     `https://gen.pollinations.ai/video/${encoded}?model=ltx-2&duration=4&aspectRatio=16:9`,
-    `https://gen.pollinations.ai/video/${encoded}?model=seedance&duration=4&aspectRatio=16:9`,
-    `https://gen.pollinations.ai/video/${encoded}?model=p-video-720p&duration=4&aspectRatio=16:9`,
-    `https://gen.pollinations.ai/video/${encoded}?model=wan-fast&duration=5&aspectRatio=16:9&audio=false`,
-    `https://gen.pollinations.ai/video/${encoded}?model=ltx-2&duration=3&aspectRatio=16:9`,
-    `https://gen.pollinations.ai/video/${encoded}?model=wan&duration=3&aspectRatio=16:9`,
-    `https://image.pollinations.ai/prompt/${encoded}?width=1280&height=720&nologo=true&model=flux`, // not video — skip below
   ];
-
-  for (const url of urls) {
-    if (url.includes('image.pollinations.ai')) continue;
-    try {
-      const ac = new AbortController();
-      const timer = setTimeout(() => ac.abort(), 120_000);
-      const res = await fetch(url, {
-        method: 'GET',
-        headers: { 'User-Agent': 'ARK-Desktop' },
-        redirect: 'follow',
-        signal: ac.signal,
-      });
-      clearTimeout(timer);
-      if (!res.ok) continue;
-      const ctype = res.headers.get('content-type') || '';
-      if (
-        !ctype.includes('video')
-        && !ctype.includes('mp4')
-        && !ctype.includes('octet-stream')
-      ) continue;
-      const buf = Buffer.from(await res.arrayBuffer());
-      if (buf.length < 8000) continue;
-      const head = buf.slice(0, 16).toString('utf8');
-      if (head.startsWith('<') || head.startsWith('{') || head.startsWith('[')) continue;
-      return { buf, ext: 'mp4', source: 'pollinations-mp4' };
-    } catch {
-      /* try next */
-    }
-  }
-  return null;
+  const results = await Promise.all(urls.map(url => fetchVideoUrl(url, 32_000)));
+  return results.find(Boolean) || null;
 }
 
 /** Second path: Hugging Face text-to-video when a token is present in the vault file. */
@@ -188,12 +188,12 @@ async function fetchHfVideo(prompt) {
 
     const models = [
       'https://router.huggingface.co/hf-inference/models/Wan-AI/Wan2.1-T2V-1.3B',
-      'https://api-inference.huggingface.co/models/Wan-AI/Wan2.1-T2V-1.3B',
       'https://api-inference.huggingface.co/models/ali-vilab/text-to-video-ms-1.7b',
-      'https://router.huggingface.co/hf-inference/models/ali-vilab/text-to-video-ms-1.7b',
     ];
     for (const url of models) {
       try {
+        const ac = new AbortController();
+        const timer = setTimeout(() => ac.abort(), 40_000);
         const res = await fetch(url, {
           method: 'POST',
           headers: {
@@ -203,12 +203,13 @@ async function fetchHfVideo(prompt) {
             'User-Agent': 'ARK-Desktop',
           },
           body: JSON.stringify({ inputs: String(prompt || '').slice(0, 400) }),
+          signal: ac.signal,
         });
+        clearTimeout(timer);
         if (!res.ok) continue;
         const ctype = res.headers.get('content-type') || '';
         const buf = Buffer.from(await res.arrayBuffer());
-        if (buf.length < 8000) continue;
-        if (ctype.includes('json') || buf.slice(0, 1).toString() === '{') continue;
+        if (!looksLikeMp4(buf, ctype)) continue;
         return { buf, ext: 'mp4', source: 'huggingface-video' };
       } catch {
         /* try next model */
@@ -543,7 +544,7 @@ async function generateVideo(prompt, modelName) {
           path: file,
           createdAt: new Date().toISOString(),
           source: 'motion-still-mp4',
-          real: true,
+          real: false,
           format: 'mp4',
         };
         writeLibraryEntry(entry);
@@ -554,7 +555,7 @@ async function generateVideo(prompt, modelName) {
           path: file,
           dataUrl,
           libraryId: id,
-          real: true,
+          real: false,
           source: 'motion-still-mp4',
           reply: shortVideoReply(prompt, dataUrl, true, { motionStill: true }),
         };

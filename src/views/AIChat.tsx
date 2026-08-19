@@ -15,6 +15,7 @@ import { preloadStartRatio } from '@/lib/speedTest';
 import {
   chatThreadKey,
   mediaMessageMarkdown,
+  extractVisionImages,
   rememberThumb,
   resolveCreationDataUrl,
   slimChatContent,
@@ -29,7 +30,6 @@ import {
   listAccountRepos,
   looksLikeBuildStart,
   pickGithubRepo,
-  shouldHandoffToCode,
   shouldInspectInChat,
   wantsGithubCatalog,
 } from '@/lib/chatStudio';
@@ -96,6 +96,64 @@ const COMPOSER_MODE_PREFIX: Record<'plan' | 'ask' | 'debug' | 'multitask', strin
   multitask: 'Break this into parallel tasks and tackle them clearly:\n\n',
 };
 
+const COMPOSER_MODE_LABEL: Record<'plan' | 'ask' | 'debug' | 'multitask', string> = {
+  plan: 'Plan',
+  ask: 'Ask',
+  debug: 'Debug',
+  multitask: 'Tasks',
+};
+
+function previewFromText(text: string) {
+  const t = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!t) return undefined;
+  return t.length > 52 ? `${t.slice(0, 50)}…` : t;
+}
+
+function ChatModeTabs() {
+  const { route, navigate } = useRouter();
+  const { activeChats } = useRecentProjects();
+  const current = route.name === 'chat'
+    ? (route.mode === 'image' || route.mode === 'video' ? route.mode : 'general')
+    : 'general';
+  const go = (next: 'general' | 'image' | 'video') => {
+    if (next === 'general') {
+      if (route.name === 'chat' && !route.mode) return;
+      navigate({ name: 'chat' });
+      return;
+    }
+    if (route.name === 'chat' && route.mode === next) return;
+    const last = activeChats.find(c => c.mode === next);
+    if (last) {
+      navigate({ name: 'chat', mode: next, chatId: last.id, creationId: last.creationId });
+    } else {
+      navigate({ name: 'chat', mode: next });
+    }
+  };
+  const tabs: { id: 'general' | 'image' | 'video'; label: string }[] = [
+    { id: 'general', label: 'Chat' },
+    { id: 'image', label: 'Image' },
+    { id: 'video', label: 'Video' },
+  ];
+  return (
+    <div className="shrink-0 flex items-center justify-center gap-1 pt-3 pb-1">
+      {tabs.map(t => (
+        <button
+          key={t.id}
+          type="button"
+          onClick={() => go(t.id)}
+          className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+            current === t.id
+              ? 'bg-surface-hover text-content-primary'
+              : 'text-content-tertiary hover:text-content-primary'
+          }`}
+        >
+          {t.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 type ModelSource = 'local' | 'cloud' | 'auto';
 
 type ModelKind = 'chat' | 'image' | 'video';
@@ -118,9 +176,9 @@ const CHAT_MODELS: ChatModelOption[] = [
   { id: 'sdxl-turbo-local', name: 'SDXL Turbo Local', source: 'local', detail: 'Fast on-device · install from Local AI', kind: 'image' },
   { id: 'flux-schnell-local', name: 'FLUX Schnell Local', source: 'local', detail: 'On-device FLUX · ~13 GB · Local AI', kind: 'image' },
   { id: 'dall-e-3', name: 'DALL·E 3', source: 'cloud', detail: 'Cloud image · OpenAI key', kind: 'image' },
-  // Video — Engine path until real MP4 ships
+  // Video — ARK Engine only (Pollinations / HF / motion-still). Not Kling or Sora.
   { id: 'ark-auto', name: 'ARK', source: 'auto', detail: 'Best path · stays on for this chat', kind: 'video' },
-  { id: 'ark-video-core', name: 'ARK Video Core', source: 'local', detail: 'MP4 when free · motion fallback', kind: 'video' },
+  { id: 'ark-video-core', name: 'ARK Video Core', source: 'local', detail: 'Free MP4 when the host answers · motion still otherwise', kind: 'video' },
 ];
 
 /** Cloud chat options — only shown in the picker when that provider key exists. */
@@ -147,6 +205,20 @@ function kindForMode(mode: ChatMode): ModelKind {
 }
 
 function defaultModelForKind(kind: ModelKind): ChatModelOption {
+  const prefs = getLocalPrefs();
+  const prefId = prefs.defaultModelId;
+  if (kind === 'chat' && prefId && prefId !== 'ark-auto') {
+    const cloud = CLOUD_CHAT_WHEN_KEYED.find(m => m.id === prefId);
+    if (cloud && hasProviderApiKey(cloud.keyId) && isCloudProviderEnabled(cloud.keyId)) return cloud;
+    if (prefId.startsWith('ollama:')) {
+      return { id: prefId, name: prefId.replace(/^ollama:/, ''), source: 'local', detail: 'Ollama', kind: 'chat' };
+    }
+    return { id: prefId, name: prefId, source: 'local', detail: 'Local · Settings default', kind: 'chat' };
+  }
+  if (prefId && prefId !== 'ark-auto') {
+    const hit = CHAT_MODELS.find(m => m.id === prefId && m.kind === kind);
+    if (hit) return hit;
+  }
   const auto = CHAT_MODELS.find(m => m.id === 'ark-auto' && m.kind === kind);
   if (auto) return auto;
   if (kind === 'chat') {
@@ -360,6 +432,7 @@ export function AIChat() {
   const [generating, setGenerating] = useState(false);
   const [queueLen, setQueueLen] = useState(0);
   const [codeSwitchDismissed, setCodeSwitchDismissed] = useState(false);
+  const [pendingImages, setPendingImages] = useState<{ id: string; name: string; dataUrl: string }[]>([]);
   const [chatStudioFiles, setChatStudioFiles] = useState<Record<string, string>>({});
   const [chatStudioProjectId, setChatStudioProjectId] = useState<string | null>(null);
   const [githubPickerOpen, setGithubPickerOpen] = useState(false);
@@ -832,18 +905,15 @@ export function AIChat() {
       /* ignore */
     }
     try {
-      saveProjectThread(project.id, messagesRef.current.map(m => ({
-        ...m,
-        project_id: project.id,
-      })));
-      const threadMsgs = messagesRef.current.map(m => ({
-        ...m,
-        project_id: project.id,
-      }));
       if (Object.keys(files).length) {
+        const threadMsgs = messagesRef.current.map(m => ({
+          ...m,
+          project_id: project.id,
+        }));
+        saveProjectThread(project.id, threadMsgs);
         void persistProjectThreadToDisk(project.id, name, threadMsgs, files);
       } else {
-        void persistProjectThreadToDisk(project.id, name, threadMsgs);
+        saveProjectThread(project.id, []);
       }
       try {
         localStorage.setItem(`ark:project-source-chat:${project.id}`, routeChatIdRef.current || persistChatIdRef.current || '');
@@ -896,9 +966,35 @@ export function AIChat() {
     navigate({ name: 'project', id: project.id });
   };
 
+  const addPendingImages = async (files: File[]) => {
+    const images = files.filter(f => f.type.startsWith('image/') || /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(f.name));
+    if (!images.length) return;
+    const next: { id: string; name: string; dataUrl: string }[] = [];
+    for (const f of images.slice(0, 4)) {
+      if (f.size > 6_000_000) continue;
+      try {
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result || ''));
+          reader.onerror = () => reject(reader.error);
+          reader.readAsDataURL(f);
+        });
+        if (!dataUrl.startsWith('data:image/')) continue;
+        const id = `attach-${crypto.randomUUID().slice(0, 10)}`;
+        rememberThumb(id, dataUrl);
+        next.push({ id, name: f.name, dataUrl });
+      } catch {
+        /* skip unreadable */
+      }
+    }
+    if (!next.length) return;
+    setPendingImages(prev => [...prev, ...next].slice(0, 4));
+  };
+
   const onPickCodeFiles = async (list: FileList | null) => {
     if (!list?.length) return;
     const files = [...list];
+    void addPendingImages(files);
     const codeFiles = files.filter(f => CODE_FILE_RE.test(f.name) || /javascript|typescript|json|text\/plain|xml/.test(f.type));
     if (!codeFiles.length) return;
     const seedFiles: Record<string, string> = { ...chatStudioFilesRef.current };
@@ -939,7 +1035,11 @@ export function AIChat() {
   }, [route]);
 
   const handlePlusAction = (action: ComposerPlusAction) => {
-    if (action === 'file' || action === 'image') {
+    if (action === 'image') {
+      imageInputRef.current?.click();
+      return;
+    }
+    if (action === 'file') {
       attachInputRef.current?.click();
       return;
     }
@@ -953,10 +1053,19 @@ export function AIChat() {
 
   const handleSend = () => {
     let content = input.trim();
-    if (!content || !user) return;
+    const images = pendingImages;
+    if ((!content && !images.length) || !user) return;
     if (composerMode && COMPOSER_MODE_PREFIX[composerMode]) {
       content = `${COMPOSER_MODE_PREFIX[composerMode]}${content}`;
     }
+    if (!content && images.length) content = 'What is in this image?';
+    if (images.length) {
+      content = [
+        content,
+        ...images.map(img => `![${img.name.replace(/[\[\]]/g, '')}](ark-media:${img.id})`),
+      ].join('\n\n');
+    }
+    setPendingImages([]);
     setComposerMode(null);
     // Do not auto-navigate on build-ish prompts — Yes on the chip switches to Code.
     const viewingChatId = routeChatIdRef.current;
@@ -1002,6 +1111,7 @@ export function AIChat() {
         mode,
         title: titleFromPrompt(content),
         updatedAt: new Date().toISOString(),
+        preview: previewFromText(content),
       });
     } else {
       const existing = chats.find(c => c.id === activeChatId);
@@ -1011,6 +1121,7 @@ export function AIChat() {
         title: existing?.title || titleFromPrompt(content),
         updatedAt: new Date().toISOString(),
         creationId: existing?.creationId,
+        preview: previewFromText(content),
       });
     }
     persistChatIdRef.current = activeChatId;
@@ -1104,6 +1215,9 @@ export function AIChat() {
 
     const finalizeAssistant = (finalText: string, provider: string, libraryId?: string) => {
       if (mySeq !== genSeqRef.current) return;
+      if (provider && provider !== 'ARK · setup needed') {
+        setLocalPrefs({ lastAnsweredLabel: provider });
+      }
       const threadChatId = persistChatIdRef.current || activeChatId;
       const routeChat = routeChatIdRef.current;
       const patchThread = (list: ChatMessage[]) => list.map(m => (
@@ -1266,7 +1380,7 @@ export function AIChat() {
         }
       }
 
-      if (!usedPlugin && (mode === 'general' || mode === 'code') && shouldInspectInChat(content, hasStudioFiles, false)) {
+      if (!usedPlugin && (mode === 'general' || mode === 'code') && shouldInspectInChat(content, hasStudioFiles, content.startsWith(COMPOSER_MODE_PREFIX.debug))) {
         const findings = scanProjectFindings(studioFiles, content);
         const picked = pickFilesForInspect(studioFiles, content);
         const inspectMessage = buildInspectPrompt(
@@ -1276,10 +1390,11 @@ export function AIChat() {
           findings,
           'Chat inspect',
         );
-        const prefs = getLocalPrefs();
-        const history = prefs.rememberContext
-          ? buildRouterHistory(priorForHistory, inspectMessage)
-          : buildRouterHistory([], inspectMessage);
+          const vision = extractVisionImages(content);
+          const prefs = getLocalPrefs();
+          const history = prefs.rememberContext
+            ? buildRouterHistory(priorForHistory, inspectMessage, vision)
+            : buildRouterHistory([], inspectMessage, vision);
         const sticky = pinnedModel.source === 'auto' ? threadBrainRef.current : null;
         const routed = await arkRoute({
           message: inspectMessage,
@@ -1303,14 +1418,6 @@ export function AIChat() {
         setInspectOfferId(assistantId);
       }
 
-      if (!usedPlugin && (mode === 'general' || mode === 'code') && shouldHandoffToCode(content, hasStudioFiles, false)) {
-        openCodeWorkspace(handoffPrompt(content, lastInspectReplyRef.current), studioFiles);
-        response = hasStudioFiles
-          ? 'Opening **Code** with your files. I will apply the change there — you can keep adding, removing, or upgrading in that chat.'
-          : 'Opening **Code** so I can start building. Keep going there to add, remove, or upgrade.';
-        usedPlugin = true;
-      }
-
       if (!usedPlugin && pluginId) {
         const pluginReply = await runPluginAction(
           pluginId,
@@ -1322,10 +1429,9 @@ export function AIChat() {
           response = pluginReply;
           usedPlugin = true;
         }
-      } else if (!usedPlugin && (mode === 'image' || mode === 'video')) {
+      } else if (!usedPlugin && mode === 'image') {
         try {
-          const kind = mode === 'image' ? 'image' : 'video';
-          const stages = MEDIA_GEN_STAGES[kind];
+          const stages = MEDIA_GEN_STAGES.image;
           const setAssistantContent = (text: string) => {
             if (abandoned || stopRequestedRef.current || mySeq !== genSeqRef.current) return;
             setMessages(prev => {
@@ -1335,31 +1441,30 @@ export function AIChat() {
             });
           };
 
-          for (const stage of stages) {
-            if (!stage.ms) continue;
-            if (stopRequestedRef.current || mySeq !== genSeqRef.current) break;
-            setAssistantContent(`__generating__:${kind}:${stage.label}`);
-            await new Promise(r => window.setTimeout(r, stage.ms));
-          }
-          setAssistantContent(`__generating__:${kind}:${stages[stages.length - 1].label}`);
+          setAssistantContent(`__generating__:image:${stages[stages.length - 1].label}`);
+          let stageIdx = 0;
+          const stageTimer = window.setInterval(() => {
+            stageIdx = Math.min(stageIdx + 1, stages.length - 1);
+            setAssistantContent(`__generating__:image:${stages[stageIdx].label}`);
+          }, 2200);
 
-          const rewritten =
-            kind === 'image' ? rewriteImagePrompt(content) : rewriteVideoPrompt(content);
-
-          const minMs = kind === 'image' ? 3200 : 5500;
+          const rewritten = rewriteImagePrompt(content);
           const sticky = pinnedModel.source === 'auto' ? threadBrainRef.current : null;
-          const routePromise = arkRoute({
-            message: rewritten,
-            kind,
-            preferredModelId: pinnedModel.id,
-            preferredModelName: pinnedModel.name,
-            preferredSource: pinnedModel.source,
-            stickyModelId: sticky?.modelId,
-            stickyModelName: sticky?.modelName,
-            stickyPinnedSource: sticky?.pinnedSource,
-          });
-          const waitPromise = new Promise(r => window.setTimeout(r, minMs));
-          const [routed] = await Promise.all([routePromise, waitPromise]);
+          let routed;
+          try {
+            routed = await arkRoute({
+              message: rewritten,
+              kind: 'image',
+              preferredModelId: pinnedModel.id,
+              preferredModelName: pinnedModel.name,
+              preferredSource: pinnedModel.source,
+              stickyModelId: sticky?.modelId,
+              stickyModelName: sticky?.modelName,
+              stickyPinnedSource: sticky?.pinnedSource,
+            });
+          } finally {
+            window.clearInterval(stageTimer);
+          }
 
           resolvedProvider = routerProviderLabel(routed, providerLabel);
           const hopNote = failoverChipText(routed, pinnedModel);
@@ -1367,7 +1472,7 @@ export function AIChat() {
           if (pinnedModel.source === 'auto' && routed.source !== 'none') {
             const nextBrain = saveAutoThreadBrain(
               activeChatId,
-              kind,
+              'image',
               routed,
               threadBrainRef.current,
               routed.attempted?.length ?? 0,
@@ -1382,7 +1487,7 @@ export function AIChat() {
             if (isReal) {
               addCreation({
                 id: libraryId,
-                kind,
+                kind: 'image',
                 title: content.slice(0, 80),
                 prompt: content,
                 modelName: routed.modelName || pinnedModel.name,
@@ -1395,11 +1500,11 @@ export function AIChat() {
             if (!isReal && routed.reply) {
               response = routed.reply.includes('![')
                 ? routed.reply
-                : `${routed.reply}\n\n${mediaMessageMarkdown(content, libraryId, routed.media.dataUrl, { real: false, kind })}`;
+                : `${routed.reply}\n\n${mediaMessageMarkdown(content, libraryId, routed.media.dataUrl, { real: false, kind: 'image' })}`;
             } else {
               response = mediaMessageMarkdown(content, libraryId, routed.media.dataUrl, {
                 real: isReal,
-                kind,
+                kind: 'image',
                 source: routed.source,
               });
             }
@@ -1409,21 +1514,124 @@ export function AIChat() {
               title: titleFromPrompt(content),
               updatedAt: new Date().toISOString(),
               creationId: libraryId,
+              preview: previewFromText(content),
             });
           } else {
             response = routed.reply;
           }
           usedPlugin = true;
         } catch (err) {
-          response = err instanceof Error ? err.message : 'Media generation failed';
+          response = err instanceof Error ? err.message : 'Image generation failed';
+          usedPlugin = true;
+        }
+      } else if (!usedPlugin && mode === 'video') {
+        try {
+          const stages = MEDIA_GEN_STAGES.video;
+          const setAssistantContent = (text: string) => {
+            if (abandoned || stopRequestedRef.current || mySeq !== genSeqRef.current) return;
+            setMessages(prev => {
+              const next = prev.map(m => (m.id === assistantId ? { ...m, content: text } : m));
+              persistModeThread(mode, next, { chatId: persistChatIdRef.current || activeChatId });
+              return next;
+            });
+          };
+
+          setAssistantContent(`__generating__:video:${stages[stages.length - 1].label}`);
+          let stageIdx = 0;
+          const stageTimer = window.setInterval(() => {
+            stageIdx = Math.min(stageIdx + 1, stages.length - 1);
+            setAssistantContent(`__generating__:video:${stages[stageIdx].label}`);
+          }, 2200);
+
+          const rewritten = rewriteVideoPrompt(content);
+          const sticky = pinnedModel.source === 'auto' ? threadBrainRef.current : null;
+          let routed;
+          try {
+            routed = await arkRoute({
+              message: rewritten,
+              kind: 'video',
+              preferredModelId: pinnedModel.id,
+              preferredModelName: pinnedModel.name,
+              preferredSource: pinnedModel.source,
+              stickyModelId: sticky?.modelId,
+              stickyModelName: sticky?.modelName,
+              stickyPinnedSource: sticky?.pinnedSource,
+            });
+          } finally {
+            window.clearInterval(stageTimer);
+          }
+
+          resolvedProvider = routerProviderLabel(routed, providerLabel);
+          const hopNote = failoverChipText(routed, pinnedModel);
+          if (hopNote) setFailoverNote(hopNote);
+          if (pinnedModel.source === 'auto' && routed.source !== 'none') {
+            const nextBrain = saveAutoThreadBrain(
+              activeChatId,
+              'video',
+              routed,
+              threadBrainRef.current,
+              routed.attempted?.length ?? 0,
+            );
+            if (nextBrain) setThreadBrain(nextBrain);
+          }
+          const libraryId = routed.media?.libraryId || `local-${Date.now()}`;
+          lastLibraryId = libraryId;
+          if (routed.media?.dataUrl) {
+            const isMp4 = routed.media.dataUrl.startsWith('data:video/');
+            const isMotionStill = (routed.source || '').includes('motion-still');
+            const isReal = Boolean(routed.media.real) && isMp4 && !isMotionStill;
+            rememberThumb(libraryId, routed.media.dataUrl);
+            if (isMp4) {
+              addCreation({
+                id: libraryId,
+                kind: 'video',
+                title: content.slice(0, 80),
+                prompt: content,
+                modelName: routed.modelName || pinnedModel.name,
+                dataUrl: routed.media.dataUrl,
+                createdAt: new Date().toISOString(),
+                real: isReal,
+                source: routed.source,
+              });
+            }
+            if (routed.reply && (routed.reply.includes('![') || isMotionStill || !isReal)) {
+              response = routed.reply.includes('![')
+                ? routed.reply
+                : `${routed.reply}\n\n${mediaMessageMarkdown(content, libraryId, routed.media.dataUrl, {
+                    real: isReal,
+                    kind: 'video',
+                    source: routed.source,
+                  })}`;
+            } else {
+              response = mediaMessageMarkdown(content, libraryId, routed.media.dataUrl, {
+                real: isReal,
+                kind: 'video',
+                source: routed.source,
+              });
+            }
+            addChat({
+              id: activeChatId!,
+              mode,
+              title: titleFromPrompt(content),
+              updatedAt: new Date().toISOString(),
+              creationId: libraryId,
+              preview: previewFromText(content),
+            });
+          } else {
+            response = routed.reply;
+          }
+          usedPlugin = true;
+        } catch (err) {
+          response = err instanceof Error ? err.message : 'Video generation failed';
           usedPlugin = true;
         }
       } else if (!usedPlugin) {
         try {
           const prefs = getLocalPrefs();
+          const vision = extractVisionImages(content);
           const history = prefs.rememberContext
-            ? buildRouterHistory(priorForHistory, content)
-            : buildRouterHistory([], content);
+            ? buildRouterHistory(priorForHistory, content, vision)
+            : buildRouterHistory([], content, vision);
           const sticky = pinnedModel.source === 'auto' ? threadBrainRef.current : null;
           const routePromise = arkRoute({
             message: content,
@@ -1435,7 +1643,8 @@ export function AIChat() {
             stickyModelName: sticky?.modelName,
             stickyPinnedSource: sticky?.pinnedSource,
             history,
-            onChunk: (piece) => {
+            onChunk: prefs.streamResponses
+              ? (piece) => {
               if (abandoned || stopRequestedRef.current || mySeq !== genSeqRef.current) return;
               streamedPartial += piece;
               const live = usableAssistantText(streamedPartial, content, previousAssistant)
@@ -1456,7 +1665,8 @@ export function AIChat() {
                 return next;
               });
               armStreamIdleFinish();
-            },
+            }
+              : undefined,
           });
           const timeoutMs = 120_000;
           const routed = await Promise.race([
@@ -1690,10 +1900,10 @@ export function AIChat() {
                     if (!model.id.startsWith('ollama:')) {
                       void setEngineModel(model.id).catch(() => undefined);
                     }
+                    setLocalPrefs({ lastChatModelId: model.id });
                   } else if (model.source !== 'auto') {
                     unpickAutoSticky();
                   }
-                  setModelMenuOpen(false);
                 }}
                 className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-surface-hover"
               >
@@ -1745,10 +1955,10 @@ export function AIChat() {
                   setActiveModel(model);
                   if (model.kind === 'chat') {
                     unpickAutoSticky();
+                    setLocalPrefs({ lastChatModelId: model.id });
                   } else if (model.source !== 'auto') {
                     unpickAutoSticky();
                   }
-                  setModelMenuOpen(false);
                 }}
                 className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-surface-hover"
               >
@@ -1766,8 +1976,22 @@ export function AIChat() {
         )}
         {kind === 'chat' && keyedCloud.length === 0 && ollamaModels.length === 0 && engineLocalModels.length === 0 && (
           <p className="px-3 py-2 text-[11px] text-content-tertiary leading-relaxed">
-            Install a local brain in Local AI / Models, or connect a free key in Settings.
+            Install a local brain in Models, or connect a free key in Settings.
           </p>
+        )}
+        {activeModel.source !== 'auto' && activeModel.kind === 'chat' && (
+          <div className="border-t border-surface-border mt-1 pt-1 px-2 pb-1">
+            <button
+              type="button"
+              className="w-full rounded-lg px-2 py-1.5 text-[11px] text-sky-300 hover:bg-sky-500/10 text-left"
+              onClick={() => {
+                setLocalPrefs({ defaultModelId: activeModel.id, lastChatModelId: activeModel.id });
+                setModelMenuOpen(false);
+              }}
+            >
+              Always use {activeModel.name} for new chats
+            </button>
+          </div>
         )}
       </div>,
       document.body,
@@ -1796,8 +2020,8 @@ export function AIChat() {
       {failoverChip}
       {composerMode && (
         <div className="mb-2 flex items-center gap-2 px-1">
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-surface-border bg-surface-hover/60 px-2.5 py-0.5 text-[11px] text-content-secondary capitalize">
-            {composerMode}
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-surface-border bg-surface-hover/60 px-2.5 py-0.5 text-[11px] text-content-secondary">
+            {COMPOSER_MODE_LABEL[composerMode]}
             <button
               type="button"
               onClick={() => setComposerMode(null)}
@@ -1828,6 +2052,27 @@ export function AIChat() {
               >
                 Clear
               </button>
+            </div>
+          )}
+          {pendingImages.length > 0 && (
+            <div className="mb-2 flex flex-wrap items-center gap-1.5 px-1">
+              {pendingImages.map(img => (
+                <span
+                  key={img.id}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-surface-border bg-ark-navy-900/80 pl-1 pr-1.5 py-0.5 text-[10px] text-content-secondary"
+                >
+                  <img src={img.dataUrl} alt="" className="w-5 h-5 rounded-full object-cover" />
+                  <span className="max-w-[7rem] truncate">{img.name}</span>
+                  <button
+                    type="button"
+                    className="text-content-tertiary hover:text-content-primary"
+                    aria-label={`Remove ${img.name}`}
+                    onClick={() => setPendingImages(prev => prev.filter(p => p.id !== img.id))}
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              ))}
             </div>
           )}
           {Object.keys(chatStudioFiles).length > 0 && (
@@ -1878,7 +2123,7 @@ export function AIChat() {
               </button>
             </div>
           )}
-          {(mode === 'general' || mode === 'code') && looksLikeCodeAsk(input) && !codeSwitchDismissed && (
+          {(mode === 'general' || mode === 'code') && looksLikeCodeAsk(input) && composerMode !== 'ask' && !codeSwitchDismissed && (
             <div className="mb-1 flex justify-center px-1">
               <span className="inline-flex items-center gap-1 rounded-full border border-violet-500/25 bg-violet-500/10 pl-2 pr-0.5 py-0.5 text-[10px] text-violet-100/90 shadow-sm max-w-full">
                 <Code2 className="w-3 h-3 shrink-0 text-violet-300/90" />
@@ -1933,6 +2178,7 @@ export function AIChat() {
             multiple
             className="hidden"
             onChange={e => {
+              void addPendingImages([...(e.target.files || [])]);
               e.target.value = '';
             }}
           />
@@ -2055,7 +2301,7 @@ export function AIChat() {
           }
         />
 
-        {(mode === 'general' || mode === 'code') && looksLikeCodeAsk(input) && !codeSwitchDismissed && (
+        {(mode === 'general' || mode === 'code') && looksLikeCodeAsk(input) && composerMode !== 'ask' && !codeSwitchDismissed && (
           <button
             type="button"
             onClick={() => openCodeWorkspace()}
@@ -2111,7 +2357,7 @@ export function AIChat() {
           </span>
         )}
 
-        {(mode === 'general' || mode === 'code') && (
+        {(mode === 'general' || mode === 'code') && (!capacity || !capacity.liveChat) && (
           <>
             <button
               type="button"
@@ -2122,7 +2368,7 @@ export function AIChat() {
               <Github className="w-3 h-3" />
               My GitHub
             </button>
-            {looksLikeCodeAsk(input) && !codeSwitchDismissed && (
+            {looksLikeCodeAsk(input) && composerMode !== 'ask' && !codeSwitchDismissed && (
               <button
                 type="button"
                 onClick={() => openCodeWorkspace()}
@@ -2153,8 +2399,9 @@ export function AIChat() {
                 Open a project
               </button>
             )}
-
-            {chatPlugins.map(plugin => (
+          </>
+        )}
+        {(mode === 'general' || mode === 'code') && chatPlugins.map(plugin => (
               <button
                 key={plugin.id}
                 type="button"
@@ -2174,8 +2421,6 @@ export function AIChat() {
                 {plugin.name}
               </button>
             ))}
-          </>
-        )}
       </div>
     </div>
   );
@@ -2195,6 +2440,7 @@ export function AIChat() {
             <button
               type="button"
               className="aspect-square rounded-2xl border border-dashed border-surface-border bg-ark-navy-900/50 hover:bg-surface-hover transition-colors flex flex-col items-center justify-center gap-2 text-content-secondary hover:text-content-primary"
+              onClick={() => imageInputRef.current?.click()}
             >
               <Upload className="w-6 h-6" />
               <span className="text-xs font-medium px-2 text-center">{uploadLabel}</span>
@@ -2221,6 +2467,7 @@ export function AIChat() {
 
   return (
     <div className="h-full min-w-0 flex flex-col overflow-hidden">
+      <ChatModeTabs />
       {loading ? (
         <div className="flex-1 flex items-center justify-center text-content-tertiary">
           <Loader2 className="w-5 h-5 animate-spin" />
@@ -2266,9 +2513,42 @@ export function AIChat() {
               </h1>
               {composer}
             </div>
-            {mode === 'image' && ideaGrid(IMAGE_IDEAS, 'Upload a photo')}
-            {mode === 'video' && ideaGrid(VIDEO_IDEAS, 'Upload a clip')}
-            {mode === 'code' && ideaGrid(CODE_IDEAS)}
+            {mode === 'image' && (
+              <>
+                {(!capacity || !capacity.imageFree) && ideaGrid(IMAGE_IDEAS, 'Upload a photo')}
+                {creations.filter(c => c.kind !== 'video').length > 0 && (
+                  <div className="w-full max-w-4xl mx-auto mt-6">
+                    <p className="text-sm font-semibold text-content-primary mb-3 px-1">Your images</p>
+                    <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
+                      {creations.filter(c => c.kind !== 'video').slice(0, 12).map(c => (
+                        <button
+                          key={c.id}
+                          type="button"
+                          onClick={() => navigate({ name: 'creation', id: c.id })}
+                          className="aspect-square rounded-xl overflow-hidden border border-surface-border bg-ark-navy-900"
+                          title={c.title || c.prompt}
+                        >
+                          {c.dataUrl ? (
+                            <img src={c.dataUrl} alt="" className="w-full h-full object-cover" />
+                          ) : (
+                            <span className="flex h-full items-center justify-center text-[10px] text-content-tertiary">Image</span>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+            {mode === 'video' && (
+              <>
+                <p className="text-[11px] text-amber-300/90 text-center mt-4 max-w-md mx-auto">
+                  Motion still when MP4 isn’t available. Labels in the bubble match History: Generated, Preview, or Motion still.
+                </p>
+                {(!capacity || !capacity.videoFree) && ideaGrid(VIDEO_IDEAS)}
+              </>
+            )}
+            {mode === 'code' && (!capacity || !capacity.liveChat) && ideaGrid(CODE_IDEAS)}
           </div>
         )
       ) : (

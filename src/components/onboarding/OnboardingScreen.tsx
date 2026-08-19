@@ -155,6 +155,7 @@ export function OnboardingScreen() {
   const [speedMbps, setSpeedMbps] = useState<number | null>(null);
   const [speedHostName, setSpeedHostName] = useState<string | null>(null);
   const [speedHosts, setSpeedHosts] = useState<HostSpeed[]>([]);
+  const [speedSkipped, setSpeedSkipped] = useState(false);
   const [apiProbes, setApiProbes] = useState<ProviderProbe[]>([]);
   const [models, setModels] = useState<RecModel[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -519,10 +520,19 @@ export function OnboardingScreen() {
                     {speedPlan ? 'Test again' : 'Run test'}
                   </button>
                 )}
+                {!speedTesting && !speedPlan && (
+                  <button
+                    type="button"
+                    onClick={() => { setSpeedSkipped(true); setPhase('models'); }}
+                    className="flex-1 h-11 rounded-xl border border-surface-border text-sm text-content-secondary hover:bg-surface-hover"
+                  >
+                    Skip test
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => setPhase('models')}
-                  disabled={speedTesting}
+                  disabled={speedTesting || (!speedPlan && !speedSkipped)}
                   className="ark-btn-primary flex-1 h-11 rounded-xl disabled:opacity-50"
                 >
                   Continue
@@ -706,15 +716,18 @@ export function OnboardingScreen() {
               <p className="text-[11px] text-content-tertiary text-center leading-relaxed">
                 This is a one-time download (~1 GB for the default brain). You can keep working with cloud keys if you connected any.
               </p>
-              {progress >= 100 && (
-                <div className={`flex items-center justify-center gap-2 text-sm animate-fade-in ${
-                  finishError ? 'text-amber-400' : 'text-ark-accent-green'
-                }`}>
-                  <CheckCircle2 className="w-4 h-4" />
-                  {finishError
-                    ? 'Opening ARK — local brain needs a retry in Local AI'
-                    : 'Ready. Opening ARK…'}
-                </div>
+              {finishError && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    markSetupCompleted();
+                    void completeOnboarding().catch(() => undefined);
+                    void refreshProfile();
+                  }}
+                  className="ark-btn-secondary w-full h-11 rounded-xl"
+                >
+                  Skip to chat
+                </button>
               )}
             </div>
           )}

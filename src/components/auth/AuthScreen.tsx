@@ -235,6 +235,9 @@ export function AuthScreen() {
                     autoComplete="username"
                     maxLength={32}
                   />
+                  <p className="mt-1.5 text-[11px] text-content-tertiary px-1">
+                    2–32 characters. Letters, numbers, spaces, _ . -
+                  </p>
                 </div>
               )}
 
@@ -327,7 +330,23 @@ export function AuthScreen() {
             )}
 
             <p className="text-center text-[11px] text-content-tertiary mt-5 leading-relaxed">
-              By continuing, you agree to our Terms of Service and Privacy Policy.
+              By continuing, you agree to our{' '}
+              <button
+                type="button"
+                className="underline hover:text-content-secondary"
+                onClick={() => void window.arkDesktop?.openExternal?.('https://github.com/DrMeji/Ark/blob/main/README.md')}
+              >
+                Terms of Service
+              </button>
+              {' '}and{' '}
+              <button
+                type="button"
+                className="underline hover:text-content-secondary"
+                onClick={() => void window.arkDesktop?.openExternal?.('https://github.com/DrMeji/Ark/blob/main/README.md')}
+              >
+                Privacy Policy
+              </button>
+              .
             </p>
           </div>
         </div>

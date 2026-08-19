@@ -40,6 +40,28 @@ function ensureHistory(history: RouterChatTurn[] | undefined, message: string): 
   return [{ role: 'user', content: message }];
 }
 
+function historyHasVision(history: RouterChatTurn[]): boolean {
+  return history.some(t => Boolean(t.images?.length));
+}
+
+function lastUserIndex(history: RouterChatTurn[]): number {
+  for (let i = history.length - 1; i >= 0; i--) {
+    if (history[i].role === 'user') return i;
+  }
+  return -1;
+}
+
+function openaiTurnContent(t: RouterChatTurn, attachVision: boolean) {
+  if (!attachVision || !t.images?.length) return t.content;
+  return [
+    { type: 'text' as const, text: t.content },
+    ...t.images.map(img => ({
+      type: 'image_url' as const,
+      image_url: { url: `data:${img.mime};base64,${img.data}` },
+    })),
+  ];
+}
+
 async function openaiCompatible(
   url: string,
   key: string,
@@ -49,9 +71,13 @@ async function openaiCompatible(
   onChunk?: (text: string) => void,
 ): Promise<string | null> {
   const system = routerSystemPrompt(history);
+  const visionAt = lastUserIndex(history);
   const messages = [
     { role: 'system', content: system },
-    ...history.map(t => ({ role: t.role, content: t.content })),
+    ...history.map((t, i) => ({
+      role: t.role,
+      content: openaiTurnContent(t, i === visionAt),
+    })),
   ];
 
   if (onChunk) {
@@ -106,6 +132,21 @@ async function chatOpenAI(
   return openaiCompatible('https://api.openai.com/v1/chat/completions', key, model, history, undefined, onChunk);
 }
 
+function anthropicTurnContent(t: RouterChatTurn, attachVision: boolean) {
+  if (!attachVision || !t.images?.length) return t.content;
+  return [
+    { type: 'text' as const, text: t.content },
+    ...t.images.map(img => ({
+      type: 'image' as const,
+      source: {
+        type: 'base64' as const,
+        media_type: img.mime || 'image/jpeg',
+        data: img.data,
+      },
+    })),
+  ];
+}
+
 async function chatAnthropic(
   key: string,
   history: RouterChatTurn[],
@@ -113,29 +154,45 @@ async function chatAnthropic(
   onChunk?: (text: string) => void,
 ) {
   const system = routerSystemPrompt(history);
-  const messages = history.map(t => ({
+  const visionAt = lastUserIndex(history);
+  const messages = history.map((t, i) => ({
     role: t.role === 'assistant' ? 'assistant' : 'user',
-    content: t.content,
+    content: anthropicTurnContent(t, i === visionAt),
   }));
+  const headers = {
+    'x-api-key': key,
+    'anthropic-version': '2023-06-01',
+    'Content-Type': 'application/json',
+  };
+  const body = {
+    model,
+    max_tokens: 4096,
+    system,
+    messages,
+  };
+
+  if (onChunk) {
+    const streamed = await desktopStreamRequest(
+      'https://api.anthropic.com/v1/messages',
+      {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ ...body, stream: true }),
+      },
+      onChunk,
+    );
+    if (!streamed.ok) throw new Error(streamed.error || 'Anthropic stream error');
+    return streamed.text.trim() || null;
+  }
+
   const res = await desktopRequest('https://api.anthropic.com/v1/messages', {
     method: 'POST',
-    headers: {
-      'x-api-key': key,
-      'anthropic-version': '2023-06-01',
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model,
-      max_tokens: 4096,
-      system,
-      messages,
-    }),
+    headers,
+    body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(apiErrorMessage(res, 'Anthropic error'));
   const data = res.data as { content?: { type: string; text?: string }[] };
-  const text = data.content?.find(c => c.type === 'text')?.text?.trim() || null;
-  if (text && onChunk) await revealCloudReply(text, onChunk);
-  return text;
+  return data.content?.find(c => c.type === 'text')?.text?.trim() || null;
 }
 
 async function chatOpenRouter(
@@ -168,27 +225,56 @@ async function chatGoogle(
   const url =
     `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`
     + `?key=${encodeURIComponent(key)}`;
-  const contents = history.map(t => ({
-    role: t.role === 'assistant' ? 'model' : 'user',
-    parts: [{ text: t.content }],
-  }));
+  const lastVision = [...history].reverse().find(t => t.role === 'user')?.images;
+  const contents = history.map((t, i) => {
+    const isLastUser = t.role === 'user' && i === history.length - 1 && lastVision?.length;
+    const parts: { text?: string; inlineData?: { mimeType: string; data: string } }[] = [
+      { text: t.content },
+    ];
+    if (isLastUser && lastVision) {
+      for (const img of lastVision) {
+        parts.push({ inlineData: { mimeType: img.mime, data: img.data } });
+      }
+    }
+    return {
+      role: t.role === 'assistant' ? 'model' : 'user',
+      parts,
+    };
+  });
+  const payload = {
+    systemInstruction: { parts: [{ text: routerSystemPrompt(history) }] },
+    contents,
+    generationConfig: { maxOutputTokens: 4096, temperature: 0.7 },
+  };
+
+  if (onChunk) {
+    const streamUrl =
+      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:streamGenerateContent`
+      + `?alt=sse&key=${encodeURIComponent(key)}`;
+    const streamed = await desktopStreamRequest(
+      streamUrl,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      },
+      onChunk,
+    );
+    if (!streamed.ok) throw new Error(streamed.error || 'Google stream error');
+    return streamed.text.trim() || null;
+  }
+
   const res = await desktopRequest(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      systemInstruction: { parts: [{ text: routerSystemPrompt(history) }] },
-      contents,
-      generationConfig: { maxOutputTokens: 4096, temperature: 0.7 },
-    }),
+    body: JSON.stringify(payload),
   });
   if (!res.ok) throw new Error(apiErrorMessage(res, 'Google AI error'));
   const data = res.data as {
     candidates?: { content?: { parts?: { text?: string }[] } }[];
   };
   const text = data.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('') || '';
-  const trimmed = text.trim() || null;
-  if (trimmed && onChunk) await revealCloudReply(trimmed, onChunk);
-  return trimmed;
+  return text.trim() || null;
 }
 
 /** Hugging Face Inference Providers (OpenAI-compatible router). */
@@ -579,13 +665,27 @@ export async function cloudChatFreeKeys(
   attempted: string[],
   history?: RouterChatTurn[],
   onChunk?: (text: string) => void,
+  opts?: {
+    acceptReply?: (reply: string) => boolean;
+    onHop?: () => void;
+  },
 ): Promise<CloudChatHit | null> {
   const keys = getProviderApiKeys();
   const turns = ensureHistory(history, message);
-  for (const attempt of FREE_KEY_PROVIDERS) {
+  const hasVision = turns.some(t => t.images?.length);
+  const providers = hasVision
+    ? [
+        ...FREE_KEY_PROVIDERS.filter(p => p.id === 'google'),
+        ...FREE_KEY_PROVIDERS.filter(p => p.id !== 'google'),
+      ]
+    : FREE_KEY_PROVIDERS;
+  for (const attempt of providers) {
+    if (attempted.length) opts?.onHop?.();
     attempted.push(attempt.label);
     const hit = await runAttempt(attempt, turns, keys, onChunk);
-    if (hit) return hit;
+    if (!hit) continue;
+    if (opts?.acceptReply && !opts.acceptReply(hit.reply)) continue;
+    return hit;
   }
   return null;
 }
@@ -599,8 +699,56 @@ export async function cloudChatPaidKeys(
 ): Promise<CloudChatHit | null> {
   const keys = getProviderApiKeys();
   const turns = ensureHistory(history, message);
-  for (const attempt of PAID_PROVIDERS) {
+  const providers = historyHasVision(turns)
+    ? [
+        { ...PAID_PROVIDERS[0], model: 'gpt-4o' },
+        { ...PAID_PROVIDERS[1], model: 'claude-3-5-sonnet-latest' },
+        ...PAID_PROVIDERS.slice(2),
+      ]
+    : PAID_PROVIDERS;
+  for (const attempt of providers) {
     attempted.push(attempt.label);
+    const hit = await runAttempt(attempt, turns, keys, onChunk);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+/** Photo attach: send pixels to models that can see them (Gemini, GPT-4o, Claude). */
+export async function cloudChatVisionKeys(
+  message: string,
+  attempted: string[],
+  history: RouterChatTurn[],
+  onChunk?: (text: string) => void,
+): Promise<CloudChatHit | null> {
+  const keys = getProviderApiKeys();
+  const turns = ensureHistory(history, message);
+  if (!historyHasVision(turns)) return null;
+  const providers: ProviderAttempt[] = [
+    {
+      id: 'google',
+      label: 'Google AI Studio',
+      cost: 'free-key',
+      model: 'gemini-2.0-flash',
+      run: chatGoogle,
+    },
+    {
+      id: 'openai',
+      label: 'OpenAI',
+      cost: 'paid',
+      model: 'gpt-4o',
+      run: chatOpenAI,
+    },
+    {
+      id: 'anthropic',
+      label: 'Anthropic',
+      cost: 'paid',
+      model: 'claude-3-5-sonnet-latest',
+      run: chatAnthropic,
+    },
+  ];
+  for (const attempt of providers) {
+    attempted.push(`${attempt.label} vision`);
     const hit = await runAttempt(attempt, turns, keys, onChunk);
     if (hit) return hit;
   }

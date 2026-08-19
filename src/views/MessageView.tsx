@@ -3,7 +3,7 @@ import { Loader2, Phone, Send } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useRouter } from '@/context/RouterContext';
 import { useSocial } from '@/context/SocialContext';
-import { listThread, sendDirectMessage, threadPreview, type DirectMessage } from '@/lib/arkSocial';
+import { listThread, sendDirectMessage, subscribeMessages, threadPreview, type DirectMessage } from '@/lib/arkSocial';
 import { formatArkId, isArkUserId, normalizeArkId } from '@/lib/arkUserId';
 import { GuestSocialBanner } from '@/components/GuestSocialBanner';
 
@@ -31,6 +31,21 @@ export function MessageView() {
       setThread(list);
       setLoading(false);
     });
+    const unsub = subscribeMessages(myArkId, msg => {
+      if (
+        (msg.senderArkId === myArkId && msg.recipientArkId === peer)
+        || (msg.senderArkId === peer && msg.recipientArkId === myArkId)
+      ) {
+        setThread(prev => (prev.some(m => m.id === msg.id) ? prev : [...prev, msg]));
+      }
+    }, user?.id);
+    const poll = window.setInterval(() => {
+      void listThread(myArkId, peer, user?.id).then(list => setThread(list));
+    }, 4000);
+    return () => {
+      unsub();
+      window.clearInterval(poll);
+    };
   }, [myArkId, peer, user?.id]);
 
   useEffect(() => {

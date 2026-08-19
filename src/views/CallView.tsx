@@ -73,20 +73,29 @@ export function CallView() {
       payload: { name: profile?.display_name || myArkId },
     }, user?.id);
 
+    const ringTimer = window.setTimeout(() => {
+      setStatus('ended');
+      setError('No answer. They need ARK open with Call revealed. Try again, or Message them.');
+      void sendCallSignal({ kind: 'hangup', from: myArkId, to: peer }, user?.id);
+    }, 30000);
+
     const onSig = (ev: Event) => {
       const signal = (ev as CustomEvent).detail as { kind?: string; from?: string };
       if (signal.from !== peer) return;
       if (signal.kind === 'accept') {
+        window.clearTimeout(ringTimer);
         setStatus('connecting');
         void startMedia(true);
       }
       if (signal.kind === 'decline' || signal.kind === 'hangup') {
+        window.clearTimeout(ringTimer);
         callRef.current?.stop();
         setStatus('ended');
       }
     };
     window.addEventListener('ark:call-signal', onSig);
     return () => {
+      window.clearTimeout(ringTimer);
       window.removeEventListener('ark:call-signal', onSig);
       callRef.current?.stop();
       callRef.current = null;
@@ -104,7 +113,7 @@ export function CallView() {
       <aside className="w-64 shrink-0 border-r border-surface-border flex flex-col">
         <div className="px-4 pt-[min(12vh,6rem)] pb-3">
           <GuestSocialBanner feature="call" />
-          <h1 className="text-xl font-semibold text-content-primary tracking-tight mb-3">Call</h1>
+          <h1 className="text-xl font-semibold text-content-primary tracking-tight mb-3">Voice calls</h1>
           <div className="flex gap-1">
             <input
               value={addId}

@@ -1,54 +1,44 @@
-import { useMemo, useState, useRef, useEffect } from 'react';
+import { useMemo, useState } from 'react';
 import { useRouter } from '@/context/RouterContext';
 import { useRecentProjects } from '@/context/RecentProjectsContext';
+import { getMemoryThumb } from '@/lib/recentStore';
 import {
-  Search, Plus, ImageIcon, FileText, LayoutGrid, List,
-  Filter, Upload, File, Eye, Folder, Video, MessageSquare, Trash2,
+  Search, ImageIcon, FileText, LayoutGrid, List,
+  Video, MessageSquare, Trash2,
 } from 'lucide-react';
 
-type HistoryKind = 'image' | 'video' | 'chat' | 'document' | 'other';
-type HistorySource = 'uploaded' | 'generated';
-type TabId = 'all' | 'images' | 'documents';
+type HistoryKind = 'image' | 'video' | 'chat';
+type TabId = 'all' | 'images' | 'videos' | 'chats';
 type ViewMode = 'list' | 'grid';
 
 type HistoryItem = {
   id: string;
   name: string;
   kind: HistoryKind;
-  source: HistorySource;
+  source: 'generated';
+  sortAt: string;
   modifiedLabel: string;
   sizeLabel: string;
   tone: string;
   chatId?: string;
   mode?: 'general' | 'image' | 'video' | 'code';
   creationId?: string;
+  thumb?: string;
 };
 
 const TABS: { id: TabId; label: string }[] = [
   { id: 'all', label: 'All' },
   { id: 'images', label: 'Images' },
-  { id: 'documents', label: 'Documents' },
-];
-
-const ADD_OPTIONS = [
-  { id: 'note', label: 'Note', icon: FileText },
-  { id: 'document', label: 'Document', icon: File },
-  { id: 'folder', label: 'Folder', icon: Folder },
-  { id: 'upload', label: 'Upload files', icon: Upload },
+  { id: 'videos', label: 'Videos' },
+  { id: 'chats', label: 'Chats' },
 ];
 
 function kindIcon(kind: HistoryKind) {
   switch (kind) {
     case 'image': return ImageIcon;
     case 'video': return Video;
-    case 'chat': return MessageSquare;
-    case 'document': return FileText;
-    default: return File;
+    default: return MessageSquare;
   }
-}
-
-function isDocumentLike(kind: HistoryKind) {
-  return kind === 'document' || kind === 'other';
 }
 
 function formatWhen(iso: string) {
@@ -65,15 +55,11 @@ function formatWhen(iso: string) {
 
 export function Dashboard() {
   const { navigate } = useRouter();
-  const { creations, chats, deleteCreationForever } = useRecentProjects();
+  const { creations, chats, deleteCreationForever, deleteChatForever } = useRecentProjects();
   const [query, setQuery] = useState('');
   const [tab, setTab] = useState<TabId>('all');
   const [view, setView] = useState<ViewMode>('list');
-  const [addOpen, setAddOpen] = useState(false);
-  const [filterOpen, setFilterOpen] = useState(false);
-  const [sourceFilter, setSourceFilter] = useState<'all' | HistorySource>('all');
-  const addRef = useRef<HTMLDivElement>(null);
-  const filterRef = useRef<HTMLDivElement>(null);
+  const [sort, setSort] = useState<'newest' | 'oldest' | 'type'>('newest');
 
   const historyItems = useMemo(() => {
     const fromCreations: HistoryItem[] = creations.map(c => ({
@@ -81,11 +67,17 @@ export function Dashboard() {
       name: c.title || c.prompt || 'Creation',
       kind: c.kind === 'video' ? 'video' : 'image',
       source: 'generated' as const,
+      sortAt: c.createdAt || '',
       modifiedLabel: formatWhen(c.createdAt),
-      sizeLabel: c.real ? 'Generated' : 'Preview',
+      sizeLabel: (c.source || '').includes('motion-still')
+        ? 'Motion still'
+        : c.real
+          ? 'Generated'
+          : 'Preview',
       tone: c.kind === 'video' ? 'from-violet-900/70 to-indigo-950' : 'from-sky-900/80 to-blue-950',
       creationId: c.id,
       mode: c.kind === 'video' ? 'video' : 'image',
+      thumb: c.dataUrl || getMemoryThumb(c.id),
     }));
 
     const fromChats: HistoryItem[] = chats
@@ -95,6 +87,7 @@ export function Dashboard() {
         name: c.title,
         kind: c.mode === 'image' ? 'image' : c.mode === 'video' ? 'video' : 'chat',
         source: 'generated' as const,
+        sortAt: c.updatedAt || '',
         modifiedLabel: formatWhen(c.updatedAt),
         sizeLabel: c.archivedAt
           ? 'Archived'
@@ -114,10 +107,7 @@ export function Dashboard() {
         creationId: c.creationId,
       }));
 
-    return [...fromChats, ...fromCreations].sort((a, b) => {
-      // Rough: Today first already via labels; keep chats list order from context
-      return 0;
-    });
+    return [...fromChats, ...fromCreations].sort((a, b) => (b.sortAt || '').localeCompare(a.sortAt || ''));
   }, [creations, chats]);
 
   const openHistoryItem = (item: HistoryItem) => {
@@ -130,36 +120,25 @@ export function Dashboard() {
       return;
     }
     if (item.creationId) {
-      navigate({
-        name: 'chat',
-        mode: item.kind === 'video' ? 'video' : 'image',
-        creationId: item.creationId,
-      });
+      navigate({ name: 'creation', id: item.creationId });
       return;
     }
     navigate({ name: 'chat' });
   };
 
-  useEffect(() => {
-    const onDoc = (e: MouseEvent) => {
-      const target = e.target as Node;
-      if (addRef.current && !addRef.current.contains(target)) setAddOpen(false);
-      if (filterRef.current && !filterRef.current.contains(target)) setFilterOpen(false);
-    };
-    document.addEventListener('mousedown', onDoc);
-    return () => document.removeEventListener('mousedown', onDoc);
-  }, []);
-
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return historyItems.filter(item => {
-      if (tab === 'images' && item.kind !== 'image' && item.kind !== 'video') return false;
-      if (tab === 'documents' && !isDocumentLike(item.kind)) return false;
-      if (sourceFilter !== 'all' && item.source !== sourceFilter) return false;
+    const list = historyItems.filter(item => {
+      if (tab === 'images' && item.kind !== 'image') return false;
+      if (tab === 'videos' && item.kind !== 'video') return false;
+      if (tab === 'chats' && item.kind !== 'chat') return false;
       if (q && !item.name.toLowerCase().includes(q)) return false;
       return true;
     });
-  }, [historyItems, query, tab, sourceFilter]);
+    if (sort === 'oldest') return [...list].sort((a, b) => (a.sortAt || '').localeCompare(b.sortAt || ''));
+    if (sort === 'type') return [...list].sort((a, b) => a.kind.localeCompare(b.kind) || (b.sortAt || '').localeCompare(a.sortAt || ''));
+    return [...list].sort((a, b) => (b.sortAt || '').localeCompare(a.sortAt || ''));
+  }, [historyItems, query, tab, sort]);
 
   return (
     <div className="h-full min-w-0 flex flex-col overflow-hidden animate-fade-in bg-ark-navy-950">
@@ -177,34 +156,6 @@ export function Dashboard() {
                   placeholder="Search"
                   className="flex-1 bg-transparent border-none text-sm text-content-primary placeholder:text-content-tertiary focus:outline-none min-w-0"
                 />
-              </div>
-
-              <div className="relative" ref={addRef}>
-                <button
-                  type="button"
-                  onClick={() => { setAddOpen(o => !o); setFilterOpen(false); }}
-                  className="w-9 h-9 rounded-full flex items-center justify-center"
-                  style={{ backgroundColor: 'rgb(var(--color-accent))', color: 'rgb(var(--color-accent-fg))' }}
-                  title="Add"
-                  aria-label="Add"
-                >
-                  <Plus className="w-4 h-4" strokeWidth={2.5} />
-                </button>
-                {addOpen && (
-                  <div className="absolute right-0 mt-2 w-48 rounded-xl border border-surface-border bg-ark-navy-900 shadow-2xl py-1.5 z-20 animate-fade-in">
-                    {ADD_OPTIONS.map(opt => (
-                      <button
-                        key={opt.id}
-                        type="button"
-                        onClick={() => setAddOpen(false)}
-                        className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-content-primary hover:bg-surface-hover text-left"
-                      >
-                        <opt.icon className="w-4 h-4 text-content-secondary" />
-                        {opt.label}
-                      </button>
-                    ))}
-                  </div>
-                )}
               </div>
             </div>
           </div>
@@ -226,45 +177,17 @@ export function Dashboard() {
                 </button>
               ))}
             </div>
+            <select
+              value={sort}
+              onChange={e => setSort(e.target.value as 'newest' | 'oldest' | 'type')}
+              className="bg-transparent border border-surface-border rounded-full px-2 py-1 text-[11px] text-content-secondary"
+            >
+              <option value="newest">Newest</option>
+              <option value="oldest">Oldest</option>
+              <option value="type">Type</option>
+            </select>
 
             <div className="flex items-center gap-1">
-              <div className="relative" ref={filterRef}>
-                <button
-                  type="button"
-                  onClick={() => { setFilterOpen(o => !o); setAddOpen(false); }}
-                  className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
-                    filterOpen || sourceFilter !== 'all'
-                      ? 'bg-surface-hover text-content-primary'
-                      : 'text-content-secondary hover:text-content-primary hover:bg-surface-hover'
-                  }`}
-                  title="Filter"
-                  aria-label="Filter"
-                >
-                  <Filter className="w-4 h-4" />
-                </button>
-                {filterOpen && (
-                  <div className="absolute right-0 mt-2 w-52 rounded-xl border border-surface-border bg-ark-navy-900 shadow-2xl py-2 z-20 animate-fade-in">
-                    <p className="px-3 pb-1 text-[10px] uppercase tracking-wider text-content-tertiary font-semibold">Source</p>
-                    {([
-                      { id: 'all' as const, label: 'All sources' },
-                      { id: 'uploaded' as const, label: 'Uploaded' },
-                      { id: 'generated' as const, label: 'Generated' },
-                    ]).map(opt => (
-                      <button
-                        key={opt.id}
-                        type="button"
-                        onClick={() => { setSourceFilter(opt.id); setFilterOpen(false); }}
-                        className={`w-full text-left px-3 py-2 text-sm hover:bg-surface-hover ${
-                          sourceFilter === opt.id ? 'text-content-primary' : 'text-content-secondary'
-                        }`}
-                      >
-                        {opt.label}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-
               <button
                 type="button"
                 onClick={() => setView('grid')}
@@ -309,9 +232,20 @@ export function Dashboard() {
                 <FileText className="w-5 h-5 text-content-secondary" />
               </div>
               <p className="text-base font-semibold text-content-primary mb-1">Nothing here yet</p>
-              <p className="text-sm text-content-tertiary">
-                Chats, images, and videos you create will show up here.
+              <p className="text-sm text-content-tertiary mb-5 max-w-sm">
+                Chats, images, and videos you create will show up here — reopen anything from one place.
               </p>
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                <button type="button" className="ark-btn-secondary text-xs" onClick={() => navigate({ name: 'chat' })}>
+                  New chat
+                </button>
+                <button type="button" className="ark-btn-secondary text-xs" onClick={() => navigate({ name: 'chat', mode: 'image' })}>
+                  Create image
+                </button>
+                <button type="button" className="ark-btn-secondary text-xs" onClick={() => navigate({ name: 'code' })}>
+                  Open Code
+                </button>
+              </div>
             </div>
           ) : view === 'list' ? (
             <div className="flex flex-col">
@@ -334,16 +268,20 @@ export function Dashboard() {
                     </button>
                     <span className="text-right text-sm text-content-secondary">{item.modifiedLabel}</span>
                     <span className="text-right text-sm text-content-secondary tabular-nums">{item.sizeLabel}</span>
-                    {item.creationId ? (
+                    {item.creationId || item.chatId ? (
                       <button
                         type="button"
                         className="opacity-0 group-hover:opacity-100 w-8 h-8 rounded-lg flex items-center justify-center text-content-tertiary hover:text-rose-400 hover:bg-rose-500/10 transition-opacity"
                         title="Delete forever"
-                        aria-label="Delete creation"
+                        aria-label="Delete"
                         onClick={(e) => {
                           e.stopPropagation();
-                          if (window.confirm('Delete this creation forever?')) {
-                            deleteCreationForever(item.creationId!);
+                          if (item.creationId) {
+                            if (window.confirm('Delete this creation forever?')) {
+                              deleteCreationForever(item.creationId);
+                            }
+                          } else if (item.chatId && window.confirm('Delete this chat forever?')) {
+                            deleteChatForever(item.chatId);
                           }
                         }}
                       >
@@ -365,13 +303,22 @@ export function Dashboard() {
                     <button
                       type="button"
                       onClick={() => openHistoryItem(item)}
-                      className={`w-full aspect-[4/3] rounded-2xl bg-gradient-to-br ${item.tone} border border-surface-border p-3 flex flex-col text-left hover:brightness-110 transition-all`}
+                      className="w-full aspect-[4/3] rounded-2xl border border-surface-border overflow-hidden text-left hover:brightness-110 transition-all relative bg-ark-navy-900"
                     >
-                      <span className="text-xs font-medium text-white/95 truncate">{item.name}</span>
-                      <span className="flex-1 flex items-center justify-center">
-                        <Icon className="w-8 h-8 text-white/80" strokeWidth={1.5} />
+                      {item.thumb ? (
+                        item.kind === 'video' ? (
+                          <video src={item.thumb} className="absolute inset-0 w-full h-full object-cover" muted />
+                        ) : (
+                          <img src={item.thumb} alt="" className="absolute inset-0 w-full h-full object-cover" />
+                        )
+                      ) : (
+                        <span className={`absolute inset-0 bg-gradient-to-br ${item.tone}`} />
+                      )}
+                      <span className="relative z-10 flex flex-col h-full p-3 bg-gradient-to-t from-black/70 via-black/20 to-transparent">
+                        <span className="text-xs font-medium text-white/95 truncate">{item.name}</span>
+                        <span className="flex-1" />
+                        <span className="text-[11px] text-white/80">{item.sizeLabel} · {item.modifiedLabel}</span>
                       </span>
-                      <span className="text-[11px] text-white/70">{item.modifiedLabel}</span>
                     </button>
                     {item.creationId ? (
                       <button
