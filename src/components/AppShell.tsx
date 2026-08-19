@@ -615,7 +615,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <div className="flex items-center gap-2 min-w-0 pl-0.5">
                   <img
                     src={`${import.meta.env.BASE_URL}ark-icon.png`}
-                    alt="ARK"
+                    alt=""
                     className="w-7 h-7 rounded-lg object-cover shrink-0"
                     onError={e => {
                       (e.currentTarget as HTMLImageElement).style.display = 'none';
@@ -814,14 +814,11 @@ export function AppShell({ children }: { children: ReactNode }) {
                       <span className="block text-xs font-medium text-content-primary truncate">
                         {displayName}
                       </span>
-                      {user?.email && ['thomaskrishnan0107@gmail.com'].includes(user.email) && (
-                        <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wide text-sky-300 bg-sky-500/15 px-1 py-0.5 rounded">dev</span>
-                      )}
                     </span>
                     {(profile?.ark_id || (user?.email && ['thomaskrishnan0107@gmail.com'].includes(user.email))) ? (
                       <span className="block text-[10px] font-mono tracking-[0.22em] text-content-tertiary truncate">
                         {user?.email && ['thomaskrishnan0107@gmail.com'].includes(user.email)
-                          ? 'deaf'
+                          ? 'Dev DEV'
                           : formatArkId(profile!.ark_id!)}
                       </span>
                     ) : null}
@@ -833,7 +830,10 @@ export function AppShell({ children }: { children: ReactNode }) {
                       title="Copy your ARK ID"
                       aria-label="Copy your ARK ID"
                       onClick={() => {
-                        void navigator.clipboard.writeText(profile.ark_id || '').catch(() => undefined);
+                        const arkIdText = user?.email && ['thomaskrishnan0107@gmail.com'].includes(user.email)
+                          ? 'Dev DEV'
+                          : formatArkId(profile.ark_id || '');
+                        void navigator.clipboard.writeText(arkIdText).catch(() => undefined);
                       }}
                     >
                       <Copy className="w-3 h-3" />

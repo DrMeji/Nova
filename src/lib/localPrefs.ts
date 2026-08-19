@@ -287,6 +287,18 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.86',
+    channel: 'stable' as const,
+    date: 'Aug 19, 2026',
+    title: 'Dev account labels + installed icon consistency',
+    notes: [
+      'Dev account (designated email): ARK ID shows “Dev DEV” (no dev badge pill)',
+      'Copy ARK ID now copies the displayed “Dev DEV” text for the dev account',
+      'Sidebar top-left icon no longer shows fallback alt text (“arc”)',
+      'Installed model check/trash icons are consistent across Models and Local AI tabs',
+    ],
+  },
+  {
     version: '0.1.85',
     channel: 'stable' as const,
     date: 'Aug 19, 2026',

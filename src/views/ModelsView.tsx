@@ -422,7 +422,7 @@ function ModelInstallControl({
           <button
             type="button"
             onClick={onDelete}
-            className="w-8 h-8 rounded-full text-rose-500 hover:text-rose-300 transition-colors flex items-center justify-center"
+            className="w-8 h-8 rounded-full bg-surface-hover text-rose-500 hover:bg-surface-hover/80 hover:text-rose-300 transition-colors flex items-center justify-center"
             title={`Delete ${name}`}
             aria-label={`Delete ${name}`}
           >

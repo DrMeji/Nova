@@ -540,14 +540,11 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                 <div>
                   <div className="flex items-center gap-2 mb-1.5">
                     <label className="block text-xs font-medium text-content-secondary">ARK ID</label>
-                    {user?.email && ['thomaskrishnan0107@gmail.com'].includes(user.email) && (
-                      <span className="text-[9px] font-semibold uppercase tracking-wide text-sky-300 bg-sky-500/15 px-1.5 py-0.5 rounded">dev</span>
-                    )}
                   </div>
                   <div className="flex items-center gap-2 min-w-0">
                     <p className="flex-1 min-w-0 rounded-lg border border-surface-border bg-ark-navy-900/80 px-3 py-2 text-sm font-mono tracking-[0.18em] sm:tracking-[0.28em] text-content-primary overflow-x-auto">
                       {user?.email && ['thomaskrishnan0107@gmail.com'].includes(user.email)
-                        ? 'deaf'
+                        ? 'Dev DEV'
                         : (profile?.ark_id ? formatArkId(profile.ark_id) : '•••••••')}
                     </p>
                     <button
@@ -555,7 +552,10 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                       disabled={!profile?.ark_id}
                       onClick={() => {
                         if (!profile?.ark_id) return;
-                        void navigator.clipboard.writeText(profile.ark_id).then(() => {
+                        const arkIdText = user?.email && ['thomaskrishnan0107@gmail.com'].includes(user.email)
+                          ? 'Dev DEV'
+                          : formatArkId(profile.ark_id);
+                        void navigator.clipboard.writeText(arkIdText).then(() => {
                           setArkCopied(true);
                           window.setTimeout(() => setArkCopied(false), 1600);
                         }).catch(() => undefined);
