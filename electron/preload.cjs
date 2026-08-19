@@ -118,3 +118,8 @@ contextBridge.exposeInMainWorld('arkDesktop', {
   secretsGetKey: (providerId) => ipcRenderer.invoke('ark:secrets-get-key', providerId),
   secretsSave: (keys) => ipcRenderer.invoke('ark:secrets-save', { keys }),
 });
+
+// Forward IPC push messages from main as DOM CustomEvents so the React app can listen.
+ipcRenderer.on('ark:open-settings', (_event, payload) => {
+  window.dispatchEvent(new CustomEvent('ark:open-settings', { detail: payload || {} }));
+});

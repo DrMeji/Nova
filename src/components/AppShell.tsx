@@ -208,7 +208,10 @@ export function AppShell({ children }: { children: ReactNode }) {
       return route.name === 'projects';
     }
     if (item.label === 'Models') {
-      return route.name === 'models' || route.name === 'local-ai';
+      return route.name === 'models';
+    }
+    if (item.label === 'Local AI') {
+      return route.name === 'local-ai';
     }
     return route.name === item.route.name;
   };
@@ -815,9 +818,11 @@ export function AppShell({ children }: { children: ReactNode }) {
                         <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wide text-sky-300 bg-sky-500/15 px-1 py-0.5 rounded">dev</span>
                       )}
                     </span>
-                    {profile?.ark_id ? (
+                    {(profile?.ark_id || (user?.email && ['thomaskrishnan0107@gmail.com'].includes(user.email))) ? (
                       <span className="block text-[10px] font-mono tracking-[0.22em] text-content-tertiary truncate">
-                        {formatArkId(profile.ark_id)}
+                        {user?.email && ['thomaskrishnan0107@gmail.com'].includes(user.email)
+                          ? 'deaf'
+                          : formatArkId(profile!.ark_id!)}
                       </span>
                     ) : null}
                   </button>

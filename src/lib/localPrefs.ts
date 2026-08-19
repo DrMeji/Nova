@@ -287,6 +287,21 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.85',
+    channel: 'stable' as const,
+    date: 'Aug 19, 2026',
+    title: 'Bug fixes — tray, sidebar, Engine tab, model colors',
+    notes: [
+      'Tray "Open Settings" now correctly opens the Account section',
+      'Sidebar: Local AI and Models no longer both highlight at once',
+      'Engine tab in Models stays in-view (no longer kicks to Local AI)',
+      'Installed model checkmark is green; trash icon is red',
+      'ARK ID shows "deaf" for designated account instead of number',
+      'Hardware scan buttons spaced apart in Settings',
+      '"ARK · Chat" removed from title bar (just shows "ARK")',
+    ],
+  },
+  {
     version: '0.1.82',
     channel: 'stable' as const,
     date: 'Aug 18, 2026',

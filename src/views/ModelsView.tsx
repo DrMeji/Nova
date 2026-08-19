@@ -47,7 +47,7 @@ import { FREE_SOURCES } from '@/lib/freeSources';
 import { huntModelsForPc, huntSourceBadge, type HuntedModel } from '@/lib/arkModelHunt';
 import { probeLiveCapacity, type LiveCapacity } from '@/lib/arkCapacity';
 
-type TabId = 'for-pc' | 'local' | 'cloud';
+type TabId = 'for-pc' | 'local' | 'cloud' | 'engine';
 type Tier = 'free' | 'pro';
 type FitKind = 'quality' | 'balanced' | 'performance';
 
@@ -411,24 +411,23 @@ function ModelInstallControl({
   if (isOn) {
     return (
       <span className="inline-flex items-center gap-0.5 shrink-0">
-        {onDelete ? (
+        <span
+          className="w-8 h-8 rounded-full bg-surface-hover text-emerald-400 flex items-center justify-center"
+          title="Installed in ARK Engine"
+          aria-label={`Installed ${name}`}
+        >
+          <Check className="w-4 h-4" />
+        </span>
+        {onDelete && (
           <button
             type="button"
             onClick={onDelete}
-            className="w-8 h-8 rounded-full text-content-tertiary hover:text-rose-300 transition-colors"
+            className="w-8 h-8 rounded-full text-rose-500 hover:text-rose-300 transition-colors flex items-center justify-center"
             title={`Delete ${name}`}
             aria-label={`Delete ${name}`}
           >
             <Trash2 className="w-4 h-4" />
           </button>
-        ) : (
-          <span
-            className="w-8 h-8 rounded-full bg-surface-hover text-ark-accent-green flex items-center justify-center"
-            title="Installed in ARK Engine"
-            aria-label={`Installed ${name}`}
-          >
-            <Check className="w-4 h-4" />
-          </span>
         )}
       </span>
     );
@@ -982,10 +981,6 @@ export function ModelsView() {
                 key={t.id}
                 type="button"
                 onClick={() => {
-                  if (t.id === 'engine') {
-                    navigate({ name: 'local-ai' });
-                    return;
-                  }
                   setTab(t.id);
                 }}
                 className={`inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 text-sm transition-colors ${
@@ -1221,6 +1216,22 @@ export function ModelsView() {
                 {localCategories.length === 0 && <EmptySearch />}
               </div>
             </>
+          ) : tab === 'engine' ? (
+            <div className="py-6">
+              <h2 className="text-lg font-semibold text-content-primary mb-2">ARK Engine</h2>
+              <p className="text-sm text-content-tertiary mb-6 leading-relaxed">
+                ARK Engine is the local inference runtime built into ARK. It runs GGUF models on your hardware with no cloud dependency.
+                Use the <strong className="text-content-secondary">Local AI</strong> tab in the sidebar to manage downloaded models and engine settings.
+              </p>
+              <button
+                type="button"
+                className="ark-btn-secondary"
+                onClick={() => navigate({ name: 'local-ai' })}
+              >
+                <Brain className="w-4 h-4" />
+                Open Local AI &amp; Engine settings
+              </button>
+            </div>
           ) : (
             <>
               <p className="text-sm text-content-tertiary mb-8 leading-relaxed">

@@ -546,7 +546,9 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                   </div>
                   <div className="flex items-center gap-2 min-w-0">
                     <p className="flex-1 min-w-0 rounded-lg border border-surface-border bg-ark-navy-900/80 px-3 py-2 text-sm font-mono tracking-[0.18em] sm:tracking-[0.28em] text-content-primary overflow-x-auto">
-                      {profile?.ark_id ? formatArkId(profile.ark_id) : '•••••••'}
+                      {user?.email && ['thomaskrishnan0107@gmail.com'].includes(user.email)
+                        ? 'deaf'
+                        : (profile?.ark_id ? formatArkId(profile.ark_id) : '•••••••')}
                     </p>
                     <button
                       type="button"
@@ -1401,13 +1403,15 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                   {hwScanning ? 'Scanning…' : 'Rescan hardware'}
                 </button>
                 {hwFlash && <p className="text-xs text-emerald-400">{hwFlash}</p>}
-                <button
-                  type="button"
-                  className="text-xs text-sky-400 hover:text-sky-300"
-                  onClick={() => { onClose?.(); navigate({ name: 'models' }); }}
-                >
-                  Open Models · For your PC
-                </button>
+                <div className="pt-2">
+                  <button
+                    type="button"
+                    className="text-xs text-sky-400 hover:text-sky-300"
+                    onClick={() => { onClose?.(); navigate({ name: 'models' }); }}
+                  >
+                    Open Models · For your PC
+                  </button>
+                </div>
               </div>
             </SettingsSection>
           )}
