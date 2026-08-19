@@ -19,7 +19,7 @@ Module._load = function mockElectron(request, parent, isMain) {
   return origLoad(request, parent, isMain);
 };
 
-const { stripLlamaCliNoise } = require('../electron/arkGguf.cjs');
+const { stripLlamaCliNoise, ensureLlamaBinary, findLlamaBinary } = require('../electron/arkGguf.cjs');
 
 const sample = [
   'available commands',
@@ -48,45 +48,54 @@ if (/You are ARK/.test(cleaned) || /<\|im_start\|>/.test(cleaned)) {
   process.exit(1);
 }
 
-const exe = path.join(os.homedir(), 'AppData/Roaming/ARK/ark-engine/bin/llama-cli.exe');
-const model = path.join(os.homedir(), 'AppData/Roaming/ARK/ark-engine/models/qwen25-7b.gguf');
-const imEnd = '<' + '|im_end|>';
-const prompt = [
-  '<|im_start|>user',
-  'Answer in one short sentence. Who is Albert Einstein?',
-  imEnd,
-  '<|im_start|>assistant',
-  '',
-].join('\n');
-const promptFile = path.join(os.tmpdir(), `ark-gguf-selftest-${Date.now()}.txt`);
-fs.writeFileSync(promptFile, prompt, 'utf8');
+(async () => {
+  // CI runs on Linux; the llama binary is not named `llama-cli.exe` there.
+  await ensureLlamaBinary();
+  const exe = findLlamaBinary();
+  if (!exe) throw new Error('llama-cli binary not found after ensureLlamaBinary()');
 
-const t0 = Date.now();
-const child = spawn(exe, [
-  '-m', model,
-  '-f', promptFile,
-  '-n', '80',
-  '-c', '2048',
-  '--temp', '0.2',
-  '--no-conversation',
-  '--single-turn',
-  '--no-display-prompt',
-  '--simple-io',
-], { windowsHide: true });
-let out = '';
-child.stdout.on('data', (d) => { out += d.toString(); });
-child.on('close', (code) => {
-  try { fs.unlinkSync(promptFile); } catch { /* ignore */ }
-  const reply = stripLlamaCliNoise(out);
-  console.log(JSON.stringify({
-    ms: Date.now() - t0,
-    code,
-    outLen: out.length,
-    reply,
-  }, null, 2));
-  if (!reply || !/Einstein/i.test(reply)) {
-    console.error('FAIL: live llama-cli did not yield an Einstein answer');
-    process.exit(1);
-  }
+  const model = path.join(os.homedir(), 'AppData/Roaming/ARK/ark-engine/models/qwen25-7b.gguf');
+  const imEnd = '<' + '|im_end|>';
+  const prompt = [
+    '<|im_start|>user',
+    'Answer in one short sentence. Who is Albert Einstein?',
+    imEnd,
+    '<|im_start|>assistant',
+    '',
+  ].join('\n');
+  const promptFile = path.join(os.tmpdir(), `ark-gguf-selftest-${Date.now()}.txt`);
+  fs.writeFileSync(promptFile, prompt, 'utf8');
+
+  const t0 = Date.now();
+  const child = spawn(exe, [
+    '-m', model,
+    '-f', promptFile,
+    '-n', '80',
+    '-c', '2048',
+    '--temp', '0.2',
+    '--no-conversation',
+    '--single-turn',
+    '--no-display-prompt',
+    '--simple-io',
+  ], { windowsHide: true });
+  let out = '';
+  child.stdout.on('data', (d) => { out += d.toString(); });
+  child.on('close', (code) => {
+    try { fs.unlinkSync(promptFile); } catch { /* ignore */ }
+    const reply = stripLlamaCliNoise(out);
+    console.log(JSON.stringify({
+      ms: Date.now() - t0,
+      code,
+      outLen: out.length,
+      reply,
+    }, null, 2));
+    if (!reply || !/Einstein/i.test(reply)) {
+      console.error('FAIL: live llama-cli did not yield an Einstein answer');
+      process.exit(1);
+    }
+  });
+  child.stdin.end();
+})().catch((err) => {
+  console.error(err instanceof Error ? err.message : String(err));
+  process.exit(1);
 });
-child.stdin.end();
