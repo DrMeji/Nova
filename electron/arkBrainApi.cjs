@@ -12,10 +12,23 @@ const arkModelRank = require('./arkModelRank.cjs');
 
 const CONTRACT_VERSION = '0.4.0';
 
+const CONTRACT_VERSION = '0.4.0';
+const MAX_BODY_BYTES = 2 * 1024 * 1024;
+const MAX_CONCURRENT = 4;
+
 function readBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = [];
-    req.on('data', (c) => chunks.push(c));
+    let total = 0;
+    req.on('data', (c) => {
+      total += c.length;
+      if (total > MAX_BODY_BYTES) {
+        reject(new Error('Request body too large'));
+        req.destroy();
+        return;
+      }
+      chunks.push(c);
+    });
     req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
     req.on('error', reject);
   });
@@ -133,6 +146,27 @@ function createBrainServer(opts) {
   let listening = false;
   let server = null;
   let activePort = port;
+  let activeGenerates = 0;
+
+  function acquireGenerateSlot() {
+    if (activeGenerates >= MAX_CONCURRENT) return false;
+    activeGenerates += 1;
+    return true;
+  }
+
+  function releaseGenerateSlot() {
+    activeGenerates = Math.max(0, activeGenerates - 1);
+  }
+
+  function sseHeaders(corsOrigin) {
+    return {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+      'Access-Control-Allow-Origin': corsOrigin,
+      Vary: 'Origin',
+    };
+  }
 
   const publicEndpoints = [
     'GET /health',
@@ -184,9 +218,13 @@ function createBrainServer(opts) {
     if (result && result.ok === false) {
       return { ok: false, error: result.error || 'Generation failed' };
     }
-    const reply = String(result?.reply || '');
+    const reply = String(result?.reply || '').trim();
+    if (!reply || reply === '(stopped)') {
+      if (result?.cancelled) return { ok: false, error: 'Generation canceled' };
+      return { ok: false, error: 'Generation returned empty output' };
+    }
     if (/Local GGUF brain failed|No local GGUF brain|not ready in ARK Engine/i.test(reply)) {
-      return { ok: false, error: reply.trim() || 'Generation failed' };
+      return { ok: false, error: reply || 'Generation failed' };
     }
     return null;
   }
@@ -280,31 +318,36 @@ function createBrainServer(opts) {
 
       // ── Native chat ───────────────────────────────────────────────
       if (url === '/v1/chat' && req.method === 'POST') {
-        const raw = await readBody(req);
-        const parsed = raw ? JSON.parse(raw) : {};
-        const result = await runGenerate(parsed);
-        const errPayload = brainErrorPayload(result);
-        if (errPayload) return json(res, 503, errPayload);
-        return json(res, 200, {
-          ok: true,
-          reply: result.reply,
-          modelName: result.modelName,
-          model: result.modelName,
-          modelId: result.modelId,
-          source: result.source || 'ark-engine',
-          media: result.media,
-        });
+        if (!acquireGenerateSlot()) {
+          return json(res, 429, { ok: false, error: 'Too many concurrent brain requests — try again shortly' });
+        }
+        try {
+          const raw = await readBody(req);
+          const parsed = raw ? JSON.parse(raw) : {};
+          const result = await runGenerate(parsed);
+          const errPayload = brainErrorPayload(result);
+          if (errPayload) return json(res, 503, errPayload);
+          return json(res, 200, {
+            ok: true,
+            reply: result.reply,
+            modelName: result.modelName,
+            model: result.modelName,
+            modelId: result.modelId,
+            source: result.source || 'ark-engine',
+            media: result.media,
+          });
+        } finally {
+          releaseGenerateSlot();
+        }
       }
 
       if (url === '/v1/chat/stream' && req.method === 'POST') {
+        if (!acquireGenerateSlot()) {
+          return json(res, 429, { ok: false, error: 'Too many concurrent brain requests — try again shortly' });
+        }
         const raw = await readBody(req);
         const parsed = raw ? JSON.parse(raw) : {};
-        res.writeHead(200, {
-          'Content-Type': 'text/event-stream',
-          'Cache-Control': 'no-cache',
-          Connection: 'keep-alive',
-          'Access-Control-Allow-Origin': '*',
-        });
+        res.writeHead(200, sseHeaders(corsOrigin));
         res.write(`event: status\ndata: ${JSON.stringify({ ok: true, phase: 'generating' })}\n\n`);
         try {
           const result = await runGenerateStream(parsed, (text) => {
@@ -336,65 +379,75 @@ function createBrainServer(opts) {
             error: err instanceof Error ? err.message : 'Bad request',
           })}\n\n`);
           res.end();
+        } finally {
+          releaseGenerateSlot();
         }
         return;
       }
 
       // ── OpenAI-compatible (many SDKs / agents) ─────────────────────
       if (url === '/v1/chat/completions' && req.method === 'POST') {
-        const raw = await readBody(req);
-        const parsed = raw ? JSON.parse(raw) : {};
-        const stream = Boolean(parsed.stream);
-        const modelLabel = typeof parsed.model === 'string' ? parsed.model : 'ark-engine';
+        if (!acquireGenerateSlot()) {
+          return json(res, 429, { ok: false, error: 'Too many concurrent brain requests — try again shortly' });
+        }
+        try {
+          const raw = await readBody(req);
+          const parsed = raw ? JSON.parse(raw) : {};
+          const stream = Boolean(parsed.stream);
+          const modelLabel = typeof parsed.model === 'string' ? parsed.model : 'ark-engine';
 
-        if (stream) {
-          res.writeHead(200, {
-            'Content-Type': 'text/event-stream',
-            'Cache-Control': 'no-cache',
-            Connection: 'keep-alive',
-            'Access-Control-Allow-Origin': '*',
-          });
-          const result = await runGenerateStream(parsed, (text) => {
-            const chunk = {
+          if (stream) {
+            res.writeHead(200, sseHeaders(corsOrigin));
+            const result = await runGenerateStream(parsed, (text) => {
+              const chunk = {
+                id: `ark-${Date.now()}`,
+                object: 'chat.completion.chunk',
+                created: Math.floor(Date.now() / 1000),
+                model: modelLabel,
+                choices: [{ index: 0, delta: { content: String(text || '') }, finish_reason: null }],
+              };
+              res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+            });
+            const errPayload = brainErrorPayload(result);
+            if (errPayload) {
+              res.write(`data: ${JSON.stringify({ error: errPayload })}\n\n`);
+              res.end();
+              return;
+            }
+            res.write(`data: ${JSON.stringify({
               id: `ark-${Date.now()}`,
               object: 'chat.completion.chunk',
               created: Math.floor(Date.now() / 1000),
-              model: modelLabel,
-              choices: [{ index: 0, delta: { content: String(text || '') }, finish_reason: null }],
-            };
-            res.write(`data: ${JSON.stringify(chunk)}\n\n`);
-          });
-          res.write(`data: ${JSON.stringify({
+              model: result.modelId || modelLabel,
+              choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+            })}\n\n`);
+            res.write('data: [DONE]\n\n');
+            res.end();
+            return;
+          }
+
+          const result = await runGenerate(parsed);
+          const errPayload = brainErrorPayload(result);
+          if (errPayload) return json(res, 503, errPayload);
+          return json(res, 200, {
             id: `ark-${Date.now()}`,
-            object: 'chat.completion.chunk',
+            object: 'chat.completion',
             created: Math.floor(Date.now() / 1000),
             model: result.modelId || modelLabel,
-            choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
-          })}\n\n`);
-          res.write('data: [DONE]\n\n');
-          res.end();
-          return;
+            choices: [{
+              index: 0,
+              message: { role: 'assistant', content: result.reply || '' },
+              finish_reason: 'stop',
+            }],
+            usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+            ark: {
+              modelName: result.modelName,
+              source: result.source || 'ark-engine',
+            },
+          });
+        } finally {
+          releaseGenerateSlot();
         }
-
-        const result = await runGenerate(parsed);
-        const errPayload = brainErrorPayload(result);
-        if (errPayload) return json(res, 503, errPayload);
-        return json(res, 200, {
-          id: `ark-${Date.now()}`,
-          object: 'chat.completion',
-          created: Math.floor(Date.now() / 1000),
-          model: result.modelId || modelLabel,
-          choices: [{
-            index: 0,
-            message: { role: 'assistant', content: result.reply || '' },
-            finish_reason: 'stop',
-          }],
-          usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
-          ark: {
-            modelName: result.modelName,
-            source: result.source || 'ark-engine',
-          },
-        });
       }
 
       // ── Ollama-compatible (Lindsay & similar) ──────────────────────
@@ -407,90 +460,98 @@ function createBrainServer(opts) {
       }
 
       if ((url === '/api/chat' || url === '/api/generate') && req.method === 'POST') {
-        const raw = await readBody(req);
-        const parsed = raw ? JSON.parse(raw) : {};
-        const stream = parsed.stream !== false; // Ollama defaults to stream true
-        const modelId = resolveModelId(parsed.model, arkEngine);
-        const modelName = modelId || arkEngine.getStatus().activeModelId || 'ark-engine';
+        if (!acquireGenerateSlot()) {
+          return json(res, 429, { ok: false, error: 'Too many concurrent brain requests — try again shortly' });
+        }
+        try {
+          const raw = await readBody(req);
+          const parsed = raw ? JSON.parse(raw) : {};
+          const stream = parsed.stream !== false; // Ollama defaults to stream true
+          const modelId = resolveModelId(parsed.model, arkEngine);
+          const modelName = modelId || arkEngine.getStatus().activeModelId || 'ark-engine';
 
-        if (stream) {
-          res.writeHead(200, {
-            'Content-Type': 'application/x-ndjson',
-            'Cache-Control': 'no-cache',
-            Connection: 'keep-alive',
-            'Access-Control-Allow-Origin': '*',
-          });
-          let full = '';
-          const result = await runGenerateStream(parsed, (text) => {
-            full += String(text || '');
-            const line = url === '/api/generate'
-              ? { model: modelName, created_at: new Date().toISOString(), response: String(text || ''), done: false }
-              : {
-                  model: modelName,
+          if (stream) {
+            res.writeHead(200, {
+              'Content-Type': 'application/x-ndjson',
+              'Cache-Control': 'no-cache',
+              Connection: 'keep-alive',
+              'Access-Control-Allow-Origin': corsOrigin,
+              Vary: 'Origin',
+            });
+            let full = '';
+            const result = await runGenerateStream(parsed, (text) => {
+              full += String(text || '');
+              const line = url === '/api/generate'
+                ? { model: modelName, created_at: new Date().toISOString(), response: String(text || ''), done: false }
+                : {
+                    model: modelName,
+                    created_at: new Date().toISOString(),
+                    message: { role: 'assistant', content: String(text || '') },
+                    done: false,
+                  };
+              res.write(`${JSON.stringify(line)}\n`);
+            });
+            const errPayload = brainErrorPayload(result);
+            if (errPayload) {
+              res.write(`${JSON.stringify({ error: errPayload.error || 'Generation failed', done: true })}\n`);
+              res.end();
+              return;
+            }
+            const doneLine = url === '/api/generate'
+              ? {
+                  model: result.modelId || modelName,
                   created_at: new Date().toISOString(),
-                  message: { role: 'assistant', content: String(text || '') },
-                  done: false,
+                  response: '',
+                  done: true,
+                  done_reason: 'stop',
+                  total_duration: 0,
+                }
+              : {
+                  model: result.modelId || modelName,
+                  created_at: new Date().toISOString(),
+                  message: { role: 'assistant', content: '' },
+                  done: true,
+                  done_reason: 'stop',
                 };
-            res.write(`${JSON.stringify(line)}\n`);
-          });
-          const errPayload = brainErrorPayload(result);
-          if (errPayload) {
-            res.writeHead(503, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
-            res.end(JSON.stringify(errPayload));
+            // If engine didn't stream chunks, emit the full reply once.
+            if (!full && result.reply) {
+              const one = url === '/api/generate'
+                ? { model: modelName, created_at: new Date().toISOString(), response: result.reply, done: false }
+                : {
+                    model: modelName,
+                    created_at: new Date().toISOString(),
+                    message: { role: 'assistant', content: result.reply },
+                    done: false,
+                  };
+              res.write(`${JSON.stringify(one)}\n`);
+            }
+            res.write(`${JSON.stringify(doneLine)}\n`);
+            res.end();
             return;
           }
-          const doneLine = url === '/api/generate'
-            ? {
-                model: result.modelId || modelName,
-                created_at: new Date().toISOString(),
-                response: '',
-                done: true,
-                done_reason: 'stop',
-                total_duration: 0,
-              }
-            : {
-                model: result.modelId || modelName,
-                created_at: new Date().toISOString(),
-                message: { role: 'assistant', content: '' },
-                done: true,
-                done_reason: 'stop',
-              };
-          // If engine didn't stream chunks, emit the full reply once.
-          if (!full && result.reply) {
-            const one = url === '/api/generate'
-              ? { model: modelName, created_at: new Date().toISOString(), response: result.reply, done: false }
-              : {
-                  model: modelName,
-                  created_at: new Date().toISOString(),
-                  message: { role: 'assistant', content: result.reply },
-                  done: false,
-                };
-            res.write(`${JSON.stringify(one)}\n`);
-          }
-          res.write(`${JSON.stringify(doneLine)}\n`);
-          res.end();
-          return;
-        }
 
-        const result = await runGenerate(parsed);
-        const errPayload = brainErrorPayload(result);
-        if (errPayload) return json(res, 503, errPayload);
-        if (url === '/api/generate') {
+          const result = await runGenerate(parsed);
+          const errPayload = brainErrorPayload(result);
+          if (errPayload) return json(res, 503, errPayload);
+          if (url === '/api/generate') {
+            return json(res, 200, {
+              model: result.modelId || modelName,
+              created_at: new Date().toISOString(),
+              response: result.reply || '',
+              done: true,
+              done_reason: 'stop',
+            });
+          }
           return json(res, 200, {
             model: result.modelId || modelName,
             created_at: new Date().toISOString(),
-            response: result.reply || '',
+            message: { role: 'assistant', content: result.reply || '' },
             done: true,
             done_reason: 'stop',
           });
+        } finally {
+          releaseGenerateSlot();
         }
-        return json(res, 200, {
-          model: result.modelId || modelName,
-          created_at: new Date().toISOString(),
-          message: { role: 'assistant', content: result.reply || '' },
-          done: true,
-          done_reason: 'stop',
-        });
       }
 
       return json(res, 404, { ok: false, error: 'Not found' });

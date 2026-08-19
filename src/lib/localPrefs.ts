@@ -169,9 +169,20 @@ export async function hydrateProviderApiKeys(): Promise<{
 }> {
   if (window.arkDesktop?.secretsLoad) {
     const res = await window.arkDesktop.secretsLoad();
-    const fromVault = (res.ok && res.keys) ? res.keys : {};
     const legacy = readLegacyLocalKeys();
-    const merged = { ...legacy, ...fromVault };
+    const merged: ProviderKeyMap = { ...legacy };
+    const status = (res.ok && res.keyStatus) ? res.keyStatus : {};
+    if (window.arkDesktop.secretsGetKey) {
+      for (const [id, set] of Object.entries(status)) {
+        if (!set) continue;
+        try {
+          const row = await window.arkDesktop.secretsGetKey(id);
+          if (row.ok && row.key) merged[id] = row.key;
+        } catch {
+          /* skip broken key */
+        }
+      }
+    }
     providerKeyCache = merged;
     keysEncrypted = Boolean(res.encrypted);
     keysHydrated = true;
@@ -263,6 +274,20 @@ export function clearPluginToken(pluginId: string) {
 
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
+  {
+    version: '0.1.75',
+    channel: 'stable' as const,
+    date: 'Aug 18, 2026',
+    title: 'Grok pass 2 — control, hardening, honesty',
+    notes: [
+      'Media preview badges always show for SVG / real:false fallbacks',
+      'Brain API rate limits, body size cap, empty-output errors, stream error events',
+      'GGUF server port conflict handling (8788–8797); tray shows brain URL + token',
+      'Main window sandbox enabled; secrets-load returns status map + per-key fetch',
+      'Title bar Local/Hybrid/Cloud/Offline pill; download Canceling… state',
+      'Signing status in Settings → Updates; GitHub picker opens Plugins when no token',
+    ],
+  },
   {
     version: '0.1.74',
     channel: 'stable' as const,

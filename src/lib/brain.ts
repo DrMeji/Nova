@@ -5,6 +5,17 @@ import { engineGenerate } from '@/lib/arkEngine';
 
 export const BRAIN_URL = 'http://127.0.0.1:8787';
 
+async function brainAuthHeaders(): Promise<Record<string, string>> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  try {
+    const row = await window.arkDesktop?.brainTokenGet?.();
+    if (row?.token) headers.Authorization = `Bearer ${row.token}`;
+  } catch {
+    /* dev without token */
+  }
+  return headers;
+}
+
 export async function probeBrain(): Promise<{
   ok: boolean;
   version?: string;
@@ -40,7 +51,9 @@ export async function brainGenerate(
   modelName?: string;
   source?: string;
   streamed?: boolean;
+  ipcFallback?: boolean;
 }> {
+  let ipcFailed = false;
   try {
     if (window.arkDesktop?.engineGenerate) {
       const result = await engineGenerate(message, modelId, kind);
@@ -51,27 +64,42 @@ export async function brainGenerate(
         source: result.source,
       };
     }
-  } catch {
-    /* fall through to HTTP brain */
+  } catch (err) {
+    ipcFailed = true;
+    if (!window.arkDesktop?.engineGenerate) throw err;
   }
 
+  const headers = await brainAuthHeaders();
   const res = await desktopRequest(`${BRAIN_URL}/v1/chat`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify({ message, model: modelId, kind }),
   });
-  if (!res.ok) throw new Error(`Brain chat failed (${res.status})`);
+  if (!res.ok) {
+    const errBody = res.data as { error?: string };
+    throw new Error(errBody?.error || `Brain chat failed (${res.status})`);
+  }
   const data = res.data as {
+    ok?: boolean;
+    error?: string;
     reply?: string;
     media?: { kind: string; dataUrl: string; path?: string; libraryId?: string; real?: boolean };
     modelName?: string;
     source?: string;
   };
+  if (data.ok === false) {
+    throw new Error(data.error || 'Brain generation failed');
+  }
+  const reply = data.reply?.trim();
+  if (!reply) {
+    throw new Error('Brain returned empty output');
+  }
   return {
-    reply: data.reply?.trim() || 'ARK brain had nothing to say.',
+    reply,
     media: data.media,
     modelName: data.modelName,
     source: data.source,
+    ipcFallback: ipcFailed,
   };
 }
 
@@ -82,6 +110,7 @@ export async function brainGenerateStream(
   onChunk: (text: string) => void,
   kind?: 'image' | 'video' | 'chat' | 'coding',
 ) {
+  let streamFailed = false;
   try {
     if (window.arkDesktop?.engineGenerateStream) {
       const { engineGenerateStream } = await import('@/lib/arkEngine');
@@ -95,9 +124,10 @@ export async function brainGenerateStream(
       };
     }
   } catch {
-    /* fall back */
+    streamFailed = true;
   }
-  return brainGenerate(message, modelId, kind);
+  const fallback = await brainGenerate(message, modelId, kind);
+  return { ...fallback, streamed: false, streamFallback: streamFailed };
 }
 
 export async function brainChat(

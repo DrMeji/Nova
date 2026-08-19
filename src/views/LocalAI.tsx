@@ -788,8 +788,10 @@ export function LocalAI() {
                     {downloadingIds.map(id => {
                       const phase = downloadPhaseMap[id] || 'downloading';
                       const pct = Math.round(downloadProgressMap[id] || 0);
-                      const label = phase === 'queued'
-                        ? 'Queued'
+                      const label = phase === 'canceling'
+                        ? 'Canceling…'
+                        : phase === 'queued'
+                        ? 'Queued — waiting for slot'
                         : phase === 'runtime'
                           ? 'Installing runtime…'
                           : phase === 'weights'

@@ -383,8 +383,13 @@ declare global {
       secretsStatus?: () => Promise<{ ok: boolean; encrypted?: boolean }>;
       secretsLoad?: () => Promise<{
         ok: boolean;
-        keys?: Record<string, string>;
+        keyStatus?: Record<string, boolean>;
         encrypted?: boolean;
+        error?: string;
+      }>;
+      secretsGetKey?: (providerId: string) => Promise<{
+        ok: boolean;
+        key?: string;
         error?: string;
       }>;
       secretsSave?: (keys: Record<string, string>) => Promise<{

@@ -5,6 +5,7 @@ import { useAuth } from '@/context/AuthContext';
 import { titleForRoute } from '@/lib/routeTitle';
 import { needsFirstRunSetup } from '@/lib/setup';
 import { getLocalPrefs } from '@/lib/localPrefs';
+import { probeAiModeLabel, type AiModeLabel } from '@/lib/aiModeStatus';
 
 /** Overlay window chrome — does not push layout down (even sidebar padding). */
 export function TitleBar() {
@@ -20,6 +21,26 @@ export function TitleBar() {
       : titleForRoute(route);
 
   const [channel, setChannel] = useState(() => getLocalPrefs().updateChannel);
+  const [aiMode, setAiMode] = useState<AiModeLabel>('Offline');
+
+  useEffect(() => {
+    let alive = true;
+    const refresh = () => {
+      void probeAiModeLabel().then((label) => {
+        if (alive) setAiMode(label);
+      });
+    };
+    refresh();
+    window.addEventListener('ark:prefs-changed', refresh);
+    window.addEventListener('ark:provider-keys-changed', refresh);
+    const t = window.setInterval(refresh, 15000);
+    return () => {
+      alive = false;
+      window.removeEventListener('ark:prefs-changed', refresh);
+      window.removeEventListener('ark:provider-keys-changed', refresh);
+      window.clearInterval(t);
+    };
+  }, []);
 
   useEffect(() => {
     if (!desktop?.windowControls) {
@@ -60,6 +81,17 @@ export function TitleBar() {
           {channel === 'beta' && (
             <span className="ml-2 text-[9px] uppercase tracking-wide text-amber-400/90">Beta</span>
           )}
+          <span className={`ml-2 text-[9px] uppercase tracking-wide px-1.5 py-0.5 rounded ${
+            aiMode === 'Offline'
+              ? 'text-rose-300/90 bg-rose-500/10'
+              : aiMode === 'Cloud'
+                ? 'text-sky-300/90 bg-sky-500/10'
+                : aiMode === 'Hybrid'
+                  ? 'text-violet-300/90 bg-violet-500/10'
+                  : 'text-emerald-300/90 bg-emerald-500/10'
+          }`}>
+            {aiMode}
+          </span>
         </span>
       </div>
       <div className="flex" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>

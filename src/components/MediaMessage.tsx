@@ -107,6 +107,20 @@ function MediaActions({ src, alt }: { src: string; alt: string }) {
   );
 }
 
+function isPreviewMedia(src: string, alt: string, preview?: boolean) {
+  if (preview) return true;
+  if (src.startsWith('data:image/svg')) return true;
+  if (/preview|not a finished|motion still|offline fallback|real:\s*false|demo|placeholder/i.test(alt)) return true;
+  if (/preview|not a finished|motion still|offline fallback/i.test(src)) return true;
+  return false;
+}
+
+function previewBadge(alt: string, src: string) {
+  if (/motion still/i.test(alt) || /motion still/i.test(src)) return 'Motion still · not a finished video';
+  if (/real:\s*false|offline fallback|demo|placeholder/i.test(alt)) return 'Preview · not a finished generation';
+  return 'Preview · not a finished generation';
+}
+
 function ResolvedMedia({
   src,
   alt,
@@ -117,15 +131,12 @@ function ResolvedMedia({
   preview?: boolean;
 }) {
   const isVideo = src.startsWith('data:video/') || /\.mp4(\?|$)/i.test(src);
-  const isSvg = src.startsWith('data:image/svg');
-  const showPreview = Boolean(preview || (!isVideo && isSvg));
+  const showPreview = isPreviewMedia(src, alt, preview);
   return (
     <div className="max-w-md">
       {showPreview && (
         <p className="mb-1.5 text-[10px] uppercase tracking-wider text-amber-400/90 font-semibold">
-          {/motion still/i.test(alt) || /motion still/i.test(src)
-            ? 'Motion still'
-            : 'Preview · not a finished generation'}
+          {previewBadge(alt, src)}
         </p>
       )}
       {isVideo ? (
@@ -213,7 +224,7 @@ export function MessageContent({ content }: { content: string }) {
   if (chunks.length === 0) chunks.push({ type: 'text', value: content });
 
   const onlyMedia = chunks.every(c => c.type === 'media' || !c.value.trim());
-  const previewHint = /preview|not a finished|motion still|offline fallback/i.test(content);
+  const previewHint = /preview|not a finished|motion still|offline fallback|real:\s*false|demo|placeholder/i.test(content);
 
   return (
     <div className={onlyMedia ? 'space-y-2' : 'space-y-3'}>

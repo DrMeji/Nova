@@ -8,9 +8,19 @@ export function DevicePreview({
   html: string;
 }) {
   const kind = familyOfDevice(device);
-  const landscape = kind === 'computer';
   const frameW = device.width;
   const frameH = device.height;
+
+  if (!html?.trim()) {
+    return (
+      <div className="h-full w-full flex flex-col items-center justify-center p-8 gap-2 text-center">
+        <p className="text-sm text-content-secondary">No preview HTML yet</p>
+        <p className="text-xs text-content-tertiary max-w-sm">
+          Ask ARK to build or open a file — the {device.label} frame appears when there is content to show.
+        </p>
+      </div>
+    );
+  }
 
   const shell =
     kind === 'computer'

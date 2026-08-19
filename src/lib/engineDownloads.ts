@@ -19,6 +19,7 @@ export type EngineDownloadJob = {
   phase: string;
   source: 'models' | 'local-ai';
   error?: string;
+  canceling?: boolean;
 };
 
 type Listener = () => void;
@@ -188,6 +189,11 @@ export async function startEngineDownload(opts: {
 }
 
 export async function cancelEngineDownload(id: string) {
+  const job = jobs.get(id);
+  if (job) {
+    jobs.set(id, { ...job, canceling: true, phase: 'canceling' });
+    emit();
+  }
   await engineDownloadCancel(id);
   removeJob(id);
 }

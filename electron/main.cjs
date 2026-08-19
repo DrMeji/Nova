@@ -88,14 +88,11 @@ function resolveAppIcon() {
   return { path: '', image: nativeImage.createEmpty() };
 }
 
-function createTray() {
-  if (tray) return;
-  const { image } = resolveAppIcon();
-  const trayImage = image.isEmpty()
-    ? image
-    : image.resize({ width: 16, height: 16 });
-  tray = new Tray(trayImage);
-  tray.setToolTip('ARK');
+function refreshTrayMenu() {
+  if (!tray) return;
+  const engine = arkEngine.getStatus();
+  const token = arkBrainToken.loadToken();
+  const brainUrl = `http://127.0.0.1:${brainPort}`;
   const menu = Menu.buildFromTemplate([
     {
       label: 'Show ARK',
@@ -103,8 +100,29 @@ function createTray() {
         showMainWindow();
       },
     },
+    { type: 'separator' },
     {
-      label: 'Quit ARK',
+      label: `Brain · ${engine.phase || 'unknown'}`,
+      enabled: false,
+    },
+    {
+      label: `Copy brain URL (${brainPort})`,
+      click: () => {
+        const { clipboard } = require('electron');
+        clipboard.writeText(brainUrl);
+      },
+    },
+    {
+      label: token ? 'Copy brain token' : 'Brain token (dev — none)',
+      enabled: Boolean(token),
+      click: () => {
+        const { clipboard } = require('electron');
+        clipboard.writeText(token);
+      },
+    },
+    { type: 'separator' },
+    {
+      label: 'Quit ARK (stops brain)',
       click: () => {
         quitting = true;
         app.quit();
@@ -112,6 +130,20 @@ function createTray() {
     },
   ]);
   tray.setContextMenu(menu);
+  tray.setToolTip(`ARK · ${engine.phase || 'starting'}`);
+}
+
+function createTray() {
+  if (tray) {
+    refreshTrayMenu();
+    return;
+  }
+  const { image } = resolveAppIcon();
+  const trayImage = image.isEmpty()
+    ? image
+    : image.resize({ width: 16, height: 16 });
+  tray = new Tray(trayImage);
+  refreshTrayMenu();
   tray.on('double-click', () => {
     showMainWindow();
   });
@@ -202,7 +234,7 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      sandbox: true,
       additionalArguments: [`--ark-packaged=${packaged ? '1' : '0'}`],
     },
   });
@@ -562,9 +594,26 @@ ipcMain.handle('ark:secrets-status', async () => ({
 
 ipcMain.handle('ark:secrets-load', async () => {
   try {
-    return { ok: true, keys: arkSecrets.loadMap(), encrypted: arkSecrets.encryptionAvailable() };
+    const map = arkSecrets.loadMap();
+    const keyStatus = {};
+    for (const [id, value] of Object.entries(map)) {
+      keyStatus[id] = Boolean(typeof value === 'string' && value.trim());
+    }
+    return { ok: true, keyStatus, encrypted: arkSecrets.encryptionAvailable() };
   } catch (err) {
-    return { ok: false, keys: {}, error: err instanceof Error ? err.message : 'Load failed' };
+    return { ok: false, keyStatus: {}, error: err instanceof Error ? err.message : 'Load failed' };
+  }
+});
+
+ipcMain.handle('ark:secrets-get-key', async (_event, providerId) => {
+  try {
+    const id = String(providerId || '').trim();
+    if (!id) return { ok: false, key: '' };
+    const map = arkSecrets.loadMap();
+    const key = map[id];
+    return { ok: true, key: typeof key === 'string' ? key : '' };
+  } catch (err) {
+    return { ok: false, key: '', error: err instanceof Error ? err.message : 'Load failed' };
   }
 });
 
@@ -949,6 +998,7 @@ function startBrainApi() {
   });
   brainApi.listen('127.0.0.1').then((port) => {
     brainPort = port;
+    refreshTrayMenu();
     if (!app.isPackaged) {
       console.log(`[ark-brain] http://127.0.0.1:${brainPort} (contract ${arkBrainApi.CONTRACT_VERSION})`);
       console.log('[ark-engine] ready (ARK-owned local runtime)');

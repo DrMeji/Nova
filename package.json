@@ -1,7 +1,7 @@
 {
   "name": "ark",
   "private": true,
-  "version": "0.1.74",
+  "version": "0.1.75",
   "type": "module",
   "main": "electron/main.cjs",
   "description": "ARK — AI Creation Studio desktop app",
@@ -22,7 +22,9 @@
     "electron:build": "npm run build && electron-builder",
     "electron:build:dir": "npm run build && electron-builder --dir",
     "electron:publish": "npm run build && electron-builder --publish always",
-    "smoke:ui": "node scripts/smoke-ui.cjs"
+    "smoke:ui": "node scripts/smoke-ui.cjs",
+    "grok:bundle": "node scripts/generate-grok-bundle.cjs",
+    "smoke:brain": "node scripts/smoke-brain-check.cjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.4",

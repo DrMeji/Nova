@@ -322,6 +322,7 @@ function getStatus() {
     ggufBinary: Boolean(llamaBin),
     ggufBinaryPath: llamaBin,
     ggufCount: arkGguf.listGgufFiles().length,
+    ggufServerPort: arkGguf.getServerPort?.() || 8788,
     defaultBrainId: DEFAULT_BRAIN_ID,
     note:
       phase === 'online'
@@ -568,6 +569,7 @@ function cancelDownload(id) {
   }
   if (downloads[id]) {
     downloads[id].cancel = true;
+    downloads[id].phase = 'canceling';
     downloads[id].error = 'Download canceled';
     return { ok: true, canceling: true };
   }

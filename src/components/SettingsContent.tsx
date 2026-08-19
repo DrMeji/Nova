@@ -154,6 +154,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
   const [brainToken, setBrainToken] = useState('');
   const [brainTokenCopied, setBrainTokenCopied] = useState(false);
   const [showLegacyProviders, setShowLegacyProviders] = useState(false);
+  const [signingStatus, setSigningStatus] = useState<string | null>(null);
   const settingsRootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -181,6 +182,16 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
         if (meta?.version) setAppVersion(meta.version);
       })
       .catch(() => {});
+    void window.arkDesktop?.signingStatus?.()
+      .then((row) => {
+        if (!row?.packaged) {
+          setSigningStatus('Dev build — signing not checked');
+          return;
+        }
+        if (row.signed) setSigningStatus('Windows Authenticode signature valid');
+        else setSigningStatus(row.status || 'Unsigned — SmartScreen may warn on first run');
+      })
+      .catch(() => setSigningStatus(null));
   }, []);
 
   useEffect(() => {
@@ -1595,6 +1606,11 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                   <p className="text-[11px] text-content-tertiary leading-relaxed">
                     Download stays in ARK. When it finishes, a small Updating window installs, then ARK reopens.
                   </p>
+                  {signingStatus ? (
+                    <p className="text-[11px] text-content-tertiary leading-relaxed">
+                      Code signing: {signingStatus}. See <code className="text-[10px]">build/signing.env.example</code> to configure Authenticode.
+                    </p>
+                  ) : null}
                 </div>
 
                 <ToggleRow

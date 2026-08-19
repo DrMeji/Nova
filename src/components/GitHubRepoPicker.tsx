@@ -47,7 +47,23 @@ export function GitHubRepoPicker({ open, onClose, onPick }: Props) {
               <Loader2 className="w-4 h-4 animate-spin" /> Loading your repos…
             </p>
           )}
-          {error && <p className="px-3 py-4 text-xs text-amber-300/90">{error}</p>}
+          {error && (
+            <div className="px-3 py-4 space-y-2">
+              <p className="text-xs text-amber-300/90">{error}</p>
+              {error.includes('Connect GitHub') ? (
+                <button
+                  type="button"
+                  className="text-xs text-sky-400 hover:text-sky-300"
+                  onClick={() => {
+                    onClose();
+                    window.dispatchEvent(new CustomEvent('ark:open-settings', { detail: { section: 'plugins' } }));
+                  }}
+                >
+                  Open Plugins → Connect GitHub
+                </button>
+              ) : null}
+            </div>
+          )}
           {!loading && !error && repos.map(repo => (
             <button
               key={repo.id}

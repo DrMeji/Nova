@@ -109,5 +109,6 @@ contextBridge.exposeInMainWorld('arkDesktop', {
   gitSetOrigin: (payload) => ipcRenderer.invoke('ark:git-set-origin', payload),
   secretsStatus: () => ipcRenderer.invoke('ark:secrets-status'),
   secretsLoad: () => ipcRenderer.invoke('ark:secrets-load'),
+  secretsGetKey: (providerId) => ipcRenderer.invoke('ark:secrets-get-key', providerId),
   secretsSave: (keys) => ipcRenderer.invoke('ark:secrets-save', { keys }),
 });

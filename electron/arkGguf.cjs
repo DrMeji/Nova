@@ -264,8 +264,13 @@ let activeAbort = null;
 let serverChild = null;
 let serverGguf = null;
 let serverCtx = 0;
-const SERVER_PORT = 8788;
+const SERVER_PORT_BASE = 8788;
+let serverPort = SERVER_PORT_BASE;
 const GGUF_CTX = 8192;
+
+function getServerPort() {
+  return serverPort;
+}
 
 function killLlamaChild(child) {
   if (!child) return;
@@ -310,15 +315,47 @@ function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function pingServer() {
+async function pingServer(port = serverPort) {
   try {
-    const res = await fetch(`http://127.0.0.1:${SERVER_PORT}/health`, {
+    const res = await fetch(`http://127.0.0.1:${port}/health`, {
       signal: AbortSignal.timeout(1500),
     });
     return res.ok;
   } catch {
     return false;
   }
+}
+
+async function bindLlamaServer(bin, gguf) {
+  for (let candidate = SERVER_PORT_BASE; candidate < SERVER_PORT_BASE + 10; candidate += 1) {
+    stopServer();
+    const child = spawn(bin, [
+      '-m', gguf,
+      '--host', '127.0.0.1',
+      '--port', String(candidate),
+      '-c', String(GGUF_CTX),
+      '--parallel', '1',
+    ], { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
+    serverChild = child;
+    serverGguf = gguf;
+    serverCtx = GGUF_CTX;
+    serverPort = candidate;
+    child.on('exit', () => {
+      if (serverChild === child) {
+        serverChild = null;
+        serverGguf = null;
+        serverCtx = 0;
+      }
+    });
+    const deadline = Date.now() + 45_000;
+    while (Date.now() < deadline) {
+      if (child.killed || child.exitCode != null) break;
+      if (await pingServer(candidate)) return true;
+      await wait(250);
+    }
+    stopServer();
+  }
+  return false;
 }
 
 /**
@@ -331,32 +368,7 @@ async function ensureLlamaServer(modelId) {
   if (serverChild && serverGguf === gguf && serverCtx === GGUF_CTX && !serverChild.killed && await pingServer()) {
     return true;
   }
-  stopServer();
-  const child = spawn(bin, [
-    '-m', gguf,
-    '--host', '127.0.0.1',
-    '--port', String(SERVER_PORT),
-    '-c', String(GGUF_CTX),
-    '--parallel', '1',
-  ], { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
-  serverChild = child;
-  serverGguf = gguf;
-  serverCtx = GGUF_CTX;
-  child.on('exit', () => {
-    if (serverChild === child) {
-      serverChild = null;
-      serverGguf = null;
-      serverCtx = 0;
-    }
-  });
-  const deadline = Date.now() + 45_000;
-  while (Date.now() < deadline) {
-    if (child.killed || child.exitCode != null) return false;
-    if (await pingServer()) return true;
-    await wait(250);
-  }
-  stopServer();
-  return false;
+  return bindLlamaServer(bin, gguf);
 }
 
 async function warmServer(modelId) {
@@ -376,7 +388,7 @@ async function runGgufServerStream(modelId, prompt, onChunk, timeoutMs, nPredict
   const timer = setTimeout(() => ac.abort(), timeoutMs);
   let out = '';
   try {
-    const res = await fetch(`http://127.0.0.1:${SERVER_PORT}/completion`, {
+    const res = await fetch(`http://127.0.0.1:${serverPort}/completion`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -434,6 +446,9 @@ async function runGgufServerStream(modelId, prompt, onChunk, timeoutMs, nPredict
       cleanedLen: text.length,
       cleanedPreview: text.slice(0, 240),
     });
+    if (!text.trim() && !cancelRequested) {
+      throw new Error('Local GGUF returned empty output');
+    }
     return {
       ok: true,
       reply: text.slice(-6000) || (cancelRequested ? '(stopped)' : ''),
@@ -806,6 +821,7 @@ module.exports = {
   findLlamaServer,
   warmServer,
   stopServer,
+  getServerPort,
   modelsDir,
   binDir,
   LLAMA_TAG,
