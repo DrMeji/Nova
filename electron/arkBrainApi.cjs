@@ -127,10 +127,12 @@ function ensureOnline(arkEngine) {
  * @param {{ arkEngine: any, port: number, token?: string }} opts
  */
 function createBrainServer(opts) {
-  const { arkEngine, port, token = '' } = opts;
+  const { arkEngine, port, token = '', requireAuth = false } = opts;
   const brainToken = String(token || '').trim();
+  const mustAuth = Boolean(requireAuth || brainToken);
   let listening = false;
   let server = null;
+  let activePort = port;
 
   const publicEndpoints = [
     'GET /health',
@@ -154,7 +156,12 @@ function createBrainServer(opts) {
     if (kind !== 'image' && kind !== 'video') {
       kind = kind === 'coding' || arkModelRank.looksLikeCodeAsk(message) ? 'coding' : 'chat';
     }
-    return arkEngine.generate(message, { modelId, kind });
+    try {
+      return await arkEngine.generate(message, { modelId, kind });
+    } catch (err) {
+      const error = err instanceof Error ? err.message : 'Generation failed';
+      return { ok: false, error };
+    }
   }
 
   async function runGenerateStream(parsed, onChunk) {
@@ -165,11 +172,30 @@ function createBrainServer(opts) {
     if (kind !== 'image' && kind !== 'video') {
       kind = kind === 'coding' || arkModelRank.looksLikeCodeAsk(message) ? 'coding' : 'chat';
     }
-    return arkEngine.generate(message, { modelId, kind, onChunk });
+    try {
+      return await arkEngine.generate(message, { modelId, kind, onChunk });
+    } catch (err) {
+      const error = err instanceof Error ? err.message : 'Generation failed';
+      return { ok: false, error };
+    }
+  }
+
+  function brainErrorPayload(result) {
+    if (result && result.ok === false) {
+      return { ok: false, error: result.error || 'Generation failed' };
+    }
+    const reply = String(result?.reply || '');
+    if (/Local GGUF brain failed|No local GGUF brain|not ready in ARK Engine/i.test(reply)) {
+      return { ok: false, error: reply.trim() || 'Generation failed' };
+    }
+    return null;
   }
 
   server = http.createServer(async (req, res) => {
-    res.setHeader('Access-Control-Allow-Origin', '*');
+    const origin = String(req.headers.origin || '');
+    const corsOrigin = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin) ? origin : 'null';
+    res.setHeader('Access-Control-Allow-Origin', corsOrigin);
+    res.setHeader('Vary', 'Origin');
     res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
     if (req.method === 'OPTIONS') {
@@ -179,9 +205,20 @@ function createBrainServer(opts) {
     }
 
     const url = (req.url || '/').split('?')[0];
-    const openPaths = new Set(['/', '/health', '/v1/contract', '/api/version']);
+    const openPaths = new Set([
+      '/', '/health', '/v1/contract', '/api/version', '/api/tags', '/v1/models', '/v1/engine',
+    ]);
 
-    if (brainToken) {
+    if (mustAuth) {
+      const auth = String(req.headers.authorization || '');
+      const ok = auth === `Bearer ${brainToken}` || auth === `bearer ${brainToken}`;
+      if (!ok && !openPaths.has(url)) {
+        return json(res, 401, {
+          ok: false,
+          error: 'Unauthorized — set Authorization: Bearer <ARK_BRAIN_TOKEN>',
+        });
+      }
+    } else if (brainToken) {
       const auth = String(req.headers.authorization || '');
       const ok = auth === `Bearer ${brainToken}` || auth === `bearer ${brainToken}`;
       if (!ok && !openPaths.has(url)) {
@@ -246,6 +283,8 @@ function createBrainServer(opts) {
         const raw = await readBody(req);
         const parsed = raw ? JSON.parse(raw) : {};
         const result = await runGenerate(parsed);
+        const errPayload = brainErrorPayload(result);
+        if (errPayload) return json(res, 503, errPayload);
         return json(res, 200, {
           ok: true,
           reply: result.reply,
@@ -275,6 +314,12 @@ function createBrainServer(opts) {
               /* ignore */
             }
           });
+          const errPayload = brainErrorPayload(result);
+          if (errPayload) {
+            res.write(`event: error\ndata: ${JSON.stringify(errPayload)}\n\n`);
+            res.end();
+            return;
+          }
           res.write(`event: done\ndata: ${JSON.stringify({
             ok: true,
             reply: result.reply,
@@ -332,6 +377,8 @@ function createBrainServer(opts) {
         }
 
         const result = await runGenerate(parsed);
+        const errPayload = brainErrorPayload(result);
+        if (errPayload) return json(res, 503, errPayload);
         return json(res, 200, {
           id: `ark-${Date.now()}`,
           object: 'chat.completion',
@@ -386,6 +433,12 @@ function createBrainServer(opts) {
                 };
             res.write(`${JSON.stringify(line)}\n`);
           });
+          const errPayload = brainErrorPayload(result);
+          if (errPayload) {
+            res.writeHead(503, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+            res.end(JSON.stringify(errPayload));
+            return;
+          }
           const doneLine = url === '/api/generate'
             ? {
                 model: result.modelId || modelName,
@@ -420,6 +473,8 @@ function createBrainServer(opts) {
         }
 
         const result = await runGenerate(parsed);
+        const errPayload = brainErrorPayload(result);
+        if (errPayload) return json(res, 503, errPayload);
         if (url === '/api/generate') {
           return json(res, 200, {
             model: result.modelId || modelName,
@@ -450,13 +505,27 @@ function createBrainServer(opts) {
   return {
     listen(host = '127.0.0.1') {
       return new Promise((resolve, reject) => {
-        server.once('error', reject);
-        server.listen(port, host, () => {
-          listening = true;
-          resolve();
-        });
+        const tryPort = (candidate) => {
+          const onError = (err) => {
+            server.removeListener('error', onError);
+            if (err && err.code === 'EADDRINUSE' && candidate < port + 10) {
+              tryPort(candidate + 1);
+              return;
+            }
+            reject(err);
+          };
+          server.once('error', onError);
+          server.listen(candidate, host, () => {
+            server.removeListener('error', onError);
+            activePort = candidate;
+            listening = true;
+            resolve(activePort);
+          });
+        };
+        tryPort(port);
       });
     },
+    getPort: () => activePort,
     close() {
       return new Promise((resolve) => {
         if (!server) return resolve();

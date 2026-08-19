@@ -50,6 +50,8 @@ contextBridge.exposeInMainWorld('arkDesktop', {
     return () => ipcRenderer.removeListener('ark:http-stream-chunk', listener);
   },
   brainStatus: () => ipcRenderer.invoke('ark:brain-status'),
+  brainTokenGet: () => ipcRenderer.invoke('ark:brain-token-get'),
+  brainTokenRotate: () => ipcRenderer.invoke('ark:brain-token-rotate'),
   engineGenerateStream: (message, modelId, kind) =>
     ipcRenderer.invoke('ark:engine-generate-stream', { message, modelId, kind }),
   engineGenerateCancel: () => ipcRenderer.invoke('ark:engine-generate-cancel'),

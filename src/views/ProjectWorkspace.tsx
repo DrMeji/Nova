@@ -85,6 +85,7 @@ import {
 } from '@/lib/mobileDevices';
 import { isCloudProviderEnabled } from '@/lib/cloudSources';
 import { DevicePreview } from '@/components/DevicePreview';
+import { WorkTrace, buildCodeTrace, buildInspectTrace } from '@/components/WorkTrace';
 import { ComposerPlusMenu, type ComposerPlusAction } from '@/components/ComposerPlusMenu';
 import { CodeEditor } from '@/components/CodeEditor';
 import { fileTintClass, languageFromPath } from '@/lib/syntaxHighlight';
@@ -274,21 +275,15 @@ function BuildProgressBubble({
   kind?: 'build' | 'inspect' | 'fix';
   focusFile?: string;
 }) {
-  const activeIdx = BUILD_PROGRESS_STEPS.findIndex(s => s.id === step);
-  const [elapsedMs, setElapsedMs] = useState(() => Date.now() - startedAt);
   const reading = kind === 'inspect';
   const fixing = kind === 'fix';
+  const [elapsedMs, setElapsedMs] = useState(() => Date.now() - startedAt);
   const title = step === 'done'
-    ? (reading ? `Read ${label}` : fixing ? `Updated ${label}` : `Built ${label}`)
-    : (reading ? `Reading ${label}` : fixing ? `Editing ${label}` : `Building ${label}`);
-  const stepLabel = (id: BuildLiveStep, fallback: string) => {
-    if (!reading) return fallback;
-    if (id === 'understand') return 'Reading the files you opened';
-    if (id === 'plan') return 'Scanning the project';
-    if (id === 'generate') return 'Writing an answer';
-    if (id === 'apply') return 'Checking findings';
-    return 'Done';
-  };
+    ? (reading ? `Reviewed ${label}` : fixing ? `Updated ${label}` : `Built ${label}`)
+    : (reading ? `Reviewing ${label}` : fixing ? `Fixing ${label}` : `Building ${label}`);
+  const traceItems = reading
+    ? buildInspectTrace(step, plannedFiles, focusFile)
+    : buildCodeTrace(step, plannedFiles, focusFile, fixing ? 'fix' : 'build');
 
   useEffect(() => {
     if (step === 'done') {
@@ -302,47 +297,11 @@ function BuildProgressBubble({
   }, [startedAt, step]);
 
   return (
-    <div className="space-y-2.5 text-xs min-w-[14rem]">
-      <div className="flex items-start justify-between gap-3">
-        <p className="text-sm font-medium text-content-primary">
-          {title}
-        </p>
-        <span className="text-[10px] text-content-tertiary tabular-nums shrink-0 pt-0.5">
-          {formatElapsed(elapsedMs)}
-        </span>
-      </div>
-      <ul className="space-y-1.5">
-        {BUILD_PROGRESS_STEPS.map((s, i) => {
-          const done = step === 'done' ? true : i < activeIdx;
-          const active = step !== 'done' && i === activeIdx;
-          return (
-            <li key={s.id} className="flex items-center gap-2">
-              {done ? (
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-              ) : active ? (
-                <Loader2 className="w-3.5 h-3.5 text-amber-400 shrink-0 animate-spin" />
-              ) : (
-                <Circle className="w-3.5 h-3.5 text-content-tertiary shrink-0" />
-              )}
-              <span className={
-                active ? 'text-content-primary'
-                  : done ? 'text-content-secondary'
-                    : 'text-content-tertiary'
-              }>
-                {stepLabel(s.id, s.label)}
-              </span>
-            </li>
-          );
-        })}
-      </ul>
-      {(focusFile || plannedFiles.length > 0) && (
-        <p className="text-[10px] text-content-tertiary border-t border-surface-border/60 pt-2 leading-relaxed">
-          {reading
-            ? `Looking at: ${focusFile || plannedFiles.slice(0, 4).join(' · ')}`
-            : `${step === 'done' ? 'Saved' : 'Editing'}: ${focusFile || plannedFiles.join(' · ')}`}
-        </p>
-      )}
-    </div>
+    <WorkTrace
+      title={title}
+      elapsed={formatElapsed(elapsedMs)}
+      items={traceItems}
+    />
   );
 }
 
@@ -1122,6 +1081,24 @@ export function ProjectWorkspace() {
           files: packDiskFiles(fileContentsRef.current, messagesRef.current),
         });
       const token = getPluginRuntime('github', loadPluginState()).token?.trim();
+      if (!token) {
+        setGithubPickerOpen(true);
+        setMessages(prev => {
+          const note: ChatMessage = {
+            id: crypto.randomUUID(),
+            user_id: user?.id ?? 'guest',
+            project_id: projectId,
+            role: 'assistant',
+            content: 'Connect GitHub in Plugins first — then Push will send your commit.',
+            provider_used: 'Git',
+            created_at: new Date().toISOString(),
+          };
+          const next = [...prev, note];
+          saveProjectThread(projectId, next);
+          return next;
+        });
+        return;
+      }
       if (!gitInfo?.git || gitInfo.dirty) {
         await gitCommit(projectId, 'Update from ARK');
       }
@@ -1650,6 +1627,14 @@ export function ProjectWorkspace() {
           ])];
           if (inspectOnly) lastInspectPathsRef.current = inspectPaths;
           if (patchOnlyNamed && allowedPatchPaths.length) lastInspectPathsRef.current = allowedPatchPaths;
+          if (inspectPaths.length) {
+            const focus = preferredLiveEditPath(inspectPaths);
+            setBuildLive(prev => (
+              prev?.assistantId === assistantId
+                ? { ...prev, plannedFiles: inspectPaths, focusFile: focus }
+                : prev
+            ));
+          }
 
           const inspectMode = explainOnly ? 'explain' : improveAsk ? 'improve' : 'debug';
           const codingMessage = inspectOnly
@@ -2247,7 +2232,11 @@ export function ProjectWorkspace() {
 
   const openPreviewInBrowser = () => {
     const url = livePreviewUrl || previewUrl;
-    if (url.startsWith('blob:') || url.includes('127.0.0.1:0')) return;
+    if (!url || url.startsWith('blob:') || url.includes('127.0.0.1:0')) {
+      setSandboxNote('No preview URL yet — ask ARK to create a page, then open Preview.');
+      window.setTimeout(() => setSandboxNote(null), 3200);
+      return;
+    }
     void openInSystemBrowser(url);
   };
 
@@ -2327,9 +2316,9 @@ export function ProjectWorkspace() {
   const showBrowserChrome = Boolean(livePreviewUrl || previewReady) && !isNativeMobileTree(fileContents);
 
   const buildLabel = buildRunning
-    ? `Building ${buildProgress}%`
+    ? `Preparing preview ${buildProgress}%`
     : previewReady || buildProgress >= 100
-      ? 'Build ready'
+      ? 'Preview ready (static HTML)'
       : null;
 
   return (
@@ -3336,7 +3325,7 @@ export function ProjectWorkspace() {
               {buildRunning && (
                 <div className="shrink-0 px-3 py-2">
                   <div className="flex items-center justify-between mb-1.5">
-                    <span className="text-xs text-content-secondary">Building preview…</span>
+                    <span className="text-xs text-content-secondary">Preparing preview…</span>
                     <span className="text-xs text-content-tertiary">{buildProgress}%</span>
                   </div>
                   <div className="h-1 bg-surface-hover rounded-full overflow-hidden">

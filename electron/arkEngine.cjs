@@ -337,14 +337,20 @@ function getStatus() {
 function start() {
   if (phase === 'online') return getStatus();
   phase = 'starting';
-  setTimeout(() => {
+  void (async () => {
+    try {
+      await ensureRuntime();
+    } catch {
+      /* binary may still download later */
+    }
     phase = 'online';
+    const llamaBin = arkGguf.findLlamaBinary();
     const ready = listModels().find((m) => m.gguf && m.status === 'ready' && m.id !== 'ark-core');
-    if (ready) {
+    if (llamaBin && ready) {
       const ggufId = String(ready.id).startsWith('gguf:') ? String(ready.id).slice(5) : ready.id;
       void arkGguf.warmServer(ggufId);
     }
-  }, 400);
+  })();
   return getStatus();
 }
 
@@ -755,6 +761,17 @@ async function generate(message, opts = {}) {
     };
   }
 
+  if (requestedId === 'ark-core') {
+    return {
+      ok: true,
+      reply: arkCoreGenerate(message, 'ARK Core'),
+      modelId: 'ark-core',
+      modelName: 'ARK Core',
+      source: 'ark-template',
+      template: true,
+    };
+  }
+
   if (phase !== 'online') {
     throw new Error('ARK Engine is offline. Start it from Local AI.');
   }
@@ -797,18 +814,9 @@ async function generate(message, opts = {}) {
         streamed: Boolean(gguf.streamed),
       };
     } catch (err) {
-      return {
-        ok: true,
-        reply: [
-          'Local GGUF brain failed to run.',
-          err instanceof Error ? err.message : 'unavailable',
-          '',
-          'Try Local AI → reinstall the brain, or connect a free cloud key.',
-        ].join('\n'),
-        modelId: model.id,
-        modelName: model.name,
-        source: 'ark-engine',
-      };
+      throw new Error(
+        err instanceof Error ? err.message : 'Local GGUF brain failed to run',
+      );
     }
   }
 

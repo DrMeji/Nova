@@ -6,6 +6,8 @@ const arkMedia = require('./arkMedia.cjs');
 const arkProjects = require('./arkProjects.cjs');
 const arkGit = require('./arkGit.cjs');
 const arkSecrets = require('./arkSecrets.cjs');
+const arkOpenExternal = require('./arkOpenExternal.cjs');
+const arkBrainToken = require('./arkBrainToken.cjs');
 const arkSystem = require('./arkSystem.cjs');
 const arkSetup = require('./arkSetup.cjs');
 const arkUpdater = require('./arkUpdater.cjs');
@@ -20,6 +22,7 @@ const DEV_URL = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173';
 const isDev = process.env.ARK_DEV === '1';
 const isUpdaterMode = process.argv.includes('--ark-updater');
 const BRAIN_PORT = 8787;
+let brainPort = BRAIN_PORT;
 
 const ALLOWED_HOSTS = new Set([
   'api.github.com',
@@ -547,12 +550,9 @@ ipcMain.handle('ark:open-path', async (_event, targetPath) => {
   return true;
 });
 
-ipcMain.handle('ark:open-external', async (_event, url) => {
-  if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) {
-    throw new Error('Only http(s) URLs can be opened externally');
-  }
-  await shell.openExternal(url);
-  return true;
+ipcMain.handle('ark:open-external', async (event, url) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  return arkOpenExternal.openExternal(url, win);
 });
 
 ipcMain.handle('ark:secrets-status', async () => ({
@@ -570,6 +570,13 @@ ipcMain.handle('ark:secrets-load', async () => {
 
 ipcMain.handle('ark:secrets-save', async (_event, payload) => {
   try {
+    if (!arkSecrets.encryptionAvailable()) {
+      return {
+        ok: false,
+        error: 'Secure storage unavailable on this PC — API keys cannot be saved safely',
+        code: 'NO_ENCRYPTION',
+      };
+    }
     const keys = payload?.keys && typeof payload.keys === 'object' ? payload.keys : {};
     // Never accept non-string values
     const clean = {};
@@ -579,7 +586,11 @@ ipcMain.handle('ark:secrets-save', async (_event, payload) => {
     arkSecrets.saveMap(clean);
     return { ok: true, encrypted: arkSecrets.encryptionAvailable() };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : 'Save failed' };
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : 'Save failed',
+      code: err.code || 'SAVE_FAILED',
+    };
   }
 });
 
@@ -902,23 +913,44 @@ ipcMain.handle('ark:signing-status', async () => {
 
 ipcMain.handle('ark:brain-status', async () => ({
   ok: Boolean(brainApi?.isListening?.()),
-  url: `http://127.0.0.1:${BRAIN_PORT}`,
+  url: `http://127.0.0.1:${brainPort}`,
   contractVersion: arkBrainApi.CONTRACT_VERSION,
   engine: arkEngine.getStatus(),
+  auth: app.isPackaged || Boolean(arkBrainToken.loadToken()) ? 'bearer' : 'none (localhost dev)',
+  hasToken: Boolean(arkBrainToken.loadToken()),
 }));
+
+ipcMain.handle('ark:brain-token-get', async () => {
+  const token = arkBrainToken.loadToken();
+  return {
+    ok: true,
+    token,
+    url: `http://127.0.0.1:${brainPort}`,
+    hasToken: Boolean(token),
+    packaged: app.isPackaged,
+  };
+});
+
+ipcMain.handle('ark:brain-token-rotate', async () => {
+  const token = arkBrainToken.rotateToken();
+  return { ok: true, token, url: `http://127.0.0.1:${brainPort}` };
+});
 
 let brainApi = null;
 
 function startBrainApi() {
   if (brainApi) return;
+  const token = arkBrainToken.ensureToken(app.isPackaged) || process.env.ARK_BRAIN_TOKEN || '';
   brainApi = arkBrainApi.createBrainServer({
     arkEngine,
     port: BRAIN_PORT,
-    token: process.env.ARK_BRAIN_TOKEN || '',
+    token,
+    requireAuth: app.isPackaged || Boolean(token),
   });
-  brainApi.listen('127.0.0.1').then(() => {
+  brainApi.listen('127.0.0.1').then((port) => {
+    brainPort = port;
     if (!app.isPackaged) {
-      console.log(`[ark-brain] http://127.0.0.1:${BRAIN_PORT} (contract ${arkBrainApi.CONTRACT_VERSION})`);
+      console.log(`[ark-brain] http://127.0.0.1:${brainPort} (contract ${arkBrainApi.CONTRACT_VERSION})`);
       console.log('[ark-engine] ready (ARK-owned local runtime)');
     }
   }).catch((err) => {

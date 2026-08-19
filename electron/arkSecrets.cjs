@@ -27,12 +27,13 @@ function saveMap(map) {
   const json = JSON.stringify(map && typeof map === 'object' ? map : {});
   const file = secretsPath();
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  if (safeStorage.isEncryptionAvailable()) {
-    const encrypted = safeStorage.encryptString(json);
-    fs.writeFileSync(file, encrypted);
-  } else {
-    fs.writeFileSync(file, json, 'utf8');
+  if (!safeStorage.isEncryptionAvailable()) {
+    const err = new Error('Secure storage unavailable on this PC — API keys cannot be saved safely');
+    err.code = 'NO_ENCRYPTION';
+    throw err;
   }
+  const encrypted = safeStorage.encryptString(json);
+  fs.writeFileSync(file, encrypted);
 }
 
 function encryptionAvailable() {

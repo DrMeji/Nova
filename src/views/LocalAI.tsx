@@ -16,6 +16,7 @@ import {
   cancelEngineDownload,
   getEngineDownloadMap,
   getEngineDownloadPhaseMap,
+  getEngineDownloadErrors,
   isEngineDownloading,
   reattachEngineDownloads,
   startEngineDownload,
@@ -330,6 +331,7 @@ export function LocalAI() {
   const [activeId, setActiveId] = useState(() => getLocalPrefs().defaultModelId || recommendation.id);
   const [downloadProgressMap, setDownloadProgressMap] = useState<Record<string, number>>(() => getEngineDownloadMap());
   const [downloadPhaseMap, setDownloadPhaseMap] = useState<Record<string, string>>(() => getEngineDownloadPhaseMap());
+  const [downloadErrorMap, setDownloadErrorMap] = useState<Record<string, string>>(() => getEngineDownloadErrors());
   const [diskNote, setDiskNote] = useState('');
   const [hunted, setHunted] = useState<HuntedModel[]>([]);
   const [huntNote, setHuntNote] = useState('');
@@ -368,6 +370,7 @@ export function LocalAI() {
     const sync = () => {
       setDownloadProgressMap(getEngineDownloadMap());
       setDownloadPhaseMap(getEngineDownloadPhaseMap());
+      setDownloadErrorMap(getEngineDownloadErrors());
     };
     sync();
     void reattachEngineDownloads('local-ai').then(sync);
@@ -810,6 +813,9 @@ export function LocalAI() {
                           <div className="h-1 bg-surface-hover rounded-full overflow-hidden">
                             <div className="h-full bg-emerald-400/80 transition-all" style={{ width: `${pct}%` }} />
                           </div>
+                          {downloadErrorMap[id] ? (
+                            <p className="text-[11px] text-rose-300/90 mt-1.5 leading-snug">{downloadErrorMap[id]}</p>
+                          ) : null}
                         </div>
                       );
                     })}

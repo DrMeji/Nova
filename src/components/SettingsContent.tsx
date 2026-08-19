@@ -150,6 +150,9 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
   const [featureTick, setFeatureTick] = useState(0);
   const [keyTestMsg, setKeyTestMsg] = useState('');
   const [keyTestFor, setKeyTestFor] = useState<string | null>(null);
+  const [brainUrl, setBrainUrl] = useState('http://127.0.0.1:8787');
+  const [brainToken, setBrainToken] = useState('');
+  const [brainTokenCopied, setBrainTokenCopied] = useState(false);
   const [showLegacyProviders, setShowLegacyProviders] = useState(false);
   const settingsRootRef = useRef<HTMLDivElement>(null);
 
@@ -157,6 +160,15 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
     const onFeat = () => setFeatureTick(t => t + 1);
     window.addEventListener('ark:features-changed', onFeat);
     return () => window.removeEventListener('ark:features-changed', onFeat);
+  }, []);
+
+  useEffect(() => {
+    void window.arkDesktop?.brainTokenGet?.()
+      .then(res => {
+        if (res?.url) setBrainUrl(res.url);
+        if (res?.token) setBrainToken(res.token);
+      })
+      .catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -670,6 +682,55 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                   <Sparkles className="w-4 h-4 text-sky-400" />
                 </div>
 
+                <div className="rounded-xl border border-surface-border p-4 space-y-3">
+                  <div>
+                    <p className="text-sm font-medium text-content-primary">Brain API (Lindsay / external apps)</p>
+                    <p className="text-[11px] text-content-tertiary mt-0.5 leading-relaxed">
+                      Loopback only. Packaged ARK requires a bearer token on chat routes.
+                    </p>
+                  </div>
+                  <div className="grid gap-2">
+                    <label className="block text-[11px] text-content-tertiary">URL</label>
+                    <input readOnly value={brainUrl} className="ark-input font-mono text-xs" />
+                    <label className="block text-[11px] text-content-tertiary">Token</label>
+                    <input
+                      readOnly
+                      type="password"
+                      value={brainToken || '(none — dev mode)'}
+                      className="ark-input font-mono text-xs"
+                    />
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      className="ark-btn-secondary text-xs"
+                      onClick={() => {
+                        const clip = `URL: ${brainUrl}\nToken: ${brainToken || ''}`;
+                        void navigator.clipboard.writeText(clip).then(() => {
+                          setBrainTokenCopied(true);
+                          window.setTimeout(() => setBrainTokenCopied(false), 1600);
+                        });
+                      }}
+                    >
+                      {brainTokenCopied ? 'Copied' : 'Copy URL + token'}
+                    </button>
+                    <button
+                      type="button"
+                      className="ark-btn-secondary text-xs"
+                      onClick={() => {
+                        void window.arkDesktop?.brainTokenRotate?.().then(res => {
+                          if (res?.token) setBrainToken(res.token);
+                          if (res?.url) setBrainUrl(res.url);
+                          setSavedFlash('Brain token rotated — update Lindsay/clients');
+                          window.setTimeout(() => setSavedFlash(''), 2200);
+                        });
+                      }}
+                    >
+                      Rotate token
+                    </button>
+                  </div>
+                </div>
+
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   {AI_MODES.map(mode => (
                     <button
@@ -882,13 +943,20 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                                 className="ark-btn-primary flex-1"
                                 disabled={!keyDraft.trim()}
                                 onClick={() => {
-                                  setProviderApiKey(p.id, keyDraft);
-                                  setProviderKeys(getProviderApiKeys());
-                                  setCloudProviderEnabled(p.id, true);
-                                  setEditingProvider(null);
-                                  setKeyDraft('');
-                                  setSavedFlash('Key saved — those models can appear in Chat now');
-                                  window.setTimeout(() => setSavedFlash(''), 1600);
+                                  void (async () => {
+                                    try {
+                                      await setProviderApiKey(p.id, keyDraft);
+                                      setProviderKeys(getProviderApiKeys());
+                                      setCloudProviderEnabled(p.id, true);
+                                      setEditingProvider(null);
+                                      setKeyDraft('');
+                                      setSavedFlash('Key saved — those models can appear in Chat now');
+                                      window.setTimeout(() => setSavedFlash(''), 1600);
+                                    } catch (err) {
+                                      setSavedFlash(err instanceof Error ? err.message : 'Could not save key');
+                                      window.setTimeout(() => setSavedFlash(''), 2600);
+                                    }
+                                  })();
                                 }}
                               >
                                 Save key
@@ -1582,7 +1650,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                           </span>
                         </div>
                         <ul className="space-y-1.5">
-                          {entry.notes.map(note => (
+                          {(entry.notes || []).map(note => (
                             <li key={note} className="text-xs text-content-secondary flex gap-2">
                               <span className="text-content-tertiary">·</span>
                               <span>{note}</span>

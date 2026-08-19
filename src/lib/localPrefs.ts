@@ -148,7 +148,10 @@ function writeLegacyLocalKeys(map: ProviderKeyMap) {
 
 async function persistProviderKeys(map: ProviderKeyMap) {
   if (window.arkDesktop?.secretsSave) {
-    await window.arkDesktop.secretsSave(map);
+    const res = await window.arkDesktop.secretsSave(map);
+    if (res && res.ok === false) {
+      throw new Error(res.error || 'Could not save API keys securely');
+    }
     try {
       localStorage.removeItem(API_KEYS_KEY);
     } catch {
@@ -206,7 +209,7 @@ export function getProviderApiKeys(): ProviderKeyMap {
   return {};
 }
 
-export function setProviderApiKey(providerId: string, apiKey: string) {
+export async function setProviderApiKey(providerId: string, apiKey: string) {
   const map = getProviderApiKeys();
   if (apiKey.trim()) {
     map[providerId] = apiKey.trim();
@@ -214,7 +217,7 @@ export function setProviderApiKey(providerId: string, apiKey: string) {
     delete map[providerId];
   }
   providerKeyCache = map;
-  void persistProviderKeys(map);
+  await persistProviderKeys(map);
   try {
     window.dispatchEvent(new Event('ark:provider-keys-changed'));
   } catch {
@@ -260,6 +263,19 @@ export function clearPluginToken(pluginId: string) {
 
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
+  {
+    version: '0.1.74',
+    channel: 'stable' as const,
+    date: 'Aug 18, 2026',
+    title: 'Grok review pass — trust, security, and work trace',
+    notes: [
+      'GGUF failures and brain API errors return real 503s instead of fake success replies',
+      'Packaged installs get a brain bearer token; copy or rotate it in Settings → AI',
+      'API keys refuse plaintext save when OS encryption is unavailable',
+      'Code review/debug shows a Grok-style work trace while ARK reads your project',
+      'External links use an allowlist with confirm for unknown hosts',
+    ],
+  },
   {
     version: '0.1.73',
     channel: 'stable' as const,

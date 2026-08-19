@@ -68,7 +68,7 @@ async function tick(id: string) {
       jobs.set(id, { ...job, progress: p, phase, error: err });
       emit();
       stopTimer(id);
-      window.setTimeout(() => removeJob(id), 2500);
+      window.setTimeout(() => removeJob(id), 12000);
       return;
     }
 
@@ -117,6 +117,14 @@ export function getEngineDownloadPhaseMap(): Record<string, string> {
   const out: Record<string, string> = {};
   jobs.forEach((j, id) => {
     out[id] = j.phase;
+  });
+  return out;
+}
+
+export function getEngineDownloadErrors(): Record<string, string> {
+  const out: Record<string, string> = {};
+  jobs.forEach((j, id) => {
+    if (j.error) out[id] = j.error;
   });
   return out;
 }

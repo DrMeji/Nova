@@ -1,19 +1,27 @@
 /**
  * Persist Supabase auth session in Electron userData (survives updates).
- * localStorage alone is too easy to lose across reinstall/update edge cases.
+ * Encrypted with OS safeStorage when available.
  */
 
 const fs = require('fs');
 const path = require('path');
-const { app } = require('electron');
+const { app, safeStorage } = require('electron');
 
 function storePath() {
-  return path.join(app.getPath('userData'), 'ark-auth-storage.json');
+  return path.join(app.getPath('userData'), 'ark-auth-storage.dat');
 }
 
 function readMap() {
   try {
-    const raw = fs.readFileSync(storePath(), 'utf8');
+    const file = storePath();
+    if (!fs.existsSync(file)) return {};
+    const buf = fs.readFileSync(file);
+    let raw = '';
+    if (safeStorage.isEncryptionAvailable()) {
+      raw = safeStorage.decryptString(buf);
+    } else {
+      raw = buf.toString('utf8');
+    }
     const data = JSON.parse(raw);
     return data && typeof data === 'object' ? data : {};
   } catch {
@@ -22,8 +30,13 @@ function readMap() {
 }
 
 function writeMap(map) {
+  const json = JSON.stringify(map && typeof map === 'object' ? map : {});
   fs.mkdirSync(path.dirname(storePath()), { recursive: true });
-  fs.writeFileSync(storePath(), JSON.stringify(map), 'utf8');
+  if (safeStorage.isEncryptionAvailable()) {
+    fs.writeFileSync(storePath(), safeStorage.encryptString(json));
+    return;
+  }
+  fs.writeFileSync(storePath(), json, 'utf8');
 }
 
 function getItem(key) {
