@@ -32,11 +32,12 @@ function readMap() {
 function writeMap(map) {
   const json = JSON.stringify(map && typeof map === 'object' ? map : {});
   fs.mkdirSync(path.dirname(storePath()), { recursive: true });
-  if (safeStorage.isEncryptionAvailable()) {
-    fs.writeFileSync(storePath(), safeStorage.encryptString(json));
-    return;
+  if (!safeStorage.isEncryptionAvailable()) {
+    const err = new Error('Secure storage unavailable — auth session cannot be saved safely');
+    err.code = 'NO_ENCRYPTION';
+    throw err;
   }
-  fs.writeFileSync(storePath(), json, 'utf8');
+  fs.writeFileSync(storePath(), safeStorage.encryptString(json));
 }
 
 function getItem(key) {

@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { ArrowLeft } from 'lucide-react';
 
 interface ModalProps {
@@ -32,6 +32,31 @@ export function Modal({
   size = 'lg',
   hideHeader = false,
 }: ModalProps) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const root = dialogRef.current;
+    const focusable = root?.querySelectorAll<HTMLElement>(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+    );
+    focusable?.[0]?.focus();
+    const trap = (e: KeyboardEvent) => {
+      if (e.key !== 'Tab' || !focusable?.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', trap);
+    return () => document.removeEventListener('keydown', trap);
+  }, [isOpen]);
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && isOpen) onClose();
@@ -62,6 +87,7 @@ export function Modal({
       />
 
       <div
+        ref={dialogRef}
         className={`z-10 flex flex-col min-w-0 rounded-2xl border border-surface-border bg-ark-navy-900 shadow-2xl shadow-black/40 overflow-hidden animate-slide-up ${sizeClasses[size]} ${className}`}
         role="dialog"
         aria-modal="true"

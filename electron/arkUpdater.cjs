@@ -1513,11 +1513,14 @@ function tryDownloadWithElectronUpdater(expectedVersion) {
       done(null);
     });
     autoUpdater.on('download-progress', (p) => {
-      const percent = Math.max(0, Math.min(99, Math.round(p.percent || 0)));
+      const percent = Math.max(0, Math.min(100, Math.round(p.percent || 0)));
+      const display = percent >= 99 && percent < 100 ? 99 : percent;
       sendProgress({
         status: 'downloading',
-        percent,
-        message: `Downloading delta update… ${percent}%`,
+        percent: display,
+        message: percent >= 99 && percent < 100
+          ? 'Finalizing download…'
+          : `Downloading delta update… ${display}%`,
         version: expectedVersion,
       });
     });

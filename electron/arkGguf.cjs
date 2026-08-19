@@ -268,8 +268,18 @@ const SERVER_PORT_BASE = 8788;
 let serverPort = SERVER_PORT_BASE;
 const GGUF_CTX = 8192;
 
+let lastServerError = null;
+
 function getServerPort() {
   return serverPort;
+}
+
+function getServerStatus() {
+  return {
+    ok: !lastServerError,
+    error: lastServerError || null,
+    port: serverPort,
+  };
 }
 
 function killLlamaChild(child) {
@@ -327,6 +337,7 @@ async function pingServer(port = serverPort) {
 }
 
 async function bindLlamaServer(bin, gguf) {
+  lastServerError = null;
   for (let candidate = SERVER_PORT_BASE; candidate < SERVER_PORT_BASE + 10; candidate += 1) {
     stopServer();
     const child = spawn(bin, [
@@ -355,6 +366,7 @@ async function bindLlamaServer(bin, gguf) {
     }
     stopServer();
   }
+  lastServerError = 'llama-server failed to start — ARK will use one-shot CLI instead';
   return false;
 }
 
@@ -822,6 +834,7 @@ module.exports = {
   warmServer,
   stopServer,
   getServerPort,
+  getServerStatus,
   modelsDir,
   binDir,
   LLAMA_TAG,

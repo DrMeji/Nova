@@ -275,6 +275,19 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.76',
+    channel: 'stable' as const,
+    date: 'Aug 18, 2026',
+    title: 'Grok pass 3 — complete wiring sweep',
+    notes: [
+      'Studio read-only guard, no-capacity honesty, clone overwrite warning, import skip counts',
+      'Auth session refuses plaintext; download errors persist; Windows disk space check',
+      'Clean shutdown stops engine + GGUF server; dynamic brain URL; llama-server error status',
+      'Settings local reports + uninstall warning; modal focus trap; guest banner dismiss',
+      'Updater finalizing at 99%; CI smoke workflow; project git hook extract',
+    ],
+  },
+  {
     version: '0.1.75',
     channel: 'stable' as const,
     date: 'Aug 18, 2026',

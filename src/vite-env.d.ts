@@ -322,6 +322,7 @@ declare global {
         files?: Record<string, string>;
         copied?: number;
         name?: string;
+        skipped?: { env?: number; large?: number; binary?: number; limit?: number };
         error?: string;
       }>;
       projectSearch?: (payload: {

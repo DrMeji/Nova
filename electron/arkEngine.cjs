@@ -302,6 +302,7 @@ function listModels() {
 
 function getStatus() {
   const models = listModels();
+  // Only auto-switch away from ark-core when caller did not explicitly pick Core.
   if (activeModelId === 'ark-core' && hasRealGguf(DEFAULT_BRAIN_ID)) {
     activeModelId = DEFAULT_BRAIN_ID;
   }
@@ -323,6 +324,7 @@ function getStatus() {
     ggufBinaryPath: llamaBin,
     ggufCount: arkGguf.listGgufFiles().length,
     ggufServerPort: arkGguf.getServerPort?.() || 8788,
+    ggufServer: arkGguf.getServerStatus?.() || { ok: true, error: null, port: 8788 },
     defaultBrainId: DEFAULT_BRAIN_ID,
     note:
       phase === 'online'
@@ -376,9 +378,9 @@ function activeDownloadCount() {
 }
 
 function diskSpaceForModels() {
+  const dir = modelsDir();
+  ensureDirs();
   try {
-    const dir = modelsDir();
-    ensureDirs();
     if (typeof fs.statfsSync === 'function') {
       const s = fs.statfsSync(dir);
       const free = Number(s.bavail) * Number(s.bsize);
@@ -392,9 +394,33 @@ function diskSpaceForModels() {
       };
     }
   } catch {
-    /* ignore */
+    /* try platform fallback */
   }
-  return { ok: false, freeBytes: null, totalBytes: null, freeGb: null, path: modelsDir() };
+  if (process.platform === 'win32') {
+    try {
+      const { execFileSync } = require('child_process');
+      const drive = path.parse(path.resolve(dir)).root.replace('\\', '');
+      const script = `$d = Get-PSDrive -Name '${drive.replace(':', '')}' -ErrorAction SilentlyContinue; if ($d) { [math]::Round($d.Free/1GB, 1) } else { '' }`;
+      const out = execFileSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script], {
+        encoding: 'utf8',
+        windowsHide: true,
+        timeout: 8000,
+      }).trim();
+      const freeGb = Number(out);
+      if (Number.isFinite(freeGb)) {
+        return {
+          ok: true,
+          freeBytes: Math.round(freeGb * 1024 ** 3),
+          totalBytes: null,
+          freeGb,
+          path: dir,
+        };
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  return { ok: false, freeBytes: null, totalBytes: null, freeGb: null, path: dir };
 }
 
 function beginDownload(id) {
@@ -536,10 +562,8 @@ function startDownloadJob(id, meta) {
       if (downloads[id]) {
         downloads[id].error = err instanceof Error ? err.message : String(err);
         downloads[id].progress = 0;
+        downloads[id].phase = 'error';
       }
-      setTimeout(() => {
-        delete downloads[id];
-      }, 8000);
       try {
         if (meta.bundle) {
           for (const part of meta.bundle) {

@@ -456,6 +456,7 @@ async function generateImage(prompt, modelName) {
     libraryId: id,
     real: false,
     source: 'fallback-svg',
+    mediaFailure: 'Free image hosts were unavailable — showing a preview placeholder instead',
     reply: shortImageReply(prompt, dataUrl, false),
   };
 }

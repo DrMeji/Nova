@@ -155,7 +155,15 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
   const [brainTokenCopied, setBrainTokenCopied] = useState(false);
   const [showLegacyProviders, setShowLegacyProviders] = useState(false);
   const [signingStatus, setSigningStatus] = useState<string | null>(null);
+  const [localReports, setLocalReports] = useState<{ name: string; mtime?: string }[]>([]);
   const settingsRootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (activeSection !== 'privacy') return;
+    void window.arkDesktop?.localReportsList?.()
+      .then(list => setLocalReports(Array.isArray(list) ? list : []))
+      .catch(() => setLocalReports([]));
+  }, [activeSection]);
 
   useEffect(() => {
     const onFeat = () => setFeatureTick(t => t + 1);
@@ -1106,6 +1114,34 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                 </button>
                 <p className="text-[11px] text-content-tertiary">
                   Clear cache removes chat threads stored in this browser profile. Models, keys, and project folders stay.
+                </p>
+                <div className="rounded-xl border border-surface-border p-4 space-y-2 mt-2">
+                  <p className="text-sm font-medium text-content-primary">Local reports & update errors</p>
+                  <p className="text-xs text-content-tertiary">Crash and update logs stay on this PC only.</p>
+                  {localReports.length === 0 ? (
+                    <p className="text-xs text-content-tertiary">No local reports yet.</p>
+                  ) : (
+                    <ul className="text-xs text-content-secondary space-y-1 max-h-32 overflow-auto">
+                      {localReports.slice(0, 8).map(r => (
+                        <li key={r.name}>{r.name}</li>
+                      ))}
+                    </ul>
+                  )}
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    <button type="button" className="ark-btn-secondary text-xs" onClick={() => void window.arkDesktop?.localReportsOpen?.()}>
+                      Open reports folder
+                    </button>
+                    <button
+                      type="button"
+                      className="ark-btn-secondary text-xs"
+                      onClick={() => void window.arkDesktop?.localReportsClear?.().then(() => setLocalReports([]))}
+                    >
+                      Clear reports
+                    </button>
+                  </div>
+                </div>
+                <p className="text-[11px] text-amber-300/80 mt-2">
+                  Uninstalling ARK removes models, keys, and projects on this PC (Windows installer setting).
                 </p>
                 <button
                   type="button"

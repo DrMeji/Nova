@@ -92,6 +92,8 @@ import { fileTintClass, languageFromPath } from '@/lib/syntaxHighlight';
 import { TokenUsageRing } from '@/components/TokenUsageRing';
 import { getTokenUsageRatio, recordTokenUsage } from '@/lib/tokenUsage';
 import { getEngineStatus, setEngineModel, engineGenerateCancel } from '@/lib/arkEngine';
+import { honestNoLiveChatReply, probeLiveCapacity } from '@/lib/arkCapacity';
+import { appendScaffoldHonesty } from '@/lib/codeBuildHonesty';
 import {
   buildInspectPrompt,
   buildNamedPatchPrompt,
@@ -1001,14 +1003,20 @@ export function ProjectWorkspace() {
       setProject(active);
       navigate({ name: 'project', id: created.id });
     }
-    const applyImported = (files: Record<string, string>, name?: string) => {
+    const applyImported = (files: Record<string, string>, name?: string, skipped?: { env?: number; large?: number; binary?: number; limit?: number }) => {
       applyProjectFiles(files);
       const count = Object.keys(files).length;
       if (name) touchRecentProject(pid, name);
+      const skipBits: string[] = [];
+      if (skipped?.env) skipBits.push(`${skipped.env} secret .env file${skipped.env === 1 ? '' : 's'}`);
+      if (skipped?.large) skipBits.push(`${skipped.large} large file${skipped.large === 1 ? '' : 's'}`);
+      if (skipped?.binary) skipBits.push(`${skipped.binary} binary file${skipped.binary === 1 ? '' : 's'}`);
+      if (skipped?.limit) skipBits.push('import limit reached');
+      const skipNote = skipBits.length ? ` Skipped: ${skipBits.join(', ')}.` : '';
       postAssistantNote(
         count
-          ? `Opened ${count} file${count === 1 ? '' : 's'}${name ? ` from ${name}` : ''}. They’re in Explorer — ask me to debug, explain, or edit them.`
-          : 'That folder opened, but I could not read any text files from it.',
+          ? `Opened ${count} file${count === 1 ? '' : 's'}${name ? ` from ${name}` : ''}.${skipNote} They’re in Explorer — ask me to debug, explain, or edit them.`
+          : `That folder opened, but I could not read any text files from it.${skipNote}`,
       );
     };
     if (!window.arkDesktop?.projectImportFolder) {
@@ -1024,10 +1032,10 @@ export function ProjectWorkspace() {
       return;
     }
     if (res.root) setDiskRoot(res.root);
-    if (res.files && Object.keys(res.files).length) applyImported(res.files, res.name);
+    if (res.files && Object.keys(res.files).length) applyImported(res.files, res.name, res.skipped as { env?: number; large?: number; binary?: number; limit?: number } | undefined);
     else {
       const read = await window.arkDesktop.projectRead?.(pid);
-      if (read?.files && Object.keys(read.files).length) applyImported(read.files, res.name);
+      if (read?.files && Object.keys(read.files).length) applyImported(read.files, res.name, res.skipped as { env?: number; large?: number; binary?: number; limit?: number } | undefined);
       else codeFolderInputRef.current?.click();
       if (read?.root) setDiskRoot(read.root);
     }
@@ -1038,6 +1046,10 @@ export function ProjectWorkspace() {
     setGithubPickerOpen(false);
     const uid = user?.id ?? 'guest';
     let pid = project?.id || projectId;
+    const hasFiles = Object.keys(fileContentsRef.current).some(k => String(fileContentsRef.current[k] || '').trim());
+    if (hasFiles && !window.confirm('This project already has files. Cloning will merge into the folder and may overwrite matching paths. Continue?')) {
+      return;
+    }
     if (!pid) {
       const created = addRecent(repo.name);
       pid = created.id;
@@ -1160,6 +1172,37 @@ export function ProjectWorkspace() {
 
     const rawContent = (overrideContent ?? chatInput).trim();
     if ((!rawContent && attachedImages.length === 0) || !project) return;
+
+    const explainEarly = isExplainAsk(rawContent);
+    const inspectEarly = wantsInspectOnly(rawContent, composerMode === 'debug')
+      || isFindInFilesAsk(rawContent);
+    if (!canEdit && !explainEarly && !inspectEarly) {
+      setMessages(prev => [...prev, {
+        id: crypto.randomUUID(),
+        user_id: user?.id ?? 'guest',
+        project_id: project.id || projectId || 'draft',
+        role: 'assistant',
+        content: 'Read access — you can inspect and ask questions, but cannot edit files or push.',
+        provider_used: 'ARK',
+        created_at: new Date().toISOString(),
+      }]);
+      return;
+    }
+
+    const capacity = await probeLiveCapacity();
+    const pluginHit = detectPluginIntent(rawContent, getChatEnabledPlugins(loadPluginState()).map(p => p.id));
+    if (!capacity.liveChat && !explainEarly && !inspectEarly && !pluginHit) {
+      setMessages(prev => [...prev, {
+        id: crypto.randomUUID(),
+        user_id: user?.id ?? 'guest',
+        project_id: project.id || projectId || 'draft',
+        role: 'assistant',
+        content: honestNoLiveChatReply(),
+        provider_used: 'ARK',
+        created_at: new Date().toISOString(),
+      }]);
+      return;
+    }
 
     const uid = user?.id ?? 'guest';
     let activeProject = project;
@@ -2080,16 +2123,13 @@ export function ProjectWorkspace() {
       return;
     }
     setBuildRunning(true);
-    setBuildProgress(0);
+    setBuildProgress(10);
     setCodeOpen(true);
     setPreviewReady(false);
 
-    const interval = setInterval(() => {
-      setBuildProgress(prev => Math.min(90, prev + 8));
-    }, 120);
-
     void (async () => {
       try {
+        setBuildProgress(40);
         const native = isNativeMobileTree(fileContents);
         const device = previewDevice
           || (native
@@ -2115,7 +2155,6 @@ export function ProjectWorkspace() {
         setBuildProgress(0);
         console.error(err);
       } finally {
-        clearInterval(interval);
         setBuildRunning(false);
       }
     })();
@@ -3208,7 +3247,8 @@ export function ProjectWorkspace() {
                     <button
                       type="button"
                       onClick={() => void handleSendChat()}
-                      disabled={!chatInput.trim() && attachedImages.length === 0}
+                      disabled={(!chatInput.trim() && attachedImages.length === 0) || (!canEdit && !isExplainAsk(chatInput) && !wantsInspectOnly(chatInput, composerMode === 'debug'))}
+                      title={!canEdit ? 'Read access — inspect/explain only' : 'Send'}
                       className="w-8 h-8 rounded-full bg-content-primary text-ark-navy-950 flex items-center justify-center hover:opacity-90 transition-opacity disabled:opacity-30 disabled:cursor-not-allowed"
                     >
                       <ArrowUp className="w-4 h-4" strokeWidth={2.5} />

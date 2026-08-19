@@ -198,8 +198,15 @@ function readProjectFiles(projectId) {
 
 function copyTree(srcRoot, destRoot) {
   const copied = [];
+  let skippedEnv = 0;
+  let skippedLarge = 0;
+  let skippedBinary = 0;
+  let skippedLimit = 0;
   function walk(dir, prefix) {
-    if (copied.length >= MAX_IMPORT_FILES) return;
+    if (copied.length >= MAX_IMPORT_FILES) {
+      skippedLimit += 1;
+      return;
+    }
     let entries = [];
     try {
       entries = fs.readdirSync(dir);
@@ -223,10 +230,17 @@ function copyTree(srcRoot, destRoot) {
         walk(from, rel);
         continue;
       }
-      if (shouldSkipFile(name, st.size)) continue;
+      if (shouldSkipFile(name, st.size)) {
+        if (/^\.env($|\.)/i.test(name) && !/\.example$/i.test(name)) skippedEnv += 1;
+        else if (st.size > MAX_FILE_BYTES) skippedLarge += 1;
+        continue;
+      }
       try {
         const buf = fs.readFileSync(from);
-        if (isProbablyBinary(buf)) continue;
+        if (isProbablyBinary(buf)) {
+          skippedBinary += 1;
+          continue;
+        }
         fs.mkdirSync(path.dirname(to), { recursive: true });
         fs.writeFileSync(to, buf);
         copied.push(rel.replace(/\\/g, '/'));
@@ -246,7 +260,15 @@ function copyTree(srcRoot, destRoot) {
       /* Explorer still works without history */
     }
   }
-  return copied;
+  return {
+    copied,
+    skipped: {
+      env: skippedEnv,
+      large: skippedLarge,
+      binary: skippedBinary,
+      limit: skippedLimit,
+    },
+  };
 }
 
 function importFolder(projectId, projectName, sourceDir) {
@@ -255,7 +277,8 @@ function importFolder(projectId, projectName, sourceDir) {
     return { ok: false, error: 'That folder could not be opened.' };
   }
   const root = projectDir(projectId);
-  const copied = copyTree(src, root);
+  const tree = copyTree(src, root);
+  const copied = tree.copied || [];
   const meta = {
     id: projectId,
     name: projectName || path.basename(src),
@@ -267,7 +290,14 @@ function importFolder(projectId, projectName, sourceDir) {
   };
   fs.writeFileSync(metaPath(projectId), JSON.stringify(meta, null, 2), 'utf8');
   const files = walkProjectFiles(root);
-  return { ok: true, root, files, copied: copied.length, name: meta.name };
+  return {
+    ok: true,
+    root,
+    files,
+    copied: copied.length,
+    skipped: tree.skipped || {},
+    name: meta.name,
+  };
 }
 
 function searchProjectFiles(projectId, query, limit = 50) {

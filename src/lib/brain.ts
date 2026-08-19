@@ -3,6 +3,10 @@
 import { desktopRequest } from '@/lib/httpDesktop';
 import { engineGenerate } from '@/lib/arkEngine';
 
+import { refreshBrainUrl, getBrainUrl } from '@/lib/brainUrl';
+
+export { getBrainUrl, refreshBrainUrl };
+
 export const BRAIN_URL = 'http://127.0.0.1:8787';
 
 async function brainAuthHeaders(): Promise<Record<string, string>> {
@@ -23,7 +27,7 @@ export async function probeBrain(): Promise<{
   error?: string;
 }> {
   try {
-    const res = await desktopRequest(`${BRAIN_URL}/health`, { method: 'GET' });
+    const res = await desktopRequest(`${await refreshBrainUrl()}/health`, { method: 'GET' });
     if (!res.ok) return { ok: false, error: `Brain API ${res.status}` };
     const data = res.data as {
       ok?: boolean;
@@ -70,7 +74,8 @@ export async function brainGenerate(
   }
 
   const headers = await brainAuthHeaders();
-  const res = await desktopRequest(`${BRAIN_URL}/v1/chat`, {
+  const base = await refreshBrainUrl();
+  const res = await desktopRequest(`${base}/v1/chat`, {
     method: 'POST',
     headers,
     body: JSON.stringify({ message, model: modelId, kind }),

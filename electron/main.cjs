@@ -1041,6 +1041,9 @@ if (isUpdaterMode) {
       }
       arkUpdater.setForceExitHook(() => {
         quitting = true;
+        try { arkEngine.stop(); } catch { /* ignore */ }
+        try { arkGguf.stopServer(); } catch { /* ignore */ }
+        try { arkGguf.cancelGguf?.(); } catch { /* ignore */ }
         if (tray) {
           try {
             tray.destroy();
@@ -1069,6 +1072,13 @@ if (isUpdaterMode) {
 
     app.on('before-quit', () => {
       quitting = true;
+      try { arkEngine.stop(); } catch { /* ignore */ }
+      try { arkGguf.stopServer(); } catch { /* ignore */ }
+      try { arkGguf.cancelGguf?.(); } catch { /* ignore */ }
+      if (brainApi) {
+        try { void brainApi.close(); } catch { /* ignore */ }
+        brainApi = null;
+      }
       if (tray) {
         try {
           tray.destroy();

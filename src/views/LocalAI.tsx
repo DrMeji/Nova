@@ -23,6 +23,7 @@ import {
   subscribeEngineDownloads,
 } from '@/lib/engineDownloads';
 import { probeBrain } from '@/lib/brain';
+import { refreshBrainUrl } from '@/lib/brainUrl';
 import {
   computePreloadPlan,
   formatDuration,
@@ -463,10 +464,11 @@ export function LocalAI() {
         }
       }
       const brain = await probeBrain();
+      const brainUrl = await refreshBrainUrl();
       if (!cancelled) {
         setBrainNote(
           brain.ok
-            ? `ARK Brain · ${brain.version ?? 'ok'} @ :8787`
+            ? `ARK Brain · ${brain.version ?? 'ok'} @ ${brainUrl.replace('http://', '')}`
             : 'ARK Brain · offline (restart desktop ARK)',
         );
       }
