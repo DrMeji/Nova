@@ -411,41 +411,25 @@ function ModelInstallControl({
   if (isOn) {
     return (
       <span className="inline-flex items-center gap-0.5 shrink-0">
-        <span
-          className="w-8 h-8 rounded-full bg-surface-hover text-ark-accent-green flex items-center justify-center"
-          title="Installed in ARK Engine"
-          aria-label={`Installed ${name}`}
-        >
-          <Check className="w-4 h-4" />
-        </span>
-        {onDelete && (
+        {onDelete ? (
           <button
             type="button"
             onClick={onDelete}
-            className="w-8 h-8 rounded-full text-content-tertiary hover:text-rose-300"
+            className="w-8 h-8 rounded-full text-content-tertiary hover:text-rose-300 transition-colors"
             title={`Delete ${name}`}
+            aria-label={`Delete ${name}`}
           >
             <Trash2 className="w-4 h-4" />
           </button>
+        ) : (
+          <span
+            className="w-8 h-8 rounded-full bg-surface-hover text-ark-accent-green flex items-center justify-center"
+            title="Installed in ARK Engine"
+            aria-label={`Installed ${name}`}
+          >
+            <Check className="w-4 h-4" />
+          </span>
         )}
-        <span
-          className={`rounded-md px-2 py-0.5 text-[10px] ${
-            isChatDefault ? 'text-sky-200 bg-sky-500/15' : 'text-sky-300'
-          }`}
-          title={isChatDefault ? 'Default for new chats (auto-set on install)' : 'Available for Chat (default not set)'}
-          aria-hidden
-        >
-          {isChatDefault ? 'Chat ✓' : 'Chat'}
-        </span>
-        <span
-          className={`rounded-md px-2 py-0.5 text-[10px] ${
-            isCodeDefault ? 'text-violet-200 bg-violet-500/15' : 'text-violet-300'
-          }`}
-          title={isCodeDefault ? 'Default for code workspaces (auto-set on install)' : 'Available for Code (default not set)'}
-          aria-hidden
-        >
-          {isCodeDefault ? 'Code ✓' : 'Code'}
-        </span>
       </span>
     );
   }
@@ -874,7 +858,7 @@ export function ModelsView() {
       const needGb = hunt.sizeGb * 1.15;
       void engineDiskSpace().then(disk => {
         if (disk?.freeGb != null && needGb > 0 && disk.freeGb < needGb) {
-          setOllamaNote(`Need ~${needGb.toFixed(1)} GB free (have ${disk.freeGb.toFixed(1)} GB)`);
+          setOllamaNote(`⚠️ Not enough space — ${hunt.name} needs ~${needGb.toFixed(1)} GB but only ${disk.freeGb.toFixed(1)} GB is free. Free up space or change the models folder in Settings → Storage.`);
           return;
         }
         setOllamaNote(`Downloading ${hunt.name}…`);
@@ -909,7 +893,7 @@ export function ModelsView() {
     const needGb = modelSizeGb(model || { size: '0' }) * 1.15;
     void engineDiskSpace().then(disk => {
       if (disk?.freeGb != null && needGb > 0 && disk.freeGb < needGb) {
-        setOllamaNote(`Need ~${needGb.toFixed(1)} GB free (have ${disk.freeGb.toFixed(1)} GB)`);
+        setOllamaNote(`⚠️ Not enough space — ${model?.name || id} needs ~${needGb.toFixed(1)} GB but only ${disk.freeGb.toFixed(1)} GB is free. Free up space or change the models folder in Settings → Storage.`);
         return;
       }
       setOllamaNote(`Downloading ${model?.name || id}…`);

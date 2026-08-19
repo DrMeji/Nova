@@ -396,11 +396,37 @@ export function AIChat() {
   const { user } = useAuth();
   const { route, navigate } = useRouter();
   const { addCreation, addChat, addRecent, touchRecentProject, creations, chats } = useRecentProjects();
+
+  // Requirement: each app launch should start on a fresh chat (no "resume last chat").
+  // We scope this to a single app open via sessionStorage so it doesn't interfere with
+  // navigating between chats during the same session.
+  const forceNewChatOnLaunch = useMemo(() => {
+    try {
+      const key = 'ark:session-first-chat-launch';
+      const had = sessionStorage.getItem(key);
+      if (had) return false;
+      sessionStorage.setItem(key, '1');
+      return true;
+    } catch {
+      return true;
+    }
+  }, []);
+
+  const didForceNewChatRef = useRef(false);
+  const chatRoute = route.name === 'chat' ? route : null;
+  const shouldForceNewChat = forceNewChatOnLaunch
+    && !didForceNewChatRef.current
+    && Boolean(chatRoute?.chatId)
+    // If we were opened via a creation deep-link (image/video), respect that.
+    && !chatRoute?.creationId;
+
+  const effectiveChatId = shouldForceNewChat ? undefined : chatRoute?.chatId;
+
   const [loading, setLoading] = useState(() => {
     // Sync-load the active Recent thread so clicking Recent doesn't flash blank.
-    if (route.name === 'chat' && route.chatId) {
+    if (route.name === 'chat' && effectiveChatId) {
       try {
-        const raw = localStorage.getItem(chatThreadKey(route.chatId));
+        const raw = localStorage.getItem(chatThreadKey(effectiveChatId));
         if (raw) return false;
       } catch {
         /* ignore */
@@ -409,9 +435,9 @@ export function AIChat() {
     return true;
   });
   const [messages, setMessages] = useState<ChatMessage[]>(() => {
-    if (route.name === 'chat' && route.chatId) {
+    if (route.name === 'chat' && effectiveChatId) {
       try {
-        const raw = localStorage.getItem(chatThreadKey(route.chatId));
+        const raw = localStorage.getItem(chatThreadKey(effectiveChatId));
         if (raw) return JSON.parse(raw) as ChatMessage[];
       } catch {
         /* ignore */
@@ -466,9 +492,9 @@ export function AIChat() {
   const [ipcFallbackDev, setIpcFallbackDev] = useState(false);
   /** Auto: equipped brain for this chat thread (sticky until failover). */
   const [threadBrain, setThreadBrain] = useState<ThreadBrain | null>(() => {
-    if (route.name === 'chat' && route.chatId) {
+    if (route.name === 'chat' && effectiveChatId) {
       const m = route.mode && route.mode !== 'general' ? route.mode : 'general';
-      return loadThreadBrain(route.chatId, brainKindForChatMode(m));
+      return loadThreadBrain(effectiveChatId, brainKindForChatMode(m));
     }
     return null;
   });
@@ -523,20 +549,27 @@ export function AIChat() {
   }, [messages]);
 
   useEffect(() => {
+    if (!shouldForceNewChat) return;
+    didForceNewChatRef.current = true;
+    const nextMode = chatRoute?.mode && chatRoute.mode !== 'general' ? chatRoute.mode : undefined;
+    navigate({ name: 'chat', mode: nextMode });
+  }, [shouldForceNewChat, navigate, chatRoute?.mode]);
+
+  useEffect(() => {
     if (route.name !== 'chat') {
       routeChatIdRef.current = undefined;
       return;
     }
-    if (route.chatId) {
-      routeChatIdRef.current = route.chatId;
-      persistChatIdRef.current = route.chatId;
+    if (effectiveChatId) {
+      routeChatIdRef.current = effectiveChatId;
+      persistChatIdRef.current = effectiveChatId;
       return;
     }
     // Explicit blank starter (New Chat / Image / Video with no id) — never keep a stale thread id.
     // Otherwise the next send attaches to the previous Recent chat and looks like a “duplicate mix”.
     routeChatIdRef.current = undefined;
     persistChatIdRef.current = null;
-  }, [route]);
+  }, [route, effectiveChatId]);
 
   const refreshChatPlugins = () => {
     setChatPlugins(getChatEnabledPlugins(loadPluginState()));

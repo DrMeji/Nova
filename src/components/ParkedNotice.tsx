@@ -1,41 +1,32 @@
-import { FlaskConical } from 'lucide-react';
+import { Clock } from 'lucide-react';
 import type { ParkId } from '@/lib/featurePark';
 
-const COPY: Record<'networking' | 'message' | 'call', { title: string; body: string }> = {
-  networking: {
-    title: 'Networking is not enabled yet',
-    body: 'This feature is wired but parked on your PC. Turn it on under Settings → Testers when you want the feed.',
-  },
-  message: {
-    title: 'Message is not enabled yet',
-    body: 'Direct messages are wired but parked. Reveal Message under Settings → Testers — not a broken app.',
-  },
-  call: {
-    title: 'Call is not enabled yet',
-    body: 'Voice calls are wired but parked (microphone + WebRTC). Reveal Call under Settings → Testers when ready.',
-  },
+const LABEL: Record<'networking' | 'message' | 'call', string> = {
+  networking: 'Networking',
+  message: 'Message',
+  call: 'Call',
 };
 
 export function ParkedNotice({ feature }: { feature: Exclude<ParkId, 'testers'> }) {
-  const copy = COPY[feature];
+  const label = LABEL[feature];
   return (
-    <div className="h-full w-full flex items-center justify-center p-8">
-      <div className="max-w-sm text-center space-y-3">
-        <div className="w-10 h-10 mx-auto rounded-xl bg-surface-hover border border-surface-border flex items-center justify-center">
-          <FlaskConical className="w-4 h-4 text-content-secondary" />
+    <div className="h-full w-full relative overflow-hidden">
+      {/* blurred background placeholder */}
+      <div className="absolute inset-0 bg-ark-navy-950/60 backdrop-blur-md" />
+      {/* "Coming Soon" card centred on top */}
+      <div className="absolute inset-0 flex items-center justify-center p-8 z-10">
+        <div className="max-w-xs w-full text-center space-y-4 rounded-2xl border border-surface-border bg-ark-navy-900/90 shadow-2xl px-8 py-10">
+          <div className="w-12 h-12 mx-auto rounded-xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center">
+            <Clock className="w-5 h-5 text-sky-400" />
+          </div>
+          <div className="space-y-1">
+            <h2 className="text-base font-semibold text-content-primary">{label}</h2>
+            <p className="text-[13px] text-sky-400 font-medium">Coming Soon</p>
+          </div>
+          <p className="text-xs text-content-tertiary leading-relaxed">
+            This feature is being built. Check back in a future update.
+          </p>
         </div>
-        <h1 className="text-lg font-semibold text-content-primary">{copy.title}</h1>
-        <p className="text-sm text-content-tertiary leading-relaxed">{copy.body}</p>
-        <p className="text-xs text-content-tertiary">Settings → Testers → turn it on for this device.</p>
-        <button
-          type="button"
-          className="ark-btn-primary text-xs"
-          onClick={() => {
-            window.dispatchEvent(new CustomEvent('ark:open-settings', { detail: { section: 'testers' } }));
-          }}
-        >
-          Open Testers
-        </button>
       </div>
     </div>
   );

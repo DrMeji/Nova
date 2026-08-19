@@ -97,6 +97,7 @@ function refreshTrayMenu() {
   const authLabel = app.isPackaged
     ? (token ? 'Auth: on' : 'Auth: on (no token file)')
     : (token ? 'Auth: on (dev token set)' : 'Auth: off (dev)');
+  const brainStatus = engine.phase === 'ready' ? 'Online' : engine.phase === 'starting' ? 'Starting…' : (engine.phase || 'Offline');
   const menu = Menu.buildFromTemplate([
     {
       label: 'Show ARK',
@@ -108,46 +109,49 @@ function refreshTrayMenu() {
       label: 'Open Settings',
       click: () => {
         showMainWindow();
-        try {
-          mainWindow?.webContents.send('ark:open-settings', { section: 'ai' });
-        } catch {
-          /* ignore */
-        }
+        // Small delay so the window is ready before sending the IPC event.
+        setTimeout(() => {
+          try {
+            mainWindow?.webContents.send('ark:open-settings', { section: 'account' });
+          } catch {
+            /* ignore */
+          }
+        }, 150);
       },
     },
     { type: 'separator' },
     {
-      label: `Brain · ${engine.phase || 'unknown'} · ${authLabel}`,
+      label: `Brain  ${brainStatus}`,
       enabled: false,
     },
     {
-      label: `URL ${brainUrl}`,
+      label: `API  ${brainUrl}`,
       enabled: false,
     },
     {
-      label: `Copy brain URL`,
+      label: 'Copy API URL',
       click: () => {
         const { clipboard } = require('electron');
         clipboard.writeText(brainUrl);
       },
     },
-    {
-      label: token ? 'Copy brain token' : 'Brain token (none)',
-      enabled: Boolean(token),
+    ...(token ? [{
+      label: 'Copy API token',
       click: () => {
         const { clipboard } = require('electron');
         clipboard.writeText(token);
       },
-    },
+    }] : []),
     { type: 'separator' },
     {
-      label: 'Hide to tray',
+      label: 'Minimize to tray',
       click: () => {
         if (mainWindow && !mainWindow.isDestroyed()) mainWindow.hide();
       },
     },
+    { type: 'separator' },
     {
-      label: 'Quit ARK (stops brain)',
+      label: 'Quit ARK',
       click: () => {
         quitting = true;
         app.quit();

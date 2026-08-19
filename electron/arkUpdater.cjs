@@ -943,8 +943,10 @@ async function checkForUpdate() {
   sendProgress({ status: 'checking', percent: 0, message: 'Checking for updates...', version: currentVersion });
 
   try {
-    const res = await httpsJson(`https://api.github.com/repos/${UPDATE_REPO}/releases/latest`);
-    if (res.status !== 200 || !res.data) {
+    // Prefer scanning all releases so we don't get stuck on a "latest" release that
+    // either isn't the newest semver or is missing the installer asset.
+    const res = await httpsJson(`https://api.github.com/repos/${UPDATE_REPO}/releases?per_page=30`);
+    if (res.status !== 200 || !Array.isArray(res.data)) {
       sendProgress({
         status: 'error',
         percent: 0,
@@ -959,22 +961,36 @@ async function checkForUpdate() {
       };
     }
 
-    const tag = res.data.tag_name || '';
-    const assets = Array.isArray(res.data.assets) ? res.data.assets : [];
-    const setup = assets.find((a) => /^ARK-Setup(\.|-).*\.exe$/i.test(a.name || ''))
-      || assets.find((a) => /ARK-Setup\.exe$/i.test(a.name || ''));
-    const hasLatestYml = assets.some((a) => /^latest\.yml$/i.test(a.name || ''));
-    const hasBlockmap = assets.some((a) => /\.blockmap$/i.test(a.name || ''));
-    const newer = tag ? isNewer(tag, currentVersion) : false;
-    const setupUrl = setup?.browser_download_url || null;
-    const latestVer = normalizeVersion(tag);
     const currentVer = normalizeVersion(currentVersion);
-    const aheadOfRelease = Boolean(tag) && isNewer(currentVersion, tag);
 
-    if (!newer) {
+    let bestRelease = null;
+    let bestNewerRelease = null;
+
+    for (const r of res.data) {
+      const tag = r?.tag_name || '';
+      if (!tag) continue;
+
+      // Track absolute max tag so we can emit a helpful "ahead of release" message.
+      if (!bestRelease || isNewer(tag, bestRelease.tag_name)) {
+        bestRelease = r;
+      }
+
+      if (isNewer(tag, currentVersion)) {
+        if (!bestNewerRelease || isNewer(tag, bestNewerRelease.tag_name)) {
+          bestNewerRelease = r;
+        }
+      }
+    }
+
+    if (!bestNewerRelease) {
+      const latestTag = bestRelease?.tag_name || '';
+      const latestVer = normalizeVersion(latestTag);
+      const aheadOfRelease = Boolean(latestTag) && isNewer(currentVersion, latestTag);
+
       const message = aheadOfRelease
         ? `This copy is ${currentVer}. GitHub’s latest installer is still ${latestVer} — Check only sees published Releases, not commits on main.`
         : `You are on the latest published release (${currentVer}).`;
+
       sendProgress({
         status: 'idle',
         percent: 0,
@@ -985,10 +1001,18 @@ async function checkForUpdate() {
         ok: true,
         newerAvailable: false,
         currentVersion,
-        latestTag: tag,
+        latestTag: latestTag || '',
         message,
       };
     }
+
+    const tag = bestNewerRelease.tag_name || '';
+    const assets = Array.isArray(bestNewerRelease.assets) ? bestNewerRelease.assets : [];
+    const setup = assets.find((a) => /^ARK-Setup(\.|-).*\.exe$/i.test(a.name || ''))
+      || assets.find((a) => /ARK-Setup\.exe$/i.test(a.name || ''));
+    const hasLatestYml = assets.some((a) => /^latest\.yml$/i.test(a.name || ''));
+    const hasBlockmap = assets.some((a) => /\.blockmap$/i.test(a.name || ''));
+    const setupUrl = setup?.browser_download_url || null;
 
     if (!setupUrl) {
       sendProgress({
@@ -1018,10 +1042,10 @@ async function checkForUpdate() {
       newerAvailable: true,
       currentVersion,
       latestTag: tag,
-      latestName: res.data.name || tag,
+      latestName: bestNewerRelease.name || tag,
       setupAssetUrl: setupUrl,
       differential: Boolean(hasLatestYml || hasBlockmap),
-      message: `Update available: ${res.data.name || tag}${hasLatestYml ? ' (delta-ready)' : ''}`,
+      message: `Update available: ${bestNewerRelease.name || tag}${hasLatestYml ? ' (delta-ready)' : ''}`,
     };
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Check failed';

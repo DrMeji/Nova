@@ -64,8 +64,8 @@ const SECTIONS: { id: string; label: string; icon: typeof User; disabled?: boole
   { id: 'projects', label: 'Projects', icon: FolderKanban },
   { id: 'security', label: 'Security', icon: Lock },
   { id: 'updates', label: 'Updates', icon: RefreshCw },
-  { id: 'testers', label: 'Testers', icon: FlaskConical },
-  { id: 'beta', label: 'Beta', icon: Sparkles },
+  { id: 'testers', label: 'Testers', icon: FlaskConical, comingSoon: true },
+  { id: 'beta', label: 'Beta', icon: Sparkles, comingSoon: true },
 ];
 
 const AI_MODES = [
@@ -258,7 +258,9 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
   useEffect(() => {
     const unsub = window.arkDesktop?.onUpdateProgress?.((payload) => {
       if (typeof payload?.percent === 'number') setUpdatePercent(payload.percent);
-      if (payload?.message) setUpdateMsg(payload.message);
+      // The updater sends a noisy "checking" message that can appear in dev tooling/status
+      // surfaces. Keep the message for meaningful phases only.
+      if (payload?.message && payload?.status !== 'checking') setUpdateMsg(payload.message);
       if (payload?.status === 'downloading') {
         setDownloadingUpdate(true);
       } else if (payload?.status === 'handoff' || payload?.status === 'installing') {
@@ -491,7 +493,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
       </div>
 
       <div className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden p-4 sm:p-6 lg:p-8">
-        <div className={`min-w-0 ${activeSection === 'providers' || activeSection === 'models' ? 'max-w-4xl' : 'max-w-2xl'}`}>
+        <div className={`min-w-0 mx-auto ${activeSection === 'providers' || activeSection === 'models' ? 'max-w-4xl' : 'max-w-2xl'}`}>
           {activeSection === 'account' && (
             <SettingsSection title="Account" description="Profile, sign in, and session controls">
               <div className="space-y-5">
@@ -536,7 +538,12 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                   onBlur={saveDisplayName}
                 />
                 <div>
-                  <label className="block text-xs font-medium text-content-secondary mb-1.5">ARK ID</label>
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <label className="block text-xs font-medium text-content-secondary">ARK ID</label>
+                    {user?.email && ['thomaskrishnan0107@gmail.com'].includes(user.email) && (
+                      <span className="text-[9px] font-semibold uppercase tracking-wide text-sky-300 bg-sky-500/15 px-1.5 py-0.5 rounded">dev</span>
+                    )}
+                  </div>
                   <div className="flex items-center gap-2 min-w-0">
                     <p className="flex-1 min-w-0 rounded-lg border border-surface-border bg-ark-navy-900/80 px-3 py-2 text-sm font-mono tracking-[0.18em] sm:tracking-[0.28em] text-content-primary overflow-x-auto">
                       {profile?.ark_id ? formatArkId(profile.ark_id) : '•••••••'}
@@ -903,33 +910,24 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                     : null;
                   const installed = m.source === 'local' && (engineStatus?.models || []).some(x => x.id === m.id && x.status === 'ready');
                   const missingKey = providerId ? !providerKeys[providerId] : false;
+                  const isSelected = prefs.defaultModelId === m.id;
                   return (
-                    <div key={`chat-${m.id}`} className="space-y-1">
                     <button
+                      key={`model-${m.id}`}
                       type="button"
-                      onClick={() => patchPrefs({ defaultModelId: m.id })}
+                      onClick={() => patchPrefs({ defaultModelId: m.id, defaultCodeModelId: m.id })}
                       className={`w-full text-left p-3 rounded-lg border transition-all ${
-                      prefs.defaultModelId === m.id
-                        ? 'border-ark-blue-400 bg-ark-blue-500/10'
-                        : 'border-surface-border hover:border-surface-border-light'
-                    }`}
-                    >
-                      <p className="text-[10px] text-content-tertiary">Chat default</p>
-                      <p className="text-sm font-medium text-content-primary truncate">{m.label}</p>
-                      <p className="text-[11px] text-content-tertiary truncate">{m.detail}{installed ? ' · installed' : ''}{missingKey ? ' · key needed' : ''}</p>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => patchPrefs({ defaultCodeModelId: m.id })}
-                      className={`w-full text-left px-3 py-1.5 rounded-lg border text-[10px] ${
-                        prefs.defaultCodeModelId === m.id
-                          ? 'border-emerald-400/50 text-emerald-300'
-                          : 'border-surface-border text-content-tertiary'
+                        isSelected
+                          ? 'border-ark-blue-400 bg-ark-blue-500/10'
+                          : 'border-surface-border hover:border-surface-border-light'
                       }`}
                     >
-                      Code default{prefs.defaultCodeModelId === m.id ? ' · selected' : ''}
+                      <p className="text-sm font-medium text-content-primary truncate">{m.label}</p>
+                      <p className="text-[11px] text-content-tertiary truncate">{m.detail}{installed ? ' · installed' : ''}{missingKey ? ' · key needed' : ''}</p>
+                      {isSelected && (
+                        <p className="text-[10px] text-ark-blue-300 mt-1">Selected</p>
+                      )}
                     </button>
-                    </div>
                   );
                 })}
                 <button

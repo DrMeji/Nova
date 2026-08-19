@@ -1295,15 +1295,15 @@ export function ProjectWorkspace() {
       || (hasFilesNow && wantsNamedPatch(rawContent, true));
 
     if (canEdit && !skipPlatformAsk && needsMobileTargetChoice(rawContent) && !isNativeMobileTree(fileContentsRef.current)) {
-      const userMsg: ChatMessage = {
-        id: crypto.randomUUID(),
-        user_id: uid,
+    const userMsg: ChatMessage = {
+      id: crypto.randomUUID(),
+      user_id: uid,
         project_id: pid,
-        role: 'user',
+      role: 'user',
         content: rawContent,
-        provider_used: null,
-        created_at: new Date().toISOString(),
-      };
+      provider_used: null,
+      created_at: new Date().toISOString(),
+    };
       const assistantId = crypto.randomUUID();
       const assistantMsg: ChatMessage = {
         id: assistantId,
@@ -1490,7 +1490,7 @@ export function ProjectWorkspace() {
         || applied.changedPaths[0];
       if (focus) {
         setSelectedFile(focus);
-        setRightTab('code');
+    setRightTab('code');
         setCodeOpen(true);
         setFileFlash(true);
         window.setTimeout(() => setFileFlash(false), 1400);
@@ -1789,8 +1789,8 @@ export function ProjectWorkspace() {
 
           const routed = await Promise.race([
             arkRoute({
-              message: codingMessage,
-              kind: 'coding',
+            message: codingMessage,
+            kind: 'coding',
               preferredModelId: activeModel.id,
               preferredModelName: activeModel.name,
               preferredSource:
@@ -1802,7 +1802,7 @@ export function ProjectWorkspace() {
               stickyModelId: sticky?.modelId,
               stickyModelName: sticky?.modelName,
               stickyPinnedSource: sticky?.pinnedSource,
-              history,
+            history,
               onAttemptReset: () => {
                 hopAfterLocalStall = false;
                 streamDraftRef.current = '';
@@ -1932,7 +1932,7 @@ export function ProjectWorkspace() {
               } else if (cutOff) {
                 replyText = spoken
                   || `Saved ${changedPaths.join(', ')}. The last file was cut off — send again to finish it.`;
-              } else {
+          } else {
                 replyText = spoken
                   || (patchOnlyNamed
                     ? `Updated ${changedPaths.join(', ')}.`
@@ -2170,12 +2170,12 @@ export function ProjectWorkspace() {
         const payloadFiles = packDiskFiles(fileContents, messagesRef.current);
         const composed = composePreviewHtml(fileContents);
         const html = composed || payloadFiles['ark-preview.html'] || payloadFiles['index.html'] || '';
-        const blob = new Blob([html], { type: 'text/html' });
-        const url = URL.createObjectURL(blob);
-        setLivePreviewUrl(url);
-        setPreviewUrl(url);
-        setPreviewReady(true);
-        setBuildProgress(100);
+          const blob = new Blob([html], { type: 'text/html' });
+          const url = URL.createObjectURL(blob);
+          setLivePreviewUrl(url);
+          setPreviewUrl(url);
+          setPreviewReady(true);
+          setBuildProgress(100);
         window.open(url, 'ark-preview');
       } catch (err) {
         setPreviewReady(false);
@@ -2424,8 +2424,8 @@ export function ProjectWorkspace() {
                   ? <span className="text-amber-400/90">· {gitInfo.dirty} file{gitInfo.dirty === 1 ? '' : 's'} changed</span>
                   : <span className="text-content-tertiary/80">· saved</span>}
               </span>
-              <button
-                type="button"
+            <button
+              type="button"
                 onClick={() => void headerPush()}
                 disabled={gitBusy || !canEdit}
                 title={canEdit ? 'Save a commit if needed, then push to GitHub' : 'Read access — you cannot push'}
@@ -2433,8 +2433,8 @@ export function ProjectWorkspace() {
               >
                 <Upload className="w-3.5 h-3.5" />
                 Push
-              </button>
-            </div>
+            </button>
+        </div>
           ) : projectId ? (
             <button
               type="button"
@@ -2575,7 +2575,7 @@ export function ProjectWorkspace() {
                         ))}
                       </>
                     )}
-                  </div>
+              </div>
                 </div>
               )}
               {creating && (
@@ -2696,11 +2696,11 @@ export function ProjectWorkspace() {
                       className="w-full flex items-center justify-between text-[11px] px-2 py-1.5 rounded-md bg-surface-hover/60 hover:bg-surface-hover text-left"
                     >
                       <span className="text-content-primary font-mono truncate">{file.path}</span>
-                      <span className="tabular-nums shrink-0 ml-2">
+                    <span className="tabular-nums shrink-0 ml-2">
                         <span className="text-emerald-400">+{file.added}</span>
-                        {' '}
+                      {' '}
                         <span className="text-red-400">-{file.removed}</span>
-                      </span>
+                    </span>
                     </button>
                   ))}
                 </div>
@@ -2815,7 +2815,7 @@ export function ProjectWorkspace() {
                         <button type="button" className="text-[10px] rounded-full border border-surface-border px-2.5 py-1 text-content-tertiary" onClick={() => setInspectOfferId(null)}>
                           Just looking
                         </button>
-                      </div>
+                </div>
                     )}
                     {mobileOfferId === msg.id && canEdit && mobileOfferStep === 'platform' && (
                       <div className="flex flex-wrap gap-1 mt-2">
@@ -3236,9 +3236,9 @@ export function ProjectWorkspace() {
                       }}
                     >
                       {codeModelOptions.map(model => (
-                        <button
+                  <button
                           key={model.id}
-                          type="button"
+                    type="button"
                           onClick={() => {
                             setActiveModel(model);
                             if (model.source === 'auto') {
@@ -3267,14 +3267,14 @@ export function ProjectWorkspace() {
                             <span className="block text-[11px] text-content-tertiary truncate">{model.detail}</span>
                           </span>
                           {activeModel.id === model.id && <Check className="w-4 h-4 text-ark-accent-green shrink-0" />}
-                        </button>
+                  </button>
                       ))}
                     </div>,
                     document.body,
                   )}
                   {buildLive ? (
-                    <button
-                      type="button"
+                <button
+                  type="button"
                       onClick={stopBuild}
                       title="Stop building"
                       aria-label="Stop building"
@@ -3289,9 +3289,9 @@ export function ProjectWorkspace() {
                       disabled={(!chatInput.trim() && attachedImages.length === 0) || (!canEdit && !isExplainAsk(chatInput) && !wantsInspectOnly(chatInput, composerMode === 'debug'))}
                       title={!canEdit ? 'Read access — inspect/explain only' : 'Send'}
                       className="w-8 h-8 rounded-full bg-content-primary text-ark-navy-950 flex items-center justify-center hover:opacity-90 transition-opacity disabled:opacity-30 disabled:cursor-not-allowed"
-                    >
-                      <ArrowUp className="w-4 h-4" strokeWidth={2.5} />
-                    </button>
+                >
+                  <ArrowUp className="w-4 h-4" strokeWidth={2.5} />
+                </button>
                   )}
                 </div>
               </div>
@@ -3310,7 +3310,7 @@ export function ProjectWorkspace() {
                       : 'Cloud · connected key'
                 }
               />
-            </div>
+              </div>
             </div>
           </div>
         </div>
@@ -3425,9 +3425,9 @@ export function ProjectWorkspace() {
                     </div>
                   ) : (
                     <CodeEditor
-                      ref={codeEditorRef}
+                    ref={codeEditorRef}
                       path={selectedFile || fileKey}
-                      value={codeBody}
+                    value={codeBody}
                       readOnly={!canEdit}
                       jumpLine={jumpLine}
                       onChange={next => {
@@ -3437,12 +3437,12 @@ export function ProjectWorkspace() {
                           [fileKey]: next,
                           [selectedFile]: next,
                         };
-                        setFileContents(prev => ({
-                          ...prev,
-                          [fileKey]: next,
-                          [selectedFile]: next,
-                        }));
-                      }}
+                      setFileContents(prev => ({
+                        ...prev,
+                        [fileKey]: next,
+                        [selectedFile]: next,
+                      }));
+                    }}
                       onSave={() => {
                         if (!canEdit || !projectId) return;
                         void safeProjectWrite({
@@ -3475,12 +3475,12 @@ export function ProjectWorkspace() {
                     )
                   ) : livePageHtml ? (
                     <div className="relative w-full h-full">
-                    <iframe
-                      title="Project preview"
+                      <iframe
+                        title="Project preview"
                       srcDoc={livePageHtml}
-                      className="w-full h-full border-0 bg-white"
-                      sandbox="allow-scripts"
-                    />
+                        className="w-full h-full border-0 bg-white"
+                        sandbox="allow-scripts"
+                      />
                     <p className="absolute bottom-2 left-2 right-2 text-[10px] text-content-tertiary pointer-events-none">
                       Sandbox preview: scripts allowed, no same-origin APIs or popups.
                     </p>
@@ -3545,44 +3545,44 @@ export function ProjectWorkspace() {
 
       {/* Status strip — only meaningful activity */}
       {(buildLabel || showBrowserChrome || !explorerOpen || !codeOpen) ? (
-        <div className="shrink-0 px-3 py-1.5 flex items-center justify-between gap-3 bg-ark-navy-900/40">
-          <div className="flex items-center gap-3 min-w-0 text-[11px]">
+      <div className="shrink-0 px-3 py-1.5 flex items-center justify-between gap-3 bg-ark-navy-900/40">
+        <div className="flex items-center gap-3 min-w-0 text-[11px]">
             {buildLabel && (
-              <span className="inline-flex items-center gap-1.5 text-content-secondary">
+          <span className="inline-flex items-center gap-1.5 text-content-secondary">
                 <span className={`w-1.5 h-1.5 rounded-full ${buildRunning ? 'bg-amber-400' : 'bg-ark-accent-green'}`} />
-                {buildLabel}
-              </span>
+            {buildLabel}
+          </span>
             )}
             {showBrowserChrome && (
-              <button
-                type="button"
-                onClick={openPreviewInBrowser}
-                className="inline-flex items-center gap-1.5 text-content-secondary truncate hover:text-content-primary transition-colors"
+            <button
+              type="button"
+              onClick={openPreviewInBrowser}
+              className="inline-flex items-center gap-1.5 text-content-secondary truncate hover:text-content-primary transition-colors"
                 title="Open preview in browser"
-              >
-                <Globe className="w-3 h-3 text-sky-400" />
+            >
+              <Globe className="w-3 h-3 text-sky-400" />
                 Open preview
-              </button>
-            )}
-          </div>
+            </button>
+          )}
+        </div>
           <div className="flex items-center gap-2 shrink-0 min-w-0">
             {showBrowserChrome && (
               <span className="text-[11px] text-content-tertiary truncate font-mono max-w-[18rem]" title={livePreviewUrl || previewUrl}>
                 {livePreviewUrl || previewUrl}
               </span>
             )}
-            {!explorerOpen && (
-              <button type="button" onClick={() => setExplorerOpen(true)} className="text-[11px] text-content-tertiary hover:text-content-secondary px-1.5">
-                Explorer
-              </button>
-            )}
-            {!codeOpen && (
-              <button type="button" onClick={() => setCodeOpen(true)} className="text-[11px] text-content-tertiary hover:text-content-secondary px-1.5">
-                Code
-              </button>
-            )}
-          </div>
+          {!explorerOpen && (
+            <button type="button" onClick={() => setExplorerOpen(true)} className="text-[11px] text-content-tertiary hover:text-content-secondary px-1.5">
+              Explorer
+            </button>
+          )}
+          {!codeOpen && (
+            <button type="button" onClick={() => setCodeOpen(true)} className="text-[11px] text-content-tertiary hover:text-content-secondary px-1.5">
+              Code
+            </button>
+          )}
         </div>
+      </div>
       ) : null}
 
       <Modal

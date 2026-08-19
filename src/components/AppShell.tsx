@@ -4,7 +4,7 @@ import {
   SquarePen, Briefcase, Blocks, Database,
   Settings, Search, PanelLeft, ChevronDown, History, Clock3,
   ImageIcon, Video, MessageSquare, Archive, Trash2, Code2, Pencil,
-  Globe, Phone, Copy, Star,
+  Globe, Phone, Copy, Star, Download, Brain,
 } from 'lucide-react';
 import { Modal } from './Modal';
 import { SettingsContent } from './SettingsContent';
@@ -27,6 +27,7 @@ import {
   type ActivityKey,
 } from '@/lib/activityIndicators';
 import { reattachEngineDownloads } from '@/lib/engineDownloads';
+import { checkArkGitHubUpdate, downloadAndInstallArkUpdate, type ArkUpdateInfo } from '@/lib/arkUpdates';
 
 function getNavGroups(): {
   id: string;
@@ -61,6 +62,7 @@ function getNavGroups(): {
       items: [
         { label: 'Plugins', icon: Blocks, route: { name: 'build' }, activity: 'plugins' },
         { label: 'Models', icon: Database, route: { name: 'models' }, activity: 'models' },
+        { label: 'Local AI', icon: Brain, route: { name: 'local-ai' } },
       ],
     },
     {
@@ -106,6 +108,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   });
   const [capacity, setCapacity] = useState<LiveCapacity | null>(null);
   const [modeLabel, setModeLabel] = useState<AiModeLabel | null>(null);
+  const [updateInfo, setUpdateInfo] = useState<ArkUpdateInfo | null>(null);
+  const [updateBusy, setUpdateBusy] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string; kind: 'chat' | 'project' } | null>(null);
   const [wipeProjectDisk, setWipeProjectDisk] = useState(false);
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -297,6 +301,65 @@ export function AppShell({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  useEffect(() => {
+    // Lightweight update indicator (near Search) — cached so we don't hammer GitHub.
+    let alive = true;
+    const CACHE_KEY = 'ark:update-indicator-cache-v1';
+    const CACHE_MS = 30 * 60 * 1000; // 30 minutes
+
+    const readCache = (): { at: number; info: ArkUpdateInfo } | null => {
+      try {
+        const raw = localStorage.getItem(CACHE_KEY);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw) as { at?: number; info?: ArkUpdateInfo };
+        if (!parsed?.at || !parsed?.info) return null;
+        return { at: parsed.at, info: parsed.info };
+      } catch {
+        return null;
+      }
+    };
+
+    const writeCache = (info: ArkUpdateInfo) => {
+      try {
+        localStorage.setItem(CACHE_KEY, JSON.stringify({ at: Date.now(), info }));
+      } catch {
+        /* ignore */
+      }
+    };
+
+    const maybeCheck = async () => {
+      const currentVersion = await window.arkDesktop?.appMeta?.().then((m) => m?.version).catch(() => undefined);
+      const cached = readCache();
+      if (cached && Date.now() - cached.at < CACHE_MS && currentVersion && cached.info.currentVersion === currentVersion) {
+        if (alive) setUpdateInfo(cached.info);
+        return;
+      }
+
+      const info = await checkArkGitHubUpdate().catch(() => null);
+      if (!alive || !info) return;
+      setUpdateInfo(info);
+      writeCache(info);
+    };
+
+    void maybeCheck();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    const unsub = window.arkDesktop?.onUpdateProgress?.((payload) => {
+      if (payload?.status === 'downloading' || payload?.status === 'handoff' || payload?.status === 'installing') {
+        setUpdateBusy(true);
+      } else if (payload?.status === 'error' || payload?.status === 'idle' || payload?.status === 'available') {
+        setUpdateBusy(false);
+      }
+    });
+    return () => {
+      unsub?.();
+    };
+  }, []);
+
   const chatIcon = (mode: string) => {
     if (mode === 'image') return ImageIcon;
     if (mode === 'video') return Video;
@@ -463,8 +526,8 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   const handleNavClick = (item: { label: string; route?: Route; activity?: ActivityKey; comingSoon?: boolean }) => {
     if (item.comingSoon) {
-      // Parked features should not be navigated into (shows a "not enabled" path instead).
-      window.dispatchEvent(new CustomEvent('ark:open-settings', { detail: { section: 'testers' } }));
+      // Navigate into the route so the blur "Coming Soon" overlay is shown.
+      if (item.route) navigate(item.route);
       return;
     }
     if (item.activity) clearActivity(item.activity);
@@ -494,8 +557,8 @@ export function AppShell({ children }: { children: ReactNode }) {
         <button
           key={item.label}
           type="button"
-          aria-label={`${item.label} (parked)`}
-          title={`${item.label} · parked — Settings → Testers to reveal`}
+          aria-label={`${item.label} (coming soon)`}
+          title={`${item.label} · Coming Soon`}
           onClick={() => handleNavClick(item)}
           className={`ark-nav-item w-full opacity-55 ${collapsed ? '!justify-center' : ''}`}
         >
@@ -503,7 +566,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           {!collapsed && (
             <>
               <span className="flex-1 text-left">{item.label}</span>
-              <span className="text-[9px] uppercase tracking-wide text-content-tertiary">Parked</span>
+              <span className="text-[9px] uppercase tracking-wide text-content-tertiary">Soon</span>
             </>
           )}
         </button>
@@ -578,6 +641,32 @@ export function AppShell({ children }: { children: ReactNode }) {
                   >
                     <Search className="w-4 h-4" />
                   </button>
+                  {updateInfo?.newerAvailable && updateInfo.setupAssetUrl && updateInfo.latestTag ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (updateBusy) return;
+                        void (async () => {
+                          setUpdateBusy(true);
+                          const result = await downloadAndInstallArkUpdate({
+                            setupAssetUrl: updateInfo.setupAssetUrl!,
+                            latestTag: updateInfo.latestTag!,
+                          });
+                          if (!result?.ok) setUpdateBusy(false);
+                        })();
+                      }}
+                      className={`ark-btn-ghost !p-1.5 ${updateBusy ? 'opacity-60' : ''}`}
+                      title={`Update available (${updateInfo.latestTag}). Click to download.`}
+                      aria-label="Download update"
+                    >
+                      <span className="relative block">
+                        <Download
+                          className={`w-4 h-4 ${updateBusy ? 'text-content-tertiary' : 'text-sky-300'}`}
+                        />
+                        <span className="absolute -bottom-[3px] left-1/2 -translate-x-1/2 w-2.5 h-[2px] rounded bg-sky-400" />
+                      </span>
+                    </button>
+                  ) : null}
                   <button
                     type="button"
                     onClick={() => setCollapsed(c => !c)}
@@ -698,18 +787,6 @@ export function AppShell({ children }: { children: ReactNode }) {
               </button>
             ) : (
               <div className="space-y-2">
-                {modeLabel ? (
-                  <p className="px-1 text-[10px] text-content-tertiary truncate" title={capacity?.summary}>
-                    Capacity: {modeLabel === 'Hybrid' ? 'Local + Cloud' : modeLabel}
-                    {capacity?.liveChat ? '' : ' · limited'}
-                  </p>
-                ) : capacity ? (
-                  <p className="px-1 text-[10px] text-content-tertiary truncate" title={capacity.summary}>
-                    {capacity.liveChat
-                      ? (capacity.localGguf ? 'Free · Local brain ready' : 'Free · Cloud keys ready')
-                      : 'No live model'}
-                  </p>
-                ) : null}
                 <div className="flex items-center gap-2 rounded-xl border border-surface-border bg-ark-navy-950/80 px-2.5 py-2">
                   <button
                     type="button"
@@ -730,10 +807,13 @@ export function AppShell({ children }: { children: ReactNode }) {
                     className="flex-1 min-w-0 text-left"
                     title="Account settings"
                   >
-                    <span
-                      className="block text-xs font-medium text-content-primary truncate"
-                    >
-                      {displayName}
+                    <span className="flex items-center gap-1.5 min-w-0">
+                      <span className="block text-xs font-medium text-content-primary truncate">
+                        {displayName}
+                      </span>
+                      {user?.email && ['thomaskrishnan0107@gmail.com'].includes(user.email) && (
+                        <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wide text-sky-300 bg-sky-500/15 px-1 py-0.5 rounded">dev</span>
+                      )}
                     </span>
                     {profile?.ark_id ? (
                       <span className="block text-[10px] font-mono tracking-[0.22em] text-content-tertiary truncate">
