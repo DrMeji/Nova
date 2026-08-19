@@ -53,15 +53,8 @@ export function TitleBar() {
       className="ark-titlebar absolute top-0 inset-x-0 z-50 h-8 flex items-stretch select-none bg-transparent"
       style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
     >
-      <div className="flex-1 min-w-0 flex items-center pl-3 pr-2 pointer-events-none">
-        <span className="text-[11px] text-content-tertiary truncate">
-          ARK
-          {null}
-          {channel === 'beta' && (
-            <span className="ml-2 text-[9px] uppercase tracking-wide text-amber-400/90">Beta</span>
-          )}
-        </span>
-      </div>
+      {/* Intentionally blank: you only want sidebar icons/search at the top-left. */}
+      <div className="flex-1 min-w-0 flex items-center pl-3 pr-2 pointer-events-none" />
       <div className="flex" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
         <button
           type="button"

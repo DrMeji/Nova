@@ -287,6 +287,15 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.89',
+    channel: 'stable' as const,
+    date: 'Aug 19, 2026',
+    title: 'Hide top-left TitleBar text',
+    notes: [
+      'Top-left window chrome is now blank (no “ARK” label), leaving only sidebar icons/search visible.',
+    ],
+  },
+  {
     version: '0.1.88',
     channel: 'stable' as const,
     date: 'Aug 19, 2026',
