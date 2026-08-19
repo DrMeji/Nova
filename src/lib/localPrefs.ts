@@ -298,6 +298,16 @@ export const ARK_CHANGELOG = [
     ],
   },
   {
+    version: '0.1.83',
+    channel: 'stable' as const,
+    date: 'Aug 18, 2026',
+    title: 'Auto-set defaults on model install',
+    notes: [
+      'Models tab stays simple: Chat/Code pills are indicators only',
+      'Installing a model auto-sets it as the default for Chat or Code based on category',
+    ],
+  },
+  {
     version: '0.1.81',
     channel: 'stable' as const,
     date: 'Aug 18, 2026',

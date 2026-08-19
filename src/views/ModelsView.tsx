@@ -428,26 +428,24 @@ function ModelInstallControl({
             <Trash2 className="w-4 h-4" />
           </button>
         )}
-        <button
-          type="button"
-          className={`rounded-md px-2.5 py-0.5 text-[10px] hover:bg-sky-500/10 transition-colors ${
+        <span
+          className={`rounded-md px-2 py-0.5 text-[10px] ${
             isChatDefault ? 'text-sky-200 bg-sky-500/15' : 'text-sky-300'
           }`}
-          title={isChatDefault ? 'Chat default (Settings → AI)' : 'Set as default for Chat (Settings → AI)'}
-          onClick={() => setLocalPrefs({ defaultModelId: modelId, lastChatModelId: modelId })}
+          title={isChatDefault ? 'Default for new chats (auto-set on install)' : 'Available for Chat (default not set)'}
+          aria-hidden
         >
           {isChatDefault ? 'Chat ✓' : 'Chat'}
-        </button>
-        <button
-          type="button"
-          className={`rounded-md px-2.5 py-0.5 text-[10px] hover:bg-violet-500/10 transition-colors ${
+        </span>
+        <span
+          className={`rounded-md px-2 py-0.5 text-[10px] ${
             isCodeDefault ? 'text-violet-200 bg-violet-500/15' : 'text-violet-300'
           }`}
-          title={isCodeDefault ? 'Code default (Settings → AI)' : 'Set as default for Code (Settings → AI)'}
-          onClick={() => setLocalPrefs({ defaultCodeModelId: modelId })}
+          title={isCodeDefault ? 'Default for code workspaces (auto-set on install)' : 'Available for Code (default not set)'}
+          aria-hidden
         >
           {isCodeDefault ? 'Code ✓' : 'Code'}
-        </button>
+        </span>
       </span>
     );
   }
@@ -865,6 +863,14 @@ export function ModelsView() {
   const toggleInstall = (id: string, hunt?: HuntedModel) => {
     if (hunt) {
       if (installed.has(id) || isEngineDownloading(id)) return;
+
+      // Auto-set defaults based on the model category (keep Models tab simple).
+      if (hunt.category === 'coding') {
+        setLocalPrefs({ defaultCodeModelId: id });
+      } else {
+        setLocalPrefs({ defaultModelId: id, lastChatModelId: id });
+      }
+
       const needGb = hunt.sizeGb * 1.15;
       void engineDiskSpace().then(disk => {
         if (disk?.freeGb != null && needGb > 0 && disk.freeGb < needGb) {
@@ -892,6 +898,14 @@ export function ModelsView() {
     }
     if (installed.has(id) || isEngineDownloading(id)) return;
     const model = LOCAL_MODELS.find(m => m.id === id);
+
+    // Auto-set defaults based on local model category.
+    if (model?.category === 'coding') {
+      setLocalPrefs({ defaultCodeModelId: id });
+    } else {
+      setLocalPrefs({ defaultModelId: id, lastChatModelId: id });
+    }
+
     const needGb = modelSizeGb(model || { size: '0' }) * 1.15;
     void engineDiskSpace().then(disk => {
       if (disk?.freeGb != null && needGb > 0 && disk.freeGb < needGb) {
