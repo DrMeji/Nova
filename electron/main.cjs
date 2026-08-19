@@ -753,6 +753,8 @@ ipcMain.handle('ark:engine-generate', async (_e, payload) =>
   arkEngine.generate(payload?.message ?? '', {
     modelId: payload?.modelId,
     kind: payload?.kind,
+    temperature: payload?.temperature,
+    nPredict: payload?.nPredict,
   }),
 );
 
@@ -761,6 +763,8 @@ ipcMain.handle('ark:engine-generate-stream', async (event, payload) => {
   return arkEngine.generate(payload?.message ?? '', {
     modelId: payload?.modelId,
     kind: payload?.kind,
+    temperature: payload?.temperature,
+    nPredict: payload?.nPredict,
     onChunk: (text) => {
       try {
         event.sender.send('ark:engine-chunk', { webContentsId, text: String(text || '') });

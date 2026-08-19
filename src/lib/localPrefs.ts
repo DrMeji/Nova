@@ -40,6 +40,10 @@ export type LocalPrefs = {
   askBeforeCloudFailover: boolean;
   streamResponses: boolean;
   rememberContext: boolean;
+  /** Local GGUF sampling temperature (0.1–1.2). */
+  ggufTemperature: number;
+  /** Local GGUF max tokens (n_predict). */
+  ggufNPredict: number;
   /** Search Hugging Face for GGUF brains that fit this PC. */
   huntInternetModels: boolean;
   /** Install the best coding GGUF found online when no coder is on disk. */
@@ -84,6 +88,8 @@ const DEFAULT_PREFS: LocalPrefs = {
   askBeforeCloudFailover: false,
   streamResponses: true,
   rememberContext: true,
+  ggufTemperature: 0.55,
+  ggufNPredict: 1536,
   huntInternetModels: true,
   autoInstallHuntModels: true,
   shareUsageStats: false,
@@ -277,6 +283,18 @@ export function clearPluginToken(pluginId: string) {
 
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
+  {
+    version: '0.1.79',
+    channel: 'stable' as const,
+    date: 'Aug 18, 2026',
+    title: 'Finish remaining Grok P2/P3 lists',
+    notes: [
+      'Single engine catalog module + UI catalog smoke; GGUF temperature/length prefs',
+      'Updater hits 100% after download; Jobs strip shows update progress',
+      'Continue from cutoff, retry-with-cloud button, import skipped toasts',
+      'OAuth callback port retry; Stripe parked; Code vs Chat default pickers',
+    ],
+  },
   {
     version: '0.1.78',
     channel: 'stable' as const,

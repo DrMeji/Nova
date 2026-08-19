@@ -125,6 +125,16 @@ export function ProjectsView() {
         return;
       }
       if (res.name) renameRecent(project.id, res.name);
+      const skipped = res.skipped as { env?: number; large?: number; binary?: number; limit?: number } | undefined;
+      const skipBits: string[] = [];
+      if (skipped?.env) skipBits.push(`${skipped.env} .env`);
+      if (skipped?.large) skipBits.push(`${skipped.large} large`);
+      if (skipped?.binary) skipBits.push(`${skipped.binary} binary`);
+      if (skipped?.limit) skipBits.push('limit');
+      if (skipBits.length) {
+        setNotice(`Opened on this PC. Skipped ${skipBits.join(', ')}.`);
+        window.setTimeout(() => setNotice(null), 6000);
+      }
       navigate({ name: 'project', id: project.id });
     } finally {
       setOpeningFolder(false);

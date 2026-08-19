@@ -402,7 +402,7 @@ async function warmServer(modelId) {
   }
 }
 
-async function runGgufServerStream(modelId, prompt, onChunk, timeoutMs, nPredict = 1536) {
+async function runGgufServerStream(modelId, prompt, onChunk, timeoutMs, nPredict = 1536, temperature = 0.55) {
   const promptStr = wrapChatPrompt(modelId, prompt);
   const started = Date.now();
   cancelRequested = false;
@@ -417,7 +417,7 @@ async function runGgufServerStream(modelId, prompt, onChunk, timeoutMs, nPredict
       body: JSON.stringify({
         prompt: promptStr,
         n_predict: nPredict,
-        temperature: 0.55,
+        temperature,
         stream: true,
         cache_prompt: true,
         stop: [stopToken(modelId)],
@@ -690,7 +690,7 @@ function writeGgufDebug(payload) {
  * Stream llama-cli stdout as it arrives.
  * onChunk(textDelta) may be called many times; final resolve still returns full reply.
  */
-function runGgufStream(modelId, prompt, onChunk, timeoutMs = 120000, nPredict = 1536) {
+function runGgufStream(modelId, prompt, onChunk, timeoutMs = 120000, nPredict = 1536, temperature = 0.55) {
   if (generateBusy || activeChild) {
     const err = new Error('Generation already running — stop the current reply or wait, then try again');
     err.code = 'RATE_LIMITED';
@@ -701,20 +701,20 @@ function runGgufStream(modelId, prompt, onChunk, timeoutMs = 120000, nPredict = 
     try {
       if (await ensureLlamaServer(modelId)) {
         try {
-          const hit = await runGgufServerStream(modelId, prompt, onChunk, timeoutMs, nPredict);
+          const hit = await runGgufServerStream(modelId, prompt, onChunk, timeoutMs, nPredict, temperature);
           if (hit?.reply) return hit;
         } catch {
           /* fall through to one-shot llama-cli */
         }
       }
-      return await runGgufCliStream(modelId, prompt, onChunk, timeoutMs, nPredict);
+      return await runGgufCliStream(modelId, prompt, onChunk, timeoutMs, nPredict, temperature);
     } finally {
       generateBusy = false;
     }
   })();
 }
 
-function runGgufCliStream(modelId, prompt, onChunk, timeoutMs = 120000, nPredict = 1536) {
+function runGgufCliStream(modelId, prompt, onChunk, timeoutMs = 120000, nPredict = 1536, temperature = 0.55) {
   return new Promise((resolve, reject) => {
     const gguf = findGgufForModel(modelId);
     const bin = findLlamaBinary();
@@ -752,7 +752,7 @@ function runGgufCliStream(modelId, prompt, onChunk, timeoutMs = 120000, nPredict
       '-n', String(nPredict),
       '-c', String(GGUF_CTX),
       '-t', String(Math.max(4, os.cpus().length)),
-      '--temp', '0.55',
+      '--temp', String(temperature),
       '--no-conversation',
       '--single-turn',
       '--no-display-prompt',

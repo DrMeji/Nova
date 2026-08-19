@@ -195,7 +195,8 @@ function startLocalCallback({ authorizeUrl, exchange }) {
       if (callbackServer === server) callbackServer = null;
     }
 
-    server.listen(0, '127.0.0.1', async () => {
+    const preferred = require('./arkConfig.cjs').OAUTH_CALLBACK_PORT;
+    const onListening = async () => {
       callbackServer = server;
       const port = server.address().port;
       const url = authorizeUrl.replace(/\{PORT\}/g, String(port));
@@ -205,7 +206,16 @@ function startLocalCallback({ authorizeUrl, exchange }) {
         cleanup();
         resolve({ ok: false, message: err instanceof Error ? err.message : 'Could not open browser' });
       }
+    };
+    server.once('error', (err) => {
+      if (err && err.code === 'EADDRINUSE') {
+        server.listen(0, '127.0.0.1', onListening);
+        return;
+      }
+      cleanup();
+      resolve({ ok: false, message: err instanceof Error ? err.message : 'OAuth listen failed' });
     });
+    server.listen(preferred, '127.0.0.1', onListening);
 
     setTimeout(() => {
       cleanup();

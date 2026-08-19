@@ -2652,6 +2652,28 @@ export function AIChat() {
                       && classifyErrorMessage(msg.content).code !== 'UNKNOWN'
                       ? <ArkErrorInline message={msg.content} />
                       : <MessageContent content={msg.content} />}
+                    {msg.role === 'assistant' && /Stopped at length limit/i.test(msg.content) ? (
+                      <button
+                        type="button"
+                        className="mt-2 text-[10px] rounded-full bg-sky-600 text-white px-2.5 py-1"
+                        onClick={() => void sendMessage('Continue the previous answer from where you stopped.')}
+                      >
+                        Continue from cutoff
+                      </button>
+                    ) : null}
+                    {msg.role === 'assistant' && /Retry with cloud/i.test(msg.content) ? (
+                      <button
+                        type="button"
+                        className="mt-2 text-[10px] rounded-full border border-sky-500/40 text-sky-300 px-2.5 py-1"
+                        onClick={() => {
+                          setLocalPrefs({ autoFailover: true, askBeforeCloudFailover: false });
+                          const lastUser = [...messages].reverse().find(m => m.role === 'user');
+                          if (lastUser) void sendMessage(lastUser.content);
+                        }}
+                      >
+                        Retry with cloud
+                      </button>
+                    ) : null}
                     {msg.role === 'assistant' && inspectOfferId === msg.id && (
                       <div className="flex flex-wrap gap-1 mt-2">
                         <button

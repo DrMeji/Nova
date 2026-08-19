@@ -52,8 +52,8 @@ contextBridge.exposeInMainWorld('arkDesktop', {
   brainStatus: () => ipcRenderer.invoke('ark:brain-status'),
   brainTokenGet: () => ipcRenderer.invoke('ark:brain-token-get'),
   brainTokenRotate: () => ipcRenderer.invoke('ark:brain-token-rotate'),
-  engineGenerateStream: (message, modelId, kind) =>
-    ipcRenderer.invoke('ark:engine-generate-stream', { message, modelId, kind }),
+  engineGenerateStream: (message, modelId, kind, opts) =>
+    ipcRenderer.invoke('ark:engine-generate-stream', { message, modelId, kind, ...(opts || {}) }),
   engineGenerateCancel: () => ipcRenderer.invoke('ark:engine-generate-cancel'),
   onEngineChunk: (handler) => {
     const listener = (_event, payload) => handler?.(payload);
@@ -82,8 +82,8 @@ contextBridge.exposeInMainWorld('arkDesktop', {
   engineDeleteModel: (id) => ipcRenderer.invoke('ark:engine-delete-model', id),
   engineDiskSpace: () => ipcRenderer.invoke('ark:engine-disk-space'),
   engineEnsureRuntime: () => ipcRenderer.invoke('ark:engine-ensure-runtime'),
-  engineGenerate: (message, modelId, kind) =>
-    ipcRenderer.invoke('ark:engine-generate', { message, modelId, kind }),
+  engineGenerate: (message, modelId, kind, opts) =>
+    ipcRenderer.invoke('ark:engine-generate', { message, modelId, kind, ...(opts || {}) }),
   modelsDirInfo: () => ipcRenderer.invoke('ark:models-dir-info'),
   modelsDirPick: () => ipcRenderer.invoke('ark:models-dir-pick'),
   modelsDirSet: (folderPath) => ipcRenderer.invoke('ark:models-dir-set', folderPath),

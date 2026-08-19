@@ -15,13 +15,33 @@ import { ArkErrorInline } from '@/components/ArkErrorInline';
 
 export function JobsStrip() {
   const [jobs, setJobs] = useState<EngineDownloadJob[]>(() => getEngineDownloadJobs());
+  const [updateJob, setUpdateJob] = useState<{ percent: number; message: string } | null>(null);
 
   useEffect(() => subscribeEngineDownloads(() => {
     setJobs(getEngineDownloadJobs());
   }), []);
 
+  useEffect(() => {
+    const unsub = window.arkDesktop?.onUpdateProgress?.((payload) => {
+      const status = String(payload?.status || '');
+      const percent = typeof payload?.percent === 'number' ? payload.percent : 0;
+      if (status === 'error') {
+        setUpdateJob({ percent: 0, message: payload?.message || payload?.error || 'Update failed' });
+        return;
+      }
+      if (status === 'idle' || percent >= 100) {
+        setUpdateJob(null);
+        return;
+      }
+      if (status === 'downloading' || status === 'checking') {
+        setUpdateJob({ percent, message: payload?.message || 'Updating…' });
+      }
+    });
+    return () => { unsub?.(); };
+  }, []);
+
   const active = jobs.filter(j => j.progress < 100 || j.error || j.canceling);
-  if (active.length === 0) return null;
+  if (active.length === 0 && !updateJob) return null;
 
   return (
     <div className="shrink-0 border-t border-surface-border bg-ark-navy-950/95 px-3 py-2 space-y-1.5">
@@ -69,6 +89,17 @@ export function JobsStrip() {
           ) : null}
         </div>
       ))}
+      {updateJob ? (
+        <div className="flex items-start gap-2 text-xs">
+          <Loader2 className="w-3.5 h-3.5 text-sky-400 animate-spin shrink-0 mt-0.5" />
+          <div className="min-w-0 flex-1">
+            <p className="text-content-secondary truncate">{updateJob.message} · {Math.round(updateJob.percent)}%</p>
+            <div className="h-1 mt-1 bg-surface-hover rounded-full overflow-hidden">
+              <div className="h-full bg-emerald-500/70 transition-all" style={{ width: `${Math.min(100, updateJob.percent)}%` }} />
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

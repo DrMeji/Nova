@@ -262,7 +262,10 @@ function downloadFile(url, dest, onProgress) {
             }
           });
           res.pipe(out);
-          out.on('finish', () => out.close(() => resolve({ bytes: received })));
+          out.on('finish', () => out.close(() => {
+            if (onProgress) onProgress(100);
+            resolve({ bytes: received });
+          }));
           out.on('error', reject);
         },
       );

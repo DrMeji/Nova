@@ -10,6 +10,7 @@
 const http = require('http');
 const crypto = require('crypto');
 const arkModelRank = require('./arkModelRank.cjs');
+const { MODEL_ALIASES } = require('./arkCatalog.cjs');
 
 const CONTRACT_VERSION = '0.4.0';
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
@@ -74,31 +75,6 @@ function packMessages(parsed) {
   }
   return lines.join('\n\n');
 }
-
-/** Common Ollama / short names → ARK Engine catalog ids. */
-const MODEL_ALIASES = {
-  'llama3.2': 'llama32-3b',
-  'llama3.2:3b': 'llama32-3b',
-  'llama3.1': 'llama31-8b',
-  'llama3.1:8b': 'llama31-8b',
-  'llama3': 'llama31-8b',
-  'qwen2.5': 'qwen25-7b',
-  'qwen2.5:7b': 'qwen25-7b',
-  'qwen2.5:1.5b': 'qwen25-15b',
-  'qwen2.5-coder': 'qwen25-coder-7b',
-  'qwen2.5-coder:7b': 'qwen25-coder-7b',
-  'qwen2.5-coder:14b': 'qwen25-coder-14b',
-  'qwen2.5-coder:32b': 'qwen25-coder-32b',
-  mistral: 'mistral-7b',
-  'mistral:7b': 'mistral-7b',
-  gemma2: 'gemma2-2b',
-  'gemma2:2b': 'gemma2-2b',
-  phi3: 'phi3-mini',
-  'phi3:mini': 'phi3-mini',
-  'deepseek-r1': 'deepseek-r1-distill-8b',
-  starcoder2: 'starcoder2-7b',
-  'deepseek-coder': 'deepseek-coder-v2-lite',
-};
 
 function resolveModelId(raw, arkEngine) {
   if (!raw || typeof raw !== 'string') return undefined;

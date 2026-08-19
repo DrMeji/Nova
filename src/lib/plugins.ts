@@ -52,7 +52,6 @@ export const LIVE_PLUGIN_IDS = [
 export const WIRED_PLUGIN_IDS = [
   ...LIVE_PLUGIN_IDS,
   'telegram',
-  'stripe',
 ] as const;
 
 export function isPluginLive(id: string): boolean {

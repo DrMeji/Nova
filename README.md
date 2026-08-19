@@ -30,3 +30,5 @@ In the app: **Settings → Updates → Check** to download newer builds.
 ARK is under active development. Installers may be unsigned until a code-signing certificate is configured; Windows Smart App Control / SmartScreen may warn on first run.
 
 Uninstalling ARK currently wipes its local app data, including downloaded models and saved provider keys. Export anything you need before uninstalling.
+
+Closing the window hides ARK to the tray so the local brain stays running. **Quit ARK** from the tray menu stops the brain and llama-server.

@@ -1,4 +1,4 @@
-/** Client for ARK Engine — ARK's own local runtime (never a third-party local app). */
+import { getLocalPrefs } from '@/lib/localPrefs';
 
 export type ArkEngineModel = {
   id: string;
@@ -132,8 +132,13 @@ export async function engineGenerate(
   modelId?: string,
   kind?: 'image' | 'video' | 'chat' | 'coding',
 ) {
+  const prefs = getLocalPrefs();
+  const sampling = {
+    temperature: prefs.ggufTemperature,
+    nPredict: kind === 'coding' ? Math.max(prefs.ggufNPredict, 2048) : prefs.ggufNPredict,
+  };
   if (window.arkDesktop?.engineGenerate) {
-    return window.arkDesktop.engineGenerate(message, modelId, kind);
+    return window.arkDesktop.engineGenerate(message, modelId, kind, sampling);
   }
   return {
     ok: true,
@@ -157,12 +162,17 @@ export async function engineGenerateStream(
   onChunk: (text: string) => void,
   kind?: 'image' | 'video' | 'chat' | 'coding',
 ) {
+  const prefs = getLocalPrefs();
+  const sampling = {
+    temperature: prefs.ggufTemperature,
+    nPredict: kind === 'coding' ? Math.max(prefs.ggufNPredict, 2048) : prefs.ggufNPredict,
+  };
   if (window.arkDesktop?.engineGenerateStream) {
     const stop = window.arkDesktop.onEngineChunk?.((payload) => {
       if (payload?.text) onChunk(payload.text);
     });
     try {
-      return await window.arkDesktop.engineGenerateStream(message, modelId, kind);
+      return await window.arkDesktop.engineGenerateStream(message, modelId, kind, sampling);
     } finally {
       stop?.();
     }

@@ -3452,18 +3452,23 @@ export function ProjectWorkspace() {
                     </div>
                     )
                   ) : livePageHtml ? (
+                    <div className="relative w-full h-full">
                     <iframe
                       title="Project preview"
                       srcDoc={livePageHtml}
                       className="w-full h-full border-0 bg-white"
                       sandbox="allow-scripts"
                     />
+                    <p className="absolute bottom-2 left-2 right-2 text-[10px] text-content-tertiary pointer-events-none">
+                      Sandbox preview: scripts allowed, no same-origin APIs or popups.
+                    </p>
+                    </div>
                   ) : (
                     <div className="h-full flex flex-col items-center justify-center text-center px-6 gap-2">
                       <Play className="w-5 h-5 text-sky-400" />
                       <p className="text-sm text-content-secondary">No static preview yet</p>
                       <p className="text-xs text-content-tertiary max-w-xs">
-                        Ask ARK in chat to create the page, then open Preview. This is a local HTML preview, not a compiled app.
+                        Ask ARK in chat to create the page, then open Preview. This is static HTML in a sandbox (scripts only — no forms posting out). It is not a running npm server.
                       </p>
                     </div>
                   )}

@@ -875,6 +875,33 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                   onChange={v => patchPrefs({ autoInstallHuntModels: v })}
                 />
                 </div>
+                <div className="rounded-xl border border-surface-border p-4 space-y-3">
+                  <p className="text-sm font-medium text-content-primary">Local GGUF (advanced)</p>
+                  <label className="block text-[11px] text-content-tertiary">
+                    Temperature {Number(prefs.ggufTemperature || 0.55).toFixed(2)}
+                    <input
+                      type="range"
+                      min={0.1}
+                      max={1.2}
+                      step={0.05}
+                      value={prefs.ggufTemperature ?? 0.55}
+                      onChange={e => patchPrefs({ ggufTemperature: Number(e.target.value) })}
+                      className="w-full mt-1"
+                    />
+                  </label>
+                  <label className="block text-[11px] text-content-tertiary">
+                    Max tokens {prefs.ggufNPredict ?? 1536}
+                    <input
+                      type="range"
+                      min={256}
+                      max={4096}
+                      step={128}
+                      value={prefs.ggufNPredict ?? 1536}
+                      onChange={e => patchPrefs({ ggufNPredict: Number(e.target.value) })}
+                      className="w-full mt-1"
+                    />
+                  </label>
+                </div>
               </div>
             </SettingsSection>
           )}
@@ -890,32 +917,35 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                       : m.id.startsWith('gpt') ? 'openai'
                       : null)
                     : null;
-                  const locked = Boolean(providerId && !providerKeys[providerId]);
                   const installed = m.source === 'local' && (engineStatus?.models || []).some(x => x.id === m.id && x.status === 'ready');
+                  const missingKey = providerId ? !providerKeys[providerId] : false;
                   return (
-                  <button
-                    key={m.id}
-                    type="button"
-                    disabled={locked}
-                    onClick={() => patchPrefs({ defaultModelId: m.id })}
-                    className={`w-full text-left p-3 rounded-xl border transition-all ${
-                      locked ? 'opacity-40 cursor-not-allowed' : ''
-                    } ${
+                    <div key={`chat-${m.id}`} className="space-y-1">
+                    <button
+                      type="button"
+                      onClick={() => patchPrefs({ defaultModelId: m.id })}
+                      className={`w-full text-left p-3 rounded-lg border transition-all ${
                       prefs.defaultModelId === m.id
                         ? 'border-ark-blue-400 bg-ark-blue-500/10'
                         : 'border-surface-border hover:border-surface-border-light'
                     }`}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium text-content-primary truncate">{m.label}</p>
-                        <p className="text-[11px] text-content-tertiary mt-0.5 line-clamp-2">
-                          {locked ? 'Save a key first' : installed ? `Installed · ${m.detail}` : m.detail}
-                        </p>
-                      </div>
-                      {prefs.defaultModelId === m.id && <Check className="w-4 h-4 text-ark-blue-400 shrink-0" />}
+                    >
+                      <p className="text-[10px] text-content-tertiary">Chat default</p>
+                      <p className="text-sm font-medium text-content-primary truncate">{m.label}</p>
+                      <p className="text-[11px] text-content-tertiary truncate">{m.detail}{installed ? ' · installed' : ''}{missingKey ? ' · key needed' : ''}</p>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => patchPrefs({ defaultCodeModelId: m.id })}
+                      className={`w-full text-left px-3 py-1.5 rounded-lg border text-[10px] ${
+                        prefs.defaultCodeModelId === m.id
+                          ? 'border-emerald-400/50 text-emerald-300'
+                          : 'border-surface-border text-content-tertiary'
+                      }`}
+                    >
+                      Code default{prefs.defaultCodeModelId === m.id ? ' · selected' : ''}
+                    </button>
                     </div>
-                  </button>
                   );
                 })}
                 <button
@@ -1214,7 +1244,9 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                   </div>
                 </div>
                 <p className="text-[11px] text-amber-300/80 mt-2">
-                  Uninstalling ARK with deleteAppDataOnUninstall enabled removes downloaded models, API keys, and local projects from this PC.
+                  Uninstalling ARK removes downloaded models, API keys, and local projects from this PC
+                  (<code>deleteAppDataOnUninstall</code>). Export settings first if you need a copy. Quit from the tray
+                  menu stops the brain; closing the window only hides to tray.
                 </p>
                 <button
                   type="button"
