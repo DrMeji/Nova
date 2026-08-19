@@ -287,6 +287,17 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.88',
+    channel: 'stable' as const,
+    date: 'Aug 19, 2026',
+    title: 'Dev ARK ID + UI chrome fixes',
+    notes: [
+      'Dev account ARK ID now shows single `DEV` (and Copy copies `DEV`) instead of repeating it',
+      'Title bar no longer renders route context text (removes “arc model engine” / random context noise)',
+      'Local AI installed check/trash icons are always green/red (never grey)',
+    ],
+  },
+  {
     version: '0.1.87',
     channel: 'stable' as const,
     date: 'Aug 19, 2026',

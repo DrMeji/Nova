@@ -818,7 +818,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                     {(profile?.ark_id || (user?.email && ['thomaskrishnan0107@gmail.com'].includes(user.email))) ? (
                       <span className="block text-[10px] font-mono tracking-[0.22em] text-content-tertiary truncate">
                         {user?.email && ['thomaskrishnan0107@gmail.com'].includes(user.email)
-                          ? 'Dev DEV'
+                          ? 'DEV'
                           : formatArkId(profile!.ark_id!)}
                       </span>
                     ) : null}
@@ -831,7 +831,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                       aria-label="Copy your ARK ID"
                       onClick={() => {
                         const arkIdText = user?.email && ['thomaskrishnan0107@gmail.com'].includes(user.email)
-                          ? 'Dev DEV'
+                          ? 'DEV'
                           : formatArkId(profile.ark_id || '');
                         void navigator.clipboard.writeText(arkIdText).catch(() => undefined);
                       }}

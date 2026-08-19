@@ -114,13 +114,11 @@ function LocalDownloadControl({
     return (
       <span className="inline-flex items-center gap-0.5 shrink-0">
         <span
-          className={`w-8 h-8 rounded-full flex items-center justify-center ${
-            isActive ? 'bg-surface-hover text-ark-accent-green' : 'text-content-tertiary'
-          }`}
+          className="w-8 h-8 rounded-full bg-surface-hover text-emerald-400 flex items-center justify-center"
           title={isActive ? 'Active model' : 'Installed'}
           aria-label={isActive ? `Active ${name}` : `Installed ${name}`}
         >
-          <Check className="w-4 h-4" />
+          <Check className="w-4 h-4 text-emerald-400" />
         </span>
         {onDelete && (
           <button
@@ -129,11 +127,11 @@ function LocalDownloadControl({
               e.stopPropagation();
               onDelete();
             }}
-            className="w-8 h-8 rounded-full flex items-center justify-center text-content-tertiary hover:text-rose-300 hover:bg-rose-500/10 transition-colors"
+            className="w-8 h-8 rounded-full bg-surface-hover text-rose-500 hover:bg-surface-hover/80 hover:text-rose-300 transition-colors flex items-center justify-center"
             title={`Delete ${name} from this PC`}
             aria-label={`Delete ${name}`}
           >
-            <Trash2 className="w-4 h-4" />
+            <Trash2 className="w-4 h-4 text-rose-500" />
           </button>
         )}
       </span>

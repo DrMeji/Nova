@@ -56,7 +56,7 @@ export function TitleBar() {
       <div className="flex-1 min-w-0 flex items-center pl-3 pr-2 pointer-events-none">
         <span className="text-[11px] text-content-tertiary truncate">
           ARK
-          {(context && context !== 'ARK') ? <span className="text-content-secondary"> · {context}</span> : null}
+          {null}
           {channel === 'beta' && (
             <span className="ml-2 text-[9px] uppercase tracking-wide text-amber-400/90">Beta</span>
           )}

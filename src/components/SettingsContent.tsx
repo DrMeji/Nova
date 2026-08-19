@@ -544,7 +544,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                   <div className="flex items-center gap-2 min-w-0">
                     <p className="flex-1 min-w-0 rounded-lg border border-surface-border bg-ark-navy-900/80 px-3 py-2 text-sm font-mono tracking-[0.18em] sm:tracking-[0.28em] text-content-primary overflow-x-auto">
                       {user?.email && ['thomaskrishnan0107@gmail.com'].includes(user.email)
-                        ? 'Dev DEV'
+                        ? 'DEV'
                         : (profile?.ark_id ? formatArkId(profile.ark_id) : '•••••••')}
                     </p>
                     <button
@@ -553,7 +553,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                       onClick={() => {
                         if (!profile?.ark_id) return;
                         const arkIdText = user?.email && ['thomaskrishnan0107@gmail.com'].includes(user.email)
-                          ? 'Dev DEV'
+                          ? 'DEV'
                           : formatArkId(profile.ark_id);
                         void navigator.clipboard.writeText(arkIdText).then(() => {
                           setArkCopied(true);
