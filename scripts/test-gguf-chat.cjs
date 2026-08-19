@@ -55,6 +55,14 @@ if (/You are ARK/.test(cleaned) || /<\|im_start\|>/.test(cleaned)) {
   if (!exe) throw new Error('llama-cli binary not found after ensureLlamaBinary()');
 
   const model = path.join(os.homedir(), 'AppData/Roaming/ARK/ark-engine/models/qwen25-7b.gguf');
+  if (!fs.existsSync(model)) {
+    console.log(JSON.stringify({
+      skip: true,
+      reason: 'gguf missing (smoke test)',
+      model,
+    }, null, 2));
+    process.exit(0);
+  }
   const imEnd = '<' + '|im_end|>';
   const prompt = [
     '<|im_start|>user',
