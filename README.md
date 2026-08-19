@@ -10,7 +10,7 @@ It combines local and cloud AI so you can chat, generate images and video, manag
 - **Chat, Image, and Video** — create in one app; outputs save to Recent / Creations  
 - **Free capacity first** — local brains plus free cloud routes when you connect a key  
 - **Plugins** — optional integrations (GitHub, Linear, Discord, Drive, and more)  
-- **Local brain API** — other apps can use ARK on `127.0.0.1:8787` (Ollama- and OpenAI-shaped endpoints)
+- **Local brain API** — other apps use ARK’s loopback brain (copy URL from **Settings → AI → Brain API**; port may differ from 8787)
 
 ## Download
 

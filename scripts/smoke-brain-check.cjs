@@ -71,6 +71,22 @@ function get(path, headers = {}) {
   if (healthBody.port) ok(`bound port ${healthBody.port}`);
 
   const headers = TOKEN ? { Authorization: `Bearer ${TOKEN}` } : {};
+
+  const contract = await get('/v1/contract', headers).catch(() => null);
+  if (contract?.status === 200) {
+    try {
+      const c = JSON.parse(contract.body);
+      const base = String(c.baseUrl || '');
+      if (base && healthBody.port && base.includes(`:${healthBody.port}`)) {
+        ok('contract baseUrl matches bound port');
+      } else if (base) {
+        ok(`contract baseUrl ${base}`);
+      }
+    } catch {
+      fail('contract parse failed');
+    }
+  }
+
   const chat = await post('/v1/chat', { message: 'ping smoke test' }, headers);
   const parsed = (() => {
     try { return JSON.parse(chat.body); } catch { return {}; }

@@ -15,13 +15,12 @@ function readMap() {
   try {
     const file = storePath();
     if (!fs.existsSync(file)) return {};
-    const buf = fs.readFileSync(file);
-    let raw = '';
-    if (safeStorage.isEncryptionAvailable()) {
-      raw = safeStorage.decryptString(buf);
-    } else {
-      raw = buf.toString('utf8');
+    if (!safeStorage.isEncryptionAvailable()) {
+      // Never load legacy plaintext session into memory when OS encryption is off.
+      return {};
     }
+    const buf = fs.readFileSync(file);
+    const raw = safeStorage.decryptString(buf);
     const data = JSON.parse(raw);
     return data && typeof data === 'object' ? data : {};
   } catch {

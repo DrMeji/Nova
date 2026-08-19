@@ -896,7 +896,7 @@ async function generate(message, opts = {}) {
       const gguf = await arkGguf.runGgufStream(ggufId, message, onChunk, timeoutMs, nPredict);
       let reply = gguf.reply;
       if (gguf.truncated || (reply && reply.length > nPredict * 3)) {
-        reply = `${reply}\n\n(Answer may be truncated — local length limit reached.)`;
+        reply = `${reply}\n\n_Stopped at length limit — ask to continue._`;
       }
       return {
         ok: true,

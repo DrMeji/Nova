@@ -15,6 +15,8 @@ import { isSocialParked, isRevealed } from '@/lib/featurePark';
 import { useSocial } from '@/context/SocialContext';
 import { getLocalPrefs, setLocalPrefs } from '@/lib/localPrefs';
 import { probeLiveCapacity, type LiveCapacity } from '@/lib/arkCapacity';
+import { probeAiModeLabel, type AiModeLabel } from '@/lib/aiModeStatus';
+import { JobsStrip } from '@/components/JobsStrip';
 import { comparePinnedThenRecent } from '@/lib/recentStore';
 import { formatArkId } from '@/lib/arkUserId';
 import {
@@ -103,6 +105,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     return Number.isFinite(w) ? Math.min(360, Math.max(200, w)) : 256;
   });
   const [capacity, setCapacity] = useState<LiveCapacity | null>(null);
+  const [modeLabel, setModeLabel] = useState<AiModeLabel | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string; kind: 'chat' | 'project' } | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
@@ -281,6 +284,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     let alive = true;
     const refresh = () => {
       void probeLiveCapacity().then(c => { if (alive) setCapacity(c); }).catch(() => undefined);
+      void probeAiModeLabel().then(l => { if (alive) setModeLabel(l); }).catch(() => undefined);
     };
     refresh();
     window.addEventListener('ark:prefs-changed', refresh);
@@ -683,7 +687,12 @@ export function AppShell({ children }: { children: ReactNode }) {
               </button>
             ) : (
               <div className="space-y-2">
-                {capacity ? (
+                {modeLabel ? (
+                  <p className="px-1 text-[10px] text-content-tertiary truncate" title={capacity?.summary}>
+                    Capacity · {modeLabel}
+                    {capacity?.liveChat ? '' : ' · limited'}
+                  </p>
+                ) : capacity ? (
                   <p className="px-1 text-[10px] text-content-tertiary truncate" title={capacity.summary}>
                     {capacity.liveChat
                       ? (capacity.localGguf ? 'Free · Local brain ready' : 'Free · Cloud keys ready')
@@ -757,7 +766,8 @@ export function AppShell({ children }: { children: ReactNode }) {
           ) : null}
       </aside>
 
-        <main className="flex-1 min-h-0 min-w-0 overflow-hidden m-2 ml-2 relative">
+        <main className="flex-1 min-h-0 min-w-0 overflow-hidden m-2 ml-2 relative flex flex-col">
+          <div className="flex-1 min-h-0 overflow-hidden relative">
           {incoming && isRevealed('call') ? (
             <div className="absolute top-3 left-3 right-3 z-30 rounded-xl border border-sky-400/30 bg-ark-navy-900/95 backdrop-blur px-4 py-3 flex items-center justify-between gap-3 shadow-lg">
               <div className="min-w-0">
@@ -771,6 +781,8 @@ export function AppShell({ children }: { children: ReactNode }) {
             </div>
           ) : null}
           {children}
+          </div>
+          <JobsStrip />
         </main>
 
       <Modal

@@ -140,7 +140,22 @@ export async function startEngineDownload(opts: {
   name: string;
   source: 'models' | 'local-ai';
   hunt?: { url: string; sizeGb: number; detail?: string; category?: 'coding' | 'chat' };
+  forceUnknownDisk?: boolean;
 }) {
+  if (!opts.forceUnknownDisk && window.arkDesktop?.engineDiskSpace) {
+    try {
+      const disk = await window.arkDesktop.engineDiskSpace();
+      if (disk && disk.ok === false) {
+        const ok = window.confirm(
+          'Couldn\'t read free disk space on this PC. Continue download anyway? Large models need several GB.',
+        );
+        if (!ok) return;
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
   const existing = jobs.get(opts.id);
   if (existing && existing.progress < 100 && !existing.error) {
     ensurePolling(opts.id);

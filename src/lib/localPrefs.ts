@@ -278,15 +278,16 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
-    version: '0.1.77',
+    version: '0.1.78',
     channel: 'stable' as const,
     date: 'Aug 18, 2026',
-    title: 'Grok 0.1.76 complete fix pass',
+    title: 'Grok pass 5 — edges, clarity, jobs strip',
     notes: [
-      'Degraded engine status, clearer structured errors, and stronger media preview honesty',
-      'Optional confirmation before cloud failover and saved-key re-validation',
-      'PIN attempt throttling and accurate app-lock versus encryption copy',
-      'Expanded Lindsay setup, dynamic brain API details, and packaged-token documentation',
+      'Packaged brain: auth required for /api/tags, /v1/models, /v1/engine',
+      'Concurrent GGUF returns busy error; truncation footer; disk confirm before download',
+      'Jobs strip for downloads; unified capacity label; System health in Settings',
+      'Dev auth-off badge in Settings + tray; auth store refuses plaintext read',
+      'Release notes no longer hardcode :8787 as the only brain URL',
     ],
   },
   {

@@ -154,6 +154,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
   const [brainToken, setBrainToken] = useState('');
   const [brainTokenCopied, setBrainTokenCopied] = useState(false);
   const [brainContractVersion, setBrainContractVersion] = useState('');
+  const [brainPackaged, setBrainPackaged] = useState<boolean | null>(null);
   const [secretsEncrypted, setSecretsEncrypted] = useState<boolean | null>(null);
   const [showLegacyProviders, setShowLegacyProviders] = useState(false);
   const [signingStatus, setSigningStatus] = useState<string | null>(null);
@@ -181,6 +182,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
     ]).then(([token, status, secrets]) => {
       if (token?.url) setBrainUrl(token.url);
       if (token?.token) setBrainToken(token.token);
+      if (typeof token?.packaged === 'boolean') setBrainPackaged(token.packaged);
       if (status?.url) setBrainUrl(status.url);
       if (status?.contractVersion) setBrainContractVersion(status.contractVersion);
       if (typeof secrets?.encrypted === 'boolean') setSecretsEncrypted(secrets.encrypted);
@@ -188,8 +190,10 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
   }, []);
 
   useEffect(() => {
-    if (initialSection) setActiveSection(initialSection);
-  }, [initialSection]);
+    if (activeSection !== 'ai') return;
+    void getEngineStatus().then(setEngineStatus).catch(() => undefined);
+    void engineDiskSpace().then(setDiskSpace).catch(() => undefined);
+  }, [activeSection]);
 
   useEffect(() => {
     void window.arkDesktop?.appMeta?.()
@@ -714,6 +718,13 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                     <p className="text-[11px] text-content-tertiary mt-0.5 leading-relaxed">
                       Loopback only. Packaged ARK requires a bearer token on chat routes.
                     </p>
+                    {brainPackaged === false && !brainToken ? (
+                      <p className="text-[11px] font-medium text-amber-400 mt-1.5">
+                        Auth: off (dev) — unpackaged builds accept chat without a token. Do not ship dev builds to users.
+                      </p>
+                    ) : brainToken ? (
+                      <p className="text-[11px] text-emerald-400/90 mt-1.5">Auth: on · bearer token required for chat</p>
+                    ) : null}
                     <p className="text-[10px] text-content-tertiary mt-1">
                       Contract {brainContractVersion || 'unavailable'} · port {(() => {
                         try { return new URL(brainUrl).port || 'default'; } catch { return 'unavailable'; }
@@ -773,6 +784,29 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                       Rotate token
                     </button>
                   </div>
+                </div>
+
+                <div className="rounded-xl border border-surface-border p-4 space-y-2">
+                  <p className="text-sm font-medium text-content-primary">System health</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 text-[11px]">
+                    <span className="text-content-tertiary">Engine</span>
+                    <span className="text-content-primary">{engineStatus?.phase ?? 'unknown'} · {engineStatus?.note ?? '—'}</span>
+                    <span className="text-content-tertiary">Brain URL</span>
+                    <span className="text-content-primary font-mono truncate">{brainUrl}</span>
+                    <span className="text-content-tertiary">Free disk</span>
+                    <span className="text-content-primary">
+                      {typeof diskSpace?.freeGb === 'number' ? `${diskSpace.freeGb.toFixed(1)} GB` : 'Unknown'}
+                    </span>
+                    <span className="text-content-tertiary">GGUF runtime</span>
+                    <span className="text-content-primary">{engineStatus?.ggufBinary ? 'Ready' : 'Not installed'}</span>
+                  </div>
+                  <button
+                    type="button"
+                    className="ark-btn-secondary text-xs mt-1"
+                    onClick={() => void window.arkDesktop?.localReportsOpen?.()}
+                  >
+                    Open local reports
+                  </button>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">

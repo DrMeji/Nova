@@ -94,7 +94,9 @@ function refreshTrayMenu() {
   const engine = arkEngine.getStatus();
   const token = arkBrainToken.loadToken();
   const brainUrl = `http://127.0.0.1:${brainPort}`;
-  const authLabel = app.isPackaged || token ? 'auth on' : 'auth off (dev)';
+  const authLabel = app.isPackaged
+    ? (token ? 'Auth: on' : 'Auth: on (no token file)')
+    : (token ? 'Auth: on (dev token set)' : 'Auth: off (dev)');
   const menu = Menu.buildFromTemplate([
     {
       label: 'Show ARK',

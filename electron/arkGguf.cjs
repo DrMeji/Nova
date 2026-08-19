@@ -267,6 +267,8 @@ function runGguf(modelId, prompt, timeoutMs = 90000) {
 
 /** Active llama-cli child — cancelled via cancelGguf(). */
 let activeChild = null;
+/** True while llama-server or CLI stream is in flight. */
+let generateBusy = false;
 let cancelRequested = false;
 let activeAbort = null;
 let serverChild = null;
@@ -689,16 +691,26 @@ function writeGgufDebug(payload) {
  * onChunk(textDelta) may be called many times; final resolve still returns full reply.
  */
 function runGgufStream(modelId, prompt, onChunk, timeoutMs = 120000, nPredict = 1536) {
+  if (generateBusy || activeChild) {
+    const err = new Error('Generation already running — stop the current reply or wait, then try again');
+    err.code = 'RATE_LIMITED';
+    return Promise.reject(err);
+  }
+  generateBusy = true;
   return (async () => {
-    if (await ensureLlamaServer(modelId)) {
-      try {
-        const hit = await runGgufServerStream(modelId, prompt, onChunk, timeoutMs, nPredict);
-        if (hit?.reply) return hit;
-      } catch {
-        /* fall through to one-shot llama-cli */
+    try {
+      if (await ensureLlamaServer(modelId)) {
+        try {
+          const hit = await runGgufServerStream(modelId, prompt, onChunk, timeoutMs, nPredict);
+          if (hit?.reply) return hit;
+        } catch {
+          /* fall through to one-shot llama-cli */
+        }
       }
+      return await runGgufCliStream(modelId, prompt, onChunk, timeoutMs, nPredict);
+    } finally {
+      generateBusy = false;
     }
-    return runGgufCliStream(modelId, prompt, onChunk, timeoutMs, nPredict);
   })();
 }
 

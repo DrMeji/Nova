@@ -253,9 +253,12 @@ function createBrainServer(opts) {
     }
 
     const url = (req.url || '/').split('?')[0];
-    const openPaths = new Set([
-      '/', '/health', '/v1/contract', '/api/version', '/api/tags', '/v1/models', '/v1/engine',
-    ]);
+    const openPaths = new Set(['/', '/health', '/v1/contract', '/api/version']);
+    if (!mustAuth) {
+      openPaths.add('/api/tags');
+      openPaths.add('/v1/models');
+      openPaths.add('/v1/engine');
+    }
 
     if (mustAuth) {
       const auth = String(req.headers.authorization || '');

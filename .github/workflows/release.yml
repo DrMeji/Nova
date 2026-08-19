@@ -70,7 +70,8 @@ jobs:
 
           After install, use **Settings → Updates → Check → Download** for newer builds in-app.
 
-          External brain API: http://127.0.0.1:8787 (docs/ark-brain-api.md · docs/lindsay-migration.md)
+          External brain API: copy URL + token from **Settings → AI → Brain API** (port may differ from 8787).
+          Docs: docs/ark-brain-api.md · docs/lindsay-migration.md
           "@
 
           $exists = gh release view $tag --repo DrMeji/Ark 2>$null

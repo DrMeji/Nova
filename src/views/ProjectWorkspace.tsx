@@ -13,6 +13,8 @@ import {
   ChevronDown, Check, Cpu, Cloud, Zap, Search, GitBranch, Upload, Undo2, Smartphone,
 } from 'lucide-react';
 import { Modal } from '@/components/Modal';
+import { ArkErrorInline } from '@/components/ArkErrorInline';
+import { classifyErrorMessage } from '@/lib/errors';
 import { openInSystemBrowser } from '@/lib/openExternal';
 import {
   detectPluginIntent,
@@ -2771,9 +2773,11 @@ export function ProjectWorkspace() {
                     </button>
                   ) : (
                     <div>
-                    {msg.content
-                      ? <AssistantBuildReply content={msg.content} onOpenPath={openPathInEditor} />
-                      : <Loader2 className="w-3.5 h-3.5 animate-spin text-content-tertiary" />}
+                    {msg.content && classifyErrorMessage(msg.content).code !== 'UNKNOWN' && /failed|timed out|not ready|Connect GitHub|Push failed|Unauthorized|NO_ENCRYPTION|already running|Stopped at length limit/i.test(msg.content)
+                      ? <ArkErrorInline message={msg.content} />
+                      : msg.content
+                        ? <AssistantBuildReply content={msg.content} onOpenPath={openPathInEditor} />
+                        : <Loader2 className="w-3.5 h-3.5 animate-spin text-content-tertiary" />}
                     {inspectOfferId === msg.id && (
                       <div className="flex flex-wrap gap-1 mt-2">
                         {canEdit && (

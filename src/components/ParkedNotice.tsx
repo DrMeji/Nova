@@ -3,16 +3,16 @@ import type { ParkId } from '@/lib/featurePark';
 
 const COPY: Record<'networking' | 'message' | 'call', { title: string; body: string }> = {
   networking: {
-    title: 'Networking is parked',
-    body: 'The feed is wired and ready, but it stays hidden until you reveal it on this PC.',
+    title: 'Networking is not enabled yet',
+    body: 'This feature is wired but parked on your PC. Turn it on under Settings → Testers when you want the feed.',
   },
   message: {
-    title: 'Message is parked',
-    body: 'Direct messages are wired and ready, but they stay hidden until you reveal them on this PC.',
+    title: 'Message is not enabled yet',
+    body: 'Direct messages are wired but parked. Reveal Message under Settings → Testers — not a broken app.',
   },
   call: {
-    title: 'Call is parked',
-    body: 'Voice calls are wired and ready (microphone + WebRTC). Reveal Call when you want it on this PC.',
+    title: 'Call is not enabled yet',
+    body: 'Voice calls are wired but parked (microphone + WebRTC). Reveal Call under Settings → Testers when ready.',
   },
 };
 
