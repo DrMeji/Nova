@@ -107,9 +107,15 @@ async function saveCloudArkId(userId: string, arkId: string): Promise<'ok' | 'ta
 }
 
 /** Look up a public ARK ID (no email). Returns null if unknown or offline. */
+const lookupAt = new Map<string, number>();
+const LOOKUP_MIN_MS = 2500;
+
 export async function lookupArkUser(arkId: string): Promise<{ arkId: string; displayName: string | null } | null> {
   const id = normalizeArkId(arkId);
   if (!isArkUserId(id)) return null;
+  const last = lookupAt.get(id) || 0;
+  if (Date.now() - last < LOOKUP_MIN_MS) return null;
+  lookupAt.set(id, Date.now());
   try {
     const { data, error } = await supabase.rpc('lookup_ark_user', { p_ark_id: id });
     if (error || !data) return null;

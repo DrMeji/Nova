@@ -11,6 +11,9 @@ echo  No menu. Compiles the repo as it is now,
 echo  then opens ARK so you can try it.
 echo  Push to GitHub only when you like it.
 echo.
+echo  Signing: set CSC_LINK and CSC_KEY_PASSWORD
+echo  before Open-ARK-Packaged.bat for SmartScreen.
+echo.
 echo  For Check-Update testing, run Open-ARK-Packaged.bat
 echo  then install release\ARK-Setup.exe.
 echo.

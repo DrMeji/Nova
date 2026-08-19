@@ -40,6 +40,11 @@ contextBridge.exposeInMainWorld('arkDesktop', {
     ipcRenderer.on('ark:window-maximized', listener);
     return () => ipcRenderer.removeListener('ark:window-maximized', listener);
   },
+  onSystemSuspend: (handler) => {
+    const listener = () => handler?.();
+    ipcRenderer.on('ark:system-suspend', listener);
+    return () => ipcRenderer.removeListener('ark:system-suspend', listener);
+  },
   httpGet: (url, headers) => ipcRenderer.invoke('ark:http-get', { url, headers }),
   httpRequest: (url, options) => ipcRenderer.invoke('ark:http-request', { url, ...(options || {}) }),
   httpStream: (url, options) =>
@@ -101,6 +106,7 @@ contextBridge.exposeInMainWorld('arkDesktop', {
   projectPath: (projectId) => ipcRenderer.invoke('ark:project-path', projectId),
   projectImportFolder: (payload) => ipcRenderer.invoke('ark:project-import-folder', payload),
   projectSearch: (payload) => ipcRenderer.invoke('ark:project-search', payload),
+  projectDeleteFiles: (projectId) => ipcRenderer.invoke('ark:project-delete-files', projectId),
   gitStatus: (projectId) => ipcRenderer.invoke('ark:git-status', projectId),
   gitClone: (payload) => ipcRenderer.invoke('ark:git-clone', payload),
   gitCommit: (payload) => ipcRenderer.invoke('ark:git-commit', payload),

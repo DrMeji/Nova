@@ -58,6 +58,8 @@ export type LocalPrefs = {
   // Security
   twoFactorEnabled: boolean;
   requirePinOnLaunch: boolean;
+  /** Lock the UI when the PC sleeps (PIN must already be set). */
+  lockOnSleep: boolean;
   autoLockMinutes: number;
   sandboxAgent: boolean;
   // Updates
@@ -99,6 +101,7 @@ const DEFAULT_PREFS: LocalPrefs = {
   openLastProjectOnLaunch: true,
   twoFactorEnabled: false,
   requirePinOnLaunch: false,
+  lockOnSleep: true,
   autoLockMinutes: 30,
   sandboxAgent: true,
   updateChannel: 'stable',
@@ -283,6 +286,17 @@ export function clearPluginToken(pluginId: string) {
 
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
+  {
+    version: '0.1.80',
+    channel: 'stable' as const,
+    date: 'Aug 18, 2026',
+    title: 'Close leftover list items',
+    notes: [
+      'PIN lock on sleep, delete project files on disk, find-in-files totals',
+      'Enter/Shift+Enter documented; Ctrl+F in Code vs Ctrl+K app search',
+      'System health extracted; lookup throttle; cleanup helper on clone temp dirs',
+    ],
+  },
   {
     version: '0.1.79',
     channel: 'stable' as const,

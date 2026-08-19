@@ -302,22 +302,37 @@ function importFolder(projectId, projectName, sourceDir) {
 
 function searchProjectFiles(projectId, query, limit = 50) {
   const q = String(query || '').trim().toLowerCase();
-  if (!q) return { ok: true, hits: [] };
+  if (!q) return { ok: true, hits: [], total: 0 };
   const { files } = readProjectFiles(projectId);
   const hits = [];
+  let total = 0;
   for (const [rel, content] of Object.entries(files)) {
     const lines = String(content || '').split('\n');
     for (let i = 0; i < lines.length; i++) {
       if (!lines[i].toLowerCase().includes(q)) continue;
-      hits.push({
-        path: rel,
-        line: i + 1,
-        text: lines[i].trim().slice(0, 220),
-      });
-      if (hits.length >= limit) return { ok: true, hits };
+      total += 1;
+      if (hits.length < limit) {
+        hits.push({
+          path: rel,
+          line: i + 1,
+          text: lines[i].trim().slice(0, 220),
+        });
+      }
     }
   }
-  return { ok: true, hits };
+  return { ok: true, hits, total };
+}
+
+function deleteProjectFiles(projectId) {
+  const root = path.resolve(projectsRoot());
+  const dir = path.resolve(resolveProjectDir(projectId));
+  const rel = path.relative(root, dir);
+  if (!dir.startsWith(root) || rel.startsWith('..') || path.isAbsolute(rel)) {
+    return { ok: false, error: 'Refusing to delete a path outside ARK projects' };
+  }
+  if (!fs.existsSync(dir)) return { ok: true };
+  fs.rmSync(dir, { recursive: true, force: true });
+  return { ok: true };
 }
 
 function getProjectPath(projectId) {
@@ -331,6 +346,7 @@ module.exports = {
   readProjectFiles,
   importFolder,
   searchProjectFiles,
+  deleteProjectFiles,
   getProjectPath,
   walkProjectFiles,
 };

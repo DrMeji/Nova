@@ -399,6 +399,7 @@ export function ProjectWorkspace() {
   const [findOpen, setFindOpen] = useState(false);
   const [findQuery, setFindQuery] = useState('');
   const [findHits, setFindHits] = useState<SearchHit[]>([]);
+  const [findTotal, setFindTotal] = useState(0);
   const [gitInfo, setGitInfo] = useState<GitStatus | null>(null);
   const [gitBusy, setGitBusy] = useState(false);
   const [githubPickerOpen, setGithubPickerOpen] = useState(false);
@@ -978,13 +979,31 @@ export function ProjectWorkspace() {
     const q = findQuery.trim();
     if (!q) {
       setFindHits([]);
+      setFindTotal(0);
       return;
     }
     const t = window.setTimeout(() => {
-      setFindHits(searchInFiles(fileContentsRef.current, q, 50));
+      const found = searchInFiles(fileContentsRef.current, q, 40);
+      setFindHits(found.hits);
+      setFindTotal(found.total);
     }, 160);
     return () => window.clearTimeout(t);
   }, [findQuery, findOpen, fileContents]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 'f') return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA') && !findOpen) {
+        /* keep typing in composer; still open explorer find when in Code */
+      }
+      e.preventDefault();
+      setFindOpen(true);
+      setExplorerOpen(true);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [findOpen]);
 
   useEffect(() => {
     if (!projectId) return;
@@ -2486,7 +2505,8 @@ export function ProjectWorkspace() {
                   <button
                     type="button"
                     onClick={() => setFindOpen(v => !v)}
-                    title="Find in files"
+                    title="Find in files (Ctrl+F)"
+                    aria-label="Find in files"
                     className={`w-6 h-6 rounded-md flex items-center justify-center ${
                       findOpen ? 'text-sky-300 bg-sky-500/10' : 'text-content-tertiary hover:text-content-primary hover:bg-surface-hover'
                     }`}
@@ -2497,6 +2517,7 @@ export function ProjectWorkspace() {
                     type="button"
                     onClick={() => startCreate('file')}
                     title={canEdit ? 'New file' : 'Read access — you cannot add files'}
+                    aria-label="New file"
                     disabled={!canEdit}
                     className="w-6 h-6 rounded-md flex items-center justify-center text-content-tertiary hover:text-content-primary hover:bg-surface-hover disabled:opacity-40"
                   >
@@ -2506,6 +2527,7 @@ export function ProjectWorkspace() {
                     type="button"
                     onClick={() => startCreate('folder')}
                     title={canEdit ? 'New folder' : 'Read access — you cannot add folders'}
+                    aria-label="New folder"
                     disabled={!canEdit}
                     className="w-6 h-6 rounded-md flex items-center justify-center text-content-tertiary hover:text-content-primary hover:bg-surface-hover disabled:opacity-40"
                   >
@@ -2535,9 +2557,9 @@ export function ProjectWorkspace() {
                       <p className="text-[10px] text-content-tertiary px-1 py-2">No matches</p>
                     ) : (
                       <>
-                        {findHits.length > 40 && (
+                        {findTotal > 40 && (
                           <p className="text-[10px] text-content-tertiary px-1 py-1">
-                            Showing 40 of {findHits.length}
+                            Showing 40 of {findTotal}
                           </p>
                         )}
                         {findHits.slice(0, 40).map(hit => (

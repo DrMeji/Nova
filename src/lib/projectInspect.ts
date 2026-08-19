@@ -129,31 +129,35 @@ export function findQueryFromMessage(message: string): string {
   return (m?.[1] || message).replace(/[?.!]+$/g, '').replace(/^(the|a|an)\s+/i, '').trim();
 }
 
-export function searchInFiles(files: ProjectFileMap, query: string, limit = 40): SearchHit[] {
+export function searchInFiles(files: ProjectFileMap, query: string, limit = 40): { hits: SearchHit[]; total: number } {
   const q = query.trim().toLowerCase();
-  if (!q) return [];
+  if (!q) return { hits: [], total: 0 };
   const flat = flattenProjectFiles(files);
   const hits: SearchHit[] = [];
+  let total = 0;
   for (const [rel, content] of Object.entries(flat)) {
     const lines = String(content || '').split('\n');
     for (let i = 0; i < lines.length; i++) {
       if (!lines[i].toLowerCase().includes(q)) continue;
-      hits.push({ path: rel, line: i + 1, text: lines[i].trim().slice(0, 220) });
-      if (hits.length >= limit) return hits;
+      total += 1;
+      if (hits.length < limit) {
+        hits.push({ path: rel, line: i + 1, text: lines[i].trim().slice(0, 220) });
+      }
     }
   }
-  return hits;
+  return { hits, total };
 }
 
-export function formatSearchHits(query: string, hits: SearchHit[]): string {
+export function formatSearchHits(query: string, hits: SearchHit[], total = hits.length): string {
   if (!hits.length) {
-    return `No matches for “${query}” in this project. Try another word, or open Find in files in Explorer.`;
+    return `No matches for “${query}” in this project. Try another word, or open Find in files in Explorer (Ctrl+F).`;
   }
+  const extra = total > hits.length ? `\nShowing ${hits.length} of ${total} matches` : '';
   return [
     `Find in files · “${query}”`,
     '',
     ...hits.slice(0, 24).map(h => `• \`${h.path}\`:${h.line}  ${h.text}`),
-    hits.length > 24 ? `\n…and ${hits.length - 24} more` : '',
+    extra,
   ]
     .filter(Boolean)
     .join('\n');

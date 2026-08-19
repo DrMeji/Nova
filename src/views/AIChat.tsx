@@ -2272,6 +2272,8 @@ export function AIChat() {
                 : placeholder
             }
             rows={1}
+            title="Enter to send · Shift+Enter for a new line"
+            aria-label="Message. Enter to send, Shift+Enter for a new line"
             className={`bg-transparent border-none resize-none overflow-hidden text-sm text-content-primary placeholder:text-content-tertiary focus:outline-none leading-5 ${
               composerTall
                 ? 'w-full px-3.5 pt-3.5 pb-2'

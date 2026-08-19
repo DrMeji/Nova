@@ -21,6 +21,7 @@ declare global {
       windowIsMaximized?: () => Promise<boolean>;
       windowClose?: () => Promise<boolean>;
       onWindowMaximized?: (handler: (payload: { maximized?: boolean }) => void) => () => void;
+      onSystemSuspend?: (handler: () => void) => () => void;
       appMeta?: () => Promise<{
         ok: boolean;
         isPackaged?: boolean;
@@ -341,8 +342,10 @@ declare global {
       }) => Promise<{
         ok: boolean;
         hits?: { path: string; line: number; text: string }[];
+        total?: number;
         error?: string;
       }>;
+      projectDeleteFiles?: (projectId: string) => Promise<{ ok: boolean; error?: string }>;
       gitStatus?: (projectId: string) => Promise<{
         ok: boolean;
         git?: boolean;

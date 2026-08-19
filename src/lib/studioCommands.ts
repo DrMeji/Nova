@@ -90,12 +90,14 @@ export async function runCodeStudioCommand(opts: {
 
   if (isFindInFilesAsk(message)) {
     const query = findQueryFromMessage(message);
-    let hits = searchInFiles(files, query);
+    let hits = searchInFiles(files, query).hits;
+    let total = hits.length;
     if (!hits.length && window.arkDesktop?.projectSearch) {
       const res = await window.arkDesktop.projectSearch({ projectId, query, limit: 40 });
       hits = res.hits || [];
+      total = typeof res.total === 'number' ? res.total : hits.length;
     }
-    return { reply: formatSearchHits(query, hits) };
+    return { reply: formatSearchHits(query, hits, total) };
   }
 
   const gitKind = classifyGitAsk(message);

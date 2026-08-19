@@ -262,9 +262,12 @@ export function SearchPanel({ onClose, onOpenSettings }: SearchPanelProps) {
               placeholder="Go to chat, project, model, or setting…"
               className="flex-1 bg-transparent border-none text-sm text-content-primary placeholder:text-content-tertiary focus:outline-none"
             />
-            <span className="text-[10px] text-content-tertiary shrink-0 hidden sm:inline">↑↓ Enter</span>
+            <span className="text-[10px] text-content-tertiary shrink-0 hidden sm:inline">Ctrl+K · ↑↓ Enter</span>
           </div>
         </div>
+        <p className="px-12 pt-2 text-[10px] text-content-tertiary">
+          App search is Ctrl+K. In Code, Ctrl+F finds in project files.
+        </p>
       </div>
 
       <div className="flex-1 overflow-auto px-3 py-3 min-h-0">

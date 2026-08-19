@@ -24,7 +24,7 @@ export function PinLockGate({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const onLock = () => {
-      if (getLocalPrefs().requirePinOnLaunch && hasPinSet()) {
+      if (hasPinSet()) {
         setStep('pin');
         setCode('');
         setPin('');
@@ -32,7 +32,13 @@ export function PinLockGate({ children }: { children: ReactNode }) {
       }
     };
     window.addEventListener('ark:pin-lock', onLock);
-    return () => window.removeEventListener('ark:pin-lock', onLock);
+    const unsubSleep = window.arkDesktop?.onSystemSuspend?.(() => {
+      if (hasPinSet() && getLocalPrefs().lockOnSleep) lockPinSession();
+    });
+    return () => {
+      window.removeEventListener('ark:pin-lock', onLock);
+      unsubSleep?.();
+    };
   }, []);
 
   useEffect(() => {

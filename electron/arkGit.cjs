@@ -4,7 +4,7 @@
 
 const { execFile } = require('child_process');
 const path = require('path');
-const fs = require('fs');
+const { tryCleanup } = require('./ignoreCleanup.cjs');
 
 function runGit(cwd, args, opts = {}) {
   return new Promise((resolve) => {
@@ -138,7 +138,7 @@ async function cloneRepo(cwd, url, token, opts = {}) {
     env: authEnv(token),
   });
   if (!cloned.ok) {
-    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* ignore */ }
+    tryCleanup(() => fs.rmSync(tmp, { recursive: true, force: true }));
     return cloned;
   }
   try {

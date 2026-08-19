@@ -107,6 +107,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [capacity, setCapacity] = useState<LiveCapacity | null>(null);
   const [modeLabel, setModeLabel] = useState<AiModeLabel | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string; kind: 'chat' | 'project' } | null>(null);
+  const [wipeProjectDisk, setWipeProjectDisk] = useState(false);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
   const [activity, setActivity] = useState(() => ({ ...getActivityFlags() }));
@@ -429,6 +430,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               onClick={(e) => {
                 e.stopPropagation();
                 setDeleteTarget({ id: item.id, title: item.title, kind: item.kind });
+                setWipeProjectDisk(false);
               }}
               className="opacity-0 group-hover:opacity-100 focus:opacity-100 w-7 h-7 rounded-md flex items-center justify-center text-content-tertiary hover:text-rose-400 hover:bg-surface-hover shrink-0 transition-opacity mr-0.5"
             >
@@ -491,6 +493,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         <button
           key={item.label}
           type="button"
+          aria-label={`${item.label} (parked)`}
           title={`${item.label} · parked — Settings → Testers to reveal`}
           onClick={() => handleNavClick(item)}
           className={`ark-nav-item w-full opacity-55 ${collapsed ? '!justify-center' : ''}`}
@@ -509,6 +512,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <button
         key={item.label}
         type="button"
+        aria-label={item.label}
         onClick={() => handleNavClick(item)}
         title={collapsed ? item.label : undefined}
         className={`ark-nav-item w-full relative ${collapsed ? '!justify-center' : ''} ${active ? 'active' : ''} ${busy ? 'ark-nav-activity' : ''}`}
@@ -558,6 +562,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                   onClick={() => setCollapsed(c => !c)}
                   className="ark-nav-item w-full !justify-center"
                   title="Expand sidebar"
+                  aria-label="Expand sidebar"
                 >
                   <PanelLeft className="w-4 h-4" />
                 </button>
@@ -577,6 +582,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                     onClick={() => setCollapsed(c => !c)}
                     className="ark-btn-ghost !p-1.5"
                     title="Toggle sidebar"
+                    aria-label="Toggle sidebar"
                   >
                     <PanelLeft className="w-4 h-4" />
                   </button>
@@ -601,6 +607,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 type="button"
                 onClick={() => setRecentOpen(o => !o)}
                 title={collapsed ? 'Recent' : undefined}
+                aria-label="Recent"
                 className={`ark-nav-item w-full ${collapsed ? '!justify-center' : ''}`}
               >
                 <Clock3 className="w-4 h-4 shrink-0" />
@@ -625,6 +632,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                     <div>
                       <button
                         type="button"
+                        aria-label="Toggle chats"
                         onClick={() => setChatsOpen(o => !o)}
                         className="w-full flex items-center px-2 py-1 text-[10px] uppercase tracking-wider text-content-tertiary"
                       >
@@ -638,6 +646,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                     <div>
                       <button
                         type="button"
+                        aria-label="Toggle projects"
                         onClick={() => setProjectsOpen(o => !o)}
                         className="w-full flex items-center px-2 py-1 text-[10px] uppercase tracking-wider text-content-tertiary"
                       >
@@ -661,6 +670,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                       <button
                         key={item.key}
                         type="button"
+                        aria-label={item.title}
                         onClick={() => openRecent(item)}
                         className={`ark-nav-item !justify-center ${active ? 'active' : ''}`}
                         title={item.title}
@@ -735,6 +745,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                       type="button"
                       className="p-1.5 rounded-lg shrink-0 text-content-tertiary hover:text-content-primary hover:bg-surface-hover"
                       title="Copy your ARK ID"
+                      aria-label="Copy your ARK ID"
                       onClick={() => {
                         void navigator.clipboard.writeText(profile.ark_id || '').catch(() => undefined);
                       }}
@@ -831,7 +842,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                   <>
                     Remove{' '}
                     <span className="text-content-primary font-medium">“{deleteTarget.title}”</span>
-                    {' '}from Recent. Files on disk stay unless you delete them yourself.
+                    {' '}from Recent.
                   </>
                 ) : (
                   <>
@@ -841,6 +852,19 @@ export function AppShell({ children }: { children: ReactNode }) {
                   </>
                 )}
               </p>
+              {deleteTarget?.kind === 'project' ? (
+                <label className="mt-3 flex items-start gap-2 text-xs text-content-secondary">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    checked={wipeProjectDisk}
+                    onChange={(e) => setWipeProjectDisk(e.target.checked)}
+                  />
+                  <span>
+                    Also delete this project’s files on disk. This cannot be undone.
+                  </span>
+                </label>
+              ) : null}
             </div>
           </div>
           <div className="flex items-center justify-end gap-2 mt-7">
@@ -857,8 +881,12 @@ export function AppShell({ children }: { children: ReactNode }) {
                 if (!deleteTarget) return;
                 const id = deleteTarget.id;
                 if (deleteTarget.kind === 'project') {
+                  if (wipeProjectDisk) {
+                    void window.arkDesktop?.projectDeleteFiles?.(id).catch(() => undefined);
+                  }
                   removeRecent(id);
                   setDeleteTarget(null);
+                  setWipeProjectDisk(false);
                   if (activeRecentId === id) navigate({ name: 'chat' });
                 } else {
                   deleteChatForever(id);

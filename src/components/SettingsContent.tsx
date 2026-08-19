@@ -36,6 +36,7 @@ import { hasPinSet, setPin, clearPin } from '@/lib/pinLock';
 import { hasSecondFactorSet, setSecondFactor, clearSecondFactor } from '@/lib/twoFactor';
 import { probeProviderKey } from '@/lib/providerSpeed';
 import { setCloudProviderEnabled } from '@/lib/cloudSources';
+import { SettingsSystemHealth } from '@/components/SettingsSystemHealth';
 
 const REVEAL_FEATURES: { id: ParkId; label: string; description: string }[] = [
   { id: 'networking', label: 'Networking', description: 'Social feed and contacts — shows Networking in the sidebar.' },
@@ -786,28 +787,11 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                   </div>
                 </div>
 
-                <div className="rounded-xl border border-surface-border p-4 space-y-2">
-                  <p className="text-sm font-medium text-content-primary">System health</p>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 text-[11px]">
-                    <span className="text-content-tertiary">Engine</span>
-                    <span className="text-content-primary">{engineStatus?.phase ?? 'unknown'} · {engineStatus?.note ?? '—'}</span>
-                    <span className="text-content-tertiary">Brain URL</span>
-                    <span className="text-content-primary font-mono truncate">{brainUrl}</span>
-                    <span className="text-content-tertiary">Free disk</span>
-                    <span className="text-content-primary">
-                      {typeof diskSpace?.freeGb === 'number' ? `${diskSpace.freeGb.toFixed(1)} GB` : 'Unknown'}
-                    </span>
-                    <span className="text-content-tertiary">GGUF runtime</span>
-                    <span className="text-content-primary">{engineStatus?.ggufBinary ? 'Ready' : 'Not installed'}</span>
-                  </div>
-                  <button
-                    type="button"
-                    className="ark-btn-secondary text-xs mt-1"
-                    onClick={() => void window.arkDesktop?.localReportsOpen?.()}
-                  >
-                    Open local reports
-                  </button>
-                </div>
+                <SettingsSystemHealth
+                  engineStatus={engineStatus}
+                  brainUrl={brainUrl}
+                  diskFreeGb={diskSpace?.freeGb}
+                />
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   {AI_MODES.map(mode => (
@@ -1575,6 +1559,18 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                       return;
                     }
                     patchPrefs({ requirePinOnLaunch: v });
+                  }}
+                />
+                <ToggleRow
+                  label="Lock when this PC sleeps"
+                  description={hasPinSet() ? 'Require PIN after Windows sleep. Locks the app UI only — keys stay in OS encryption.' : 'Set a PIN first'}
+                  value={prefs.lockOnSleep}
+                  onChange={v => {
+                    if (v && !hasPinSet()) {
+                      setPinMsg('Set a PIN before enabling sleep lock');
+                      return;
+                    }
+                    patchPrefs({ lockOnSleep: v });
                   }}
                 />
 

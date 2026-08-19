@@ -1,4 +1,4 @@
-const { app, BrowserWindow, shell, ipcMain, dialog, Tray, Menu, nativeImage } = require('electron');
+const { app, BrowserWindow, shell, ipcMain, dialog, Tray, Menu, nativeImage, powerMonitor } = require('electron');
 const path = require('path');
 const arkEngine = require('./arkEngine.cjs');
 const arkPreview = require('./arkPreview.cjs');
@@ -912,6 +912,14 @@ ipcMain.handle('ark:project-search', async (_e, payload) => {
   }
 });
 
+ipcMain.handle('ark:project-delete-files', async (_e, projectId) => {
+  try {
+    return arkProjects.deleteProjectFiles(projectId);
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'delete failed' };
+  }
+});
+
 function projectCwd(projectId) {
   return arkProjects.getProjectPath(projectId).root;
 }
@@ -1126,6 +1134,11 @@ if (isUpdaterMode) {
       startBrainApi();
       createWindow();
       createTray();
+      powerMonitor.on('suspend', () => {
+        for (const w of BrowserWindow.getAllWindows()) {
+          w.webContents.send('ark:system-suspend');
+        }
+      });
       app.on('activate', () => {
         showMainWindow();
       });
