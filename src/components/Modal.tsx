@@ -18,7 +18,8 @@ const sizeClasses = {
   lg: 'w-full max-w-2xl max-h-[min(85vh,calc(100vh-1.5rem))]',
   xl: 'w-full max-w-4xl max-h-[min(85vh,calc(100vh-1.5rem))]',
   full: 'w-[min(92vw,90rem)] max-w-[calc(100vw-1.5rem)] max-h-[min(90vh,calc(100vh-1.5rem))]',
-  settings: 'w-[min(78vw,56rem)] h-[min(78vh,calc(100vh-1.5rem))] max-w-[calc(100vw-1.5rem)]',
+  // Settings used to feel wide/flat; keep it roomy so dense panels (Models/Plugins/AI) don't look cramped.
+  settings: 'w-[min(92vw,72rem)] h-[min(86vh,calc(100vh-1.5rem))] max-w-[calc(100vw-1.5rem)]',
   // Wider panel, same height feel
   search: 'w-[min(58rem,calc(100vw-1.5rem))] h-[min(36rem,calc(100vh-1.5rem))]',
 };

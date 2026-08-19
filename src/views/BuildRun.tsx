@@ -57,7 +57,9 @@ export function BuildRun() {
       ...cat,
       plugins: PLUGIN_CATALOG.filter(p => {
         if (p.category !== cat.id) return false;
-        if (!q && pluginShelf === 'catalog' && !isPluginLive(p.id) && !isPluginWired(p.id)) return false;
+        // In the "Browse" shelf we want to show both live/wired and catalog-only plugins.
+        // (Users expect the "Coming soon" inventory to still appear.)
+        if (!q && pluginShelf === 'catalog' && false) return false;
         if (pluginShelf === 'installed') return false;
         if (!q) return true;
         return (

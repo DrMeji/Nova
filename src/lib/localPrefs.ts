@@ -287,6 +287,17 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.82',
+    channel: 'stable' as const,
+    date: 'Aug 18, 2026',
+    title: 'Restore roomy settings + clarify model pills',
+    notes: [
+      'Settings modal widened back to the original roomy layout',
+      'Models Chat/Code pills are clickable again (tooltips clarify defaults)',
+      'Plugins Browse now shows catalog-only / coming-soon inventory again',
+    ],
+  },
+  {
     version: '0.1.81',
     channel: 'stable' as const,
     date: 'Aug 18, 2026',
