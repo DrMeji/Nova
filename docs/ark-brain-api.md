@@ -2,11 +2,11 @@
 
 ARK owns this loopback API. External apps (personal assistants like Lindsay, agents, IDEs, custom tools) talk to **ARK Engine** on this PC — not to Ollama or any third-party local runtime.
 
-Base URL: `http://127.0.0.1:8787` (desktop ARK must be running — minimize to tray keeps the brain up)
+Base URL: copy it from **Settings → AI → Brain API**. It is loopback-only and commonly starts at `http://127.0.0.1:8787`, but ARK may select another available port.
 
 Lindsay migration: [lindsay-migration.md](./lindsay-migration.md)
 
-Optional auth: set `ARK_BRAIN_TOKEN` and send `Authorization: Bearer <token>`.
+Packaged ARK requires the token shown in **Settings → AI → Brain API**. Set it as `ARK_BRAIN_TOKEN` and send `Authorization: Bearer <token>`. Authentication is optional only in an unpackaged localhost development build.
 
 Contract: `GET /v1/contract` (currently **0.4.0**)
 
@@ -31,7 +31,7 @@ If the request omits `model` (or sends `ark-auto`), Engine picks the best **read
 
 ### Ollama-shaped (Lindsay & similar)
 
-Point the app’s Ollama base URL at `http://127.0.0.1:8787` (not `:11434`).
+Point the app’s Ollama base URL at the URL shown in **Settings → AI** (not `:11434`) and configure its bearer/API token.
 
 | Method | Path |
 |--------|------|
@@ -51,9 +51,13 @@ Streaming uses Ollama-style NDJSON. Model names are ARK Engine ids (e.g. `qwen25
 ## Quick curl
 
 ```bash
-curl -s http://127.0.0.1:8787/health
-curl -s http://127.0.0.1:8787/api/tags
-curl -s http://127.0.0.1:8787/v1/chat \
+export ARK_BRAIN_URL="http://127.0.0.1:8787" # copy the actual URL from Settings → AI
+export ARK_BRAIN_TOKEN="..."                   # required in packaged ARK
+curl -s "$ARK_BRAIN_URL/health"
+curl -s "$ARK_BRAIN_URL/v1/contract"
+curl -s "$ARK_BRAIN_URL/api/tags" -H "Authorization: Bearer $ARK_BRAIN_TOKEN"
+curl -s "$ARK_BRAIN_URL/v1/chat" \
+  -H "Authorization: Bearer $ARK_BRAIN_TOKEN" \
   -H "Content-Type: application/json" \
   -d "{\"message\":\"Say hello from ARK Engine\",\"kind\":\"chat\"}"
 ```
@@ -61,7 +65,8 @@ curl -s http://127.0.0.1:8787/v1/chat \
 Multi-turn:
 
 ```bash
-curl -s http://127.0.0.1:8787/v1/chat \
+curl -s "$ARK_BRAIN_URL/v1/chat" \
+  -H "Authorization: Bearer $ARK_BRAIN_TOKEN" \
   -H "Content-Type: application/json" \
   -d "{\"messages\":[{\"role\":\"user\",\"content\":\"Remember the number 7\"},{\"role\":\"assistant\",\"content\":\"OK\"},{\"role\":\"user\",\"content\":\"What number?\"}]}"
 ```

@@ -43,6 +43,7 @@ export function ProjectsView() {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [openingFolder, setOpeningFolder] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
     setLoading(true);
@@ -100,6 +101,8 @@ export function ProjectsView() {
       setShowCreate(false);
       setNewName('');
       setCreating(false);
+      setNotice('Saved on this PC only — cloud sync unavailable');
+      window.setTimeout(() => setNotice(null), 4000);
       navigate({ name: 'project', id: local.id });
     }
   };
@@ -139,6 +142,11 @@ export function ProjectsView() {
     <div className="h-full min-w-0 flex flex-col overflow-hidden animate-fade-in bg-ark-navy-950">
       <div className="shrink-0 px-4 sm:px-6 pt-[min(12vh,6rem)] bg-ark-navy-950">
         <div className="w-full max-w-3xl mx-auto min-w-0">
+          {notice && (
+            <p className="mb-3 rounded-xl border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-100/90">
+              {notice}
+            </p>
+          )}
           <div className="flex items-center justify-between gap-3 mb-5 min-w-0">
             <h1 className="text-2xl sm:text-3xl font-semibold text-content-primary tracking-tight truncate">Projects</h1>
             <div className="flex items-center gap-2 shrink-0">

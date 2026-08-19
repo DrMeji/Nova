@@ -117,6 +117,9 @@ export function AuthAmbientOrbs() {
     const layer = layerRef.current;
     if (!layer) return;
 
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reducedMotion) return;
+
     const resize = () => {
       const w = layer.clientWidth;
       const h = layer.clientHeight;

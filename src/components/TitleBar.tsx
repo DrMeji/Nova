@@ -84,6 +84,8 @@ export function TitleBar() {
           <span className={`ml-2 text-[9px] uppercase tracking-wide px-1.5 py-0.5 rounded ${
             aiMode === 'Offline'
               ? 'text-rose-300/90 bg-rose-500/10'
+              : aiMode === 'Degraded'
+                ? 'text-amber-300/90 bg-amber-500/10'
               : aiMode === 'Cloud'
                 ? 'text-sky-300/90 bg-sky-500/10'
                 : aiMode === 'Hybrid'

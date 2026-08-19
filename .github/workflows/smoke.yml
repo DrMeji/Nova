@@ -28,4 +28,9 @@ jobs:
           cache: npm
       - run: npm ci
       - run: node scripts/test-gguf-chat.cjs
-      - run: node scripts/smoke-brain-check.cjs || true
+      - run: node scripts/smoke-secrets-check.cjs
+      # Brain HTTP smoke only when a local brain is running (desktop app).
+      - name: Brain API smoke (optional)
+        env:
+          ARK_BRAIN_SMOKE_OPTIONAL: '1'
+        run: node scripts/smoke-brain-check.cjs

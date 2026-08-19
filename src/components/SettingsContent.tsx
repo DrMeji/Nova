@@ -153,6 +153,8 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
   const [brainUrl, setBrainUrl] = useState('http://127.0.0.1:8787');
   const [brainToken, setBrainToken] = useState('');
   const [brainTokenCopied, setBrainTokenCopied] = useState(false);
+  const [brainContractVersion, setBrainContractVersion] = useState('');
+  const [secretsEncrypted, setSecretsEncrypted] = useState<boolean | null>(null);
   const [showLegacyProviders, setShowLegacyProviders] = useState(false);
   const [signingStatus, setSigningStatus] = useState<string | null>(null);
   const [localReports, setLocalReports] = useState<{ name: string; mtime?: string }[]>([]);
@@ -172,12 +174,17 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
   }, []);
 
   useEffect(() => {
-    void window.arkDesktop?.brainTokenGet?.()
-      .then(res => {
-        if (res?.url) setBrainUrl(res.url);
-        if (res?.token) setBrainToken(res.token);
-      })
-      .catch(() => undefined);
+    void Promise.all([
+      window.arkDesktop?.brainTokenGet?.(),
+      window.arkDesktop?.brainStatus?.(),
+      window.arkDesktop?.secretsStatus?.(),
+    ]).then(([token, status, secrets]) => {
+      if (token?.url) setBrainUrl(token.url);
+      if (token?.token) setBrainToken(token.token);
+      if (status?.url) setBrainUrl(status.url);
+      if (status?.contractVersion) setBrainContractVersion(status.contractVersion);
+      if (typeof secrets?.encrypted === 'boolean') setSecretsEncrypted(secrets.encrypted);
+    }).catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -707,6 +714,11 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                     <p className="text-[11px] text-content-tertiary mt-0.5 leading-relaxed">
                       Loopback only. Packaged ARK requires a bearer token on chat routes.
                     </p>
+                    <p className="text-[10px] text-content-tertiary mt-1">
+                      Contract {brainContractVersion || 'unavailable'} · port {(() => {
+                        try { return new URL(brainUrl).port || 'default'; } catch { return 'unavailable'; }
+                      })()}
+                    </p>
                   </div>
                   <div className="grid gap-2">
                     <label className="block text-[11px] text-content-tertiary">URL</label>
@@ -732,6 +744,19 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                       }}
                     >
                       {brainTokenCopied ? 'Copied' : 'Copy URL + token'}
+                    </button>
+                    <button
+                      type="button"
+                      className="ark-btn-secondary text-xs"
+                      onClick={() => {
+                        const curl = `curl "${brainUrl}/v1/chat" -H "Authorization: Bearer ${brainToken}" -H "Content-Type: application/json" -d "{\\"message\\":\\"Hello from Lindsay\\"}"`;
+                        void navigator.clipboard.writeText(curl).then(() => {
+                          setSavedFlash('Sample curl copied');
+                          window.setTimeout(() => setSavedFlash(''), 1600);
+                        });
+                      }}
+                    >
+                      Copy sample curl
                     </button>
                     <button
                       type="button"
@@ -784,6 +809,12 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                   description="If a provider is limited or offline, switch to the next healthy option"
                   value={prefs.autoFailover}
                   onChange={v => patchPrefs({ autoFailover: v })}
+                />
+                <ToggleRow
+                  label="Ask before cloud failover"
+                  description="Confirm before a local request is sent to a cloud provider"
+                  value={prefs.askBeforeCloudFailover}
+                  onChange={v => patchPrefs({ askBeforeCloudFailover: v })}
                 />
                 <ToggleRow
                   label="Stream responses"
@@ -873,6 +904,14 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
               description="Connect once. Keys stay on this device (OS-encrypted in Desktop) and power ARK Auto failover."
             >
               <div className="space-y-3">
+                {secretsEncrypted === false && window.arkDesktop ? (
+                  <div className="rounded-xl border border-rose-500/40 bg-rose-950/30 px-4 py-3">
+                    <p className="text-sm font-semibold text-rose-200">NO_ENCRYPTION: secure key storage is unavailable</p>
+                    <p className="text-xs text-rose-100/75 mt-1">
+                      ARK will not save provider secrets as plaintext. Repair Windows credential encryption before connecting a key.
+                    </p>
+                  </div>
+                ) : null}
                 <div className="ark-card p-3.5 flex items-center gap-3">
                   <div className="w-9 h-9 rounded-lg bg-ark-blue-500/10 flex items-center justify-center shrink-0">
                     <Cloud className="w-4 h-4 text-ark-blue-400" />
@@ -1141,7 +1180,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                   </div>
                 </div>
                 <p className="text-[11px] text-amber-300/80 mt-2">
-                  Uninstalling ARK removes models, keys, and projects on this PC (Windows installer setting).
+                  Uninstalling ARK with deleteAppDataOnUninstall enabled removes downloaded models, API keys, and local projects from this PC.
                 </p>
                 <button
                   type="button"
@@ -1390,8 +1429,8 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                     <p className="text-sm font-medium text-content-primary">Local PIN</p>
                     <p className="text-xs text-content-tertiary mt-0.5">
                       {hasPinSet()
-                        ? 'PIN is set on this device. Change it or clear it below.'
-                        : 'Set a 4–8 digit PIN to lock ARK on this PC.'}
+                        ? 'PIN is set on this device and locks the app UI. It does not encrypt API keys.'
+                        : 'Set a 4–8 digit PIN to lock the app UI on this PC. It does not encrypt API keys.'}
                     </p>
                   </div>
                   <div className="grid gap-2 sm:grid-cols-2">
@@ -1500,7 +1539,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-content-primary">Extra unlock code</p>
                       <p className="text-xs text-content-tertiary mt-0.5">
-                        After PIN, require a local security code on this PC. This is not SMS or an authenticator app.
+                        After PIN, require a local security code to unlock the app UI. This does not encrypt keys and is not SMS or an authenticator app.
                       </p>
                     </div>
                   </div>
@@ -1649,6 +1688,21 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                   ) : null}
                 </div>
 
+                <div className="rounded-xl border border-surface-border p-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Info className="w-4 h-4 text-content-secondary" />
+                    <h2 className="text-sm font-semibold text-content-primary">About</h2>
+                  </div>
+                  <p className="text-xs text-content-secondary">
+                    ARK v{appVersion}
+                  </p>
+                  <p className="text-[11px] text-content-tertiary mt-1">
+                    Brain contract {brainContractVersion || 'unavailable'} · port {(() => {
+                      try { return new URL(brainUrl).port || '8787'; } catch { return '8787'; }
+                    })()}
+                  </p>
+                </div>
+
                 <ToggleRow
                   label="Launch ARK when Windows starts"
                   description="Open ARK automatically after you sign in to this PC"
@@ -1656,7 +1710,11 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                   onChange={v => {
                     patchPrefs({ launchOnStartup: v });
                     void window.arkDesktop?.loginItemSet?.(v).then((r) => {
-                      if (r?.devBlocked && v) patchPrefs({ launchOnStartup: false });
+                      if (r?.devBlocked && v) {
+                        patchPrefs({ launchOnStartup: false });
+                        setSavedFlash('Launch at startup is unavailable in a development build');
+                        window.setTimeout(() => setSavedFlash(''), 2600);
+                      }
                     });
                   }}
                 />

@@ -3,6 +3,10 @@
 const HASH_KEY = 'ark:pin-hash';
 const SALT_KEY = 'ark:pin-salt';
 const SESSION_KEY = 'ark:pin-unlocked';
+const FAILURES_KEY = 'ark:pin-failures';
+const LOCKOUT_KEY = 'ark:pin-lockout-until';
+const MAX_FAILURES = 5;
+const LOCKOUT_MS = 30_000;
 
 function randomSalt() {
   const bytes = crypto.getRandomValues(new Uint8Array(16));
@@ -65,12 +69,40 @@ export async function clearPin() {
   markPinUnlocked();
 }
 
+export function getPinLockoutMs() {
+  try {
+    return Math.max(0, Number(sessionStorage.getItem(LOCKOUT_KEY) || 0) - Date.now());
+  } catch {
+    return 0;
+  }
+}
+
 export async function verifyPin(pin: string) {
+  if (getPinLockoutMs() > 0) return false;
   const salt = localStorage.getItem(SALT_KEY) || '';
   const expected = localStorage.getItem(HASH_KEY) || '';
   if (!salt || !expected) return true;
   const hash = await sha256Hex(`${salt}:${pin.replace(/\D/g, '')}`);
-  if (hash !== expected) return false;
+  if (hash !== expected) {
+    try {
+      const failures = Number(sessionStorage.getItem(FAILURES_KEY) || 0) + 1;
+      if (failures >= MAX_FAILURES) {
+        sessionStorage.setItem(LOCKOUT_KEY, String(Date.now() + LOCKOUT_MS));
+        sessionStorage.setItem(FAILURES_KEY, '0');
+      } else {
+        sessionStorage.setItem(FAILURES_KEY, String(failures));
+      }
+    } catch {
+      /* throttle is best-effort when session storage is unavailable */
+    }
+    return false;
+  }
+  try {
+    sessionStorage.removeItem(FAILURES_KEY);
+    sessionStorage.removeItem(LOCKOUT_KEY);
+  } catch {
+    /* ignore */
+  }
   markPinUnlocked();
   return true;
 }

@@ -12,7 +12,8 @@
  * Optional: ARK_BRAIN_TOKEN=... ARK_BRAIN_URL=http://127.0.0.1:8787
  */
 
-const BRAIN = process.env.ARK_BRAIN_URL || 'http://127.0.0.1:8787';
+const DISCOVERY_URL = process.env.ARK_BRAIN_URL || 'http://127.0.0.1:8787';
+let BRAIN = DISCOVERY_URL;
 const TOKEN = process.env.ARK_BRAIN_TOKEN || '';
 
 function headers() {
@@ -86,6 +87,11 @@ async function main() {
   const ollama = args.includes('--ollama');
   const message = args.filter((a) => a !== '--stream' && a !== '--ollama').join(' ')
     || 'Say hello from ARK Engine';
+
+  const contract = await fetch(`${DISCOVERY_URL}/v1/contract`, { headers: headers() })
+    .then((r) => r.ok ? r.json() : null)
+    .catch(() => null);
+  if (contract?.baseUrl) BRAIN = contract.baseUrl;
 
   const health = await fetch(`${BRAIN}/health`).then((r) => r.json()).catch(() => null);
   if (!health?.ok) {

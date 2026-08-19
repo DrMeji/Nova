@@ -88,6 +88,9 @@ function saveLocalMessages(list: DirectMessage[]) {
 export async function addContact(arkIdRaw: string, displayName?: string): Promise<ArkContact | null> {
   const arkId = normalizeArkId(arkIdRaw);
   if (!isArkUserId(arkId)) return null;
+  if (loadLocalContacts().some(c => c.arkId === arkId)) {
+    throw new Error('Already in contacts');
+  }
   const looked = await lookupArkUser(arkId);
   const contact: ArkContact = {
     arkId,

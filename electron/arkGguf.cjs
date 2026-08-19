@@ -190,9 +190,17 @@ async function ensureLlamaBinary(onProgress) {
   const extractDir = path.join(binDir(), `_extract_${LLAMA_TAG}`);
 
   if (onProgress) onProgress(2);
-  await arkFetch.downloadToFile(url, archivePath, (pct) => {
-    if (onProgress) onProgress(Math.min(85, Math.round(pct * 0.85)));
-  });
+  try {
+    await arkFetch.downloadToFile(url, archivePath, (pct) => {
+      if (onProgress) onProgress(Math.min(85, Math.round(pct * 0.85)));
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (/404|\(404\)/.test(msg)) {
+      throw new Error(`LLAMA release ${LLAMA_TAG} not found — check network or update LLAMA_TAG in arkGguf.cjs`);
+    }
+    throw err;
+  }
 
   try {
     if (fs.existsSync(extractDir)) fs.rmSync(extractDir, { recursive: true, force: true });
@@ -264,7 +272,8 @@ let activeAbort = null;
 let serverChild = null;
 let serverGguf = null;
 let serverCtx = 0;
-const SERVER_PORT_BASE = 8788;
+const SERVER_PORT_BASE = require('./arkConfig.cjs').GGUF_SERVER_PORT_BASE;
+const SERVER_PORT_MAX = SERVER_PORT_BASE + require('./arkConfig.cjs').GGUF_SERVER_PORT_MAX_TRIES;
 let serverPort = SERVER_PORT_BASE;
 const GGUF_CTX = 8192;
 
@@ -338,7 +347,7 @@ async function pingServer(port = serverPort) {
 
 async function bindLlamaServer(bin, gguf) {
   lastServerError = null;
-  for (let candidate = SERVER_PORT_BASE; candidate < SERVER_PORT_BASE + 10; candidate += 1) {
+  for (let candidate = SERVER_PORT_BASE; candidate < SERVER_PORT_MAX; candidate += 1) {
     stopServer();
     const child = spawn(bin, [
       '-m', gguf,
@@ -710,8 +719,10 @@ function runGgufCliStream(modelId, prompt, onChunk, timeoutMs = 120000, nPredict
 
     cancelRequested = false;
     if (activeChild) {
-      killLlamaChild(activeChild);
-      activeChild = null;
+      const err = new Error('Another local generation is already running — stop it or wait, then try again');
+      err.code = 'RATE_LIMITED';
+      reject(err);
+      return;
     }
 
     const promptStr = wrapChatPrompt(modelId, prompt);
@@ -817,6 +828,7 @@ function runGgufCliStream(modelId, prompt, onChunk, timeoutMs = 120000, nPredict
         modelFile: path.basename(gguf),
         source: 'ark-gguf',
         streamed: Boolean(onChunk),
+        truncated: Boolean(nPredict && text.length > nPredict * 2),
       });
     });
   });

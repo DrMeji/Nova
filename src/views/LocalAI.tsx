@@ -14,14 +14,17 @@ import {
 } from '@/lib/arkEngine';
 import {
   cancelEngineDownload,
+  dismissEngineDownloadError,
   getEngineDownloadMap,
   getEngineDownloadPhaseMap,
   getEngineDownloadErrors,
   isEngineDownloading,
   reattachEngineDownloads,
+  retryEngineDownload,
   startEngineDownload,
   subscribeEngineDownloads,
 } from '@/lib/engineDownloads';
+import { classifyErrorMessage } from '@/lib/errors';
 import { probeBrain } from '@/lib/brain';
 import { refreshBrainUrl } from '@/lib/brainUrl';
 import {
@@ -320,7 +323,7 @@ export function LocalAI() {
   const [hw, setHw] = useState<HardwareInfo>(() => loadHardwareSnapshot() || detectHardware());
   const [recommendation, setRecommendation] = useState(() => getRecommendedChatModel(loadHardwareSnapshot() || detectHardware()));
   const [engineRunning, setEngineRunning] = useState(false);
-  const [enginePhase, setEnginePhase] = useState<'offline' | 'starting' | 'online'>('offline');
+  const [enginePhase, setEnginePhase] = useState<ArkEngineStatus['phase']>('offline');
   const [installed, setInstalled] = useState<Array<{
     id: string;
     name: string;
@@ -818,7 +821,27 @@ export function LocalAI() {
                             <div className="h-full bg-emerald-400/80 transition-all" style={{ width: `${pct}%` }} />
                           </div>
                           {downloadErrorMap[id] ? (
-                            <p className="text-[11px] text-rose-300/90 mt-1.5 leading-snug">{downloadErrorMap[id]}</p>
+                            <div className="mt-1.5">
+                              <p className="text-[11px] text-rose-300/90 leading-snug">
+                                {classifyErrorMessage(downloadErrorMap[id]).message}
+                              </p>
+                              <div className="flex items-center gap-2 mt-1.5">
+                                <button
+                                  type="button"
+                                  className="text-[10px] text-content-tertiary hover:text-content-secondary"
+                                  onClick={() => dismissEngineDownloadError(id)}
+                                >
+                                  Dismiss
+                                </button>
+                                <button
+                                  type="button"
+                                  className="text-[10px] text-sky-400 hover:text-sky-300"
+                                  onClick={() => void retryEngineDownload(id)}
+                                >
+                                  Retry
+                                </button>
+                              </div>
+                            </div>
                           ) : null}
                         </div>
                       );

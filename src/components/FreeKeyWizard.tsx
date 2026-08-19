@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { ExternalLink, KeyRound, Loader2, X, Check } from 'lucide-react';
+import { ExternalLink, KeyRound, Loader2, X, Check, RefreshCw } from 'lucide-react';
 import { getProviderApiKeys, setProviderApiKey } from '@/lib/localPrefs';
 import { openInSystemBrowser } from '@/lib/openExternal';
+import { probeProviderKey } from '@/lib/providerSpeed';
 
 type FreeKeyProvider = {
   id: string;
@@ -67,6 +68,7 @@ export function FreeKeyWizard({
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [saved, setSaved] = useState<Record<string, boolean>>({});
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [validation, setValidation] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (!open) return;
@@ -91,6 +93,22 @@ export function FreeKeyWizard({
       setProviderApiKey(id, value);
       setSaved(prev => ({ ...prev, [id]: Boolean(value) }));
       if (value) setDrafts(prev => ({ ...prev, [id]: '' }));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const revalidate = async (id: string) => {
+    const key = getProviderApiKeys()[id];
+    if (!key) return;
+    setBusyId(id);
+    setValidation(prev => ({ ...prev, [id]: 'Checking…' }));
+    try {
+      const result = await probeProviderKey(id, key);
+      setValidation(prev => ({
+        ...prev,
+        [id]: result.ok ? `Valid · ${result.ms} ms` : `Failed${result.error ? ` · ${result.error}` : ''}`,
+      }));
     } finally {
       setBusyId(null);
     }
@@ -152,6 +170,22 @@ export function FreeKeyWizard({
                   {busyId === p.id ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Save'}
                 </button>
               </div>
+              {saved[p.id] ? (
+                <div className="flex items-center justify-between gap-2">
+                  <span className={`text-[11px] ${validation[p.id]?.startsWith('Failed') ? 'text-rose-400' : 'text-content-tertiary'}`}>
+                    {validation[p.id] || 'Probe the saved key without replacing it.'}
+                  </span>
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1 text-[11px] text-content-secondary hover:text-content-primary"
+                    disabled={busyId === p.id}
+                    onClick={() => void revalidate(p.id)}
+                  >
+                    <RefreshCw className={`w-3 h-3 ${busyId === p.id ? 'animate-spin' : ''}`} />
+                    Re-validate
+                  </button>
+                </div>
+              ) : null}
             </div>
           ))}
         </div>

@@ -1,11 +1,14 @@
 /**
  * Smoke checks for brain API honesty (run with ARK desktop open).
  * node scripts/smoke-brain-check.cjs
+ *
+ * Set ARK_BRAIN_SMOKE_OPTIONAL=1 to skip (exit 0) when brain is offline — used in CI.
  */
 const http = require('http');
 
 const BASE = process.env.ARK_BRAIN_URL || 'http://127.0.0.1:8787';
 const TOKEN = process.env.ARK_BRAIN_TOKEN || '';
+const OPTIONAL = process.env.ARK_BRAIN_SMOKE_OPTIONAL === '1';
 
 function request(method, path, body, headers = {}) {
   return new Promise((resolve, reject) => {
@@ -54,10 +57,18 @@ function get(path, headers = {}) {
 
   const health = await get('/health').catch(() => null);
   if (!health) {
+    if (OPTIONAL) {
+      console.log('SKIP: brain not reachable (optional CI smoke)');
+      process.exit(0);
+    }
     fail(`brain not reachable at ${BASE}`);
     process.exit(1);
   }
   ok(`health ${health.status}`);
+
+  let healthBody = {};
+  try { healthBody = JSON.parse(health.body); } catch { /* ignore */ }
+  if (healthBody.port) ok(`bound port ${healthBody.port}`);
 
   const headers = TOKEN ? { Authorization: `Bearer ${TOKEN}` } : {};
   const chat = await post('/v1/chat', { message: 'ping smoke test' }, headers);
@@ -68,6 +79,8 @@ function get(path, headers = {}) {
     ok(`chat error status honest (${chat.status})`);
   } else if (chat.status === 401) {
     ok('chat requires auth (401)');
+  } else if (chat.status === 429) {
+    ok('chat rate limited (429)');
   } else if (/Local GGUF brain failed/i.test(String(parsed.reply || ''))) {
     fail('soft failure disguised as reply');
   } else if (!parsed.reply?.trim()) {
@@ -77,8 +90,8 @@ function get(path, headers = {}) {
   }
 
   const noAuth = await post('/v1/chat', { message: 'auth probe' });
-  if (!TOKEN && noAuth.status === 401) {
-    ok('dev without token still allows or blocks consistently');
+  if (noAuth.status === 401) {
+    ok('chat without token returns 401 when auth required');
   }
 
   const bigBody = 'x'.repeat(3 * 1024 * 1024);

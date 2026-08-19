@@ -12,7 +12,22 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
     <meta name="twitter:card" content="summary_large_image">
-</head>
+  </head>
+  <script>
+    (function () {
+      try {
+        var theme = localStorage.getItem('ark-theme');
+        var root = document.documentElement;
+        if (theme === 'light') {
+          root.classList.add('light');
+          root.classList.remove('dark');
+        } else {
+          root.classList.add('dark');
+          root.classList.remove('light');
+        }
+      } catch (e) { /* ignore */ }
+    })();
+  </script>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>

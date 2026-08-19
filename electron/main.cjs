@@ -17,11 +17,12 @@ const arkOAuth = require('./arkOAuth.cjs');
 const arkCrashLog = require('./arkCrashLog.cjs');
 const arkGguf = require('./arkGguf.cjs');
 const arkBrainApi = require('./arkBrainApi.cjs');
+const arkConfig = require('./arkConfig.cjs');
 
 const DEV_URL = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173';
 const isDev = process.env.ARK_DEV === '1';
 const isUpdaterMode = process.argv.includes('--ark-updater');
-const BRAIN_PORT = 8787;
+const BRAIN_PORT = arkConfig.BRAIN_PORT_BASE;
 let brainPort = BRAIN_PORT;
 
 const ALLOWED_HOSTS = new Set([
@@ -93,6 +94,7 @@ function refreshTrayMenu() {
   const engine = arkEngine.getStatus();
   const token = arkBrainToken.loadToken();
   const brainUrl = `http://127.0.0.1:${brainPort}`;
+  const authLabel = app.isPackaged || token ? 'auth on' : 'auth off (dev)';
   const menu = Menu.buildFromTemplate([
     {
       label: 'Show ARK',
@@ -100,20 +102,35 @@ function refreshTrayMenu() {
         showMainWindow();
       },
     },
+    {
+      label: 'Open Settings',
+      click: () => {
+        showMainWindow();
+        try {
+          mainWindow?.webContents.send('ark:open-settings', { section: 'ai' });
+        } catch {
+          /* ignore */
+        }
+      },
+    },
     { type: 'separator' },
     {
-      label: `Brain · ${engine.phase || 'unknown'}`,
+      label: `Brain · ${engine.phase || 'unknown'} · ${authLabel}`,
       enabled: false,
     },
     {
-      label: `Copy brain URL (${brainPort})`,
+      label: `URL ${brainUrl}`,
+      enabled: false,
+    },
+    {
+      label: `Copy brain URL`,
       click: () => {
         const { clipboard } = require('electron');
         clipboard.writeText(brainUrl);
       },
     },
     {
-      label: token ? 'Copy brain token' : 'Brain token (dev — none)',
+      label: token ? 'Copy brain token' : 'Brain token (none)',
       enabled: Boolean(token),
       click: () => {
         const { clipboard } = require('electron');
@@ -121,6 +138,12 @@ function refreshTrayMenu() {
       },
     },
     { type: 'separator' },
+    {
+      label: 'Hide to tray',
+      click: () => {
+        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.hide();
+      },
+    },
     {
       label: 'Quit ARK (stops brain)',
       click: () => {
@@ -130,7 +153,7 @@ function refreshTrayMenu() {
     },
   ]);
   tray.setContextMenu(menu);
-  tray.setToolTip(`ARK · ${engine.phase || 'starting'}`);
+  tray.setToolTip(`ARK · ${engine.phase || 'starting'} · ${brainPort}`);
 }
 
 function createTray() {
@@ -359,7 +382,23 @@ function assertAllowedUrl(url) {
 async function handleHttpRequest(_event, payload) {
   const url = payload?.url;
   const method = (payload?.method || 'GET').toUpperCase();
-  const headers = payload?.headers && typeof payload.headers === 'object' ? payload.headers : {};
+  const headers = payload?.headers && typeof payload.headers === 'object' ? { ...payload.headers } : {};
+  const authProviderId = payload?.authProviderId ? String(payload.authProviderId).trim() : '';
+  if (authProviderId) {
+    delete headers.Authorization;
+    delete headers.authorization;
+    delete headers['x-api-key'];
+    try {
+      const map = arkSecrets.loadMap();
+      const key = map[authProviderId];
+      if (typeof key === 'string' && key.trim()) {
+        if (authProviderId === 'anthropic') headers['x-api-key'] = key.trim();
+        else headers.Authorization = `Bearer ${key.trim()}`;
+      }
+    } catch {
+      /* ignore */
+    }
+  }
   const body = typeof payload?.body === 'string' ? payload.body : undefined;
   assertAllowedUrl(url);
 
@@ -408,7 +447,23 @@ async function handleHttpRequest(_event, payload) {
 async function handleHttpStream(event, payload) {
   const url = payload?.url;
   const method = (payload?.method || 'POST').toUpperCase();
-  const headers = payload?.headers && typeof payload.headers === 'object' ? payload.headers : {};
+  const headers = payload?.headers && typeof payload.headers === 'object' ? { ...payload.headers } : {};
+  const authProviderId = payload?.authProviderId ? String(payload.authProviderId).trim() : '';
+  if (authProviderId) {
+    delete headers.Authorization;
+    delete headers.authorization;
+    delete headers['x-api-key'];
+    try {
+      const map = arkSecrets.loadMap();
+      const key = map[authProviderId];
+      if (typeof key === 'string' && key.trim()) {
+        if (authProviderId === 'anthropic') headers['x-api-key'] = key.trim();
+        else headers.Authorization = `Bearer ${key.trim()}`;
+      }
+    } catch {
+      /* ignore */
+    }
+  }
   const body = typeof payload?.body === 'string' ? payload.body : undefined;
   const streamId = payload?.streamId || `s-${Date.now()}`;
   assertAllowedUrl(url);

@@ -225,4 +225,9 @@ module.exports = {
   findFfmpeg,
   ensureFfmpeg,
   stillToMp4,
+  ffmpegInstallHint() {
+    if (process.platform === 'win32') return null;
+    if (findFfmpeg()) return null;
+    return 'Install ffmpeg for motion clips (e.g. brew install ffmpeg or apt install ffmpeg).';
+  },
 };

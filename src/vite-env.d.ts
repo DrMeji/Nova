@@ -125,6 +125,7 @@ declare global {
           method?: string;
           headers?: Record<string, string>;
           body?: string;
+          authProviderId?: string;
         },
       ) => Promise<{ ok: boolean; status: number; data: unknown }>;
       httpStream?: (
@@ -145,10 +146,16 @@ declare global {
           status?: number;
         }) => void,
       ) => () => void;
-      brainStatus?: () => Promise<{ ok: boolean; url: string; engine?: unknown; auth?: string; hasToken?: boolean }>;
+      brainStatus?: () => Promise<{
+        ok: boolean;
+        url: string;
+        contractVersion?: string;
+        engine?: unknown;
+        auth?: string;
+        hasToken?: boolean;
+      }>;
       brainTokenGet?: () => Promise<{ ok: boolean; token?: string; url?: string; hasToken?: boolean; packaged?: boolean }>;
       brainTokenRotate?: () => Promise<{ ok: boolean; token?: string; url?: string }>;
-      secretsSave?: (keys: Record<string, string>) => Promise<{ ok: boolean; error?: string; code?: string; encrypted?: boolean }>;
       pluginOAuthStart?: (pluginId: string) => Promise<{
         ok: boolean;
         accessToken?: string;

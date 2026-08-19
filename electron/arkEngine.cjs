@@ -15,6 +15,7 @@ const arkFetch = require('./arkFetch.cjs');
 const arkPaths = require('./arkPaths.cjs');
 const arkModelRank = require('./arkModelRank.cjs');
 const arkHunt = require('./arkHunt.cjs');
+const arkFfmpeg = require('./arkFfmpeg.cjs');
 const os = require('os');
 
 /** Default zero-key brain for new installs (~1 GB Q4). */
@@ -270,6 +271,36 @@ const downloads = {};
 const downloadQueue = [];
 const MAX_PARALLEL_DOWNLOADS = 2;
 
+function downloadQueuePath() {
+  return path.join(app.getPath('userData'), 'engine-download-queue.json');
+}
+
+function persistDownloadQueue() {
+  try {
+    fs.writeFileSync(downloadQueuePath(), JSON.stringify(downloadQueue), 'utf8');
+  } catch {
+    /* ignore */
+  }
+}
+
+function loadPersistedDownloadQueue() {
+  try {
+    const p = downloadQueuePath();
+    if (!fs.existsSync(p)) return;
+    const raw = JSON.parse(fs.readFileSync(p, 'utf8'));
+    if (!Array.isArray(raw)) return;
+    for (const id of raw) {
+      if (typeof id === 'string' && !downloadQueue.includes(id) && !downloads[id]) {
+        downloadQueue.push(id);
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+loadPersistedDownloadQueue();
+
 function listModels() {
   const ggufs = arkGguf.listGgufFiles();
   return catalogAll().map((m) => {
@@ -326,11 +357,14 @@ function getStatus() {
     ggufServerPort: arkGguf.getServerPort?.() || 8788,
     ggufServer: arkGguf.getServerStatus?.() || { ok: true, error: null, port: 8788 },
     defaultBrainId: DEFAULT_BRAIN_ID,
+    ffmpegHint: arkFfmpeg.ffmpegInstallHint?.() || null,
     note:
       phase === 'online'
         ? (llamaBin && arkGguf.listGgufFiles().length
           ? 'ARK Engine online · local GGUF brain ready'
           : 'ARK Engine online · install a local brain for zero-key chat')
+        : phase === 'degraded'
+          ? 'ARK Engine degraded · runtime not ready yet'
         : phase === 'starting'
           ? 'Starting ARK Engine…'
           : 'ARK Engine offline',
@@ -341,17 +375,24 @@ function start() {
   if (phase === 'online') return getStatus();
   phase = 'starting';
   void (async () => {
+    let runtimeOk = false;
     try {
       await ensureRuntime();
+      runtimeOk = Boolean(arkGguf.findLlamaBinary());
     } catch {
-      /* binary may still download later */
+      runtimeOk = false;
     }
-    phase = 'online';
     const llamaBin = arkGguf.findLlamaBinary();
     const ready = listModels().find((m) => m.gguf && m.status === 'ready' && m.id !== 'ark-core');
-    if (llamaBin && ready) {
-      const ggufId = String(ready.id).startsWith('gguf:') ? String(ready.id).slice(5) : ready.id;
-      void arkGguf.warmServer(ggufId);
+    if (runtimeOk && llamaBin) {
+      phase = 'online';
+      if (ready) {
+        const ggufId = String(ready.id).startsWith('gguf:') ? String(ready.id).slice(5) : ready.id;
+        void arkGguf.warmServer(ggufId);
+      }
+    } else {
+      // Engine process is up, but binary/weights may still be missing.
+      phase = 'degraded';
     }
   })();
   return getStatus();
@@ -453,10 +494,12 @@ function beginDownload(id) {
       `Not enough disk space for ${meta.name} (need ~${meta.sizeGb} GB, free ${disk.freeGb ?? '?'} GB)`,
     );
   }
+  const diskUnknown = !disk.ok;
 
   ensureDirs();
   if (activeDownloadCount() >= MAX_PARALLEL_DOWNLOADS) {
     downloadQueue.push(id);
+    persistDownloadQueue();
     downloads[id] = { progress: 0, phase: 'queued' };
     return getStatus();
   }
@@ -468,6 +511,7 @@ function beginDownload(id) {
 function pumpDownloadQueue() {
   while (activeDownloadCount() < MAX_PARALLEL_DOWNLOADS && downloadQueue.length > 0) {
     const nextId = downloadQueue.shift();
+    persistDownloadQueue();
     const meta = catalogAll().find((m) => m.id === nextId);
     if (!meta || (!meta.url && !(meta.bundle && meta.bundle.length))) {
       delete downloads[nextId];
@@ -478,7 +522,9 @@ function pumpDownloadQueue() {
 }
 
 function startDownloadJob(id, meta) {
-  downloads[id] = { progress: 1, phase: 'runtime', cancel: false };
+  const disk = diskSpaceForModels();
+  const diskWarning = disk.ok ? undefined : 'Free disk space unknown — download may fail if storage is low.';
+  downloads[id] = { progress: 1, phase: 'runtime', cancel: false, diskWarning };
 
   void (async () => {
     try {
@@ -531,15 +577,21 @@ function startDownloadJob(id, meta) {
             }
             continue;
           }
-          await arkFetch.downloadToFile(part.url, dest, (pct) => {
+          try {
+            await arkFetch.downloadToFile(part.url, dest, (pct) => {
+              if (downloads[id]?.cancel) throw new Error('Download canceled');
+              if (downloads[id]) {
+                const base = 20 + Math.round((i / parts.length) * 80);
+                const slice = Math.round((pct / 100) * (80 / parts.length));
+                downloads[id].progress = Math.min(99, base + slice);
+              }
+            });
             if (downloads[id]?.cancel) throw new Error('Download canceled');
-            if (downloads[id]) {
-              const base = 20 + Math.round((i / parts.length) * 80);
-              const slice = Math.round((pct / 100) * (80 / parts.length));
-              downloads[id].progress = Math.min(99, base + slice);
-            }
-          });
-          if (downloads[id]?.cancel) throw new Error('Download canceled');
+          } catch (partErr) {
+            throw new Error(
+              `Failed downloading ${part.file}: ${partErr instanceof Error ? partErr.message : String(partErr)}`,
+            );
+          }
         }
         writeMarker(id, meta, { path: arkSd.fluxDiffusionPath(), bundle: true });
       } else {
@@ -575,8 +627,16 @@ function startDownloadJob(id, meta) {
           const partial = path.join(modelsDir(), `${id}.${ext}.partial`);
           if (fs.existsSync(partial)) fs.unlinkSync(partial);
         }
-      } catch {
-        /* ignore */
+      } catch (cleanupErr) {
+        try {
+          const arkCrashLog = require('./arkCrashLog.cjs');
+          arkCrashLog.appendReport('download-cleanup', {
+            modelId: id,
+            error: cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr),
+          });
+        } catch {
+          /* ignore */
+        }
       }
     } finally {
       pumpDownloadQueue();
@@ -798,8 +858,11 @@ async function generate(message, opts = {}) {
     };
   }
 
-  if (phase !== 'online') {
+  if (phase !== 'online' && phase !== 'degraded') {
     throw new Error('ARK Engine is offline. Start it from Local AI.');
+  }
+  if (phase === 'degraded' && !arkGguf.findLlamaBinary()) {
+    throw new Error('ARK Engine is degraded — local runtime is not ready. Open Local AI to install a brain.');
   }
 
   const ramGb = Math.round(os.totalmem() / (1024 * 1024 * 1024));
@@ -831,9 +894,13 @@ async function generate(message, opts = {}) {
       const timeoutMs = kind === 'coding' ? 300_000 : 90_000;
       const nPredict = kind === 'coding' ? 8192 : 1536;
       const gguf = await arkGguf.runGgufStream(ggufId, message, onChunk, timeoutMs, nPredict);
+      let reply = gguf.reply;
+      if (gguf.truncated || (reply && reply.length > nPredict * 3)) {
+        reply = `${reply}\n\n(Answer may be truncated — local length limit reached.)`;
+      }
       return {
         ok: true,
-        reply: gguf.reply,
+        reply,
         modelId: model.id,
         modelName: model.name,
         source: 'ark-gguf',

@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Lock, ShieldCheck } from 'lucide-react';
 import { getLocalPrefs } from '@/lib/localPrefs';
-import { hasPinSet, lockPinSession, shouldLockOnLaunch, verifyPin } from '@/lib/pinLock';
+import { getPinLockoutMs, hasPinSet, lockPinSession, shouldLockOnLaunch, verifyPin } from '@/lib/pinLock';
 import { hasSecondFactorSet, verifySecondFactor } from '@/lib/twoFactor';
 
 type UnlockStep = 'pin' | '2fa';
@@ -12,6 +12,15 @@ export function PinLockGate({ children }: { children: ReactNode }) {
   const [pin, setPin] = useState('');
   const [code, setCode] = useState('');
   const [error, setError] = useState('');
+  const [lockoutSeconds, setLockoutSeconds] = useState(() => Math.ceil(getPinLockoutMs() / 1000));
+
+  useEffect(() => {
+    if (!locked || lockoutSeconds <= 0) return;
+    const timer = window.setInterval(() => {
+      setLockoutSeconds(Math.ceil(getPinLockoutMs() / 1000));
+    }, 250);
+    return () => window.clearInterval(timer);
+  }, [locked, lockoutSeconds]);
 
   useEffect(() => {
     const onLock = () => {
@@ -24,6 +33,18 @@ export function PinLockGate({ children }: { children: ReactNode }) {
     };
     window.addEventListener('ark:pin-lock', onLock);
     return () => window.removeEventListener('ark:pin-lock', onLock);
+  }, []);
+
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.visibilityState !== 'hidden') return;
+      const prefs = getLocalPrefs();
+      if (prefs.autoLockMinutes > 0 && prefs.requirePinOnLaunch && hasPinSet()) {
+        lockPinSession();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
   }, []);
 
   useEffect(() => {
@@ -52,9 +73,19 @@ export function PinLockGate({ children }: { children: ReactNode }) {
 
   const submitPin = async () => {
     setError('');
+    const remaining = getPinLockoutMs();
+    if (remaining > 0) {
+      setLockoutSeconds(Math.ceil(remaining / 1000));
+      setError(`Too many attempts. Try again in ${Math.ceil(remaining / 1000)}s.`);
+      return;
+    }
     const ok = await verifyPin(pin);
     if (!ok) {
-      setError('Wrong PIN');
+      const nextRemaining = getPinLockoutMs();
+      setLockoutSeconds(Math.ceil(nextRemaining / 1000));
+      setError(nextRemaining > 0
+        ? `Too many attempts. Try again in ${Math.ceil(nextRemaining / 1000)}s.`
+        : 'Wrong PIN');
       setPin('');
       return;
     }
@@ -88,7 +119,7 @@ export function PinLockGate({ children }: { children: ReactNode }) {
         <p className="text-xs text-content-tertiary">
           {step === '2fa'
             ? 'Enter your security code for this PC.'
-            : 'Enter your local PIN for this PC.'}
+            : 'Enter your local PIN. This locks the app UI on this PC; it does not encrypt your keys.'}
         </p>
         {step === 'pin' ? (
           <input
@@ -96,6 +127,7 @@ export function PinLockGate({ children }: { children: ReactNode }) {
             inputMode="numeric"
             autoComplete="off"
             value={pin}
+            disabled={lockoutSeconds > 0}
             onChange={e => setPin(e.target.value.replace(/\D/g, '').slice(0, 8))}
             onKeyDown={e => { if (e.key === 'Enter') void submitPin(); }}
             className="w-full rounded-lg border border-surface-border bg-ark-navy-950 px-3 py-2 text-sm tracking-[0.3em] text-center text-content-primary"
@@ -116,6 +148,7 @@ export function PinLockGate({ children }: { children: ReactNode }) {
         <button
           type="button"
           className="ark-btn-primary w-full text-sm"
+          disabled={step === 'pin' && lockoutSeconds > 0}
           onClick={() => void (step === 'pin' ? submitPin() : submit2fa())}
         >
           Unlock

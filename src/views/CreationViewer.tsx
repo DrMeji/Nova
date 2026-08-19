@@ -62,6 +62,9 @@ export function CreationViewer() {
     : creation.real
       ? 'Generated'
       : 'Preview';
+  const isPreview = !creation.real
+    || (creation.source || '').includes('motion-still')
+    || Boolean(dataUrl?.startsWith('data:image/svg'));
 
   const onDownload = () => {
     if (!dataUrl) return;
@@ -134,6 +137,15 @@ export function CreationViewer() {
       </header>
 
       <div className="flex-1 overflow-auto p-6 flex flex-col items-center gap-4">
+        {isPreview ? (
+          <div className="w-full max-w-3xl rounded-xl border border-amber-400/35 bg-amber-500/15 px-4 py-3 text-sm text-amber-100">
+            <span className="font-semibold">Preview only</span>
+            {' — '}
+            {honesty === 'Motion still'
+              ? 'This is a still preview, not a generated video.'
+              : 'This fallback is not a finished generated image or video.'}
+          </div>
+        ) : null}
         {loading ? (
           <Loader2 className="w-6 h-6 animate-spin text-content-tertiary mt-20" />
         ) : dataUrl ? (

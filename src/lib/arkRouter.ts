@@ -63,6 +63,8 @@ export type ArkRouterResult = {
   attempted: string[];
   /** True when prior turns were sent so the model can continue mid-task. */
   continued?: boolean;
+  /** Dev: IPC failed and brain HTTP was used instead. */
+  ipcFallback?: boolean;
 };
 
 export type ArkRouteOpts = {
@@ -85,6 +87,26 @@ export type ArkRouteOpts = {
 
 function modeAllowsCloud(mode: AiModePref) {
   return mode !== 'local_only';
+}
+
+function shouldAskBeforeCloud(prefs: ReturnType<typeof getLocalPrefs>) {
+  return Boolean(prefs.askBeforeCloudFailover && !prefs.autoFailover);
+}
+
+function askCloudRetryReply(attempted: string[]): ArkRouterResult {
+  return {
+    reply: [
+      'Local brain failed or is not ready.',
+      '',
+      'Enable **Auto failover** in Settings → AI, or pick a cloud model from the ARK menu and send again.',
+      '',
+      '**Retry with cloud?** Choose a cloud model, then resend your message.',
+    ].join('\n'),
+    modelName: 'ARK Auto',
+    source: 'none',
+    tier: 'local-free',
+    attempted,
+  };
 }
 
 function modePrefersCloud(mode: AiModePref) {
@@ -167,6 +189,7 @@ async function tryLocalChat(
         tier: 'local-free',
         attempted,
         continued: hasContinuity(history),
+        ipcFallback: 'ipcFallback' in result ? result.ipcFallback : undefined,
       };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -472,6 +495,18 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
           attempted,
         }, history);
       }
+      if (!hasAnyCloudChatKey()) {
+        return {
+          reply: [
+            'This message includes an image, but no vision-capable cloud key is set.',
+            'Add OpenAI, Google, or Anthropic in Models → Cloud (free tiers available).',
+          ].join(' '),
+          modelName: 'Vision',
+          source: 'none',
+          tier: 'paid',
+          attempted,
+        };
+      }
     }
 
     if (opts.stickyModelId && opts.stickyPinnedSource && !(hasVision && opts.stickyPinnedSource === 'local')) {
@@ -503,6 +538,9 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
         opts.onAttemptReset,
       );
       if (local && isStrongLocal(local.source)) return local;
+      if (shouldAskBeforeCloud(prefs) && modeAllowsCloud(mode)) {
+        return askCloudRetryReply(attempted);
+      }
     }
 
     if (mode === 'local_only') {
@@ -916,7 +954,10 @@ async function routeImage(opts: ArkRouteOpts): Promise<ArkRouterResult> {
   ).catch(() => undefined);
 
   return {
-    reply: 'Image generation failed. Check ARK Engine / network, or add a Hugging Face / OpenAI key.',
+    reply: [
+      'Image generation failed.',
+      'Open **Local AI** to install image weights, or add a Hugging Face / OpenAI key in Models → Cloud.',
+    ].join(' '),
     modelName: 'ARK Router',
     source: 'none',
     tier: 'no-key-free',

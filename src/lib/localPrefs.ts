@@ -36,6 +36,8 @@ export type LocalPrefs = {
   showStatusBar: boolean;
   // AI
   autoFailover: boolean;
+  /** Ask before a local request is sent to a cloud provider during failover. */
+  askBeforeCloudFailover: boolean;
   streamResponses: boolean;
   rememberContext: boolean;
   /** Search Hugging Face for GGUF brains that fit this PC. */
@@ -79,6 +81,7 @@ const DEFAULT_PREFS: LocalPrefs = {
   sidebarWidth: 256,
   showStatusBar: true,
   autoFailover: true,
+  askBeforeCloudFailover: false,
   streamResponses: true,
   rememberContext: true,
   huntInternetModels: true,
@@ -274,6 +277,31 @@ export function clearPluginToken(pluginId: string) {
 
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
+  {
+    version: '0.1.77',
+    channel: 'stable' as const,
+    date: 'Aug 18, 2026',
+    title: 'Grok 0.1.76 complete fix pass',
+    notes: [
+      'Degraded engine status, clearer structured errors, and stronger media preview honesty',
+      'Optional confirmation before cloud failover and saved-key re-validation',
+      'PIN attempt throttling and accurate app-lock versus encryption copy',
+      'Expanded Lindsay setup, dynamic brain API details, and packaged-token documentation',
+    ],
+  },
+  {
+    version: '0.1.77',
+    channel: 'stable' as const,
+    date: 'Aug 18, 2026',
+    title: 'Grok pass 4 — complete fix list',
+    notes: [
+      'Ask-before-cloud failover, vision key errors, main-process cloud auth injection',
+      'Download errors persist with Dismiss/Retry; queue survives restart; FLUX part errors',
+      'Media library corrupt reset; OpenAPI 401/429/503; cloud keys never in renderer headers',
+      'Scaffold honesty in Code, find-in-files totals, Projects cloud-fail notice',
+      'About unified, theme FOUC fix, reduced-motion orbs, PIN lock on sleep',
+    ],
+  },
   {
     version: '0.1.76',
     channel: 'stable' as const,

@@ -3,11 +3,13 @@ info:
   title: ARK Brain API
   description: |
     External clients talk to ARK Engine on localhost — never to a third-party local runtime.
+    Packaged ARK requires Bearer token on chat routes. Bound port may differ from 8787 — read /v1/contract baseUrl.
     Cookbook: docs/ark-brain-api.md · sample: examples/external-brain-client/
     Compat: Ollama /api/* and OpenAI /v1/chat/completions on the same port.
   version: 0.4.0
 servers:
   - url: http://127.0.0.1:8787
+    description: Default loopback port (may shift if busy)
 paths:
   /health:
     get:
@@ -51,6 +53,16 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BrainChatResponse'
+        '401':
+          description: Missing or invalid bearer token (packaged)
+        '429':
+          description: Too many concurrent brain requests
+        '503':
+          description: Generation failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrainErrorResponse'
   /v1/chat/stream:
     post:
       summary: SSE chat stream
@@ -64,7 +76,13 @@ paths:
               $ref: '#/components/schemas/BrainChatRequest'
       responses:
         '200':
-          description: text/event-stream
+          description: text/event-stream (events include delta, error, done)
+        '401':
+          description: Missing or invalid bearer token
+        '429':
+          description: Rate limited
+        '503':
+          description: Stream ended with error event
   /v1/chat/completions:
     post:
       summary: OpenAI-compatible chat completions
@@ -86,6 +104,12 @@ paths:
       responses:
         '200':
           description: Chat completion or SSE stream
+        '401':
+          description: Unauthorized
+        '429':
+          description: Rate limited
+        '503':
+          description: Generation error (stream ends with [DONE] after error chunk)
   /api/tags:
     get:
       summary: Ollama-compatible model list
@@ -100,6 +124,12 @@ paths:
       responses:
         '200':
           description: JSON or NDJSON stream
+        '401':
+          description: Unauthorized
+        '429':
+          description: Rate limited
+        '503':
+          description: Error line `{ error, done: true }` in NDJSON stream
   /api/generate:
     post:
       summary: Ollama-compatible generate
@@ -108,6 +138,10 @@ paths:
       responses:
         '200':
           description: JSON or NDJSON stream
+        '401':
+          description: Unauthorized
+        '429':
+          description: Rate limited
   /api/version:
     get:
       summary: Ollama-compatible version string
@@ -119,7 +153,7 @@ components:
     bearerAuth:
       type: http
       scheme: bearer
-      description: Optional. Set ARK_BRAIN_TOKEN on the desktop process.
+      description: Required in packaged builds. Set ARK_BRAIN_TOKEN on the desktop process.
   schemas:
     BrainChatRequest:
       type: object
@@ -135,7 +169,7 @@ components:
         model: { type: string }
         kind:
           type: string
-          enum: [chat, image, video]
+          enum: [chat, image, video, coding]
     BrainChatResponse:
       type: object
       properties:
@@ -151,3 +185,9 @@ components:
             dataUrl: { type: string }
             libraryId: { type: string }
             real: { type: boolean }
+    BrainErrorResponse:
+      type: object
+      properties:
+        ok: { type: boolean }
+        error: { type: string }
+        code: { type: string }

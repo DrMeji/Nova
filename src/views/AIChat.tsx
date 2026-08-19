@@ -51,6 +51,8 @@ import { arkRoute, routerProviderLabel, type ArkRouterResult } from '@/lib/arkRo
 import { FreeKeyWizard } from '@/components/FreeKeyWizard';
 import { ComposerPlusMenu, type ComposerPlusAction } from '@/components/ComposerPlusMenu';
 import { TokenUsageRing } from '@/components/TokenUsageRing';
+import { ArkErrorInline } from '@/components/ArkErrorInline';
+import { classifyErrorMessage } from '@/lib/errors';
 import { activityKeyForChatMode, notifyWorkDone } from '@/lib/activityIndicators';
 import { getTokenUsageRatio, recordTokenUsage } from '@/lib/tokenUsage';
 import {
@@ -234,8 +236,12 @@ function failoverChipText(routed: ArkRouterResult, pinned: ChatModelOption): str
   const name = (routed.modelName || '').trim();
   if (!name) return null;
 
+  if (hops > 1) {
+    return `Local failed → trying ${name}`;
+  }
+
   if (pinned.id === 'ark-auto' || pinned.source === 'auto') {
-    return hops > 1 ? `Switched to ${name}` : null;
+    return null;
   }
 
   const pinnedName = (pinned.name || '').toLowerCase();
@@ -245,7 +251,7 @@ function failoverChipText(routed: ArkRouterResult, pinned: ChatModelOption): str
     resolved.includes(pinnedName)
     || pinnedName.includes(resolved)
     || (pinnedId && resolved.includes(pinnedId.replace(/^(ollama|ark)-?/, '')));
-  if (hops > 1 || !same) return `Switched to ${name}`;
+  if (!same) return `Switched to ${name}`;
   return null;
 }
 
@@ -428,6 +434,7 @@ export function AIChat() {
   const [ollamaModels, setOllamaModels] = useState<ChatModelOption[]>([]);
   const [engineLocalModels, setEngineLocalModels] = useState<ChatModelOption[]>([]);
   const [engineInstallingModels, setEngineInstallingModels] = useState<ChatModelOption[]>([]);
+  const [engineReadyIds, setEngineReadyIds] = useState<Set<string>>(() => new Set());
   const [capacity, setCapacity] = useState<LiveCapacity | null>(null);
   const [generating, setGenerating] = useState(false);
   const [queueLen, setQueueLen] = useState(0);
@@ -456,6 +463,7 @@ export function AIChat() {
   const activeModelRef = useRef(activeModel);
   const [freeKeyOpen, setFreeKeyOpen] = useState(false);
   const [failoverNote, setFailoverNote] = useState<string | null>(null);
+  const [ipcFallbackDev, setIpcFallbackDev] = useState(false);
   /** Auto: equipped brain for this chat thread (sticky until failover). */
   const [threadBrain, setThreadBrain] = useState<ThreadBrain | null>(() => {
     if (route.name === 'chat' && route.chatId) {
@@ -775,10 +783,12 @@ export function AIChat() {
             }));
           setEngineLocalModels(ready);
           setEngineInstallingModels(installing);
+          setEngineReadyIds(new Set(status.models.filter(m => m.status === 'ready').map(m => m.id)));
         })
         .catch(() => {
           setEngineLocalModels([]);
           setEngineInstallingModels([]);
+          setEngineReadyIds(new Set());
         });
     };
     loadEngine();
@@ -1092,6 +1102,7 @@ export function AIChat() {
     if (!content.trim() || !user || generatingRef.current) return;
     stopRequestedRef.current = false;
     setFailoverNote(null);
+    setIpcFallbackDev(false);
     const mySeq = ++genSeqRef.current;
 
     // Prefer live route id. Blank starters (no chatId) always mint a new id — never reuse persist.
@@ -1521,7 +1532,7 @@ export function AIChat() {
           }
           usedPlugin = true;
         } catch (err) {
-          response = err instanceof Error ? err.message : 'Image generation failed';
+          response = classifyErrorMessage(err instanceof Error ? err.message : 'Image generation failed').message;
           usedPlugin = true;
         }
       } else if (!usedPlugin && mode === 'video') {
@@ -1622,7 +1633,7 @@ export function AIChat() {
           }
           usedPlugin = true;
         } catch (err) {
-          response = err instanceof Error ? err.message : 'Video generation failed';
+          response = classifyErrorMessage(err instanceof Error ? err.message : 'Video generation failed').message;
           usedPlugin = true;
         }
       } else if (!usedPlugin) {
@@ -1704,6 +1715,7 @@ export function AIChat() {
             resolvedProvider = routerProviderLabel(routed.full, providerLabel);
             const hopNote = failoverChipText(routed.full, pinnedModel);
             if (hopNote) setFailoverNote(hopNote);
+            if (routed.full.ipcFallback) setIpcFallbackDev(true);
             if (pinnedModel.source === 'auto' && routed.full.source !== 'none') {
               const saveKind =
                 mode === 'code' || looksLikeCodeAsk(content) ? 'coding' : threadKind;
@@ -1727,13 +1739,14 @@ export function AIChat() {
           void engineGenerateCancel();
           clearGeneratingIfMine();
           const timedOut = err instanceof Error && /timed out/i.test(err.message);
-          response = stopRequestedRef.current && streamedPartial
+          const rawErr = stopRequestedRef.current && streamedPartial
             ? usableAssistantText(streamedPartial, content, previousAssistant) || streamedPartial.trim()
             : streamedPartial.trim().length > 8
               ? usableAssistantText(streamedPartial, content, previousAssistant) || (looksLikePromptEcho(streamedPartial) ? '' : streamedPartial.trim())
               : (timedOut
                 ? 'Response timed out. Try again or pick another model.'
                 : (err instanceof Error ? err.message : 'ARK Router failed'));
+          response = classifyErrorMessage(rawErr).message;
           usedPlugin = true;
         }
       }
@@ -1941,6 +1954,48 @@ export function AIChat() {
             ))}
           </>
         )}
+        {(() => {
+          const notReadyLocal = modelsForTab.filter(m =>
+            m.source === 'local'
+            && m.id !== 'ark-auto'
+            && !engineReadyIds.has(m.id)
+            && !installingModels.some(i => i.id === m.id)
+            && !localModels.some(l => l.id === m.id),
+          );
+          if (!notReadyLocal.length) return null;
+          return (
+            <>
+              <div className="my-1.5 border-t border-surface-border" />
+              <p className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-content-tertiary font-semibold">
+                Not installed
+              </p>
+              {notReadyLocal.map(model => (
+                <div
+                  key={model.id}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 text-left opacity-90"
+                >
+                  <span className="w-7 h-7 rounded-lg bg-surface-hover text-content-tertiary flex items-center justify-center shrink-0">
+                    <Cpu className="w-3.5 h-3.5" />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm text-content-primary truncate">{model.name}</span>
+                    <span className="block text-[11px] text-content-tertiary truncate">{model.detail}</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setModelMenuOpen(false);
+                      navigate({ name: 'local-ai' });
+                    }}
+                    className="text-[10px] text-sky-400 hover:text-sky-300 shrink-0"
+                  >
+                    Install
+                  </button>
+                </div>
+              ))}
+            </>
+          );
+        })()}
         {cloudModels.length > 0 && (
           <>
             {(autoModels.length > 0 || localModels.length > 0 || installingModels.length > 0) && (
@@ -1999,7 +2054,7 @@ export function AIChat() {
     : null;
 
   const failoverChip = failoverNote ? (
-    <div className="mb-2 flex justify-center">
+    <div className="mb-2 flex justify-center gap-2 flex-wrap">
       <span className="inline-flex items-center gap-1.5 rounded-full border border-sky-500/30 bg-sky-500/10 pl-2.5 pr-1 py-0.5 text-[11px] text-sky-300/95">
         {failoverNote}
         <button
@@ -2011,6 +2066,17 @@ export function AIChat() {
         >
           <X className="w-3 h-3" />
         </button>
+      </span>
+      {import.meta.env.DEV && ipcFallbackDev && (
+        <span className="inline-flex items-center rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-0.5 text-[11px] text-amber-300/95">
+          IPC fallback · brain HTTP
+        </span>
+      )}
+    </div>
+  ) : import.meta.env.DEV && ipcFallbackDev ? (
+    <div className="mb-2 flex justify-center">
+      <span className="inline-flex items-center rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-0.5 text-[11px] text-amber-300/95">
+        IPC fallback · brain HTTP
       </span>
     </div>
   ) : null;
@@ -2296,7 +2362,7 @@ export function AIChat() {
                 : activeModel.source === 'auto'
                   ? autoRingDetail(threadBrain, threadKind)
                   : activeModel.source === 'local'
-                    ? 'Local · ARK Engine'
+                    ? 'On-device · no cloud quota'
                     : 'Cloud · connected key'
           }
         />
@@ -2581,7 +2647,11 @@ export function AIChat() {
                           : 'rounded-2xl px-4 py-3 bg-ark-navy-900 border border-surface-border'
                     }`}
                   >
-                    <MessageContent content={msg.content} />
+                    {msg.role === 'assistant'
+                      && msg.content.length < 600
+                      && classifyErrorMessage(msg.content).code !== 'UNKNOWN'
+                      ? <ArkErrorInline message={msg.content} />
+                      : <MessageContent content={msg.content} />}
                     {msg.role === 'assistant' && inspectOfferId === msg.id && (
                       <div className="flex flex-wrap gap-1 mt-2">
                         <button

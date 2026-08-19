@@ -12,6 +12,7 @@ const ALLOWED_HOSTS = new Set([
   'cdn-lfs.huggingface.co',
   'pollinations.ai',
   'image.pollinations.ai',
+  'gen.pollinations.ai',
   'groq.com',
   'console.groq.com',
   'aistudio.google.com',

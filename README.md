@@ -28,3 +28,5 @@ In the app: **Settings → Updates → Check** to download newer builds.
 ## Note
 
 ARK is under active development. Installers may be unsigned until a code-signing certificate is configured; Windows Smart App Control / SmartScreen may warn on first run.
+
+Uninstalling ARK currently wipes its local app data, including downloaded models and saved provider keys. Export anything you need before uninstalling.

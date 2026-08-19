@@ -294,7 +294,7 @@ export function getChatEnabledPlugins(map: PluginStateMap) {
   return PLUGIN_CATALOG.filter(p => {
     if (!isPluginWired(p.id)) return false;
     const s = getPluginRuntime(p.id, map);
-    return s.installed && s.connected && s.enabledInChat;
+    return s.installed && s.connected && s.enabledInChat && s.permissions.length > 0;
   });
 }
 

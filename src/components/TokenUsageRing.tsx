@@ -36,6 +36,8 @@ export function TokenUsageRing({
 
   const label = modelName?.trim() || 'ARK Auto';
   const detail = modelDetail?.trim() || 'Session turn budget';
+  const isLocal = /\blocal\b|on-device/i.test(detail);
+  const budgetLabel = isLocal ? 'On-device context budget' : 'Turn budget';
 
   useEffect(() => {
     if (!open) return;
@@ -82,7 +84,7 @@ export function TokenUsageRing({
         type="button"
         onClick={() => setOpen(o => !o)}
         className={`inline-flex items-center justify-center shrink-0 rounded-full hover:opacity-90 transition-opacity focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/40 ${className}`}
-        title={title || `${label} · ${pct}% of turn budget`}
+        title={title || `${label} · ${pct}% of ${isLocal ? 'on-device context' : 'turn'} budget`}
         aria-label={`${label}, token usage ${pct} percent`}
         aria-expanded={open}
       >
@@ -123,7 +125,7 @@ export function TokenUsageRing({
           <p className="text-[11px] text-content-tertiary mt-0.5 truncate">{detail}</p>
           <div className="mt-3">
             <div className="flex items-center justify-between text-[11px] mb-1.5">
-              <span className="text-content-secondary">Turn budget</span>
+              <span className="text-content-secondary">{budgetLabel}</span>
               <span className={`font-medium ${r > 0.85 ? 'text-amber-300' : 'text-content-primary'}`}>{pct}%</span>
             </div>
             <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">

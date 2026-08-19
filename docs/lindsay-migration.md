@@ -4,9 +4,7 @@ ARK owns the local brain. External apps should talk to ARK Engine on this PC —
 
 ## Base URL
 
-```
-http://127.0.0.1:8787
-```
+Copy the current URL from **ARK Settings → AI → Brain API**. ARK commonly starts on `http://127.0.0.1:8787`, but it can choose another port when that port is occupied.
 
 Keep the **ARK desktop app running** (window can be minimized to the tray). Closing ARK stops the brain API.
 
@@ -14,9 +12,11 @@ Keep the **ARK desktop app running** (window can be minimized to the tray). Clos
 
 1. Install / open ARK and finish first-run setup (Hardware → Models → Connect).
 2. Install at least one local brain in **Local AI** (or connect a free cloud key).
-3. In Lindsay (or your client), set the API / Ollama base URL to `http://127.0.0.1:8787`.
-4. Use ARK model ids (or common aliases) — see below.
-5. Optional: set `ARK_BRAIN_TOKEN` in the environment if you want a shared secret on requests.
+3. In **Settings → AI → Brain API**, use **Copy URL + token**.
+4. In Lindsay (or your client), set the API / Ollama base URL and bearer token to those copied values.
+5. Use ARK model ids (or common aliases) — see below.
+
+Packaged ARK requires the token on chat and model routes. `ARK_BRAIN_TOKEN` is optional only for an unpackaged localhost development build.
 
 ## Model names
 
@@ -37,6 +37,6 @@ Prefer exact ARK ids from `GET /api/tags` or `GET /v1/models`. If the client omi
 
 - Ollama-shaped: `/api/tags`, `/api/chat`, `/api/generate`, `/api/version`
 - OpenAI-shaped: `/v1/chat/completions`
-- Native: `/v1/chat`, `/v1/chat/stream`, `/health`
+- Native: `/v1/chat`, `/v1/chat/stream`, `/v1/contract`, `/health`
 
 Full contract: [ark-brain-api.md](./ark-brain-api.md) · OpenAPI: [ark-brain-openapi.yaml](./ark-brain-openapi.yaml) · sample: `examples/external-brain-client/`

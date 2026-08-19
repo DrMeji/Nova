@@ -8,6 +8,10 @@ export type ArkErrorCode =
   | 'PORT_IN_USE'
   | 'KEY_MISSING'
   | 'UNAUTHORIZED'
+  | 'NO_ENCRYPTION'
+  | 'RATE_LIMITED'
+  | 'EMPTY_OUTPUT'
+  | 'TEMPLATE_ONLY'
   | 'OFFLINE'
   | 'CANCELED'
   | 'UNKNOWN';
@@ -22,6 +26,18 @@ export type ArkErrorInfo = {
 export function classifyErrorMessage(raw: string): ArkErrorInfo {
   const msg = String(raw || '').trim() || 'Something went wrong';
   const lower = msg.toLowerCase();
+  if (/no[_ -]?encryption|encryption (?:is )?unavailable|not encrypted|plaintext.*(?:refus|blocked)|safe storage.*unavailable/i.test(lower)) {
+    return { code: 'NO_ENCRYPTION', message: msg, action: 'Open Security' };
+  }
+  if (/rate[_ -]?limit|too many requests|\b429\b|quota (?:exceeded|reached)|capacity limit/i.test(lower)) {
+    return { code: 'RATE_LIMITED', message: msg, action: 'Try another model' };
+  }
+  if (/empty[_ -]?output|returned (?:an? )?empty|no output (?:was )?(?:returned|generated)/i.test(lower)) {
+    return { code: 'EMPTY_OUTPUT', message: msg, action: 'Retry' };
+  }
+  if (/template[_ -]?only|template (?:preview|output)|placeholder (?:only|output)|preview only/i.test(lower)) {
+    return { code: 'TEMPLATE_ONLY', message: msg, action: 'Choose a real generation model' };
+  }
   if (/no local gguf|not ready in ark engine|no model|install a local brain/i.test(lower)) {
     return { code: 'NO_MODEL', message: msg, action: 'Open Local AI', route: { name: 'local-ai' } };
   }

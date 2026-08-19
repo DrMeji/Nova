@@ -2,20 +2,25 @@
 
 export type HttpResult = { ok: boolean; status: number; data: unknown };
 
+export type DesktopHttpOptions = {
+  method?: string;
+  headers?: Record<string, string>;
+  body?: string;
+  /** Inject Authorization from main-process secrets — never pass keys in headers when set. */
+  authProviderId?: string;
+};
+
 export async function desktopRequest(
   url: string,
-  options?: {
-    method?: string;
-    headers?: Record<string, string>;
-    body?: string;
-  },
+  options?: DesktopHttpOptions,
 ): Promise<HttpResult> {
   const method = options?.method ?? 'GET';
   const headers = options?.headers ?? {};
   const body = options?.body;
+  const authProviderId = options?.authProviderId;
 
   if (window.arkDesktop?.httpRequest) {
-    return window.arkDesktop.httpRequest(url, { method, headers, body });
+    return window.arkDesktop.httpRequest(url, { method, headers, body, authProviderId });
   }
 
   if (method === 'GET' && window.arkDesktop?.httpGet) {
@@ -39,11 +44,7 @@ export async function desktopRequest(
  */
 export async function desktopStreamRequest(
   url: string,
-  options: {
-    method?: string;
-    headers?: Record<string, string>;
-    body?: string;
-  },
+  options: DesktopHttpOptions,
   onChunk: (text: string) => void,
 ): Promise<{ ok: boolean; status?: number; text: string; error?: string }> {
   if (!window.arkDesktop?.httpStream) {

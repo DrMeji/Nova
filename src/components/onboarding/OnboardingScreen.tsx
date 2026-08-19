@@ -187,7 +187,7 @@ export function OnboardingScreen() {
     saveHardwareSnapshot(detected);
     const recs = recommendationsFor(detected);
     setHw(detected);
-    setModels(recs);
+    setModels(recs.slice(0, 2));
     setSelectedId(recs.find(m => m.recommended)?.id ?? recs[0]?.id ?? null);
     setHwScanning(false);
   };

@@ -24,14 +24,14 @@ function loadMap() {
 }
 
 function saveMap(map) {
-  const json = JSON.stringify(map && typeof map === 'object' ? map : {});
-  const file = secretsPath();
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  if (!safeStorage.isEncryptionAvailable()) {
+  if (!encryptionAvailable()) {
     const err = new Error('Secure storage unavailable on this PC — API keys cannot be saved safely');
     err.code = 'NO_ENCRYPTION';
     throw err;
   }
+  const json = JSON.stringify(map && typeof map === 'object' ? map : {});
+  const file = secretsPath();
+  fs.mkdirSync(path.dirname(file), { recursive: true });
   const encrypted = safeStorage.encryptString(json);
   fs.writeFileSync(file, encrypted);
 }

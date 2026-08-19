@@ -121,9 +121,17 @@ async function push(cwd, token) {
   return { ok: true, message: result.stderr || result.stdout || 'Pushed.', remote: st.remote };
 }
 
-async function cloneRepo(cwd, url, token) {
+async function cloneRepo(cwd, url, token, opts = {}) {
   const dest = path.resolve(cwd);
   fs.mkdirSync(dest, { recursive: true });
+  const existing = fs.readdirSync(dest).filter(n => n !== '.git' && !n.startsWith('.'));
+  if (existing.length > 0 && !opts.force) {
+    return {
+      ok: false,
+      error: 'Project folder is not empty. Confirm overwrite before cloning into it.',
+      needsConfirm: true,
+    };
+  }
   const tmp = path.join(path.dirname(dest), `${path.basename(dest)}-clone-${Date.now()}`);
   const cloned = await runGit(path.dirname(dest), ['clone', '--depth', '1', url, tmp], {
     timeout: 180_000,

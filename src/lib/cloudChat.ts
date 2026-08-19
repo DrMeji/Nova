@@ -69,6 +69,7 @@ async function openaiCompatible(
   history: RouterChatTurn[],
   extraHeaders?: Record<string, string>,
   onChunk?: (text: string) => void,
+  providerKeyId?: string,
 ): Promise<string | null> {
   const system = routerSystemPrompt(history);
   const visionAt = lastUserIndex(history);
@@ -80,16 +81,21 @@ async function openaiCompatible(
     })),
   ];
 
+  const useMainAuth = Boolean(providerKeyId && window.arkDesktop?.httpRequest);
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...extraHeaders,
+  };
+  if (!useMainAuth && key) headers.Authorization = `Bearer ${key}`;
+  const authOpts = useMainAuth ? { authProviderId: providerKeyId } : {};
+
   if (onChunk) {
     const streamed = await desktopStreamRequest(
       url,
       {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${key}`,
-          'Content-Type': 'application/json',
-          ...extraHeaders,
-        },
+        headers,
+        ...authOpts,
         body: JSON.stringify({
           model,
           messages,
@@ -106,11 +112,8 @@ async function openaiCompatible(
 
   const res = await desktopRequest(url, {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${key}`,
-      'Content-Type': 'application/json',
-      ...extraHeaders,
-    },
+    headers,
+    ...authOpts,
     body: JSON.stringify({
       model,
       messages,
@@ -129,7 +132,7 @@ async function chatOpenAI(
   model: string,
   onChunk?: (text: string) => void,
 ) {
-  return openaiCompatible('https://api.openai.com/v1/chat/completions', key, model, history, undefined, onChunk);
+  return openaiCompatible('https://api.openai.com/v1/chat/completions', key, model, history, undefined, onChunk, 'openai');
 }
 
 function anthropicTurnContent(t: RouterChatTurn, attachVision: boolean) {
@@ -159,11 +162,13 @@ async function chatAnthropic(
     role: t.role === 'assistant' ? 'assistant' : 'user',
     content: anthropicTurnContent(t, i === visionAt),
   }));
-  const headers = {
-    'x-api-key': key,
+  const useMainAuth = Boolean(window.arkDesktop?.httpRequest);
+  const headers: Record<string, string> = {
     'anthropic-version': '2023-06-01',
     'Content-Type': 'application/json',
   };
+  if (!useMainAuth) headers['x-api-key'] = key;
+  const authOpts = useMainAuth ? { authProviderId: 'anthropic' } : {};
   const body = {
     model,
     max_tokens: 4096,
@@ -177,6 +182,7 @@ async function chatAnthropic(
       {
         method: 'POST',
         headers,
+        ...authOpts,
         body: JSON.stringify({ ...body, stream: true }),
       },
       onChunk,
@@ -188,6 +194,7 @@ async function chatAnthropic(
   const res = await desktopRequest('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers,
+    ...authOpts,
     body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(apiErrorMessage(res, 'Anthropic error'));
@@ -204,7 +211,7 @@ async function chatOpenRouter(
   return openaiCompatible('https://openrouter.ai/api/v1/chat/completions', key, model, history, {
     'HTTP-Referer': 'https://ark.local',
     'X-Title': 'ARK',
-  }, onChunk);
+  }, onChunk, 'openrouter');
 }
 
 async function chatGroq(
@@ -213,7 +220,7 @@ async function chatGroq(
   model: string,
   onChunk?: (text: string) => void,
 ) {
-  return openaiCompatible('https://api.groq.com/openai/v1/chat/completions', key, model, history, undefined, onChunk);
+  return openaiCompatible('https://api.groq.com/openai/v1/chat/completions', key, model, history, undefined, onChunk, 'groq');
 }
 
 async function chatGoogle(
@@ -291,6 +298,7 @@ async function chatHuggingFace(
     history,
     undefined,
     onChunk,
+    'huggingface',
   );
 }
 
@@ -308,6 +316,7 @@ async function chatNvidia(
     history,
     undefined,
     onChunk,
+    'nvidia',
   );
 }
 
@@ -317,7 +326,7 @@ async function chatTogether(
   model: string,
   onChunk?: (text: string) => void,
 ) {
-  return openaiCompatible('https://api.together.xyz/v1/chat/completions', key, model, history, undefined, onChunk);
+  return openaiCompatible('https://api.together.xyz/v1/chat/completions', key, model, history, undefined, onChunk, 'together');
 }
 
 async function chatFireworks(
@@ -333,6 +342,7 @@ async function chatFireworks(
     history,
     undefined,
     onChunk,
+    'fireworks',
   );
 }
 
@@ -342,7 +352,7 @@ async function chatDeepSeek(
   model: string,
   onChunk?: (text: string) => void,
 ) {
-  return openaiCompatible('https://api.deepseek.com/chat/completions', key, model, history, undefined, onChunk);
+  return openaiCompatible('https://api.deepseek.com/chat/completions', key, model, history, undefined, onChunk, 'deepseek');
 }
 
 async function chatMistral(
@@ -351,7 +361,7 @@ async function chatMistral(
   model: string,
   onChunk?: (text: string) => void,
 ) {
-  return openaiCompatible('https://api.mistral.ai/v1/chat/completions', key, model, history, undefined, onChunk);
+  return openaiCompatible('https://api.mistral.ai/v1/chat/completions', key, model, history, undefined, onChunk, 'mistral');
 }
 
 async function chatCerebras(
@@ -360,7 +370,7 @@ async function chatCerebras(
   model: string,
   onChunk?: (text: string) => void,
 ) {
-  return openaiCompatible('https://api.cerebras.ai/v1/chat/completions', key, model, history, undefined, onChunk);
+  return openaiCompatible('https://api.cerebras.ai/v1/chat/completions', key, model, history, undefined, onChunk, 'cerebras');
 }
 
 async function chatSambaNova(
@@ -369,7 +379,7 @@ async function chatSambaNova(
   model: string,
   onChunk?: (text: string) => void,
 ) {
-  return openaiCompatible('https://api.sambanova.ai/v1/chat/completions', key, model, history, undefined, onChunk);
+  return openaiCompatible('https://api.sambanova.ai/v1/chat/completions', key, model, history, undefined, onChunk, 'sambanova');
 }
 
 /** Progressive word reveal — fallback when a provider has no SSE path (Google/Anthropic). */

@@ -8,13 +8,23 @@
  */
 
 const http = require('http');
+const crypto = require('crypto');
 const arkModelRank = require('./arkModelRank.cjs');
-
-const CONTRACT_VERSION = '0.4.0';
 
 const CONTRACT_VERSION = '0.4.0';
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
 const MAX_CONCURRENT = 4;
+
+function timingSafeEqualToken(presented, expected) {
+  const a = Buffer.from(String(presented || ''), 'utf8');
+  const b = Buffer.from(String(expected || ''), 'utf8');
+  if (a.length !== b.length || a.length === 0) return false;
+  try {
+    return crypto.timingSafeEqual(a, b);
+  } catch {
+    return false;
+  }
+}
 
 function readBody(req) {
   return new Promise((resolve, reject) => {
@@ -249,7 +259,8 @@ function createBrainServer(opts) {
 
     if (mustAuth) {
       const auth = String(req.headers.authorization || '');
-      const ok = auth === `Bearer ${brainToken}` || auth === `bearer ${brainToken}`;
+      const presented = auth.replace(/^Bearer\s+/i, '').trim();
+      const ok = timingSafeEqualToken(presented, brainToken);
       if (!ok && !openPaths.has(url)) {
         return json(res, 401, {
           ok: false,
@@ -258,7 +269,8 @@ function createBrainServer(opts) {
       }
     } else if (brainToken) {
       const auth = String(req.headers.authorization || '');
-      const ok = auth === `Bearer ${brainToken}` || auth === `bearer ${brainToken}`;
+      const presented = auth.replace(/^Bearer\s+/i, '').trim();
+      const ok = timingSafeEqualToken(presented, brainToken);
       if (!ok && !openPaths.has(url)) {
         return json(res, 401, {
           ok: false,
@@ -276,13 +288,16 @@ function createBrainServer(opts) {
           service: 'ark-brain',
           version: CONTRACT_VERSION,
           contractVersion: CONTRACT_VERSION,
+          port: activePort,
+          url: `http://127.0.0.1:${activePort}`,
+          ggufServerPort: engine.ggufServerPort || engine.ggufServer?.port || null,
           engine: {
             phase: engine.phase,
             activeModelId: engine.activeModelId,
             activeModelName: engine.activeModelName,
           },
           compat: ['ollama-/api', 'openai-/v1/chat/completions'],
-          note: 'ARK brain API — ARK Engine on this device (drop-in brain for external apps)',
+          note: 'loopback brain',
         });
       }
 
@@ -290,10 +305,11 @@ function createBrainServer(opts) {
         return json(res, 200, {
           ok: true,
           contractVersion: CONTRACT_VERSION,
-          baseUrl: `http://127.0.0.1:${port}`,
+          baseUrl: `http://127.0.0.1:${activePort}`,
+          port: activePort,
           endpoints: publicEndpoints,
-          auth: brainToken ? 'bearer' : 'none (localhost)',
-          kinds: ['chat', 'image', 'video'],
+          auth: mustAuth || brainToken ? 'bearer' : 'none (localhost)',
+          kinds: ['chat', 'image', 'video', 'coding'],
           messages: true,
           compat: {
             ollama: ['GET /api/tags', 'POST /api/chat', 'POST /api/generate'],
@@ -309,11 +325,19 @@ function createBrainServer(opts) {
           ok: true,
           models: engine.models.filter((m) => m.status === 'ready'),
           activeModelId: engine.activeModelId,
+          port: activePort,
         });
       }
 
       if (url === '/v1/engine' && req.method === 'GET') {
-        return json(res, 200, { ok: true, ...arkEngine.getStatus() });
+        const engine = arkEngine.getStatus();
+        return json(res, 200, {
+          ok: true,
+          ...engine,
+          brainPort: activePort,
+          brainUrl: `http://127.0.0.1:${activePort}`,
+          ggufServerPort: engine.ggufServerPort || engine.ggufServer?.port || null,
+        });
       }
 
       // ── Native chat ───────────────────────────────────────────────
@@ -398,31 +422,40 @@ function createBrainServer(opts) {
 
           if (stream) {
             res.writeHead(200, sseHeaders(corsOrigin));
-            const result = await runGenerateStream(parsed, (text) => {
-              const chunk = {
+            try {
+              const result = await runGenerateStream(parsed, (text) => {
+                const chunk = {
+                  id: `ark-${Date.now()}`,
+                  object: 'chat.completion.chunk',
+                  created: Math.floor(Date.now() / 1000),
+                  model: modelLabel,
+                  choices: [{ index: 0, delta: { content: String(text || '') }, finish_reason: null }],
+                };
+                res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+              });
+              const errPayload = brainErrorPayload(result);
+              if (errPayload) {
+                res.write(`data: ${JSON.stringify({ error: { message: errPayload.error || 'Generation failed', type: 'ark_error' } })}\n\n`);
+                res.write('data: [DONE]\n\n');
+                res.end();
+                return;
+              }
+              res.write(`data: ${JSON.stringify({
                 id: `ark-${Date.now()}`,
                 object: 'chat.completion.chunk',
                 created: Math.floor(Date.now() / 1000),
-                model: modelLabel,
-                choices: [{ index: 0, delta: { content: String(text || '') }, finish_reason: null }],
-              };
-              res.write(`data: ${JSON.stringify(chunk)}\n\n`);
-            });
-            const errPayload = brainErrorPayload(result);
-            if (errPayload) {
-              res.write(`data: ${JSON.stringify({ error: errPayload })}\n\n`);
+                model: result.modelId || modelLabel,
+                choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+              })}\n\n`);
+              res.write('data: [DONE]\n\n');
               res.end();
-              return;
+            } catch (err) {
+              res.write(`data: ${JSON.stringify({
+                error: { message: err instanceof Error ? err.message : 'Generation failed', type: 'ark_error' },
+              })}\n\n`);
+              res.write('data: [DONE]\n\n');
+              res.end();
             }
-            res.write(`data: ${JSON.stringify({
-              id: `ark-${Date.now()}`,
-              object: 'chat.completion.chunk',
-              created: Math.floor(Date.now() / 1000),
-              model: result.modelId || modelLabel,
-              choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
-            })}\n\n`);
-            res.write('data: [DONE]\n\n');
-            res.end();
             return;
           }
 
@@ -478,6 +511,7 @@ function createBrainServer(opts) {
               'Access-Control-Allow-Origin': corsOrigin,
               Vary: 'Origin',
             });
+            try {
             let full = '';
             const result = await runGenerateStream(parsed, (text) => {
               full += String(text || '');
@@ -528,6 +562,12 @@ function createBrainServer(opts) {
             res.write(`${JSON.stringify(doneLine)}\n`);
             res.end();
             return;
+            } catch (streamErr) {
+              const msg = streamErr instanceof Error ? streamErr.message : 'Stream failed';
+              res.write(`${JSON.stringify({ error: msg, done: true })}\n`);
+              res.end();
+              return;
+            }
           }
 
           const result = await runGenerate(parsed);

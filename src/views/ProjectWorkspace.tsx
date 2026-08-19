@@ -2021,6 +2021,12 @@ export function ProjectWorkspace() {
 
       buildAbortRef.current = null;
       if (replyText) replyText = withTiming(replyText);
+      if (
+        replyText
+        && /stalled|timed out|stopped mid-file|did not finish|cut off|could not finish|offline starter/i.test(replyText)
+      ) {
+        replyText = appendScaffoldHonesty(replyText);
+      }
 
       if (runId !== runIdRef.current) {
         if (replyText) {
@@ -2526,17 +2532,24 @@ export function ProjectWorkspace() {
                     {findQuery.trim() && findHits.length === 0 ? (
                       <p className="text-[10px] text-content-tertiary px-1 py-2">No matches</p>
                     ) : (
-                      findHits.slice(0, 40).map(hit => (
-                        <button
-                          key={`${hit.path}:${hit.line}:${hit.text.slice(0, 24)}`}
-                          type="button"
-                          onClick={() => openPathInEditor(hit.path, hit.line)}
-                          className="w-full text-left px-1.5 py-1 rounded-md hover:bg-surface-hover"
-                        >
-                          <p className="text-[10px] text-sky-300 truncate">{hit.path}:{hit.line}</p>
-                          <p className="text-[10px] text-content-tertiary truncate">{hit.text}</p>
-                        </button>
-                      ))
+                      <>
+                        {findHits.length > 40 && (
+                          <p className="text-[10px] text-content-tertiary px-1 py-1">
+                            Showing 40 of {findHits.length}
+                          </p>
+                        )}
+                        {findHits.slice(0, 40).map(hit => (
+                          <button
+                            key={`${hit.path}:${hit.line}:${hit.text.slice(0, 24)}`}
+                            type="button"
+                            onClick={() => openPathInEditor(hit.path, hit.line)}
+                            className="w-full text-left px-1.5 py-1 rounded-md hover:bg-surface-hover"
+                          >
+                            <p className="text-[10px] text-sky-300 truncate">{hit.path}:{hit.line}</p>
+                            <p className="text-[10px] text-content-tertiary truncate">{hit.text}</p>
+                          </button>
+                        ))}
+                      </>
                     )}
                   </div>
                 </div>

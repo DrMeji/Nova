@@ -66,10 +66,9 @@ async function tick(id: string) {
     }
 
     if (err) {
-      jobs.set(id, { ...job, progress: p, phase, error: err });
+      jobs.set(id, { ...job, progress: p, phase: 'error', error: err });
       emit();
       stopTimer(id);
-      window.setTimeout(() => removeJob(id), 12000);
       return;
     }
 
@@ -184,8 +183,19 @@ export async function startEngineDownload(opts: {
     });
     emit();
     stopTimer(opts.id);
-    window.setTimeout(() => removeJob(opts.id), 2500);
   }
+}
+
+export function dismissEngineDownloadError(id: string) {
+  removeJob(id);
+}
+
+export async function retryEngineDownload(id: string) {
+  const job = jobs.get(id);
+  if (!job) return;
+  const { name, source } = job;
+  removeJob(id);
+  await startEngineDownload({ id, name, source });
 }
 
 export async function cancelEngineDownload(id: string) {

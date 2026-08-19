@@ -15,7 +15,7 @@ export function ArkErrorInline({
   return (
     <div className="rounded-xl border border-rose-500/30 bg-rose-950/20 px-3 py-2.5 text-sm text-rose-100/90 space-y-2">
       <p className="leading-relaxed whitespace-pre-wrap">{err.message}</p>
-      {err.action ? (
+      {err.action && (onAction || err.route) ? (
         <button
           type="button"
           className="text-xs font-medium text-rose-200 hover:text-white underline underline-offset-2"

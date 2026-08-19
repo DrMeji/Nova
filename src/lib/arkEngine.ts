@@ -13,7 +13,7 @@ export type ArkEngineStatus = {
   ok: boolean;
   service: string;
   version: string;
-  phase: 'offline' | 'starting' | 'online';
+  phase: 'offline' | 'starting' | 'online' | 'degraded';
   activeModelId: string;
   activeModelName: string;
   modelsDir: string;

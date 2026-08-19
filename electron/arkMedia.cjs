@@ -269,8 +269,20 @@ function writeLibraryEntry(entry) {
   let list = [];
   try {
     if (fs.existsSync(libPath)) list = JSON.parse(fs.readFileSync(libPath, 'utf8'));
-  } catch {
+  } catch (err) {
     list = [];
+    try {
+      const backup = `${libPath}.bak-${Date.now()}`;
+      if (fs.existsSync(libPath)) fs.copyFileSync(libPath, backup);
+      fs.writeFileSync(libPath, '[]', 'utf8');
+      const arkCrashLog = require('./arkCrashLog.cjs');
+      arkCrashLog.appendReport('media-library-reset', {
+        error: err instanceof Error ? err.message : String(err),
+        backup,
+      });
+    } catch {
+      /* ignore */
+    }
   }
   // Never persist huge dataUrls in the index
   const { dataUrl: _drop, ...meta } = entry;
@@ -287,7 +299,20 @@ function listLibrary(opts = {}) {
   try {
     if (!fs.existsSync(libPath)) return [];
     list = JSON.parse(fs.readFileSync(libPath, 'utf8'));
-  } catch {
+  } catch (err) {
+    try {
+      const backup = `${libPath}.bak-${Date.now()}`;
+      if (fs.existsSync(libPath)) fs.copyFileSync(libPath, backup);
+      fs.writeFileSync(libPath, '[]', 'utf8');
+      const arkCrashLog = require('./arkCrashLog.cjs');
+      arkCrashLog.appendReport('media-library-reset', {
+        error: err instanceof Error ? err.message : String(err),
+        backup,
+        phase: 'list',
+      });
+    } catch {
+      /* ignore */
+    }
     return [];
   }
   return list.map((item) => {
