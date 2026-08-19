@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { useAuth } from '@/context/AuthContext';
-import { Loader2, Mail, Lock, AlertCircle, Zap, Eye, EyeOff, User } from 'lucide-react';
+import { Loader2, Mail, Lock, AlertCircle, Zap, Eye, EyeOff } from 'lucide-react';
 import { AuthAmbientOrbs } from '@/components/auth/AuthAmbientOrbs';
 
 const TYPE_PHRASES = [
@@ -73,7 +73,6 @@ export function AuthScreen() {
   const [mode, setMode] = useState<AuthMode>('signin');
   const [showBypass, setShowBypass] = useState(true);
   const [email, setEmail] = useState('');
-  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -119,17 +118,6 @@ export function AuthScreen() {
       setError('Enter a valid email to continue.');
       return;
     }
-    if (mode === 'signup') {
-      const name = username.trim();
-      if (name.length < 2) {
-        setError('Pick a username (at least 2 characters).');
-        return;
-      }
-      if (!/^[a-zA-Z0-9_\-. ]{2,32}$/.test(name)) {
-        setError('Username can use letters, numbers, spaces, _ . - (2–32 chars).');
-        return;
-      }
-    }
     if (password.length < 6) {
       setError('Password must be at least 6 characters.');
       return;
@@ -146,7 +134,8 @@ export function AuthScreen() {
       return;
     }
 
-    const created = await signUp(email.trim(), password, username.trim());
+    // Users do not pick their own handle/username. We assign a 7-digit ARK ID automatically.
+    const created = await signUp(email.trim(), password);
     if (created.error) {
       setLoading(false);
       setError(created.error);
@@ -223,21 +212,8 @@ export function AuthScreen() {
               </div>
 
               {mode === 'signup' && (
-                <div className="relative animate-fade-in">
-                  <User className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-content-tertiary" />
-                  <input
-                    type="text"
-                    required
-                    value={username}
-                    onChange={e => setUsername(e.target.value)}
-                    placeholder="Choose a username"
-                    className="ark-input pl-10 h-12 rounded-xl"
-                    autoComplete="username"
-                    maxLength={32}
-                  />
-                  <p className="mt-1.5 text-[11px] text-content-tertiary px-1">
-                    2–32 characters. Letters, numbers, spaces, _ . -
-                  </p>
+                <div className="text-[11px] text-content-tertiary px-1 animate-fade-in">
+                  Your 7-digit ARK ID is assigned automatically.
                 </div>
               )}
 

@@ -143,7 +143,7 @@ function ChatModeTabs() {
           key={t.id}
           type="button"
           onClick={() => go(t.id)}
-          className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+          className={`rounded-full px-4 py-2 text-sm font-semibold transition-colors ${
             current === t.id
               ? 'bg-surface-hover text-content-primary'
               : 'text-content-tertiary hover:text-content-primary'
@@ -2583,7 +2583,7 @@ export function AIChat() {
             </div>
             {mode === 'image' && (
               <>
-                {(!capacity || !capacity.imageFree) && ideaGrid(IMAGE_IDEAS, 'Upload a photo')}
+                {ideaGrid(IMAGE_IDEAS, 'Upload a photo')}
                 {creations.filter(c => c.kind !== 'video').length > 0 && (
                   <div className="w-full max-w-4xl mx-auto mt-6">
                     <p className="text-sm font-semibold text-content-primary mb-3 px-1">Your images</p>
@@ -2611,9 +2611,10 @@ export function AIChat() {
             {mode === 'video' && (
               <>
                 <p className="text-[11px] text-amber-300/90 text-center mt-4 max-w-md mx-auto">
-                  Motion still when MP4 isn’t available. Labels in the bubble match History: Generated, Preview, or Motion still.
+                  Video fallback: if MP4 isn’t available, ARK falls back to a motion still.
+                  History bubbles may say “Generated”, “Preview”, or “Motion still”.
                 </p>
-                {(!capacity || !capacity.videoFree) && ideaGrid(VIDEO_IDEAS)}
+                {ideaGrid(VIDEO_IDEAS)}
               </>
             )}
             {mode === 'code' && (!capacity || !capacity.liveChat) && ideaGrid(CODE_IDEAS)}

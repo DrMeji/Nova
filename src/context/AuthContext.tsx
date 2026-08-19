@@ -10,7 +10,7 @@ import {
   prepareLaunchForTesting,
 } from '@/lib/setup';
 import { hydrateProviderApiKeys } from '@/lib/localPrefs';
-import { ensureArkId, readLocalArkId } from '@/lib/arkUserId';
+import { ensureArkId, formatArkId, readLocalArkId } from '@/lib/arkUserId';
 import { mergeGuestSocialToCloud } from '@/lib/arkSocial';
 
 // Guest identity used when login is bypassed (dev / testing only).
@@ -237,20 +237,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
+      // If the caller does not provide a displayName, we leave user_metadata empty.
+      // We'll assign the ARK ID display name after we generate/claim their 7-digit ARK ID.
       options: { data: { display_name: displayName?.trim() || undefined } },
     });
     if (!error && data.user) {
       try {
+        const trimmed = displayName?.trim() || null;
         await supabase.from('profiles').upsert({
           id: data.user.id,
-          display_name: displayName?.trim() || null,
+          display_name: trimmed,
           // Cloud flag is informational; local install setup still gates the UI.
           onboarding_completed: isSetupCompleted(),
         });
-        await ensureArkId(data.user.id);
+        const arkId = await ensureArkId(data.user.id);
+
+        // Enforce: users do not choose their own username at signup.
+        // If no displayName was provided, set display_name to the 7-digit ARK ID.
+        if (!trimmed) {
+          const auto = formatArkId(arkId);
+          await supabase.from('profiles').update({ display_name: auto }).eq('id', data.user.id);
+          const { setLocalPrefs } = await import('@/lib/localPrefs');
+          setLocalPrefs({ displayName: auto });
+        }
       } catch {
         /* profile row may be created by trigger */
       }
+      // If a caller provided a displayName, keep the prior behavior.
       if (displayName?.trim()) {
         try {
           const { setLocalPrefs } = await import('@/lib/localPrefs');

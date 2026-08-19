@@ -462,8 +462,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   };
 
   const handleNavClick = (item: { label: string; route?: Route; activity?: ActivityKey; comingSoon?: boolean }) => {
-    if (item.comingSoon && item.route) {
-      navigate(item.route);
+    if (item.comingSoon) {
+      // Parked features should not be navigated into (shows a "not enabled" path instead).
+      window.dispatchEvent(new CustomEvent('ark:open-settings', { detail: { section: 'testers' } }));
       return;
     }
     if (item.activity) clearActivity(item.activity);
@@ -699,7 +700,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               <div className="space-y-2">
                 {modeLabel ? (
                   <p className="px-1 text-[10px] text-content-tertiary truncate" title={capacity?.summary}>
-                    Capacity · {modeLabel}
+                    Capacity: {modeLabel === 'Hybrid' ? 'Local + Cloud' : modeLabel}
                     {capacity?.liveChat ? '' : ' · limited'}
                   </p>
                 ) : capacity ? (

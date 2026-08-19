@@ -287,6 +287,19 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.81',
+    channel: 'stable' as const,
+    date: 'Aug 18, 2026',
+    title: 'Harden auth & restore media/UI clarity',
+    notes: [
+      'Signup no longer asks for a custom username (auto ARK ID display name)',
+      'Parked Connect items no longer navigate (opens Settings → Testers)',
+      'Title bar no longer shows confusing Hybrid pill; Capacity label clarifies local+cloud',
+      'Models list returns to download/check/trash (Chat/Code pills are non-clickable)',
+      'Image/Video templates are restored; motion-still helper text clarified',
+    ],
+  },
+  {
     version: '0.1.80',
     channel: 'stable' as const,
     date: 'Aug 18, 2026',

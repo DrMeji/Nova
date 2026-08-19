@@ -428,22 +428,24 @@ function ModelInstallControl({
             <Trash2 className="w-4 h-4" />
           </button>
         )}
-        <button
-          type="button"
-          className={`rounded-md px-1.5 py-0.5 text-[10px] ${isChatDefault ? 'text-sky-200 bg-sky-500/15' : 'text-sky-300 hover:bg-sky-500/10'}`}
-          title={isChatDefault ? 'Default for new chats' : 'Use this as the default for Chat'}
-          onClick={() => setLocalPrefs({ defaultModelId: modelId, lastChatModelId: modelId })}
+        <span
+          className={`rounded-md px-2 py-0.5 text-[10px] ${
+            isChatDefault ? 'text-sky-200 bg-sky-500/15' : 'text-sky-300'
+          }`}
+          title={isChatDefault ? 'Default for new chats' : 'Available for Chat (default not set)'}
+          aria-hidden
         >
           {isChatDefault ? 'Chat ✓' : 'Chat'}
-        </button>
-        <button
-          type="button"
-          className={`rounded-md px-1.5 py-0.5 text-[10px] ${isCodeDefault ? 'text-violet-200 bg-violet-500/15' : 'text-violet-300 hover:bg-violet-500/10'}`}
-          title={isCodeDefault ? 'Default for Code' : 'Use this as the default for Code'}
-          onClick={() => setLocalPrefs({ defaultCodeModelId: modelId })}
+        </span>
+        <span
+          className={`rounded-md px-2 py-0.5 text-[10px] ${
+            isCodeDefault ? 'text-violet-200 bg-violet-500/15' : 'text-violet-300'
+          }`}
+          title={isCodeDefault ? 'Default for Code' : 'Available for Code (default not set)'}
+          aria-hidden
         >
           {isCodeDefault ? 'Code ✓' : 'Code'}
-        </button>
+        </span>
       </span>
     );
   }
