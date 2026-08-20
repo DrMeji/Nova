@@ -3,51 +3,48 @@ import { Copy, Download, Check } from 'lucide-react';
 import { resolveMediaRef } from '@/lib/recentStore';
 import { usableAssistantText } from '@/lib/chatHistory';
 
-const PIXEL_COLS = 14;
-const PIXEL_ROWS = 10;
+const PIXEL_COLS = 18;
+const PIXEL_ROWS = 14;
 
-function MediaPixelField({ video }: { video?: boolean }) {
+function MediaPixelField() {
   const cells = useMemo(() => {
     const list: { id: number; delay: number; dur: number }[] = [];
     for (let i = 0; i < PIXEL_COLS * PIXEL_ROWS; i++) {
       list.push({
         id: i,
-        delay: (i * 37) % 1200,
-        dur: 900 + ((i * 53) % 900),
+        delay: (i * 41 + (i % 7) * 90) % 1600,
+        dur: 850 + ((i * 59) % 1100),
       });
     }
     return list;
   }, []);
 
+  // Full-card grid: equal padding on all sides (no paddingTop squeeze into the foot).
   return (
     <div
-      className={`absolute inset-x-0 bottom-0 flex items-end justify-center px-8 pb-10 pointer-events-none ${
-        video ? 'h-[55%]' : 'h-[58%]'
-      }`}
+      className="absolute inset-0 pointer-events-none"
+      style={{ padding: 14 }}
       aria-hidden
     >
       <div
-        className="grid w-full max-w-[240px] gap-[6px]"
+        className="grid h-full w-full gap-[4px]"
         style={{
           gridTemplateColumns: `repeat(${PIXEL_COLS}, minmax(0, 1fr))`,
           gridTemplateRows: `repeat(${PIXEL_ROWS}, minmax(0, 1fr))`,
         }}
       >
-        {cells.map((cell, i) => {
-          const row = Math.floor(i / PIXEL_COLS);
-          const fade = 0.15 + (row / (PIXEL_ROWS - 1)) * 0.85;
-          return (
-            <span
-              key={cell.id}
-              className="media-gen-pixel aspect-square rounded-full"
-              style={{
-                opacity: fade,
-                animationDelay: `${cell.delay}ms`,
-                animationDuration: `${cell.dur}ms`,
-              }}
-            />
-          );
-        })}
+        {cells.map((cell) => (
+          <span
+            key={cell.id}
+            className="media-gen-pixel rounded-full"
+            style={{
+              width: '100%',
+              height: '100%',
+              animationDelay: `${cell.delay}ms`,
+              animationDuration: `${cell.dur}ms`,
+            }}
+          />
+        ))}
       </div>
     </div>
   );
@@ -56,20 +53,23 @@ function MediaPixelField({ video }: { video?: boolean }) {
 export function GeneratingPlaceholder({
   kind,
   label,
+  sessionKey,
 }: {
   kind: 'image' | 'video' | 'chat';
   label?: string;
+  sessionKey?: string;
 }) {
   const [elapsed, setElapsed] = useState(0);
 
   useEffect(() => {
     if (kind === 'chat') return;
     const t0 = Date.now();
+    setElapsed(0);
     const id = window.setInterval(() => {
       setElapsed(Math.floor((Date.now() - t0) / 1000));
     }, 1000);
     return () => window.clearInterval(id);
-  }, [kind, label]);
+  }, [kind, sessionKey]);
 
   if (kind === 'chat') {
     return (
@@ -87,27 +87,56 @@ export function GeneratingPlaceholder({
   const headline = label
     || (kind === 'video' ? 'Creating video' : 'Creating image');
 
+  // Slightly smaller card; fixed px so flex layouts cannot collapse it.
   return (
     <div
-      className={`relative overflow-hidden rounded-2xl bg-[#2a2b32] ${
-        kind === 'video' ? 'aspect-video' : 'aspect-square'
-      }`}
-      style={{
-        width: 'min(100%, 26rem)',
-        minWidth: '16rem',
-        minHeight: kind === 'video' ? '10rem' : '16rem',
-      }}
-      aria-label={headline}
       role="status"
+      aria-label={headline}
+      style={{
+        position: 'relative',
+        width: 320,
+        maxWidth: '100%',
+        height: kind === 'video' ? 180 : 320,
+        borderRadius: 16,
+        background: '#2a2b32',
+        overflow: 'hidden',
+        flexShrink: 0,
+      }}
     >
       <div className="absolute inset-0 media-gen-wash" />
-      <MediaPixelField video={kind === 'video'} />
-      <div className="absolute inset-x-0 top-0 p-5 sm:p-6 z-10">
-        <p className="text-[15px] sm:text-base font-medium text-white tracking-tight">
+      <MediaPixelField />
+      <div
+        style={{
+          position: 'absolute',
+          insetInline: 0,
+          top: 0,
+          padding: '14px 16px 0',
+          zIndex: 2,
+          background: 'linear-gradient(180deg, rgba(42,43,50,0.92) 0%, rgba(42,43,50,0.55) 70%, transparent 100%)',
+          paddingBottom: 28,
+        }}
+      >
+        <p
+          style={{
+            margin: 0,
+            fontSize: 15,
+            fontWeight: 500,
+            color: '#fff',
+            textShadow: '0 1px 2px rgba(0,0,0,0.55)',
+          }}
+        >
           {headline}
         </p>
         {elapsed > 0 ? (
-          <p className="mt-1.5 text-[11px] text-white/50 tabular-nums">
+          <p
+            style={{
+              margin: '6px 0 0',
+              fontSize: 11,
+              color: 'rgba(255,255,255,0.55)',
+              fontVariantNumeric: 'tabular-nums',
+              textShadow: '0 1px 2px rgba(0,0,0,0.45)',
+            }}
+          >
             {elapsed}s
           </p>
         ) : null}
@@ -188,13 +217,15 @@ function ResolvedMedia({ src, alt, preview }: { src: string; alt: string; previe
         <video
           src={src}
           controls
-          className="w-[min(100%,26rem)] rounded-2xl bg-black block"
+          className="rounded-2xl bg-black block"
+          style={{ width: 320, maxWidth: '100%' }}
         />
       ) : (
         <img
           src={src}
           alt={alt}
-          className="w-[min(100%,26rem)] rounded-2xl object-contain bg-[#0d1117] block"
+          className="rounded-2xl object-contain bg-[#0d1117] block"
+          style={{ width: 320, maxWidth: '100%' }}
         />
       )}
       <MediaActions src={src} alt={alt} />
@@ -228,7 +259,8 @@ export function MessageContent({ content }: { content: string }) {
     const parts = content.split(':');
     const kind = parts[1] === 'video' ? 'video' : parts[1] === 'chat' ? 'chat' : 'image';
     const label = parts.slice(2).join(':') || undefined;
-    return <GeneratingPlaceholder kind={kind} label={label} />;
+    const sessionKey = `${kind}`;
+    return <GeneratingPlaceholder kind={kind} label={label} sessionKey={sessionKey} />;
   }
 
   if (content.startsWith('__progress__:')) {
@@ -287,11 +319,7 @@ export function MessageContent({ content }: { content: string }) {
         const text = chunk.value.trim();
         if (!text) return null;
         if (/^Source:\s/i.test(text)) {
-          return (
-            <p key={i} className="text-[10px] uppercase tracking-wider text-content-tertiary">
-              {text}
-            </p>
-          );
+          return null;
         }
         if (/preview|not a finished|motion still|offline fallback/i.test(text) && text.length < 200) {
           return (

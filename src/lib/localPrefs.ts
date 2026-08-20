@@ -291,6 +291,19 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.97',
+    channel: 'stable' as const,
+    date: 'Aug 20, 2026',
+    title: 'Image accuracy, Chat→Image handoff, Video parked',
+    notes: [
+      'More reliable free images: simplify Pollinations URLs, AI Horde fallback, quality-first Flux path, wallpaper 16:9',
+      'Vague image prompts ask a short brief (style/subject/size); upload a photo to recreate via img2img',
+      'In Chat, image asks show Stay/Yes like Code — Yes opens Image and starts generating',
+      'Video tab disabled (coming soon) until generative video is ready; Search hides Video',
+      'Update via Settings → Updates → Check → Download when this build is published',
+    ],
+  },
+  {
     version: '0.1.96',
     channel: 'stable' as const,
     date: 'Aug 19, 2026',

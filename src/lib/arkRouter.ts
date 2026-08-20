@@ -85,6 +85,8 @@ export type ArkRouteOpts = {
   stickyPinnedSource?: 'local' | 'cloud' | 'optional';
   /** Target clip length for video generation (seconds, max 30). */
   mediaDurationSec?: number;
+  /** Optional reference photo for img2img recreation. */
+  referenceImageDataUrl?: string;
 };
 
 function modeAllowsCloud(mode: AiModePref) {
@@ -755,6 +757,7 @@ async function tryStickyImage(
   try {
     const result = await brainGenerate(opts.message, modelId, 'image', {
       mediaDurationSec: opts.mediaDurationSec,
+      referenceImageDataUrl: opts.referenceImageDataUrl,
     });
     if (!result.media?.dataUrl) {
       return result.reply
@@ -880,6 +883,7 @@ async function routeImage(opts: ArkRouteOpts): Promise<ArkRouterResult> {
     try {
       const result = await brainGenerate(opts.message, mid, 'image', {
         mediaDurationSec: opts.mediaDurationSec,
+        referenceImageDataUrl: opts.referenceImageDataUrl,
       });
       if (!result.media?.dataUrl) {
         return {
@@ -920,16 +924,10 @@ async function routeImage(opts: ArkRouteOpts): Promise<ArkRouterResult> {
   }
 
   const local = await tryLocalMedia();
-  // Prefer real cloud images over local SVG fallback when failover is on.
   if (local?.media?.dataUrl && local.media.real) return local;
 
-  const IMAGE_ALTS = ['sd15-local', 'sdxl-turbo-local', 'flux-schnell-local', 'ark-image-core'];
-  const tried = new Set(attempted.map(a => a.toLowerCase()));
-  for (const alt of IMAGE_ALTS) {
-    if (tried.has(alt) || alt === (opts.preferredModelId || '')) continue;
-    const altHit = await tryLocalMedia(alt);
-    if (altHit?.media?.dataUrl && altHit.media.real) return altHit;
-  }
+  // One engine pass only — generateImage already ranks local → HF → Pollinations.
+  // Do not loop IMAGE_ALTS; that re-ran Pollinations for minutes.
 
   if ((!wantsCloud || !local?.media?.real) && failover && modeAllowsCloud(mode)) {
     const cloud = await tryCloud();

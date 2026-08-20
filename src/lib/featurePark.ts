@@ -41,3 +41,8 @@ export function setRevealed(id: ParkId, on: boolean) {
 export function isSocialParked(name: 'networking' | 'message' | 'call'): boolean {
   return !isRevealed(name);
 }
+
+/** Video tab parked until generative video is reliable (motion-still fallback is not product-ready). */
+export function isVideoTabEnabled(): boolean {
+  return false;
+}

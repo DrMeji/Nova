@@ -6,7 +6,7 @@ import {
 import { useRouter, type Route } from '@/context/RouterContext';
 import { useRecentProjects } from '@/context/RecentProjectsContext';
 import { CLOUD_MODELS } from '@/views/ModelsView';
-import { isRevealed } from '@/lib/featurePark';
+import { isRevealed, isVideoTabEnabled } from '@/lib/featurePark';
 import { getEngineStatus } from '@/lib/arkEngine';
 
 type SearchItem = {
@@ -39,6 +39,10 @@ const CATALOG: SearchItem[] = [
   { id: 'updates', label: 'Updates', group: 'Settings', description: 'Check for new ARK builds', icon: Settings, action: 'settings', settingsSection: 'updates' },
   { id: 'testers', label: 'Testers', group: 'Settings', description: 'Reveal parked features, feedback', icon: Settings, action: 'settings', settingsSection: 'testers' },
 ];
+
+function navigateCatalog(): SearchItem[] {
+  return CATALOG.filter(item => item.id !== 'video' || isVideoTabEnabled());
+}
 
 function socialSearchItems(): SearchItem[] {
   const items: SearchItem[] = [];
@@ -120,7 +124,7 @@ export function SearchPanel({ onClose, onOpenSettings }: SearchPanelProps) {
         route: { name: 'creation' as const, id: c.id },
       })),
     ];
-    return [...recents, ...CATALOG, ...socialSearchItems()];
+    return [...recents, ...navigateCatalog(), ...socialSearchItems()];
   }, [chats, recent, creations, featureTick]);
 
   const results = useMemo(() => {

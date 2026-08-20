@@ -1,20 +1,66 @@
 /** Expand a short user prompt into a detailed media brief for better fidelity. */
 
+const PRODUCT_RE =
+  /\b(iphone|ipad|macbook|android phone|smartphone|galaxy|pixel|pro max|ultra)\b/;
+const PRODUCT_ACTION_RE =
+  /\b(phone|device|product)\b.*\b(make|create|design|render|generate)\b|\b(make|create|design|render|generate)\b.*\b(phone|device|product)\b/;
+
+export function isProductPrompt(raw: string): boolean {
+  const lower = String(raw || '').toLowerCase();
+  return PRODUCT_RE.test(lower) || PRODUCT_ACTION_RE.test(lower);
+}
+
+export const PRODUCT_NEGATIVE =
+  'hands, hand, fingers, person, people, face, arm, holding, lifestyle, selfie, grip, palm';
+
+function productPackshotPrompt(subject: string): string {
+  const concept = subject
+    .replace(/product concept:\s*/i, '')
+    .replace(/\biphone\s*(1[8-9]|[2-9]\d)[^\s,]*/gi, 'next-generation titanium flagship smartphone')
+    .slice(0, 140);
+  return [
+    `studio photograph of ${concept}`,
+    'isolated product on a seamless gray backdrop',
+    'centered, no hands, no people, no lifestyle scene',
+  ].join(', ');
+}
+
+function hostSafeImagePrompt(raw: string): string {
+  let t = String(raw || '').trim();
+  if (/\biphone\s*(1[8-9]|[2-9]\d)\b/i.test(t)) {
+    t = t.replace(/\biphone\s*(1[8-9]|[2-9]\d)[^\s,]*/gi, 'next-generation titanium flagship smartphone');
+  }
+  return t;
+}
+
 export function rewriteImagePrompt(raw: string): string {
-  const prompt = String(raw || '').trim();
+  const prompt = hostSafeImagePrompt(String(raw || '').trim());
   if (!prompt) return 'a clean, well-composed image';
+
+  if (/studio photograph of |isolated product on a seamless/i.test(prompt)) {
+    return prompt;
+  }
 
   const lower = prompt.toLowerCase();
   const subjectHints: string[] = [];
 
+  if (/\b(wireless|bluetooth)\b/.test(lower) && /\b(mouse|keyboard|headset|earbuds|headphones)\b/.test(lower)) {
+    subjectHints.push('wireless device with no cable, no cord, no wire visible');
+  }
+  if (/\b(logitech|razer|steelseries|corsair)\b/.test(lower)) {
+    subjectHints.push('accurate consumer electronics product design, no garbled logos or fake brand text');
+  }
   if (/\b(cat|kitten|cats)\b/.test(lower) && !/\b(human|person|man|woman|people)\b/.test(lower)) {
-    subjectHints.push('subject is a real cat (animal), not a human');
+    subjectHints.push('subject is a real cat (animal), symmetrical face and eyes, not a human');
   }
   if (/\b(dog|puppy|dogs)\b/.test(lower) && !/\b(human|person|man|woman|people)\b/.test(lower)) {
     subjectHints.push('subject is a real dog (animal), not a human');
   }
-  if (/\b(wallpaper|desktop background)\b/.test(lower)) {
-    subjectHints.push('desktop wallpaper composition, no UI chrome, no text overlays');
+  if (/\b(wallpaper|desktop background|lock screen)\b/.test(lower)) {
+    subjectHints.push('16:9 landscape desktop wallpaper, edge-to-edge composition, no desktop icons, no taskbar, no UI chrome, no text overlays');
+  }
+  if (/\b4k\b|\b3840\b|\b2160\b|\b1920\s*x\s*1080\b/.test(lower)) {
+    subjectHints.push('ultra sharp 4K detail, crisp edges, high resolution');
   }
   if (/\bdark and simple\b|\bsimple\b/.test(lower) && /\bdark\b/.test(lower)) {
     subjectHints.push('minimal dark aesthetic, sparse composition, soft lighting');
@@ -22,27 +68,19 @@ export function rewriteImagePrompt(raw: string): string {
   if (/\btesla\b/.test(lower)) {
     subjectHints.push('accurate Tesla vehicle design, single coherent car body');
   }
-  if (/\b(iphone|ipad|macbook|android phone|smartphone|galaxy|pixel|pro max|ultra)\b/.test(lower)
-    || (/\b(phone|device|product)\b/.test(lower) && /\b(make|create|design|render|generate)\b/.test(lower))) {
-    // Put constraints FIRST so Pollinations truncation (450 chars) keeps them.
-    return [
-      'isolated product hero photograph on a clean studio backdrop',
-      'single smartphone device only, front three-quarter view, sharp focus',
-      'no hands, no people, no fingers holding the phone, no lifestyle scene',
-      prompt,
-      'accurate industrial design, realistic materials, commercial product render',
-      'no watermarks, no UI chrome, no captions',
-    ].join(', ');
+  if (isProductPrompt(prompt)) {
+    return productPackshotPrompt(prompt);
   }
 
   const fidelity = [
     'Follow the user request exactly',
     'match the described subject, style, and composition',
     'do not invent unrelated subjects or swap species',
-    'coherent anatomy and objects',
+    'coherent anatomy and objects, correct proportions',
     'sharp focus, high detail, professional quality',
     'natural lighting and believable materials',
     'no watermarks, no UI, no captions burned into the image',
+    'no misspelled brand text or nonsense lettering on products',
   ];
 
   return [prompt, ...subjectHints, ...fidelity].join(', ');
@@ -64,31 +102,45 @@ export function rewriteVideoPrompt(raw: string): string {
   if (/\breel|trailer|explainer|logo\b/.test(lower)) {
     hints.push('strong focal subject centered for social video framing');
   }
-  if (/\bapple\.com\b|\bapple\b/.test(lower)) {
-    hints.push('modern Apple-like product aesthetic, clean minimal design');
+  if (isProductPrompt(prompt)) {
+    hints.unshift(
+      'product-focused motion, isolated device on a seamless backdrop, no hands, no people',
+    );
   }
 
   return [prompt, ...hints].join(', ');
 }
 
+/** Target pixel size from prompt intent (hosts cap ~1344 on the long edge). */
+export function resolveImageDimensions(raw: string): { width: number; height: number } {
+  const lower = String(raw || '').toLowerCase();
+  if (/\b(portrait|vertical|9:16|phone wallpaper|lock screen)\b/.test(lower)) {
+    return { width: 768, height: 1344 };
+  }
+  if (/\b(wallpaper|desktop background|16:9|1920|1080|3840|2160|4k)\b/.test(lower)) {
+    return { width: 1344, height: 768 };
+  }
+  return { width: 1024, height: 1024 };
+}
+
 export const MEDIA_GEN_STAGES = {
   image: [
-    { key: 'create', label: 'Creating image', ms: 4500 },
-    { key: 'sketch', label: 'Sketching it out', ms: 5500 },
-    { key: 'almost', label: 'Almost done', ms: 6000 },
+    { key: 'create', label: 'Creating image', ms: 8000 },
+    { key: 'sketch', label: 'Refining details', ms: 10000 },
+    { key: 'almost', label: 'Almost done', ms: 12000 },
     { key: 'wrap', label: 'Wrapping it up', ms: 0 },
   ],
   video: [
-    { key: 'create', label: 'Creating video', ms: 4500 },
-    { key: 'plan', label: 'Planning the shot', ms: 5500 },
-    { key: 'render', label: 'Rendering frames', ms: 7000 },
+    { key: 'create', label: 'Creating video', ms: 5500 },
+    { key: 'plan', label: 'Planning the shot', ms: 7000 },
+    { key: 'render', label: 'Rendering frames', ms: 9000 },
     { key: 'wrap', label: 'Wrapping it up', ms: 0 },
   ],
 } as const;
 
 export type MediaGenMode = keyof typeof MEDIA_GEN_STAGES;
 
-/** Advance ChatGPT-style stage labels while async media work runs. */
+/** Advance ChatGPT-style stage labels while async media work runs (last stage holds until work ends). */
 export function runMediaGenStages(
   mode: MediaGenMode,
   onStage: (label: string) => void,

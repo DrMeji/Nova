@@ -637,7 +637,19 @@ async function generate(message, opts = {}) {
   let model = models.find((m) => m.id === modelId) || models[0];
 
   if (kind === 'image' || (modelId && String(modelId).includes('image'))) {
-    const media = await arkMedia.generateImage(message, model?.name || 'ARK Image Core');
+    const localOnlyIds = new Set(['sd15-local', 'sdxl-turbo-local', 'flux-schnell-local']);
+    if (localOnlyIds.has(String(modelId || '')) && !arkSd.isLocalImageReady()) {
+      return {
+        ok: false,
+        reply: 'Local image weights are not installed. Open Local AI to install them, or use ARK Image Core.',
+        modelId: modelId || 'ark-image-core',
+        modelName: model?.name || String(modelId),
+        source: 'none',
+      };
+    }
+    const media = await arkMedia.generateImage(message, model?.name || 'ARK Image Core', {
+      referenceImageDataUrl: opts.referenceImageDataUrl,
+    });
     return {
       ok: media.ok !== false,
       reply: media.reply,
@@ -658,18 +670,18 @@ async function generate(message, opts = {}) {
       durationSec: opts.mediaDurationSec,
     });
     return {
-      ok: true,
+      ok: media.ok !== false,
       reply: media.reply,
       modelId: modelId || 'ark-video-core',
       modelName: media.modelName,
-      source: 'ark-media',
-      media: {
+      source: media.source || 'ark-media',
+      media: media.dataUrl ? {
         kind: 'video',
         dataUrl: media.dataUrl,
         path: media.path,
         libraryId: media.libraryId,
         real: Boolean(media.real),
-      },
+      } : undefined,
     };
   }
 

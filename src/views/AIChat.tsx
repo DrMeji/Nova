@@ -15,11 +15,12 @@ import {
   mediaMessageMarkdown,
   extractVisionImages,
   rememberThumb,
+  getMemoryThumb,
   resolveCreationDataUrl,
   slimChatContent,
   titleFromPrompt,
 } from '@/lib/recentStore';
-import { looksLikeCodeAsk } from '@/lib/chatIntent';
+import { looksLikeCodeAsk, looksLikeImageAsk } from '@/lib/chatIntent';
 import {
   formatChatInspectReply,
   formatRepoCatalog,
@@ -46,12 +47,19 @@ import {
   rewriteVideoPrompt,
   runMediaGenStages,
 } from '@/lib/mediaPrompt';
+import {
+  buildImageBriefMessage,
+  mergeImageBrief,
+  needsImageBrief,
+  parseImageRequest,
+} from '@/lib/mediaBrief';
 import { arkRoute, routerProviderLabel, type ArkRouterResult } from '@/lib/arkRouter';
 import { FreeKeyWizard } from '@/components/FreeKeyWizard';
 import { ComposerPlusMenu, type ComposerPlusAction } from '@/components/ComposerPlusMenu';
 import { TokenUsageRing } from '@/components/TokenUsageRing';
 import { ArkErrorInline } from '@/components/ArkErrorInline';
 import { classifyErrorMessage, isLikelyErrorMessage } from '@/lib/errors';
+import { isVideoTabEnabled } from '@/lib/featurePark';
 import { notifyChatDone } from '@/lib/activityIndicators';
 import { formatReplyElapsed } from '@/lib/speedTest';
 import { getTokenUsageRatio, recordTokenUsage } from '@/lib/tokenUsage';
@@ -84,7 +92,7 @@ import {
 import type { ChatMessage } from '@/types';
 import {
   Bot, User as UserIcon, Loader2, ImageIcon, Video, Code2,
-  Upload, Cpu, Cloud, ChevronDown, Check, Blocks, FolderKanban, Zap, Square, X,
+  Upload, Cpu, Cloud, ChevronDown, Check, Blocks, FolderKanban, Zap, Square, X, ImagePlus,
   Puzzle, Briefcase, Github,
 } from 'lucide-react';
 import { engineGenerateCancel, getEngineStatus, setEngineModel } from '@/lib/arkEngine';
@@ -118,6 +126,7 @@ function ChatModeTabs() {
     ? (route.mode === 'image' || route.mode === 'video' ? route.mode : 'general')
     : 'general';
   const go = (next: 'general' | 'image' | 'video') => {
+    if (next === 'video' && !isVideoTabEnabled()) return;
     if (next === 'general') {
       if (route.name === 'chat' && !route.mode && !route.chatId) return;
       navigate({ name: 'chat' });
@@ -145,20 +154,28 @@ function ChatModeTabs() {
   ];
   return (
     <div className="shrink-0 flex items-center justify-center gap-1 pt-3 pb-1">
-      {tabs.map(t => (
+      {tabs.map(t => {
+        const videoOff = t.id === 'video' && !isVideoTabEnabled();
+        return (
         <button
           key={t.id}
           type="button"
+          disabled={videoOff}
           onClick={() => go(t.id)}
+          title={videoOff ? 'Video · coming soon' : undefined}
           className={`rounded-full px-4 py-2 text-sm font-semibold transition-colors ${
-            current === t.id
+            videoOff
+              ? 'text-content-tertiary/40 cursor-not-allowed opacity-50'
+              : current === t.id
               ? 'bg-surface-hover text-content-primary'
               : 'text-content-tertiary hover:text-content-primary'
           }`}
         >
           {t.label}
+          {videoOff ? ' · soon' : ''}
         </button>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -269,8 +286,9 @@ const PLACEHOLDERS: Record<ChatMode, string[]> = {
     'Ask a question...',
   ],
   image: [
-    'Describe the image you want to create...',
-    'Ask ARK to generate an image...',
+    'Describe the image — ARK may ask a quick brief first…',
+    'Upload a photo (+) to recreate or improve it…',
+    'Describe style, subject, and mood for best accuracy…',
   ],
   video: [
     'Describe the video you want to create...',
@@ -524,6 +542,10 @@ export function AIChat() {
   /** Skip storage reload after we create a chat so Explore ideas doesn't flash back. */
   const skipChatLoadIdsRef = useRef<Set<string>>(new Set());
   const messagesRef = useRef(messages);
+  const imageBriefRef = useRef<{ chatId: string; original: string } | null>(null);
+  const imageOfferPromptRef = useRef('');
+  const [imageOfferId, setImageOfferId] = useState<string | null>(null);
+  const [imageSwitchDismissed, setImageSwitchDismissed] = useState(false);
   const attachInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const chatStudioFilesRef = useRef<Record<string, string>>({});
@@ -614,6 +636,10 @@ export function AIChat() {
   useEffect(() => {
     if (route.name !== 'chat') return;
     const next = route.mode && route.mode !== 'general' ? route.mode : 'general';
+    if (next === 'video' && !isVideoTabEnabled()) {
+      navigate({ name: 'chat', mode: 'image' });
+      return;
+    }
     setMode(next);
     const kind = kindForMode(next);
     setActiveModel(prev => (prev.kind === kind ? prev : defaultModelForKind(kind)));
@@ -628,7 +654,27 @@ export function AIChat() {
         /* ignore */
       }
     }
-  }, [route]);
+  }, [route, navigate]);
+
+  // After Chat → Image handoff, auto-send the carried prompt once.
+  useEffect(() => {
+    if (route.name !== 'chat' || mode !== 'image') return;
+    let prompt: string | null = null;
+    try {
+      if (sessionStorage.getItem('ark:image-handoff-send') === '1') {
+        prompt = sessionStorage.getItem('ark:image-handoff-prompt');
+        sessionStorage.removeItem('ark:image-handoff-send');
+        sessionStorage.removeItem('ark:image-handoff-prompt');
+      }
+    } catch {
+      /* ignore */
+    }
+    if (!prompt || generatingRef.current) return;
+    const t = window.setTimeout(() => {
+      if (!generatingRef.current && prompt) void sendMessageRef.current(prompt);
+    }, 120);
+    return () => window.clearTimeout(t);
+  }, [mode, route.name]);
 
   // Open a Recent creation into a continuable Image/Video chat thread.
   useEffect(() => {
@@ -644,7 +690,9 @@ export function AIChat() {
     if (!creation) return;
 
     hydratedCreationRef.current = creationId;
-    const tab = creation.kind === 'video' ? 'video' : 'image';
+    const tab = creation.kind === 'video'
+      ? (isVideoTabEnabled() ? 'video' : 'general')
+      : 'image';
     let cancelled = false;
 
     void (async () => {
@@ -684,7 +732,9 @@ export function AIChat() {
           if (Array.isArray(existing) && existing.length > 0) {
             setMessages(existing);
             setMode(tab);
-            setActiveModel(defaultModelForKind(tab === 'video' ? 'video' : 'image'));
+            setActiveModel(defaultModelForKind(
+              tab === 'video' ? 'video' : tab === 'image' ? 'image' : 'chat',
+            ));
             setLoading(false);
             return;
           }
@@ -699,7 +749,9 @@ export function AIChat() {
         /* ignore */
       }
       setMode(tab);
-      setActiveModel(defaultModelForKind(tab === 'video' ? 'video' : 'image'));
+      setActiveModel(defaultModelForKind(
+        tab === 'video' ? 'video' : tab === 'image' ? 'image' : 'chat',
+      ));
       setLoading(false);
       requestAnimationFrame(() => textareaRef.current?.focus());
     })();
@@ -722,12 +774,18 @@ export function AIChat() {
       const inFlight = Boolean(
         generatingRef.current && activeGenChatIdRef.current === route.chatId,
       );
+      // Never clobber an in-progress Image/Video (or chat) turn by reloading disk.
+      if (inFlight) {
+        setLoading(false);
+        setGenerating(true);
+        return;
+      }
       // We just created this chat and already have messages in state — don't wipe them.
-      if (skipChatLoadIdsRef.current.has(route.chatId) || inFlight) {
+      if (skipChatLoadIdsRef.current.has(route.chatId)) {
         if (messagesRef.current.length > 0) {
           skipChatLoadIdsRef.current.delete(route.chatId);
           setLoading(false);
-          setGenerating(Boolean(generatingRef.current && activeGenChatIdRef.current === route.chatId));
+          setGenerating(false);
           return;
         }
         skipChatLoadIdsRef.current.delete(route.chatId);
@@ -744,9 +802,24 @@ export function AIChat() {
         messagesRef.current = [];
         setThreadBrain(null);
       }
-      // Stop button / queue only apply to the chat that is actively generating.
       setGenerating(Boolean(generatingRef.current && activeGenChatIdRef.current === route.chatId));
       setLoading(false);
+      // Remount / tab return: if this thread is still marked in-flight and the last
+      // assistant bubble is still generating, keep Stop + placeholder visible.
+      try {
+        const raw = sessionStorage.getItem('ark:inflight-media');
+        const inflight = raw ? JSON.parse(raw) as { chatId?: string; mode?: string } : null;
+        if (inflight?.chatId === route.chatId) {
+          const last = messagesRef.current[messagesRef.current.length - 1];
+          if (last?.role === 'assistant' && String(last.content || '').startsWith('__generating__:')) {
+            activeGenChatIdRef.current = route.chatId;
+            generatingRef.current = true;
+            setGenerating(true);
+          }
+        }
+      } catch {
+        /* ignore */
+      }
       requestAnimationFrame(() => textareaRef.current?.focus());
       return;
     }
@@ -984,6 +1057,25 @@ export function AIChat() {
     }
   };
 
+  const openImageTab = (seedPrompt?: string) => {
+    const seed = (seedPrompt ?? imageOfferPromptRef.current ?? input).trim();
+    setImageOfferId(null);
+    setImageSwitchDismissed(true);
+    try {
+      if (seed) {
+        localStorage.setItem('ark:chat-draft:image', seed);
+        sessionStorage.setItem('ark:image-handoff-send', '1');
+        sessionStorage.setItem('ark:image-handoff-prompt', seed);
+      }
+    } catch {
+      /* ignore */
+    }
+    setInput('');
+    setComposerTall(false);
+    if (textareaRef.current) textareaRef.current.style.height = 'auto';
+    navigate({ name: 'chat', mode: 'image' });
+  };
+
   const openCodeWorkspace = (seedPrompt?: string, seedFiles?: Record<string, string>) => {
     const seed = (seedPrompt ?? input).trim();
     const files = { ...chatStudioFilesRef.current, ...(seedFiles || {}) };
@@ -1157,7 +1249,11 @@ export function AIChat() {
     if (composerMode && COMPOSER_MODE_PREFIX[composerMode]) {
       content = `${COMPOSER_MODE_PREFIX[composerMode]}${content}`;
     }
-    if (!content && images.length) content = 'What is in this image?';
+    if (!content && images.length) {
+      content = mode === 'image'
+        ? 'Recreate and improve this image'
+        : 'What is in this image?';
+    }
     if (images.length) {
       content = [
         content,
@@ -1518,6 +1614,17 @@ export function AIChat() {
         }
       }
 
+      if (!usedPlugin && (mode === 'general' || mode === 'code') && looksLikeImageAsk(content) && composerMode !== 'ask') {
+        imageOfferPromptRef.current = content;
+        response = [
+          'That sounds like an image request.',
+          '',
+          'Switch to **Image** to generate it — your prompt carries over and the result saves to Creations.',
+        ].join('\n');
+        setImageOfferId(assistantId);
+        usedPlugin = true;
+      }
+
       if (!usedPlugin && (mode === 'general' || mode === 'code') && shouldInspectInChat(content, hasStudioFiles, content.startsWith(COMPOSER_MODE_PREFIX.debug))) {
         const findings = scanProjectFindings(studioFiles, content);
         const picked = pickFilesForInspect(studioFiles, content);
@@ -1599,7 +1706,20 @@ export function AIChat() {
             }
           };
 
-          const rewritten = rewriteImagePrompt(content);
+          const { text: imageText, referenceId } = parseImageRequest(content);
+          const referenceDataUrl = referenceId ? getMemoryThumb(referenceId) : undefined;
+          let promptForGen = imageText || content;
+
+          if (imageBriefRef.current?.chatId === activeChatId) {
+            promptForGen = mergeImageBrief(imageBriefRef.current.original, imageText);
+            imageBriefRef.current = null;
+          } else if (!referenceDataUrl && needsImageBrief(imageText)) {
+            imageBriefRef.current = { chatId: activeChatId!, original: imageText };
+            response = buildImageBriefMessage(imageText);
+            setAssistantContent(response);
+            usedPlugin = true;
+          } else {
+          const rewritten = rewriteImagePrompt(promptForGen);
           const sticky = stickyBrain;
           let routed: Awaited<ReturnType<typeof arkRoute>> | undefined;
           await runMediaGenStages('image', label => {
@@ -1614,6 +1734,7 @@ export function AIChat() {
               stickyModelId: sticky?.modelId,
               stickyModelName: sticky?.modelName,
               stickyPinnedSource: sticky?.pinnedSource,
+              referenceImageDataUrl: referenceDataUrl,
             });
           });
 
@@ -1669,18 +1790,23 @@ export function AIChat() {
             } else {
               const failText = String(routed.reply || '').replace(/!\[[^\]]*\]\([^)]+\)/g, '').trim();
               response = failText || [
-                'Could not generate a real image right now.',
+                'Couldn\'t generate image — try again.',
                 '',
                 'Try again in a minute, or connect a Hugging Face key in Models → Cloud.',
               ].join('\n');
             }
             usedPlugin = true;
           }
+          }
         } catch (err) {
           response = classifyErrorMessage(err instanceof Error ? err.message : 'Image generation failed').message;
           usedPlugin = true;
         }
       } else if (!usedPlugin && mode === 'video') {
+        if (!isVideoTabEnabled()) {
+          response = 'Video generation is coming soon. Use **Image** or **Chat** for now.';
+          usedPlugin = true;
+        } else {
         try {
           const setAssistantContent = (text: string) => {
             if (abandoned || stopRequestedRef.current || mySeq !== genSeqRef.current) return;
@@ -1747,34 +1873,38 @@ export function AIChat() {
             }
             const libraryId = routed.media?.libraryId || `local-${Date.now()}`;
             lastLibraryId = libraryId;
-            if (routed.media?.dataUrl) {
-              const isMp4 = routed.media.dataUrl.startsWith('data:video/');
-              const isMotionStill = (routed.source || '').includes('motion-still');
-              const isReal = Boolean(routed.media.real) && isMp4 && !isMotionStill;
-              rememberThumb(libraryId, routed.media.dataUrl);
-              if (isMp4) {
-                addCreation({
-                  id: libraryId,
-                  kind: 'video',
-                  title: content.slice(0, 80),
-                  prompt: content,
-                  modelName: routed.modelName || pinnedModel.name,
-                  dataUrl: routed.media.dataUrl,
-                  createdAt: new Date().toISOString(),
-                  real: isReal,
-                  source: routed.source,
-                });
-              }
+            const dataUrl = routed.media?.dataUrl;
+            const isSvg = Boolean(
+              dataUrl?.startsWith('data:image/svg')
+              || dataUrl?.includes('image/svg'),
+            );
+            const isMp4 = Boolean(dataUrl?.startsWith('data:video/'));
+            const isMotionStill = (routed.source || '').includes('motion-still');
+
+            if (dataUrl && isMp4 && !isSvg) {
+              const isReal = Boolean(routed.media?.real) && isMp4 && !isMotionStill;
+              rememberThumb(libraryId, dataUrl);
+              addCreation({
+                id: libraryId,
+                kind: 'video',
+                title: content.slice(0, 80),
+                prompt: content,
+                modelName: routed.modelName || pinnedModel.name,
+                dataUrl,
+                createdAt: new Date().toISOString(),
+                real: isReal,
+                source: routed.source,
+              });
               if (routed.reply && (routed.reply.includes('![') || isMotionStill || !isReal)) {
                 response = routed.reply.includes('![')
                   ? routed.reply
-                  : `${routed.reply}\n\n${mediaMessageMarkdown(content, libraryId, routed.media.dataUrl, {
+                  : `${routed.reply}\n\n${mediaMessageMarkdown(content, libraryId, dataUrl, {
                       real: isReal,
                       kind: 'video',
                       source: routed.source,
                     })}`;
               } else {
-                response = mediaMessageMarkdown(content, libraryId, routed.media.dataUrl, {
+                response = mediaMessageMarkdown(content, libraryId, dataUrl, {
                   real: isReal,
                   kind: 'video',
                   source: routed.source,
@@ -1789,13 +1919,19 @@ export function AIChat() {
                 preview: previewFromText(content),
               });
             } else {
-              response = routed.reply || 'Video generation failed. Try again in a moment.';
+              const failText = String(routed.reply || '').replace(/!\[[^\]]*\]\([^)]+\)/g, '').trim();
+              response = failText || [
+                'Couldn\'t generate video — try again.',
+                '',
+                'Free video hosts did not return a playable MP4.',
+              ].join('\n');
             }
             usedPlugin = true;
           }
         } catch (err) {
           response = classifyErrorMessage(err instanceof Error ? err.message : 'Video generation failed').message;
           usedPlugin = true;
+        }
         }
       } else if (!usedPlugin) {
         try {
@@ -1975,6 +2111,7 @@ export function AIChat() {
   const onInput = (value: string) => {
     setInput(value);
     if (codeSwitchDismissed && !looksLikeCodeAsk(value)) setCodeSwitchDismissed(false);
+    if (imageSwitchDismissed && !looksLikeImageAsk(value)) setImageSwitchDismissed(false);
     requestAnimationFrame(resizeComposer);
   };
 
@@ -2358,6 +2495,31 @@ export function AIChat() {
               </button>
             </div>
           )}
+          {(mode === 'general' || mode === 'code') && looksLikeImageAsk(input) && composerMode !== 'ask' && !imageSwitchDismissed && !looksLikeCodeAsk(input) && (
+            <div className="mb-1 flex justify-center px-1">
+              <span className="inline-flex items-center gap-1 rounded-full border border-sky-500/25 bg-sky-500/10 pl-2 pr-0.5 py-0.5 text-[10px] text-sky-100/90 shadow-sm max-w-full">
+                <ImageIcon className="w-3 h-3 shrink-0 text-sky-300/90" />
+                <span className="truncate max-w-[11rem] sm:max-w-[14rem]">
+                  Generate in Image?
+                </span>
+                <button
+                  type="button"
+                  className="rounded-full px-1.5 py-0.5 text-sky-100/60 hover:bg-sky-500/15 transition-colors"
+                  onClick={() => setImageSwitchDismissed(true)}
+                  title="Stay in chat"
+                >
+                  Stay
+                </button>
+                <button
+                  type="button"
+                  className="rounded-full px-1.5 py-0.5 text-sky-50 hover:bg-sky-500/20 transition-colors font-medium"
+                  onClick={() => openImageTab()}
+                >
+                  Yes
+                </button>
+              </span>
+            </div>
+          )}
           {(mode === 'general' || mode === 'code') && looksLikeCodeAsk(input) && composerMode !== 'ask' && !codeSwitchDismissed && (
             <div className="mb-1 flex justify-center px-1">
               <span className="inline-flex items-center gap-1 rounded-full border border-violet-500/25 bg-violet-500/10 pl-2 pr-0.5 py-0.5 text-[10px] text-violet-100/90 shadow-sm max-w-full">
@@ -2438,6 +2600,18 @@ export function AIChat() {
               e.target.value = '';
             }}
           />
+
+          {!composerTall && mode === 'image' && (
+            <button
+              type="button"
+              onClick={() => imageInputRef.current?.click()}
+              className="w-8 h-8 rounded-full flex items-center justify-center text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors shrink-0"
+              title="Upload a reference photo to recreate or improve"
+              aria-label="Upload reference photo"
+            >
+              <ImagePlus className="w-4 h-4" />
+            </button>
+          )}
 
           {!composerTall && (
             <ComposerPlusMenu
@@ -2831,40 +3005,46 @@ export function AIChat() {
                     </div>
                   )}
                   <div
-                    className={`min-w-0 text-sm text-content-primary ${
+                    className={`text-sm text-content-primary ${
                       msg.role === 'user'
-                        ? 'max-w-[min(42rem,78%)] rounded-2xl px-4 py-3 bg-surface-hover'
-                        : isMediaOnlyContent(msg.content) || msg.content.startsWith('__generating__:image:') || msg.content.startsWith('__generating__:video:')
-                          ? 'w-[min(100%,26rem)] px-0 py-0 bg-transparent'
-                          : 'max-w-[min(42rem,78%)] rounded-2xl px-4 py-3 bg-ark-navy-900 border border-surface-border'
+                        ? 'max-w-[min(42rem,78%)] min-w-0 rounded-2xl px-4 py-3 bg-surface-hover'
+                        : isMediaOnlyContent(msg.content)
+                          || msg.content.startsWith('__generating__:')
+                          || (
+                            generating
+                            && msg.id === messages[messages.length - 1]?.id
+                            && (mode === 'image' || mode === 'video')
+                          )
+                          ? 'shrink-0'
+                          : 'max-w-[min(42rem,78%)] min-w-0 rounded-2xl px-4 py-3 bg-ark-navy-900 border border-surface-border'
                     }`}
                   >
-                    {msg.role === 'assistant' && (
-                      !msg.content.trim()
-                      || msg.content.startsWith('__generating__:image:')
-                      || msg.content.startsWith('__generating__:video:')
-                      || (
-                        generating
-                        && msg.id === messages[messages.length - 1]?.id
-                        && (mode === 'image' || mode === 'video')
-                        && !msg.content.includes('![')
-                      )
-                    ) ? (
-                      <GeneratingPlaceholder
-                        kind={
-                          msg.content.includes(':video:') || mode === 'video' ? 'video' : 'image'
-                        }
-                        label={
-                          msg.content.startsWith('__generating__:')
-                            ? msg.content.split(':').slice(2).join(':') || undefined
-                            : (mode === 'video' ? 'Creating video' : 'Creating image')
-                        }
-                      />
-                    ) : msg.role === 'assistant' && isLikelyErrorMessage(msg.content) ? (
-                      <ArkErrorInline message={msg.content} />
-                    ) : (
-                      <MessageContent content={msg.content} />
-                    )}
+                    {(() => {
+                      const isAssistant = msg.role === 'assistant';
+                      const isLast = msg.id === messages[messages.length - 1]?.id;
+                      const showMediaGen = isAssistant && (
+                        !String(msg.content || '').trim()
+                        || msg.content.startsWith('__generating__:image:')
+                        || msg.content.startsWith('__generating__:video:')
+                        || (
+                          generating
+                          && isLast
+                          && (mode === 'image' || mode === 'video')
+                          && !msg.content.includes('![')
+                        )
+                      );
+                      if (showMediaGen) {
+                        const genKind = msg.content.includes(':video:') || mode === 'video' ? 'video' : 'image';
+                        const genLabel = msg.content.startsWith('__generating__:')
+                          ? msg.content.split(':').slice(2).join(':') || undefined
+                          : (genKind === 'video' ? 'Creating video' : 'Creating image');
+                        return <GeneratingPlaceholder kind={genKind} label={genLabel} sessionKey={msg.id} />;
+                      }
+                      if (isAssistant && isLikelyErrorMessage(msg.content)) {
+                        return <ArkErrorInline message={msg.content} />;
+                      }
+                      return <MessageContent content={msg.content} />;
+                    })()}
                     {msg.role === 'assistant'
                       && typeof msg.elapsed_ms === 'number'
                       && msg.elapsed_ms >= 0
@@ -2897,6 +3077,24 @@ export function AIChat() {
                         Retry with cloud
                       </button>
                     ) : null}
+                    {msg.role === 'assistant' && imageOfferId === msg.id && (
+                      <div className="flex flex-wrap gap-1 mt-2">
+                        <button
+                          type="button"
+                          className="text-[10px] rounded-full bg-sky-600 text-white px-2.5 py-1"
+                          onClick={() => openImageTab(imageOfferPromptRef.current)}
+                        >
+                          Yes, open Image
+                        </button>
+                        <button
+                          type="button"
+                          className="text-[10px] rounded-full border border-surface-border px-2.5 py-1 text-content-secondary"
+                          onClick={() => setImageOfferId(null)}
+                        >
+                          Stay in Chat
+                        </button>
+                      </div>
+                    )}
                     {msg.role === 'assistant' && inspectOfferId === msg.id && (
                       <div className="flex flex-wrap gap-1 mt-2">
                         <button

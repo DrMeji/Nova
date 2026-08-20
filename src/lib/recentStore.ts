@@ -399,7 +399,7 @@ export function mediaMessageMarkdown(
 ): string {
   const safe = (alt || 'ARK generation').slice(0, 80).replace(/[\[\]]/g, '');
   const body = dataUrl ? `![${safe}](${dataUrl})` : `![${safe}](ark-media:${libraryId})`;
-  const sourceLine = opts?.source ? `Source: ${opts.source}` : '';
+  const sourceLine = '';
   if (opts?.source?.includes('motion-still')) {
     return [
       'Short motion clip · MP4 from a still (not generative video)',

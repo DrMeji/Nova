@@ -246,15 +246,17 @@
     animation: authTypeRainbow 8s linear infinite;
   }
   .media-gen-wash {
-    background: radial-gradient(120% 80% at 50% 100%, rgb(255 255 255 / 0.04), transparent 55%);
+    background: radial-gradient(120% 90% at 50% 40%, rgb(255 255 255 / 0.05), transparent 60%);
   }
   .media-gen-pixel {
-    background: rgb(210 214 220 / 0.7);
+    background: rgb(210 214 220 / 0.6);
     animation: mediaGenPixelPulse ease-in-out infinite;
+    min-width: 2px;
+    min-height: 2px;
   }
   @keyframes mediaGenPixelPulse {
-    0%, 100% { transform: scale(0.65); filter: brightness(0.4); }
-    45%, 55% { transform: scale(1.05); filter: brightness(1.25); }
+    0%, 100% { opacity: 0.22; transform: scale(0.55); }
+    50% { opacity: 0.95; transform: scale(1); }
   }
   .media-gen-shimmer {
     background: linear-gradient(

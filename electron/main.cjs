@@ -41,6 +41,7 @@ const ALLOWED_HOSTS = new Set([
   'api.figma.com',
   'image.pollinations.ai',
   'gen.pollinations.ai',
+  'aihorde.net',
   'huggingface.co',
   'hf-mirror.com',
   'api-inference.huggingface.co',
@@ -760,6 +761,7 @@ ipcMain.handle('ark:engine-generate', async (_e, payload) =>
     temperature: payload?.temperature,
     nPredict: payload?.nPredict,
     mediaDurationSec: payload?.mediaDurationSec,
+    referenceImageDataUrl: payload?.referenceImageDataUrl,
   }),
 );
 
