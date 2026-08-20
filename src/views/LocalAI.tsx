@@ -25,6 +25,7 @@ import {
   subscribeEngineDownloads,
 } from '@/lib/engineDownloads';
 import { ArkErrorInline } from '@/components/ArkErrorInline';
+import { classifyErrorMessage } from '@/lib/errors';
 import { probeBrain } from '@/lib/brain';
 import { refreshBrainUrl } from '@/lib/brainUrl';
 import {
@@ -520,6 +521,11 @@ export function LocalAI() {
           <div className="flex items-center justify-between gap-3 mb-5 min-w-0">
             <div className="min-w-0">
               <h1 className="text-2xl sm:text-3xl font-semibold text-content-primary tracking-tight">Engine</h1>
+              {statusNote ? (
+                classifyErrorMessage(statusNote).code !== 'UNKNOWN'
+                  ? <div className="mt-2"><ArkErrorInline message={statusNote} /></div>
+                  : <p className="mt-1 text-xs text-content-tertiary">{statusNote}</p>
+              ) : null}
               <button
                 type="button"
                 onClick={() => navigate({ name: 'models' })}

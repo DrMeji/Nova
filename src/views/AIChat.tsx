@@ -1222,11 +1222,14 @@ export function AIChat() {
     messagesRef.current = [...normalized, userMsg, assistantMsg];
 
     const histPrefs = getLocalPrefs();
-    const keepContinuity = Boolean(
+    const keepContinuity = mode === 'code' || Boolean(
       threadBrainRef.current?.pendingModelId || threadBrainRef.current?.freshBudget,
     );
     const seedHistory = histPrefs.rememberContext
-      ? buildRouterHistory(priorForHistory, content, undefined, { keepContinuity })
+      ? buildRouterHistory(priorForHistory, content, undefined, {
+        keepContinuity,
+        kind: mode === 'code' ? 'coding' : 'chat',
+      })
       : buildRouterHistory([], content);
     const rotation = await prepareBrainRotation({
       scopeId: activeChatId,
@@ -1240,7 +1243,12 @@ export function AIChat() {
       setThreadBrain(rotation.brain);
     }
     setTokenRatio(rotation.pressure);
-    const rotatedHistory = rotation.history;
+    const rotatedHistory = rotation.swapped && histPrefs.rememberContext
+      ? buildRouterHistory(priorForHistory, content, undefined, {
+        keepContinuity: true,
+        kind: mode === 'code' ? 'coding' : 'chat',
+      })
+      : rotation.history;
     const stickyBrain = pinnedModel.source === 'auto' ? rotation.brain : null;
 
     // Messages first — then navigate — so Explore ideas never replaces the thread.
@@ -1449,12 +1457,15 @@ export function AIChat() {
           const vision = extractVisionImages(content);
           const prefs = getLocalPrefs();
           const history = prefs.rememberContext
-            ? (rotatedHistory.length ? rotatedHistory : buildRouterHistory(priorForHistory, inspectMessage, vision))
+            ? (rotatedHistory.length ? rotatedHistory : buildRouterHistory(priorForHistory, inspectMessage, vision, {
+              keepContinuity: true,
+              kind: mode === 'code' ? 'coding' : 'chat',
+            }))
             : buildRouterHistory([], inspectMessage, vision);
         const sticky = stickyBrain;
         const routed = await arkRoute({
           message: inspectMessage,
-          kind: 'chat',
+          kind: mode === 'code' ? 'coding' : 'chat',
           preferredModelId: pinnedModel.id,
           preferredModelName: pinnedModel.name,
           preferredSource: pinnedModel.source,
@@ -1686,7 +1697,10 @@ export function AIChat() {
           const prefs = getLocalPrefs();
           const vision = extractVisionImages(content);
           const history = prefs.rememberContext
-            ? (rotatedHistory.length ? rotatedHistory : buildRouterHistory(priorForHistory, content, vision))
+            ? (rotatedHistory.length ? rotatedHistory : buildRouterHistory(priorForHistory, content, vision, {
+              keepContinuity: true,
+              kind: mode === 'code' ? 'coding' : 'chat',
+            }))
             : buildRouterHistory([], content, vision);
           const sticky = stickyBrain;
           const routePromise = arkRoute({
@@ -2695,9 +2709,10 @@ export function AIChat() {
                           : 'rounded-2xl px-4 py-3 bg-ark-navy-900 border border-surface-border'
                     }`}
                   >
-                    {msg.role === 'assistant'
-                      && msg.content.length < 600
-                      && classifyErrorMessage(msg.content).code !== 'UNKNOWN'
+                    {msg.role === 'assistant' && (() => {
+                      const code = classifyErrorMessage(msg.content).code;
+                      return code !== 'UNKNOWN' && code !== 'CANCELED';
+                    })()
                       ? <ArkErrorInline message={msg.content} />
                       : <MessageContent content={msg.content} />}
                     {msg.role === 'assistant' && /Stopped at length limit/i.test(msg.content) ? (

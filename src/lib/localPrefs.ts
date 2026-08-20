@@ -291,6 +291,18 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.90',
+    channel: 'stable' as const,
+    date: 'Aug 19, 2026',
+    title: 'Seamless brain rotation and reliability pass',
+    notes: [
+      'Speed-aware GGUF preload and hot-swap keep long chats and coding threads in context',
+      'Coding history, preview honesty, and clearer errors in Chat, Code, and Local AI',
+      'Models Engine tab stays on Models; stop/cancel no longer starts a second local run',
+      'Update via Settings → Updates → Check → Download when this build is published',
+    ],
+  },
+  {
     version: '0.1.89',
     channel: 'stable' as const,
     date: 'Aug 19, 2026',
@@ -413,7 +425,7 @@ export const ARK_CHANGELOG = [
     version: '0.1.79',
     channel: 'stable' as const,
     date: 'Aug 18, 2026',
-    title: 'Finish remaining Grok P2/P3 lists',
+    title: 'Finish remaining polish lists',
     notes: [
       'Single engine catalog module + UI catalog smoke; GGUF temperature/length prefs',
       'Updater hits 100% after download; Jobs strip shows update progress',
@@ -425,7 +437,7 @@ export const ARK_CHANGELOG = [
     version: '0.1.78',
     channel: 'stable' as const,
     date: 'Aug 18, 2026',
-    title: 'Grok pass 5 — edges, clarity, jobs strip',
+    title: 'Quality pass 5 — edges, clarity, jobs strip',
     notes: [
       'Packaged brain: auth required for /api/tags, /v1/models, /v1/engine',
       'Concurrent GGUF returns busy error; truncation footer; disk confirm before download',
@@ -438,7 +450,7 @@ export const ARK_CHANGELOG = [
     version: '0.1.77',
     channel: 'stable' as const,
     date: 'Aug 18, 2026',
-    title: 'Grok pass 4 — complete fix list',
+    title: 'Quality pass 4 — complete fix list',
     notes: [
       'Ask-before-cloud failover, vision key errors, main-process cloud auth injection',
       'Download errors persist with Dismiss/Retry; queue survives restart; FLUX part errors',
@@ -451,7 +463,7 @@ export const ARK_CHANGELOG = [
     version: '0.1.76',
     channel: 'stable' as const,
     date: 'Aug 18, 2026',
-    title: 'Grok pass 3 — complete wiring sweep',
+    title: 'Quality pass 3 — complete wiring sweep',
     notes: [
       'Studio read-only guard, no-capacity honesty, clone overwrite warning, import skip counts',
       'Auth session refuses plaintext; download errors persist; Windows disk space check',
@@ -464,7 +476,7 @@ export const ARK_CHANGELOG = [
     version: '0.1.75',
     channel: 'stable' as const,
     date: 'Aug 18, 2026',
-    title: 'Grok pass 2 — control, hardening, honesty',
+    title: 'Quality pass 2 — control, hardening, honesty',
     notes: [
       'Media preview badges always show for SVG / real:false fallbacks',
       'Brain API rate limits, body size cap, empty-output errors, stream error events',
@@ -478,12 +490,12 @@ export const ARK_CHANGELOG = [
     version: '0.1.74',
     channel: 'stable' as const,
     date: 'Aug 18, 2026',
-    title: 'Grok review pass — trust, security, and work trace',
+    title: 'Review pass — trust, security, and work trace',
     notes: [
       'GGUF failures and brain API errors return real 503s instead of fake success replies',
       'Packaged installs get a brain bearer token; copy or rotate it in Settings → AI',
       'API keys refuse plaintext save when OS encryption is unavailable',
-      'Code review/debug shows a Grok-style work trace while ARK reads your project',
+      'Code review/debug shows a live work trace while ARK reads your project',
       'External links use an allowlist with confirm for unknown hosts',
     ],
   },
@@ -698,7 +710,7 @@ export const ARK_CHANGELOG = [
     notes: [
       'Build hint bar is smaller and cleaner; chat still returns copy-pasteable code when you press Enter',
       'System-prompt echoes stripped from chat bubbles',
-      'Code workspace shows plan → write → apply steps (Cursor-style) and creates files from markdown fences',
+      'Code workspace shows plan → write → apply steps and creates files from markdown fences',
     ],
   },
   {

@@ -21,6 +21,7 @@ In the app: **Settings → Updates → Check** to download newer builds.
 ## Docs
 
 - [Brain API](docs/ark-brain-api.md) — point external clients at ARK  
+- [Product brain](docs/product-brain.md) — ARK Engine and creation product rules  
 - [Lindsay migration](docs/lindsay-migration.md) — switch from Ollama-style setups  
 - [OAuth setup](docs/oauth-setup.md) — one-click plugin connect  
 - [Code signing](build/signing.env.example) — Authenticode for SmartScreen

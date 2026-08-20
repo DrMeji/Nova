@@ -6,7 +6,6 @@
 
 import { getAccurateHardware, parseRamGb } from '@/lib/api';
 import { getEngineStatus } from '@/lib/arkEngine';
-import { installNextWhenCurrentRanOut } from '@/lib/arkHuntBootstrap';
 import {
   compressHistoryIfNeeded,
   flattenHistoryText,
@@ -51,7 +50,10 @@ export function measureThreadPressure(history: RouterChatTurn[]): number {
   return Math.max(0, Math.min(1, tokens / USABLE_TOKENS));
 }
 
+let lastRotationNote = '';
 export function emitRotationNote(message: string) {
+  if (!message || message === lastRotationNote) return;
+  lastRotationNote = message;
   try {
     window.dispatchEvent(new CustomEvent(ROTATION_NOTE_EVENT, { detail: { message } }));
   } catch {
@@ -205,23 +207,7 @@ export async function prepareBrainRotation(opts: {
             forceUnknownDisk: true,
           }).catch(() => undefined);
         } else {
-          const hunted = await installNextWhenCurrentRanOut({
-            kind: engineKind,
-            reason: 'context',
-            currentModelId: currentId,
-            ignoreHuntPrefs: true,
-          }).catch(() => null);
-          if (hunted?.id) {
-            brain = withPending(
-              brain,
-              { kind: opts.kind, currentId, currentName: engineRowName(models, currentId || '') },
-              hunted.id,
-              hunted.name,
-            );
-            if (brain) saveThreadBrain(opts.scopeId, brain, opts.kind);
-          } else {
-            emitRotationNote('This PC fits one local brain — Auto can fail over to a free cloud path.');
-          }
+          emitRotationNote('No second on-device brain fits this PC — Auto can use a free cloud path if a key is saved.');
         }
       }
     }

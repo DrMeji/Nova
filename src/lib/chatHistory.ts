@@ -162,19 +162,24 @@ export function buildRouterHistory(
   prior: LooseMessage[],
   latestUserMessage: string,
   images?: { mime: string; data: string }[],
-  opts?: { keepContinuity?: boolean },
+  opts?: { keepContinuity?: boolean; kind?: 'chat' | 'coding' },
 ): RouterChatTurn[] {
   const turns: RouterChatTurn[] = [];
+  const keepContinuity = Boolean(opts?.keepContinuity || opts?.kind === 'coding');
+  const assistantCap = opts?.kind === 'coding' ? 6000 : 720;
+  const maxChars = opts?.kind === 'coding' ? 40_000 : MAX_CHARS;
+  const maxTurns = opts?.kind === 'coding' ? 64 : MAX_TURNS;
   for (const m of prior) {
     const role = m.role === 'assistant' ? 'assistant' : m.role === 'user' ? 'user' : null;
     if (!role) continue;
     let content = slimTurnContent(m.content || '');
     if (!content) continue;
-    // Keep prior assistant turns short so local models do not “finish” a truncated line.
-    if (role === 'assistant' && content.length > 720) {
-      const slice = content.slice(0, 720);
-      const breakAt = Math.max(slice.lastIndexOf('. '), slice.lastIndexOf('\n'), slice.lastIndexOf(' '));
-      content = `${(breakAt > 280 ? slice.slice(0, breakAt + 1) : slice).trimEnd()}…`;
+    // Chat: keep prior assistant turns short so GGUF does not “finish” a truncated line.
+    // Coding: keep a much larger slice so multi-step edits still see prior code.
+    if (role === 'assistant' && content.length > assistantCap) {
+      const slice = content.slice(0, assistantCap);
+      const breakAt = Math.max(slice.lastIndexOf('. '), slice.lastIndexOf('\n'), slice.lastIndexOf('```'), slice.lastIndexOf(' '));
+      content = `${(breakAt > assistantCap * 0.4 ? slice.slice(0, breakAt + 1) : slice).trimEnd()}…`;
     }
     turns.push({ role, content });
   }
@@ -191,9 +196,9 @@ export function buildRouterHistory(
   }
 
   // Keep the most recent turns, then trim by total size from the front.
-  let window = turns.slice(-MAX_TURNS);
+  let window = turns.slice(-maxTurns);
   let total = window.reduce((n, t) => n + t.content.length, 0);
-  while (window.length > 1 && total > MAX_CHARS) {
+  while (window.length > 1 && total > maxChars) {
     const removed = window.shift();
     total -= removed?.content.length || 0;
   }
@@ -204,7 +209,7 @@ export function buildRouterHistory(
 
   // New task (e.g. weather → “build an app”): drop prior turns so GGUF cannot regurgitate them.
   // Keep the thread when a brain rotation is pending/applied — the user should not re-brief.
-  if (!opts?.keepContinuity && latest && isTopicShift(window, latest)) {
+  if (!keepContinuity && latest && isTopicShift(window, latest)) {
     return [{ role: 'user', content: latest.slice(0, MAX_TURN_CHARS), images: vision }];
   }
 

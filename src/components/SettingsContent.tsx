@@ -36,6 +36,7 @@ import { hasPinSet, setPin, clearPin } from '@/lib/pinLock';
 import { hasSecondFactorSet, setSecondFactor, clearSecondFactor } from '@/lib/twoFactor';
 import { probeProviderKey } from '@/lib/providerSpeed';
 import { setCloudProviderEnabled } from '@/lib/cloudSources';
+import { getBrainUrl } from '@/lib/brainUrl';
 import { SettingsSystemHealth } from '@/components/SettingsSystemHealth';
 
 const REVEAL_FEATURES: { id: ParkId; label: string; description: string }[] = [
@@ -151,7 +152,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
   const [featureTick, setFeatureTick] = useState(0);
   const [keyTestMsg, setKeyTestMsg] = useState('');
   const [keyTestFor, setKeyTestFor] = useState<string | null>(null);
-  const [brainUrl, setBrainUrl] = useState('http://127.0.0.1:8787');
+  const [brainUrl, setBrainUrl] = useState(() => getBrainUrl());
   const [brainToken, setBrainToken] = useState('');
   const [brainTokenCopied, setBrainTokenCopied] = useState(false);
   const [brainContractVersion, setBrainContractVersion] = useState('');
@@ -1762,7 +1763,12 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                   </p>
                   <p className="text-[11px] text-content-tertiary mt-1">
                     Brain contract {brainContractVersion || 'unavailable'} · port {(() => {
-                      try { return new URL(brainUrl).port || '8787'; } catch { return '8787'; }
+                      try {
+                        const port = new URL(brainUrl).port;
+                        return port || (brainUrl ? 'default' : 'unavailable');
+                      } catch {
+                        return 'unavailable';
+                      }
                     })()}
                   </p>
                 </div>

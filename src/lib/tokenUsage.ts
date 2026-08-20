@@ -4,7 +4,7 @@
 export const GGUF_CTX = 8192;
 /** Leave room for the next reply (chat nPredict is 4096). */
 export const REPLY_RESERVE = 4096;
-export const USABLE_TOKENS = GGUF_CTX - REPLY_RESERVE;
+export const USABLE_TOKENS = Math.max(2048, GGUF_CTX - REPLY_RESERVE - 256);
 /** Fast-link band only. Rotation threshold is `preloadStartRatio(nextModel)` from saved MBps. */
 export const ROTATION_PRESSURE = 0.9;
 

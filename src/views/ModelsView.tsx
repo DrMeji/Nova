@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useRouter } from '@/context/RouterContext';
 import {
   Search, Plus, Check, Download, Loader2, Cpu, Cloud, Monitor,
   Code, Boxes, Brain, Eye, Zap, Image as ImageIcon, Video, Gauge, Sparkles, Rocket, X, KeyRound, Globe, RefreshCw, Trash2,
@@ -189,7 +188,7 @@ export const CLOUD_MODELS: CloudModel[] = [
   { id: 'llama31-405b', name: 'Llama 3.1 405B', description: 'Large open chat model via cloud hosts.', provider: 'OpenRouter', category: 'chat', tiers: ['free', 'pro'], tone: 'from-violet-500 to-indigo-800', initial: '405' },
   { id: 'mistral-large', name: 'Mistral Large', description: 'High quality Mistral chat model.', provider: 'Mistral', category: 'chat', tiers: ['pro'], tone: 'from-orange-500 to-red-700', initial: 'ML' },
   { id: 'command-r-plus', name: 'Command R+', description: 'Cohere chat model with strong tools support.', provider: 'Cohere', category: 'chat', tiers: ['pro'], tone: 'from-emerald-500 to-teal-800', initial: 'CR' },
-  { id: 'grok-2', name: 'Grok 2', description: 'xAI chat model for general work.', provider: 'xAI', category: 'chat', tiers: ['free', 'pro'], tone: 'from-zinc-400 to-black', initial: 'Gx' },
+  { id: 'xai-chat-2', name: 'xAI Chat 2', description: 'xAI chat model for general work.', provider: 'xAI', category: 'chat', tiers: ['free', 'pro'], tone: 'from-zinc-400 to-black', initial: 'xA' },
   { id: 'hf-llama-31', name: 'Llama 3.1 8B (HF)', description: 'Open chat via Hugging Face Inference.', provider: 'Hugging Face', category: 'chat', tiers: ['free', 'pro'], tone: 'from-yellow-500 to-amber-700', initial: 'HF' },
   { id: 'nvidia-llama-31', name: 'Llama 3.1 8B (NIM)', description: 'NVIDIA NIM hosted Llama for coding and chat.', provider: 'NVIDIA', category: 'chat', tiers: ['free', 'pro'], tone: 'from-lime-500 to-green-800', initial: 'NV' },
   { id: 'hf-flux-schnell', name: 'FLUX.1 schnell (HF)', description: 'Fast free-key images via Hugging Face.', provider: 'Hugging Face', category: 'image', tiers: ['free', 'pro'], tone: 'from-yellow-400 to-orange-700', initial: 'FX' },
@@ -487,8 +486,13 @@ function TierBadges({ tiers }: { tiers: Tier[] }) {
 }
 
 export function ModelsView() {
-  const { navigate } = useRouter();
   const [tab, setTab] = useState<TabId>('for-pc');
+  const [engineSnap, setEngineSnap] = useState<{
+    phase: string;
+    activeModelName: string;
+    modelsDir: string;
+    note?: string;
+  } | null>(null);
   const [query, setQuery] = useState('');
   const [installed, setInstalled] = useState<Set<string>>(() => new Set());
   const [installing, setInstalling] = useState<Set<string>>(() => new Set(
@@ -535,6 +539,18 @@ export function ModelsView() {
   useEffect(() => {
     void probeLiveCapacity().then(setLiveCapacity);
   }, [keyedProviders, ollamaOn, installed]);
+
+  useEffect(() => {
+    if (tab !== 'engine') return;
+    void getEngineStatus().then(status => {
+      setEngineSnap({
+        phase: status.phase,
+        activeModelName: status.activeModelName,
+        modelsDir: status.modelsDir,
+        note: status.note,
+      });
+    }).catch(() => setEngineSnap(null));
+  }, [tab]);
 
   useEffect(() => {
     const sync = () => {
@@ -1217,20 +1233,31 @@ export function ModelsView() {
               </div>
             </>
           ) : tab === 'engine' ? (
-            <div className="py-6">
+            <div className="py-6 max-w-xl">
               <h2 className="text-lg font-semibold text-content-primary mb-2">ARK Engine</h2>
-              <p className="text-sm text-content-tertiary mb-6 leading-relaxed">
-                ARK Engine is the local inference runtime built into ARK. It runs GGUF models on your hardware with no cloud dependency.
-                Use the <strong className="text-content-secondary">Local AI</strong> tab in the sidebar to manage downloaded models and engine settings.
+              <p className="text-sm text-content-tertiary mb-4 leading-relaxed">
+                Local inference is built into ARK. This tab stays on Models — it does not switch the sidebar to Local AI.
               </p>
-              <button
-                type="button"
-                className="ark-btn-secondary"
-                onClick={() => navigate({ name: 'local-ai' })}
-              >
-                <Brain className="w-4 h-4" />
-                Open Local AI &amp; Engine settings
-              </button>
+              <div className="rounded-xl border border-surface-border p-4 space-y-2 text-sm">
+                <p className="text-content-secondary">
+                  Status:{' '}
+                  <span className="text-content-primary">
+                    {engineSnap?.phase || 'checking…'}
+                  </span>
+                </p>
+                <p className="text-content-secondary">
+                  Active:{' '}
+                  <span className="text-content-primary">
+                    {engineSnap?.activeModelName || '—'}
+                  </span>
+                </p>
+                {engineSnap?.modelsDir ? (
+                  <p className="text-[11px] text-content-tertiary font-mono break-all">{engineSnap.modelsDir}</p>
+                ) : null}
+                {engineSnap?.note ? (
+                  <p className="text-xs text-content-tertiary">{engineSnap.note}</p>
+                ) : null}
+              </div>
             </div>
           ) : (
             <>

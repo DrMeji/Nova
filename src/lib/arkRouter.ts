@@ -963,8 +963,8 @@ async function routeImage(opts: ArkRouteOpts): Promise<ArkRouterResult> {
 
   return {
     reply: [
-      'Image generation failed.',
-      'Open **Local AI** to install image weights, or add a Hugging Face / OpenAI key in Models → Cloud.',
+      'Image generation failed. No local image weights and the free image host did not return a real image.',
+      'Open Local AI to install image weights, or add a Hugging Face / OpenAI key in Models → Cloud.',
     ].join(' '),
     modelName: 'ARK Router',
     source: 'none',
@@ -1051,7 +1051,10 @@ async function routeVideo(opts: ArkRouteOpts): Promise<ArkRouterResult> {
       }),
     ).catch(() => undefined);
     return {
-      reply: err instanceof Error ? err.message : 'Video generation failed',
+      reply: [
+        err instanceof Error ? err.message : 'Video generation failed',
+        'Open Local AI to install video weights, or add a key in Models → Cloud.',
+      ].join(' '),
       modelName: 'ARK Video Core',
       source: 'none',
       tier: 'no-key-free',

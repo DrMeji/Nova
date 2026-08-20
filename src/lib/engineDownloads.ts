@@ -78,6 +78,11 @@ async function tick(id: string) {
     if (p >= 100) {
       stopTimer(id);
       notifyWorkDone(activityFor(job.source));
+      try {
+        void window.arkDesktop?.engineSetModel?.(id);
+      } catch {
+        /* warmup is best-effort */
+      }
       window.setTimeout(() => removeJob(id), 800);
     }
   } catch {

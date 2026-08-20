@@ -29,6 +29,9 @@ export function classifyErrorMessage(raw: string): ArkErrorInfo {
   if (/no[_ -]?encryption|encryption (?:is )?unavailable|not encrypted|plaintext.*(?:refus|blocked)|safe storage.*unavailable/i.test(lower)) {
     return { code: 'NO_ENCRYPTION', message: msg, action: 'Open Security' };
   }
+  if (/already running|generation already running|another local generation/i.test(lower)) {
+    return { code: 'RATE_LIMITED', message: msg, action: 'Stop the current reply, then send again' };
+  }
   if (/rate[_ -]?limit|too many requests|\b429\b|quota (?:exceeded|reached)|capacity limit/i.test(lower)) {
     return { code: 'RATE_LIMITED', message: msg, action: 'Try another model' };
   }
@@ -38,7 +41,7 @@ export function classifyErrorMessage(raw: string): ArkErrorInfo {
   if (/template[_ -]?only|template (?:preview|output)|placeholder (?:only|output)|preview only/i.test(lower)) {
     return { code: 'TEMPLATE_ONLY', message: msg, action: 'Choose a real generation model' };
   }
-  if (/no local gguf|not ready in ark engine|no model|install a local brain/i.test(lower)) {
+  if (/no local gguf|not ready in ark engine|no model|install a local brain|install image weights|install video weights/i.test(lower)) {
     return { code: 'NO_MODEL', message: msg, action: 'Open Local AI', route: { name: 'local-ai' } };
   }
   if (/timed out|timeout|gguf.*fail/i.test(lower)) {
@@ -55,6 +58,9 @@ export function classifyErrorMessage(raw: string): ArkErrorInfo {
   }
   if (/offline|engine is offline/i.test(lower)) {
     return { code: 'OFFLINE', message: msg, action: 'Start engine', route: { name: 'local-ai' } };
+  }
+  if (/stopped at length limit/i.test(lower)) {
+    return { code: 'UNKNOWN', message: msg };
   }
   if (/cancel|stopped|abort/i.test(lower)) {
     return { code: 'CANCELED', message: msg };

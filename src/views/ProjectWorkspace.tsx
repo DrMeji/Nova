@@ -1506,6 +1506,13 @@ export function ProjectWorkspace() {
           files: packDiskFiles(applied.files, messagesRef.current),
         }).then(res => {
           if (res.root) setDiskRoot(res.root);
+          if (!res.ok && res.error) {
+            setSandboxNote(res.error);
+            window.setTimeout(() => setSandboxNote(null), 5000);
+          }
+        }).catch(err => {
+          setSandboxNote(err instanceof Error ? err.message : 'Could not save project files');
+          window.setTimeout(() => setSandboxNote(null), 5000);
         });
       if (applied.changedPaths.length && !native && window.arkDesktop?.previewStart) {
         void window.arkDesktop.previewStart({
@@ -1513,13 +1520,19 @@ export function ProjectWorkspace() {
           projectName: buildLabel,
           files: packDiskFiles(applied.files, messagesRef.current),
         }).then(res => {
-          if (res?.url) {
+          if (res?.url && !String(res.url).includes('127.0.0.1:0') && !String(res.url).includes('://0')) {
             setLivePreviewUrl(res.url);
             setPreviewUrl(res.url);
             setPreviewReady(true);
             setRightTab('preview');
+          } else if (res && (res.ok === false || !res.url || String(res.url).includes(':0'))) {
+            setSandboxNote('Preview server did not start — static HTML is still in the Preview tab.');
+            window.setTimeout(() => setSandboxNote(null), 4200);
           }
-        }).catch(() => undefined);
+        }).catch(err => {
+          setSandboxNote(err instanceof Error ? err.message : 'Preview failed to start');
+          window.setTimeout(() => setSandboxNote(null), 4200);
+        });
       }
       setShipOfferId(assistantId);
       if (isNativeMobileTree(applied.files) && !classifyMobileDevice(content)) {
@@ -1667,11 +1680,9 @@ export function ProjectWorkspace() {
           const priorForHistory = revisingId
             ? messages.filter(m => m.id !== revisingId).concat(userMsg)
             : [...messages, userMsg];
-          const keepContinuity = Boolean(
-            threadBrainRef.current?.pendingModelId || threadBrainRef.current?.freshBudget,
-          );
+          const keepContinuity = true;
           const historyBase = prefs.rememberContext
-            ? buildRouterHistory(priorForHistory, content, undefined, { keepContinuity })
+            ? buildRouterHistory(priorForHistory, content, undefined, { keepContinuity, kind: 'coding' })
             : buildRouterHistory([], content);
           const findings = scanProjectFindings(fileContentsRef.current, rawContent);
           const inspectPaths = pickFilesForInspect(fileContentsRef.current, rawContent);
@@ -2388,7 +2399,9 @@ export function ProjectWorkspace() {
     ? (fileContents[selectedFile] ?? fileContents[fileKey] ?? '')
     : '';
   const livePageHtml = composePreviewHtml(fileContents).trim();
-  const showBrowserChrome = Boolean(livePreviewUrl || previewReady) && !isNativeMobileTree(fileContents);
+  const showBrowserChrome = Boolean(
+    (livePreviewUrl && !livePreviewUrl.includes('127.0.0.1:0')) || previewReady,
+  ) && !isNativeMobileTree(fileContents);
 
   const buildLabel = buildRunning
     ? `Preparing preview ${buildProgress}%`
@@ -2804,7 +2817,7 @@ export function ProjectWorkspace() {
                     </button>
                   ) : (
                     <div>
-                    {msg.content && classifyErrorMessage(msg.content).code !== 'UNKNOWN' && /failed|timed out|not ready|Connect GitHub|Push failed|Unauthorized|NO_ENCRYPTION|already running|Stopped at length limit/i.test(msg.content)
+                    {msg.content && classifyErrorMessage(msg.content).code !== 'UNKNOWN' && classifyErrorMessage(msg.content).code !== 'CANCELED'
                       ? <ArkErrorInline message={msg.content} />
                       : msg.content
                         ? <AssistantBuildReply content={msg.content} onOpenPath={openPathInEditor} />
@@ -3510,7 +3523,9 @@ export function ProjectWorkspace() {
                 <div className="shrink-0 px-3 py-2 flex items-center gap-2 text-xs text-content-secondary flex-wrap">
                   <Globe className="w-3.5 h-3.5 text-sky-400 shrink-0" />
                   <span className="truncate">
-                    Live preview (static HTML) · {fileKey || 'index'}{previewReady ? ' · ready' : ''}
+                    {livePreviewUrl && !livePreviewUrl.includes('127.0.0.1:0')
+                      ? `Preview · ${fileKey || 'index'}`
+                      : `Preview (static HTML) · ${fileKey || 'index'}`}
                   </span>
                   <select
                     className="ml-auto max-w-[11rem] bg-transparent border border-surface-border rounded-md px-1.5 py-0.5 text-[10px] text-content-secondary"
@@ -3576,8 +3591,8 @@ export function ProjectWorkspace() {
         </div>
           <div className="flex items-center gap-2 shrink-0 min-w-0">
             {showBrowserChrome && (
-              <span className="text-[11px] text-content-tertiary truncate font-mono max-w-[18rem]" title={livePreviewUrl || previewUrl}>
-                {livePreviewUrl || previewUrl}
+              <span className="text-[11px] text-content-tertiary truncate font-mono max-w-[18rem]" title={livePreviewUrl && !livePreviewUrl.includes('127.0.0.1:0') ? livePreviewUrl : 'Static HTML preview'}>
+                {livePreviewUrl && !livePreviewUrl.includes('127.0.0.1:0') ? livePreviewUrl : 'Static HTML preview'}
               </span>
             )}
           {!explorerOpen && (

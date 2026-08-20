@@ -582,6 +582,7 @@ async function runGgufServerStream(modelId, prompt, onChunk, timeoutMs, nPredict
     let buf = '';
     let emitted = '';
     while (true) {
+      if (cancelRequested) break;
       const { value, done } = await reader.read();
       if (done) break;
       buf += decoder.decode(value, { stream: true });
@@ -854,10 +855,21 @@ function runGgufStream(modelId, prompt, onChunk, timeoutMs = 240000, nPredict = 
       if (await ensureLlamaServer(modelId)) {
         try {
           const hit = await runGgufServerStream(modelId, prompt, onChunk, timeoutMs, nPredict, temperature);
+          if (hit?.cancelled) return hit;
           if (hit?.reply) return hit;
-        } catch {
+        } catch (err) {
+          if (cancelRequested) {
+            const stopped = new Error('Generation stopped');
+            stopped.code = 'CANCELED';
+            throw stopped;
+          }
           /* fall through to one-shot llama-cli */
         }
+      }
+      if (cancelRequested) {
+        const stopped = new Error('Generation stopped');
+        stopped.code = 'CANCELED';
+        throw stopped;
       }
       return await runGgufCliStream(modelId, prompt, onChunk, timeoutMs, nPredict, temperature);
     } finally {
