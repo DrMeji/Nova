@@ -1,7 +1,57 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Copy, Download, Check } from 'lucide-react';
 import { resolveMediaRef } from '@/lib/recentStore';
 import { usableAssistantText } from '@/lib/chatHistory';
+
+const PIXEL_COLS = 14;
+const PIXEL_ROWS = 10;
+
+function MediaPixelField({ video }: { video?: boolean }) {
+  const cells = useMemo(() => {
+    const list: { id: number; delay: number; dur: number }[] = [];
+    for (let i = 0; i < PIXEL_COLS * PIXEL_ROWS; i++) {
+      list.push({
+        id: i,
+        delay: (i * 37) % 1200,
+        dur: 900 + ((i * 53) % 900),
+      });
+    }
+    return list;
+  }, []);
+
+  return (
+    <div
+      className={`absolute inset-x-0 bottom-0 flex items-end justify-center px-8 pb-10 pointer-events-none ${
+        video ? 'h-[55%]' : 'h-[58%]'
+      }`}
+      aria-hidden
+    >
+      <div
+        className="grid w-full max-w-[240px] gap-[6px]"
+        style={{
+          gridTemplateColumns: `repeat(${PIXEL_COLS}, minmax(0, 1fr))`,
+          gridTemplateRows: `repeat(${PIXEL_ROWS}, minmax(0, 1fr))`,
+        }}
+      >
+        {cells.map((cell, i) => {
+          const row = Math.floor(i / PIXEL_COLS);
+          const fade = 0.15 + (row / (PIXEL_ROWS - 1)) * 0.85;
+          return (
+            <span
+              key={cell.id}
+              className="media-gen-pixel aspect-square rounded-full"
+              style={{
+                opacity: fade,
+                animationDelay: `${cell.delay}ms`,
+                animationDuration: `${cell.dur}ms`,
+              }}
+            />
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 export function GeneratingPlaceholder({
   kind,
@@ -10,6 +60,17 @@ export function GeneratingPlaceholder({
   kind: 'image' | 'video' | 'chat';
   label?: string;
 }) {
+  const [elapsed, setElapsed] = useState(0);
+
+  useEffect(() => {
+    if (kind === 'chat') return;
+    const t0 = Date.now();
+    const id = window.setInterval(() => {
+      setElapsed(Math.floor((Date.now() - t0) / 1000));
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [kind, label]);
+
   if (kind === 'chat') {
     return (
       <div className="flex items-center gap-2 py-1 text-sm text-content-secondary" aria-label={label || 'Thinking'}>
@@ -22,22 +83,34 @@ export function GeneratingPlaceholder({
       </div>
     );
   }
+
+  const headline = label
+    || (kind === 'video' ? 'Creating video' : 'Creating image');
+
   return (
     <div
-      className={`relative w-full max-w-md overflow-hidden rounded-2xl bg-[#1a1d24] border border-surface-border/80 ${
+      className={`relative overflow-hidden rounded-2xl bg-[#2a2b32] ${
         kind === 'video' ? 'aspect-video' : 'aspect-square'
       }`}
-      aria-label={label || (kind === 'video' ? 'Creating video' : 'Creating image')}
+      style={{
+        width: 'min(100%, 26rem)',
+        minWidth: '16rem',
+        minHeight: kind === 'video' ? '10rem' : '16rem',
+      }}
+      aria-label={headline}
+      role="status"
     >
-      <div className="absolute inset-0 media-gen-shimmer" />
-      <div className="absolute inset-0 media-gen-dots opacity-40" />
-      <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-6 text-center">
-        <p className="text-sm text-content-primary/90 font-medium">
-          {label || (kind === 'video' ? 'Creating video…' : 'Creating image…')}
+      <div className="absolute inset-0 media-gen-wash" />
+      <MediaPixelField video={kind === 'video'} />
+      <div className="absolute inset-x-0 top-0 p-5 sm:p-6 z-10">
+        <p className="text-[15px] sm:text-base font-medium text-white tracking-tight">
+          {headline}
         </p>
-        <p className="text-[11px] text-content-tertiary">
-          Matching your prompt — this can take a moment
-        </p>
+        {elapsed > 0 ? (
+          <p className="mt-1.5 text-[11px] text-white/50 tabular-nums">
+            {elapsed}s
+          </p>
+        ) : null}
       </div>
     </div>
   );
@@ -79,16 +152,16 @@ function MediaActions({ src, alt }: { src: string; alt: string }) {
         : src.includes('png')
           ? 'png'
           : 'jpg';
-    a.download = `${(alt || 'ark-creation').slice(0, 40).replace(/\s+/g, '-')}.${ext}`;
+    a.download = `ark-${Date.now()}.${ext}`;
     a.click();
   };
 
   return (
-    <div className="flex items-center gap-0.5 mt-2">
+    <div className="flex items-center gap-1 mt-2">
       <button
         type="button"
         onClick={() => void onCopy()}
-        className="w-8 h-8 rounded-lg flex items-center justify-center text-content-tertiary hover:text-content-primary hover:bg-surface-hover transition-colors"
+        className="p-1.5 rounded-lg text-content-tertiary hover:text-content-primary hover:bg-surface-hover/80 transition-colors"
         title="Copy"
         aria-label="Copy"
       >
@@ -97,7 +170,7 @@ function MediaActions({ src, alt }: { src: string; alt: string }) {
       <button
         type="button"
         onClick={onDownload}
-        className="w-8 h-8 rounded-lg flex items-center justify-center text-content-tertiary hover:text-content-primary hover:bg-surface-hover transition-colors"
+        className="p-1.5 rounded-lg text-content-tertiary hover:text-content-primary hover:bg-surface-hover/80 transition-colors"
         title="Download"
         aria-label="Download"
       >
@@ -107,51 +180,21 @@ function MediaActions({ src, alt }: { src: string; alt: string }) {
   );
 }
 
-function isPreviewMedia(src: string, alt: string, preview?: boolean) {
-  if (preview) return true;
-  if (src.startsWith('data:image/svg')) return true;
-  if (/preview|not a finished|motion still|offline fallback|real:\s*false|demo|placeholder/i.test(alt)) return true;
-  if (/preview|not a finished|motion still|offline fallback/i.test(src)) return true;
-  return false;
-}
-
-function previewBadge(alt: string, src: string) {
-  if (/motion still/i.test(alt) || /motion still/i.test(src)) return 'Motion still · not a finished video';
-  if (/real:\s*false|offline fallback|demo|placeholder/i.test(alt)) return 'Preview · not a finished generation';
-  return 'Preview · not a finished generation';
-}
-
-function ResolvedMedia({
-  src,
-  alt,
-  preview,
-}: {
-  src: string;
-  alt: string;
-  preview?: boolean;
-}) {
+function ResolvedMedia({ src, alt, preview }: { src: string; alt: string; preview?: boolean }) {
   const isVideo = src.startsWith('data:video/') || /\.mp4(\?|$)/i.test(src);
-  const showPreview = isPreviewMedia(src, alt, preview);
   return (
-    <div className="max-w-md">
-      {showPreview && (
-        <p className="mb-1.5 text-[10px] uppercase tracking-wider text-amber-400/90 font-semibold">
-          {previewBadge(alt, src)}
-        </p>
-      )}
+    <div className={`${preview ? 'opacity-90' : ''}`}>
       {isVideo ? (
         <video
           src={src}
           controls
-          playsInline
-          className="w-full rounded-2xl object-cover bg-ark-navy-950 aspect-video"
-          aria-label={alt || 'ARK video'}
+          className="w-[min(100%,26rem)] rounded-2xl bg-black block"
         />
       ) : (
         <img
           src={src}
-          alt={alt || 'ARK generation'}
-          className={`w-full rounded-2xl object-cover bg-ark-navy-950 ${showPreview ? 'ring-1 ring-amber-400/30' : ''}`}
+          alt={alt}
+          className="w-[min(100%,26rem)] rounded-2xl object-contain bg-[#0d1117] block"
         />
       )}
       <MediaActions src={src} alt={alt} />
@@ -161,24 +204,15 @@ function ResolvedMedia({
 
 function ArkMediaImage({ id, alt, preview }: { id: string; alt: string; preview?: boolean }) {
   const [src, setSrc] = useState<string | null>(null);
-  const [failed, setFailed] = useState(false);
-
   useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      const url = await resolveMediaRef(id);
-      if (cancelled) return;
-      if (url) setSrc(url);
-      else setFailed(true);
-    })();
+    let alive = true;
+    void resolveMediaRef(id).then(url => {
+      if (alive) setSrc(url);
+    });
     return () => {
-      cancelled = true;
+      alive = false;
     };
   }, [id]);
-
-  if (failed) {
-    return <p className="text-xs text-content-tertiary">Couldn’t load this creation.</p>;
-  }
   if (!src) {
     return <GeneratingPlaceholder kind="image" label="Loading…" />;
   }
@@ -201,7 +235,7 @@ export function MessageContent({ content }: { content: string }) {
     return <GeneratingPlaceholder kind="chat" label="Working…" />;
   }
 
-  if (!content.includes('ark-media:')) {
+  if (!content.includes('ark-media:') && !/!\[[^\]]*\]\([^)]+\)/.test(content)) {
     const shown = usableAssistantText(content) || content.trim();
     if (!shown) {
       return <p className="text-sm text-content-tertiary">(no response)</p>;
@@ -259,7 +293,6 @@ export function MessageContent({ content }: { content: string }) {
             </p>
           );
         }
-        // Keep preview lines visible; soft-style them
         if (/preview|not a finished|motion still|offline fallback/i.test(text) && text.length < 200) {
           return (
             <p key={i} className="text-xs text-amber-400/90 whitespace-pre-wrap">

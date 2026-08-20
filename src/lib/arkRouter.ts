@@ -83,6 +83,8 @@ export type ArkRouteOpts = {
   stickyModelId?: string;
   stickyModelName?: string;
   stickyPinnedSource?: 'local' | 'cloud' | 'optional';
+  /** Target clip length for video generation (seconds, max 30). */
+  mediaDurationSec?: number;
 };
 
 function modeAllowsCloud(mode: AiModePref) {
@@ -751,7 +753,9 @@ async function tryStickyImage(
 
   const modelId = opts.stickyModelId || 'ark-image-core';
   try {
-    const result = await brainGenerate(opts.message, modelId, 'image');
+    const result = await brainGenerate(opts.message, modelId, 'image', {
+      mediaDurationSec: opts.mediaDurationSec,
+    });
     if (!result.media?.dataUrl) {
       return result.reply
         ? {
@@ -786,7 +790,9 @@ async function tryStickyVideo(
   attempted.push(`Sticky · ${opts.stickyModelName || opts.stickyModelId}`);
   const modelId = opts.stickyModelId || 'ark-video-core';
   try {
-    const result = await brainGenerate(opts.message, modelId, 'video');
+    const result = await brainGenerate(opts.message, modelId, 'video', {
+      mediaDurationSec: opts.mediaDurationSec,
+    });
     const source = result.source || 'ark-media';
     const isMp4 = Boolean(
       result.media?.dataUrl?.startsWith('data:video/')
@@ -872,7 +878,9 @@ async function routeImage(opts: ArkRouteOpts): Promise<ArkRouterResult> {
     const label = mid === 'ark-image-core' ? 'ARK Image Core' : mid;
     attempted.push(label);
     try {
-      const result = await brainGenerate(opts.message, mid, 'image');
+      const result = await brainGenerate(opts.message, mid, 'image', {
+        mediaDurationSec: opts.mediaDurationSec,
+      });
       if (!result.media?.dataUrl) {
         return {
           reply: result.reply,
@@ -987,7 +995,9 @@ async function routeVideo(opts: ArkRouteOpts): Promise<ArkRouterResult> {
     : 'ark-video-core';
   attempted.push(modelId === 'ark-video-core' ? 'ARK Video Core' : modelId);
   try {
-    const result = await brainGenerate(opts.message, modelId, 'video');
+    const result = await brainGenerate(opts.message, modelId, 'video', {
+      mediaDurationSec: opts.mediaDurationSec,
+    });
     const source = result.source || 'ark-media';
     const isMp4 = Boolean(
       result.media?.dataUrl?.startsWith('data:video/')
@@ -1027,7 +1037,9 @@ async function routeVideo(opts: ArkRouteOpts): Promise<ArkRouterResult> {
     if (modelId !== 'ark-video-core') {
       try {
         attempted.push('ARK Video Core');
-        const retry = await brainGenerate(opts.message, 'ark-video-core', 'video');
+        const retry = await brainGenerate(opts.message, 'ark-video-core', 'video', {
+          mediaDurationSec: opts.mediaDurationSec,
+        });
         if (retry?.media?.dataUrl) {
           return {
             reply: retry.reply,

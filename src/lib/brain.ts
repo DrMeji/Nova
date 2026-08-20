@@ -44,11 +44,16 @@ export async function probeBrain(): Promise<{
   }
 }
 
+export type BrainMediaOpts = {
+  mediaDurationSec?: number;
+};
+
 /** Prefer IPC engine when available; else brain HTTP; always ARK-owned. */
 export async function brainGenerate(
   message: string,
   modelId?: string,
   kind?: 'image' | 'video' | 'chat' | 'coding',
+  mediaOpts?: BrainMediaOpts,
 ): Promise<{
   reply: string;
   media?: { kind: string; dataUrl: string; path?: string; libraryId?: string; real?: boolean };
@@ -60,7 +65,9 @@ export async function brainGenerate(
   let ipcFailed = false;
   try {
     if (window.arkDesktop?.engineGenerate) {
-      const result = await engineGenerate(message, modelId, kind);
+      const result = await engineGenerate(message, modelId, kind, {
+        mediaDurationSec: mediaOpts?.mediaDurationSec,
+      });
       return {
         reply: result.reply,
         media: result.media,

@@ -44,6 +44,7 @@ import {
   MEDIA_GEN_STAGES,
   rewriteImagePrompt,
   rewriteVideoPrompt,
+  runMediaGenStages,
 } from '@/lib/mediaPrompt';
 import { arkRoute, routerProviderLabel, type ArkRouterResult } from '@/lib/arkRouter';
 import { FreeKeyWizard } from '@/components/FreeKeyWizard';
@@ -71,7 +72,7 @@ import {
   saveAutoThreadBrain,
   type ThreadBrain,
 } from '@/lib/threadBrain';
-import { MessageContent } from '@/components/MediaMessage';
+import { MessageContent, GeneratingPlaceholder } from '@/components/MediaMessage';
 import {
   detectPluginIntent,
   getChatEnabledPlugins,
@@ -122,8 +123,19 @@ function ChatModeTabs() {
       navigate({ name: 'chat' });
       return;
     }
-    // Always open a fresh Image / Video canvas — never jump to the last Recent thread.
-    if (route.name === 'chat' && route.mode === next && !route.chatId) return;
+    // Already on this Image/Video thread — keep it (don't wipe an in-progress generate).
+    if (route.name === 'chat' && route.mode === next) return;
+    // If a generate is still running for this mode, return to that chat instead of a blank canvas.
+    try {
+      const raw = sessionStorage.getItem('ark:inflight-media');
+      const inflight = raw ? JSON.parse(raw) as { chatId?: string; mode?: string } : null;
+      if (inflight?.mode === next && inflight.chatId) {
+        navigate({ name: 'chat', mode: next, chatId: inflight.chatId });
+        return;
+      }
+    } catch {
+      /* ignore */
+    }
     navigate({ name: 'chat', mode: next });
   };
   const tabs: { id: 'general' | 'image' | 'video'; label: string }[] = [
@@ -469,6 +481,7 @@ export function AIChat() {
   const [githubOfferId, setGithubOfferId] = useState<string | null>(null);
   const [composerTall, setComposerTall] = useState(false);
   const [composerMode, setComposerMode] = useState<'plan' | 'ask' | 'debug' | 'multitask' | null>(null);
+  const [videoDurationSec, setVideoDurationSec] = useState<10 | 20 | 30>(10);
   const [tokenRatio, setTokenRatio] = useState(0);
   const stopRequestedRef = useRef(false);
   const generatingRef = useRef(false);
@@ -745,6 +758,25 @@ export function AIChat() {
       setGenerating(Boolean(generatingRef.current));
       return;
     }
+    try {
+      const raw = sessionStorage.getItem('ark:inflight-media');
+      const inflight = raw ? JSON.parse(raw) as { chatId?: string; mode?: string } : null;
+      if (
+        inflight?.chatId
+        && inflight.mode
+        && (route.mode === inflight.mode || (!route.mode && inflight.mode === 'general'))
+      ) {
+        navigate({
+          name: 'chat',
+          mode: inflight.mode === 'general' ? undefined : (inflight.mode as 'image' | 'video'),
+          chatId: inflight.chatId,
+        });
+        setLoading(false);
+        return;
+      }
+    } catch {
+      /* ignore */
+    }
     setMessages([]);
     messagesRef.current = [];
     setThreadBrain(null);
@@ -755,7 +787,7 @@ export function AIChat() {
       setGenerating(Boolean(generatingRef.current));
     }
     setLoading(false);
-  }, [route, mode]);
+  }, [route, mode, navigate]);
 
   useEffect(() => {
     let cancelled = false;
@@ -925,6 +957,11 @@ export function AIChat() {
     void engineGenerateCancel();
     generatingRef.current = false;
     activeGenChatIdRef.current = null;
+    try {
+      sessionStorage.removeItem('ark:inflight-media');
+    } catch {
+      /* ignore */
+    }
     setGenerating(false);
     setMessages(prev => {
       const next = prev.map(m => (
@@ -1234,6 +1271,16 @@ export function AIChat() {
     setMessages(messagesRef.current);
     generatingRef.current = true;
     setGenerating(true);
+    if (isMediaMode) {
+      try {
+        sessionStorage.setItem(
+          'ark:inflight-media',
+          JSON.stringify({ chatId: activeChatId, mode }),
+        );
+      } catch {
+        /* ignore */
+      }
+    }
 
     if (isNewChat) {
       addChat({
@@ -1286,6 +1333,15 @@ export function AIChat() {
       generatingRef.current = false;
       if (activeGenChatIdRef.current === activeChatId) {
         activeGenChatIdRef.current = null;
+      }
+      try {
+        const raw = sessionStorage.getItem('ark:inflight-media');
+        const inflight = raw ? JSON.parse(raw) as { chatId?: string } : null;
+        if (!inflight?.chatId || inflight.chatId === activeChatId) {
+          sessionStorage.removeItem('ark:inflight-media');
+        }
+      } catch {
+        sessionStorage.removeItem('ark:inflight-media');
       }
       setGenerating(false);
     };
@@ -1516,27 +1572,39 @@ export function AIChat() {
         }
       } else if (!usedPlugin && mode === 'image') {
         try {
-          const stages = MEDIA_GEN_STAGES.image;
           const setAssistantContent = (text: string) => {
             if (abandoned || stopRequestedRef.current || mySeq !== genSeqRef.current) return;
-            setMessages(prev => {
-              const next = prev.map(m => (m.id === assistantId ? { ...m, content: text } : m));
-              persistModeThread(mode, next, { chatId: persistChatIdRef.current || activeChatId });
-              return next;
-            });
+            const threadChatId = persistChatIdRef.current || activeChatId;
+            const patch = (list: ChatMessage[]) =>
+              list.map(m => (m.id === assistantId ? { ...m, content: text } : m));
+            const viewing = !routeChatIdRef.current || routeChatIdRef.current === threadChatId;
+            if (viewing) {
+              setMessages(prev => {
+                const next = patch(prev.some(m => m.id === assistantId) ? prev : messagesRef.current);
+                messagesRef.current = next;
+                persistModeThread(mode, next, { chatId: threadChatId });
+                return next;
+              });
+              return;
+            }
+            try {
+              const raw = localStorage.getItem(chatThreadKey(threadChatId));
+              const stored = raw ? JSON.parse(raw) as ChatMessage[] : [];
+              const base = Array.isArray(stored) && stored.some(m => m.id === assistantId)
+                ? stored
+                : messagesRef.current;
+              persistModeThread(mode, patch(base), { chatId: threadChatId });
+            } catch {
+              /* ignore */
+            }
           };
-
-          setAssistantContent(`__generating__:image:${stages[0].label}`);
-          let stageIdx = 0;
-          const stageTimer = window.setInterval(() => {
-            stageIdx = Math.min(stageIdx + 1, stages.length - 1);
-            setAssistantContent(`__generating__:image:${stages[stageIdx].label}`);
-          }, 2800);
 
           const rewritten = rewriteImagePrompt(content);
           const sticky = stickyBrain;
-          let routed;
-          try {
+          let routed: Awaited<ReturnType<typeof arkRoute>> | undefined;
+          await runMediaGenStages('image', label => {
+            setAssistantContent(`__generating__:image:${label}`);
+          }, async () => {
             routed = await arkRoute({
               message: rewritten,
               kind: 'image',
@@ -1547,91 +1615,106 @@ export function AIChat() {
               stickyModelName: sticky?.modelName,
               stickyPinnedSource: sticky?.pinnedSource,
             });
-          } finally {
-            window.clearInterval(stageTimer);
-          }
+          });
 
-          resolvedProvider = routerProviderLabel(routed, providerLabel);
-          const hopNote = failoverChipText(routed, pinnedModel);
-          if (hopNote) setFailoverNote(hopNote);
-          if (pinnedModel.source === 'auto' && routed.source !== 'none') {
-            const nextBrain = saveAutoThreadBrain(
-              activeChatId,
-              'image',
-              routed,
-              threadBrainRef.current,
-              routed.attempted?.length ?? 0,
-            );
-            if (nextBrain) setThreadBrain(nextBrain);
-          }
-          const libraryId = routed.media?.libraryId || `local-${Date.now()}`;
-          lastLibraryId = libraryId;
-          if (routed.media?.dataUrl) {
-            const isReal = Boolean(routed.media.real);
-            rememberThumb(libraryId, routed.media.dataUrl);
-            if (isReal) {
+          if (!routed) {
+            response = 'Image generation failed. Try again in a moment.';
+            usedPlugin = true;
+          } else {
+            resolvedProvider = routerProviderLabel(routed, providerLabel);
+            const hopNote = failoverChipText(routed, pinnedModel);
+            if (hopNote) setFailoverNote(hopNote);
+            if (pinnedModel.source === 'auto' && routed.source !== 'none') {
+              const nextBrain = saveAutoThreadBrain(
+                activeChatId,
+                'image',
+                routed,
+                threadBrainRef.current,
+                routed.attempted?.length ?? 0,
+              );
+              if (nextBrain) setThreadBrain(nextBrain);
+            }
+            const libraryId = routed.media?.libraryId || `local-${Date.now()}`;
+            lastLibraryId = libraryId;
+            const dataUrl = routed.media?.dataUrl;
+            const isSvg = Boolean(dataUrl?.startsWith('data:image/svg'));
+            const isReal = Boolean(routed.media?.real) && Boolean(dataUrl) && !isSvg;
+
+            if (isReal && dataUrl) {
+              rememberThumb(libraryId, dataUrl);
               addCreation({
                 id: libraryId,
                 kind: 'image',
                 title: content.slice(0, 80),
                 prompt: content,
                 modelName: routed.modelName || pinnedModel.name,
-                dataUrl: routed.media.dataUrl,
+                dataUrl,
                 createdAt: new Date().toISOString(),
                 real: true,
                 source: routed.source,
               });
-            }
-            if (!isReal && routed.reply) {
-              response = routed.reply.includes('![')
-                ? routed.reply
-                : `${routed.reply}\n\n${mediaMessageMarkdown(content, libraryId, routed.media.dataUrl, { real: false, kind: 'image' })}`;
-            } else {
-              response = mediaMessageMarkdown(content, libraryId, routed.media.dataUrl, {
-                real: isReal,
+              response = mediaMessageMarkdown(content, libraryId, dataUrl, {
+                real: true,
                 kind: 'image',
                 source: routed.source,
               });
+              addChat({
+                id: activeChatId!,
+                mode,
+                title: titleFromPrompt(content),
+                updatedAt: new Date().toISOString(),
+                creationId: libraryId,
+                preview: previewFromText(content),
+              });
+            } else {
+              const failText = String(routed.reply || '').replace(/!\[[^\]]*\]\([^)]+\)/g, '').trim();
+              response = failText || [
+                'Could not generate a real image right now.',
+                '',
+                'Try again in a minute, or connect a Hugging Face key in Models → Cloud.',
+              ].join('\n');
             }
-            addChat({
-              id: activeChatId!,
-              mode,
-              title: titleFromPrompt(content),
-              updatedAt: new Date().toISOString(),
-              creationId: libraryId,
-              preview: previewFromText(content),
-            });
-          } else {
-            response = routed.reply;
+            usedPlugin = true;
           }
-          usedPlugin = true;
         } catch (err) {
           response = classifyErrorMessage(err instanceof Error ? err.message : 'Image generation failed').message;
           usedPlugin = true;
         }
       } else if (!usedPlugin && mode === 'video') {
         try {
-          const stages = MEDIA_GEN_STAGES.video;
           const setAssistantContent = (text: string) => {
             if (abandoned || stopRequestedRef.current || mySeq !== genSeqRef.current) return;
-            setMessages(prev => {
-              const next = prev.map(m => (m.id === assistantId ? { ...m, content: text } : m));
-              persistModeThread(mode, next, { chatId: persistChatIdRef.current || activeChatId });
-              return next;
-            });
+            const threadChatId = persistChatIdRef.current || activeChatId;
+            const patch = (list: ChatMessage[]) =>
+              list.map(m => (m.id === assistantId ? { ...m, content: text } : m));
+            const viewing = !routeChatIdRef.current || routeChatIdRef.current === threadChatId;
+            if (viewing) {
+              setMessages(prev => {
+                const next = patch(prev.some(m => m.id === assistantId) ? prev : messagesRef.current);
+                messagesRef.current = next;
+                persistModeThread(mode, next, { chatId: threadChatId });
+                return next;
+              });
+              return;
+            }
+            try {
+              const raw = localStorage.getItem(chatThreadKey(threadChatId));
+              const stored = raw ? JSON.parse(raw) as ChatMessage[] : [];
+              const base = Array.isArray(stored) && stored.some(m => m.id === assistantId)
+                ? stored
+                : messagesRef.current;
+              persistModeThread(mode, patch(base), { chatId: threadChatId });
+            } catch {
+              /* ignore */
+            }
           };
-
-          setAssistantContent(`__generating__:video:${stages[stages.length - 1].label}`);
-          let stageIdx = 0;
-          const stageTimer = window.setInterval(() => {
-            stageIdx = Math.min(stageIdx + 1, stages.length - 1);
-            setAssistantContent(`__generating__:video:${stages[stageIdx].label}`);
-          }, 2200);
 
           const rewritten = rewriteVideoPrompt(content);
           const sticky = stickyBrain;
-          let routed;
-          try {
+          let routed: Awaited<ReturnType<typeof arkRoute>> | undefined;
+          await runMediaGenStages('video', label => {
+            setAssistantContent(`__generating__:video:${label}`);
+          }, async () => {
             routed = await arkRoute({
               message: rewritten,
               kind: 'video',
@@ -1641,71 +1724,75 @@ export function AIChat() {
               stickyModelId: sticky?.modelId,
               stickyModelName: sticky?.modelName,
               stickyPinnedSource: sticky?.pinnedSource,
+              mediaDurationSec: videoDurationSec,
             });
-          } finally {
-            window.clearInterval(stageTimer);
-          }
+          });
 
-          resolvedProvider = routerProviderLabel(routed, providerLabel);
-          const hopNote = failoverChipText(routed, pinnedModel);
-          if (hopNote) setFailoverNote(hopNote);
-          if (pinnedModel.source === 'auto' && routed.source !== 'none') {
-            const nextBrain = saveAutoThreadBrain(
-              activeChatId,
-              'video',
-              routed,
-              threadBrainRef.current,
-              routed.attempted?.length ?? 0,
-            );
-            if (nextBrain) setThreadBrain(nextBrain);
-          }
-          const libraryId = routed.media?.libraryId || `local-${Date.now()}`;
-          lastLibraryId = libraryId;
-          if (routed.media?.dataUrl) {
-            const isMp4 = routed.media.dataUrl.startsWith('data:video/');
-            const isMotionStill = (routed.source || '').includes('motion-still');
-            const isReal = Boolean(routed.media.real) && isMp4 && !isMotionStill;
-            rememberThumb(libraryId, routed.media.dataUrl);
-            if (isMp4) {
-              addCreation({
-                id: libraryId,
-                kind: 'video',
-                title: content.slice(0, 80),
-                prompt: content,
-                modelName: routed.modelName || pinnedModel.name,
-                dataUrl: routed.media.dataUrl,
-                createdAt: new Date().toISOString(),
-                real: isReal,
-                source: routed.source,
-              });
-            }
-            if (routed.reply && (routed.reply.includes('![') || isMotionStill || !isReal)) {
-              response = routed.reply.includes('![')
-                ? routed.reply
-                : `${routed.reply}\n\n${mediaMessageMarkdown(content, libraryId, routed.media.dataUrl, {
-                    real: isReal,
-                    kind: 'video',
-                    source: routed.source,
-                  })}`;
-            } else {
-              response = mediaMessageMarkdown(content, libraryId, routed.media.dataUrl, {
-                real: isReal,
-                kind: 'video',
-                source: routed.source,
-              });
-            }
-            addChat({
-              id: activeChatId!,
-              mode,
-              title: titleFromPrompt(content),
-              updatedAt: new Date().toISOString(),
-              creationId: libraryId,
-              preview: previewFromText(content),
-            });
+          if (!routed) {
+            response = 'Video generation failed. Try again in a moment.';
+            usedPlugin = true;
           } else {
-            response = routed.reply;
+            resolvedProvider = routerProviderLabel(routed, providerLabel);
+            const hopNote = failoverChipText(routed, pinnedModel);
+            if (hopNote) setFailoverNote(hopNote);
+            if (pinnedModel.source === 'auto' && routed.source !== 'none') {
+              const nextBrain = saveAutoThreadBrain(
+                activeChatId,
+                'video',
+                routed,
+                threadBrainRef.current,
+                routed.attempted?.length ?? 0,
+              );
+              if (nextBrain) setThreadBrain(nextBrain);
+            }
+            const libraryId = routed.media?.libraryId || `local-${Date.now()}`;
+            lastLibraryId = libraryId;
+            if (routed.media?.dataUrl) {
+              const isMp4 = routed.media.dataUrl.startsWith('data:video/');
+              const isMotionStill = (routed.source || '').includes('motion-still');
+              const isReal = Boolean(routed.media.real) && isMp4 && !isMotionStill;
+              rememberThumb(libraryId, routed.media.dataUrl);
+              if (isMp4) {
+                addCreation({
+                  id: libraryId,
+                  kind: 'video',
+                  title: content.slice(0, 80),
+                  prompt: content,
+                  modelName: routed.modelName || pinnedModel.name,
+                  dataUrl: routed.media.dataUrl,
+                  createdAt: new Date().toISOString(),
+                  real: isReal,
+                  source: routed.source,
+                });
+              }
+              if (routed.reply && (routed.reply.includes('![') || isMotionStill || !isReal)) {
+                response = routed.reply.includes('![')
+                  ? routed.reply
+                  : `${routed.reply}\n\n${mediaMessageMarkdown(content, libraryId, routed.media.dataUrl, {
+                      real: isReal,
+                      kind: 'video',
+                      source: routed.source,
+                    })}`;
+              } else {
+                response = mediaMessageMarkdown(content, libraryId, routed.media.dataUrl, {
+                  real: isReal,
+                  kind: 'video',
+                  source: routed.source,
+                });
+              }
+              addChat({
+                id: activeChatId!,
+                mode,
+                title: titleFromPrompt(content),
+                updatedAt: new Date().toISOString(),
+                creationId: libraryId,
+                preview: previewFromText(content),
+              });
+            } else {
+              response = routed.reply || 'Video generation failed. Try again in a moment.';
+            }
+            usedPlugin = true;
           }
-          usedPlugin = true;
         } catch (err) {
           response = classifyErrorMessage(err instanceof Error ? err.message : 'Video generation failed').message;
           usedPlugin = true;
@@ -1841,6 +1928,11 @@ export function AIChat() {
       }
       if (stopRequestedRef.current && !response.trim()) {
         response = '(stopped)';
+      }
+      if (!String(response || '').trim()) {
+        response = isMediaMode
+          ? 'Generation did not finish. Try sending again.'
+          : '(no response)';
       }
 
       finalizeAssistant(response, resolvedProvider, lastLibraryId);
@@ -2295,6 +2387,27 @@ export function AIChat() {
               </span>
             </div>
           )}
+          {mode === 'video' && (
+            <div className="mb-2 flex flex-wrap items-center gap-2 px-1">
+              <span className="text-[11px] text-content-tertiary">Clip length</span>
+              {([10, 20, 30] as const).map(sec => (
+                <button
+                  key={sec}
+                  type="button"
+                  disabled={generating}
+                  onClick={() => setVideoDurationSec(sec)}
+                  className={`rounded-full px-2.5 py-0.5 text-[11px] border transition-colors ${
+                    videoDurationSec === sec
+                      ? 'border-sky-500/50 bg-sky-500/15 text-sky-100'
+                      : 'border-surface-border bg-surface-hover/40 text-content-secondary hover:text-content-primary'
+                  }`}
+                >
+                  {sec}s
+                </button>
+              ))}
+              <span className="text-[10px] text-content-tertiary">Max 30s · quality render may take up to ~30s</span>
+            </div>
+          )}
           <div className={`flex gap-2 min-w-0 ${composerTall ? 'items-end' : 'items-center'}`}>
           <div
             className={`flex-1 min-w-0 border border-surface-border bg-ark-navy-900/90 shadow-lg shadow-black/20 ${
@@ -2687,9 +2800,8 @@ export function AIChat() {
             )}
             {mode === 'video' && (
               <>
-                <p className="text-[11px] text-amber-300/90 text-center mt-4 max-w-md mx-auto">
-                  Video fallback: if MP4 isn’t available, ARK falls back to a motion still.
-                  History bubbles may say “Generated”, “Preview”, or “Motion still”.
+                <p className="text-[11px] text-content-tertiary text-center mt-4 max-w-md mx-auto">
+                  Pick clip length (10 / 20 / 30s) above the composer before you send. ARK renders quality frames — expect ~15–30s.
                 </p>
                 {ideaGrid(VIDEO_IDEAS)}
               </>
@@ -2719,17 +2831,40 @@ export function AIChat() {
                     </div>
                   )}
                   <div
-                    className={`max-w-[min(42rem,78%)] text-sm text-content-primary ${
+                    className={`min-w-0 text-sm text-content-primary ${
                       msg.role === 'user'
-                        ? 'rounded-2xl px-4 py-3 bg-surface-hover'
-                        : isMediaOnlyContent(msg.content)
-                          ? 'px-0 py-0 bg-transparent'
-                          : 'rounded-2xl px-4 py-3 bg-ark-navy-900 border border-surface-border'
+                        ? 'max-w-[min(42rem,78%)] rounded-2xl px-4 py-3 bg-surface-hover'
+                        : isMediaOnlyContent(msg.content) || msg.content.startsWith('__generating__:image:') || msg.content.startsWith('__generating__:video:')
+                          ? 'w-[min(100%,26rem)] px-0 py-0 bg-transparent'
+                          : 'max-w-[min(42rem,78%)] rounded-2xl px-4 py-3 bg-ark-navy-900 border border-surface-border'
                     }`}
                   >
-                    {msg.role === 'assistant' && isLikelyErrorMessage(msg.content)
-                      ? <ArkErrorInline message={msg.content} />
-                      : <MessageContent content={msg.content} />}
+                    {msg.role === 'assistant' && (
+                      !msg.content.trim()
+                      || msg.content.startsWith('__generating__:image:')
+                      || msg.content.startsWith('__generating__:video:')
+                      || (
+                        generating
+                        && msg.id === messages[messages.length - 1]?.id
+                        && (mode === 'image' || mode === 'video')
+                        && !msg.content.includes('![')
+                      )
+                    ) ? (
+                      <GeneratingPlaceholder
+                        kind={
+                          msg.content.includes(':video:') || mode === 'video' ? 'video' : 'image'
+                        }
+                        label={
+                          msg.content.startsWith('__generating__:')
+                            ? msg.content.split(':').slice(2).join(':') || undefined
+                            : (mode === 'video' ? 'Creating video' : 'Creating image')
+                        }
+                      />
+                    ) : msg.role === 'assistant' && isLikelyErrorMessage(msg.content) ? (
+                      <ArkErrorInline message={msg.content} />
+                    ) : (
+                      <MessageContent content={msg.content} />
+                    )}
                     {msg.role === 'assistant'
                       && typeof msg.elapsed_ms === 'number'
                       && msg.elapsed_ms >= 0

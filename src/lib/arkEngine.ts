@@ -137,11 +137,13 @@ export async function engineGenerate(
   message: string,
   modelId?: string,
   kind?: 'image' | 'video' | 'chat' | 'coding',
+  opts?: { mediaDurationSec?: number },
 ) {
   const prefs = getLocalPrefs();
   const sampling = {
     temperature: prefs.ggufTemperature,
     nPredict: ggufNPredictForKind(kind),
+    mediaDurationSec: opts?.mediaDurationSec,
   };
   if (window.arkDesktop?.engineGenerate) {
     return window.arkDesktop.engineGenerate(message, modelId, kind, sampling);

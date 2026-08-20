@@ -116,6 +116,36 @@ async function fetchImageUrl(url, timeoutMs = 45_000) {
   }
 }
 
+const IMAGE_MIN_BYTES = 18_000;
+/** Hard budget so Image mode finishes around ~30s, not minutes of sequential timeouts. */
+const IMAGE_TOTAL_BUDGET_MS = 28_000;
+
+/** Quality-first sequential fetch — never race turbo; stay under ~30s total. */
+async function fetchRealImage(prompt, opts = {}) {
+  const encoded = encodeURIComponent(String(prompt || 'abstract art').slice(0, 450));
+  const baseSeed = (opts.seed ?? hashPrompt(prompt)) % 999999;
+  const w = opts.width || 1024;
+  const h = opts.height || 1024;
+  const started = Date.now();
+  const tiers = [
+    { model: 'flux', source: 'pollinations-flux', ms: 16_000 },
+    { model: 'flux-realism', source: 'pollinations-flux-realism', ms: 12_000 },
+    { model: 'turbo', source: 'pollinations-turbo', ms: 8_000 },
+  ];
+
+  for (const tier of tiers) {
+    const left = IMAGE_TOTAL_BUDGET_MS - (Date.now() - started);
+    if (left < 2_500) break;
+    const timeoutMs = Math.min(tier.ms, left);
+    const url = `https://image.pollinations.ai/prompt/${encoded}?width=${w}&height=${h}&nologo=true&model=${tier.model}&enhance=true&seed=${baseSeed}`;
+    const hit = await fetchImageUrl(url, timeoutMs);
+    if (hit && hit.buf.length >= IMAGE_MIN_BYTES) {
+      return { ...hit, source: tier.source, model: tier.model };
+    }
+  }
+  return null;
+}
+
 /** Hugging Face FLUX when the user connected a free HF key in Models. */
 async function fetchHfImage(prompt) {
   try {
@@ -125,14 +155,15 @@ async function fetchHfImage(prompt) {
     if (!token) return null;
 
     const text = String(prompt || '').slice(0, 450);
-    const hosts = [
-      'https://router.huggingface.co/hf-inference/models/black-forest-labs/FLUX.1-schnell',
-      'https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-schnell',
+    const models = [
+      { url: 'https://router.huggingface.co/hf-inference/models/black-forest-labs/FLUX.1-dev', source: 'huggingface-flux-dev' },
+      { url: 'https://router.huggingface.co/hf-inference/models/black-forest-labs/FLUX.1-schnell', source: 'huggingface-flux-schnell' },
+      { url: 'https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-schnell', source: 'huggingface-flux-schnell' },
     ];
-    for (const url of hosts) {
+    for (const { url, source } of models) {
       try {
         const ac = new AbortController();
-        const timer = setTimeout(() => ac.abort(), 55_000);
+        const timer = setTimeout(() => ac.abort(), 22_000);
         const res = await fetch(url, {
           method: 'POST',
           headers: {
@@ -148,50 +179,15 @@ async function fetchHfImage(prompt) {
         if (!res.ok) continue;
         const ctype = res.headers.get('content-type') || '';
         const buf = Buffer.from(await res.arrayBuffer());
-        if (buf.length < 2500) continue;
+        if (buf.length < IMAGE_MIN_BYTES) continue;
         const ext = ctype.includes('png') ? 'png' : 'jpg';
-        return { buf, ext, source: 'huggingface-flux' };
+        return { buf, ext, source };
       } catch {
         /* try next host */
       }
     }
   } catch {
     /* no HF vault */
-  }
-  return null;
-}
-
-/** Prefer Flux-quality free hosts; try models + seeds until a real PNG/JPG lands. */
-async function fetchRealImage(prompt, opts = {}) {
-  const encoded = encodeURIComponent(String(prompt || 'abstract art').slice(0, 450));
-  const baseSeed = (opts.seed ?? hashPrompt(prompt)) % 999999;
-  const w = opts.width || 1024;
-  const h = opts.height || 1024;
-  const models = ['flux', 'flux-realism', 'turbo', 'openjourney'];
-
-  /** @type {string[]} */
-  const urls = [];
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const seed = (baseSeed + attempt * 7919) % 999999;
-    for (const model of models) {
-      urls.push(
-        `https://image.pollinations.ai/prompt/${encoded}?width=${w}&height=${h}&nologo=true&model=${model}&enhance=true&seed=${seed}`,
-      );
-    }
-    urls.push(
-      `https://image.pollinations.ai/prompt/${encoded}?width=${w}&height=${h}&nologo=true&seed=${seed + 17}`,
-    );
-  }
-
-  // Race the first batch in parallel, then walk the rest sequentially.
-  const batch = urls.slice(0, 4);
-  const parallel = await Promise.all(batch.map(u => fetchImageUrl(u)));
-  const hit = parallel.find(Boolean);
-  if (hit) return { ...hit, source: 'flux-pollinations' };
-
-  for (const url of urls.slice(4)) {
-    const one = await fetchImageUrl(url);
-    if (one) return { ...one, source: 'flux-pollinations' };
   }
   return null;
 }
@@ -234,15 +230,20 @@ async function fetchVideoUrl(url, timeoutMs) {
   }
 }
 
-/** Two free hosts in parallel, ~30s each — never walk a long URL list. */
-async function fetchRealVideo(prompt) {
+/** Sequential video fetch — one host at a time; duration capped at 30s. */
+async function fetchRealVideo(prompt, durationSec = 10) {
   const encoded = encodeURIComponent(String(prompt || 'cinematic motion').slice(0, 400));
+  const duration = Math.max(4, Math.min(30, Number(durationSec) || 10));
+  const timeoutMs = Math.min(32_000, duration * 2200 + 12_000);
   const urls = [
-    `https://gen.pollinations.ai/video/${encoded}?model=wan-fast&duration=4&aspectRatio=16:9`,
-    `https://gen.pollinations.ai/video/${encoded}?model=ltx-2&duration=4&aspectRatio=16:9`,
+    `https://gen.pollinations.ai/video/${encoded}?model=ltx-2&duration=${duration}&aspectRatio=16:9`,
+    `https://gen.pollinations.ai/video/${encoded}?model=wan-fast&duration=${duration}&aspectRatio=16:9`,
   ];
-  const results = await Promise.all(urls.map(url => fetchVideoUrl(url, 32_000)));
-  return results.find(Boolean) || null;
+  for (const url of urls) {
+    const hit = await fetchVideoUrl(url, timeoutMs);
+    if (hit) return hit;
+  }
+  return null;
 }
 
 /** Second path: Hugging Face text-to-video when a token is present in the vault file. */
@@ -303,6 +304,17 @@ function rewriteImagePrompt(prompt) {
   }
   if (/\btesla\b/.test(lower)) {
     hints.push('accurate single Tesla car, coherent body');
+  }
+  if (/\b(iphone|ipad|macbook|android phone|smartphone|galaxy|pixel|pro max|ultra)\b/.test(lower)
+    || (/\b(phone|device|product)\b/.test(lower) && /\b(make|create|design|render|generate)\b/.test(lower))) {
+    return [
+      'isolated product hero photograph on a clean studio backdrop',
+      'single smartphone device only, front three-quarter view, sharp focus',
+      'no hands, no people, no fingers holding the phone, no lifestyle scene',
+      raw,
+      'accurate industrial design, realistic materials, commercial product render',
+      'no watermarks, no UI chrome, no captions',
+    ].join(', ');
   }
   return [
     raw,
@@ -492,6 +504,37 @@ async function generateImage(prompt, modelName) {
     }
   }
 
+  const real = await fetchRealImage(enhanced, { width: 1024, height: 1024 });
+
+  if (real) {
+    const file = path.join(mediaDir(), `${id}.${real.ext}`);
+    fs.writeFileSync(file, real.buf);
+    const dataUrl = `data:image/${real.ext === 'jpg' ? 'jpeg' : real.ext};base64,${real.buf.toString('base64')}`;
+    const entry = {
+      id,
+      kind: 'image',
+      title: String(prompt).slice(0, 80),
+      prompt: String(prompt),
+      modelName: modelName || real.model || 'ARK Image Core',
+      path: file,
+      createdAt: new Date().toISOString(),
+      source: real.source,
+      real: true,
+    };
+    writeLibraryEntry(entry);
+    return {
+      ok: true,
+      kind: 'image',
+      modelName: entry.modelName,
+      path: file,
+      dataUrl,
+      libraryId: id,
+      real: true,
+      source: real.source,
+      reply: shortImageReply(prompt, dataUrl, true),
+    };
+  }
+
   const hf = await fetchHfImage(enhanced);
   if (hf) {
     const file = path.join(mediaDir(), `${id}.${hf.ext}`);
@@ -522,37 +565,6 @@ async function generateImage(prompt, modelName) {
     };
   }
 
-  const real = await fetchRealImage(enhanced, { width: 1024, height: 1024 });
-
-  if (real) {
-    const file = path.join(mediaDir(), `${id}.${real.ext}`);
-    fs.writeFileSync(file, real.buf);
-    const dataUrl = `data:image/${real.ext === 'jpg' ? 'jpeg' : real.ext};base64,${real.buf.toString('base64')}`;
-    const entry = {
-      id,
-      kind: 'image',
-      title: String(prompt).slice(0, 80),
-      prompt: String(prompt),
-      modelName: modelName || 'ARK Image Core',
-      path: file,
-      createdAt: new Date().toISOString(),
-      source: real.source,
-      real: true,
-    };
-    writeLibraryEntry(entry);
-    return {
-      ok: true,
-      kind: 'image',
-      modelName: entry.modelName,
-      path: file,
-      dataUrl,
-      libraryId: id,
-      real: true,
-      source: real.source,
-      reply: shortImageReply(prompt, dataUrl, true),
-    };
-  }
-
   const svg = buildFallbackSvg(prompt, modelName, 'image');
   const file = path.join(mediaDir(), `${id}.svg`);
   fs.writeFileSync(file, svg, 'utf8');
@@ -575,11 +587,12 @@ async function generateImage(prompt, modelName) {
   };
 }
 
-async function generateVideo(prompt, modelName) {
+async function generateVideo(prompt, modelName, opts = {}) {
   const id = `vid-${Date.now()}-${hashPrompt(prompt).toString(16)}`;
+  const durationSec = Math.max(4, Math.min(30, Number(opts.durationSec) || 10));
 
   // Prefer real generative MP4 when a free Pollinations / HF route answers.
-  const mp4 = (await fetchRealVideo(prompt)) || (await fetchHfVideo(prompt));
+  const mp4 = (await fetchRealVideo(prompt, durationSec)) || (await fetchHfVideo(prompt));
   if (mp4) {
     const file = path.join(mediaDir(), `${id}.mp4`);
     fs.writeFileSync(file, mp4.buf);
@@ -640,7 +653,7 @@ async function generateVideo(prompt, modelName) {
     const stillFile = path.join(mediaDir(), `${id}-still.${stillExt}`);
     fs.writeFileSync(stillFile, stillBuf);
     try {
-      const motionBuf = await arkFfmpeg.stillToMp4(stillFile, { duration: 4 });
+      const motionBuf = await arkFfmpeg.stillToMp4(stillFile, { duration: durationSec });
       if (motionBuf) {
         const file = path.join(mediaDir(), `${id}.mp4`);
         fs.writeFileSync(file, motionBuf);

@@ -291,6 +291,33 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.96',
+    channel: 'stable' as const,
+    date: 'Aug 19, 2026',
+    title: 'ChatGPT-style image generating UI + reliable reveal',
+    notes: [
+      'Creating image card with moving pixel animation and stages: Creating image → Sketching it out → Almost done → Wrapping it up',
+      'Fixed invisible generating card (width collapse) and empty assistant bubble after failed/slow generates',
+      'Image fetch budget capped ~28s so it finishes instead of hanging past a minute',
+      'Switching Chat/Image tabs mid-generate returns you to the in-progress thread; Stop stays available',
+      'Finished images show clean (no outer frame) with copy/download',
+      'Update via Settings → Updates → Check → Download when this build is published',
+    ],
+  },
+  {
+    version: '0.1.95',
+    channel: 'stable' as const,
+    date: 'Aug 19, 2026',
+    title: 'Quality-first image & video generation',
+    notes: [
+      'Image mode no longer races fast turbo models — ARK tries flux-realism, flux, then openjourney sequentially (up to ~30s)',
+      'Product prompts (iPhone, devices) get hero-shot hints: sharp studio render, no hands unless you ask',
+      'Live generation animation with elapsed seconds and progress bar while images/videos render',
+      'Video tab: pick 10 / 20 / 30 second clip length before send (max 30s)',
+      'Update via Settings → Updates → Check → Download when this build is published',
+    ],
+  },
+  {
     version: '0.1.94',
     channel: 'stable' as const,
     date: 'Aug 19, 2026',

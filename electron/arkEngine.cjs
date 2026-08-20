@@ -654,7 +654,9 @@ async function generate(message, opts = {}) {
     };
   }
   if (kind === 'video' || (modelId && String(modelId).includes('video'))) {
-    const media = await arkMedia.generateVideo(message, model?.name || 'ARK Video Core');
+    const media = await arkMedia.generateVideo(message, model?.name || 'ARK Video Core', {
+      durationSec: opts.mediaDurationSec,
+    });
     return {
       ok: true,
       reply: media.reply,

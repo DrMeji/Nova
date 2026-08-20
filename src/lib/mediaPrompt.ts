@@ -7,7 +7,6 @@ export function rewriteImagePrompt(raw: string): string {
   const lower = prompt.toLowerCase();
   const subjectHints: string[] = [];
 
-  // Keep animal/human subjects explicit so models don't swap them.
   if (/\b(cat|kitten|cats)\b/.test(lower) && !/\b(human|person|man|woman|people)\b/.test(lower)) {
     subjectHints.push('subject is a real cat (animal), not a human');
   }
@@ -22,6 +21,18 @@ export function rewriteImagePrompt(raw: string): string {
   }
   if (/\btesla\b/.test(lower)) {
     subjectHints.push('accurate Tesla vehicle design, single coherent car body');
+  }
+  if (/\b(iphone|ipad|macbook|android phone|smartphone|galaxy|pixel|pro max|ultra)\b/.test(lower)
+    || (/\b(phone|device|product)\b/.test(lower) && /\b(make|create|design|render|generate)\b/.test(lower))) {
+    // Put constraints FIRST so Pollinations truncation (450 chars) keeps them.
+    return [
+      'isolated product hero photograph on a clean studio backdrop',
+      'single smartphone device only, front three-quarter view, sharp focus',
+      'no hands, no people, no fingers holding the phone, no lifestyle scene',
+      prompt,
+      'accurate industrial design, realistic materials, commercial product render',
+      'no watermarks, no UI chrome, no captions',
+    ].join(', ');
   }
 
   const fidelity = [
@@ -62,13 +73,42 @@ export function rewriteVideoPrompt(raw: string): string {
 
 export const MEDIA_GEN_STAGES = {
   image: [
-    { key: 'understand', label: 'Reading your prompt…', ms: 900 },
-    { key: 'compose', label: 'Composing the scene…', ms: 1400 },
-    { key: 'render', label: 'Rendering image…', ms: 0 },
+    { key: 'create', label: 'Creating image', ms: 4500 },
+    { key: 'sketch', label: 'Sketching it out', ms: 5500 },
+    { key: 'almost', label: 'Almost done', ms: 6000 },
+    { key: 'wrap', label: 'Wrapping it up', ms: 0 },
   ],
   video: [
-    { key: 'understand', label: 'Reading your prompt…', ms: 1000 },
-    { key: 'compose', label: 'Planning the shot…', ms: 1600 },
-    { key: 'render', label: 'Rendering motion…', ms: 0 },
+    { key: 'create', label: 'Creating video', ms: 4500 },
+    { key: 'plan', label: 'Planning the shot', ms: 5500 },
+    { key: 'render', label: 'Rendering frames', ms: 7000 },
+    { key: 'wrap', label: 'Wrapping it up', ms: 0 },
   ],
 } as const;
+
+export type MediaGenMode = keyof typeof MEDIA_GEN_STAGES;
+
+/** Advance ChatGPT-style stage labels while async media work runs. */
+export function runMediaGenStages(
+  mode: MediaGenMode,
+  onStage: (label: string) => void,
+  work: () => Promise<void>,
+): Promise<void> {
+  const stages = MEDIA_GEN_STAGES[mode];
+  let idx = 0;
+  onStage(stages[0].label);
+  let timer: number | undefined;
+  const arm = () => {
+    const wait = stages[idx].ms;
+    if (!wait || idx >= stages.length - 1) return;
+    timer = window.setTimeout(() => {
+      idx = Math.min(idx + 1, stages.length - 1);
+      onStage(stages[idx].label);
+      arm();
+    }, wait);
+  };
+  arm();
+  return work().finally(() => {
+    if (timer) window.clearTimeout(timer);
+  });
+}

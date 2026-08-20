@@ -759,6 +759,7 @@ ipcMain.handle('ark:engine-generate', async (_e, payload) =>
     kind: payload?.kind,
     temperature: payload?.temperature,
     nPredict: payload?.nPredict,
+    mediaDurationSec: payload?.mediaDurationSec,
   }),
 );
 
