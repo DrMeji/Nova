@@ -15,13 +15,14 @@ const MAX_TURNS = 48;
 const MAX_CHARS = 24_000;
 const MAX_TURN_CHARS = 2_400;
 
-const BASE_SYSTEM =
-  'You are ARK, the assistant inside the ARK desktop creation studio on this computer. '
-  + 'ARK the product can chat, write and edit code, generate images and video, run a local AI brain, and connect free/cloud models. '
-  + 'You are not the video game Ark: Survival Evolved, not a dinosaur-survival game, and not an unrelated game engine. '
-  + 'Never “correct” the user’s spelling of ARK. Never mention that game unless they clearly ask about it by name. '
-  + 'Be concise. Never echo the user’s greeting. '
-  + 'If they only say hi/hello, reply once: “How can I assist you today?”';
+export const BASE_SYSTEM =
+  'You are ARK, a normal helpful AI chat assistant. Talk like ChatGPT — not a design studio or image tool unless they ask to make something. '
+  + 'You are not the video game Ark: Survival Evolved. Never “correct” the user’s spelling of ARK. '
+  + 'Never echo the user’s greeting. If they only say hi/hello/hey, reply: “Hello! How can I assist you today?” '
+  + 'Be accurate and complete. Cover the main facts they need, then one short follow-up: “Want more on any of that?” '
+  + 'People: who they are, companies they founded/own/run (list the well-known ones), and a couple of notable facts. '
+  + 'Movies/shows: Title (year) — one line why it is good. Then typical places to watch (Netflix, Disney+, Prime Video, Max, YouTube) and IMDb for listings. Say availability varies by country. '
+  + 'Write lists as: 1. Drama: Title (year) — … Watch: Netflix / Prime. Never nest asterisks. Never wrap genre names in **.';
 
 const CONTINUITY =
   'This is a follow-up in the same ARK app chat. '
@@ -45,6 +46,7 @@ const INSTRUCTION_LEAD_RES = [
   /^Do not (?:echo the prompt|correct the spelling of ARK|repeat system instructions)[^\n]*\.?\s*/i,
   /^Pick the right fence tag[^\n]*\.?\s*/i,
   /^You are ARK, the assistant[^\n]*(?:\n(?!```)[^\n]{0,240})*\n+/i,
+  /^You are ARK, a (?:normal )?helpful AI chat assistant[^\n]*(?:\n(?!```)[^\n]{0,280})*\n+/i,
 ];
 
 
@@ -367,6 +369,7 @@ export function sanitizeAssistantReply(
   text = text.replace(/^[a-z]\.\s+Is there anything specific you'd like to know about Ark\??\s*/i, '').trim();
   text = text.replace(/^[a-z]\.\s+(?:If you have any specific|I(?:['’]d| would) be happy)[^\n]*\n*/i, '').trim();
   text = text.replace(/^Hello!\s+It (?:looks|seems) like you might have (?:meant|a typo)[^\n]*\n*/i, '').trim();
+  text = tidyMarkdownStars(text);
 
   const user = String(lastUserMessage || '').trim();
   if (user) {
@@ -475,6 +478,9 @@ export function looksLikePromptEcho(reply: string): boolean {
   if (!t) return false;
   if (PROMPT_FRAGMENT_RE.test(t)) return true;
   // Strong signal: models sometimes re-emit the exact system instruction block.
+  if (/^You are ARK, a (?:normal )?helpful AI chat assistant/i.test(t)) {
+    return /Hello! How can I assist you today/i.test(t) || /Never nest asterisks/i.test(t) || /Want more on any of that/i.test(t);
+  }
   if (/^You are ARK, the assistant inside the ARK desktop creation studio on this computer\./i.test(t)) {
     return /Do not echo the prompt\./i.test(t) || /Answer the latest user request clearly\./i.test(t);
   }
@@ -550,5 +556,15 @@ function stripPreviousBleed(text: string, previousAssistant: string): string {
     }
   }
 
+  return out;
+}
+
+/** Collapse nested / escaped bold so **Drama** renders instead of **\*\*Drama\*\*:** */
+export function tidyMarkdownStars(text: string): string {
+  let out = String(text || '');
+  out = out.replace(/\*\*\\+\*\*/g, '**');
+  out = out.replace(/\\(\*)/g, '$1');
+  out = out.replace(/\*\*\*\*+/g, '**');
+  out = out.replace(/\*\*\s*\*\*/g, '');
   return out;
 }

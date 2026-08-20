@@ -129,11 +129,17 @@ async function fetchImageUrl(url, timeoutMs = 45_000) {
   }
 }
 
-const IMAGE_MIN_BYTES = 24_000;
-/** Quality-first: allow slower real renders (~15–45s). */
-const IMAGE_TOTAL_BUDGET_MS = 45_000;
-/** Under this = likely CDN cache — retry while budget remains. */
-const IMAGE_CACHE_HARD_MS = 3_500;
+/** Tiny stubs / error JPEGs are usually under ~8KB; real gens are larger. */
+const IMAGE_MIN_BYTES = 10_000;
+/** Keep Pollinations under a minute, then fall through to AI Horde. */
+const IMAGE_TOTAL_BUDGET_MS = 40_000;
+/**
+ * Only treat ultra-fast + tiny bodies as CDN cache stubs.
+ * Modern Pollinations often returns real Flux JPEGs in under 2s — do not
+ * retry-storm those (it hits 429 “queue full” and fails Tesla / car prompts).
+ */
+const IMAGE_CACHE_HARD_MS = 600;
+const IMAGE_CACHE_MAX_BYTES = 22_000;
 
 function freshImageSeed(prompt) {
   const a = hashPrompt(`${prompt}|${Date.now()}|${Math.random()}`);
@@ -181,14 +187,22 @@ function resolveImageDimensions(prompt) {
 }
 
 /**
- * Fetch a unique Pollinations JPEG. Duplicate bodies are skipped.
- * Fast hits are retried while budget remains, then the best buffer is returned.
+ * Fetch a unique Pollinations JPEG. Prefer the first real render.
+ * Avoid retry storms — free hosts queue one request per IP and 429 after spam.
  */
 async function fetchRealImage(prompt, opts = {}) {
   const visualFallback = isProductPrompt(prompt)
     ? 'titanium flagship smartphone, large display, studio product photograph, isolated on a seamless gray backdrop, centered, no hands, no people'
     : '';
-  const texts = [hostSafeImagePrompt(prompt), hostSafeImagePrompt(opts.fallbackPrompt), visualFallback]
+  const carFallback = /\b(tesla|model\s*[3sxy]|cybertruck|plaid)\b/i.test(String(prompt || ''))
+    ? 'sleek modern electric luxury sedan, studio automotive photograph, coherent single car body, sharp detail'
+    : '';
+  const texts = [
+    hostSafeImagePrompt(prompt),
+    hostSafeImagePrompt(opts.fallbackPrompt),
+    carFallback,
+    visualFallback,
+  ]
     .map((p) => String(p || '').trim())
     .filter(Boolean)
     .filter((p, i, arr) => arr.indexOf(p) === i);
@@ -198,82 +212,97 @@ async function fetchRealImage(prompt, opts = {}) {
   const h = opts.height || 1024;
   const started = Date.now();
   const tiers = [
-    { model: 'flux', source: 'pollinations-flux', ms: 28_000 },
-    { model: 'gptimage', source: 'pollinations-gptimage', ms: 22_000 },
-    { model: 'turbo', source: 'pollinations-turbo', ms: 14_000 },
+    { model: 'flux', source: 'pollinations-flux', ms: 55_000 },
+    { model: 'zimage', source: 'pollinations-zimage', ms: 40_000 },
+    { model: 'turbo', source: 'pollinations-turbo', ms: 28_000 },
   ];
 
   const seen = new Set();
   let best = null;
-  let attempt = 0;
-  let rateLimited = false;
+  let rateLimitedStreak = 0;
 
-  promptLoop:
   for (const text of texts) {
     const encoded = encodeURIComponent(text.slice(0, 450));
-    while (IMAGE_TOTAL_BUDGET_MS - (Date.now() - started) >= 2_000) {
-      attempt += 1;
-      const seed = opts.seed != null && attempt === 1
-        ? (Number(opts.seed) % 999999)
-        : freshImageSeed(`${text}:a${attempt}`);
+    const seed = opts.seed != null
+      ? (Number(opts.seed) % 999999)
+      : freshImageSeed(text);
 
-      for (const tier of tiers) {
-        const left = IMAGE_TOTAL_BUDGET_MS - (Date.now() - started);
-        if (left < 2_000) break;
-        const timeoutMs = Math.min(tier.ms, left);
-        const modelQ = tier.model ? `&model=${tier.model}` : '';
-        const url = `https://image.pollinations.ai/prompt/${encoded}?width=${w}&height=${h}&nologo=true${modelQ}&seed=${seed}`;
-        const t0 = Date.now();
-        const hit = await fetchImageUrl(url, timeoutMs);
-        const took = Date.now() - t0;
-        if (hit && hit.error === 429) {
-          if (!rateLimited) {
-            rateLimited = true;
-            await sleep(1800);
-          }
-          continue;
-        }
-        if (hit && hit.error) {
-          if (hit.error >= 500) continue promptLoop;
-          continue;
-        }
-        if (!hit || !hit.buf || hit.buf.length < IMAGE_MIN_BYTES) continue;
+    for (const tier of tiers) {
+      const left = IMAGE_TOTAL_BUDGET_MS - (Date.now() - started);
+      if (left < 2_500) break;
 
-        const fp = bufFingerprint(hit.buf);
-        if (seen.has(fp)) {
-          try {
-            console.log(`[ark-media] duplicate body skipped model=${tier.model} tookMs=${took}`);
-          } catch { /* ignore */ }
-          continue;
-        }
-        seen.add(fp);
+      const timeoutMs = Math.min(tier.ms, left);
+      const modelQ = tier.model ? `&model=${encodeURIComponent(tier.model)}` : '';
+      const url = `https://image.pollinations.ai/prompt/${encoded}?width=${w}&height=${h}&nologo=true${modelQ}&seed=${seed}`;
+      const t0 = Date.now();
+      const hit = await fetchImageUrl(url, timeoutMs);
+      const took = Date.now() - t0;
 
-        const candidate = { ...hit, source: tier.source, model: tier.model, seed, tookMs: took };
-
-        if (took < IMAGE_CACHE_HARD_MS && left > 12_000) {
-          if (!best || took > (best.tookMs || 0)) best = candidate;
-          try {
-            console.log(`[ark-media] fast hit keep/retry model=${tier.model} tookMs=${took}`);
-          } catch { /* ignore */ }
-          continue;
-        }
-
+      if (hit && hit.error === 429) {
+        rateLimitedStreak += 1;
         try {
-          console.log(`[ark-media] image model=${tier.model} seed=${seed} tookMs=${took} bytes=${hit.buf.length}`);
+          console.log(`[ark-media] rate limited model=${tier.model} streak=${rateLimitedStreak}`);
         } catch { /* ignore */ }
-        return candidate;
+        await sleep(rateLimitedStreak === 1 ? 4500 : 7000);
+        // One retry of the same tier after backoff, then leave Pollinations for Horde.
+        if (rateLimitedStreak >= 2) {
+          if (best) return best;
+          return null;
+        }
+        const retry = await fetchImageUrl(url, Math.min(tier.ms, IMAGE_TOTAL_BUDGET_MS - (Date.now() - started)));
+        if (retry && retry.buf && retry.buf.length >= IMAGE_MIN_BYTES) {
+          try {
+            console.log(`[ark-media] image after 429 model=${tier.model} bytes=${retry.buf.length}`);
+          } catch { /* ignore */ }
+          return { ...retry, source: tier.source, model: tier.model, seed, tookMs: Date.now() - t0 };
+        }
+        if (best) return best;
+        return null;
       }
+
+      if (hit && hit.error) {
+        try {
+          console.log(`[ark-media] image HTTP ${hit.error} model=${tier.model} tookMs=${took}`);
+        } catch { /* ignore */ }
+        continue;
+      }
+      if (!hit || !hit.buf || hit.buf.length < IMAGE_MIN_BYTES) continue;
+
+      rateLimitedStreak = 0;
+      const fp = bufFingerprint(hit.buf);
+      if (seen.has(fp)) {
+        try {
+          console.log(`[ark-media] duplicate body skipped model=${tier.model} tookMs=${took}`);
+        } catch { /* ignore */ }
+        continue;
+      }
+      seen.add(fp);
+
+      const candidate = { ...hit, source: tier.source, model: tier.model, seed, tookMs: took };
+      const looksLikeStub = took < IMAGE_CACHE_HARD_MS && hit.buf.length < IMAGE_CACHE_MAX_BYTES;
+      if (looksLikeStub && left > 10_000) {
+        if (!best || hit.buf.length > (best.buf?.length || 0)) best = candidate;
+        try {
+          console.log(`[ark-media] tiny/fast stub keep model=${tier.model} tookMs=${took} bytes=${hit.buf.length}`);
+        } catch { /* ignore */ }
+        continue;
+      }
+
+      try {
+        console.log(`[ark-media] image model=${tier.model} seed=${seed} tookMs=${took} bytes=${hit.buf.length}`);
+      } catch { /* ignore */ }
+      return candidate;
     }
 
     if (best) {
       try {
-        console.log(`[ark-media] returning best candidate tookMs=${best.tookMs}`);
+        console.log(`[ark-media] returning best candidate tookMs=${best.tookMs} bytes=${best.buf?.length}`);
       } catch { /* ignore */ }
       return best;
     }
   }
 
-  return null;
+  return best;
 }
 
 /** Hugging Face FLUX when the user connected a free HF key in Models. */
@@ -772,9 +801,15 @@ async function generateImage(prompt, modelName, opts = {}) {
   }
 
   // Prefer on-device SD when the user installed local image weights.
+  // Cap wait so a broken local install cannot burn the free-host window.
   if (arkSd.isLocalImageReady()) {
     try {
-      const local = await arkSd.generateLocalImage(enhanced, { width: 768, height: 768, steps: 28 });
+      const local = await arkSd.generateLocalImage(enhanced, {
+        width: 768,
+        height: 768,
+        steps: 28,
+        timeoutMs: 45_000,
+      });
       if (local) {
         const file = path.join(mediaDir(), `${id}.${local.ext}`);
         fs.writeFileSync(file, local.buf);
@@ -838,30 +873,46 @@ async function generateImage(prompt, modelName, opts = {}) {
     };
   }
 
-  const real = await fetchRealImage(enhanced, {
+  // Pollinations first; kick AI Horde after 10s (or immediately if Pollinations fails).
+  // Do not retry-storm Pollinations — free hosts queue one request per IP.
+  const pollPromise = fetchRealImage(enhanced, {
     width: dim.width,
     height: dim.height,
     fallbackPrompt: String(prompt || '').trim(),
   });
-  const horde = real || (await fetchHordeImage(enhanced, {
-    width: dim.width,
-    height: dim.height,
-    referenceImageDataUrl: ref,
-  }));
+  let hordePromise = null;
+  const kickHorde = () => {
+    if (!hordePromise) {
+      hordePromise = fetchHordeImage(enhanced, {
+        width: Math.min(dim.width, 1024),
+        height: Math.min(dim.height, 1024),
+        referenceImageDataUrl: ref,
+      });
+    }
+    return hordePromise;
+  };
+  const hordeTimer = setTimeout(() => { void kickHorde(); }, 10_000);
+  let winner = null;
+  try {
+    winner = await pollPromise;
+  } finally {
+    clearTimeout(hordeTimer);
+  }
+  if (!winner) winner = await kickHorde();
 
-  if (horde) {
-    const file = path.join(mediaDir(), `${id}.${horde.ext}`);
-    fs.writeFileSync(file, horde.buf);
-    const dataUrl = `data:image/${horde.ext === 'jpg' ? 'jpeg' : horde.ext};base64,${horde.buf.toString('base64')}`;
+  if (winner) {
+    const file = path.join(mediaDir(), `${id}.${winner.ext}`);
+    fs.writeFileSync(file, winner.buf);
+    const dataUrl = `data:image/${winner.ext === 'jpg' ? 'jpeg' : winner.ext};base64,${winner.buf.toString('base64')}`;
     const entry = {
       id,
       kind: 'image',
       title: String(prompt).slice(0, 80),
       prompt: String(prompt),
-      modelName: modelName || horde.model || 'ARK Image Core',
+      modelName: modelName || winner.model || 'ARK Image Core',
       path: file,
       createdAt: new Date().toISOString(),
-      source: horde.source,
+      source: winner.source,
       real: true,
     };
     writeLibraryEntry(entry);
@@ -873,7 +924,7 @@ async function generateImage(prompt, modelName, opts = {}) {
       dataUrl,
       libraryId: id,
       real: true,
-      source: horde.source,
+      source: winner.source,
       reply: shortImageReply(prompt, dataUrl, true),
     };
   }

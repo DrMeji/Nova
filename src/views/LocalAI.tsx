@@ -25,6 +25,7 @@ import {
   subscribeEngineDownloads,
 } from '@/lib/engineDownloads';
 import { ArkErrorInline } from '@/components/ArkErrorInline';
+import { BrandMark, StatusCheck } from '@/components/BrandMark';
 import { classifyErrorMessage } from '@/lib/errors';
 import { probeBrain } from '@/lib/brain';
 import { refreshBrainUrl } from '@/lib/brainUrl';
@@ -114,13 +115,7 @@ function LocalDownloadControl({
   if (isInstalled) {
     return (
       <span className="inline-flex items-center gap-0.5 shrink-0">
-        <span
-          className="w-8 h-8 rounded-full bg-surface-hover text-emerald-400 flex items-center justify-center"
-          title={isActive ? 'Active model' : 'Installed'}
-          aria-label={isActive ? `Active ${name}` : `Installed ${name}`}
-        >
-          <Check className="w-4 h-4 text-emerald-400" />
-        </span>
+        <StatusCheck label={isActive ? `Active ${name}` : `Installed ${name}`} />
         {onDelete && (
           <button
             type="button"
@@ -616,9 +611,7 @@ export function LocalAI() {
                   </button>
                 </div>
                 <div className="flex items-center gap-3 py-3 px-1 rounded-xl hover:bg-surface-hover/50 transition-colors">
-                  <span className={`w-10 h-10 rounded-xl bg-gradient-to-br ${activeModel.tone} flex items-center justify-center text-[10px] font-bold text-white shrink-0`}>
-                    {activeModel.initial}
-                  </span>
+                  <BrandMark id={activeModel.id} name={activeModel.name} initial={activeModel.initial} tone={activeModel.tone} />
                   <span className="min-w-0 flex-1">
                     <span className="flex items-center gap-2 min-w-0 flex-wrap">
                       <span className="text-sm font-medium text-content-primary truncate">{activeModel.name}</span>
@@ -729,9 +722,7 @@ export function LocalAI() {
                           onClick={() => switchModel(model.id)}
                           className="flex items-center gap-3 min-w-0 flex-1 text-left"
                         >
-                        <span className={`w-10 h-10 rounded-xl bg-gradient-to-br ${model.tone} flex items-center justify-center text-[10px] font-bold text-white shrink-0`}>
-                          {model.initial}
-                        </span>
+                        <BrandMark id={model.id} name={model.name} initial={model.initial} tone={model.tone} />
                         <span className="min-w-0 flex-1">
                           <span className="flex items-center gap-2 min-w-0 flex-wrap">
                             <span className="text-sm font-medium text-content-primary truncate">{model.name}</span>
@@ -778,11 +769,12 @@ export function LocalAI() {
                           key={model.id}
                           className="flex items-center gap-3 py-3 px-1 rounded-xl hover:bg-surface-hover/50 transition-colors min-w-0"
                         >
-                          <span className={`w-10 h-10 rounded-xl bg-gradient-to-br ${
-                            model.source === 'modelscope' ? 'from-sky-500 to-indigo-700' : 'from-emerald-400 to-sky-700'
-                          } flex items-center justify-center text-[10px] font-bold text-white shrink-0`}>
-                            {huntSourceBadge(model.source)}
-                          </span>
+                          <BrandMark
+                            id={model.id}
+                            name={model.name}
+                            initial={huntSourceBadge(model.source)}
+                            tone={model.source === 'modelscope' ? 'from-sky-500 to-indigo-700' : 'from-emerald-400 to-sky-700'}
+                          />
                           <span className="min-w-0 flex-1">
                             <span className="flex items-center gap-2 min-w-0 flex-wrap">
                               <span className="text-sm font-medium text-content-primary truncate">{model.name}</span>
@@ -827,9 +819,7 @@ export function LocalAI() {
                             key={model.id}
                             className="flex items-center gap-3 py-3 px-1 rounded-xl hover:bg-surface-hover/50 transition-colors min-w-0"
                           >
-                            <span className={`w-10 h-10 rounded-xl bg-gradient-to-br ${model.tone} flex items-center justify-center text-[10px] font-bold text-white shrink-0`}>
-                              {model.initial}
-                            </span>
+                            <BrandMark id={model.id} name={model.name} initial={model.initial} tone={model.tone} />
                             <span className="min-w-0 flex-1">
                               <span className="flex items-center gap-2 min-w-0 flex-wrap">
                                 <span className="text-sm font-medium text-content-primary truncate">{model.name}</span>

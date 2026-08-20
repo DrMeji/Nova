@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Copy, Download, Check } from 'lucide-react';
 import { resolveMediaRef } from '@/lib/recentStore';
 import { usableAssistantText } from '@/lib/chatHistory';
+import { ChatMarkdown } from '@/lib/chatMarkdown';
 
 const PIXEL_COLS = 18;
 const PIXEL_ROWS = 14;
@@ -328,11 +329,7 @@ export function MessageContent({ content }: { content: string }) {
             </p>
           );
         }
-        return (
-          <p key={i} className="whitespace-pre-wrap leading-relaxed">
-            {text}
-          </p>
-        );
+        return <ChatMarkdown key={i} text={text} />;
       })}
     </div>
   );

@@ -16,6 +16,7 @@ import {
   upsertRecentChat,
   togglePinnedChat,
   togglePinnedProject,
+  isMediaDeleted,
   type RecentChat,
   type RecentCreation,
   type RecentProject,
@@ -90,6 +91,7 @@ export function RecentProjectsProvider({ children }: { children: ReactNode }) {
         if (res?.ok && Array.isArray(res.items) && res.items.length) {
           for (const item of res.items.slice(0, 40)) {
             if (!item?.id) continue;
+            if (isMediaDeleted(item.id)) continue;
             upsertCreation({
               id: item.id,
               kind: item.kind === 'video' ? 'video' : 'image',

@@ -33,6 +33,7 @@ import { verifyTelegramToken } from '@/lib/telegram';
 import { verifyStripeToken } from '@/lib/stripe';
 import { openInSystemBrowser } from '@/lib/openExternal';
 import { getPluginAuthLink } from '@/lib/pluginAuth';
+import { BrandMark } from '@/components/BrandMark';
 
 export function BuildRun() {
   const [query, setQuery] = useState('');
@@ -328,9 +329,7 @@ export function BuildRun() {
                         className="text-left rounded-xl border border-surface-border hover:bg-surface-hover/70 px-3 py-3 transition-colors"
                       >
                         <span className="flex items-center gap-2.5">
-                          <span className={`w-9 h-9 rounded-xl bg-gradient-to-br ${plugin.tone} flex items-center justify-center text-[10px] font-bold text-white shrink-0`}>
-                            {plugin.initial}
-                          </span>
+                          <BrandMark id={plugin.id} name={plugin.name} initial={plugin.initial} tone={plugin.tone} size="sm" />
                           <span className="min-w-0 flex-1">
                             <span className="block text-sm font-medium text-content-primary">{plugin.name}</span>
                             <span className="block text-[11px] text-content-tertiary truncate">
@@ -379,9 +378,9 @@ export function BuildRun() {
                           type="button"
                           onClick={() => openPlugin(plugin)}
                           title={plugin.name}
-                          className={`relative w-10 h-10 rounded-xl bg-gradient-to-br ${plugin.tone} flex items-center justify-center text-xs font-bold text-white shadow-sm`}
+                          className="relative w-10 h-10 flex items-center justify-center shadow-sm"
                         >
-                          {plugin.initial}
+                          <BrandMark id={plugin.id} name={plugin.name} initial={plugin.initial} tone={plugin.tone} />
                           {runtime.connected && (
                             <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-400 border border-ark-navy-950" />
                           )}
@@ -408,9 +407,7 @@ export function BuildRun() {
                         onClick={() => openPlugin(plugin)}
                         className="flex items-center gap-3 py-3 rounded-xl px-1 text-left hover:bg-surface-hover/50 transition-colors"
                       >
-                        <span className={`w-10 h-10 rounded-xl bg-gradient-to-br ${plugin.tone} flex items-center justify-center text-xs font-bold text-white shrink-0`}>
-                          {plugin.initial}
-                        </span>
+                        <BrandMark id={plugin.id} name={plugin.name} initial={plugin.initial} tone={plugin.tone} />
                         <span className="min-w-0 flex-1">
                           <span className="flex items-center gap-2 min-w-0">
                             <span className="text-sm font-medium text-content-primary truncate">{plugin.name}</span>
@@ -462,9 +459,7 @@ export function BuildRun() {
           >
             <div className="shrink-0 px-5 py-4 flex items-start justify-between gap-3 border-b border-surface-border">
               <div className="flex items-center gap-3 min-w-0">
-                <span className={`w-11 h-11 rounded-xl bg-gradient-to-br ${selected.tone} flex items-center justify-center text-sm font-bold text-white shrink-0`}>
-                  {selected.initial}
-                </span>
+                <BrandMark id={selected.id} name={selected.name} initial={selected.initial} tone={selected.tone} size="lg" />
                 <div className="min-w-0">
                   <h2 className="text-lg font-semibold text-content-primary truncate">{selected.name}</h2>
                   <p className="text-xs text-content-tertiary">

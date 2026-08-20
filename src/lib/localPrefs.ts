@@ -291,6 +291,19 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.98',
+    channel: 'stable' as const,
+    date: 'Aug 20, 2026',
+    title: 'Tesla images, normal chat, Brain on Engine',
+    notes: [
+      'Fixed free image failures (Tesla Model S etc.): stop Pollinations retry storms that hit 429 queue-full; kick AI Horde after 10s; accept real fast renders',
+      'Chat greets like a normal assistant (no “desktop creation” pitch); richer answers + movie watch-where hints; markdown bold renders without star spam',
+      'Brand icons for plugins/models; installed checkmark without circle; Storage disk bar shows used space; Brain API lives on Models → Engine',
+      'Deleting an image chat removes it from History too; Recent overflow archives into History',
+      'Update via Settings → Updates → Check → Download when this build is published',
+    ],
+  },
+  {
     version: '0.1.97',
     channel: 'stable' as const,
     date: 'Aug 20, 2026',

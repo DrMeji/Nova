@@ -62,49 +62,60 @@ export function Dashboard() {
   const [sort, setSort] = useState<'newest' | 'oldest' | 'type'>('newest');
 
   const historyItems = useMemo(() => {
-    const fromCreations: HistoryItem[] = creations.map(c => ({
-      id: `creation-${c.id}`,
-      name: c.title || c.prompt || 'Creation',
-      kind: c.kind === 'video' ? 'video' : 'image',
+    const archived = chats.filter(c => c.archivedAt);
+    const activeCreationIds = new Set(
+      chats.filter(c => !c.archivedAt && c.creationId).map(c => c.creationId as string),
+    );
+    const archivedCreationIds = new Set(
+      archived.map(c => c.creationId).filter(Boolean) as string[],
+    );
+
+    const fromChats: HistoryItem[] = archived.map(c => ({
+      id: `chat-${c.id}`,
+      name: c.title,
+      kind: c.mode === 'image' ? 'image' : c.mode === 'video' ? 'video' : 'chat',
       source: 'generated' as const,
-      sortAt: c.createdAt || '',
-      modifiedLabel: formatWhen(c.createdAt),
-      sizeLabel: (c.source || '').includes('motion-still')
-        ? 'Motion still'
-        : c.real
-          ? 'Generated'
-          : 'Preview',
-      tone: c.kind === 'video' ? 'from-violet-900/70 to-indigo-950' : 'from-sky-900/80 to-blue-950',
-      creationId: c.id,
-      mode: c.kind === 'video' ? 'video' : 'image',
-      thumb: c.dataUrl || getMemoryThumb(c.id),
+      sortAt: c.archivedAt || c.updatedAt || '',
+      modifiedLabel: formatWhen(c.archivedAt || c.updatedAt || ''),
+      sizeLabel:
+        c.mode === 'image'
+          ? 'Image'
+          : c.mode === 'video'
+            ? 'Video'
+            : 'Chat',
+      tone:
+        c.mode === 'video'
+          ? 'from-violet-900/70 to-indigo-950'
+          : c.mode === 'image'
+            ? 'from-sky-900/80 to-blue-950'
+            : 'from-zinc-800 to-zinc-950',
+      chatId: c.id,
+      mode: c.mode,
+      creationId: c.creationId,
+      thumb: c.creationId
+        ? (creations.find(x => x.id === c.creationId)?.dataUrl || getMemoryThumb(c.creationId))
+        : undefined,
     }));
 
-    const fromChats: HistoryItem[] = chats
-      .filter(c => !c.creationId || !creations.some(x => x.id === c.creationId))
+    // Orphans only — not live Recent, not already represented by an archived chat
+    const fromCreations: HistoryItem[] = creations
+      .filter(c => !activeCreationIds.has(c.id) && !archivedCreationIds.has(c.id))
       .map(c => ({
-        id: `chat-${c.id}`,
-        name: c.title,
-        kind: c.mode === 'image' ? 'image' : c.mode === 'video' ? 'video' : 'chat',
+        id: `creation-${c.id}`,
+        name: c.title || c.prompt || 'Creation',
+        kind: c.kind === 'video' ? 'video' as const : 'image' as const,
         source: 'generated' as const,
-        sortAt: c.updatedAt || '',
-        modifiedLabel: formatWhen(c.updatedAt),
-        sizeLabel: c.archivedAt
-          ? 'Archived'
-          : c.mode === 'image'
-            ? 'Image'
-            : c.mode === 'video'
-              ? 'Video'
-              : 'Chat',
-        tone:
-          c.mode === 'video'
-            ? 'from-violet-900/70 to-indigo-950'
-            : c.mode === 'image'
-              ? 'from-sky-900/80 to-blue-950'
-              : 'from-zinc-800 to-zinc-950',
-        chatId: c.id,
-        mode: c.mode,
-        creationId: c.creationId,
+        sortAt: c.createdAt || '',
+        modifiedLabel: formatWhen(c.createdAt),
+        sizeLabel: (c.source || '').includes('motion-still')
+          ? 'Motion still'
+          : c.real
+            ? 'Generated'
+            : 'Preview',
+        tone: c.kind === 'video' ? 'from-violet-900/70 to-indigo-950' : 'from-sky-900/80 to-blue-950',
+        creationId: c.id,
+        mode: c.kind === 'video' ? 'video' as const : 'image' as const,
+        thumb: c.dataUrl || getMemoryThumb(c.id),
       }));
 
     return [...fromChats, ...fromCreations].sort((a, b) => (b.sortAt || '').localeCompare(a.sortAt || ''));
@@ -124,6 +135,18 @@ export function Dashboard() {
       return;
     }
     navigate({ name: 'chat' });
+  };
+
+  const deleteItem = (item: HistoryItem) => {
+    if (item.chatId) {
+      if (window.confirm('Delete this forever? It will leave Recent and History.')) {
+        deleteChatForever(item.chatId);
+      }
+      return;
+    }
+    if (item.creationId && window.confirm('Delete this creation forever?')) {
+      deleteCreationForever(item.creationId);
+    }
   };
 
   const filtered = useMemo(() => {
@@ -160,80 +183,69 @@ export function Dashboard() {
             </div>
           </div>
 
-          <div className="flex items-center justify-between gap-3 mb-4">
-            <div className="flex items-center gap-1">
+          <div className="flex items-center justify-between gap-3 mb-4 min-w-0">
+            <div className="flex items-center gap-1 overflow-x-auto min-w-0">
               {TABS.map(t => (
                 <button
                   key={t.id}
                   type="button"
                   onClick={() => setTab(t.id)}
-                  className={`rounded-full px-3.5 py-1.5 text-sm transition-colors ${
+                  className={`px-3 py-1.5 rounded-full text-xs font-medium shrink-0 transition-colors ${
                     tab === t.id
                       ? 'bg-surface-hover text-content-primary'
-                      : 'text-content-secondary hover:text-content-primary'
+                      : 'text-content-tertiary hover:text-content-secondary'
                   }`}
                 >
                   {t.label}
                 </button>
               ))}
             </div>
-            <select
-              value={sort}
-              onChange={e => setSort(e.target.value as 'newest' | 'oldest' | 'type')}
-              className="bg-transparent border border-surface-border rounded-full px-2 py-1 text-[11px] text-content-secondary"
-            >
-              <option value="newest">Newest</option>
-              <option value="oldest">Oldest</option>
-              <option value="type">Type</option>
-            </select>
-
-            <div className="flex items-center gap-1">
-              <button
-                type="button"
-                onClick={() => setView('grid')}
-                className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
-                  view === 'grid' ? 'bg-surface-hover text-content-primary' : 'text-content-secondary hover:text-content-primary hover:bg-surface-hover'
-                }`}
-                title="Grid"
-                aria-label="Grid view"
-              >
-                <LayoutGrid className="w-4 h-4" />
-              </button>
+            <div className="flex items-center gap-1 shrink-0">
               <button
                 type="button"
                 onClick={() => setView('list')}
-                className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
-                  view === 'list' ? 'bg-surface-hover text-content-primary' : 'text-content-secondary hover:text-content-primary hover:bg-surface-hover'
+                className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                  view === 'list' ? 'bg-surface-hover text-content-primary' : 'text-content-tertiary'
                 }`}
-                title="List"
-                aria-label="List view"
+                aria-label="List"
               >
                 <List className="w-4 h-4" />
               </button>
+              <button
+                type="button"
+                onClick={() => setView('grid')}
+                className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                  view === 'grid' ? 'bg-surface-hover text-content-primary' : 'text-content-tertiary'
+                }`}
+                aria-label="Grid"
+              >
+                <LayoutGrid className="w-4 h-4" />
+              </button>
+              <select
+                value={sort}
+                onChange={e => setSort(e.target.value as typeof sort)}
+                className="ark-input text-xs py-1.5 w-auto"
+              >
+                <option value="newest">Newest</option>
+                <option value="oldest">Oldest</option>
+                <option value="type">Type</option>
+              </select>
             </div>
           </div>
-
-          {view === 'list' && filtered.length > 0 && (
-            <div className="grid grid-cols-[1fr_6.5rem_5rem_2rem] gap-2 px-1 pb-2 text-xs text-content-tertiary">
-              <span>Name</span>
-              <span className="text-right">Modified</span>
-              <span className="text-right">Type</span>
-              <span />
-            </div>
-          )}
+          <p className="text-[11px] text-content-tertiary mb-3">
+            Older chats leave Recent and land here. Delete forever removes the chat and any images with it.
+          </p>
         </div>
       </div>
 
-      <div className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden px-4 sm:px-6 pb-10">
+      <div className="flex-1 min-h-0 overflow-y-auto px-4 sm:px-6 pb-10">
         <div className="w-full max-w-4xl mx-auto">
           {filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 text-center">
-              <div className="w-11 h-11 rounded-xl bg-surface-hover flex items-center justify-center mb-4">
-                <FileText className="w-5 h-5 text-content-secondary" />
-              </div>
-              <p className="text-base font-semibold text-content-primary mb-1">Nothing here yet</p>
-              <p className="text-sm text-content-tertiary mb-5 max-w-sm">
-                Chats, images, and videos you create will show up here — reopen anything from one place.
+              <FileText className="w-10 h-10 text-content-tertiary mb-3" strokeWidth={1.5} />
+              <p className="text-base font-semibold text-content-primary mb-1">Nothing in History yet</p>
+              <p className="text-sm text-content-tertiary mb-4 max-w-sm">
+                Keep working in Recent — when it fills up, older chats move here automatically.
               </p>
               <div className="flex flex-wrap items-center justify-center gap-2">
                 <button type="button" className="ark-btn-secondary text-xs" onClick={() => navigate({ name: 'chat' })}>
@@ -261,8 +273,16 @@ export function Dashboard() {
                       onClick={() => openHistoryItem(item)}
                       className="flex items-center gap-3 min-w-0 text-left"
                     >
-                      <span className={`w-9 h-9 rounded-lg bg-gradient-to-br ${item.tone} flex items-center justify-center shrink-0`}>
-                        <Icon className="w-4 h-4 text-white/90" strokeWidth={1.75} />
+                      <span className={`w-9 h-9 rounded-lg bg-gradient-to-br ${item.tone} flex items-center justify-center shrink-0 overflow-hidden`}>
+                        {item.thumb ? (
+                          item.kind === 'video' ? (
+                            <video src={item.thumb} className="w-full h-full object-cover" muted />
+                          ) : (
+                            <img src={item.thumb} alt="" className="w-full h-full object-cover" />
+                          )
+                        ) : (
+                          <Icon className="w-4 h-4 text-white/90" strokeWidth={1.75} />
+                        )}
                       </span>
                       <span className="text-sm font-medium text-content-primary truncate">{item.name}</span>
                     </button>
@@ -276,13 +296,7 @@ export function Dashboard() {
                         aria-label="Delete"
                         onClick={(e) => {
                           e.stopPropagation();
-                          if (item.creationId) {
-                            if (window.confirm('Delete this creation forever?')) {
-                              deleteCreationForever(item.creationId);
-                            }
-                          } else if (item.chatId && window.confirm('Delete this chat forever?')) {
-                            deleteChatForever(item.chatId);
-                          }
+                          deleteItem(item);
                         }}
                       >
                         <Trash2 className="w-3.5 h-3.5" />
@@ -312,7 +326,9 @@ export function Dashboard() {
                           <img src={item.thumb} alt="" className="absolute inset-0 w-full h-full object-cover" />
                         )
                       ) : (
-                        <span className={`absolute inset-0 bg-gradient-to-br ${item.tone}`} />
+                        <span className={`absolute inset-0 bg-gradient-to-br ${item.tone} flex items-center justify-center`}>
+                          <Icon className="w-8 h-8 text-white/80" />
+                        </span>
                       )}
                       <span className="relative z-10 flex flex-col h-full p-3 bg-gradient-to-t from-black/70 via-black/20 to-transparent">
                         <span className="text-xs font-medium text-white/95 truncate">{item.name}</span>
@@ -320,17 +336,15 @@ export function Dashboard() {
                         <span className="text-[11px] text-white/80">{item.sizeLabel} · {item.modifiedLabel}</span>
                       </span>
                     </button>
-                    {item.creationId ? (
+                    {(item.creationId || item.chatId) ? (
                       <button
                         type="button"
                         className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 w-8 h-8 rounded-lg flex items-center justify-center bg-black/40 text-white/90 hover:bg-rose-500/80 transition-opacity"
                         title="Delete forever"
-                        aria-label="Delete creation"
+                        aria-label="Delete"
                         onClick={(e) => {
                           e.stopPropagation();
-                          if (window.confirm('Delete this creation forever?')) {
-                            deleteCreationForever(item.creationId!);
-                          }
+                          deleteItem(item);
                         }}
                       >
                         <Trash2 className="w-3.5 h-3.5" />

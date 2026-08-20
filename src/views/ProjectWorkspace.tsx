@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { Modal } from '@/components/Modal';
 import { ArkErrorInline } from '@/components/ArkErrorInline';
+import { BrandMark } from '@/components/BrandMark';
 import { classifyErrorMessage, isLikelyErrorMessage } from '@/lib/errors';
 import { openInSystemBrowser } from '@/lib/openExternal';
 import {
@@ -2996,9 +2997,7 @@ export function ProjectWorkspace() {
                     className="inline-flex items-center gap-1.5 rounded-full border border-surface-border bg-ark-navy-900/60 px-2.5 py-1 text-[11px] text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors"
                     title={plugin.description}
                   >
-                    <span className={`w-4 h-4 rounded-md bg-gradient-to-br ${plugin.tone} text-[8px] font-bold text-white flex items-center justify-center`}>
-                      {plugin.initial}
-                    </span>
+                    <BrandMark id={plugin.id} name={plugin.name} initial={plugin.initial} tone={plugin.tone} size="xs" />
                     {plugin.name}
                   </button>
                 ))}

@@ -146,8 +146,13 @@ function listModels() {
 function getStatus() {
   const models = listModels();
   // Only auto-switch away from ark-core when caller did not explicitly pick Core.
-  if (activeModelId === 'ark-core' && hasRealGguf(DEFAULT_BRAIN_ID)) {
-    activeModelId = DEFAULT_BRAIN_ID;
+  if (activeModelId === 'ark-core') {
+    if (hasRealGguf(DEFAULT_BRAIN_ID)) {
+      activeModelId = DEFAULT_BRAIN_ID;
+    } else {
+      const readyBrain = models.find((m) => m.status === 'ready' && m.gguf && m.id !== 'ark-core');
+      if (readyBrain) activeModelId = readyBrain.id;
+    }
   }
   const active = models.find((m) => m.id === activeModelId) || models[0];
   const llamaBin = arkGguf.findLlamaBinary();

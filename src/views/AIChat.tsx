@@ -58,6 +58,7 @@ import { FreeKeyWizard } from '@/components/FreeKeyWizard';
 import { ComposerPlusMenu, type ComposerPlusAction } from '@/components/ComposerPlusMenu';
 import { TokenUsageRing } from '@/components/TokenUsageRing';
 import { ArkErrorInline } from '@/components/ArkErrorInline';
+import { BrandMark } from '@/components/BrandMark';
 import { classifyErrorMessage, isLikelyErrorMessage } from '@/lib/errors';
 import { isVideoTabEnabled } from '@/lib/featurePark';
 import { notifyChatDone } from '@/lib/activityIndicators';
@@ -1773,6 +1774,7 @@ export function AIChat() {
                 createdAt: new Date().toISOString(),
                 real: true,
                 source: routed.source,
+                chatId: activeChatId!,
               });
               response = mediaMessageMarkdown(content, libraryId, dataUrl, {
                 real: true,
@@ -1894,6 +1896,7 @@ export function AIChat() {
                 createdAt: new Date().toISOString(),
                 real: isReal,
                 source: routed.source,
+                chatId: activeChatId!,
               });
               if (routed.reply && (routed.reply.includes('![') || isMotionStill || !isReal)) {
                 response = routed.reply.includes('![')
@@ -2847,9 +2850,7 @@ export function AIChat() {
                 className="inline-flex items-center gap-1.5 rounded-full border border-surface-border bg-ark-navy-900/80 px-2 py-0.5 text-[11px] text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors"
                 title={plugin.actions[0]?.label ?? plugin.name}
               >
-                <span className={`w-3.5 h-3.5 rounded bg-gradient-to-br ${plugin.tone} flex items-center justify-center text-[7px] font-bold text-white`}>
-                  {plugin.initial}
-                </span>
+                <BrandMark id={plugin.id} name={plugin.name} initial={plugin.initial} tone={plugin.tone} size="xs" />
                 {plugin.name}
               </button>
             ))}

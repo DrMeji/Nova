@@ -38,6 +38,7 @@ import { probeProviderKey } from '@/lib/providerSpeed';
 import { setCloudProviderEnabled } from '@/lib/cloudSources';
 import { getBrainUrl } from '@/lib/brainUrl';
 import { SettingsSystemHealth } from '@/components/SettingsSystemHealth';
+import { StatusCheck } from '@/components/BrandMark';
 
 const REVEAL_FEATURES: { id: ParkId; label: string; description: string }[] = [
   { id: 'networking', label: 'Networking', description: 'Social feed and contacts — shows Networking in the sidebar.' },
@@ -153,10 +154,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
   const [keyTestMsg, setKeyTestMsg] = useState('');
   const [keyTestFor, setKeyTestFor] = useState<string | null>(null);
   const [brainUrl, setBrainUrl] = useState(() => getBrainUrl());
-  const [brainToken, setBrainToken] = useState('');
-  const [brainTokenCopied, setBrainTokenCopied] = useState(false);
   const [brainContractVersion, setBrainContractVersion] = useState('');
-  const [brainPackaged, setBrainPackaged] = useState<boolean | null>(null);
   const [secretsEncrypted, setSecretsEncrypted] = useState<boolean | null>(null);
   const [showLegacyProviders, setShowLegacyProviders] = useState(false);
   const [signingStatus, setSigningStatus] = useState<string | null>(null);
@@ -178,13 +176,9 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
 
   useEffect(() => {
     void Promise.all([
-      window.arkDesktop?.brainTokenGet?.(),
       window.arkDesktop?.brainStatus?.(),
       window.arkDesktop?.secretsStatus?.(),
-    ]).then(([token, status, secrets]) => {
-      if (token?.url) setBrainUrl(token.url);
-      if (token?.token) setBrainToken(token.token);
-      if (typeof token?.packaged === 'boolean') setBrainPackaged(token.packaged);
+    ]).then(([status, secrets]) => {
       if (status?.url) setBrainUrl(status.url);
       if (status?.contractVersion) setBrainContractVersion(status.contractVersion);
       if (typeof secrets?.encrypted === 'boolean') setSecretsEncrypted(secrets.encrypted);
@@ -385,6 +379,10 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
     ? diskSpace.totalBytes / (1024 ** 3)
     : 0;
   const modelPercent = diskTotalGb > 0 ? Math.min(100, Math.round((modelUsedGb / diskTotalGb) * 100)) : 0;
+  const diskUsedGb = diskTotalGb > 0 && typeof diskSpace?.freeGb === 'number'
+    ? Math.max(0, diskTotalGb - diskSpace.freeGb)
+    : 0;
+  const diskUsedPercent = diskTotalGb > 0 ? Math.min(100, Math.round((diskUsedGb / diskTotalGb) * 100)) : 0;
 
   const flashSaved = (msg: string) => {
     setSavedFlash(msg);
@@ -723,78 +721,23 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                   <Sparkles className="w-4 h-4 text-sky-400" />
                 </div>
 
-                <div className="rounded-xl border border-surface-border p-4 space-y-3">
-                  <div>
-                    <p className="text-sm font-medium text-content-primary">Brain API (Lindsay / external apps)</p>
+                <div className="rounded-xl border border-surface-border p-4 flex items-center justify-between gap-4">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-content-primary">ARK Brain details</p>
                     <p className="text-[11px] text-content-tertiary mt-0.5 leading-relaxed">
-                      Loopback only. Packaged ARK requires a bearer token on chat routes.
-                    </p>
-                    {brainPackaged === false && !brainToken ? (
-                      <p className="text-[11px] font-medium text-amber-400 mt-1.5">
-                        Auth: off (dev) — unpackaged builds accept chat without a token. Do not ship dev builds to users.
-                      </p>
-                    ) : brainToken ? (
-                      <p className="text-[11px] text-emerald-400/90 mt-1.5">Auth: on · bearer token required for chat</p>
-                    ) : null}
-                    <p className="text-[10px] text-content-tertiary mt-1">
-                      Contract {brainContractVersion || 'unavailable'} · port {(() => {
-                        try { return new URL(brainUrl).port || 'default'; } catch { return 'unavailable'; }
-                      })()}
+                      Engine status, active local brain, localhost API URL, and access token now live together in Models.
                     </p>
                   </div>
-                  <div className="grid gap-2">
-                    <label className="block text-[11px] text-content-tertiary">URL</label>
-                    <input readOnly value={brainUrl} className="ark-input font-mono text-xs" />
-                    <label className="block text-[11px] text-content-tertiary">Token</label>
-                    <input
-                      readOnly
-                      type="password"
-                      value={brainToken || '(none — dev mode)'}
-                      className="ark-input font-mono text-xs"
-                    />
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      className="ark-btn-secondary text-xs"
-                      onClick={() => {
-                        const clip = `URL: ${brainUrl}\nToken: ${brainToken || ''}`;
-                        void navigator.clipboard.writeText(clip).then(() => {
-                          setBrainTokenCopied(true);
-                          window.setTimeout(() => setBrainTokenCopied(false), 1600);
-                        });
-                      }}
-                    >
-                      {brainTokenCopied ? 'Copied' : 'Copy URL + token'}
-                    </button>
-                    <button
-                      type="button"
-                      className="ark-btn-secondary text-xs"
-                      onClick={() => {
-                        const curl = `curl "${brainUrl}/v1/chat" -H "Authorization: Bearer ${brainToken}" -H "Content-Type: application/json" -d "{\\"message\\":\\"Hello from Lindsay\\"}"`;
-                        void navigator.clipboard.writeText(curl).then(() => {
-                          setSavedFlash('Sample curl copied');
-                          window.setTimeout(() => setSavedFlash(''), 1600);
-                        });
-                      }}
-                    >
-                      Copy sample curl
-                    </button>
-                    <button
-                      type="button"
-                      className="ark-btn-secondary text-xs"
-                      onClick={() => {
-                        void window.arkDesktop?.brainTokenRotate?.().then(res => {
-                          if (res?.token) setBrainToken(res.token);
-                          if (res?.url) setBrainUrl(res.url);
-                          setSavedFlash('Brain token rotated — update Lindsay/clients');
-                          window.setTimeout(() => setSavedFlash(''), 2200);
-                        });
-                      }}
-                    >
-                      Rotate token
-                    </button>
-                  </div>
+                  <button
+                    type="button"
+                    className="ark-btn-secondary text-xs shrink-0"
+                    onClick={() => {
+                      onClose?.();
+                      navigate({ name: 'models', tab: 'engine' });
+                    }}
+                  >
+                    Open ARK Brain
+                  </button>
                 </div>
 
                 <SettingsSystemHealth
@@ -1268,13 +1211,13 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                   tone="bg-sky-500"
                 />
                 <StorageBar
-                  label="Free space"
-                  used={typeof diskSpace?.freeGb === 'number' ? `${diskSpace.freeGb.toFixed(1)} GB free` : 'Unknown'}
-                  total={engineStatus?.modelsDir ? 'Models folder' : 'Desktop only'}
-                  percent={typeof diskSpace?.freeGb === 'number' && diskTotalGb > 0
-                    ? Math.min(100, Math.round((diskSpace.freeGb / diskTotalGb) * 100))
-                    : 0}
-                  tone="bg-emerald-500"
+                  label="Disk"
+                  used={`${diskUsedGb.toFixed(0)} GB used`}
+                  total={diskTotalGb > 0 && typeof diskSpace?.freeGb === 'number'
+                    ? `${diskTotalGb.toFixed(0)} GB · ${diskSpace.freeGb.toFixed(1)} GB free`
+                    : 'this PC'}
+                  percent={diskUsedPercent}
+                  tone="bg-zinc-500"
                 />
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1300,12 +1243,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                     <div className="rounded-xl border border-surface-border divide-y divide-surface-border/80 overflow-hidden">
                       {installedModels.map(model => (
                         <div key={model.id} className="flex items-center gap-3 px-3.5 py-2.5 min-w-0">
-                          <span
-                            className="w-8 h-8 rounded-full bg-surface-hover text-ark-accent-green flex items-center justify-center shrink-0"
-                            title="Installed in ARK Engine"
-                          >
-                            <Check className="w-4 h-4" />
-                          </span>
+                          <StatusCheck label={`${model.name} installed in ARK Engine`} />
                           <div className="min-w-0 flex-1">
                             <p className="text-sm font-medium text-content-primary truncate">{model.name}</p>
                             <p className="text-[11px] text-content-tertiary truncate">

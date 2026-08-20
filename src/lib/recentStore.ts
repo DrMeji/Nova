@@ -19,6 +19,8 @@ export type RecentCreation = {
   createdAt: string;
   real?: boolean;
   source?: string;
+  /** Chat that produced this media (used when deleting / History overflow) */
+  chatId?: string;
 };
 
 /** Unified Recent list entry (ChatGPT-style). */
@@ -39,6 +41,11 @@ export type RecentChat = {
 const PROJECTS_KEY = 'ark:recent-projects';
 const CREATIONS_KEY = 'ark:recent-creations';
 const CHATS_KEY = 'ark:recent-chats';
+const DELETED_MEDIA_KEY = 'ark:deleted-media-ids';
+
+/** Keep Recent short; older unpinned chats move to History. */
+const RECENT_SIDEBAR_MAX = 12;
+const HISTORY_KEEP = 80;
 
 /** In-memory thumbs so sidebar/viewer work without stuffing localStorage. */
 const memoryThumbs = new Map<string, string>();
@@ -166,9 +173,16 @@ export function saveRecentCreations(list: RecentCreation[]) {
 }
 
 export function upsertCreation(entry: RecentCreation) {
+  if (isMediaDeleted(entry.id)) return loadRecentCreations();
   if (entry.dataUrl) rememberThumb(entry.id, entry.dataUrl);
+  const prev = loadRecentCreations().find(c => c.id === entry.id);
   const list = loadRecentCreations().filter(c => c.id !== entry.id);
-  list.unshift({ ...entry, dataUrl: entry.dataUrl || memoryThumbs.get(entry.id) });
+  list.unshift({
+    ...prev,
+    ...entry,
+    chatId: entry.chatId ?? prev?.chatId,
+    dataUrl: entry.dataUrl || memoryThumbs.get(entry.id),
+  });
   saveRecentCreations(list);
   window.dispatchEvent(new Event('ark:creations-changed'));
   return list;
@@ -178,15 +192,53 @@ export function loadRecentChats(): RecentChat[] {
   try {
     const raw = localStorage.getItem(CHATS_KEY);
     if (!raw) return [];
-    return JSON.parse(raw) as RecentChat[];
+    const list = JSON.parse(raw) as RecentChat[];
+    const capped = capRecentAndArchive(Array.isArray(list) ? list : []);
+    const activeBefore = list.filter(c => !c.archivedAt).length;
+    const activeAfter = capped.filter(c => !c.archivedAt).length;
+    const archivedBefore = list.filter(c => c.archivedAt).length;
+    const archivedAfter = capped.filter(c => c.archivedAt).length;
+    if (activeBefore !== activeAfter || archivedBefore !== archivedAfter || capped.length !== list.length) {
+      try {
+        localStorage.setItem(CHATS_KEY, JSON.stringify(capped));
+      } catch {
+        /* ignore */
+      }
+    }
+    return capped;
   } catch {
     return [];
   }
 }
 
+function capRecentAndArchive(list: RecentChat[]): RecentChat[] {
+  const pinned = list.filter(c => c.pinnedAt && !c.archivedAt);
+  const active = list
+    .filter(c => !c.archivedAt && !c.pinnedAt)
+    .sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
+  const alreadyArchived = list.filter(c => c.archivedAt);
+  const keepActive = active.slice(0, RECENT_SIDEBAR_MAX);
+  const overflow = active.slice(RECENT_SIDEBAR_MAX).map(c => ({
+    ...c,
+    archivedAt: c.archivedAt || new Date().toISOString(),
+  }));
+  const archived = [...overflow, ...alreadyArchived]
+    .sort((a, b) => (b.archivedAt || b.updatedAt || '').localeCompare(a.archivedAt || a.updatedAt || ''))
+    .slice(0, HISTORY_KEEP);
+  // Deduplicate by id (pinned/active win)
+  const seen = new Set<string>();
+  const out: RecentChat[] = [];
+  for (const c of [...pinned, ...keepActive, ...archived]) {
+    if (seen.has(c.id)) continue;
+    seen.add(c.id);
+    out.push(c);
+  }
+  return out;
+}
+
 export function saveRecentChats(list: RecentChat[]) {
   try {
-    localStorage.setItem(CHATS_KEY, JSON.stringify(list.slice(0, 40)));
+    localStorage.setItem(CHATS_KEY, JSON.stringify(capRecentAndArchive(list)));
   } catch {
     /* ignore */
   }
@@ -199,6 +251,8 @@ export function upsertRecentChat(entry: RecentChat) {
     ...entry,
     pinnedAt: entry.pinnedAt ?? prev?.pinnedAt,
     preview: entry.preview ?? prev?.preview,
+    // Activity restores the thread into Recent (out of History overflow).
+    archivedAt: undefined,
   };
   const list = loadRecentChats().filter(c => c.id !== entry.id);
   list.unshift(merged);
@@ -262,7 +316,7 @@ export function archiveRecentChat(chatId: string) {
  */
 export function deleteRecentChatPermanently(chatId: string) {
   const existing = loadRecentChats().find(c => c.id === chatId);
-  const creationId = existing?.creationId;
+  const mediaIds = collectChatMediaIds(chatId, existing?.creationId);
 
   const nextChats = loadRecentChats().filter(c => c.id !== chatId);
   saveRecentChats(nextChats);
@@ -287,26 +341,75 @@ export function deleteRecentChatPermanently(chatId: string) {
     /* ignore */
   }
 
-  if (creationId) {
-    memoryThumbs.delete(creationId);
-    const nextCreations = loadRecentCreations().filter(c => c.id !== creationId);
-    saveRecentCreations(nextCreations);
-    try {
-      localStorage.removeItem(`ark:chat-thread:creation:${creationId}`);
-      localStorage.removeItem(`ark:media-feedback:${creationId}`);
-    } catch {
-      /* ignore */
-    }
-    void window.arkDesktop?.mediaRemove?.(creationId)?.catch?.(() => undefined);
+  for (const creationId of mediaIds) {
+    wipeCreationLocal(creationId);
   }
+
+  // Drop any leftover creations still tagged to this chat
+  saveRecentCreations(loadRecentCreations().filter(c => c.chatId !== chatId));
 
   window.dispatchEvent(new Event('ark:chats-changed'));
   window.dispatchEvent(new Event('ark:creations-changed'));
   return nextChats;
 }
 
-export function deleteCreationPermanently(creationId: string) {
-  if (!creationId) return loadRecentCreations();
+function loadDeletedMediaIds(): Set<string> {
+  try {
+    const raw = localStorage.getItem(DELETED_MEDIA_KEY);
+    if (!raw) return new Set();
+    const arr = JSON.parse(raw) as string[];
+    return new Set(Array.isArray(arr) ? arr.filter(Boolean) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+export function markMediaDeleted(id: string) {
+  if (!id) return;
+  const ids = loadDeletedMediaIds();
+  ids.add(id);
+  try {
+    localStorage.setItem(DELETED_MEDIA_KEY, JSON.stringify([...ids].slice(-240)));
+  } catch {
+    /* ignore */
+  }
+}
+
+export function isMediaDeleted(id: string) {
+  return Boolean(id) && loadDeletedMediaIds().has(id);
+}
+
+export function collectChatMediaIds(chatId: string, creationId?: string): string[] {
+  const ids = new Set<string>();
+  if (creationId) ids.add(creationId);
+  try {
+    const raw = localStorage.getItem(chatThreadKey(chatId));
+    if (raw) {
+      for (const m of raw.matchAll(/ark-media:([A-Za-z0-9_-]+)/g)) ids.add(m[1]);
+      for (const m of raw.matchAll(/"libraryId"\s*:\s*"([^"]+)"/g)) ids.add(m[1]);
+    }
+  } catch {
+    /* ignore */
+  }
+  try {
+    if (creationId) {
+      const raw = localStorage.getItem(`ark:chat-thread:creation:${creationId}`);
+      if (raw) {
+        for (const m of raw.matchAll(/ark-media:([A-Za-z0-9_-]+)/g)) ids.add(m[1]);
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  for (const c of loadRecentCreations()) {
+    if (c.chatId === chatId) ids.add(c.id);
+  }
+  return [...ids];
+}
+
+function wipeCreationLocal(creationId: string) {
+  if (!creationId) return;
+  markMediaDeleted(creationId);
   memoryThumbs.delete(creationId);
   const nextCreations = loadRecentCreations().filter(c => c.id !== creationId);
   saveRecentCreations(nextCreations);
@@ -317,16 +420,49 @@ export function deleteCreationPermanently(creationId: string) {
     /* ignore */
   }
   void window.arkDesktop?.mediaRemove?.(creationId)?.catch?.(() => undefined);
+}
 
-  // Detach chats that pointed at this creation
-  const nextChats = loadRecentChats().map(c =>
-    c.creationId === creationId ? { ...c, creationId: undefined } : c,
+export function deleteCreationPermanently(creationId: string) {
+  if (!creationId) return loadRecentCreations();
+  const linkedChatIds = loadRecentChats()
+    .filter(c => c.creationId === creationId)
+    .map(c => c.id);
+
+  wipeCreationLocal(creationId);
+
+  for (const chatId of linkedChatIds) {
+    const otherMedia = collectChatMediaIds(chatId).filter(id => id !== creationId);
+    for (const id of otherMedia) wipeCreationLocal(id);
+
+    saveRecentChats(loadRecentChats().filter(c => c.id !== chatId));
+    try {
+      localStorage.removeItem(chatThreadKey(chatId));
+    } catch {
+      /* ignore */
+    }
+    try {
+      const keys: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k) keys.push(k);
+      }
+      for (const k of keys) {
+        if (k.includes(chatId)) localStorage.removeItem(k);
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  saveRecentChats(
+    loadRecentChats().map(c =>
+      c.creationId === creationId ? { ...c, creationId: undefined } : c,
+    ),
   );
-  saveRecentChats(nextChats);
 
   window.dispatchEvent(new Event('ark:creations-changed'));
   window.dispatchEvent(new Event('ark:chats-changed'));
-  return nextCreations;
+  return loadRecentCreations();
 }
 
 export function titleFromPrompt(prompt: string): string {

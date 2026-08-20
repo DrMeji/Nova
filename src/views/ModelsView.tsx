@@ -9,7 +9,10 @@ import {
   LOCAL_CATEGORY_ORDER,
   sortModelsByCategoryThenSizeDesc,
 } from '@/lib/modelSort';
-import { engineDiskSpace, getEngineStatus, deleteEngineModel } from '@/lib/arkEngine';
+import { engineDiskSpace, getEngineStatus, deleteEngineModel, type ArkEngineStatus } from '@/lib/arkEngine';
+import { BrandMark, StatusCheck } from '@/components/BrandMark';
+import { BrainApiCard } from '@/components/BrainApiCard';
+import { useRouter } from '@/context/RouterContext';
 import {
   cancelEngineDownload,
   getEngineDownloadMap,
@@ -410,13 +413,7 @@ function ModelInstallControl({
   if (isOn) {
     return (
       <span className="inline-flex items-center gap-0.5 shrink-0">
-        <span
-          className="w-8 h-8 rounded-full bg-surface-hover text-emerald-400 flex items-center justify-center"
-          title="Installed in ARK Engine"
-          aria-label={`Installed ${name}`}
-        >
-          <Check className="w-4 h-4 text-emerald-400" />
-        </span>
+        <StatusCheck label={`Installed ${name} in ARK Engine`} />
         {onDelete && (
           <button
             type="button"
@@ -486,13 +483,12 @@ function TierBadges({ tiers }: { tiers: Tier[] }) {
 }
 
 export function ModelsView() {
-  const [tab, setTab] = useState<TabId>('for-pc');
-  const [engineSnap, setEngineSnap] = useState<{
-    phase: string;
-    activeModelName: string;
-    modelsDir: string;
-    note?: string;
-  } | null>(null);
+  const { route, navigate } = useRouter();
+  const [tab, setTab] = useState<TabId>(() => route.name === 'models' ? route.tab || 'for-pc' : 'for-pc');
+  const [engineSnap, setEngineSnap] = useState<Pick<
+    ArkEngineStatus,
+    'phase' | 'activeModelName' | 'modelsDir' | 'note' | 'ggufBinary' | 'models'
+  > | null>(null);
   const [query, setQuery] = useState('');
   const [installed, setInstalled] = useState<Set<string>>(() => new Set());
   const [installing, setInstalling] = useState<Set<string>>(() => new Set(
@@ -518,6 +514,10 @@ export function ModelsView() {
   const pcClass = useMemo(() => getHardwareClass(hw), [hw]);
   const ramGb = useMemo(() => parseRamGb(hw), [hw]);
   const fitLists = useMemo(() => buildFitLists(pcClass, ramGb), [pcClass, ramGb]);
+
+  useEffect(() => {
+    if (route.name === 'models') setTab(route.tab || 'for-pc');
+  }, [route]);
 
   useEffect(() => {
     const hydrate = () => {
@@ -548,6 +548,8 @@ export function ModelsView() {
         activeModelName: status.activeModelName,
         modelsDir: status.modelsDir,
         note: status.note,
+        ggufBinary: status.ggufBinary,
+        models: status.models,
       });
     }).catch(() => setEngineSnap(null));
   }, [tab]);
@@ -991,13 +993,14 @@ export function ModelsView() {
               { id: 'for-pc' as const, label: 'For your PC', icon: Monitor },
               { id: 'local' as const, label: 'Local AI', icon: Cpu },
               { id: 'cloud' as const, label: 'Cloud AI', icon: Cloud },
-              { id: 'engine' as const, label: 'Engine', icon: Gauge },
+              { id: 'engine' as const, label: 'Brain', icon: Gauge },
             ]).map(t => (
               <button
                 key={t.id}
                 type="button"
                 onClick={() => {
                   setTab(t.id);
+                  navigate({ name: 'models', tab: t.id });
                 }}
                 className={`inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 text-sm transition-colors ${
                   tab === t.id
@@ -1051,11 +1054,12 @@ export function ModelsView() {
                           key={model.id}
                           className="flex items-center gap-3 py-3 rounded-xl px-1 hover:bg-surface-hover/50 transition-colors"
                         >
-                          <span className={`w-10 h-10 rounded-xl bg-gradient-to-br ${
-                            model.source === 'modelscope' ? 'from-sky-500 to-indigo-700' : 'from-emerald-400 to-sky-700'
-                          } flex items-center justify-center text-[10px] font-bold text-white shrink-0`}>
-                            {huntSourceBadge(model.source)}
-                          </span>
+                          <BrandMark
+                            id={model.id}
+                            name={model.name}
+                            initial={huntSourceBadge(model.source)}
+                            tone={model.source === 'modelscope' ? 'from-sky-500 to-indigo-700' : 'from-emerald-400 to-sky-700'}
+                          />
                           <span className="min-w-0 flex-1">
                             <span className="flex items-center gap-2 min-w-0 flex-wrap">
                               <span className="text-sm font-medium text-content-primary truncate">{model.name}</span>
@@ -1105,9 +1109,7 @@ export function ModelsView() {
                                 key={`${section.id}-${model.id}`}
                                 className="flex items-center gap-3 py-3 rounded-xl px-1 hover:bg-surface-hover/50 transition-colors"
                               >
-                                <span className={`w-10 h-10 rounded-xl bg-gradient-to-br ${model.tone} flex items-center justify-center text-[10px] font-bold text-white shrink-0`}>
-                                  {model.initial}
-                                </span>
+                                <BrandMark id={model.id} name={model.name} initial={model.initial} tone={model.tone} />
                                 <span className="min-w-0 flex-1">
                                   <span className="flex items-center gap-2 min-w-0 flex-wrap">
                                     <span className="text-sm font-medium text-content-primary truncate">{model.name}</span>
@@ -1155,9 +1157,7 @@ export function ModelsView() {
                           key={model.id}
                           className="w-full flex items-center gap-3 py-3 px-1 rounded-xl hover:bg-surface-hover/50 transition-colors min-w-0"
                         >
-                          <span className={`w-10 h-10 rounded-xl bg-gradient-to-br ${model.tone} flex items-center justify-center text-[10px] font-bold text-white shrink-0`}>
-                            {model.initial}
-                          </span>
+                          <BrandMark id={model.id} name={model.name} initial={model.initial} tone={model.tone} />
                           <span className="min-w-0 flex-1">
                             <span className="flex items-center gap-2 min-w-0 flex-wrap">
                               <span className="text-sm font-medium text-content-primary truncate">{model.name}</span>
@@ -1198,9 +1198,7 @@ export function ModelsView() {
                             key={model.id}
                             className="flex items-center gap-3 py-3 rounded-xl px-1 hover:bg-surface-hover/50 transition-colors"
                           >
-                            <span className={`w-10 h-10 rounded-xl bg-gradient-to-br ${model.tone} flex items-center justify-center text-[10px] font-bold text-white shrink-0`}>
-                              {model.initial}
-                            </span>
+                            <BrandMark id={model.id} name={model.name} initial={model.initial} tone={model.tone} />
                             <span className="min-w-0 flex-1">
                               <span className="flex items-center gap-2 min-w-0 flex-wrap">
                                 <span className="text-sm font-medium text-content-primary truncate">{model.name}</span>
@@ -1233,31 +1231,55 @@ export function ModelsView() {
               </div>
             </>
           ) : tab === 'engine' ? (
-            <div className="py-6 max-w-xl">
-              <h2 className="text-lg font-semibold text-content-primary mb-2">ARK Engine</h2>
-              <p className="text-sm text-content-tertiary mb-4 leading-relaxed">
-                Local inference is built into ARK. This tab stays on Models — it does not switch the sidebar to Local AI.
-              </p>
-              <div className="rounded-xl border border-surface-border p-4 space-y-2 text-sm">
-                <p className="text-content-secondary">
-                  Status:{' '}
-                  <span className="text-content-primary">
-                    {engineSnap?.phase || 'checking…'}
-                  </span>
+            <div className="py-6 max-w-xl space-y-4">
+              <div>
+                <h2 className="text-lg font-semibold text-content-primary mb-2">ARK Brain</h2>
+                <p className="text-sm text-content-tertiary mb-4 leading-relaxed">
+                  ARK Brain is the built-in local engine and localhost API that powers on-device inference for ARK and external apps.
                 </p>
-                <p className="text-content-secondary">
-                  Active:{' '}
-                  <span className="text-content-primary">
-                    {engineSnap?.activeModelName || '—'}
-                  </span>
-                </p>
-                {engineSnap?.modelsDir ? (
-                  <p className="text-[11px] text-content-tertiary font-mono break-all">{engineSnap.modelsDir}</p>
-                ) : null}
-                {engineSnap?.note ? (
-                  <p className="text-xs text-content-tertiary">{engineSnap.note}</p>
-                ) : null}
+                <div className="rounded-xl border border-surface-border p-4 space-y-2 text-sm">
+                  <p className="text-content-secondary">
+                    Status:{' '}
+                    <span className="text-content-primary">
+                      {engineSnap?.phase === 'online'
+                        ? 'Running'
+                        : engineSnap?.phase === 'starting'
+                          ? 'Starting'
+                          : engineSnap?.phase === 'offline'
+                            ? 'Offline'
+                            : engineSnap?.phase === 'degraded'
+                              ? 'Needs attention'
+                              : 'Checking…'}
+                    </span>
+                  </p>
+                  <p className="text-content-secondary">
+                    Active:{' '}
+                    <span className="text-content-primary">
+                      {(() => {
+                        if (!engineSnap) return '—';
+                        if (engineSnap.activeModelName !== 'ARK Core') return engineSnap.activeModelName;
+                        return engineSnap.models.find(model =>
+                          model.status === 'ready'
+                          && !['ark-core', 'ark-image-core', 'ark-video-core'].includes(model.id)
+                        )?.name || engineSnap.activeModelName;
+                      })()}
+                    </span>
+                  </p>
+                  <p className="text-content-secondary">
+                    Local runtime:{' '}
+                    <span className="text-content-primary">
+                      {engineSnap ? (engineSnap.ggufBinary ? 'Ready' : 'Not installed') : 'Checking…'}
+                    </span>
+                  </p>
+                  {engineSnap?.modelsDir ? (
+                    <p className="text-[11px] text-content-tertiary font-mono break-all">{engineSnap.modelsDir}</p>
+                  ) : null}
+                  {engineSnap?.note ? (
+                    <p className="text-xs text-content-tertiary">{engineSnap.note}</p>
+                  ) : null}
+                </div>
               </div>
+              <BrainApiCard />
             </div>
           ) : (
             <>
@@ -1283,9 +1305,7 @@ export function ModelsView() {
                           onClick={() => toggleConnected(provider.id)}
                           className="w-full flex items-center gap-3 py-3 px-1 rounded-xl text-left hover:bg-surface-hover/50 transition-colors"
                         >
-                          <span className={`w-10 h-10 rounded-xl bg-gradient-to-br ${provider.tone} flex items-center justify-center text-[10px] font-bold text-white shrink-0`}>
-                            {provider.initial}
-                          </span>
+                          <BrandMark id={provider.id} name={provider.name} initial={provider.initial} tone={provider.tone} />
                           <span className="min-w-0 flex-1">
                             <span className="flex items-center gap-2 min-w-0 flex-wrap">
                               <span className="text-sm font-medium text-content-primary truncate">{provider.name}</span>
@@ -1310,9 +1330,7 @@ export function ModelsView() {
                               {provider.id === 'ollama' ? (ollamaNote || provider.name) : provider.name}
                             </span>
                           </span>
-                          <span className="w-8 h-8 rounded-full bg-surface-hover text-ark-accent-green flex items-center justify-center shrink-0">
-                            <Check className="w-4 h-4" />
-                          </span>
+                          <StatusCheck label={`${provider.name} connected`} />
                         </button>
                       ))}
                     </div>
@@ -1341,9 +1359,7 @@ export function ModelsView() {
                       className="flex items-center gap-3 py-3 rounded-xl px-1 hover:bg-surface-hover/50 transition-colors"
                       title={src.detail}
                     >
-                      <span className={`w-10 h-10 rounded-xl bg-gradient-to-br ${src.tone} flex items-center justify-center text-[10px] font-bold text-white shrink-0`}>
-                        {src.initial}
-                      </span>
+                      <BrandMark id={src.id} name={src.name} initial={src.initial} tone={src.tone} />
                       <span className="min-w-0 flex-1">
                         <span className="flex items-center gap-2 min-w-0 flex-wrap">
                           <span className="text-sm font-medium text-content-primary truncate">{src.name}</span>
@@ -1381,9 +1397,7 @@ export function ModelsView() {
                           key={provider.id}
                           className="flex items-center gap-3 py-3 rounded-xl px-1 hover:bg-surface-hover/50 transition-colors"
                         >
-                          <span className={`w-10 h-10 rounded-xl bg-gradient-to-br ${provider.tone} flex items-center justify-center text-[10px] font-bold text-white shrink-0`}>
-                            {provider.initial}
-                          </span>
+                          <BrandMark id={provider.id} name={provider.name} initial={provider.initial} tone={provider.tone} />
                           <span className="min-w-0 flex-1">
                             <span className="flex items-center gap-2 min-w-0 flex-wrap">
                               <span className="text-sm font-medium text-content-primary truncate">{provider.name}</span>
@@ -1480,9 +1494,7 @@ export function ModelsView() {
                               avail !== 'live' ? 'opacity-80' : ''
                             }`}
                           >
-                            <span className={`w-10 h-10 rounded-xl bg-gradient-to-br ${model.tone} flex items-center justify-center text-[10px] font-bold text-white shrink-0`}>
-                              {model.initial}
-                            </span>
+                            <BrandMark id={model.id} name={model.name} initial={model.initial} tone={model.tone} />
                             <span className="min-w-0 flex-1">
                               <span className="flex items-center gap-2 min-w-0 flex-wrap">
                                 <span className="text-sm font-medium text-content-primary truncate">{model.name}</span>
