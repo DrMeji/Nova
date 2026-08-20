@@ -21,7 +21,9 @@ import { comparePinnedThenRecent } from '@/lib/recentStore';
 import { formatArkId } from '@/lib/arkUserId';
 import {
   clearActivity,
+  clearChatDone,
   getActivityFlags,
+  getDoneChatIds,
   setActivityViewing,
   subscribeActivity,
   type ActivityKey,
@@ -115,6 +117,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
   const [activity, setActivity] = useState(() => ({ ...getActivityFlags() }));
+  const [doneChats, setDoneChats] = useState(() => new Set(getDoneChatIds()));
   const [navTick, setNavTick] = useState(0);
   const { incoming, acceptCall, declineCall, unreadFrom } = useSocial();
 
@@ -127,7 +130,10 @@ export function AppShell({ children }: { children: ReactNode }) {
   const NAV_GROUPS = useMemo(() => getNavGroups(), [navTick]);
 
   useEffect(() => {
-    const unsub = subscribeActivity(() => setActivity({ ...getActivityFlags() }));
+    const unsub = subscribeActivity(() => {
+      setActivity({ ...getActivityFlags() });
+      setDoneChats(new Set(getDoneChatIds()));
+    });
     return () => {
       unsub();
     };
@@ -176,11 +182,11 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     setActivityViewing({
-      route: route.name,
+      route: settingsOpen ? 'settings' : route.name,
       mode: route.name === 'chat' ? route.mode : undefined,
-      chatId: route.name === 'chat' ? route.chatId : undefined,
+      chatId: settingsOpen ? undefined : (route.name === 'chat' ? route.chatId : undefined),
     });
-  }, [route]);
+  }, [route, settingsOpen]);
 
   const displayName = resolveDisplayName(prefsName, profile?.display_name, user?.email);
   const initial = displayName[0]?.toUpperCase() || '?';
@@ -383,6 +389,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   const openRecent = (item: RecentRow) => {
     if (item.kind === 'chat') {
+      clearChatDone(item.id);
       navigate({
         name: 'chat',
         mode: item.mode === 'general' ? undefined : (item.mode as 'image' | 'video' | 'code' | undefined),
@@ -395,13 +402,14 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   const renderRecentRow = (item: RecentRow) => {
     const active = item.kind === 'chat' ? activeChatId === item.id : activeRecentId === item.id;
+    const doneAway = item.kind === 'chat' && doneChats.has(item.id) && !active;
     const Icon = item.kind === 'project' ? Code2 : chatIcon(item.mode || 'general');
     const renameKey = item.key;
     const editing = renamingId === renameKey;
     return (
       <div
         key={item.key}
-        className={`group flex items-center gap-0.5 rounded-lg ${active ? 'bg-surface-hover' : ''}`}
+        className={`group relative flex items-center gap-0.5 rounded-lg ${active ? 'bg-surface-hover' : ''} ${doneAway ? 'ark-nav-activity' : ''}`}
       >
         {editing ? (
           <input
@@ -430,7 +438,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               setRenamingId(renameKey);
               setRenameDraft(item.title);
             }}
-            className={`ark-nav-item !py-1.5 !gap-2.5 flex-1 min-w-0 ${active ? 'active' : ''}`}
+            className={`ark-nav-item !py-1.5 !gap-2.5 flex-1 min-w-0 ${active ? 'active' : ''} ${doneAway ? 'ark-nav-activity' : ''}`}
             title={`${item.title} · double-click to rename`}
           >
             <Icon className="w-3.5 h-3.5 shrink-0 text-content-tertiary" strokeWidth={1.75} />
@@ -441,6 +449,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               ) : null}
             </span>
             {item.pinned ? <Star className="w-2.5 h-2.5 text-amber-300 shrink-0 fill-amber-300" /> : null}
+            {doneAway ? <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" aria-hidden /> : null}
           </button>
         )}
         {!editing && (
@@ -758,6 +767,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                     const active = item.kind === 'chat'
                       ? activeChatId === item.id
                       : activeRecentId === item.id;
+                    const doneAway = item.kind === 'chat' && doneChats.has(item.id) && !active;
                     const Icon = item.kind === 'project' ? Code2 : chatIcon(item.mode || 'general');
                     return (
                       <button
@@ -765,10 +775,11 @@ export function AppShell({ children }: { children: ReactNode }) {
                         type="button"
                         aria-label={item.title}
                         onClick={() => openRecent(item)}
-                        className={`ark-nav-item !justify-center ${active ? 'active' : ''}`}
+                        className={`ark-nav-item !justify-center relative ${active ? 'active' : ''} ${doneAway ? 'ark-nav-activity' : ''}`}
                         title={item.title}
                       >
                         <Icon className="w-3.5 h-3.5" strokeWidth={1.75} />
+                        {doneAway ? <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-emerald-400" aria-hidden /> : null}
                       </button>
                     );
                   })}

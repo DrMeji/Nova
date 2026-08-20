@@ -291,6 +291,19 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.93',
+    channel: 'stable' as const,
+    date: 'Aug 19, 2026',
+    title: 'Chat reply polish: no false red errors, fresh Image/Video, response timer',
+    notes: [
+      'Normal assistant answers no longer show as red error boxes (fixed false “port/space” matches)',
+      'Image and Video tabs always open a fresh canvas instead of jumping to the last Recent thread',
+      '“Responded in …” timer restored under Chat, Image, and Video replies; Code still shows Worked for …',
+      'Finished-while-away glow lights the Recent chat row (not New Chat) until you open that thread',
+      'Update via Settings → Updates → Check → Download when this build is published',
+    ],
+  },
+  {
     version: '0.1.91',
     channel: 'stable' as const,
     date: 'Aug 19, 2026',

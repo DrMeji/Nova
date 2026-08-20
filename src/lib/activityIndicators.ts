@@ -29,6 +29,9 @@ const flags: Record<ActivityKey, boolean> = {
 
 const listeners = new Set<Listener>();
 
+/** Recent chat ids that finished while the user was looking elsewhere. */
+const doneChatIds = new Set<string>();
+
 /** What the user is looking at right now (updated by shell / views). */
 let viewing: { route: string; mode?: string; chatId?: string } = { route: 'chat' };
 
@@ -42,10 +45,34 @@ export function setActivityViewing(next: { route: string; mode?: string; chatId?
     mode: next.mode,
     chatId: next.chatId,
   };
+  if (next.route === 'chat' && next.chatId && doneChatIds.has(next.chatId)) {
+    doneChatIds.delete(next.chatId);
+    emit();
+  }
 }
 
 export function getActivityFlags(): Readonly<Record<ActivityKey, boolean>> {
   return flags;
+}
+
+export function getDoneChatIds(): ReadonlySet<string> {
+  return doneChatIds;
+}
+
+export function clearChatDone(chatId: string) {
+  if (!doneChatIds.has(chatId)) return;
+  doneChatIds.delete(chatId);
+  emit();
+}
+
+/** Light the Recent row for this thread — never the New Chat nav item. */
+export function notifyChatDone(chatId: string | undefined) {
+  if (!chatId) return;
+  const onThisThread = viewing.route === 'chat' && viewing.chatId === chatId;
+  if (onThisThread) return;
+  if (doneChatIds.has(chatId)) return;
+  doneChatIds.add(chatId);
+  emit();
 }
 
 export function subscribeActivity(listener: Listener) {
