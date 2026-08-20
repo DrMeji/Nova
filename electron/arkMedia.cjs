@@ -92,39 +92,106 @@ function fileToDataUrl(filePath) {
   return `data:${mime};base64,${buf.toString('base64')}`;
 }
 
-/** Prefer Flux-quality free hosts; try several models for fidelity. */
+/** Poll one free image URL; returns buffer or null. */
+async function fetchImageUrl(url, timeoutMs = 45_000) {
+  try {
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), timeoutMs);
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: { 'User-Agent': 'ARK-Desktop' },
+      redirect: 'follow',
+      signal: ac.signal,
+    });
+    clearTimeout(timer);
+    if (!res.ok) return null;
+    const ctype = res.headers.get('content-type') || '';
+    if (!ctype.includes('image') && !ctype.includes('octet-stream')) return null;
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length < 2500) return null;
+    const ext = ctype.includes('png') ? 'png' : ctype.includes('webp') ? 'webp' : 'jpg';
+    return { buf, ext };
+  } catch {
+    return null;
+  }
+}
+
+/** Hugging Face FLUX when the user connected a free HF key in Models. */
+async function fetchHfImage(prompt) {
+  try {
+    const arkSecrets = require('./arkSecrets.cjs');
+    const keys = arkSecrets.loadMap() || {};
+    const token = keys.huggingface;
+    if (!token) return null;
+
+    const text = String(prompt || '').slice(0, 450);
+    const hosts = [
+      'https://router.huggingface.co/hf-inference/models/black-forest-labs/FLUX.1-schnell',
+      'https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-schnell',
+    ];
+    for (const url of hosts) {
+      try {
+        const ac = new AbortController();
+        const timer = setTimeout(() => ac.abort(), 55_000);
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+            Accept: 'image/png',
+            'User-Agent': 'ARK-Desktop',
+          },
+          body: JSON.stringify({ inputs: text }),
+          signal: ac.signal,
+        });
+        clearTimeout(timer);
+        if (!res.ok) continue;
+        const ctype = res.headers.get('content-type') || '';
+        const buf = Buffer.from(await res.arrayBuffer());
+        if (buf.length < 2500) continue;
+        const ext = ctype.includes('png') ? 'png' : 'jpg';
+        return { buf, ext, source: 'huggingface-flux' };
+      } catch {
+        /* try next host */
+      }
+    }
+  } catch {
+    /* no HF vault */
+  }
+  return null;
+}
+
+/** Prefer Flux-quality free hosts; try models + seeds until a real PNG/JPG lands. */
 async function fetchRealImage(prompt, opts = {}) {
   const encoded = encodeURIComponent(String(prompt || 'abstract art').slice(0, 450));
-  const seed = (opts.seed ?? hashPrompt(prompt)) % 999999;
+  const baseSeed = (opts.seed ?? hashPrompt(prompt)) % 999999;
   const w = opts.width || 1024;
-  const h = opts.height || 768;
-  const urls = [
-    `https://image.pollinations.ai/prompt/${encoded}?width=${w}&height=${h}&nologo=true&model=flux&enhance=true&seed=${seed}`,
-    `https://image.pollinations.ai/prompt/${encoded}?width=${w}&height=${h}&nologo=true&model=turbo&seed=${seed}`,
-    `https://image.pollinations.ai/prompt/${encoded}?width=${w}&height=${h}&nologo=true&seed=${seed + 1}`,
-  ];
+  const h = opts.height || 1024;
+  const models = ['flux', 'flux-realism', 'turbo', 'openjourney'];
 
-  for (const url of urls) {
-    try {
-      const ac = new AbortController();
-      const timer = setTimeout(() => ac.abort(), 22_000);
-      const res = await fetch(url, {
-        method: 'GET',
-        headers: { 'User-Agent': 'ARK-Desktop' },
-        redirect: 'follow',
-        signal: ac.signal,
-      });
-      clearTimeout(timer);
-      if (!res.ok) continue;
-      const ctype = res.headers.get('content-type') || '';
-      if (!ctype.includes('image') && !ctype.includes('octet-stream')) continue;
-      const buf = Buffer.from(await res.arrayBuffer());
-      if (buf.length < 1000) continue;
-      const ext = ctype.includes('png') ? 'png' : ctype.includes('webp') ? 'webp' : 'jpg';
-      return { buf, ext, source: 'flux-pollinations' };
-    } catch {
-      /* try next */
+  /** @type {string[]} */
+  const urls = [];
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const seed = (baseSeed + attempt * 7919) % 999999;
+    for (const model of models) {
+      urls.push(
+        `https://image.pollinations.ai/prompt/${encoded}?width=${w}&height=${h}&nologo=true&model=${model}&enhance=true&seed=${seed}`,
+      );
     }
+    urls.push(
+      `https://image.pollinations.ai/prompt/${encoded}?width=${w}&height=${h}&nologo=true&seed=${seed + 17}`,
+    );
+  }
+
+  // Race the first batch in parallel, then walk the rest sequentially.
+  const batch = urls.slice(0, 4);
+  const parallel = await Promise.all(batch.map(u => fetchImageUrl(u)));
+  const hit = parallel.find(Boolean);
+  if (hit) return { ...hit, source: 'flux-pollinations' };
+
+  for (const url of urls.slice(4)) {
+    const one = await fetchImageUrl(url);
+    if (one) return { ...one, source: 'flux-pollinations' };
   }
   return null;
 }
@@ -391,7 +458,7 @@ async function generateImage(prompt, modelName) {
   // Prefer on-device SD when the user installed local image weights.
   if (arkSd.isLocalImageReady()) {
     try {
-      const local = await arkSd.generateLocalImage(enhanced, { width: 512, height: 512, steps: 20 });
+      const local = await arkSd.generateLocalImage(enhanced, { width: 768, height: 768, steps: 28 });
       if (local) {
         const file = path.join(mediaDir(), `${id}.${local.ext}`);
         fs.writeFileSync(file, local.buf);
@@ -401,7 +468,7 @@ async function generateImage(prompt, modelName) {
           kind: 'image',
           title: String(prompt).slice(0, 80),
           prompt: String(prompt),
-          modelName: modelName || 'Stable Diffusion 1.5 (Local)',
+          modelName: modelName || 'Stable Diffusion (Local)',
           path: file,
           createdAt: new Date().toISOString(),
           source: local.source,
@@ -425,7 +492,37 @@ async function generateImage(prompt, modelName) {
     }
   }
 
-  const real = await fetchRealImage(enhanced, { width: 1280, height: 1280 });
+  const hf = await fetchHfImage(enhanced);
+  if (hf) {
+    const file = path.join(mediaDir(), `${id}.${hf.ext}`);
+    fs.writeFileSync(file, hf.buf);
+    const dataUrl = `data:image/${hf.ext === 'jpg' ? 'jpeg' : hf.ext};base64,${hf.buf.toString('base64')}`;
+    const entry = {
+      id,
+      kind: 'image',
+      title: String(prompt).slice(0, 80),
+      prompt: String(prompt),
+      modelName: modelName || 'Hugging Face FLUX',
+      path: file,
+      createdAt: new Date().toISOString(),
+      source: hf.source,
+      real: true,
+    };
+    writeLibraryEntry(entry);
+    return {
+      ok: true,
+      kind: 'image',
+      modelName: entry.modelName,
+      path: file,
+      dataUrl,
+      libraryId: id,
+      real: true,
+      source: hf.source,
+      reply: shortImageReply(prompt, dataUrl, true),
+    };
+  }
+
+  const real = await fetchRealImage(enhanced, { width: 1024, height: 1024 });
 
   if (real) {
     const file = path.join(mediaDir(), `${id}.${real.ext}`);
@@ -460,29 +557,21 @@ async function generateImage(prompt, modelName) {
   const file = path.join(mediaDir(), `${id}.svg`);
   fs.writeFileSync(file, svg, 'utf8');
   const dataUrl = toDataUrl(svg);
-  const entry = {
-    id,
-    kind: 'image',
-    title: String(prompt).slice(0, 80),
-    prompt: String(prompt),
-    modelName: modelName || 'ARK Image Core',
-    path: file,
-    createdAt: new Date().toISOString(),
-    source: 'fallback-svg',
-    real: false,
-  };
-  writeLibraryEntry(entry);
   return {
-    ok: true,
+    ok: false,
     kind: 'image',
-    modelName: entry.modelName,
+    modelName: modelName || 'ARK Image Core',
     path: file,
     dataUrl,
     libraryId: id,
     real: false,
     source: 'fallback-svg',
-    mediaFailure: 'Free image hosts were unavailable — showing a preview placeholder instead',
-    reply: shortImageReply(prompt, dataUrl, false),
+    mediaFailure: 'Free image hosts were unavailable — no real image was generated',
+    reply: [
+      'Could not generate a real image right now.',
+      '',
+      'Try again in a minute, connect a Hugging Face key in Models → Cloud, or install local SD weights in Local AI.',
+    ].join('\n'),
   };
 }
 

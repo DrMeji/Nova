@@ -291,6 +291,18 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.94',
+    channel: 'stable' as const,
+    date: 'Aug 19, 2026',
+    title: 'Real image generation pass + silent update indicator',
+    notes: [
+      'Image mode tries local SD, Hugging Face FLUX, then Pollinations (flux / realism / turbo) with longer waits',
+      'Gradient SVG placeholders no longer masquerade as finished images when hosts fail',
+      'Bottom “Checking for updates” strip removed; green download button appears near Search when an update exists',
+      'Update via Settings → Updates → Check → Download when this build is published',
+    ],
+  },
+  {
     version: '0.1.93',
     channel: 'stable' as const,
     date: 'Aug 19, 2026',

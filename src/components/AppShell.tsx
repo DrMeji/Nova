@@ -667,16 +667,18 @@ export function AppShell({ children }: { children: ReactNode }) {
                           if (!result?.ok) setUpdateBusy(false);
                         })();
                       }}
-                      className={`ark-btn-ghost !p-1.5 ${updateBusy ? 'opacity-60' : ''}`}
+                      className={`relative rounded-lg !p-1.5 transition-colors ${
+                        updateBusy
+                          ? 'opacity-60'
+                          : 'bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25 hover:text-emerald-200'
+                      }`}
                       title={`Update available (${updateInfo.latestTag}). Click to download.`}
                       aria-label="Download update"
                     >
-                      <span className="relative block">
-                        <Download
-                          className={`w-4 h-4 ${updateBusy ? 'text-content-tertiary' : 'text-sky-300'}`}
-                        />
-                        <span className="absolute -bottom-[3px] left-1/2 -translate-x-1/2 w-2.5 h-[2px] rounded bg-sky-400" />
-                      </span>
+                      <Download className={`w-4 h-4 ${updateBusy ? 'text-content-tertiary' : ''}`} />
+                      {!updateBusy ? (
+                        <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-400" aria-hidden />
+                      ) : null}
                     </button>
                   ) : null}
                   <button

@@ -46,7 +46,8 @@ export function JobsStrip() {
         setUpdateJob(null);
         return;
       }
-      if (status === 'downloading' || status === 'checking') {
+      // Only show bottom strip during an active download/install — never idle "checking".
+      if (status === 'downloading' || status === 'handoff' || status === 'installing') {
         setUpdateJob({ percent, message: payload?.message || 'Updating…' });
       }
     });

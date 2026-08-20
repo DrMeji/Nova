@@ -639,18 +639,18 @@ async function generate(message, opts = {}) {
   if (kind === 'image' || (modelId && String(modelId).includes('image'))) {
     const media = await arkMedia.generateImage(message, model?.name || 'ARK Image Core');
     return {
-      ok: true,
+      ok: media.ok !== false,
       reply: media.reply,
       modelId: modelId || 'ark-image-core',
       modelName: media.modelName,
-      source: 'ark-media',
-      media: {
+      source: media.source || 'ark-media',
+      media: media.dataUrl ? {
         kind: 'image',
         dataUrl: media.dataUrl,
         path: media.path,
         libraryId: media.libraryId,
         real: Boolean(media.real),
-      },
+      } : undefined,
     };
   }
   if (kind === 'video' || (modelId && String(modelId).includes('video'))) {

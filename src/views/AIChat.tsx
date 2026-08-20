@@ -1526,12 +1526,12 @@ export function AIChat() {
             });
           };
 
-          setAssistantContent(`__generating__:image:${stages[stages.length - 1].label}`);
+          setAssistantContent(`__generating__:image:${stages[0].label}`);
           let stageIdx = 0;
           const stageTimer = window.setInterval(() => {
             stageIdx = Math.min(stageIdx + 1, stages.length - 1);
             setAssistantContent(`__generating__:image:${stages[stageIdx].label}`);
-          }, 2200);
+          }, 2800);
 
           const rewritten = rewriteImagePrompt(content);
           const sticky = stickyBrain;

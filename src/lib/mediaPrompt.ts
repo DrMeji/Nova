@@ -26,9 +26,11 @@ export function rewriteImagePrompt(raw: string): string {
 
   const fidelity = [
     'Follow the user request exactly',
-    'do not invent unrelated subjects',
+    'match the described subject, style, and composition',
+    'do not invent unrelated subjects or swap species',
     'coherent anatomy and objects',
     'sharp focus, high detail, professional quality',
+    'natural lighting and believable materials',
     'no watermarks, no UI, no captions burned into the image',
   ];
 

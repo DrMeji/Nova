@@ -940,7 +940,7 @@ async function runStandaloneSplash(argv) {
 
 async function checkForUpdate() {
   const currentVersion = app.getVersion();
-  sendProgress({ status: 'checking', percent: 0, message: 'Checking for updates...', version: currentVersion });
+  // Silent check — indicator lives in the sidebar near Search, not the bottom strip.
 
   try {
     // Prefer scanning all releases so we don't get stuck on a "latest" release that
