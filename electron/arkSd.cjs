@@ -49,17 +49,39 @@ function findFileRecursive(root, names) {
 function extractArchive(archivePath, destDir) {
   return new Promise((resolve, reject) => {
     fs.mkdirSync(destDir, { recursive: true });
+    let size = 0;
+    try {
+      size = fs.statSync(archivePath).size;
+    } catch {
+      reject(new Error(`Archive missing before extract: ${archivePath}`));
+      return;
+    }
+    if (size < 1024) {
+      reject(new Error(`Archive too small (${size} bytes) — download likely incomplete`));
+      return;
+    }
     if (process.platform === 'win32' && archivePath.toLowerCase().endsWith('.zip')) {
       execFile(
-        'powershell.exe',
-        [
-          '-NoProfile',
-          '-NonInteractive',
-          '-Command',
-          `Expand-Archive -LiteralPath '${archivePath.replace(/'/g, "''")}' -DestinationPath '${destDir.replace(/'/g, "''")}' -Force`,
-        ],
+        'tar.exe',
+        ['-xf', archivePath, '-C', destDir],
         { windowsHide: true },
-        (err) => (err ? reject(err) : resolve()),
+        (tarErr) => {
+          if (!tarErr) {
+            resolve();
+            return;
+          }
+          execFile(
+            'powershell.exe',
+            [
+              '-NoProfile',
+              '-NonInteractive',
+              '-Command',
+              `Expand-Archive -LiteralPath '${archivePath.replace(/'/g, "''")}' -DestinationPath '${destDir.replace(/'/g, "''")}' -Force`,
+            ],
+            { windowsHide: true },
+            (err) => (err ? reject(err) : resolve()),
+          );
+        },
       );
       return;
     }
@@ -77,9 +99,16 @@ function sdReleaseUrl() {
   return `https://github.com/leejet/stable-diffusion.cpp/releases/download/${SD_TAG}/sd-master-${SD_COMMIT}-bin-Linux-Ubuntu-24.04-x86_64.zip`;
 }
 
+function sdBinaryNames() {
+  // Newer stable-diffusion.cpp Windows builds ship sd-cli.exe (not sd.exe).
+  return process.platform === 'win32'
+    ? ['sd.exe', 'sd-cli.exe']
+    : ['sd', 'sd-cli'];
+}
+
 function findSdBinary() {
   ensureDirs();
-  const names = process.platform === 'win32' ? ['sd.exe'] : ['sd'];
+  const names = sdBinaryNames();
   for (const name of names) {
     const full = path.join(binDir(), name);
     if (fs.existsSync(full)) return full;
@@ -91,6 +120,28 @@ function findSdBinary() {
         const full = path.join(binDir(), entry.name, name);
         if (fs.existsSync(full)) return full;
       }
+    }
+  } catch {
+    /* ignore */
+  }
+  // Recover a prior extract that left sd-cli.exe under _extract_sd_*
+  try {
+    const leftover = findFileRecursive(binDir(), names);
+    if (leftover) {
+      const dest = path.join(binDir(), process.platform === 'win32' ? 'sd.exe' : 'sd');
+      if (path.resolve(leftover) !== path.resolve(dest)) fs.copyFileSync(leftover, dest);
+      try { fs.chmodSync(dest, 0o755); } catch { /* ignore */ }
+      try {
+        const srcDir = path.dirname(leftover);
+        for (const f of fs.readdirSync(srcDir)) {
+          if (/\.(dll|dylib|so(\.\d+)?)$/i.test(f)) {
+            fs.copyFileSync(path.join(srcDir, f), path.join(binDir(), f));
+          }
+        }
+      } catch {
+        /* ignore */
+      }
+      return dest;
     }
   } catch {
     /* ignore */
@@ -125,7 +176,7 @@ async function ensureSdBinary(onProgress) {
   if (onProgress) onProgress(88);
   await extractArchive(archivePath, extractDir);
 
-  const names = process.platform === 'win32' ? ['sd.exe'] : ['sd'];
+  const names = sdBinaryNames();
   const found = findFileRecursive(extractDir, names);
   if (!found) throw new Error('sd binary not found inside release archive');
 

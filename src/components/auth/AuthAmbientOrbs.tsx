@@ -107,6 +107,17 @@ function bouncePair(a: OrbSpec, b: OrbSpec) {
   }
 }
 
+function paintOrbs(orbs: OrbSpec[], orbEls: (HTMLDivElement | null)[]) {
+  for (let i = 0; i < orbs.length; i++) {
+    const el = orbEls[i];
+    if (!el) continue;
+    const orb = orbs[i];
+    el.style.width = `${orb.size}px`;
+    el.style.height = `${orb.size}px`;
+    el.style.transform = `translate3d(${orb.x - orb.size / 2}px, ${orb.y - orb.size / 2}px, 0)`;
+  }
+}
+
 export function AuthAmbientOrbs() {
   const layerRef = useRef<HTMLDivElement>(null);
   const orbRefs = useRef<(HTMLDivElement | null)[]>([]);
@@ -117,12 +128,15 @@ export function AuthAmbientOrbs() {
     const layer = layerRef.current;
     if (!layer) return;
 
-    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if (reducedMotion) return;
+    // Always place orbs on screen. Windows "reduce motion" used to bail early and
+    // leave them at translate(-9999px) — invisible forever on login/setup.
+    const motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+    let animate = !motionQuery.matches;
 
-    const resize = () => {
+    const ensureSeeded = () => {
       const w = layer.clientWidth;
       const h = layer.clientHeight;
+      if (w < 2 || h < 2) return false;
       if (!stateRef.current) {
         stateRef.current = seedOrbs(w, h);
       } else {
@@ -130,15 +144,21 @@ export function AuthAmbientOrbs() {
           bounceWalls(orb, w, h);
         }
       }
+      paintOrbs(stateRef.current, orbRefs.current);
+      return true;
     };
 
-    resize();
+    const resize = () => {
+      ensureSeeded();
+    };
 
     const tick = () => {
+      if (!animate) return;
       const w = layer.clientWidth;
       const h = layer.clientHeight;
       const orbs = stateRef.current;
       if (!orbs) {
+        ensureSeeded();
         rafRef.current = requestAnimationFrame(tick);
         return;
       }
@@ -155,25 +175,29 @@ export function AuthAmbientOrbs() {
         }
       }
 
-      for (let i = 0; i < orbs.length; i++) {
-        const el = orbRefs.current[i];
-        if (!el) continue;
-        const orb = orbs[i];
-        el.style.width = `${orb.size}px`;
-        el.style.height = `${orb.size}px`;
-        el.style.transform = `translate3d(${orb.x - orb.size / 2}px, ${orb.y - orb.size / 2}px, 0)`;
-      }
-
+      paintOrbs(orbs, orbRefs.current);
       rafRef.current = requestAnimationFrame(tick);
     };
 
-    rafRef.current = requestAnimationFrame(tick);
+    const startOrStop = () => {
+      cancelAnimationFrame(rafRef.current);
+      animate = !motionQuery.matches;
+      ensureSeeded();
+      if (animate) {
+        rafRef.current = requestAnimationFrame(tick);
+      }
+    };
+
+    ensureSeeded();
+    startOrStop();
     const ro = new ResizeObserver(resize);
     ro.observe(layer);
+    motionQuery.addEventListener('change', startOrStop);
 
     return () => {
       cancelAnimationFrame(rafRef.current);
       ro.disconnect();
+      motionQuery.removeEventListener('change', startOrStop);
     };
   }, []);
 

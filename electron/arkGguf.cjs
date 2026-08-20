@@ -134,10 +134,13 @@ function llamaCpuUrl() {
 function llamaCudaCandidateUrls() {
   if (process.platform !== 'win32' || process.arch === 'arm64') return [];
   const tag = LLAMA_TAG;
-  return [
-    `https://github.com/ggml-org/llama.cpp/releases/download/${tag}/llama-${tag}-bin-win-cuda-12.4-x64.zip`,
-    `https://github.com/ggml-org/llama.cpp/releases/download/${tag}/llama-${tag}-bin-win-cuda-13.3-x64.zip`,
-  ];
+  const cuda124 = `https://github.com/ggml-org/llama.cpp/releases/download/${tag}/llama-${tag}-bin-win-cuda-12.4-x64.zip`;
+  const cuda133 = `https://github.com/ggml-org/llama.cpp/releases/download/${tag}/llama-${tag}-bin-win-cuda-13.3-x64.zip`;
+  // Prefer the CUDA major that already matches installed toolkit DLLs when present.
+  if (fs.existsSync(path.join(binDir(), 'cublas64_13.dll')) || fs.existsSync(path.join(binDir(), 'cudart64_13.dll'))) {
+    return [cuda133, cuda124];
+  }
+  return [cuda124, cuda133];
 }
 
 function llamaCudaRuntimeUrl(cudaVer) {
@@ -216,23 +219,56 @@ function findFileRecursive(root, names) {
 function extractArchive(archivePath, destDir) {
   return new Promise((resolve, reject) => {
     fs.mkdirSync(destDir, { recursive: true });
+    let size = 0;
+    try {
+      size = fs.statSync(archivePath).size;
+    } catch {
+      reject(new Error(`Archive missing before extract: ${archivePath}`));
+      return;
+    }
+    if (size < 1024) {
+      reject(new Error(`Archive too small (${size} bytes) — download likely incomplete: ${path.basename(archivePath)}`));
+      return;
+    }
     if (process.platform === 'win32' && archivePath.toLowerCase().endsWith('.zip')) {
+      // Prefer tar.exe (ships with Windows 10+) — Expand-Archive is slow and races badly
+      // when two installs share the same zip path.
       execFile(
-        'powershell.exe',
-        [
-          '-NoProfile',
-          '-NonInteractive',
-          '-Command',
-          `Expand-Archive -LiteralPath '${archivePath.replace(/'/g, "''")}' -DestinationPath '${destDir.replace(/'/g, "''")}' -Force`,
-        ],
+        'tar.exe',
+        ['-xf', archivePath, '-C', destDir],
         { windowsHide: true },
-        (err) => (err ? reject(err) : resolve()),
+        (tarErr) => {
+          if (!tarErr) {
+            resolve();
+            return;
+          }
+          execFile(
+            'powershell.exe',
+            [
+              '-NoProfile',
+              '-NonInteractive',
+              '-Command',
+              `Expand-Archive -LiteralPath '${archivePath.replace(/'/g, "''")}' -DestinationPath '${destDir.replace(/'/g, "''")}' -Force`,
+            ],
+            { windowsHide: true },
+            (err) => (err ? reject(err) : resolve()),
+          );
+        },
       );
       return;
     }
     // tar handles .tar.gz and often .zip on modern macOS/Linux
     execFile('tar', ['-xf', archivePath, '-C', destDir], (err) => (err ? reject(err) : resolve()));
   });
+}
+
+/** Serialize llama installs so concurrent model downloads cannot delete each other's zip mid-extract. */
+let llamaInstallChain = Promise.resolve();
+
+function withLlamaInstallLock(fn) {
+  const next = llamaInstallChain.then(fn, fn);
+  llamaInstallChain = next.then(() => undefined, () => undefined);
+  return next;
 }
 
 /**
@@ -285,6 +321,10 @@ async function nvidiaWantsCuda() {
 }
 
 async function ensureLlamaBinary(onProgress, forceCudaUpgrade) {
+  return withLlamaInstallLock(() => ensureLlamaBinaryLocked(onProgress, forceCudaUpgrade));
+}
+
+async function ensureLlamaBinaryLocked(onProgress, forceCudaUpgrade) {
   const existing = findLlamaBinary();
   const flavor = readRuntimeFlavor();
   const wantCuda = await nvidiaWantsCuda();
@@ -303,7 +343,8 @@ async function ensureLlamaBinary(onProgress, forceCudaUpgrade) {
   if (existing && wantCuda && !forceCudaUpgrade) {
     if (!fs.existsSync(cudaAttemptPath())) {
       try { fs.writeFileSync(cudaAttemptPath(), '1'); } catch { /* ignore */ }
-      void ensureLlamaBinary(onProgress, true).catch(() => undefined);
+      // Background upgrade must not share the caller's progress/error channel.
+      void ensureLlamaBinary(undefined, true).catch(() => undefined);
     }
     findLlamaServer();
     return existing;
@@ -328,6 +369,9 @@ async function ensureLlamaBinary(onProgress, forceCudaUpgrade) {
       await arkFetch.downloadToFile(url, archivePath, (pct) => {
         if (onProgress) onProgress(Math.min(85, Math.round(pct * 0.85)));
       });
+      if (!fs.existsSync(archivePath) || fs.statSync(archivePath).size < 1024) {
+        throw new Error(`Download produced empty archive (${archiveName})`);
+      }
       downloaded = true;
       break;
     } catch (err) {
@@ -354,11 +398,23 @@ async function ensureLlamaBinary(onProgress, forceCudaUpgrade) {
   }
 
   if (onProgress) onProgress(88);
-  await extractArchive(archivePath, extractDir);
+  try {
+    await extractArchive(archivePath, extractDir);
+  } catch (err) {
+    if (existing) {
+      findLlamaServer();
+      return existing;
+    }
+    throw err;
+  }
 
   const names = cliNames();
   const found = findFileRecursive(extractDir, names);
   if (!found) {
+    if (existing) {
+      findLlamaServer();
+      return existing;
+    }
     throw new Error('llama-cli not found inside release archive');
   }
 

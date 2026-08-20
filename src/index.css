@@ -201,32 +201,32 @@
     top: 0;
     left: 0;
     border-radius: 9999px;
-    filter: blur(80px);
-    opacity: 0.5;
+    filter: blur(72px);
+    opacity: 0.72;
     will-change: transform, background-color;
   }
   .auth-orb-tone-a {
-    background: rgb(56 189 248 / 0.22);
+    background: rgb(56 189 248 / 0.38);
     animation: authOrbHueA 28s ease-in-out infinite alternate;
   }
   .auth-orb-tone-b {
-    background: rgb(167 139 250 / 0.2);
+    background: rgb(167 139 250 / 0.34);
     animation: authOrbHueB 32s ease-in-out infinite alternate;
   }
   .auth-orb-tone-c {
-    background: rgb(52 211 153 / 0.14);
+    background: rgb(52 211 153 / 0.28);
     animation: authOrbHueC 30s ease-in-out infinite alternate;
   }
   .auth-orb-tone-d {
-    background: rgb(244 114 182 / 0.14);
+    background: rgb(244 114 182 / 0.28);
     animation: authOrbHueD 26s ease-in-out infinite alternate;
   }
   .auth-orb-tone-e {
-    background: rgb(251 191 36 / 0.12);
+    background: rgb(251 191 36 / 0.24);
     animation: authOrbHueE 34s ease-in-out infinite alternate;
   }
   .auth-orb-tone-f {
-    background: rgb(125 211 252 / 0.16);
+    background: rgb(125 211 252 / 0.3);
     animation: authOrbHueF 24s ease-in-out infinite alternate;
   }
   .auth-type-rainbow {

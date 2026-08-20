@@ -291,6 +291,18 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.91',
+    channel: 'stable' as const,
+    date: 'Aug 19, 2026',
+    title: 'First-message chat handoff, login orbs, engine install fixes',
+    notes: [
+      'Sending from New Chat now opens that thread instead of leaving you on the empty starter',
+      'Login and setup ambient RGB orbs show again (even when Windows reduce-motion is on)',
+      'Safer CUDA / Stable Diffusion binary install and extract; stuck Stop on empty New Chat cleared',
+      'Update via Settings → Updates → Check → Download when this build is published',
+    ],
+  },
+  {
     version: '0.1.90',
     channel: 'stable' as const,
     date: 'Aug 19, 2026',

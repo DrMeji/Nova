@@ -396,9 +396,9 @@ export function AIChat() {
   const { route, navigate } = useRouter();
   const { addCreation, addChat, addRecent, touchRecentProject, creations, chats } = useRecentProjects();
 
-  // Requirement: each app launch should start on a fresh chat (no "resume last chat").
-  // We scope this to a single app open via sessionStorage so it doesn't interfere with
-  // navigating between chats during the same session.
+  // Requirement: each app launch starts on a fresh chat (no resume of last thread).
+  // Only strip a chatId that was ALREADY present on first paint — never wipe a chat
+  // the user just created in this session (that race left them stuck on New Chat).
   const forceNewChatOnLaunch = useMemo(() => {
     try {
       const key = 'ark:session-first-chat-launch';
@@ -411,13 +411,14 @@ export function AIChat() {
     }
   }, []);
 
+  const launchHadChatIdRef = useRef(Boolean(
+    route.name === 'chat' && route.chatId && !route.creationId,
+  ));
   const didForceNewChatRef = useRef(false);
   const chatRoute = route.name === 'chat' ? route : null;
   const shouldForceNewChat = forceNewChatOnLaunch
     && !didForceNewChatRef.current
-    && Boolean(chatRoute?.chatId)
-    // If we were opened via a creation deep-link (image/video), respect that.
-    && !chatRoute?.creationId;
+    && launchHadChatIdRef.current;
 
   const effectiveChatId = shouldForceNewChat ? undefined : chatRoute?.chatId;
 
@@ -548,11 +549,15 @@ export function AIChat() {
   }, [messages]);
 
   useEffect(() => {
-    if (!shouldForceNewChat) return;
+    if (!shouldForceNewChat) {
+      // No launch-time thread to clear — never steal later navigations.
+      if (forceNewChatOnLaunch) didForceNewChatRef.current = true;
+      return;
+    }
     didForceNewChatRef.current = true;
     const nextMode = chatRoute?.mode && chatRoute.mode !== 'general' ? chatRoute.mode : undefined;
     navigate({ name: 'chat', mode: nextMode });
-  }, [shouldForceNewChat, navigate, chatRoute?.mode]);
+  }, [shouldForceNewChat, forceNewChatOnLaunch, navigate, chatRoute?.mode]);
 
   useEffect(() => {
     if (route.name !== 'chat') {
@@ -729,11 +734,22 @@ export function AIChat() {
       return;
     }
 
-    // Fresh New Chat / Image / Video — empty canvas
+    // Fresh New Chat / Image / Video — empty canvas (never inherit a stuck Stop state)
+    // Guard: if a send is mid-flight, do not wipe messages during a brief route race.
+    if (generatingRef.current && activeGenChatIdRef.current) {
+      setLoading(false);
+      setGenerating(true);
+      return;
+    }
     setMessages([]);
     messagesRef.current = [];
     setThreadBrain(null);
-    setGenerating(Boolean(generatingRef.current && !activeGenChatIdRef.current));
+    if (!activeGenChatIdRef.current) {
+      generatingRef.current = false;
+      setGenerating(false);
+    } else {
+      setGenerating(Boolean(generatingRef.current));
+    }
     setLoading(false);
   }, [route, mode]);
 
