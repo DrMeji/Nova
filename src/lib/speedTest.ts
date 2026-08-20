@@ -47,6 +47,17 @@ export function formatDuration(seconds: number) {
   return rm > 0 ? `${h}h ${rm}m` : `${h}h`;
 }
 
+/** Compact label under assistant bubbles (e.g. "2.4 s", "1m 12s"). */
+export function formatReplyElapsed(ms: number) {
+  if (!Number.isFinite(ms) || ms < 0) return '';
+  if (ms < 1000) return `${Math.max(1, Math.round(ms))} ms`;
+  const s = ms / 1000;
+  if (s < 60) return s < 10 ? `${s.toFixed(1)} s` : `${Math.round(s)} s`;
+  const m = Math.floor(s / 60);
+  const rem = Math.round(s % 60);
+  return rem > 0 ? `${m}m ${rem}s` : `${m}m`;
+}
+
 export function formatMBps(MBps: number) {
   if (!Number.isFinite(MBps) || MBps <= 0) return 'n/a';
   const mbpsBits = MBps * 8;

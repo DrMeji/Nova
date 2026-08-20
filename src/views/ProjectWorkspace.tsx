@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import { Modal } from '@/components/Modal';
 import { ArkErrorInline } from '@/components/ArkErrorInline';
-import { classifyErrorMessage } from '@/lib/errors';
+import { classifyErrorMessage, isLikelyErrorMessage } from '@/lib/errors';
 import { openInSystemBrowser } from '@/lib/openExternal';
 import {
   detectPluginIntent,
@@ -2817,7 +2817,7 @@ export function ProjectWorkspace() {
                     </button>
                   ) : (
                     <div>
-                    {msg.content && classifyErrorMessage(msg.content).code !== 'UNKNOWN' && classifyErrorMessage(msg.content).code !== 'CANCELED'
+                    {msg.content && isLikelyErrorMessage(msg.content)
                       ? <ArkErrorInline message={msg.content} />
                       : msg.content
                         ? <AssistantBuildReply content={msg.content} onOpenPath={openPathInEditor} />

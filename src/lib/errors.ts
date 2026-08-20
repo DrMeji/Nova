@@ -47,13 +47,13 @@ export function classifyErrorMessage(raw: string): ArkErrorInfo {
   if (/timed out|timeout|gguf.*fail/i.test(lower)) {
     return { code: 'GGUF_TIMEOUT', message: msg, action: 'Retry or use cloud key' };
   }
-  if (/disk|space|enospc/i.test(lower)) {
+  if (/\b(?:enospc|disk full|out of space|no space left on device)\b/i.test(lower)) {
     return { code: 'DISK_FULL', message: msg, action: 'Free disk space' };
   }
-  if (/port|eaddrinuse|8787|8788/i.test(lower)) {
+  if (/\beaddrinuse\b|\bport (?:\d+ )?in use\b|\b8787\b|\b8788\b/i.test(lower)) {
     return { code: 'PORT_IN_USE', message: msg, action: 'Quit other ARK copies' };
   }
-  if (/api key|connect a free key|provider key|unauthorized|401|403/i.test(lower)) {
+  if (/api key|connect a free key|provider key|unauthorized|\b401\b|\b403\b/i.test(lower)) {
     return { code: 'KEY_MISSING', message: msg, action: 'Connect free key', route: { name: 'chat' } };
   }
   if (/offline|engine is offline/i.test(lower)) {
@@ -62,8 +62,17 @@ export function classifyErrorMessage(raw: string): ArkErrorInfo {
   if (/stopped at length limit/i.test(lower)) {
     return { code: 'UNKNOWN', message: msg };
   }
-  if (/cancel|stopped|abort/i.test(lower)) {
+  if (/^(?:\(stopped\)|stopped\.?|canceled|cancelled|aborted)\b/i.test(lower) || (msg.length < 120 && /\b(canceled|cancelled|aborted)\b/i.test(lower))) {
     return { code: 'CANCELED', message: msg };
   }
   return { code: 'UNKNOWN', message: msg };
+}
+
+/** UI guard — never paint long assistant answers as red error boxes. */
+export function isLikelyErrorMessage(raw: string): boolean {
+  const msg = String(raw || '').trim();
+  if (!msg || msg.startsWith('__generating__:') || msg.startsWith('__progress__:')) return false;
+  if (msg.length > 320) return false;
+  const info = classifyErrorMessage(msg);
+  return info.code !== 'UNKNOWN' && info.code !== 'CANCELED';
 }

@@ -50,8 +50,9 @@ import { FreeKeyWizard } from '@/components/FreeKeyWizard';
 import { ComposerPlusMenu, type ComposerPlusAction } from '@/components/ComposerPlusMenu';
 import { TokenUsageRing } from '@/components/TokenUsageRing';
 import { ArkErrorInline } from '@/components/ArkErrorInline';
-import { classifyErrorMessage } from '@/lib/errors';
-import { activityKeyForChatMode, notifyWorkDone } from '@/lib/activityIndicators';
+import { classifyErrorMessage, isLikelyErrorMessage } from '@/lib/errors';
+import { notifyChatDone } from '@/lib/activityIndicators';
+import { formatReplyElapsed } from '@/lib/speedTest';
 import { getTokenUsageRatio, recordTokenUsage } from '@/lib/tokenUsage';
 import { prepareBrainRotation } from '@/lib/modelRotation';
 import {
@@ -112,23 +113,18 @@ function previewFromText(text: string) {
 
 function ChatModeTabs() {
   const { route, navigate } = useRouter();
-  const { activeChats } = useRecentProjects();
   const current = route.name === 'chat'
     ? (route.mode === 'image' || route.mode === 'video' ? route.mode : 'general')
     : 'general';
   const go = (next: 'general' | 'image' | 'video') => {
     if (next === 'general') {
-      if (route.name === 'chat' && !route.mode) return;
+      if (route.name === 'chat' && !route.mode && !route.chatId) return;
       navigate({ name: 'chat' });
       return;
     }
-    if (route.name === 'chat' && route.mode === next) return;
-    const last = activeChats.find(c => c.mode === next);
-    if (last) {
-      navigate({ name: 'chat', mode: next, chatId: last.id, creationId: last.creationId });
-    } else {
-      navigate({ name: 'chat', mode: next });
-    }
+    // Always open a fresh Image / Video canvas — never jump to the last Recent thread.
+    if (route.name === 'chat' && route.mode === next && !route.chatId) return;
+    navigate({ name: 'chat', mode: next });
   };
   const tabs: { id: 'general' | 'image' | 'video'; label: string }[] = [
     { id: 'general', label: 'Chat' },
@@ -545,6 +541,7 @@ export function AIChat() {
   }, []);
 
   useEffect(() => {
+    if (generatingRef.current && messagesRef.current.length > messages.length) return;
     messagesRef.current = messages;
   }, [messages]);
 
@@ -567,6 +564,9 @@ export function AIChat() {
     if (effectiveChatId) {
       routeChatIdRef.current = effectiveChatId;
       persistChatIdRef.current = effectiveChatId;
+      return;
+    }
+    if (generatingRef.current && activeGenChatIdRef.current) {
       return;
     }
     // Explicit blank starter (New Chat / Image / Video with no id) — never keep a stale thread id.
@@ -707,14 +707,18 @@ export function AIChat() {
 
     if (route.chatId) {
       const inFlight = Boolean(
-        generatingRef.current && activeGenChatIdRef.current === route.chatId && messagesRef.current.length,
+        generatingRef.current && activeGenChatIdRef.current === route.chatId,
       );
       // We just created this chat and already have messages in state — don't wipe them.
       if (skipChatLoadIdsRef.current.has(route.chatId) || inFlight) {
-        if (!inFlight) skipChatLoadIdsRef.current.delete(route.chatId);
-        setLoading(false);
-        setGenerating(Boolean(generatingRef.current && activeGenChatIdRef.current === route.chatId));
-        return;
+        if (messagesRef.current.length > 0) {
+          skipChatLoadIdsRef.current.delete(route.chatId);
+          setLoading(false);
+          setGenerating(Boolean(generatingRef.current && activeGenChatIdRef.current === route.chatId));
+          return;
+        }
+        skipChatLoadIdsRef.current.delete(route.chatId);
+        // Fall through and load from disk if state was emptied by a re-render race.
       }
       try {
         const raw = localStorage.getItem(chatThreadKey(route.chatId));
@@ -735,10 +739,10 @@ export function AIChat() {
     }
 
     // Fresh New Chat / Image / Video — empty canvas (never inherit a stuck Stop state)
-    // Guard: if a send is mid-flight, do not wipe messages during a brief route race.
-    if (generatingRef.current && activeGenChatIdRef.current) {
+    // Guard: a send is mid-flight (including the await before generatingRef flips).
+    if (activeGenChatIdRef.current && (generatingRef.current || messagesRef.current.length > 0)) {
       setLoading(false);
-      setGenerating(true);
+      setGenerating(Boolean(generatingRef.current));
       return;
     }
     setMessages([]);
@@ -1125,13 +1129,12 @@ export function AIChat() {
     }
     setPendingImages([]);
     setComposerMode(null);
-    // Do not auto-navigate on build-ish prompts — Yes on the chip switches to Code.
-    const viewingChatId = routeChatIdRef.current;
-    const busyOnThisChat = generatingRef.current && (
-      !viewingChatId
-      || !activeGenChatIdRef.current
-      || activeGenChatIdRef.current === viewingChatId
-      || activeGenChatIdRef.current === persistChatIdRef.current
+    // Queue only when this same thread is already answering. New Chat while another
+    // thread is busy still starts a new send once the engine is free (sendMessage gates).
+    const viewingChatId = route.name === 'chat' ? route.chatId : undefined;
+    const genId = activeGenChatIdRef.current;
+    const busyOnThisChat = generatingRef.current && Boolean(genId) && (
+      Boolean(viewingChatId) && viewingChatId === genId
     );
     if (busyOnThisChat) {
       pendingQueueRef.current.push(content);
@@ -1162,16 +1165,7 @@ export function AIChat() {
     if (!activeChatId) {
       activeChatId = `chat-${crypto.randomUUID().slice(0, 10)}`;
       skipChatLoadIdsRef.current.add(activeChatId);
-      // Fresh thread: wipe any leftover UI messages so history cannot leak from a prior chat.
       messagesRef.current = [];
-      setMessages([]);
-      addChat({
-        id: activeChatId,
-        mode,
-        title: titleFromPrompt(content),
-        updatedAt: new Date().toISOString(),
-        preview: previewFromText(content),
-      });
     } else {
       const existing = chats.find(c => c.id === activeChatId);
       addChat({
@@ -1236,6 +1230,25 @@ export function AIChat() {
     });
     const previousAssistant = [...priorForHistory].reverse().find(m => m.role === 'assistant')?.content || '';
     messagesRef.current = [...normalized, userMsg, assistantMsg];
+    persistModeThread(mode, messagesRef.current, { chatId: activeChatId });
+    setMessages(messagesRef.current);
+    generatingRef.current = true;
+    setGenerating(true);
+
+    if (isNewChat) {
+      addChat({
+        id: activeChatId,
+        mode,
+        title: titleFromPrompt(content),
+        updatedAt: new Date().toISOString(),
+        preview: previewFromText(content),
+      });
+      navigate({
+        name: 'chat',
+        mode: mode === 'general' ? undefined : mode,
+        chatId: activeChatId,
+      });
+    }
 
     const histPrefs = getLocalPrefs();
     const keepContinuity = mode === 'code' || Boolean(
@@ -1266,23 +1279,7 @@ export function AIChat() {
       })
       : rotation.history;
     const stickyBrain = pinnedModel.source === 'auto' ? rotation.brain : null;
-
-    // Messages first — then navigate — so Explore ideas never replaces the thread.
-    setMessages(() => {
-      const next = messagesRef.current;
-      persistModeThread(mode, next, { chatId: activeChatId });
-      return next;
-    });
-    generatingRef.current = true;
-    setGenerating(true);
-
-    if (isNewChat) {
-      navigate({
-        name: 'chat',
-        mode: mode === 'general' ? undefined : mode,
-        chatId: activeChatId,
-      });
-    }
+    const replyStartedAt = Date.now();
 
     const clearGeneratingIfMine = () => {
       if (mySeq !== genSeqRef.current) return;
@@ -1300,15 +1297,16 @@ export function AIChat() {
       }
       const threadChatId = persistChatIdRef.current || activeChatId;
       const routeChat = routeChatIdRef.current;
+      const elapsedMs = Date.now() - replyStartedAt;
       const patchThread = (list: ChatMessage[]) => list.map(m => (
         m.id === assistantId
-          ? { ...m, content: finalText, provider_used: provider }
+          ? { ...m, content: finalText, provider_used: provider, elapsed_ms: elapsedMs }
           : m
       ));
 
       // Prefer live messages; fall back to stored thread when the view already switched chats.
       let next = patchThread(messagesRef.current);
-      if (routeChat && threadChatId && routeChat !== threadChatId) {
+      if (!next.some(m => m.id === assistantId)) {
         try {
           const raw = localStorage.getItem(chatThreadKey(threadChatId));
           const stored = raw ? JSON.parse(raw) as ChatMessage[] : [];
@@ -1318,7 +1316,11 @@ export function AIChat() {
         } catch {
           /* ignore */
         }
-      } else {
+      }
+      if (!next.some(m => m.id === assistantId)) {
+        next = [...normalized, userMsg, { ...assistantMsg, content: finalText, provider_used: provider, elapsed_ms: elapsedMs }];
+      }
+      if (!routeChat || routeChat === threadChatId) {
         messagesRef.current = next;
       }
 
@@ -1336,7 +1338,7 @@ export function AIChat() {
         return next;
       });
 
-      notifyWorkDone(activityKeyForChatMode(mode));
+      notifyChatDone(threadChatId);
     };
 
     // First-run guarantee: no live chat path → honest CTA reply (no fake ARK Core answer).
@@ -2725,12 +2727,19 @@ export function AIChat() {
                           : 'rounded-2xl px-4 py-3 bg-ark-navy-900 border border-surface-border'
                     }`}
                   >
-                    {msg.role === 'assistant' && (() => {
-                      const code = classifyErrorMessage(msg.content).code;
-                      return code !== 'UNKNOWN' && code !== 'CANCELED';
-                    })()
+                    {msg.role === 'assistant' && isLikelyErrorMessage(msg.content)
                       ? <ArkErrorInline message={msg.content} />
                       : <MessageContent content={msg.content} />}
+                    {msg.role === 'assistant'
+                      && typeof msg.elapsed_ms === 'number'
+                      && msg.elapsed_ms >= 0
+                      && !msg.content.startsWith('__generating__:')
+                      && !isLikelyErrorMessage(msg.content) ? (
+                        <p className="text-[11px] text-content-tertiary mt-2 tabular-nums">
+                          Responded in {formatReplyElapsed(msg.elapsed_ms)}
+                          {msg.provider_used ? ` · ${msg.provider_used}` : ''}
+                        </p>
+                      ) : null}
                     {msg.role === 'assistant' && /Stopped at length limit/i.test(msg.content) ? (
                       <button
                         type="button"

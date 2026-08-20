@@ -77,6 +77,8 @@ export interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
   content: string;
   provider_used: string | null;
+  /** Wall-clock ms for assistant replies (shown under the bubble). */
+  elapsed_ms?: number;
   created_at: string;
 }
 
