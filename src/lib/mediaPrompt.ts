@@ -30,6 +30,7 @@ function hostSafeImagePrompt(raw: string): string {
   if (/\biphone\s*(1[8-9]|[2-9]\d)\b/i.test(t)) {
     t = t.replace(/\biphone\s*(1[8-9]|[2-9]\d)[^\s,]*/gi, 'next-generation titanium flagship smartphone');
   }
+  t = t.replace(/\bplad\b/gi, 'plaid');
   return t;
 }
 
@@ -65,8 +66,14 @@ export function rewriteImagePrompt(raw: string): string {
   if (/\bdark and simple\b|\bsimple\b/.test(lower) && /\bdark\b/.test(lower)) {
     subjectHints.push('minimal dark aesthetic, sparse composition, soft lighting');
   }
-  if (/\btesla\b/.test(lower)) {
-    subjectHints.push('accurate Tesla vehicle design, single coherent car body');
+  if (/\b(tesla|model\s*s|plaid|cybertruck|model\s*[3xy])\b/.test(lower)) {
+    subjectHints.push('accurate modern Tesla EV design, single coherent car body, correct proportions');
+    if (/\bplaid\b|\bmodel\s*s\b/.test(lower)) {
+      subjectHints.push('2021+ Tesla Model S Plaid refreshed fascia, full-width headlight bar — not the early 2012-2016 Model S');
+    }
+    if (/\bred\b|\bcrimson\b|\bscarlet\b/.test(lower)) {
+      subjectHints.push('vivid red factory paint, studio automotive lighting, sharp reflections');
+    }
   }
   if (isProductPrompt(prompt)) {
     return productPackshotPrompt(prompt);
@@ -125,9 +132,9 @@ export function resolveImageDimensions(raw: string): { width: number; height: nu
 
 export const MEDIA_GEN_STAGES = {
   image: [
-    { key: 'create', label: 'Creating image', ms: 8000 },
-    { key: 'sketch', label: 'Refining details', ms: 10000 },
-    { key: 'almost', label: 'Almost done', ms: 12000 },
+    { key: 'create', label: 'Creating image', ms: 10000 },
+    { key: 'sketch', label: 'Refining details', ms: 14000 },
+    { key: 'almost', label: 'Polishing quality', ms: 16000 },
     { key: 'wrap', label: 'Wrapping it up', ms: 0 },
   ],
   video: [

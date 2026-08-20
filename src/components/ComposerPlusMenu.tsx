@@ -33,7 +33,7 @@ const ITEMS: {
   { id: 'multitask', label: 'Tasks', hint: 'Prefix: split work into a numbered list', icon: Layers2 },
   { id: 'file', label: 'Add file', hint: 'Attach a file to inspect in chat', icon: FilePlus2 },
   { id: 'image', label: 'Add photo', hint: 'Attach an image for vision models', icon: ImagePlus },
-  { id: 'folder', label: 'Open folder', hint: 'Inspect a folder, then continue in Code', icon: FolderOpen },
+  { id: 'folder', label: 'Open folder', hint: 'Attach a folder — then pick what to do', icon: FolderOpen },
 ];
 
 const MODE_IDS = new Set<ComposerPlusAction>(['plan', 'ask', 'debug', 'multitask']);

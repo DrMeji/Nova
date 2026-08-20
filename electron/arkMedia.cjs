@@ -130,16 +130,17 @@ async function fetchImageUrl(url, timeoutMs = 45_000) {
 }
 
 /** Tiny stubs / error JPEGs are usually under ~8KB; real gens are larger. */
-const IMAGE_MIN_BYTES = 10_000;
-/** Keep Pollinations under a minute, then fall through to AI Horde. */
-const IMAGE_TOTAL_BUDGET_MS = 40_000;
+const IMAGE_MIN_BYTES = 12_000;
+/** Prefer a real quality pass (~15–55s) before falling through. */
+const IMAGE_TOTAL_BUDGET_MS = 55_000;
 /**
- * Only treat ultra-fast + tiny bodies as CDN cache stubs.
- * Modern Pollinations often returns real Flux JPEGs in under 2s — do not
- * retry-storm those (it hits 429 “queue full” and fails Tesla / car prompts).
+ * Reject “instant” low-detail CDN frames. Real Flux work is usually slower
+ * and larger; 2–3s medium JPEGs look soft / wrong model year on cars.
  */
-const IMAGE_CACHE_HARD_MS = 600;
-const IMAGE_CACHE_MAX_BYTES = 22_000;
+const IMAGE_QUALITY_FAST_MS = 7_500;
+const IMAGE_QUALITY_MIN_BYTES = 85_000;
+const IMAGE_CACHE_HARD_MS = 900;
+const IMAGE_CACHE_MAX_BYTES = 28_000;
 
 function freshImageSeed(prompt) {
   const a = hashPrompt(`${prompt}|${Date.now()}|${Math.random()}`);
@@ -168,7 +169,28 @@ function hostSafeImagePrompt(raw) {
   if (/\biphone\s*(1[8-9]|[2-9]\d)\b/i.test(t)) {
     t = t.replace(/\biphone\s*(1[8-9]|[2-9]\d)[^\s,]*/gi, 'next-generation titanium flagship smartphone');
   }
+  // Common typo when asking for Tesla Model S Plaid
+  t = t.replace(/\bplad\b/gi, 'plaid');
   return t;
+}
+
+function sourceDisplayName(source, fallback) {
+  const s = String(source || '');
+  if (/pollinations-flux/i.test(s)) return 'Pollinations Flux';
+  if (/pollinations-zimage/i.test(s)) return 'Pollinations';
+  if (/pollinations/i.test(s)) return 'Pollinations';
+  if (/ai-horde/i.test(s)) return 'AI Horde';
+  if (/huggingface/i.test(s)) return 'Hugging Face FLUX';
+  if (/local|sd\./i.test(s)) return 'Local SD';
+  return fallback || 'ARK Image Core';
+}
+
+function isLowQualityHit(tookMs, bytes) {
+  if (!bytes || bytes < IMAGE_MIN_BYTES) return true;
+  // Instant + modest size → soft / cached look (user saw 2.7s “ARK Core” frames).
+  if (tookMs < IMAGE_QUALITY_FAST_MS && bytes < IMAGE_QUALITY_MIN_BYTES) return true;
+  if (tookMs < IMAGE_CACHE_HARD_MS && bytes < IMAGE_CACHE_MAX_BYTES) return true;
+  return false;
 }
 
 function sleep(ms) {
@@ -187,20 +209,16 @@ function resolveImageDimensions(prompt) {
 }
 
 /**
- * Fetch a unique Pollinations JPEG. Prefer the first real render.
+ * Fetch a unique Pollinations JPEG. Quality-first: skip instant soft frames.
  * Avoid retry storms — free hosts queue one request per IP and 429 after spam.
  */
 async function fetchRealImage(prompt, opts = {}) {
   const visualFallback = isProductPrompt(prompt)
     ? 'titanium flagship smartphone, large display, studio product photograph, isolated on a seamless gray backdrop, centered, no hands, no people'
     : '';
-  const carFallback = /\b(tesla|model\s*[3sxy]|cybertruck|plaid)\b/i.test(String(prompt || ''))
-    ? 'sleek modern electric luxury sedan, studio automotive photograph, coherent single car body, sharp detail'
-    : '';
   const texts = [
     hostSafeImagePrompt(prompt),
     hostSafeImagePrompt(opts.fallbackPrompt),
-    carFallback,
     visualFallback,
   ]
     .map((p) => String(p || '').trim())
@@ -211,93 +229,88 @@ async function fetchRealImage(prompt, opts = {}) {
   const w = opts.width || 1024;
   const h = opts.height || 1024;
   const started = Date.now();
+  // Flux first (quality). Skip turbo — it wins on speed and loses on detail.
   const tiers = [
-    { model: 'flux', source: 'pollinations-flux', ms: 55_000 },
-    { model: 'zimage', source: 'pollinations-zimage', ms: 40_000 },
-    { model: 'turbo', source: 'pollinations-turbo', ms: 28_000 },
+    { model: 'flux', source: 'pollinations-flux', ms: 58_000 },
+    { model: 'zimage', source: 'pollinations-zimage', ms: 45_000 },
   ];
 
   const seen = new Set();
   let best = null;
   let rateLimitedStreak = 0;
+  let softRejects = 0;
 
   for (const text of texts) {
-    const encoded = encodeURIComponent(text.slice(0, 450));
-    const seed = opts.seed != null
-      ? (Number(opts.seed) % 999999)
-      : freshImageSeed(text);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const encoded = encodeURIComponent(text.slice(0, 480));
+      const seed = opts.seed != null && attempt === 0
+        ? (Number(opts.seed) % 999999)
+        : freshImageSeed(`${text}:q${attempt}`);
 
-    for (const tier of tiers) {
-      const left = IMAGE_TOTAL_BUDGET_MS - (Date.now() - started);
-      if (left < 2_500) break;
+      for (const tier of tiers) {
+        const left = IMAGE_TOTAL_BUDGET_MS - (Date.now() - started);
+        if (left < 3_000) break;
 
-      const timeoutMs = Math.min(tier.ms, left);
-      const modelQ = tier.model ? `&model=${encodeURIComponent(tier.model)}` : '';
-      const url = `https://image.pollinations.ai/prompt/${encoded}?width=${w}&height=${h}&nologo=true${modelQ}&seed=${seed}`;
-      const t0 = Date.now();
-      const hit = await fetchImageUrl(url, timeoutMs);
-      const took = Date.now() - t0;
+        const timeoutMs = Math.min(tier.ms, left);
+        const modelQ = tier.model ? `&model=${encodeURIComponent(tier.model)}` : '';
+        const url = `https://image.pollinations.ai/prompt/${encoded}?width=${w}&height=${h}&nologo=true&enhance=true${modelQ}&seed=${seed}`;
+        const t0 = Date.now();
+        const hit = await fetchImageUrl(url, timeoutMs);
+        const took = Date.now() - t0;
 
-      if (hit && hit.error === 429) {
-        rateLimitedStreak += 1;
-        try {
-          console.log(`[ark-media] rate limited model=${tier.model} streak=${rateLimitedStreak}`);
-        } catch { /* ignore */ }
-        await sleep(rateLimitedStreak === 1 ? 4500 : 7000);
-        // One retry of the same tier after backoff, then leave Pollinations for Horde.
-        if (rateLimitedStreak >= 2) {
-          if (best) return best;
-          return null;
-        }
-        const retry = await fetchImageUrl(url, Math.min(tier.ms, IMAGE_TOTAL_BUDGET_MS - (Date.now() - started)));
-        if (retry && retry.buf && retry.buf.length >= IMAGE_MIN_BYTES) {
+        if (hit && hit.error === 429) {
+          rateLimitedStreak += 1;
           try {
-            console.log(`[ark-media] image after 429 model=${tier.model} bytes=${retry.buf.length}`);
+            console.log(`[ark-media] rate limited model=${tier.model} streak=${rateLimitedStreak}`);
           } catch { /* ignore */ }
-          return { ...retry, source: tier.source, model: tier.model, seed, tookMs: Date.now() - t0 };
+          await sleep(rateLimitedStreak === 1 ? 5000 : 8000);
+          if (rateLimitedStreak >= 2) {
+            if (best) return best;
+            return null;
+          }
+          continue;
         }
-        if (best) return best;
-        return null;
-      }
 
-      if (hit && hit.error) {
+        if (hit && hit.error) {
+          try {
+            console.log(`[ark-media] image HTTP ${hit.error} model=${tier.model} tookMs=${took}`);
+          } catch { /* ignore */ }
+          continue;
+        }
+        if (!hit || !hit.buf || hit.buf.length < IMAGE_MIN_BYTES) continue;
+
+        rateLimitedStreak = 0;
+        const fp = bufFingerprint(hit.buf);
+        if (seen.has(fp)) {
+          try {
+            console.log(`[ark-media] duplicate body skipped model=${tier.model} tookMs=${took}`);
+          } catch { /* ignore */ }
+          continue;
+        }
+        seen.add(fp);
+
+        const candidate = { ...hit, source: tier.source, model: tier.model, seed, tookMs: took };
+        if (isLowQualityHit(took, hit.buf.length)) {
+          softRejects += 1;
+          if (!best || hit.buf.length > (best.buf?.length || 0)) best = candidate;
+          try {
+            console.log(`[ark-media] soft/fast reject model=${tier.model} tookMs=${took} bytes=${hit.buf.length} (want quality)`);
+          } catch { /* ignore */ }
+          // One more flux attempt with a new seed, then accept best if budget is low.
+          if (softRejects >= 3 || left < 12_000) {
+            if (best) return best;
+          }
+          continue;
+        }
+
         try {
-          console.log(`[ark-media] image HTTP ${hit.error} model=${tier.model} tookMs=${took}`);
+          console.log(`[ark-media] image model=${tier.model} seed=${seed} tookMs=${took} bytes=${hit.buf.length}`);
         } catch { /* ignore */ }
-        continue;
+        return candidate;
       }
-      if (!hit || !hit.buf || hit.buf.length < IMAGE_MIN_BYTES) continue;
-
-      rateLimitedStreak = 0;
-      const fp = bufFingerprint(hit.buf);
-      if (seen.has(fp)) {
-        try {
-          console.log(`[ark-media] duplicate body skipped model=${tier.model} tookMs=${took}`);
-        } catch { /* ignore */ }
-        continue;
-      }
-      seen.add(fp);
-
-      const candidate = { ...hit, source: tier.source, model: tier.model, seed, tookMs: took };
-      const looksLikeStub = took < IMAGE_CACHE_HARD_MS && hit.buf.length < IMAGE_CACHE_MAX_BYTES;
-      if (looksLikeStub && left > 10_000) {
-        if (!best || hit.buf.length > (best.buf?.length || 0)) best = candidate;
-        try {
-          console.log(`[ark-media] tiny/fast stub keep model=${tier.model} tookMs=${took} bytes=${hit.buf.length}`);
-        } catch { /* ignore */ }
-        continue;
-      }
-
-      try {
-        console.log(`[ark-media] image model=${tier.model} seed=${seed} tookMs=${took} bytes=${hit.buf.length}`);
-      } catch { /* ignore */ }
-      return candidate;
     }
 
-    if (best) {
-      try {
-        console.log(`[ark-media] returning best candidate tookMs=${best.tookMs} bytes=${best.buf?.length}`);
-      } catch { /* ignore */ }
+    if (best && !isLowQualityHit(best.tookMs || 0, best.buf?.length || 0)) {
       return best;
     }
   }
@@ -592,8 +605,14 @@ function rewriteImagePrompt(prompt) {
   if (/\b(wallpaper|desktop background|lock screen)\b/.test(lower)) {
     hints.push('16:9 landscape desktop wallpaper, no desktop icons, no taskbar, no UI chrome');
   }
-  if (/\btesla\b/.test(lower)) {
-    hints.push('accurate single Tesla car, coherent body');
+  if (/\b(tesla|model\s*s|plaid|cybertruck|model\s*[3xy])\b/.test(lower)) {
+    hints.push('accurate modern Tesla EV design, single coherent car body, correct proportions');
+    if (/\bplaid\b|\bmodel\s*s\b/.test(lower)) {
+      hints.push('2021+ Tesla Model S Plaid refreshed fascia, full-width headlight bar, sleek performance sedan — not the early 2012-2016 Model S');
+    }
+    if (/\bred\b|\bcrimson\b|\bscarlet\b/.test(lower)) {
+      hints.push('vivid red factory paint, studio automotive lighting, sharp reflections');
+    }
   }
   if (isProductPrompt(raw)) {
     const concept = hostSafeImagePrompt(raw.replace(/product concept:\s*/i, '')).slice(0, 140);
@@ -873,8 +892,7 @@ async function generateImage(prompt, modelName, opts = {}) {
     };
   }
 
-  // Pollinations first; kick AI Horde after 10s (or immediately if Pollinations fails).
-  // Do not retry-storm Pollinations — free hosts queue one request per IP.
+  // Pollinations first; kick AI Horde after 22s so quality Flux can finish.
   const pollPromise = fetchRealImage(enhanced, {
     width: dim.width,
     height: dim.height,
@@ -891,7 +909,7 @@ async function generateImage(prompt, modelName, opts = {}) {
     }
     return hordePromise;
   };
-  const hordeTimer = setTimeout(() => { void kickHorde(); }, 10_000);
+  const hordeTimer = setTimeout(() => { void kickHorde(); }, 22_000);
   let winner = null;
   try {
     winner = await pollPromise;
@@ -904,12 +922,13 @@ async function generateImage(prompt, modelName, opts = {}) {
     const file = path.join(mediaDir(), `${id}.${winner.ext}`);
     fs.writeFileSync(file, winner.buf);
     const dataUrl = `data:image/${winner.ext === 'jpg' ? 'jpeg' : winner.ext};base64,${winner.buf.toString('base64')}`;
+    const niceName = sourceDisplayName(winner.source, modelName || 'ARK Image Core');
     const entry = {
       id,
       kind: 'image',
       title: String(prompt).slice(0, 80),
       prompt: String(prompt),
-      modelName: modelName || winner.model || 'ARK Image Core',
+      modelName: niceName,
       path: file,
       createdAt: new Date().toISOString(),
       source: winner.source,
@@ -919,7 +938,7 @@ async function generateImage(prompt, modelName, opts = {}) {
     return {
       ok: true,
       kind: 'image',
-      modelName: entry.modelName,
+      modelName: niceName,
       path: file,
       dataUrl,
       libraryId: id,

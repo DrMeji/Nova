@@ -652,14 +652,17 @@ async function generate(message, opts = {}) {
         source: 'none',
       };
     }
-    const media = await arkMedia.generateImage(message, model?.name || 'ARK Image Core', {
+    const mediaLabel = (!model || model.id === 'ark-core' || model.builtin)
+      ? 'ARK Image Core'
+      : (model.name || 'ARK Image Core');
+    const media = await arkMedia.generateImage(message, mediaLabel, {
       referenceImageDataUrl: opts.referenceImageDataUrl,
     });
     return {
       ok: media.ok !== false,
       reply: media.reply,
       modelId: modelId || 'ark-image-core',
-      modelName: media.modelName,
+      modelName: media.modelName || mediaLabel,
       source: media.source || 'ark-media',
       media: media.dataUrl ? {
         kind: 'image',

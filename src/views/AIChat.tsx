@@ -19,12 +19,12 @@ import {
   resolveCreationDataUrl,
   slimChatContent,
   titleFromPrompt,
+  loadRecentProjects,
 } from '@/lib/recentStore';
 import { looksLikeCodeAsk, looksLikeImageAsk } from '@/lib/chatIntent';
 import {
   formatChatInspectReply,
   formatRepoCatalog,
-  handoffPrompt,
   isGithubPullAsk,
   listAccountRepos,
   looksLikeBuildStart,
@@ -1080,10 +1080,19 @@ export function AIChat() {
   const openCodeWorkspace = (seedPrompt?: string, seedFiles?: Record<string, string>) => {
     const seed = (seedPrompt ?? input).trim();
     const files = { ...chatStudioFilesRef.current, ...(seedFiles || {}) };
-    const name = seed
-      ? titleFromPrompt(seed).replace(/^(let'?s|lets|please)\s+/i, '').slice(0, 48) || 'Code project'
-      : 'Code project';
     const existingId = chatStudioProjectIdRef.current;
+    const existingName = existingId
+      ? loadRecentProjects().find(p => p.id === existingId)?.name
+      : undefined;
+    const fromPrompt = seed
+      ? titleFromPrompt(seed).replace(/^(let'?s|lets|please)\s+/i, '').slice(0, 48) || ''
+      : '';
+    const keepFolderName = Boolean(
+      existingName && !/^(inspect|code project|code|opened folder|new project)$/i.test(existingName),
+    );
+    const name = keepFolderName
+      ? existingName!
+      : (fromPrompt || existingName || 'Code project');
     const project = existingId
       ? { id: existingId, name }
       : addRecent(name);
@@ -1199,6 +1208,24 @@ export function AIChat() {
       }
     }
     setChatStudioFiles(seedFiles);
+    const count = Object.keys(seedFiles).length;
+    if (count > 0) {
+      const noteId = crypto.randomUUID();
+      setMessages(prev => [...prev, {
+        id: noteId,
+        user_id: user?.id ?? 'guest',
+        project_id: null,
+        role: 'assistant',
+        content: [
+          `Attached ${count} file${count === 1 ? '' : 's'}.`,
+          '',
+          'What should I do with them? Pick a prompt below, or type your own.',
+        ].join('\n'),
+        provider_used: 'ARK',
+        created_at: new Date().toISOString(),
+      }]);
+      setInspectOfferId(noteId);
+    }
   };
 
   const openFolderInChat = async () => {
@@ -1209,16 +1236,29 @@ export function AIChat() {
     const pid = `proj-${crypto.randomUUID().slice(0, 8)}`;
     const res = await window.arkDesktop.projectImportFolder({
       projectId: pid,
-      projectName: 'Inspect',
     });
     if (!res?.ok || res.canceled) return;
     const files = res.files || {};
+    const folderName = res.name || 'folder';
+    const count = Object.keys(files).length;
     setChatStudioFiles(files);
     setChatStudioProjectId(pid);
-    touchRecentProject(pid, res.name || 'Inspect');
-    if (res.root && window.arkDesktop.projectRead) {
-      /* files already on disk for later Code handoff */
-    }
+    touchRecentProject(pid, folderName);
+    const noteId = crypto.randomUUID();
+    setMessages(prev => [...prev, {
+      id: noteId,
+      user_id: user?.id ?? 'guest',
+      project_id: null,
+      role: 'assistant',
+      content: [
+        `Loaded **${folderName}** — ${count} file${count === 1 ? '' : 's'} attached.`,
+        '',
+        'What should I do with it? Pick a prompt below, or type your own. Stay in Chat, or open Code when you want to edit.',
+      ].join('\n'),
+      provider_used: 'ARK',
+      created_at: new Date().toISOString(),
+    }]);
+    setInspectOfferId(noteId);
   };
 
   useEffect(() => {
@@ -2479,12 +2519,19 @@ export function AIChat() {
                 type="button"
                 className="text-[10px] text-amber-200/90 hover:text-amber-100"
                 onClick={() => {
-                  const text = input.trim() || 'Look at these files and tell me what you see.';
-                  setInput('');
-                  void sendMessageRef.current(`${COMPOSER_MODE_PREFIX.debug}${text}`);
+                  void sendMessageRef.current(`${COMPOSER_MODE_PREFIX.debug}Find bugs and risky code in these files.`);
                 }}
               >
                 Debug
+              </button>
+              <button
+                type="button"
+                className="text-[10px] text-content-secondary hover:text-content-primary"
+                onClick={() => {
+                  void sendMessageRef.current('Summarize what these files do.');
+                }}
+              >
+                Summarize
               </button>
               <button
                 type="button"
@@ -2492,6 +2539,7 @@ export function AIChat() {
                 onClick={() => {
                   setChatStudioFiles({});
                   setChatStudioProjectId(null);
+                  setInspectOfferId(null);
                 }}
               >
                 Clear
@@ -3101,22 +3149,53 @@ export function AIChat() {
                         <button
                           type="button"
                           className="text-[10px] rounded-full bg-sky-600 text-white px-2.5 py-1"
-                          onClick={() => openCodeWorkspace(
-                            handoffPrompt('yes, fix these', lastInspectReplyRef.current),
-                          )}
+                          onClick={() => {
+                            setInspectOfferId(null);
+                            void sendMessageRef.current('Summarize what these files do and how they fit together.');
+                          }}
                         >
-                          Yes, fix this
+                          Summarize project
                         </button>
                         <button
                           type="button"
                           className="text-[10px] rounded-full border border-surface-border px-2.5 py-1 text-content-secondary"
                           onClick={() => {
-                            setComposerMode('debug');
-                            setInput('Look at these files');
+                            setInspectOfferId(null);
+                            void sendMessageRef.current(`${COMPOSER_MODE_PREFIX.debug}Find bugs, risky code, and broken paths in these files.`);
+                          }}
+                        >
+                          Debug this
+                        </button>
+                        <button
+                          type="button"
+                          className="text-[10px] rounded-full border border-surface-border px-2.5 py-1 text-content-secondary"
+                          onClick={() => {
+                            setInspectOfferId(null);
+                            void sendMessageRef.current('Explain the architecture and how the main pieces connect.');
+                          }}
+                        >
+                          Explain architecture
+                        </button>
+                        <button
+                          type="button"
+                          className="text-[10px] rounded-full border border-surface-border px-2.5 py-1 text-content-secondary"
+                          onClick={() => {
+                            setInspectOfferId(null);
+                            void sendMessageRef.current('Suggest concrete improvements I should make next.');
+                          }}
+                        >
+                          Suggest improvements
+                        </button>
+                        <button
+                          type="button"
+                          className="text-[10px] rounded-full border border-surface-border px-2.5 py-1 text-content-secondary"
+                          onClick={() => {
+                            setInput('Add this feature: ');
+                            setInspectOfferId(null);
                             requestAnimationFrame(() => textareaRef.current?.focus());
                           }}
                         >
-                          Debug
+                          Add a feature
                         </button>
                         <button
                           type="button"
@@ -3126,6 +3205,13 @@ export function AIChat() {
                           )}
                         >
                           Continue in Code
+                        </button>
+                        <button
+                          type="button"
+                          className="text-[10px] rounded-full border border-surface-border px-2.5 py-1 text-content-tertiary"
+                          onClick={() => setInspectOfferId(null)}
+                        >
+                          Dismiss
                         </button>
                       </div>
                     )}

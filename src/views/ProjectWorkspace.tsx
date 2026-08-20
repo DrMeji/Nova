@@ -484,7 +484,7 @@ export function ProjectWorkspace() {
 
   const canEdit = myAccess !== 'read';
 
-  const postAssistantNote = useCallback((text: string) => {
+  const postAssistantNote = useCallback((text: string, offerPrompts = false) => {
     const uid = user?.id ?? 'guest';
     const pid = project?.id || projectId || '';
     const note: ChatMessage = {
@@ -498,9 +498,11 @@ export function ProjectWorkspace() {
     };
     setMessages(prev => {
       const next = [...prev, note];
+      messagesRef.current = next;
       if (pid) saveProjectThread(pid, next);
       return next;
     });
+    if (offerPrompts) setInspectOfferId(note.id);
   }, [project?.id, projectId, user?.id]);
 
   const refreshLivePreview = useCallback(async (
@@ -910,22 +912,18 @@ export function ProjectWorkspace() {
           && Object.keys(mapped).length > 0
         ) {
           const name = loadRecentProjects().find(p => p.id === projectId)?.name || 'Project';
+          const fileCount = Object.keys(mapped).length;
           const seeded: ChatMessage[] = [
-            {
-              id: `local-user-${projectId}`,
-              user_id: user?.id ?? 'guest',
-              project_id: projectId,
-              role: 'user',
-              content: name,
-              provider_used: null,
-              created_at: new Date().toISOString(),
-            },
             {
               id: `local-asst-${projectId}`,
               user_id: user?.id ?? 'guest',
               project_id: projectId,
               role: 'assistant',
-              content: `I built **${name}**. It's saved on this PC — files are in Explorer. Ask me to change anything.`,
+              content: [
+                `Loaded **${name}** — ${fileCount} file${fileCount === 1 ? '' : 's'} are in Explorer.`,
+                '',
+                'What should I do with it? Pick a prompt below, or type your own.',
+              ].join('\n'),
               provider_used: 'ARK',
               created_at: new Date().toISOString(),
             },
@@ -933,6 +931,7 @@ export function ProjectWorkspace() {
           setMessages(seeded);
           messagesRef.current = seeded;
           saveProjectThread(projectId, seeded);
+          setInspectOfferId(`local-asst-${projectId}`);
         }
       } catch {
         /* ignore */
@@ -1036,8 +1035,13 @@ export function ProjectWorkspace() {
       const skipNote = skipBits.length ? ` Skipped: ${skipBits.join(', ')}.` : '';
       postAssistantNote(
         count
-          ? `Opened ${count} file${count === 1 ? '' : 's'}${name ? ` from ${name}` : ''}.${skipNote} They’re in Explorer — ask me to debug, explain, or edit them.`
+          ? [
+              `Opened ${count} file${count === 1 ? '' : 's'}${name ? ` from **${name}**` : ''}.${skipNote}`,
+              '',
+              'They’re in Explorer. What should I do next? Pick a prompt below, or type your own.',
+            ].join('\n')
           : `That folder opened, but I could not read any text files from it.${skipNote}`,
+        Boolean(count),
       );
     };
     if (!window.arkDesktop?.projectImportFolder) {
@@ -2825,18 +2829,30 @@ export function ProjectWorkspace() {
                         : <Loader2 className="w-3.5 h-3.5 animate-spin text-content-tertiary" />}
                     {inspectOfferId === msg.id && (
                       <div className="flex flex-wrap gap-1 mt-2">
+                        <button type="button" className="text-[10px] rounded-full bg-sky-600 text-white px-2.5 py-1" onClick={() => void handleSendChat('Summarize what this project does and how it is structured.')}>
+                          Summarize project
+                        </button>
+                        <button type="button" className="text-[10px] rounded-full border border-surface-border px-2.5 py-1 text-content-secondary" onClick={() => void handleSendChat('Debug this project. Find bugs, risky code, and broken paths.')}>
+                          Debug this
+                        </button>
+                        <button type="button" className="text-[10px] rounded-full border border-surface-border px-2.5 py-1 text-content-secondary" onClick={() => void handleSendChat('Explain the architecture and how the main pieces connect.')}>
+                          Explain architecture
+                        </button>
+                        <button type="button" className="text-[10px] rounded-full border border-surface-border px-2.5 py-1 text-content-secondary" onClick={() => void handleSendChat('Suggest concrete improvements I should make next.')}>
+                          Suggest improvements
+                        </button>
                         {canEdit && (
-                          <button type="button" className="text-[10px] rounded-full bg-sky-600 text-white px-2.5 py-1" onClick={() => void handleSendChat('Debug this project. Find issues in the files.')}>
-                            Debug this
+                          <button type="button" className="text-[10px] rounded-full border border-surface-border px-2.5 py-1 text-content-secondary" onClick={() => { setChatInput('Add this feature: '); textareaRef.current?.focus(); }}>
+                            Add a feature
                           </button>
                         )}
                         {canEdit && (
                           <button type="button" className="text-[10px] rounded-full border border-surface-border px-2.5 py-1 text-content-secondary" onClick={() => { setChatInput('Change '); textareaRef.current?.focus(); }}>
-                            Work on this
+                            Change something
                           </button>
                         )}
                         <button type="button" className="text-[10px] rounded-full border border-surface-border px-2.5 py-1 text-content-tertiary" onClick={() => setInspectOfferId(null)}>
-                          Just looking
+                          Dismiss
                         </button>
                 </div>
                     )}

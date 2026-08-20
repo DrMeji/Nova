@@ -279,9 +279,13 @@ function importFolder(projectId, projectName, sourceDir) {
   const root = projectDir(projectId);
   const tree = copyTree(src, root);
   const copied = tree.copied || [];
+  const folderName = path.basename(src);
+  const hint = String(projectName || '').trim();
+  // Prefer the real folder name over placeholder labels from Chat/Projects UI.
+  const placeholder = /^(inspect|opened folder|new project|code project|code)$/i.test(hint);
   const meta = {
     id: projectId,
-    name: projectName || path.basename(src),
+    name: (!hint || placeholder) ? folderName : hint,
     category: 'code',
     root,
     importedFrom: src,
