@@ -915,6 +915,14 @@ async function routeImage(opts: ArkRouteOpts): Promise<ArkRouterResult> {
   // Prefer real cloud images over local SVG fallback when failover is on.
   if (local?.media?.dataUrl && local.media.real) return local;
 
+  const IMAGE_ALTS = ['sd15-local', 'sdxl-turbo-local', 'flux-schnell-local', 'ark-image-core'];
+  const tried = new Set(attempted.map(a => a.toLowerCase()));
+  for (const alt of IMAGE_ALTS) {
+    if (tried.has(alt) || alt === (opts.preferredModelId || '')) continue;
+    const altHit = await tryLocalMedia(alt);
+    if (altHit?.media?.dataUrl && altHit.media.real) return altHit;
+  }
+
   if ((!wantsCloud || !local?.media?.real) && failover && modeAllowsCloud(mode)) {
     const cloud = await tryCloud();
     if (cloud) return cloud;
@@ -1016,6 +1024,25 @@ async function routeVideo(opts: ArkRouteOpts): Promise<ArkRouterResult> {
       attempted,
     };
   } catch (err) {
+    if (modelId !== 'ark-video-core') {
+      try {
+        attempted.push('ARK Video Core');
+        const retry = await brainGenerate(opts.message, 'ark-video-core', 'video');
+        if (retry?.media?.dataUrl) {
+          return {
+            reply: retry.reply,
+            media: retry.media,
+            modelName: retry.modelName || 'ARK Video Core',
+            modelId: 'ark-video-core',
+            source: retry.source || 'ark-media',
+            tier: retry.media.real ? 'no-key-free' : 'local-free',
+            attempted,
+          };
+        }
+      } catch {
+        /* fall through */
+      }
+    }
     void import('@/lib/arkHuntBootstrap').then(m =>
       m.installNextWhenCurrentRanOut({
         kind: 'video',

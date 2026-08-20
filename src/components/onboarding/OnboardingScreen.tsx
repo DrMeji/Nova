@@ -5,6 +5,7 @@ import {
   detectHardwareAsync,
   getHardwareClass,
   getRecommendedChatModel,
+  getRecommendedCoderModel,
   saveHardwareSnapshot,
   type HardwareInfo,
 } from '@/lib/api';
@@ -144,6 +145,31 @@ function recommendationsFor(hw: HardwareInfo): RecModel[] {
   ];
 }
 
+function queueSetupBrainDownloads(opts: {
+  chatId: string;
+  chatName?: string;
+  hw: HardwareInfo | null;
+}) {
+  void import('@/lib/engineDownloads').then(({ startEngineDownload }) => {
+    void startEngineDownload({
+      id: opts.chatId,
+      name: opts.chatName || opts.chatId,
+      source: 'local-ai',
+      forceUnknownDisk: true,
+    }).catch(() => undefined);
+    if (!opts.hw) return;
+    const coder = getRecommendedCoderModel(opts.hw);
+    if (coder && coder.id !== opts.chatId) {
+      void startEngineDownload({
+        id: coder.id,
+        name: coder.name,
+        source: 'local-ai',
+        forceUnknownDisk: true,
+      }).catch(() => undefined);
+    }
+  });
+}
+
 export function OnboardingScreen() {
   const { refreshProfile } = useAuth();
   const [phase, setPhase] = useState<Phase>('intro');
@@ -188,8 +214,16 @@ export function OnboardingScreen() {
     const recs = recommendationsFor(detected);
     setHw(detected);
     setModels(recs.slice(0, 2));
-    setSelectedId(recs.find(m => m.recommended)?.id ?? recs[0]?.id ?? null);
+    const chatId = recs.find(m => m.recommended)?.id ?? recs[0]?.id ?? null;
+    setSelectedId(chatId);
     setHwScanning(false);
+    if (chatId) {
+      queueSetupBrainDownloads({
+        chatId,
+        chatName: recs.find(m => m.id === chatId)?.name,
+        hw: detected,
+      });
+    }
   };
 
   const runSpeed = async () => {
@@ -221,11 +255,12 @@ export function OnboardingScreen() {
     setProgress(0);
     setFinishError(null);
 
+    const rec = hw ? getRecommendedChatModel(hw) : { id: 'qwen25-15b' };
     const allowed = ['qwen25-15b', 'llama32-3b', 'qwen25-7b', 'qwen25-coder-7b', 'qwen25-coder-14b'];
     const brainId =
       selectedId && allowed.includes(selectedId)
         ? selectedId
-        : 'qwen25-15b';
+        : rec.id;
 
     setLocalPrefs({
       defaultModelId: 'ark-auto',
@@ -240,6 +275,10 @@ export function OnboardingScreen() {
       const { downloadEngineModel, engineDownloadProgress, engineDownloadError } = await import('@/lib/arkEngine');
       await downloadEngineModel(brainId);
       downloadStarted = true;
+      const coder = hw ? getRecommendedCoderModel(hw) : null;
+      if (coder && coder.id !== brainId) {
+        void downloadEngineModel(coder.id).catch(() => undefined);
+      }
 
       await new Promise<void>((resolve) => {
         const tick = window.setInterval(async () => {
@@ -593,7 +632,17 @@ export function OnboardingScreen() {
               <button
                 type="button"
                 disabled={!selected}
-                onClick={() => setPhase('connect')}
+                onClick={() => {
+                  setPhase('connect');
+                  const chatId = selectedId || selected?.id;
+                  if (chatId) {
+                    queueSetupBrainDownloads({
+                      chatId,
+                      chatName: selected?.name,
+                      hw,
+                    });
+                  }
+                }}
                 className="ark-btn-primary w-full h-11 rounded-xl"
               >
                 Continue to connect

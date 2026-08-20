@@ -44,8 +44,6 @@ import {
 } from '@/lib/projectThread';
 import { getLocalPrefs, hasProviderApiKey, setLocalPrefs } from '@/lib/localPrefs';
 import { safeProjectWrite } from '@/lib/projectWriteSafe';
-import { installNextWhenCurrentRanOut } from '@/lib/arkHuntBootstrap';
-import { preloadStartRatio } from '@/lib/speedTest';
 import { loadRecentProjects } from '@/lib/recentStore';
 import {
   applyFileEdits,
@@ -93,6 +91,7 @@ import { CodeEditor } from '@/components/CodeEditor';
 import { fileTintClass, languageFromPath } from '@/lib/syntaxHighlight';
 import { TokenUsageRing } from '@/components/TokenUsageRing';
 import { getTokenUsageRatio, recordTokenUsage } from '@/lib/tokenUsage';
+import { prepareBrainRotation } from '@/lib/modelRotation';
 import { getEngineStatus, setEngineModel, engineGenerateCancel } from '@/lib/arkEngine';
 import { honestNoLiveChatReply, probeLiveCapacity } from '@/lib/arkCapacity';
 import { appendScaffoldHonesty } from '@/lib/codeBuildHonesty';
@@ -1270,13 +1269,6 @@ export function ProjectWorkspace() {
       return buildDoneSummary(buildLabel, opts);
     };
     setTokenRatio(recordTokenUsage(pid, content));
-    if (getTokenUsageRatio(pid) >= preloadStartRatio()) {
-      void installNextWhenCurrentRanOut({
-        kind: 'coding',
-        reason: 'context',
-        currentModelId: threadBrainRef.current?.modelId,
-      }).catch(() => undefined);
-    }
     const revisingId = reviseUserMsgId;
     setReviseUserMsgId(null);
     setEditingUserId(null);
@@ -1675,8 +1667,11 @@ export function ProjectWorkspace() {
           const priorForHistory = revisingId
             ? messages.filter(m => m.id !== revisingId).concat(userMsg)
             : [...messages, userMsg];
+          const keepContinuity = Boolean(
+            threadBrainRef.current?.pendingModelId || threadBrainRef.current?.freshBudget,
+          );
           const historyBase = prefs.rememberContext
-            ? buildRouterHistory(priorForHistory, content)
+            ? buildRouterHistory(priorForHistory, content, undefined, { keepContinuity })
             : buildRouterHistory([], content);
           const findings = scanProjectFindings(fileContentsRef.current, rawContent);
           const inspectPaths = pickFilesForInspect(fileContentsRef.current, rawContent);
@@ -1718,6 +1713,20 @@ export function ProjectWorkspace() {
               ? { ...turn, content: codingMessage }
               : turn,
           );
+
+          const rotation = await prepareBrainRotation({
+            scopeId: pid,
+            kind: 'coding',
+            history,
+            currentModelId: threadBrainRef.current?.modelId,
+            brain: activeModel.source === 'auto' ? threadBrainRef.current : null,
+          });
+          if (rotation.brain) {
+            threadBrainRef.current = rotation.brain;
+            setThreadBrain(rotation.brain);
+          }
+          setTokenRatio(rotation.pressure);
+          const routeHistory = rotation.history;
 
           const paintFiles = (edits: ReturnType<typeof parseFileEdits>, focusLast = true) => {
             if (!canEdit) return;
@@ -1782,9 +1791,9 @@ export function ProjectWorkspace() {
 
           hardTimer = window.setTimeout(() => {
             finishWait('Code generation timed out');
-          }, inspectOnly || patchOnlyNamed ? 120_000 : CODE_ROUTE_TIMEOUT_MS);
+          }, inspectOnly || patchOnlyNamed ? 250_000 : CODE_ROUTE_TIMEOUT_MS);
 
-          const sticky = activeModel.source === 'auto' ? threadBrainRef.current : null;
+          const sticky = activeModel.source === 'auto' ? (rotation.brain || threadBrainRef.current) : null;
           streamDraftRef.current = '';
 
           const routed = await Promise.race([
@@ -1802,7 +1811,7 @@ export function ProjectWorkspace() {
               stickyModelId: sticky?.modelId,
               stickyModelName: sticky?.modelName,
               stickyPinnedSource: sticky?.pinnedSource,
-            history,
+            history: routeHistory,
               onAttemptReset: () => {
                 hopAfterLocalStall = false;
                 streamDraftRef.current = '';
@@ -1812,7 +1821,7 @@ export function ProjectWorkspace() {
                 if (hardTimer) window.clearTimeout(hardTimer);
                 hardTimer = window.setTimeout(() => {
                   finishWait('Code generation timed out');
-                }, inspectOnly || patchOnlyNamed ? 120_000 : CODE_ROUTE_TIMEOUT_MS);
+                }, inspectOnly || patchOnlyNamed ? 250_000 : CODE_ROUTE_TIMEOUT_MS);
               },
               onChunk: (piece) => {
                 if (aborted) return;

@@ -9,9 +9,7 @@ import { isCloudProviderEnabled } from '@/lib/cloudSources';
 import { honestNoLiveChatReply, probeLiveCapacity, type LiveCapacity } from '@/lib/arkCapacity';
 import {
   BACKUP_DOWNLOAD_EVENT,
-  installNextWhenCurrentRanOut,
 } from '@/lib/arkHuntBootstrap';
-import { preloadStartRatio } from '@/lib/speedTest';
 import {
   chatThreadKey,
   mediaMessageMarkdown,
@@ -55,6 +53,7 @@ import { ArkErrorInline } from '@/components/ArkErrorInline';
 import { classifyErrorMessage } from '@/lib/errors';
 import { activityKeyForChatMode, notifyWorkDone } from '@/lib/activityIndicators';
 import { getTokenUsageRatio, recordTokenUsage } from '@/lib/tokenUsage';
+import { prepareBrainRotation } from '@/lib/modelRotation';
 import {
   buildRouterHistory,
   looksLikePromptEcho,
@@ -1173,15 +1172,6 @@ export function AIChat() {
     activeGenChatIdRef.current = activeChatId;
     setTokenRatio(recordTokenUsage(activeChatId, content));
     const pinnedModel = activeModelRef.current;
-    const usage = getTokenUsageRatio(activeChatId);
-    if (usage >= preloadStartRatio()) {
-      const runOutKind = mode === 'image' ? 'image' : mode === 'video' ? 'video' : mode === 'code' ? 'coding' : 'chat';
-      void installNextWhenCurrentRanOut({
-        kind: runOutKind,
-        reason: 'context',
-        currentModelId: threadBrainRef.current?.modelId || pinnedModel.id,
-      }).catch(() => undefined);
-    }
 
     const userMsg: ChatMessage = {
       id: crypto.randomUUID(),
@@ -1230,6 +1220,28 @@ export function AIChat() {
     });
     const previousAssistant = [...priorForHistory].reverse().find(m => m.role === 'assistant')?.content || '';
     messagesRef.current = [...normalized, userMsg, assistantMsg];
+
+    const histPrefs = getLocalPrefs();
+    const keepContinuity = Boolean(
+      threadBrainRef.current?.pendingModelId || threadBrainRef.current?.freshBudget,
+    );
+    const seedHistory = histPrefs.rememberContext
+      ? buildRouterHistory(priorForHistory, content, undefined, { keepContinuity })
+      : buildRouterHistory([], content);
+    const rotation = await prepareBrainRotation({
+      scopeId: activeChatId,
+      kind: brainKindForChatMode(mode),
+      history: seedHistory,
+      currentModelId: threadBrainRef.current?.modelId || pinnedModel.id,
+      brain: pinnedModel.source === 'auto' ? threadBrainRef.current : null,
+    });
+    if (rotation.brain) {
+      threadBrainRef.current = rotation.brain;
+      setThreadBrain(rotation.brain);
+    }
+    setTokenRatio(rotation.pressure);
+    const rotatedHistory = rotation.history;
+    const stickyBrain = pinnedModel.source === 'auto' ? rotation.brain : null;
 
     // Messages first — then navigate — so Explore ideas never replaces the thread.
     setMessages(() => {
@@ -1437,9 +1449,9 @@ export function AIChat() {
           const vision = extractVisionImages(content);
           const prefs = getLocalPrefs();
           const history = prefs.rememberContext
-            ? buildRouterHistory(priorForHistory, inspectMessage, vision)
+            ? (rotatedHistory.length ? rotatedHistory : buildRouterHistory(priorForHistory, inspectMessage, vision))
             : buildRouterHistory([], inspectMessage, vision);
-        const sticky = pinnedModel.source === 'auto' ? threadBrainRef.current : null;
+        const sticky = stickyBrain;
         const routed = await arkRoute({
           message: inspectMessage,
           kind: 'chat',
@@ -1493,7 +1505,7 @@ export function AIChat() {
           }, 2200);
 
           const rewritten = rewriteImagePrompt(content);
-          const sticky = pinnedModel.source === 'auto' ? threadBrainRef.current : null;
+          const sticky = stickyBrain;
           let routed;
           try {
             routed = await arkRoute({
@@ -1588,7 +1600,7 @@ export function AIChat() {
           }, 2200);
 
           const rewritten = rewriteVideoPrompt(content);
-          const sticky = pinnedModel.source === 'auto' ? threadBrainRef.current : null;
+          const sticky = stickyBrain;
           let routed;
           try {
             routed = await arkRoute({
@@ -1674,9 +1686,9 @@ export function AIChat() {
           const prefs = getLocalPrefs();
           const vision = extractVisionImages(content);
           const history = prefs.rememberContext
-            ? buildRouterHistory(priorForHistory, content, vision)
+            ? (rotatedHistory.length ? rotatedHistory : buildRouterHistory(priorForHistory, content, vision))
             : buildRouterHistory([], content, vision);
-          const sticky = pinnedModel.source === 'auto' ? threadBrainRef.current : null;
+          const sticky = stickyBrain;
           const routePromise = arkRoute({
             message: content,
             kind: mode === 'code' ? 'coding' : 'chat',
@@ -1712,7 +1724,7 @@ export function AIChat() {
             }
               : undefined,
           });
-          const timeoutMs = 120_000;
+          const timeoutMs = 250_000;
           const routed = await Promise.race([
             routePromise.then(r => ({ reply: r.reply, full: r as Awaited<typeof routePromise> })),
             earlyDone.then(r => ({ reply: r.reply, full: null })),

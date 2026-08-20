@@ -16,6 +16,11 @@ export type ThreadBrain = {
   modelName: string;
   pinnedSource: ThreadBrainPinnedSource;
   tier?: RouterTier;
+  /** Next GGUF to use on the following turn once it is ready. */
+  pendingModelId?: string;
+  pendingModelName?: string;
+  /** After a hot-swap, grow the token budget from zero instead of the full archive. */
+  freshBudget?: boolean;
 };
 
 export function brainKindForChatMode(mode: ChatMode): ThreadBrainKind {
@@ -111,6 +116,13 @@ export function threadBrainFromResult(
     modelName: result.modelName,
     pinnedSource: tierToPinnedSource(result.tier),
     tier: result.tier,
+    pendingModelId: result.modelId && result.modelId === prev?.pendingModelId
+      ? undefined
+      : prev?.pendingModelId,
+    pendingModelName: result.modelId && result.modelId === prev?.pendingModelId
+      ? undefined
+      : prev?.pendingModelName,
+    freshBudget: prev?.freshBudget,
   };
 }
 

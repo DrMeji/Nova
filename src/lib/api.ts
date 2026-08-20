@@ -226,6 +226,18 @@ export function getRecommendedChatModel(hw: HardwareInfo): { name: string; size:
   return { name: 'Qwen2.5 1.5B Instruct', size: '1.0 GB', id: 'qwen25-15b' };
 }
 
+/** Optional second download during setup when RAM can hold a coder. */
+export function getRecommendedCoderModel(hw: HardwareInfo): { name: string; size: string; id: string } | null {
+  const ramGb = parseRamGb(hw);
+  if (ramGb >= 16) {
+    return { name: 'Qwen2.5-Coder 7B Instruct', size: '4.7 GB', id: 'qwen25-coder-7b' };
+  }
+  if (ramGb >= 10) {
+    return { name: 'Qwen2.5-Coder 7B Instruct', size: '4.7 GB', id: 'qwen25-coder-7b' };
+  }
+  return null;
+}
+
 /** Free-key providers that work well as first hops for this PC (always useful; heavier local needs RAM). */
 export function suggestedKeysForHardware(hw: HardwareInfo): { id: string; name: string; why: string }[] {
   const tier = getHardwareClass(hw);

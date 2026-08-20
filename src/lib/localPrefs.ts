@@ -91,7 +91,7 @@ const DEFAULT_PREFS: LocalPrefs = {
   streamResponses: true,
   rememberContext: true,
   ggufTemperature: 0.55,
-  ggufNPredict: 1536,
+  ggufNPredict: 4096,
   huntInternetModels: true,
   autoInstallHuntModels: true,
   shareUsageStats: false,
@@ -114,7 +114,11 @@ export function getLocalPrefs(): LocalPrefs {
   try {
     const raw = localStorage.getItem(PREFS_KEY);
     if (!raw) return { ...DEFAULT_PREFS };
-    return { ...DEFAULT_PREFS, ...JSON.parse(raw) as Partial<LocalPrefs> };
+    const merged = { ...DEFAULT_PREFS, ...JSON.parse(raw) as Partial<LocalPrefs> };
+    if (typeof merged.ggufNPredict === 'number' && merged.ggufNPredict < 4096) {
+      merged.ggufNPredict = 4096;
+    }
+    return merged;
   } catch {
     return { ...DEFAULT_PREFS };
   }

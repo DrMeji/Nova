@@ -12,14 +12,27 @@ import {
   type EngineDownloadJob,
 } from '@/lib/engineDownloads';
 import { ArkErrorInline } from '@/components/ArkErrorInline';
+import { ROTATION_NOTE_EVENT } from '@/lib/modelRotation';
 
 export function JobsStrip() {
   const [jobs, setJobs] = useState<EngineDownloadJob[]>(() => getEngineDownloadJobs());
   const [updateJob, setUpdateJob] = useState<{ percent: number; message: string } | null>(null);
+  const [rotationNote, setRotationNote] = useState<string | null>(null);
 
   useEffect(() => subscribeEngineDownloads(() => {
     setJobs(getEngineDownloadJobs());
   }), []);
+
+  useEffect(() => {
+    const onNote = (ev: Event) => {
+      const message = (ev as CustomEvent<{ message?: string }>).detail?.message;
+      if (!message) return;
+      setRotationNote(message);
+      window.setTimeout(() => setRotationNote(prev => (prev === message ? null : prev)), 12_000);
+    };
+    window.addEventListener(ROTATION_NOTE_EVENT, onNote);
+    return () => window.removeEventListener(ROTATION_NOTE_EVENT, onNote);
+  }, []);
 
   useEffect(() => {
     const unsub = window.arkDesktop?.onUpdateProgress?.((payload) => {
@@ -41,7 +54,7 @@ export function JobsStrip() {
   }, []);
 
   const active = jobs.filter(j => j.progress < 100 || j.error || j.canceling);
-  if (active.length === 0 && !updateJob) return null;
+  if (active.length === 0 && !updateJob && !rotationNote) return null;
 
   return (
     <div className="shrink-0 border-t border-surface-border bg-ark-navy-950/95 px-3 py-2 space-y-1.5">
@@ -56,7 +69,12 @@ export function JobsStrip() {
             ) : (
               <>
                 <p className="text-content-secondary truncate">
-                  {job.canceling ? 'Canceling…' : 'Downloading'} {job.name || job.id}
+                  {job.canceling
+                    ? 'Canceling…'
+                    : /next brain/i.test(job.name)
+                      ? 'Preparing next brain'
+                      : 'Downloading'}{' '}
+                  {job.name.replace(/^Next brain · /i, '') || job.id}
                   {!job.canceling ? ` · ${Math.round(job.progress)}%` : ''}
                 </p>
                 {!job.canceling && job.progress < 100 ? (
@@ -89,6 +107,9 @@ export function JobsStrip() {
           ) : null}
         </div>
       ))}
+      {rotationNote ? (
+        <p className="text-xs text-content-tertiary truncate">{rotationNote}</p>
+      ) : null}
       {updateJob ? (
         <div className="flex items-start gap-2 text-xs">
           <Loader2 className="w-3.5 h-3.5 text-sky-400 animate-spin shrink-0 mt-0.5" />

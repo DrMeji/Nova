@@ -127,6 +127,12 @@ export async function ensureEngineRuntime() {
   throw new Error('Runtime install needs the desktop app');
 }
 
+function ggufNPredictForKind(kind?: 'image' | 'video' | 'chat' | 'coding') {
+  const prefs = getLocalPrefs();
+  const min = kind === 'coding' ? 8192 : 4096;
+  return Math.max(Number(prefs.ggufNPredict) || 0, min);
+}
+
 export async function engineGenerate(
   message: string,
   modelId?: string,
@@ -135,7 +141,7 @@ export async function engineGenerate(
   const prefs = getLocalPrefs();
   const sampling = {
     temperature: prefs.ggufTemperature,
-    nPredict: kind === 'coding' ? Math.max(prefs.ggufNPredict, 2048) : prefs.ggufNPredict,
+    nPredict: ggufNPredictForKind(kind),
   };
   if (window.arkDesktop?.engineGenerate) {
     return window.arkDesktop.engineGenerate(message, modelId, kind, sampling);
@@ -165,7 +171,7 @@ export async function engineGenerateStream(
   const prefs = getLocalPrefs();
   const sampling = {
     temperature: prefs.ggufTemperature,
-    nPredict: kind === 'coding' ? Math.max(prefs.ggufNPredict, 2048) : prefs.ggufNPredict,
+    nPredict: ggufNPredictForKind(kind),
   };
   if (window.arkDesktop?.engineGenerateStream) {
     const stop = window.arkDesktop.onEngineChunk?.((payload) => {

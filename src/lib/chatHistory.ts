@@ -11,8 +11,8 @@ export type RouterChatTurn = {
   images?: { mime: string; data: string }[];
 };
 
-const MAX_TURNS = 16;
-const MAX_CHARS = 12_000;
+const MAX_TURNS = 48;
+const MAX_CHARS = 24_000;
 const MAX_TURN_CHARS = 2_400;
 
 const BASE_SYSTEM =
@@ -162,6 +162,7 @@ export function buildRouterHistory(
   prior: LooseMessage[],
   latestUserMessage: string,
   images?: { mime: string; data: string }[],
+  opts?: { keepContinuity?: boolean },
 ): RouterChatTurn[] {
   const turns: RouterChatTurn[] = [];
   for (const m of prior) {
@@ -202,7 +203,8 @@ export function buildRouterHistory(
   }
 
   // New task (e.g. weather → “build an app”): drop prior turns so GGUF cannot regurgitate them.
-  if (latest && isTopicShift(window, latest)) {
+  // Keep the thread when a brain rotation is pending/applied — the user should not re-brief.
+  if (!opts?.keepContinuity && latest && isTopicShift(window, latest)) {
     return [{ role: 'user', content: latest.slice(0, MAX_TURN_CHARS), images: vision }];
   }
 
@@ -227,6 +229,45 @@ function wantsChatCode(latest: string) {
   return BUILD_HINT.test(latest) && !TEACH_HINT.test(latest);
 }
 
+export function flattenHistoryText(history: RouterChatTurn[]): string {
+  return history
+    .map(t => `${t.role === 'user' ? 'User' : 'ARK'}: ${String(t.content || '').trim()}`)
+    .filter(Boolean)
+    .join('\n');
+}
+
+/**
+ * If the thread is over the GGUF prompt budget, fold oldest turns into one
+ * memory blob and keep recent turns verbatim. Never wipe the thread.
+ */
+export function compressHistoryIfNeeded(
+  history: RouterChatTurn[],
+  maxChars = 16_000,
+): RouterChatTurn[] {
+  const text = flattenHistoryText(history);
+  if (!history.length || text.length <= maxChars) return history;
+  const keep = Math.min(8, history.length);
+  if (history.length <= keep) {
+    return history.map(t => ({
+      ...t,
+      content: t.content.length > 1800 ? `${t.content.slice(0, 400)}\n…\n${t.content.slice(-1200)}` : t.content,
+    }));
+  }
+  const old = history.slice(0, -keep);
+  const recent = history.slice(-keep);
+  const blob = old
+    .map(t => `${t.role === 'user' ? 'User' : 'ARK'}: ${t.content.replace(/\s+/g, ' ').slice(0, 280)}`)
+    .join('\n')
+    .slice(0, 3500);
+  return [
+    {
+      role: 'user',
+      content: `Earlier in this chat (keep using this memory):\n${blob}`,
+    },
+    ...recent,
+  ];
+}
+
 /** Pack history into one prompt for engines that only take a single string (GGUF / Core / Ollama generate). */
 export function packHistoryPrompt(history: RouterChatTurn[], latestFallback?: string): string {
   const latest = latestUserMessage(history, latestFallback || '').trim();
@@ -234,18 +275,25 @@ export function packHistoryPrompt(history: RouterChatTurn[], latestFallback?: st
 
   // Keep identity in the ChatML system turn (arkGguf wrapChatPrompt). Stuffing it into
   // the user text makes Qwen parrot “Never continue a previous sentence…” in the bubble.
-  if (history.length <= 1 || !history.some(t => t.role === 'assistant') || isTopicShift(history, latest)) {
+  const keepContinuity = history.some(t => /Earlier in this chat/i.test(t.content))
+    || history.filter(t => t.role === 'user').length >= 3;
+  if (
+    history.length <= 1
+    || !history.some(t => t.role === 'assistant')
+    || (!keepContinuity && isTopicShift(history, latest))
+  ) {
     return wantsChatCode(latest) ? `${CHAT_CODE_OUTPUT}\n\n${latest}` : latest;
   }
 
-  const priorUsers = history
+  const packedHistory = compressHistoryIfNeeded(history);
+  const priorUsers = packedHistory
     .filter(t => t.role === 'user' && t.content.trim() && t.content.trim() !== latest)
-    .slice(-3)
-    .map(t => `- ${t.content.replace(/\s+/g, ' ').slice(0, 160)}`);
-  const lastAssistant = [...history].reverse().find(t => t.role === 'assistant')?.content
+    .slice(-8)
+    .map(t => `- ${t.content.replace(/\s+/g, ' ').slice(0, 400)}`);
+  const lastAssistant = [...packedHistory].reverse().find(t => t.role === 'assistant')?.content
     ?.replace(/\s+/g, ' ')
     .trim()
-    .slice(-900);
+    .slice(-2000);
 
   if (wantsChatCode(latest)) {
     return [

@@ -5,6 +5,10 @@
  * Native:   /health /v1/* @ 8787
  * Compat:   Ollama-shaped /api/* and OpenAI-shaped /v1/chat/completions
  *           so apps that currently speak Ollama can point at ARK instead.
+ *
+ * Capacity rotation (speed-aware preload + pending swap) lives in the
+ * renderer (`src/lib/modelRotation.ts`). This API generates on the active
+ * Engine GGUF and does not hot-swap mid-request.
  */
 
 const http = require('http');

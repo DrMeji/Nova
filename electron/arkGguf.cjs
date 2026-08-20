@@ -12,7 +12,7 @@ const { app } = require('electron');
 const arkFetch = require('./arkFetch.cjs');
 const arkPaths = require('./arkPaths.cjs');
 
-/** Pinned llama.cpp release — CPU builds for zero-key local chat. */
+/** Pinned llama.cpp release — CUDA when NVIDIA is present, else CPU. */
 const LLAMA_TAG = 'b9992';
 
 function modelsDir() {
@@ -118,7 +118,7 @@ function listGgufFiles() {
     }));
 }
 
-function llamaReleaseUrl() {
+function llamaCpuUrl() {
   const tag = LLAMA_TAG;
   if (process.platform === 'win32') {
     const arch = process.arch === 'arm64' ? 'arm64' : 'x64';
@@ -129,6 +129,69 @@ function llamaReleaseUrl() {
     return `https://github.com/ggml-org/llama.cpp/releases/download/${tag}/llama-${tag}-bin-${arch}.tar.gz`;
   }
   return `https://github.com/ggml-org/llama.cpp/releases/download/${tag}/llama-${tag}-bin-ubuntu-x64.tar.gz`;
+}
+
+function llamaCudaCandidateUrls() {
+  if (process.platform !== 'win32' || process.arch === 'arm64') return [];
+  const tag = LLAMA_TAG;
+  return [
+    `https://github.com/ggml-org/llama.cpp/releases/download/${tag}/llama-${tag}-bin-win-cuda-12.4-x64.zip`,
+    `https://github.com/ggml-org/llama.cpp/releases/download/${tag}/llama-${tag}-bin-win-cuda-13.3-x64.zip`,
+  ];
+}
+
+function llamaCudaRuntimeUrl(cudaVer) {
+  const tag = LLAMA_TAG;
+  return `https://github.com/ggml-org/llama.cpp/releases/download/${tag}/cudart-llama-bin-win-cuda-${cudaVer}-x64.zip`;
+}
+
+async function mergeCudaRuntimeDlls(cudaVer, onProgress) {
+  if (process.platform !== 'win32' || !cudaVer) return;
+  const url = llamaCudaRuntimeUrl(cudaVer);
+  const archivePath = path.join(binDir(), path.basename(new URL(url).pathname));
+  const extractDir = path.join(binDir(), `_extract_cudart_${cudaVer}`);
+  try {
+    await arkFetch.downloadToFile(url, archivePath, (pct) => {
+      if (onProgress) onProgress(Math.min(97, 90 + Math.round(pct * 0.07)));
+    });
+    if (fs.existsSync(extractDir)) fs.rmSync(extractDir, { recursive: true, force: true });
+    await extractArchive(archivePath, extractDir);
+    const stack = [extractDir];
+    while (stack.length) {
+      const dir = stack.pop();
+      let entries = [];
+      try {
+        entries = fs.readdirSync(dir, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+      for (const e of entries) {
+        const full = path.join(dir, e.name);
+        if (e.isDirectory()) stack.push(full);
+        else if (/\.dll$/i.test(e.name)) {
+          fs.copyFileSync(full, path.join(binDir(), e.name));
+        }
+      }
+    }
+  } catch {
+    /* CUDA toolkit on the machine can still satisfy the DLLs */
+  }
+  try { if (fs.existsSync(archivePath)) fs.unlinkSync(archivePath); } catch { /* ignore */ }
+  try { if (fs.existsSync(extractDir)) fs.rmSync(extractDir, { recursive: true, force: true }); } catch { /* ignore */ }
+}
+
+async function llamaDownloadUrls() {
+  const cpu = llamaCpuUrl();
+  try {
+    const arkSystem = require('./arkSystem.cjs');
+    const info = await arkSystem.probeSystemInfo();
+    if (info && info.acceleration === 'CUDA') {
+      return [...llamaCudaCandidateUrls(), cpu];
+    }
+  } catch {
+    /* CPU build is always valid */
+  }
+  return [cpu];
 }
 
 function findFileRecursive(root, names) {
@@ -174,32 +237,114 @@ function extractArchive(archivePath, destDir) {
 
 /**
  * Download + install llama-cli into ark-engine/bin if missing.
+ * NVIDIA PCs prefer CUDA on first install, and retry CUDA once if only a CPU binary exists.
  * @param {(pct: number) => void} [onProgress]
  */
-async function ensureLlamaBinary(onProgress) {
+function llamaLooksCuda() {
+  if (process.platform !== 'win32') return false;
+  return ['ggml-cuda.dll', 'cublas64_12.dll', 'cublas64_13.dll'].some(n =>
+    fs.existsSync(path.join(binDir(), n)),
+  );
+}
+
+function flavorPath() {
+  return path.join(binDir(), 'runtime-flavor.txt');
+}
+
+function cudaAttemptPath() {
+  return path.join(binDir(), `cuda-attempt-${LLAMA_TAG}.txt`);
+}
+
+function readRuntimeFlavor() {
+  try {
+    if (fs.existsSync(flavorPath())) return String(fs.readFileSync(flavorPath(), 'utf8')).trim();
+  } catch {
+    /* ignore */
+  }
+  if (llamaLooksCuda()) return 'cuda';
+  return findLlamaBinary() ? 'cpu' : null;
+}
+
+function writeRuntimeFlavor(kind) {
+  try {
+    fs.writeFileSync(flavorPath(), kind);
+  } catch {
+    /* ignore */
+  }
+}
+
+async function nvidiaWantsCuda() {
+  if (process.platform !== 'win32' || process.arch === 'arm64') return false;
+  try {
+    const arkSystem = require('./arkSystem.cjs');
+    const info = await arkSystem.probeSystemInfo();
+    return Boolean(info && info.acceleration === 'CUDA');
+  } catch {
+    return false;
+  }
+}
+
+async function ensureLlamaBinary(onProgress, forceCudaUpgrade) {
   const existing = findLlamaBinary();
-  if (existing) {
+  const flavor = readRuntimeFlavor();
+  const wantCuda = await nvidiaWantsCuda();
+
+  if (existing && (flavor === 'cuda' || llamaLooksCuda()) && !forceCudaUpgrade) {
+    writeRuntimeFlavor('cuda');
     findLlamaServer();
     return existing;
   }
 
+  if (existing && !forceCudaUpgrade && !wantCuda) {
+    findLlamaServer();
+    return existing;
+  }
+
+  if (existing && wantCuda && !forceCudaUpgrade) {
+    if (!fs.existsSync(cudaAttemptPath())) {
+      try { fs.writeFileSync(cudaAttemptPath(), '1'); } catch { /* ignore */ }
+      void ensureLlamaBinary(onProgress, true).catch(() => undefined);
+    }
+    findLlamaServer();
+    return existing;
+  }
+
+  if (forceCudaUpgrade) {
+    try { stopServer(); } catch { /* ignore */ }
+  }
+
   ensureDirs();
-  const url = llamaReleaseUrl();
-  const archiveName = path.basename(new URL(url).pathname);
-  const archivePath = path.join(binDir(), archiveName);
+  const urls = await llamaDownloadUrls();
   const extractDir = path.join(binDir(), `_extract_${LLAMA_TAG}`);
+  let archivePath = '';
+  let downloaded = false;
+  let lastErr = new Error(`LLAMA release ${LLAMA_TAG} not found`);
 
   if (onProgress) onProgress(2);
-  try {
-    await arkFetch.downloadToFile(url, archivePath, (pct) => {
-      if (onProgress) onProgress(Math.min(85, Math.round(pct * 0.85)));
-    });
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+  for (const url of urls) {
+    const archiveName = path.basename(new URL(url).pathname);
+    archivePath = path.join(binDir(), archiveName);
+    try {
+      await arkFetch.downloadToFile(url, archivePath, (pct) => {
+        if (onProgress) onProgress(Math.min(85, Math.round(pct * 0.85)));
+      });
+      downloaded = true;
+      break;
+    } catch (err) {
+      lastErr = err instanceof Error ? err : new Error(String(err));
+      try { if (fs.existsSync(archivePath)) fs.unlinkSync(archivePath); } catch { /* ignore */ }
+    }
+  }
+  if (!downloaded) {
+    if (existing) {
+      findLlamaServer();
+      return existing;
+    }
+    const msg = lastErr.message || String(lastErr);
     if (/404|\(404\)/.test(msg)) {
       throw new Error(`LLAMA release ${LLAMA_TAG} not found — check network or update LLAMA_TAG in arkGguf.cjs`);
     }
-    throw err;
+    throw lastErr;
   }
 
   try {
@@ -249,6 +394,12 @@ async function ensureLlamaBinary(onProgress) {
     /* ignore */
   }
 
+  const cudaVer = path.basename(archivePath).match(/cuda-(\d+\.\d+)/i);
+  if (cudaVer) {
+    if (onProgress) onProgress(90);
+    await mergeCudaRuntimeDlls(cudaVer[1], onProgress);
+  }
+
   try {
     fs.unlinkSync(archivePath);
   } catch {
@@ -258,10 +409,11 @@ async function ensureLlamaBinary(onProgress) {
   if (onProgress) onProgress(100);
   const bin = findLlamaBinary();
   if (!bin) throw new Error('llama-cli install finished but binary not found');
+  writeRuntimeFlavor(cudaVer ? 'cuda' : 'cpu');
   return bin;
 }
 
-function runGguf(modelId, prompt, timeoutMs = 90000) {
+function runGguf(modelId, prompt, timeoutMs = 240000) {
   return runGgufStream(modelId, prompt, null, timeoutMs);
 }
 
@@ -402,7 +554,7 @@ async function warmServer(modelId) {
   }
 }
 
-async function runGgufServerStream(modelId, prompt, onChunk, timeoutMs, nPredict = 1536, temperature = 0.55) {
+async function runGgufServerStream(modelId, prompt, onChunk, timeoutMs, nPredict = 4096, temperature = 0.55) {
   const promptStr = wrapChatPrompt(modelId, prompt);
   const started = Date.now();
   cancelRequested = false;
@@ -690,7 +842,7 @@ function writeGgufDebug(payload) {
  * Stream llama-cli stdout as it arrives.
  * onChunk(textDelta) may be called many times; final resolve still returns full reply.
  */
-function runGgufStream(modelId, prompt, onChunk, timeoutMs = 120000, nPredict = 1536, temperature = 0.55) {
+function runGgufStream(modelId, prompt, onChunk, timeoutMs = 240000, nPredict = 4096, temperature = 0.55) {
   if (generateBusy || activeChild) {
     const err = new Error('Generation already running — stop the current reply or wait, then try again');
     err.code = 'RATE_LIMITED';
@@ -714,7 +866,7 @@ function runGgufStream(modelId, prompt, onChunk, timeoutMs = 120000, nPredict = 
   })();
 }
 
-function runGgufCliStream(modelId, prompt, onChunk, timeoutMs = 120000, nPredict = 1536, temperature = 0.55) {
+function runGgufCliStream(modelId, prompt, onChunk, timeoutMs = 240000, nPredict = 4096, temperature = 0.55) {
   return new Promise((resolve, reject) => {
     const gguf = findGgufForModel(modelId);
     const bin = findLlamaBinary();
@@ -863,4 +1015,5 @@ module.exports = {
   binDir,
   LLAMA_TAG,
   stripLlamaCliNoise,
+  GGUF_CTX,
 };

@@ -1,6 +1,13 @@
-/** Approximate token budget for the UI ring (failover still handled by the router). */
+/** Approximate token budget for the UI ring — driven by real thread pressure. */
 
-const BUDGET = 28_000;
+/** Matches electron/arkGguf.cjs GGUF_CTX. */
+export const GGUF_CTX = 8192;
+/** Leave room for the next reply (chat nPredict is 4096). */
+export const REPLY_RESERVE = 4096;
+export const USABLE_TOKENS = GGUF_CTX - REPLY_RESERVE;
+/** Fast-link band only. Rotation threshold is `preloadStartRatio(nextModel)` from saved MBps. */
+export const ROTATION_PRESSURE = 0.9;
+
 const KEY = 'ark:token-usage';
 
 type UsageMap = Record<string, number>;
@@ -34,17 +41,24 @@ export function estimateTokens(text: string) {
 export function getTokenUsageRatio(scopeId: string): number {
   if (!scopeId) return 0;
   const used = readMap()[scopeId] || 0;
-  return Math.max(0, Math.min(1, used / BUDGET));
+  return Math.max(0, Math.min(1, used / USABLE_TOKENS));
 }
 
 export function recordTokenUsage(scopeId: string, text: string) {
   if (!scopeId) return getTokenUsageRatio(scopeId);
   const map = readMap();
-  const next = (map[scopeId] || 0) + estimateTokens(text);
-  // Soft wrap when budget fills — new “segment” after failover feels like a fresh ring.
-  map[scopeId] = next >= BUDGET ? next % BUDGET : next;
+  map[scopeId] = (map[scopeId] || 0) + estimateTokens(text);
   writeMap(map);
-  return Math.max(0, Math.min(1, map[scopeId] / BUDGET));
+  return getTokenUsageRatio(scopeId);
+}
+
+/** Replace accumulated usage with a measurement of the full thread. */
+export function syncTokenUsage(scopeId: string, tokens: number) {
+  if (!scopeId) return 0;
+  const map = readMap();
+  map[scopeId] = Math.max(0, tokens);
+  writeMap(map);
+  return getTokenUsageRatio(scopeId);
 }
 
 export function resetTokenUsage(scopeId: string) {

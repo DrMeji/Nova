@@ -372,6 +372,12 @@ function startDownloadJob(id, meta) {
         if (downloads[id]) downloads[id].progress = 100;
         delete downloads[id];
         activeModelId = id;
+        try {
+          const ggufId = String(id).startsWith('gguf:') ? String(id).slice(5) : id;
+          void arkGguf.warmServer(ggufId);
+        } catch {
+          /* warmup is best-effort */
+        }
         pumpDownloadQueue();
         return;
       }
@@ -422,6 +428,12 @@ function startDownloadJob(id, meta) {
       if (downloads[id]) downloads[id].progress = 100;
       delete downloads[id];
       activeModelId = id;
+      try {
+        const ggufId = String(id).startsWith('gguf:') ? String(id).slice(5) : id;
+        void arkGguf.warmServer(ggufId);
+      } catch {
+        /* warmup is best-effort */
+      }
     } catch (err) {
       if (downloads[id]) {
         downloads[id].error = err instanceof Error ? err.message : String(err);
@@ -703,10 +715,12 @@ async function generate(message, opts = {}) {
   if (arkGguf.findGgufForModel(ggufId) && arkGguf.findLlamaBinary()) {
     try {
       const onChunk = typeof opts.onChunk === 'function' ? opts.onChunk : null;
-      const timeoutMs = kind === 'coding' ? 300_000 : 90_000;
-      const nPredict = typeof opts.nPredict === 'number'
+      const timeoutMs = kind === 'coding' ? 300_000 : 240_000;
+      const nPredictMin = kind === 'coding' ? 8192 : 4096;
+      const requested = typeof opts.nPredict === 'number' && Number.isFinite(opts.nPredict)
         ? opts.nPredict
-        : (kind === 'coding' ? 8192 : 1536);
+        : nPredictMin;
+      const nPredict = Math.max(requested, nPredictMin);
       const temperature = typeof opts.temperature === 'number' ? opts.temperature : 0.55;
       const gguf = await arkGguf.runGgufStream(ggufId, message, onChunk, timeoutMs, nPredict, temperature);
       let reply = gguf.reply;

@@ -115,6 +115,12 @@ function pickReadyEngineId(models, intent, ramGb) {
   return rankedReadyEngineIds(models, intent, ramGb)[0];
 }
 
+/** Next ready GGUF when the current one is near context capacity. */
+function pickSuccessorReadyId(models, intent, ramGb, currentId) {
+  const ordered = rankedReadyEngineIds(models, intent, ramGb);
+  return ordered.find((id) => id && id !== currentId) || null;
+}
+
 module.exports = {
   CHAT_ENGINE_RANK,
   CODER_ENGINE_RANK,
@@ -123,4 +129,5 @@ module.exports = {
   isWeakChatBrain,
   rankedReadyEngineIds,
   pickReadyEngineId,
+  pickSuccessorReadyId,
 };

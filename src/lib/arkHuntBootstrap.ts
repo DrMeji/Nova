@@ -43,9 +43,12 @@ function markTried(id: string) {
   }
 }
 
-function busyDownloading() {
+function busyDownloadingTextBrain() {
   const downloading = Object.keys(getEngineDownloadMap());
-  return downloading.some(id => isEngineDownloading(id));
+  return downloading.some(id => {
+    if (!isEngineDownloading(id)) return false;
+    return !/image|video|^sd|flux/i.test(id);
+  });
 }
 
 function emitBackup(id: string, name: string, kind: RunOutKind, reason: RunOutReason) {
@@ -68,8 +71,9 @@ async function startCatalogBackup(
   markTried(id);
   await startEngineDownload({
     id,
-    name,
+    name: reason === 'context' ? `Next brain · ${name}` : name,
     source: 'local-ai',
+    forceUnknownDisk: true,
   });
   emitBackup(id, name, kind, reason);
   return { id, name };
@@ -80,13 +84,17 @@ export async function installNextWhenCurrentRanOut(opts?: {
   kind?: RunOutKind;
   reason?: RunOutReason;
   currentModelId?: string;
+  /** Catalog successor for context rotation — do not require hunt toggles. */
+  ignoreHuntPrefs?: boolean;
 }): Promise<{ id: string; name: string } | null> {
   const prefs = getLocalPrefs();
-  if (!prefs.huntInternetModels || !prefs.autoInstallHuntModels) return null;
-  if (busyDownloading()) return null;
-
   const kind = opts?.kind || 'chat';
   const reason = opts?.reason || 'quota';
+  const rotation = opts?.ignoreHuntPrefs || reason === 'context';
+  const allowCatalog = rotation || prefs.autoInstallHuntModels;
+  const allowHunt = prefs.huntInternetModels && prefs.autoInstallHuntModels;
+  if (!allowCatalog && !allowHunt) return null;
+  if (busyDownloadingTextBrain()) return null;
 
   const hw = await getAccurateHardware(true);
   const ramGb = parseRamGb(hw);
@@ -111,7 +119,7 @@ export async function installNextWhenCurrentRanOut(opts?: {
   }
 
   if (kind === 'image' || kind === 'video') return null;
-  if (!prefs.huntInternetModels) return null;
+  if (!allowHunt) return null;
 
   const found = await huntModelsForPc(hw);
   if (!found.length) return null;
@@ -129,6 +137,7 @@ export async function installNextWhenCurrentRanOut(opts?: {
     id: next.id,
     name: next.name,
     source: 'models',
+    forceUnknownDisk: true,
     hunt: {
       url: next.url,
       sizeGb: next.sizeGb,

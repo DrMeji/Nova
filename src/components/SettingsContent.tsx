@@ -883,13 +883,13 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                     />
                   </label>
                   <label className="block text-[11px] text-content-tertiary">
-                    Max tokens {prefs.ggufNPredict ?? 1536}
+                    Max tokens {prefs.ggufNPredict ?? 4096}
                     <input
                       type="range"
-                      min={256}
-                      max={4096}
+                      min={4096}
+                      max={8192}
                       step={128}
-                      value={prefs.ggufNPredict ?? 1536}
+                      value={prefs.ggufNPredict ?? 4096}
                       onChange={e => patchPrefs({ ggufNPredict: Number(e.target.value) })}
                       className="w-full mt-1"
                     />

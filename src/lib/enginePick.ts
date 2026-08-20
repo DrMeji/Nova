@@ -116,6 +116,23 @@ export function pickReadyEngineId(
 
 const IMAGE_BACKUP_RANK = ['sd15-local', 'sdxl-turbo-local', 'flux-schnell-local'] as const;
 
+/** Ready GGUF to hot-swap onto when the current thread is near context capacity. */
+export function pickSuccessorReadyId(
+  models: EngineRow[] | undefined,
+  kind: 'chat' | 'coding' | 'image' | 'video',
+  ramGb = 8,
+  currentId?: string,
+): string | undefined {
+  if (kind === 'image' || kind === 'video') {
+    const ready = new Set(
+      (models || []).filter(m => m.status === 'ready' && m.id).map(m => String(m.id)),
+    );
+    return IMAGE_BACKUP_RANK.find(id => ready.has(id) && id !== currentId);
+  }
+  const intent: ChatIntent = kind === 'coding' ? 'coding' : 'chat';
+  return rankedReadyEngineIds(models, intent, ramGb).find(id => id !== currentId);
+}
+
 /** Next Engine catalog brain to download when the current one is exhausted. */
 export function pickNextBackupId(
   models: EngineRow[] | undefined,

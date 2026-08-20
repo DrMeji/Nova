@@ -94,11 +94,16 @@ export function saveSpeedSample(sample: SpeedSample, plan?: PreloadPlan) {
   }
 }
 
-/** Session usage 0–1 when a backup download should start. Fast links wait; slow links start early. */
+/**
+ * Session usage 0–1 when the next GGUF should start downloading.
+ * Uses saved speed in **MBps (megabytes/s)**, not megabits. 100 Mbps ≈ 12.5 MBps.
+ * No sample → middle-band default (`computePreloadPlan(8)`). Fast links ~90–95%; slow links much earlier.
+ * Pass `nextModel.sizeGb` so a 14B on a slow link starts earlier than a 1.5B.
+ */
 export function preloadStartRatio(nextModel?: { name: string; sizeGb: number }): number {
   const saved = loadSavedSpeed();
-  if (!saved) return 0.8;
-  return computePreloadPlan(saved.MBps, nextModel).startAtPercent / 100;
+  const MBps = saved && saved.MBps > 0 ? saved.MBps : 8;
+  return computePreloadPlan(MBps, nextModel).startAtPercent / 100;
 }
 
 /**
