@@ -291,6 +291,18 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.101',
+    channel: 'stable' as const,
+    date: 'Aug 21, 2026',
+    title: 'Fresh install always shows setup after sign-in',
+    notes: [
+      'Reinstalling from GitHub no longer skips Hardware → Models → Connect after sign-in/sign-up',
+      'Setup completion is tied to an install id; leftover AppData cannot fake a finished first-run',
+      'In-place upgrades still keep your setup so you are not forced through onboarding again',
+      'Update via Settings → Updates → Check → Download when this build is published',
+    ],
+  },
+  {
     version: '0.1.100',
     channel: 'stable' as const,
     date: 'Aug 21, 2026',

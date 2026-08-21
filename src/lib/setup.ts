@@ -19,12 +19,14 @@ export function needsFirstRunSetup() {
 
 export function markSetupCompleted() {
   localStorage.setItem(SETUP_KEY, '1');
+  gatePromise = null;
   void window.arkDesktop?.setupSet?.(true)?.catch?.(() => {});
   window.dispatchEvent(new Event('ark:setup-changed'));
 }
 
 export function clearSetupCompleted() {
   localStorage.removeItem(SETUP_KEY);
+  gatePromise = null;
   void window.arkDesktop?.setupSet?.(false)?.catch?.(() => {});
   window.dispatchEvent(new Event('ark:setup-changed'));
 }
@@ -32,7 +34,8 @@ export function clearSetupCompleted() {
 /**
  * Packaged / desktop installs: sync setup from Electron userData so a real
  * first install always runs Hardware → Models → Connect (sign-in and sign-up).
- * Cleared when the app is uninstalled (deleteAppDataOnUninstall).
+ * Cleared on uninstall, and invalidated when ark-install-id changes (reinstall
+ * that left leftover AppData). Upgrades keep the same install id + setup flag.
  */
 export async function ensureFirstRunGate(): Promise<void> {
   if (!gatePromise) {
