@@ -15,18 +15,31 @@ const MAX_TURNS = 48;
 const MAX_CHARS = 24_000;
 const MAX_TURN_CHARS = 2_400;
 
+/** Core product bar: respond to the ask, not a substitute topic. */
+export const ANSWER_THE_ASK =
+  'Answer the user’s latest question or request directly — chat fact, image, code, edit, ideas, or folder focus. '
+  + 'Do not substitute a different topic, dump unrelated files, repeat an earlier overview, or invent a “better” answer they did not ask for. '
+  + 'If you cannot answer, say so in one clear line.';
+
 export const BASE_SYSTEM =
   'You are ARK, a normal helpful AI chat assistant. Talk like ChatGPT — not a design studio or image tool unless they ask to make something. '
   + 'You are not the video game Ark: Survival Evolved. Never “correct” the user’s spelling of ARK. '
+  + `${ANSWER_THE_ASK} `
+  + 'When they ask for ideas or recommendations (app, website, coffee shop, etc.): give concrete, accurate pieces that product should have, then say where to start first and offer to begin. '
+  + 'When they ask what a project is or what they are building: explain the product goal in plain language from the evidence, then suggest a practical next step — do not paste a generic file inventory. '
+  + 'If this chat is about building an app/website and they ask where to start, what first, or recommendations: answer about THAT product only — never switch to celebrities, movies, weather, or unrelated trivia. '
   + 'Never echo the user’s greeting. If they only say hi/hello/hey, reply: “Hello! How can I assist you today?” '
   + 'Be accurate and complete. Cover the main facts they need, then one short follow-up: “Want more on any of that?” '
-  + 'People: who they are, companies they founded/own/run (list the well-known ones), and a couple of notable facts. '
-  + 'Movies/shows: Title (year) — one line why it is good. Then typical places to watch (Netflix, Disney+, Prime Video, Max, YouTube) and IMDb for listings. Say availability varies by country. '
+  + 'Only when they ask about a person: who they are, companies they founded/own/run (list the well-known ones), and a couple of notable facts. '
+  + 'Only when they ask about movies/shows: Title (year) — one line why it is good. Then typical places to watch (Netflix, Disney+, Prime Video, Max, YouTube) and IMDb for listings. Say availability varies by country. '
   + 'Write lists as: 1. Drama: Title (year) — … Watch: Netflix / Prime. Never nest asterisks. Never wrap genre names in **.';
 
 const CONTINUITY =
   'This is a follow-up in the same ARK app chat. '
+  + 'Stay on the same topic as the earlier turns (especially any app, website, or project they described). '
   + 'Answer the latest user message with a brand-new reply. '
+  + `${ANSWER_THE_ASK} `
+  + 'If they ask where to start, what first, or for recommendations: prioritize the product/app from this thread. '
   + 'If they ask to continue, tell more, or go on, finish the previous answer from where it stopped — do not restart the same list from item 1. '
   + 'If they asked a new question, do not repeat an earlier list.';
 
@@ -36,7 +49,7 @@ const CHAT_CODE_OUTPUT =
 const SYSTEM_ECHO_RE =
   /^You are ARK(?:,|\s)[\s\S]*?(?:Do not echo the prompt\.|Never continue a previous sentence[^.\n]*\.|Answer only the latest user message[^.\n]*\.)/i;
 const PROMPT_FRAGMENT_RE =
-  /^(?:You are ARK\b|Answer the latest user request clearly\.?|Do not echo the prompt\.?|Do not correct the spelling of ARK\.?|Answer only the latest user message with a brand-new reply\.?|Never continue a previous sentence, list item, or closing question\.?)$/i;
+  /^(?:You are ARK\b|Answer the latest user request clearly\.?|Answer the user’s latest question[^\n]*\.?|Do not echo the prompt\.?|Do not correct the spelling of ARK\.?|Answer only the latest user message with a brand-new reply\.?|Never continue a previous sentence, list item, or closing question\.?)$/i;
 const INSTRUCTION_LEAD_RES = [
   /^Never continue a previous sentence[^\n]*\.?\s*/i,
   /^The user wants working source code[^\n]*\.?\s*/i,
@@ -63,7 +76,10 @@ const FACT_HINT =
 const STORY_HINT = /\b(story|joke|poem|song|riddle|fairytale)\b/i;
 const GREET_HINT = /^(hi|hello|hey|yo|sup|howdy)\b/i;
 const FOLLOW_UP_HINT =
-  /^(?:(?:can you |could you |please )?(?:tell me more|say more|go on|continue|elaborate)|more|why|how so|and\b|also\b|what about|ok but|please explain)\b/i;
+  /^(?:(?:can you |could you |please )?(?:tell me more|say more|go on|continue|elaborate)|more|why|how so|and\b|also\b|what about|ok but|please explain|okay[,.]?\s*|ok[,.]?\s*)\b/i;
+/** Same-thread product next steps — must keep build context. */
+const THREAD_CONTINUE_HINT =
+  /\b(where (should|do|to) (we|i|you) start|where (do you think )?(we|i) should start|what (should|do) (we|i) (do )?first|what first|next step|i want (some |a )?recommendations?|recommendations?\b|recommend)\b/i;
 
 function significantTokens(text: string): Set<string> {
   return new Set(
@@ -79,7 +95,7 @@ function significantTokens(text: string): Set<string> {
 export function isTopicShift(history: RouterChatTurn[], latestUserMessage: string): boolean {
   const latest = String(latestUserMessage || '').trim();
   if (!latest) return false;
-  if (FOLLOW_UP_HINT.test(latest)) return false;
+  if (FOLLOW_UP_HINT.test(latest) || THREAD_CONTINUE_HINT.test(latest)) return false;
   const priorUsers = history.filter(t => t.role === 'user');
   const earlier = priorUsers.length > 1
     ? priorUsers[priorUsers.length - 2]
@@ -89,7 +105,10 @@ export function isTopicShift(history: RouterChatTurn[], latestUserMessage: strin
   if (!earlier?.content) return false;
   const a = earlier.content.trim();
   const b = latest;
-  if (GREET_HINT.test(a) && !GREET_HINT.test(b) && !FOLLOW_UP_HINT.test(b)) return true;
+  // After a build/app ask, “where should we start” etc. stay on that product.
+  if (BUILD_HINT.test(a) && THREAD_CONTINUE_HINT.test(b)) return false;
+  if (BUILD_HINT.test(a) && /\b(app|website|site|product|project|build)\b/i.test(b)) return false;
+  if (GREET_HINT.test(a) && !GREET_HINT.test(b) && !FOLLOW_UP_HINT.test(b) && !THREAD_CONTINUE_HINT.test(b)) return true;
   if (STORY_HINT.test(b) && !STORY_HINT.test(a)) return true;
   if (STORY_HINT.test(a) && !STORY_HINT.test(b) && !FOLLOW_UP_HINT.test(b)) return true;
   if (BUILD_HINT.test(b) && !BUILD_HINT.test(a) && (FACT_HINT.test(a) || a.length > 12)) return true;
@@ -97,7 +116,9 @@ export function isTopicShift(history: RouterChatTurn[], latestUserMessage: strin
   const ta = significantTokens(a);
   const tb = significantTokens(b);
   if (tb.size < 2 || ta.size < 2) {
-    return a.toLowerCase() !== b.toLowerCase() && !FOLLOW_UP_HINT.test(b);
+    // Short follow-ups after a build thread are continuity, not a new topic.
+    if (BUILD_HINT.test(a) && b.length < 120) return false;
+    return a.toLowerCase() !== b.toLowerCase() && !FOLLOW_UP_HINT.test(b) && !THREAD_CONTINUE_HINT.test(b);
   }
   let overlap = 0;
   for (const t of tb) if (ta.has(t)) overlap += 1;
@@ -105,7 +126,7 @@ export function isTopicShift(history: RouterChatTurn[], latestUserMessage: strin
 }
 
 /** Strip UI / media noise so providers get usable text. */
-export function slimTurnContent(content: string): string {
+export function slimTurnContent(content: string, maxChars = MAX_TURN_CHARS): string {
   const raw = (content || '').trim();
   if (!raw) return '';
   if (raw.startsWith('__generating__:')) return '';
@@ -136,8 +157,8 @@ export function slimTurnContent(content: string): string {
       .join('\n')
       .trim();
   }
-  if (text.length > MAX_TURN_CHARS) {
-    const slice = text.slice(0, MAX_TURN_CHARS);
+  if (text.length > maxChars) {
+    const slice = text.slice(0, maxChars);
     const breakAt = Math.max(
       slice.lastIndexOf('\n'),
       slice.lastIndexOf('. '),
@@ -145,7 +166,7 @@ export function slimTurnContent(content: string): string {
       slice.lastIndexOf('! '),
       slice.lastIndexOf(' '),
     );
-    const cut = breakAt > MAX_TURN_CHARS * 0.45 ? slice.slice(0, breakAt + 1) : slice;
+    const cut = breakAt > maxChars * 0.45 ? slice.slice(0, breakAt + 1) : slice;
     text = `${cut.trimEnd()}…`;
   }
   return text.trim();
@@ -164,29 +185,39 @@ export function buildRouterHistory(
   prior: LooseMessage[],
   latestUserMessage: string,
   images?: { mime: string; data: string }[],
-  opts?: { keepContinuity?: boolean; kind?: 'chat' | 'coding' },
+  opts?: { keepContinuity?: boolean; kind?: 'chat' | 'coding'; maxTurns?: number },
 ): RouterChatTurn[] {
   const turns: RouterChatTurn[] = [];
   const keepContinuity = Boolean(opts?.keepContinuity || opts?.kind === 'coding');
-  const assistantCap = opts?.kind === 'coding' ? 6000 : 720;
-  const maxChars = opts?.kind === 'coding' ? 40_000 : MAX_CHARS;
-  const maxTurns = opts?.kind === 'coding' ? 64 : MAX_TURNS;
+  // Coding: keep prior turns short — do not re-pack old @@@FILE dumps into the context window.
+  const assistantCap = opts?.kind === 'coding' ? 320 : 720;
+  const maxChars = opts?.kind === 'coding' ? 12_000 : MAX_CHARS;
+  const maxTurns = opts?.maxTurns
+    ?? (opts?.kind === 'coding' ? 8 : MAX_TURNS);
+  const latestCap = opts?.kind === 'coding' ? 36_000 : MAX_TURN_CHARS;
   for (const m of prior) {
     const role = m.role === 'assistant' ? 'assistant' : m.role === 'user' ? 'user' : null;
     if (!role) continue;
     let content = slimTurnContent(m.content || '');
     if (!content) continue;
-    // Chat: keep prior assistant turns short so GGUF does not “finish” a truncated line.
-    // Coding: keep a much larger slice so multi-step edits still see prior code.
+    if (opts?.kind === 'coding' && role === 'assistant') {
+      // Drop file dumps; keep a short status line for continuity.
+      content = content
+        .replace(/@@@FILE\b[\s\S]*?(?=\n@@@FILE\b|$)/gi, '')
+        .replace(/```[\s\S]*?```/g, '')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+      if (!content) content = 'Updated project files.';
+    }
     if (role === 'assistant' && content.length > assistantCap) {
       const slice = content.slice(0, assistantCap);
-      const breakAt = Math.max(slice.lastIndexOf('. '), slice.lastIndexOf('\n'), slice.lastIndexOf('```'), slice.lastIndexOf(' '));
+      const breakAt = Math.max(slice.lastIndexOf('. '), slice.lastIndexOf('\n'), slice.lastIndexOf(' '));
       content = `${(breakAt > assistantCap * 0.4 ? slice.slice(0, breakAt + 1) : slice).trimEnd()}…`;
     }
     turns.push({ role, content });
   }
 
-  const latest = slimTurnContent(latestUserMessage) || latestUserMessage.trim();
+  const latest = slimTurnContent(latestUserMessage, latestCap) || latestUserMessage.trim();
   const vision = images?.length ? images : undefined;
   if (latest) {
     const last = turns[turns.length - 1];
@@ -206,13 +237,13 @@ export function buildRouterHistory(
   }
   // Ensure we still end on the latest user turn
   if (window.length === 0 && latest) {
-    window = [{ role: 'user', content: latest.slice(0, MAX_TURN_CHARS), images: vision }];
+    window = [{ role: 'user', content: latest.slice(0, latestCap), images: vision }];
   }
 
   // New task (e.g. weather → “build an app”): drop prior turns so GGUF cannot regurgitate them.
   // Keep the thread when a brain rotation is pending/applied — the user should not re-brief.
   if (!keepContinuity && latest && isTopicShift(window, latest)) {
-    return [{ role: 'user', content: latest.slice(0, MAX_TURN_CHARS), images: vision }];
+    return [{ role: 'user', content: latest.slice(0, latestCap), images: vision }];
   }
 
   return window;
@@ -226,8 +257,8 @@ export function routerSystemPrompt(history: RouterChatTurn[]): string {
     : '';
   const hasPrior = history.some(t => t.role === 'assistant') || history.length > 1;
   if (!hasPrior) return `${BASE_SYSTEM}${visionNote}`;
-  if (FOLLOW_UP_HINT.test(latest.trim())) {
-    return `${BASE_SYSTEM}\n\nThis is a follow-up. Continue the previous answer from where it stopped. Do not restart the same numbered list from 1.${visionNote}`;
+  if (FOLLOW_UP_HINT.test(latest.trim()) || THREAD_CONTINUE_HINT.test(latest.trim())) {
+    return `${BASE_SYSTEM}\n\nThis is a follow-up. Stay on the same app/project from earlier turns. Continue from that context — do not switch to celebrities, movies, or unrelated topics.${visionNote}`;
   }
   return `${BASE_SYSTEM}\n\n${CONTINUITY}${visionNote}`;
 }
@@ -323,7 +354,18 @@ export function packHistoryPrompt(history: RouterChatTurn[], latestFallback?: st
 
 export function latestUserMessage(history: RouterChatTurn[], fallback: string): string {
   for (let i = history.length - 1; i >= 0; i--) {
-    if (history[i].role === 'user') return history[i].content;
+    if (history[i].role === 'user') {
+      const content = history[i].content;
+      // Prefer the full inspect/coding prompt when history was truncated.
+      if (
+        fallback
+        && fallback.length > content.length + 200
+        && /Selected file contents|@@@FILE|File tree/i.test(fallback)
+      ) {
+        return fallback;
+      }
+      return content;
+    }
   }
   return fallback;
 }
@@ -492,6 +534,30 @@ export function looksLikePromptEcho(reply: string): boolean {
   }
   // Weaker fallback: if it starts like the system prompt, and contains typical system phrases.
   if (/^You are ARK(?:,|\s)/i.test(t) && /Do not echo the prompt\./i.test(t)) return true;
+  return false;
+}
+
+/** True when the assistant mostly repeated the user’s ask (e.g. “Updated Okay, on top right…”). */
+export function looksLikeUserAskEcho(reply: string, userMessage: string): boolean {
+  const r = String(reply || '').trim().replace(/\s+/g, ' ');
+  const u = String(userMessage || '').trim().replace(/\s+/g, ' ');
+  if (!r || u.length < 16) return false;
+  const rl = r.toLowerCase();
+  const ul = u.toLowerCase();
+  const snippet = ul.slice(0, Math.min(64, ul.length));
+  if (snippet.length >= 16 && rl.includes(snippet)) {
+    // “Updated {user text}…” or reply that is mostly the ask
+    if (/^updated\b/i.test(r) && r.length < u.length * 2.8) return true;
+    if (r.length < u.length * 1.6) return true;
+  }
+  // High token overlap on short replies
+  const ut = new Set(ul.split(/[^a-z0-9]+/).filter(w => w.length > 3));
+  const rt = rl.split(/[^a-z0-9]+/).filter(w => w.length > 3);
+  if (ut.size >= 4 && rt.length >= 4 && rt.length <= 40) {
+    let hit = 0;
+    for (const w of rt) if (ut.has(w)) hit += 1;
+    if (hit / rt.length >= 0.72 && !/```|@@@FILE/.test(r)) return true;
+  }
   return false;
 }
 

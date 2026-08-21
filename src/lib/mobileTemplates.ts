@@ -1017,6 +1017,34 @@ function cssColor(name: string): string | null {
   return null;
 }
 
+function contrastTextForBg(bg: string): string {
+  const dark = /#0|#1|#2|black|dark/i.test(bg);
+  const light = /#f|#e|white/i.test(bg);
+  if (dark) return '#f5f7fb';
+  if (light) return '#111827';
+  return '#e8eefc';
+}
+
+function patchWebBodyColors(css: string, bg: string, fg: string): string {
+  let next = css;
+  if (/body\s*\{[^}]*background(?:-color)?\s*:/i.test(next)) {
+    next = next.replace(/(body\s*\{[^}]*?)background(?:-color)?\s*:\s*[^;]+/i, `$1background: ${bg}`);
+  } else if (/body\s*\{/i.test(next)) {
+    next = next.replace(/body\s*\{/i, `body {\n  background: ${bg};`);
+  } else {
+    next = `body { background: ${bg}; color: ${fg}; }\n${next}`;
+  }
+  if (/body\s*\{[^}]*\bcolor\s*:/i.test(next)) {
+    next = next.replace(/(body\s*\{[^}]*?)\bcolor\s*:\s*[^;]+/i, `$1color: ${fg}`);
+  } else if (/body\s*\{/i.test(next)) {
+    next = next.replace(/body\s*\{/i, `body {\n  color: ${fg};`);
+  }
+  if (/h1\s*\{[^}]*\bcolor\s*:/i.test(next)) {
+    next = next.replace(/(h1\s*\{[^}]*?)\bcolor\s*:\s*[^;]+/i, `$1color: ${fg}`);
+  }
+  return next;
+}
+
 /** Cheap local patches so “change the background” doesn’t spawn a new app folder. */
 export function simpleVisualPatchEdits(files: Record<string, string>, message: string): ParsedFileEdit[] {
   const out: ParsedFileEdit[] = [];
@@ -1025,7 +1053,9 @@ export function simpleVisualPatchEdits(files: Record<string, string>, message: s
   const viewPath = iosDir ? `${iosDir}/ContentView.swift` : null;
   const colorWord = t.match(/\b(black|white|blue|dark|red|green)\b/i)?.[1];
   const wantsBg = /\bbackground\b/i.test(t) && Boolean(colorWord);
-  const renameTo = t.match(/(?:change|rename|set).{0,48}(?:to|into)\s+["']?([A-Za-z0-9][A-Za-z0-9 .+-]{1,40})/i)?.[1]?.trim();
+  const wantsTextColor = /\b(text|words?|title|heading|hello\s*world)\b.{0,40}\b(white|black|color)\b|\b(white|black)\s+(color|text)\b/i.test(t);
+  const renameTo = t.match(/(?:change|rename|set|into).{0,48}(?:to|into)\s+["']?([A-Za-z0-9][A-Za-z0-9 .+-]{1,40})/i)?.[1]?.trim()
+    || t.match(/(?:saying|say)\s+["']?([A-Za-z0-9][A-Za-z0-9 .+-]{1,40})/i)?.[1]?.trim();
 
   if (wantsBg && colorWord && viewPath && files[viewPath]) {
     const color = swiftColor(colorWord);
@@ -1043,25 +1073,49 @@ export function simpleVisualPatchEdits(files: Record<string, string>, message: s
       }
       out.push({ path: viewPath, content: view });
     }
-    const htmlColor = cssColor(colorWord);
-    if (htmlColor && files['ark-preview.html']) {
+  }
+
+  const htmlColor = colorWord ? cssColor(colorWord) : null;
+  if ((wantsBg || wantsTextColor) && htmlColor) {
+    const fg = wantsTextColor && /\bwhite\b/i.test(t)
+      ? '#ffffff'
+      : wantsTextColor && /\bblack\b/i.test(t) && !wantsBg
+        ? '#111827'
+        : contrastTextForBg(htmlColor);
+    if (files['ark-preview.html']) {
       out.push({
         path: 'ark-preview.html',
         content: files['ark-preview.html']
-          .replace(/background(?:-color)?:\s*#[0-9a-fA-F]{3,8}/gi, `background:${htmlColor}`),
+          .replace(/background(?:-color)?:\s*#[0-9a-fA-F]{3,8}/gi, `background:${htmlColor}`)
+          .replace(/\bcolor\s*:\s*#[0-9a-fA-F]{3,8}/gi, `color:${fg}`),
       });
     }
-    if (htmlColor && files['index.html']) {
-      out.push({
-        path: 'index.html',
-        content: files['index.html'].replace(/background(?:-color)?:\s*[^;]+/gi, `background: ${htmlColor}`),
-      });
+    if (files['index.html']) {
+      const html = files['index.html'].replace(/background(?:-color)?:\s*[^;]+/gi, `background: ${htmlColor}`);
+      out.push({ path: 'index.html', content: html });
+    }
+    const cssPath = Object.keys(files).find(p => /styles?\.css$/i.test(p) || /index\.css$/i.test(p));
+    if (cssPath && files[cssPath]) {
+      out.push({ path: cssPath, content: patchWebBodyColors(files[cssPath], htmlColor, fg) });
     }
   }
 
   if (renameTo && viewPath && files[viewPath] && !classifyMobileDevice(t)) {
     const view = files[viewPath].replace(/Text\("[^"]+"\)/, `Text(${JSON.stringify(renameTo)})`);
     out.push({ path: viewPath, content: view });
+  }
+
+  if (renameTo && !classifyMobileDevice(t)) {
+    const safe = renameTo.replace(/</g, '');
+    for (const path of Object.keys(files)) {
+      if (!/\.html?$/i.test(path)) continue;
+      const html = files[path];
+      if (!/<h1[\s>]/i.test(html)) continue;
+      out.push({
+        path,
+        content: html.replace(/(<h1[^>]*>)([\s\S]*?)(<\/h1>)/i, `$1${safe}$3`),
+      });
+    }
   }
 
   const namedDevice = classifyMobileDevice(t);

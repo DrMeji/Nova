@@ -15,6 +15,8 @@ export type ComposerPlusAction =
 
 type Props = {
   onAction: (action: ComposerPlusAction) => void;
+  /** chat = full attach menu; image = photos only; code = file/folder/photo for workspace */
+  scope?: 'chat' | 'image' | 'code';
   /** @deprecated Image is handled via Add file */
   showImage?: boolean;
   className?: string;
@@ -31,15 +33,26 @@ const ITEMS: {
   { id: 'ask', label: 'Ask', hint: 'Prefix: direct Q&A, no code changes', icon: MessageCircleQuestion },
   { id: 'debug', label: 'Debug', hint: 'Prefix: find and fix the problem', icon: Bug },
   { id: 'multitask', label: 'Tasks', hint: 'Prefix: split work into a numbered list', icon: Layers2 },
-  { id: 'file', label: 'Add file', hint: 'Attach a file to inspect in chat', icon: FilePlus2 },
-  { id: 'image', label: 'Add photo', hint: 'Attach an image for vision models', icon: ImagePlus },
-  { id: 'folder', label: 'Open folder', hint: 'Attach a folder — then pick what to do', icon: FolderOpen },
+  { id: 'file', label: 'Add file', hint: 'Windows File Explorer — pick one or more files', icon: FilePlus2 },
+  { id: 'image', label: 'Add photo', hint: 'Windows File Explorer — pick photo(s)', icon: ImagePlus },
+  { id: 'folder', label: 'Open folder', hint: 'Windows File Explorer — attach a whole folder', icon: FolderOpen },
 ];
 
 const MODE_IDS = new Set<ComposerPlusAction>(['plan', 'ask', 'debug', 'multitask']);
 
+function itemsForScope(scope: 'chat' | 'image' | 'code') {
+  if (scope === 'image') {
+    return ITEMS.filter(m => m.id === 'image');
+  }
+  if (scope === 'code') {
+    return ITEMS.filter(m => m.id === 'file' || m.id === 'image' || m.id === 'folder' || MODE_IDS.has(m.id));
+  }
+  return ITEMS;
+}
+
 export function ComposerPlusMenu({
   onAction,
+  scope = 'chat',
   className = '',
   buttonClassName = '',
 }: Props) {
@@ -47,6 +60,9 @@ export function ComposerPlusMenu({
   const [pos, setPos] = useState<{ left: number; bottom: number } | null>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const visible = itemsForScope(scope);
+  const modes = visible.filter(m => MODE_IDS.has(m.id));
+  const attach = visible.filter(m => !MODE_IDS.has(m.id));
 
   useEffect(() => {
     if (!open) return;
@@ -100,43 +116,53 @@ export function ComposerPlusMenu({
           zIndex: 99999,
         }}
       >
-        <p className="px-2.5 pt-2 pb-1 text-[10px] text-content-tertiary">
-          Message modes add a prefix to your next send
-        </p>
-        <div className="pb-1">
-          {ITEMS.filter(m => MODE_IDS.has(m.id)).map(m => (
-            <button
-              key={m.id}
-              type="button"
-              onClick={() => pick(m.id)}
-              className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left hover:bg-surface-hover transition-colors"
-            >
-              <m.icon className="w-3.5 h-3.5 text-content-tertiary shrink-0" strokeWidth={1.75} />
-              <span className="min-w-0 flex-1">
-                <span className="block text-[13px] text-content-primary leading-tight">{m.label}</span>
-                <span className="block text-[10px] text-content-tertiary truncate leading-tight">{m.hint}</span>
-              </span>
-            </button>
-          ))}
-        </div>
-        <div className="mx-2.5 border-t border-surface-border" />
-        <p className="px-2.5 pt-2 pb-1 text-[10px] text-content-tertiary">Attach or open</p>
-        <div className="pb-1">
-          {ITEMS.filter(m => !MODE_IDS.has(m.id)).map(m => (
-            <button
-              key={m.id}
-              type="button"
-              onClick={() => pick(m.id)}
-              className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left hover:bg-surface-hover transition-colors"
-            >
-              <m.icon className="w-3.5 h-3.5 text-content-tertiary shrink-0" strokeWidth={1.75} />
-              <span className="min-w-0 flex-1">
-                <span className="block text-[13px] text-content-primary leading-tight">{m.label}</span>
-                <span className="block text-[10px] text-content-tertiary truncate leading-tight">{m.hint}</span>
-              </span>
-            </button>
-          ))}
-        </div>
+        {modes.length > 0 && (
+          <>
+            <p className="px-2.5 pt-2 pb-1 text-[10px] text-content-tertiary">
+              Message modes add a prefix to your next send
+            </p>
+            <div className="pb-1">
+              {modes.map(m => (
+                <button
+                  key={m.id}
+                  type="button"
+                  onClick={() => pick(m.id)}
+                  className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left hover:bg-surface-hover transition-colors"
+                >
+                  <m.icon className="w-3.5 h-3.5 text-content-tertiary shrink-0" strokeWidth={1.75} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-[13px] text-content-primary leading-tight">{m.label}</span>
+                    <span className="block text-[10px] text-content-tertiary truncate leading-tight">{m.hint}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+            {attach.length > 0 && <div className="mx-2.5 border-t border-surface-border" />}
+          </>
+        )}
+        {attach.length > 0 && (
+          <>
+            <p className="px-2.5 pt-2 pb-1 text-[10px] text-content-tertiary">
+              {scope === 'image' ? 'Photos only' : 'Attach'}
+            </p>
+            <div className="pb-1">
+              {attach.map(m => (
+                <button
+                  key={m.id}
+                  type="button"
+                  onClick={() => pick(m.id)}
+                  className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left hover:bg-surface-hover transition-colors"
+                >
+                  <m.icon className="w-3.5 h-3.5 text-content-tertiary shrink-0" strokeWidth={1.75} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-[13px] text-content-primary leading-tight">{m.label}</span>
+                    <span className="block text-[10px] text-content-tertiary truncate leading-tight">{m.hint}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </>
+        )}
       </div>,
       document.body,
     )
@@ -149,8 +175,8 @@ export function ComposerPlusMenu({
         type="button"
         onClick={() => setOpen(o => !o)}
         className={buttonClassName || 'w-9 h-9 rounded-full flex items-center justify-center text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors shrink-0'}
-        title="Add mode or file"
-        aria-label="Add mode or file"
+        title={scope === 'image' ? 'Add photo' : 'Add mode or file'}
+        aria-label={scope === 'image' ? 'Add photo' : 'Add mode or file'}
         aria-expanded={open}
       >
         <Plus className="w-4 h-4" />

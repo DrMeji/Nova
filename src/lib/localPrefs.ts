@@ -291,6 +291,19 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.100',
+    channel: 'stable' as const,
+    date: 'Aug 21, 2026',
+    title: 'Code workspace that actually edits the live page',
+    notes: [
+      'Canonical web paths: stop writing path/to junk; Done only when Start/preview files change',
+      'Fast local patches for background, text color, search bar, theme toggle, RGB title, rename',
+      'Honest Code chat replies (no “from your latest notes” echo); GitHub push chip only when asked',
+      'Usage ring aligned with the composer; Chat sticky folder / studio answer engine polish',
+      'Update via Settings → Updates → Check → Download when this build is published',
+    ],
+  },
+  {
     version: '0.1.98',
     channel: 'stable' as const,
     date: 'Aug 20, 2026',

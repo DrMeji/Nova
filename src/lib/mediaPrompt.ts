@@ -35,6 +35,7 @@ function hostSafeImagePrompt(raw: string): string {
 }
 
 export function rewriteImagePrompt(raw: string): string {
+  // Keep the user’s subject; only add fidelity hints — never swap in a different scene.
   const prompt = hostSafeImagePrompt(String(raw || '').trim());
   if (!prompt) return 'a clean, well-composed image';
 

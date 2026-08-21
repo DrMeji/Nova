@@ -7,9 +7,9 @@ echo  ========================================
 echo   ARK - building your latest changes
 echo  ========================================
 echo.
-echo  No menu. Compiles the repo as it is now,
-echo  then opens ARK so you can try it.
-echo  Push to GitHub only when you like it.
+echo  Day-to-day testing: this bat builds THIS folder
+echo  and opens Electron. Do not use the installed
+echo  Start Menu ARK — that is the old GitHub build.
 echo.
 echo  Signing: set CSC_LINK and CSC_KEY_PASSWORD
 echo  before Open-ARK-Packaged.bat for SmartScreen.
@@ -46,9 +46,20 @@ if errorlevel 1 (
   exit /b 1
 )
 
+REM Launch Electron binary directly — never "npx electron" on Windows.
+REM npx resolves to npx.ps1 which can open in Notepad instead of running ARK.
+set "ELECTRON_EXE=%~dp0node_modules\electron\dist\electron.exe"
+if not exist "%ELECTRON_EXE%" (
+  echo ERROR: Electron not found at:
+  echo   %ELECTRON_EXE%
+  echo Run npm install, then try again.
+  pause
+  exit /b 1
+)
+
 echo.
 echo  Build OK - launching ARK with your current code.
 echo  Close the app window when you are done testing.
 echo.
-call npx --yes electron .
-exit /b %ERRORLEVEL%
+start "" "%ELECTRON_EXE%" "%~dp0."
+exit /b 0

@@ -1210,7 +1210,8 @@ export function LocalAI() {
                     }
                     void (async () => {
                       for (const f of files) {
-                        const p = (f as File & { path?: string }).path;
+                        const p = window.arkDesktop?.getPathForFile?.(f)
+                          || (f as File & { path?: string }).path;
                         if (!p || !window.arkDesktop?.engineImportGguf) {
                           setStatusNote('Drag-drop import needs the desktop app');
                           return;

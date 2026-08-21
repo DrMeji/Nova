@@ -33,6 +33,7 @@ export function looksLikeWebsiteBuild(message: string): boolean {
   if (/website in the browser using HTML/i.test(t) || /HTML\/CSS\/JS in the browser/i.test(t)) {
     return true;
   }
+  if (/\bhello\s*world\b|\bblank\s+page\b/i.test(t)) return true;
   if (classifyMobileTarget(t)) return false;
   return /\b(website|web\s?app|webapp|landing\s?page|in the browser|for the web|browser (app|page)|html\/css)\b/i.test(t)
     || (/\bhtml\b/i.test(t) && BUILD_VERB_RE.test(t));

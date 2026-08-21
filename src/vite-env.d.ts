@@ -13,6 +13,8 @@ declare global {
         chrome: string;
         node: string;
       };
+      /** Absolute path for a dropped/selected File (Electron 32+). */
+      getPathForFile?: (file: File) => string;
       openExternal?: (url: string) => Promise<boolean>;
       openPath?: (targetPath: string) => Promise<boolean>;
       windowControls?: boolean;
@@ -331,8 +333,64 @@ declare global {
         root?: string;
         files?: Record<string, string>;
         copied?: number;
+        listed?: number;
+        imagePaths?: string[];
         name?: string;
+        path?: string;
         skipped?: { env?: number; large?: number; binary?: number; limit?: number };
+        error?: string;
+      }>;
+      /** Native file picker — shows files inside folders (unlike Open folder). */
+      pickFiles?: (payload?: { imagesOnly?: boolean }) => Promise<{
+        ok: boolean;
+        canceled?: boolean;
+        paths?: string[];
+        error?: string;
+      }>;
+      /** Pick a folder to look inside (then listDir shows files/photos). */
+      pickBrowseFolder?: () => Promise<{ ok: boolean; canceled?: boolean; path?: string; error?: string }>;
+      listDir?: (dirPath: string) => Promise<{
+        ok: boolean;
+        path?: string;
+        name?: string;
+        parent?: string | null;
+        items?: Array<{
+          name: string;
+          path: string;
+          kind: 'dir' | 'file';
+          isImage?: boolean;
+          size?: number;
+        }>;
+        error?: string;
+      }>;
+      browseRoots?: () => Promise<{
+        ok: boolean;
+        roots?: Array<{ id: string; label: string; path: string }>;
+        error?: string;
+      }>;
+      pathStat?: (targetPath: string) => Promise<{
+        ok: boolean;
+        path?: string;
+        name?: string;
+        isDirectory?: boolean;
+        isFile?: boolean;
+        size?: number;
+        error?: string;
+      }>;
+      readTextFile?: (payload: string | { path: string; maxBytes?: number }) => Promise<{
+        ok: boolean;
+        path?: string;
+        name?: string;
+        text?: string;
+        binary?: boolean;
+        size?: number;
+        error?: string;
+      }>;
+      readDataUrl?: (payload: string | { path: string; maxBytes?: number }) => Promise<{
+        ok: boolean;
+        path?: string;
+        name?: string;
+        dataUrl?: string;
         error?: string;
       }>;
       projectSearch?: (payload: {

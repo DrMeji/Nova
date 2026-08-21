@@ -124,7 +124,6 @@ export async function brainGenerateStream(
   onChunk: (text: string) => void,
   kind?: 'image' | 'video' | 'chat' | 'coding',
 ) {
-  let streamFailed = false;
   try {
     if (window.arkDesktop?.engineGenerateStream) {
       const { engineGenerateStream } = await import('@/lib/arkEngine');
@@ -137,11 +136,17 @@ export async function brainGenerateStream(
         streamed: true,
       };
     }
-  } catch {
-    streamFailed = true;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err || '');
+    // Never restart a full generate after Stop / cancel — that re-locks the engine
+    // and leaves Chat/Code stuck on Thinking / Reviewing.
+    if (/stopp?ed|cancel|abort|Generation already running/i.test(msg)) {
+      throw err instanceof Error ? err : new Error(msg || 'Generation stopped');
+    }
+    // Stream IPC missing or failed — fall through to non-stream once.
   }
   const fallback = await brainGenerate(message, modelId, kind);
-  return { ...fallback, streamed: false, streamFallback: streamFailed };
+  return { ...fallback, streamed: false, streamFallback: true };
 }
 
 export async function brainChat(

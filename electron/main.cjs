@@ -897,7 +897,8 @@ ipcMain.handle('ark:project-import-folder', async (_e, payload) => {
     let sourceDir = payload?.sourceDir;
     if (!sourceDir) {
       const result = await dialog.showOpenDialog(win || undefined, {
-        title: 'Open folder in ARK Code',
+        title: 'Choose a folder',
+        message: 'Select the folder. Everything inside stays in that folder attach until you send.',
         properties: ['openDirectory'],
       });
       if (result.canceled || !result.filePaths?.[0]) {
@@ -907,7 +908,112 @@ ipcMain.handle('ark:project-import-folder', async (_e, payload) => {
     }
     return arkProjects.importFolder(payload?.projectId, payload?.projectName, sourceDir);
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : 'import failed' };
+    const msg = err instanceof Error ? err.message : 'import failed';
+    if (/ENOTDIR/i.test(msg)) {
+      return { ok: false, error: 'Could not open that folder. Try the real folder (not a broken shortcut).' };
+    }
+    return { ok: false, error: msg };
+  }
+});
+
+/** Pick one or more files (shows files inside folders — unlike Open folder). */
+ipcMain.handle('ark:pick-files', async (_e, payload) => {
+  try {
+    const win = BrowserWindow.getFocusedWindow() || mainWindow;
+    const imagesOnly = Boolean(payload?.imagesOnly);
+    let defaultPath;
+    try {
+      defaultPath = imagesOnly ? app.getPath('pictures') : app.getPath('documents');
+    } catch {
+      defaultPath = undefined;
+    }
+    const result = await dialog.showOpenDialog(win || undefined, {
+      title: imagesOnly ? 'Choose photo(s)' : 'Choose file(s)',
+      defaultPath,
+      properties: ['openFile', 'multiSelections'],
+      filters: imagesOnly
+        ? [
+          { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg'] },
+          { name: 'All files', extensions: ['*'] },
+        ]
+        : [
+          { name: 'All files', extensions: ['*'] },
+          { name: 'Code', extensions: ['ts', 'tsx', 'js', 'jsx', 'py', 'go', 'rs', 'java', 'kt', 'swift', 'cs', 'cpp', 'c', 'h', 'rb', 'php', 'vue', 'css', 'html', 'json', 'md', 'txt', 'sql', 'yml', 'yaml', 'toml'] },
+          { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg'] },
+        ],
+    });
+    if (result.canceled || !result.filePaths?.length) {
+      return { ok: false, canceled: true, paths: [] };
+    }
+    const paths = result.filePaths.filter((p) => {
+      if (!imagesOnly) return true;
+      return /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(p);
+    });
+    return { ok: true, paths };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'pick failed', paths: [] };
+  }
+});
+
+ipcMain.handle('ark:path-stat', async (_e, targetPath) => {
+  try {
+    return arkProjects.pathStat(targetPath);
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'stat failed' };
+  }
+});
+
+ipcMain.handle('ark:list-dir', async (_e, dirPath) => {
+  try {
+    return arkProjects.listDir(dirPath);
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'list failed', items: [] };
+  }
+});
+
+ipcMain.handle('ark:browse-roots', async () => {
+  try {
+    return arkProjects.browseRoots();
+  } catch (err) {
+    return { ok: false, roots: [], error: err instanceof Error ? err.message : 'roots failed' };
+  }
+});
+
+/** Jump to a folder, then the UI lists files inside (including images). */
+ipcMain.handle('ark:pick-browse-folder', async () => {
+  try {
+    const win = BrowserWindow.getFocusedWindow() || mainWindow;
+    const result = await dialog.showOpenDialog(win || undefined, {
+      title: 'Jump to a folder',
+      message: 'Pick the folder to look inside. ARK will then show the files and photos in that folder.',
+      properties: ['openDirectory'],
+    });
+    if (result.canceled || !result.filePaths?.[0]) {
+      return { ok: false, canceled: true };
+    }
+    return { ok: true, path: result.filePaths[0] };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'pick failed' };
+  }
+});
+
+ipcMain.handle('ark:read-text-file', async (_e, payload) => {
+  try {
+    const target = typeof payload === 'string' ? payload : payload?.path;
+    const maxBytes = typeof payload === 'object' && payload?.maxBytes ? payload.maxBytes : 2_000_000;
+    return arkProjects.readTextFile(target, maxBytes);
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'read failed' };
+  }
+});
+
+ipcMain.handle('ark:read-data-url', async (_e, payload) => {
+  try {
+    const target = typeof payload === 'string' ? payload : payload?.path;
+    const maxBytes = typeof payload === 'object' && payload?.maxBytes ? payload.maxBytes : 6_000_000;
+    return arkProjects.readDataUrl(target, maxBytes);
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'read failed' };
   }
 });
 

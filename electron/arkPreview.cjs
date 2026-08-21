@@ -284,6 +284,7 @@ async function openPreviewWindow(payload) {
     autoHideMenuBar: true,
     resizable: kind !== 'device',
     maximizable: kind !== 'device',
+    minimizable: true,
     useContentSize: true,
     webPreferences: {
       sandbox: true,
@@ -294,6 +295,12 @@ async function openPreviewWindow(payload) {
   previewWindows.set(id, win);
   win.on('closed', () => {
     if (previewWindows.get(id) === win) previewWindows.delete(id);
+  });
+  win.webContents.on('did-finish-load', () => {
+    win.webContents.insertCSS(`
+      html { scrollbar-width: none; }
+      ::-webkit-scrollbar { width: 0 !important; height: 0 !important; }
+    `).catch(() => {});
   });
   if (kind === 'device' && device) {
     enableDeviceZoom(win);

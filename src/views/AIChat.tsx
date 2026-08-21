@@ -25,6 +25,7 @@ import { looksLikeCodeAsk, looksLikeImageAsk } from '@/lib/chatIntent';
 import {
   formatChatInspectReply,
   formatRepoCatalog,
+  handoffPrompt,
   isGithubPullAsk,
   listAccountRepos,
   looksLikeBuildStart,
@@ -33,9 +34,21 @@ import {
   wantsGithubCatalog,
 } from '@/lib/chatStudio';
 import {
-  buildInspectPrompt,
-  pickFilesForInspect,
-  scanProjectFindings,
+  answerStudio,
+  type StudioIntent,
+} from '@/lib/studioAnswerEngine';
+import {
+  attachKey,
+  encodeChatAttaches,
+  parseChatAttach,
+  parseChatAttaches,
+  type ChatAttachMeta,
+} from '@/lib/chatAttach';
+import { allowWindowFileDrop, dropHasFiles, resolveChatDrop } from '@/lib/chatDrop';
+import { AttachCard } from '@/components/AttachCard';
+import {
+  describeProjectFromFiles,
+  type InspectFinding,
 } from '@/lib/projectInspect';
 import { saveProjectThread, persistProjectThreadToDisk } from '@/lib/projectThread';
 import { GitHubRepoPicker } from '@/components/GitHubRepoPicker';
@@ -97,9 +110,6 @@ import {
   Puzzle, Briefcase, Github,
 } from 'lucide-react';
 import { engineGenerateCancel, getEngineStatus, setEngineModel } from '@/lib/arkEngine';
-
-const CODE_FILE_RE =
-  /\.(tsx?|jsx?|mjs|cjs|py|go|rs|java|kt|swift|cs|cpp|cxx|cc|c|h|hpp|rb|php|vue|svelte|css|scss|less|html|json|toml|ya?ml|md|sql|sh|bash|zsh|ps1|dockerfile|makefile)$/i;
 
 const COMPOSER_MODE_PREFIX: Record<'plan' | 'ask' | 'debug' | 'multitask', string> = {
   plan: 'Plan this out step by step, then we can build:\n\n',
@@ -391,6 +401,124 @@ function isMediaOnlyContent(content: string) {
   return !stripped && /!\[[^\]]*\]\([^)]+\)/.test(content);
 }
 
+function chatStudioKey(chatId: string) {
+  return `ark:chat-studio:${chatId}`;
+}
+
+function saveChatStudio(
+  chatId: string,
+  files: Record<string, string>,
+  projectId: string | null,
+  name?: string,
+) {
+  if (!chatId || !Object.keys(files).length) return;
+  try {
+    localStorage.setItem(chatStudioKey(chatId), JSON.stringify({
+      files,
+      projectId,
+      name: name || null,
+      savedAt: Date.now(),
+    }));
+  } catch {
+    /* ignore */
+  }
+}
+
+function loadChatStudio(chatId: string): {
+  files: Record<string, string>;
+  projectId: string | null;
+  name?: string;
+} | null {
+  if (!chatId) return null;
+  try {
+    const raw = localStorage.getItem(chatStudioKey(chatId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as {
+      files?: Record<string, string>;
+      projectId?: string | null;
+      name?: string;
+    };
+    if (!parsed?.files || !Object.keys(parsed.files).length) return null;
+    return {
+      files: parsed.files,
+      projectId: parsed.projectId || null,
+      name: parsed.name,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function projectIdFromThread(messages: { content?: string }[]): string | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const metas = parseChatAttaches(String(messages[i]?.content || ''));
+    for (const m of metas) {
+      if (m.projectId) return m.projectId;
+    }
+  }
+  return null;
+}
+
+function folderNameFromThread(messages: { content?: string }[]): string | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const metas = parseChatAttaches(String(messages[i]?.content || ''));
+    for (const m of metas) {
+      if (m.name) return m.name;
+    }
+  }
+  return null;
+}
+
+async function resolveStudioFiles(opts: {
+  chatId: string;
+  memoryFiles: Record<string, string>;
+  memoryProjectId: string | null;
+  messages: { content?: string }[];
+}): Promise<{ files: Record<string, string>; projectId: string | null; name?: string }> {
+  if (Object.keys(opts.memoryFiles).length) {
+    return {
+      files: opts.memoryFiles,
+      projectId: opts.memoryProjectId,
+      name: folderNameFromThread(opts.messages) || undefined,
+    };
+  }
+  const fromChat = loadChatStudio(opts.chatId);
+  if (fromChat) return fromChat;
+
+  const pid = opts.memoryProjectId || projectIdFromThread(opts.messages);
+  if (pid) {
+    try {
+      const raw = localStorage.getItem(`ark:chat-studio-files:${pid}`);
+      if (raw) {
+        const parsed = JSON.parse(raw) as { files?: Record<string, string>; name?: string };
+        if (parsed?.files && Object.keys(parsed.files).length) {
+          return { files: parsed.files, projectId: pid, name: parsed.name };
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+    if (window.arkDesktop?.projectRead) {
+      try {
+        const read = await Promise.race([
+          window.arkDesktop.projectRead(pid),
+          new Promise<null>((resolve) => { window.setTimeout(() => resolve(null), 3_000); }),
+        ]);
+        if (read?.ok && read.files && Object.keys(read.files).length) {
+          return {
+            files: read.files as Record<string, string>,
+            projectId: pid,
+            name: folderNameFromThread(opts.messages) || undefined,
+          };
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+  return { files: {}, projectId: pid, name: folderNameFromThread(opts.messages) || undefined };
+}
+
 function persistModeThread(
   mode: ChatMode,
   messages: ChatMessage[],
@@ -495,8 +623,15 @@ export function AIChat() {
   const [pendingImages, setPendingImages] = useState<{ id: string; name: string; dataUrl: string }[]>([]);
   const [chatStudioFiles, setChatStudioFiles] = useState<Record<string, string>>({});
   const [chatStudioProjectId, setChatStudioProjectId] = useState<string | null>(null);
+  /** Folder/file ready to send with the next message (Cursor-style pending chip). */
+  const [pendingAttaches, setPendingAttaches] = useState<ChatAttachMeta[]>([]);
+  const [dragOverChat, setDragOverChat] = useState(false);
+  const [dropHint, setDropHint] = useState<string | null>(null);
+  const [attachUploading, setAttachUploading] = useState<string | null>(null);
   const [githubPickerOpen, setGithubPickerOpen] = useState(false);
   const [inspectOfferId, setInspectOfferId] = useState<string | null>(null);
+  /** actions = what next; handoff = after inspect */
+  const [studioOfferKind, setStudioOfferKind] = useState<'actions' | 'handoff' | null>(null);
   const [githubOfferId, setGithubOfferId] = useState<string | null>(null);
   const [composerTall, setComposerTall] = useState(false);
   const [composerMode, setComposerMode] = useState<'plan' | 'ask' | 'debug' | 'multitask' | null>(null);
@@ -510,6 +645,7 @@ export function AIChat() {
   const persistChatIdRef = useRef<string | null>(null);
   /** Always-current route chat id — avoid stale closures when flushing the queue. */
   const routeChatIdRef = useRef<string | undefined>(undefined);
+  const ignoreEnterUntilRef = useRef(0);
   const sendMessageRef = useRef<(content: string) => Promise<void>>(async () => {});
   /** Bumps on every new send/stop so late chunks from an old turn cannot stick Stop/queue. */
   const genSeqRef = useRef(0);
@@ -552,6 +688,8 @@ export function AIChat() {
   const chatStudioFilesRef = useRef<Record<string, string>>({});
   const chatStudioProjectIdRef = useRef<string | null>(null);
   const lastInspectReplyRef = useRef('');
+  const lastStudioIntentRef = useRef<StudioIntent | null>(null);
+  const lastFindingsRef = useRef<InspectFinding[]>([]);
   chatStudioFilesRef.current = chatStudioFiles;
   chatStudioProjectIdRef.current = chatStudioProjectId;
 
@@ -786,7 +924,7 @@ export function AIChat() {
         if (messagesRef.current.length > 0) {
           skipChatLoadIdsRef.current.delete(route.chatId);
           setLoading(false);
-          setGenerating(false);
+          setGenerating(Boolean(generatingRef.current && activeGenChatIdRef.current === route.chatId));
           return;
         }
         skipChatLoadIdsRef.current.delete(route.chatId);
@@ -803,14 +941,42 @@ export function AIChat() {
         messagesRef.current = [];
         setThreadBrain(null);
       }
+      // Don't carry a folder from another chat into this thread — but restore this chat's files.
+      if (activeGenChatIdRef.current !== route.chatId) {
+        const restored = loadChatStudio(route.chatId);
+        if (restored) {
+          setChatStudioFiles(restored.files);
+          setChatStudioProjectId(restored.projectId);
+        } else {
+          setChatStudioFiles({});
+          setChatStudioProjectId(null);
+          lastStudioIntentRef.current = null;
+          lastFindingsRef.current = [];
+        }
+        setPendingAttaches([]);
+      }
       setGenerating(Boolean(generatingRef.current && activeGenChatIdRef.current === route.chatId));
       setLoading(false);
       // Remount / tab return: if this thread is still marked in-flight and the last
       // assistant bubble is still generating, keep Stop + placeholder visible.
+      // Stale inflight (app closed mid-gen) must not lock Thinking forever.
       try {
         const raw = sessionStorage.getItem('ark:inflight-media');
-        const inflight = raw ? JSON.parse(raw) as { chatId?: string; mode?: string } : null;
-        if (inflight?.chatId === route.chatId) {
+        const inflight = raw ? JSON.parse(raw) as { chatId?: string; mode?: string; startedAt?: number } : null;
+        const stale = Boolean(inflight?.startedAt && Date.now() - inflight.startedAt > 180_000);
+        if (stale || (inflight?.chatId && inflight.chatId !== route.chatId)) {
+          sessionStorage.removeItem('ark:inflight-media');
+          setMessages(prev => {
+            const next = prev.map(m => (
+              m.role === 'assistant' && String(m.content || '').startsWith('__generating__:')
+                ? { ...m, content: '(interrupted — send again)' }
+                : m
+            ));
+            messagesRef.current = next;
+            persistModeThread(mode, next, { chatId: route.chatId });
+            return next;
+          });
+        } else if (inflight?.chatId === route.chatId) {
           const last = messagesRef.current[messagesRef.current.length - 1];
           if (last?.role === 'assistant' && String(last.content || '').startsWith('__generating__:')) {
             activeGenChatIdRef.current = route.chatId;
@@ -854,6 +1020,12 @@ export function AIChat() {
     setMessages([]);
     messagesRef.current = [];
     setThreadBrain(null);
+    setChatStudioFiles({});
+    setChatStudioProjectId(null);
+    setPendingAttaches([]);
+    setPendingImages([]);
+    lastStudioIntentRef.current = null;
+    lastFindingsRef.current = [];
     if (!activeGenChatIdRef.current) {
       generatingRef.current = false;
       setGenerating(false);
@@ -1128,7 +1300,9 @@ export function AIChat() {
     setComposerTall(false);
     setChatStudioFiles({});
     setChatStudioProjectId(null);
+    setPendingAttaches([]);
     setInspectOfferId(null);
+    setStudioOfferKind(null);
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
     navigate({ name: 'project', id: project.id });
   };
@@ -1189,76 +1363,236 @@ export function AIChat() {
       }
     }
     if (!next.length) return;
+    // Stay pending on the composer until Send (lands in the thread with the message).
     setPendingImages(prev => [...prev, ...next].slice(0, 4));
+  };
+
+  const applyDropResult = (result: Awaited<ReturnType<typeof resolveChatDrop>>) => {
+    // Only explicit image drops go in the preview strip — never folder contents.
+    if (result.images.length && !result.attaches.some(a => a.kind === 'folder')) {
+      for (const img of result.images) rememberThumb(img.id, img.dataUrl);
+      setPendingImages(prev => {
+        const names = new Set(prev.map(p => p.name.toLowerCase()));
+        const merged = [...prev];
+        for (const img of result.images) {
+          if (names.has(img.name.toLowerCase())) continue;
+          names.add(img.name.toLowerCase());
+          merged.push(img);
+        }
+        return merged.slice(0, 4);
+      });
+    }
+    const fileCount = Object.keys(result.files).length;
+    if (fileCount) {
+      setChatStudioFiles(prev => ({ ...prev, ...result.files }));
+    }
+    if (result.projectId) setChatStudioProjectId(result.projectId);
+    const nextAttaches = (result.attaches?.length
+      ? result.attaches
+      : (result.attach ? [result.attach] : [])
+    )
+      .filter(a => a.kind !== 'image')
+      .map(a => ({
+        ...a,
+        id: a.id || a.projectId || `att-${crypto.randomUUID().slice(0, 8)}`,
+      }));
+    if (nextAttaches.length) {
+      setPendingAttaches(prev => {
+        const seen = new Set(prev.map(attachKey));
+        const merged = [...prev];
+        for (const a of nextAttaches) {
+          const k = attachKey(a);
+          if (seen.has(k)) continue;
+          seen.add(k);
+          merged.push(a);
+        }
+        return merged.slice(0, 12);
+      });
+      setDropHint(null);
+    } else if (result.images.length && !result.attaches.some(a => a.kind === 'folder')) {
+      setDropHint(null);
+    } else if (result.note) {
+      setDropHint(result.note);
+    } else if (!fileCount && !result.images.length) {
+      setDropHint('Nothing readable in that drop — try another folder or file.');
+    }
+    ignoreEnterUntilRef.current = Date.now() + 600;
+  };
+
+  const removePendingAttach = (meta: ChatAttachMeta) => {
+    setPendingAttaches(prev => prev.filter(a => attachKey(a) !== attachKey(meta)));
+    if (meta.kind === 'folder') {
+      const prefix = `${meta.name}/`;
+      setChatStudioFiles(prev => {
+        const next = { ...prev };
+        for (const k of Object.keys(next)) {
+          if (k.startsWith(prefix)) delete next[k];
+        }
+        return next;
+      });
+      // Folder X must not leave stray image chips behind.
+      setPendingImages([]);
+    } else if (meta.kind === 'file' || meta.kind === 'files') {
+      setChatStudioFiles(prev => {
+        const next = { ...prev };
+        if (meta.name && next[meta.name] != null) delete next[meta.name];
+        return next;
+      });
+    }
   };
 
   const onPickCodeFiles = async (list: FileList | null) => {
     if (!list?.length) return;
-    const files = [...list];
-    void addPendingImages(files);
-    const codeFiles = files.filter(f => CODE_FILE_RE.test(f.name) || /javascript|typescript|json|text\/plain|xml/.test(f.type));
-    if (!codeFiles.length) return;
-    const seedFiles: Record<string, string> = { ...chatStudioFilesRef.current };
-    for (const f of codeFiles.slice(0, 40)) {
-      try {
-        const rel = (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name;
-        seedFiles[rel.replace(/\\/g, '/')] = await f.text();
-      } catch {
-        /* skip unreadable */
-      }
-    }
-    setChatStudioFiles(seedFiles);
-    const count = Object.keys(seedFiles).length;
-    if (count > 0) {
-      const noteId = crypto.randomUUID();
-      setMessages(prev => [...prev, {
-        id: noteId,
-        user_id: user?.id ?? 'guest',
-        project_id: null,
-        role: 'assistant',
-        content: [
-          `Attached ${count} file${count === 1 ? '' : 's'}.`,
-          '',
-          'What should I do with them? Pick a prompt below, or type your own.',
-        ].join('\n'),
-        provider_used: 'ARK',
-        created_at: new Date().toISOString(),
-      }]);
-      setInspectOfferId(noteId);
+    setAttachUploading('Reading files…');
+    try {
+      const result = await resolveChatDrop(list);
+      applyDropResult(result);
+    } finally {
+      setAttachUploading(null);
     }
   };
 
-  const openFolderInChat = async () => {
+  const dragActiveRef = useRef(false);
+  const setDragActive = (on: boolean) => {
+    if (dragActiveRef.current === on) return;
+    dragActiveRef.current = on;
+    setDragOverChat(on);
+  };
+
+  // Capture-phase only — avoid React+window double handlers that flicker the overlay.
+  useEffect(() => {
+    const onEnter = (e: DragEvent) => {
+      allowWindowFileDrop(e);
+      if (dropHasFiles(e.dataTransfer) || (e.dataTransfer?.types?.length ?? 0) === 0) {
+        setDragActive(true);
+      }
+    };
+    const onOver = (e: DragEvent) => {
+      allowWindowFileDrop(e);
+    };
+    const onLeave = (e: DragEvent) => {
+      if (e.relatedTarget == null) setDragActive(false);
+    };
+    const onDrop = (e: DragEvent) => {
+      allowWindowFileDrop(e);
+      setDragActive(false);
+      const list = e.dataTransfer?.files;
+      if (!list?.length) return;
+      const snapshot = [...list];
+      if (mode === 'image') {
+        const imagesOnly = snapshot.filter(f =>
+          f.type.startsWith('image/') || /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(f.name),
+        );
+        if (!imagesOnly.length) {
+          setDropHint('Image mode only accepts photos (PNG, JPG, WebP, …).');
+          return;
+        }
+        setAttachUploading('Uploading photos…');
+        void (async () => {
+          try {
+            await addPendingImages(imagesOnly);
+            setDropHint(null);
+          } finally {
+            setAttachUploading(null);
+          }
+        })();
+        return;
+      }
+      setAttachUploading('Uploading…');
+      void (async () => {
+        try {
+          const result = await resolveChatDrop(snapshot);
+          applyDropResult(result);
+          requestAnimationFrame(() => textareaRef.current?.focus());
+        } finally {
+          setAttachUploading(null);
+        }
+      })();
+    };
+    window.addEventListener('dragenter', onEnter, true);
+    window.addEventListener('dragover', onOver, true);
+    window.addEventListener('dragleave', onLeave, true);
+    window.addEventListener('drop', onDrop, true);
+    return () => {
+      window.removeEventListener('dragenter', onEnter, true);
+      window.removeEventListener('dragover', onOver, true);
+      window.removeEventListener('dragleave', onLeave, true);
+      window.removeEventListener('drop', onDrop, true);
+    };
+  }, [mode]);
+
+  const openFolderInChat = async (sourceDir?: string) => {
     if (!window.arkDesktop?.projectImportFolder) {
       attachInputRef.current?.click();
       return;
     }
     const pid = `proj-${crypto.randomUUID().slice(0, 8)}`;
-    const res = await window.arkDesktop.projectImportFolder({
-      projectId: pid,
-    });
-    if (!res?.ok || res.canceled) return;
-    const files = res.files || {};
-    const folderName = res.name || 'folder';
-    const count = Object.keys(files).length;
-    setChatStudioFiles(files);
-    setChatStudioProjectId(pid);
-    touchRecentProject(pid, folderName);
-    const noteId = crypto.randomUUID();
-    setMessages(prev => [...prev, {
-      id: noteId,
-      user_id: user?.id ?? 'guest',
-      project_id: null,
-      role: 'assistant',
-      content: [
-        `Loaded **${folderName}** — ${count} file${count === 1 ? '' : 's'} attached.`,
-        '',
-        'What should I do with it? Pick a prompt below, or type your own. Stay in Chat, or open Code when you want to edit.',
-      ].join('\n'),
-      provider_used: 'ARK',
-      created_at: new Date().toISOString(),
-    }]);
-    setInspectOfferId(noteId);
+    setAttachUploading('Uploading folder…');
+    setDropHint(null);
+    try {
+      const res = await window.arkDesktop.projectImportFolder({
+        projectId: pid,
+        ...(sourceDir ? { sourceDir } : {}),
+      });
+      if (res?.canceled) return;
+      if (!res?.ok) {
+        // If they somehow picked a file, attach it as a file instead of scolding them.
+        if ((res as { error?: string })?.error === 'file' && (res as { path?: string })?.path) {
+          const filePath = String((res as { path: string }).path);
+          const base = (res as { name?: string }).name || filePath.split(/[/\\]/).pop() || 'file';
+          if (/\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(base)) {
+            const data = await window.arkDesktop.readDataUrl?.(filePath);
+            if (data?.ok && data.dataUrl) {
+              const id = `attach-${crypto.randomUUID().slice(0, 10)}`;
+              rememberThumb(id, data.dataUrl);
+              setPendingImages(prev => [...prev, { id, name: base, dataUrl: data.dataUrl! }].slice(0, 4));
+              return;
+            }
+          }
+          const read = await window.arkDesktop.readTextFile?.({ path: filePath });
+          const text = read?.ok && read.text != null ? read.text : `[Attached file: ${base}]`;
+          setChatStudioFiles(prev => ({ ...prev, [base]: text }));
+          setPendingAttaches(prev => [...prev, { kind: 'file', name: base, count: 1, id: `file-${pid}` }].slice(0, 12));
+          return;
+        }
+        setDropHint(res?.error || 'Could not open that folder.');
+        return;
+      }
+      const rawFiles = res.files || {};
+      const folderName = res.name || 'folder';
+      const files: Record<string, string> = {};
+      for (const [rel, text] of Object.entries(rawFiles)) {
+        const path = String(rel).replace(/\\/g, '/');
+        files[path.startsWith(`${folderName}/`) ? path : `${folderName}/${path}`] = text;
+      }
+      const count = Object.keys(files).length;
+      if (!count) {
+        setDropHint(`Opened “${folderName}” but it looks empty.`);
+        return;
+      }
+      setChatStudioFiles(prev => ({ ...prev, ...files }));
+      setChatStudioProjectId(pid);
+      setPendingAttaches(prev => [
+        ...prev,
+        { kind: 'folder', name: folderName, count, projectId: pid, id: pid },
+      ].slice(0, 12));
+      setDropHint(null);
+      // Do NOT explode images into separate chips — folder chip owns everything.
+      try {
+        localStorage.setItem(`ark:chat-studio-files:${pid}`, JSON.stringify({
+          name: folderName,
+          files,
+        }));
+      } catch {
+        /* ignore */
+      }
+      const scopeChat = routeChatIdRef.current || persistChatIdRef.current;
+      if (scopeChat) saveChatStudio(scopeChat, files, pid, folderName);
+      ignoreEnterUntilRef.current = Date.now() + 600;
+      requestAnimationFrame(() => textareaRef.current?.focus());
+    } finally {
+      setAttachUploading(null);
+    }
   };
 
   useEffect(() => {
@@ -1266,13 +1600,61 @@ export function AIChat() {
     setTokenRatio(getTokenUsageRatio(scope));
   }, [route]);
 
+  const attachImagesFromPaths = async (paths: string[]) => {
+    const next: { id: string; name: string; dataUrl: string }[] = [];
+    for (const abs of paths.slice(0, 4)) {
+      const data = await window.arkDesktop?.readDataUrl?.(abs);
+      if (data?.ok && data.dataUrl?.startsWith('data:image/')) {
+        const id = `attach-${crypto.randomUUID().slice(0, 10)}`;
+        rememberThumb(id, data.dataUrl);
+        next.push({ id, name: data.name || abs.split(/[/\\]/).pop() || 'image', dataUrl: data.dataUrl });
+      }
+    }
+    if (next.length) {
+      setPendingImages(prev => [...prev, ...next].slice(0, 4));
+      setDropHint(null);
+    } else {
+      setDropHint('Could not read those images.');
+    }
+  };
+
+  const attachFilesFromPaths = async (paths: string[]) => {
+    for (const abs of paths) {
+      const base = abs.split(/[/\\]/).pop() || 'file';
+      if (/\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(base)) {
+        await attachImagesFromPaths([abs]);
+        continue;
+      }
+      const read = await window.arkDesktop?.readTextFile?.({ path: abs });
+      const text = read?.ok && read.text != null ? read.text : `[Attached file: ${base}]`;
+      setChatStudioFiles(prev => ({ ...prev, [base]: text }));
+      setPendingAttaches(prev => {
+        if (prev.some(a => a.name === base && a.kind === 'file')) return prev;
+        return [...prev, {
+          kind: 'file' as const,
+          name: base,
+          count: 1,
+          id: `file-${crypto.randomUUID().slice(0, 8)}`,
+        }].slice(0, 12);
+      });
+    }
+    setDropHint(null);
+    ignoreEnterUntilRef.current = Date.now() + 600;
+  };
+
   const handlePlusAction = (action: ComposerPlusAction) => {
+    if (mode === 'image') {
+      if (action === 'image' || action === 'file') {
+        void pickPhotosIntoChat();
+      }
+      return;
+    }
     if (action === 'image') {
-      imageInputRef.current?.click();
+      void pickPhotosIntoChat();
       return;
     }
     if (action === 'file') {
-      attachInputRef.current?.click();
+      void pickFilesIntoChat();
       return;
     }
     if (action === 'folder') {
@@ -1283,25 +1665,58 @@ export function AIChat() {
     requestAnimationFrame(() => textareaRef.current?.focus());
   };
 
+  /** Native OS photo picker (Windows File Explorer). */
+  const pickPhotosIntoChat = async () => {
+    if (!window.arkDesktop?.pickFiles) {
+      attachInputRef.current?.click();
+      return;
+    }
+    const res = await window.arkDesktop.pickFiles({ imagesOnly: true });
+    if (res?.canceled || !res?.ok || !res.paths?.length) return;
+    await attachImagesFromPaths(res.paths);
+    ignoreEnterUntilRef.current = Date.now() + 600;
+  };
+
+  /** Native OS file picker — shows files inside folders. */
+  const pickFilesIntoChat = async () => {
+    if (!window.arkDesktop?.pickFiles) {
+      attachInputRef.current?.click();
+      return;
+    }
+    const res = await window.arkDesktop.pickFiles();
+    if (res?.canceled || !res?.ok || !res.paths?.length) return;
+    await attachFilesFromPaths(res.paths);
+  };
+
   const handleSend = () => {
     let content = input.trim();
     const images = pendingImages;
-    if ((!content && !images.length) || !user) return;
+    const attaches = pendingAttaches;
+    const hasStudio = Object.keys(chatStudioFilesRef.current).length > 0;
+    if ((!content && !images.length && !attaches.length && !hasStudio) || !user) return;
     if (composerMode && COMPOSER_MODE_PREFIX[composerMode]) {
       content = `${COMPOSER_MODE_PREFIX[composerMode]}${content}`;
     }
-    if (!content && images.length) {
-      content = mode === 'image'
-        ? 'Recreate and improve this image'
-        : 'What is in this image?';
+    const userTyped = Boolean(content.trim());
+    const parts: string[] = [];
+    if (attaches.length) {
+      parts.push(encodeChatAttaches(attaches));
+    }
+    if (userTyped) {
+      parts.push(content);
+    } else if (attaches.length || hasStudio) {
+      // Enter with only a folder/file — read it. Marker is hidden in the bubble.
+      parts.push('<!--ark-auto-read-->');
+    } else if (images.length) {
+      content = mode === 'image' ? 'Recreate and improve this image' : 'What is in this image?';
+      parts.push(content);
     }
     if (images.length) {
-      content = [
-        content,
-        ...images.map(img => `![${img.name.replace(/[\[\]]/g, '')}](ark-media:${img.id})`),
-      ].join('\n\n');
+      parts.push(...images.map(img => `![${img.name.replace(/[\[\]]/g, '')}](ark-media:${img.id})`));
     }
+    content = parts.join('\n\n');
     setPendingImages([]);
+    setPendingAttaches([]);
     setComposerMode(null);
     // Queue only when this same thread is already answering. New Chat while another
     // thread is busy still starts a new send once the engine is free (sendMessage gates).
@@ -1324,7 +1739,13 @@ export function AIChat() {
   };
 
   const sendMessage = async (content: string) => {
-    if (!content.trim() || !user || generatingRef.current) return;
+    if (!content.trim() || !user) return;
+    // Free a stuck prior GGUF job (timed-out inspect was locking “More details”).
+    void engineGenerateCancel();
+    if (generatingRef.current) {
+      generatingRef.current = false;
+      setGenerating(false);
+    }
     stopRequestedRef.current = false;
     setFailoverNote(null);
     setIpcFallbackDev(false);
@@ -1354,6 +1775,16 @@ export function AIChat() {
     persistChatIdRef.current = activeChatId;
     routeChatIdRef.current = activeChatId;
     activeGenChatIdRef.current = activeChatId;
+    // Bind any pending folder attach to this chat id for follow-ups.
+    if (Object.keys(chatStudioFilesRef.current).length) {
+      const meta = parseChatAttach(content) || parseChatAttaches(content)[0];
+      saveChatStudio(
+        activeChatId,
+        chatStudioFilesRef.current,
+        chatStudioProjectIdRef.current || meta?.projectId || null,
+        meta?.name,
+      );
+    }
     setTokenRatio(recordTokenUsage(activeChatId, content));
     const pinnedModel = activeModelRef.current;
 
@@ -1378,14 +1809,24 @@ export function AIChat() {
 
     const assistantId = crypto.randomUUID();
     const isMediaMode = mode === 'image' || mode === 'video';
+    // Reading… only when THIS message includes an upload — not leftover studio files.
+    const readingAttach = /<!--ark-attach:/.test(content)
+      || /<!--ark-auto-read-->/.test(content)
+      || /!\[[^\]]*\]\(ark-media:/.test(content)
+      || /!\[[^\]]*\]\(data:image\//.test(content);
+    const statusLabel = isMediaMode
+      ? MEDIA_GEN_STAGES[mode][0].label
+      : readingAttach
+        ? 'Reading…'
+        : 'Thinking…';
     const assistantMsg: ChatMessage = {
       id: assistantId,
       user_id: user.id,
       project_id: null,
       role: 'assistant',
       content: isMediaMode
-        ? `__generating__:${mode}:${MEDIA_GEN_STAGES[mode][0].label}`
-        : '__generating__:chat:Thinking…',
+        ? `__generating__:${mode}:${statusLabel}`
+        : `__generating__:chat:${statusLabel}`,
       provider_used: providerLabel,
       created_at: new Date().toISOString(),
     };
@@ -1412,7 +1853,7 @@ export function AIChat() {
       try {
         sessionStorage.setItem(
           'ark:inflight-media',
-          JSON.stringify({ chatId: activeChatId, mode }),
+          JSON.stringify({ chatId: activeChatId, mode, startedAt: Date.now() }),
         );
       } catch {
         /* ignore */
@@ -1435,15 +1876,142 @@ export function AIChat() {
     }
 
     const histPrefs = getLocalPrefs();
+    const replyStartedAt = Date.now();
+
+    // Recover folder files from every source before any model call.
+    const resolvedStudio = await resolveStudioFiles({
+      chatId: activeChatId,
+      memoryFiles: chatStudioFilesRef.current,
+      memoryProjectId: chatStudioProjectIdRef.current,
+      messages: messagesRef.current,
+    });
+    if (Object.keys(resolvedStudio.files).length) {
+      setChatStudioFiles(resolvedStudio.files);
+      chatStudioFilesRef.current = resolvedStudio.files;
+      if (resolvedStudio.projectId) {
+        setChatStudioProjectId(resolvedStudio.projectId);
+        chatStudioProjectIdRef.current = resolvedStudio.projectId;
+      }
+      saveChatStudio(
+        activeChatId,
+        resolvedStudio.files,
+        resolvedStudio.projectId,
+        resolvedStudio.name,
+      );
+    }
+
+    const clearGeneratingIfMineEarly = () => {
+      if (mySeq !== genSeqRef.current) return;
+      generatingRef.current = false;
+      if (activeGenChatIdRef.current === activeChatId) {
+        activeGenChatIdRef.current = null;
+      }
+      setGenerating(false);
+    };
+
+    // HARD GATE: sticky files → unified answer engine (never bare arkRoute).
+    const stickyFiles = resolvedStudio.files;
+    const stickyCount = Object.keys(stickyFiles).length;
+    if (
+      (mode === 'general' || mode === 'code')
+      && stickyCount > 0
+      && shouldInspectInChat(content, true, content.startsWith(COMPOSER_MODE_PREFIX.debug))
+    ) {
+      setMessages(prev => prev.map(m => (
+        m.id === assistantId
+          ? { ...m, content: `__generating__:chat:Reading ${stickyCount} file${stickyCount === 1 ? '' : 's'}…` }
+          : m
+      )));
+      await new Promise<void>(r => { window.setTimeout(r, 40); });
+      if (mySeq !== genSeqRef.current) return;
+
+      const projectLabel = resolvedStudio.name
+        || loadRecentProjects().find(p => p.id === resolvedStudio.projectId)?.name
+        || loadChatStudio(activeChatId)?.name
+        || 'Attached project';
+      const sticky = pinnedModel.source === 'auto' ? threadBrainRef.current : null;
+
+      const result = await answerStudio(
+        {
+          userMessage: content,
+          files: stickyFiles,
+          projectName: projectLabel,
+          lastIntent: lastStudioIntentRef.current,
+          lastFindings: lastFindingsRef.current,
+          mode: mode === 'code' ? 'code' : 'chat',
+          preferredModelId: pinnedModel.id,
+          preferredModelName: pinnedModel.name,
+          preferredSource: pinnedModel.source,
+          stickyModelId: sticky?.modelId,
+          stickyModelName: sticky?.modelName,
+          stickyPinnedSource: sticky?.pinnedSource,
+          shouldAbort: () => mySeq !== genSeqRef.current || stopRequestedRef.current,
+        },
+        (live) => {
+          if (mySeq !== genSeqRef.current || stopRequestedRef.current) return;
+          const text = String(live || '').trim();
+          if (text.length < 2) return;
+          setMessages(prev => {
+            const next = prev.map(m => (
+              m.id === assistantId ? { ...m, content: text } : m
+            ));
+            messagesRef.current = next;
+            return next;
+          });
+        },
+      );
+
+      if (mySeq !== genSeqRef.current) return;
+
+      lastStudioIntentRef.current = result.intent;
+      if (result.findings?.length) lastFindingsRef.current = result.findings;
+
+      const reply = result.text;
+      const elapsedMs = Date.now() - replyStartedAt;
+      const next = messagesRef.current.map(m => (
+        m.id === assistantId
+          ? {
+            ...m,
+            content: reply,
+            provider_used: result.meta || 'Local scan · attached files',
+            elapsed_ms: elapsedMs,
+          }
+          : m
+      ));
+      messagesRef.current = next;
+      persistModeThread(mode, next, { chatId: activeChatId });
+      setMessages(next);
+      setInspectOfferId(assistantId);
+      setStudioOfferKind('actions');
+      clearGeneratingIfMineEarly();
+      lastInspectReplyRef.current = reply;
+      window.setTimeout(() => {
+        if (mySeq === genSeqRef.current) flushQueuedSend();
+      }, 0);
+      return;
+    }
+
+    const earlyHasStudio = stickyCount > 0
+      || Object.keys(chatStudioFilesRef.current).length > 0
+      || content.includes('<!--ark-attach:')
+      || content.includes('<!--ark-auto-read-->');
+    const willInspect = shouldInspectInChat(
+      content,
+      earlyHasStudio,
+      content.startsWith(COMPOSER_MODE_PREFIX.debug),
+    );
     const keepContinuity = mode === 'code' || Boolean(
       threadBrainRef.current?.pendingModelId || threadBrainRef.current?.freshBudget,
     );
-    const seedHistory = histPrefs.rememberContext
-      ? buildRouterHistory(priorForHistory, content, undefined, {
-        keepContinuity,
-        kind: mode === 'code' ? 'coding' : 'chat',
-      })
-      : buildRouterHistory([], content);
+    // Inspect follow-ups must not pack the prior huge dump into GGUF (that hung Thinking…).
+    const seedHistory = willInspect
+      ? buildRouterHistory([], content)
+      : histPrefs.rememberContext
+        ? buildRouterHistory(priorForHistory, content, undefined, {
+          keepContinuity,
+          kind: mode === 'code' ? 'coding' : 'chat',
+        })
+        : buildRouterHistory([], content);
     const rotation = await prepareBrainRotation({
       scopeId: activeChatId,
       kind: brainKindForChatMode(mode),
@@ -1456,14 +2024,15 @@ export function AIChat() {
       setThreadBrain(rotation.brain);
     }
     setTokenRatio(rotation.pressure);
-    const rotatedHistory = rotation.swapped && histPrefs.rememberContext
-      ? buildRouterHistory(priorForHistory, content, undefined, {
-        keepContinuity: true,
-        kind: mode === 'code' ? 'coding' : 'chat',
-      })
-      : rotation.history;
+    const rotatedHistory = willInspect
+      ? seedHistory
+      : rotation.swapped && histPrefs.rememberContext
+        ? buildRouterHistory(priorForHistory, content, undefined, {
+          keepContinuity: true,
+          kind: mode === 'code' ? 'coding' : 'chat',
+        })
+        : rotation.history;
     const stickyBrain = pinnedModel.source === 'auto' ? rotation.brain : null;
-    const replyStartedAt = Date.now();
 
     const clearGeneratingIfMine = () => {
       if (mySeq !== genSeqRef.current) return;
@@ -1554,6 +2123,7 @@ export function AIChat() {
     void (async () => {
       let response = 'ARK Router could not complete this request.';
       let usedPlugin = false;
+      let skipReplySanitize = false;
       let lastLibraryId: string | undefined;
       let resolvedProvider = providerLabel;
       let streamedPartial = '';
@@ -1584,8 +2154,14 @@ export function AIChat() {
       };
 
       try {
-      const studioFiles = chatStudioFilesRef.current;
+      // Prefer sticky map from resolveStudioFiles — never trust an empty ref after attach.
+      const studioFiles = Object.keys(resolvedStudio.files).length
+        ? resolvedStudio.files
+        : chatStudioFilesRef.current;
       const hasStudioFiles = Object.keys(studioFiles).length > 0;
+      if (hasStudioFiles) {
+        chatStudioFilesRef.current = studioFiles;
+      }
 
       if ((mode === 'general' || mode === 'code') && isGithubPullAsk(content)) {
         const runtime = getPluginRuntime('github', loadPluginState());
@@ -1655,7 +2231,8 @@ export function AIChat() {
         }
       }
 
-      if (!usedPlugin && (mode === 'general' || mode === 'code') && looksLikeImageAsk(content) && composerMode !== 'ask') {
+      // Do not steal project follow-ups into Image when a folder is sticky.
+      if (!usedPlugin && !hasStudioFiles && (mode === 'general' || mode === 'code') && looksLikeImageAsk(content) && composerMode !== 'ask') {
         imageOfferPromptRef.current = content;
         response = [
           'That sounds like an image request.',
@@ -1667,44 +2244,112 @@ export function AIChat() {
       }
 
       if (!usedPlugin && (mode === 'general' || mode === 'code') && shouldInspectInChat(content, hasStudioFiles, content.startsWith(COMPOSER_MODE_PREFIX.debug))) {
-        const findings = scanProjectFindings(studioFiles, content);
-        const picked = pickFilesForInspect(studioFiles, content);
-        const inspectMessage = buildInspectPrompt(
-          content,
-          studioFiles,
-          picked,
-          findings,
-          'Chat inspect',
-        );
-          const vision = extractVisionImages(content);
-          const prefs = getLocalPrefs();
-          const history = prefs.rememberContext
-            ? (rotatedHistory.length ? rotatedHistory : buildRouterHistory(priorForHistory, inspectMessage, vision, {
-              keepContinuity: true,
-              kind: mode === 'code' ? 'coding' : 'chat',
-            }))
-            : buildRouterHistory([], inspectMessage, vision);
-        const sticky = stickyBrain;
-        const routed = await arkRoute({
-          message: inspectMessage,
-          kind: mode === 'code' ? 'coding' : 'chat',
-          preferredModelId: pinnedModel.id,
-          preferredModelName: pinnedModel.name,
-          preferredSource: pinnedModel.source,
-          stickyModelId: sticky?.modelId,
-          stickyModelName: sticky?.modelName,
-          stickyPinnedSource: sticky?.pinnedSource,
-          history,
-        });
-        response = formatChatInspectReply(
-          routed.reply,
-          findings,
-          Object.keys(studioFiles),
-        );
-        lastInspectReplyRef.current = response;
-        resolvedProvider = routerProviderLabel(routed, providerLabel);
-        usedPlugin = true;
-        setInspectOfferId(assistantId);
+        skipReplySanitize = true;
+        try {
+          const attachMeta = parseChatAttach(content) || parseChatAttaches(content)[0];
+          let filesForInspect = studioFiles;
+          if (Object.keys(filesForInspect).length === 0) {
+            const pid = attachMeta?.projectId || chatStudioProjectIdRef.current;
+            if (pid && window.arkDesktop?.projectRead) {
+              try {
+                const read = await Promise.race([
+                  window.arkDesktop.projectRead(pid),
+                  new Promise<null>((resolve) => { window.setTimeout(() => resolve(null), 4_000); }),
+                ]);
+                if (read?.ok && read.files && Object.keys(read.files).length) {
+                  filesForInspect = read.files as Record<string, string>;
+                  setChatStudioFiles(filesForInspect);
+                  chatStudioFilesRef.current = filesForInspect;
+                  if (!chatStudioProjectIdRef.current) setChatStudioProjectId(pid);
+                }
+              } catch {
+                /* ignore */
+              }
+            }
+            if (Object.keys(filesForInspect).length === 0 && pid) {
+              try {
+                const raw = localStorage.getItem(`ark:chat-studio-files:${pid}`);
+                if (raw) {
+                  const parsed = JSON.parse(raw) as { files?: Record<string, string> };
+                  if (parsed?.files && Object.keys(parsed.files).length) {
+                    filesForInspect = parsed.files;
+                    setChatStudioFiles(filesForInspect);
+                    chatStudioFilesRef.current = filesForInspect;
+                  }
+                }
+              } catch {
+                /* ignore */
+              }
+            }
+          }
+          const projectLabel = attachMeta?.name
+            || loadRecentProjects().find(p => p.id === chatStudioProjectIdRef.current)?.name
+            || loadChatStudio(activeChatId)?.name
+            || 'Attached project';
+          const fileCount = Object.keys(filesForInspect).length;
+          if (!fileCount) {
+            response = `I see the **${projectLabel}** attach, but no file contents loaded. Re-attach the folder with +, then ask again.`;
+            usedPlugin = true;
+          } else {
+            saveChatStudio(activeChatId, filesForInspect, chatStudioProjectIdRef.current, projectLabel);
+            const userAsk = content
+              .replace(/<!--ark-attach:[\s\S]*?-->/g, '')
+              .replace(/<!--ark-auto-read-->/g, '')
+              .trim()
+              || `Tell me what **${projectLabel}** is about.`;
+            const isFreshAttach = content.includes('<!--ark-attach:') || content.includes('<!--ark-auto-read-->');
+            const sticky = stickyBrain;
+            const engineResult = await answerStudio(
+              {
+                userMessage: isFreshAttach && !userAsk ? `What is ${projectLabel} about?` : (userAsk || content),
+                files: filesForInspect,
+                projectName: projectLabel,
+                lastIntent: lastStudioIntentRef.current,
+                lastFindings: lastFindingsRef.current,
+                mode: mode === 'code' ? 'code' : 'chat',
+                preferredModelId: pinnedModel.id,
+                preferredModelName: pinnedModel.name,
+                preferredSource: pinnedModel.source,
+                stickyModelId: sticky?.modelId,
+                stickyModelName: sticky?.modelName,
+                stickyPinnedSource: sticky?.pinnedSource,
+                shouldAbort: () => abandoned || stopRequestedRef.current || mySeq !== genSeqRef.current,
+              },
+              (live) => {
+                if (abandoned || stopRequestedRef.current || mySeq !== genSeqRef.current) return;
+                const text = String(live || '').trim();
+                if (text.length < 2) return;
+                setMessages(prev => {
+                  const next = prev.map(m => (
+                    m.id === assistantId ? { ...m, content: text } : m
+                  ));
+                  messagesRef.current = next;
+                  return next;
+                });
+              },
+            );
+            lastStudioIntentRef.current = engineResult.intent;
+            if (engineResult.findings?.length) lastFindingsRef.current = engineResult.findings;
+            response = engineResult.text;
+            lastInspectReplyRef.current = response;
+            resolvedProvider = engineResult.meta || `${providerLabel} · files`;
+            usedPlugin = true;
+            setInspectOfferId(assistantId);
+            setStudioOfferKind('actions');
+          }
+        } catch (err) {
+          const studio = chatStudioFilesRef.current;
+          const label = parseChatAttach(content)?.name || 'folder';
+          response = Object.keys(studio).length
+            ? formatChatInspectReply(
+              describeProjectFromFiles(studio, label),
+              [],
+              Object.keys(studio),
+              'explain',
+            )
+            : (err instanceof Error ? err.message : 'Could not read that folder. Try attaching it again.');
+          usedPlugin = true;
+        }
       }
 
       if (!usedPlugin && pluginId) {
@@ -1766,17 +2411,23 @@ export function AIChat() {
           await runMediaGenStages('image', label => {
             setAssistantContent(`__generating__:image:${label}`);
           }, async () => {
-            routed = await arkRoute({
-              message: rewritten,
-              kind: 'image',
-              preferredModelId: pinnedModel.id,
-              preferredModelName: pinnedModel.name,
-              preferredSource: pinnedModel.source,
-              stickyModelId: sticky?.modelId,
-              stickyModelName: sticky?.modelName,
-              stickyPinnedSource: sticky?.pinnedSource,
-              referenceImageDataUrl: referenceDataUrl,
-            });
+            const IMAGE_TIMEOUT_MS = 120_000;
+            routed = await Promise.race([
+              arkRoute({
+                message: rewritten,
+                kind: 'image',
+                preferredModelId: pinnedModel.id,
+                preferredModelName: pinnedModel.name,
+                preferredSource: pinnedModel.source,
+                stickyModelId: sticky?.modelId,
+                stickyModelName: sticky?.modelName,
+                stickyPinnedSource: sticky?.pinnedSource,
+                referenceImageDataUrl: referenceDataUrl,
+              }),
+              new Promise<never>((_, reject) => {
+                window.setTimeout(() => reject(new Error('Image timed out. Try again or pick another model.')), IMAGE_TIMEOUT_MS);
+              }),
+            ]);
           });
 
           if (!routed) {
@@ -1841,6 +2492,7 @@ export function AIChat() {
           }
           }
         } catch (err) {
+          void engineGenerateCancel();
           response = classifyErrorMessage(err instanceof Error ? err.message : 'Image generation failed').message;
           usedPlugin = true;
         }
@@ -1883,17 +2535,23 @@ export function AIChat() {
           await runMediaGenStages('video', label => {
             setAssistantContent(`__generating__:video:${label}`);
           }, async () => {
-            routed = await arkRoute({
-              message: rewritten,
-              kind: 'video',
-              preferredModelId: pinnedModel.id,
-              preferredModelName: pinnedModel.name,
-              preferredSource: pinnedModel.source,
-              stickyModelId: sticky?.modelId,
-              stickyModelName: sticky?.modelName,
-              stickyPinnedSource: sticky?.pinnedSource,
-              mediaDurationSec: videoDurationSec,
-            });
+            const VIDEO_TIMEOUT_MS = 150_000;
+            routed = await Promise.race([
+              arkRoute({
+                message: rewritten,
+                kind: 'video',
+                preferredModelId: pinnedModel.id,
+                preferredModelName: pinnedModel.name,
+                preferredSource: pinnedModel.source,
+                stickyModelId: sticky?.modelId,
+                stickyModelName: sticky?.modelName,
+                stickyPinnedSource: sticky?.pinnedSource,
+                mediaDurationSec: videoDurationSec,
+              }),
+              new Promise<never>((_, reject) => {
+                window.setTimeout(() => reject(new Error('Video timed out. Try again or pick another model.')), VIDEO_TIMEOUT_MS);
+              }),
+            ]);
           });
 
           if (!routed) {
@@ -1972,6 +2630,7 @@ export function AIChat() {
             usedPlugin = true;
           }
         } catch (err) {
+          void engineGenerateCancel();
           response = classifyErrorMessage(err instanceof Error ? err.message : 'Video generation failed').message;
           usedPlugin = true;
         }
@@ -1987,6 +2646,9 @@ export function AIChat() {
             }))
             : buildRouterHistory([], content, vision);
           const sticky = stickyBrain;
+          const timeoutMs = 250_000;
+          const firstTokenMs = 35_000;
+          let sawToken = false;
           const routePromise = arkRoute({
             message: content,
             kind: mode === 'code' ? 'coding' : 'chat',
@@ -2000,6 +2662,7 @@ export function AIChat() {
             onChunk: prefs.streamResponses
               ? (piece) => {
               if (abandoned || stopRequestedRef.current || mySeq !== genSeqRef.current) return;
+              sawToken = true;
               streamedPartial += piece;
               const live = usableAssistantText(streamedPartial, content, previousAssistant)
                 || streamedPartial.trim();
@@ -2007,7 +2670,7 @@ export function AIChat() {
                 const next = prev.map(m => {
                   if (m.id !== assistantId) return m;
                   const liveClean = live && !looksLikePromptEcho(live) ? live : '';
-                  return { ...m, content: liveClean || '__generating__:chat:Thinking…' };
+                  return { ...m, content: liveClean || `__generating__:chat:${statusLabel}` };
                 });
                 messagesRef.current = next;
                 if (persistTimerRef.current) window.clearTimeout(persistTimerRef.current);
@@ -2022,14 +2685,23 @@ export function AIChat() {
             }
               : undefined,
           });
-          const timeoutMs = 250_000;
-          const routed = await Promise.race([
+          const races: Promise<{ reply: string; full: Awaited<typeof routePromise> | null }>[] = [
             routePromise.then(r => ({ reply: r.reply, full: r as Awaited<typeof routePromise> })),
             earlyDone.then(r => ({ reply: r.reply, full: null })),
-            new Promise<never>((_, reject) => {
+            new Promise((_, reject) => {
               window.setTimeout(() => reject(new Error('Response timed out. Try again or pick another model.')), timeoutMs);
             }),
-          ]);
+          ];
+          if (prefs.streamResponses) {
+            races.push(new Promise((_, reject) => {
+              window.setTimeout(() => {
+                if (!sawToken && !streamedPartial.trim()) {
+                  reject(new Error('No response yet. Try again or pick another model.'));
+                }
+              }, firstTokenMs);
+            }));
+          }
+          const routed = await Promise.race(races);
           if (idleTimer) window.clearTimeout(idleTimer);
           // Release Stop as soon as we have a usable reply — don't wait on trailing work.
           clearGeneratingIfMine();
@@ -2100,7 +2772,7 @@ export function AIChat() {
 
       if (mySeq !== genSeqRef.current) return;
 
-      if (!isMediaMode && !pluginId) {
+      if (!isMediaMode && !pluginId && !skipReplySanitize) {
         const cleaned = usableAssistantText(response, content, previousAssistant);
         const candidate = String(cleaned || response || '').trim();
         response = looksLikePromptEcho(candidate) ? '' : (cleaned || candidate);
@@ -2137,18 +2809,33 @@ export function AIChat() {
   const resizeComposer = () => {
     const el = textareaRef.current;
     if (!el) return;
-    if (!el.value) {
-      el.style.height = '20px';
+    const value = el.value || '';
+    if (!value) {
+      el.style.height = '';
+      el.style.maxHeight = '';
       el.style.overflowY = 'hidden';
       setComposerTall(false);
       return;
     }
-    el.style.height = '20px';
-    const raw = el.scrollHeight;
-    const max = Math.round(window.innerHeight * 0.55);
-    el.style.height = `${Math.min(raw, max)}px`;
-    el.style.overflowY = raw > max ? 'auto' : 'hidden';
-    setComposerTall(raw > 28);
+    // Leave pill layout early so wrapped lines are never clipped.
+    const wantsTall = value.includes('\n') || value.length > 24;
+    setComposerTall(wantsTall);
+
+    const applyHeight = () => {
+      const box = textareaRef.current;
+      if (!box) return;
+      box.style.height = 'auto';
+      void box.offsetHeight;
+      const raw = box.scrollHeight;
+      const max = Math.round(window.innerHeight * 0.4);
+      const minPx = wantsTall ? 56 : 22;
+      const next = Math.max(minPx, Math.min(Math.max(raw, minPx), max));
+      box.style.height = `${next}px`;
+      box.style.overflowY = raw > max ? 'auto' : 'hidden';
+    };
+
+    applyHeight();
+    requestAnimationFrame(applyHeight);
   };
 
   const onInput = (value: string) => {
@@ -2469,14 +3156,51 @@ export function AIChat() {
               </button>
             </div>
           )}
+          {attachUploading && (
+            <p className="mb-2 px-1 text-[11px] text-sky-300/90 animate-pulse">{attachUploading}</p>
+          )}
+          {pendingAttaches.length > 0 && (
+            <div className="mb-2 flex flex-wrap items-center gap-1.5 px-1">
+              {pendingAttaches.map(meta => (
+                <span key={attachKey(meta)} className="inline-flex items-center gap-1">
+                  <AttachCard meta={meta} />
+                  <button
+                    type="button"
+                    className="text-[10px] text-content-tertiary hover:text-content-secondary"
+                    onClick={() => removePendingAttach(meta)}
+                    aria-label={`Remove ${meta.name}`}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+              {pendingAttaches.length > 1 && (
+                <button
+                  type="button"
+                  className="text-[10px] text-content-tertiary hover:text-content-secondary"
+                  onClick={() => {
+                    setPendingAttaches([]);
+                    setChatStudioFiles({});
+                    setChatStudioProjectId(null);
+                    setPendingImages([]);
+                  }}
+                >
+                  Clear all
+                </button>
+              )}
+            </div>
+          )}
+          {dropHint && !pendingAttaches.length && !attachUploading && (
+            <p className="mb-2 px-1 text-[11px] text-amber-300/90">{dropHint}</p>
+          )}
           {pendingImages.length > 0 && (
             <div className="mb-2 flex flex-wrap items-center gap-1.5 px-1">
               {pendingImages.map(img => (
                 <span
                   key={img.id}
-                  className="inline-flex items-center gap-1.5 rounded-full border border-surface-border bg-ark-navy-900/80 pl-1 pr-1.5 py-0.5 text-[10px] text-content-secondary"
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-surface-border bg-ark-navy-900/80 pl-1 pr-1.5 py-1 text-[10px] text-content-secondary"
                 >
-                  <img src={img.dataUrl} alt="" className="w-5 h-5 rounded-full object-cover" />
+                  <img src={img.dataUrl} alt="" className="w-8 h-8 rounded-md object-cover" />
                   <span className="max-w-[7rem] truncate">{img.name}</span>
                   <button
                     type="button"
@@ -2488,62 +3212,6 @@ export function AIChat() {
                   </button>
                 </span>
               ))}
-            </div>
-          )}
-          {Object.keys(chatStudioFiles).length > 0 && (
-            <div className="mb-2 flex flex-wrap items-center gap-1.5 px-1">
-              {Object.keys(chatStudioFiles).slice(0, 8).map(name => (
-                <span
-                  key={name}
-                  className="inline-flex items-center max-w-[10rem] truncate rounded-full border border-surface-border bg-ark-navy-900/80 px-2 py-0.5 text-[10px] text-content-secondary"
-                  title={name}
-                >
-                  {name.split('/').pop()}
-                </span>
-              ))}
-              {Object.keys(chatStudioFiles).length > 8 ? (
-                <span className="text-[10px] text-content-tertiary">
-                  +{Object.keys(chatStudioFiles).length - 8}
-                </span>
-              ) : null}
-              <button
-                type="button"
-                className="text-[10px] text-violet-300/90 hover:text-violet-200"
-                onClick={() => openCodeWorkspace(
-                  input.trim() || lastInspectReplyRef.current || 'Continue from chat',
-                )}
-              >
-                Continue in Code
-              </button>
-              <button
-                type="button"
-                className="text-[10px] text-amber-200/90 hover:text-amber-100"
-                onClick={() => {
-                  void sendMessageRef.current(`${COMPOSER_MODE_PREFIX.debug}Find bugs and risky code in these files.`);
-                }}
-              >
-                Debug
-              </button>
-              <button
-                type="button"
-                className="text-[10px] text-content-secondary hover:text-content-primary"
-                onClick={() => {
-                  void sendMessageRef.current('Summarize what these files do.');
-                }}
-              >
-                Summarize
-              </button>
-              <button
-                type="button"
-                className="text-[10px] text-content-tertiary hover:text-content-secondary"
-                onClick={() => {
-                  setChatStudioFiles({});
-                  setChatStudioProjectId(null);
-                  setInspectOfferId(null);
-                }}
-              >
-                Clear
-              </button>
             </div>
           )}
           {(mode === 'general' || mode === 'code') && looksLikeImageAsk(input) && composerMode !== 'ask' && !imageSwitchDismissed && !looksLikeCodeAsk(input) && (
@@ -2625,8 +3293,8 @@ export function AIChat() {
           <div
             className={`flex-1 min-w-0 border border-surface-border bg-ark-navy-900/90 shadow-lg shadow-black/20 ${
               composerTall
-                ? 'flex flex-col rounded-2xl overflow-hidden'
-                : 'flex items-center gap-1 rounded-full h-11 pl-1 pr-1.5'
+                ? 'flex flex-col rounded-2xl overflow-visible'
+                : 'flex items-center gap-1 rounded-full min-h-11 pl-1 pr-1.5 py-1.5 overflow-visible'
             }`}
           >
           <input
@@ -2655,7 +3323,7 @@ export function AIChat() {
           {!composerTall && mode === 'image' && (
             <button
               type="button"
-              onClick={() => imageInputRef.current?.click()}
+              onClick={() => void pickPhotosIntoChat()}
               className="w-8 h-8 rounded-full flex items-center justify-center text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors shrink-0"
               title="Upload a reference photo to recreate or improve"
               aria-label="Upload reference photo"
@@ -2666,6 +3334,7 @@ export function AIChat() {
 
           {!composerTall && (
             <ComposerPlusMenu
+              scope={mode === 'image' ? 'image' : 'chat'}
               onAction={handlePlusAction}
               buttonClassName="w-8 h-8 rounded-full flex items-center justify-center text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors shrink-0"
             />
@@ -2677,23 +3346,28 @@ export function AIChat() {
             onChange={e => onInput(e.target.value)}
             onKeyDown={e => {
               if (e.key === 'Enter' && !e.shiftKey) {
+                if (Date.now() < ignoreEnterUntilRef.current) {
+                  e.preventDefault();
+                  return;
+                }
                 e.preventDefault();
                 handleSend();
               }
             }}
             placeholder={
-              Object.keys(chatStudioFiles).length
-                ? 'Ask me to debug these files, or say what to add…'
+              pendingAttaches.length || Object.keys(chatStudioFiles).length
+                ? 'Press Enter to read this, or type an ask…'
                 : placeholder
             }
             rows={1}
             title="Enter to send · Shift+Enter for a new line"
             aria-label="Message. Enter to send, Shift+Enter for a new line"
-            className={`bg-transparent border-none resize-none overflow-hidden text-sm text-content-primary placeholder:text-content-tertiary focus:outline-none leading-5 ${
+            className={`bg-transparent border-none resize-none text-sm text-content-primary placeholder:text-content-tertiary focus:outline-none leading-5 ${
               composerTall
-                ? 'w-full px-3.5 pt-3.5 pb-2'
-                : 'flex-1 min-w-0 px-1 py-0'
+                ? 'w-full min-h-[3.25rem] px-3.5 pt-3.5 pb-2'
+                : 'flex-1 min-w-0 min-h-[1.25rem] px-1 py-0 self-center'
             }`}
+            style={{ overflowY: 'hidden' }}
           />
 
           <div
@@ -2705,6 +3379,7 @@ export function AIChat() {
           >
           {composerTall && (
             <ComposerPlusMenu
+              scope={mode === 'image' ? 'image' : 'chat'}
               onAction={handlePlusAction}
               buttonClassName="w-8 h-8 rounded-full flex items-center justify-center text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors shrink-0"
             />
@@ -2757,32 +3432,31 @@ export function AIChat() {
           </div>
           </div>
 
-          <div className={`flex items-center gap-1.5 shrink-0 ${composerTall ? 'pb-2' : ''}`}>
-        <TokenUsageRing
-          ratio={tokenRatio}
-          size={16}
-          className="text-content-primary shrink-0"
-          modelName={
-            activeModel.source === 'auto'
-              ? autoModelLabel
-              : activeModel.name
-          }
-          modelDetail={
-            mode === 'image'
-              ? activeModel.source === 'auto'
-                ? autoRingDetail(threadBrain, 'image')
-                : 'Image · session budget'
-              : mode === 'video'
+          <TokenUsageRing
+            ratio={tokenRatio}
+            size={16}
+            className={`text-content-primary shrink-0 ${composerTall ? 'mb-2' : 'self-center'}`}
+            modelName={
+              activeModel.source === 'auto'
+                ? autoModelLabel
+                : activeModel.name
+            }
+            modelDetail={
+              mode === 'image'
                 ? activeModel.source === 'auto'
-                  ? autoRingDetail(threadBrain, 'video')
-                  : 'Video · session budget'
-                : activeModel.source === 'auto'
-                  ? autoRingDetail(threadBrain, threadKind)
-                  : activeModel.source === 'local'
-                    ? 'On-device · no cloud quota'
-                    : 'Cloud · connected key'
-          }
-        />
+                  ? autoRingDetail(threadBrain, 'image')
+                  : 'Image · session budget'
+                : mode === 'video'
+                  ? activeModel.source === 'auto'
+                    ? autoRingDetail(threadBrain, 'video')
+                    : 'Video · session budget'
+                  : activeModel.source === 'auto'
+                    ? autoRingDetail(threadBrain, threadKind)
+                    : activeModel.source === 'local'
+                      ? 'On-device · no cloud quota'
+                      : 'Cloud · connected key'
+            }
+          />
 
         {(mode === 'general' || mode === 'code') && looksLikeCodeAsk(input) && composerMode !== 'ask' && !codeSwitchDismissed && (
           <button
@@ -2795,7 +3469,6 @@ export function AIChat() {
             <Code2 className="w-3.5 h-3.5" />
           </button>
         )}
-        </div>
           </div>
         </div>
       </div>
@@ -2921,7 +3594,7 @@ export function AIChat() {
             <button
               type="button"
               className="aspect-square rounded-2xl border border-dashed border-surface-border bg-ark-navy-900/50 hover:bg-surface-hover transition-colors flex flex-col items-center justify-center gap-2 text-content-secondary hover:text-content-primary"
-              onClick={() => imageInputRef.current?.click()}
+              onClick={() => void pickPhotosIntoChat()}
             >
               <Upload className="w-6 h-6" />
               <span className="text-xs font-medium px-2 text-center">{uploadLabel}</span>
@@ -2947,7 +3620,19 @@ export function AIChat() {
   );
 
   return (
-    <div className="h-full min-w-0 flex flex-col overflow-hidden">
+    <div className="h-full min-w-0 flex flex-col overflow-hidden relative">
+      {/* Always mounted — toggling mount caused flicker; only opacity changes. */}
+      <div
+        className={`absolute inset-0 z-50 flex items-center justify-center bg-black/50 pointer-events-none transition-opacity duration-150 ${
+          dragOverChat ? 'opacity-100' : 'opacity-0'
+        }`}
+        aria-hidden={!dragOverChat}
+      >
+        <div className="rounded-2xl border border-sky-400/40 bg-ark-navy-900/95 px-6 py-4 text-center shadow-xl">
+          <p className="text-sm font-medium text-content-primary">Drop folder or files</p>
+          <p className="text-[11px] text-content-tertiary mt-1">Add as many as you need — press Enter to read</p>
+        </div>
+      </div>
       <ChatModeTabs />
       {loading ? (
         <div className="flex-1 flex items-center justify-center text-content-tertiary">
@@ -3071,21 +3756,24 @@ export function AIChat() {
                     {(() => {
                       const isAssistant = msg.role === 'assistant';
                       const isLast = msg.id === messages[messages.length - 1]?.id;
+                      const raw = String(msg.content || '');
+                      // Only Image/Video tabs (or explicit image/video generating tags) show media placeholder.
+                      // Empty chat bubbles must never become “Creating image”.
                       const showMediaGen = isAssistant && (
-                        !String(msg.content || '').trim()
-                        || msg.content.startsWith('__generating__:image:')
-                        || msg.content.startsWith('__generating__:video:')
+                        raw.startsWith('__generating__:image:')
+                        || raw.startsWith('__generating__:video:')
                         || (
-                          generating
+                          (mode === 'image' || mode === 'video')
                           && isLast
-                          && (mode === 'image' || mode === 'video')
-                          && !msg.content.includes('![')
+                          && generating
+                          && (!raw.trim() || raw.startsWith('__generating__:'))
+                          && !raw.includes('![')
                         )
                       );
                       if (showMediaGen) {
-                        const genKind = msg.content.includes(':video:') || mode === 'video' ? 'video' : 'image';
-                        const genLabel = msg.content.startsWith('__generating__:')
-                          ? msg.content.split(':').slice(2).join(':') || undefined
+                        const genKind = raw.includes(':video:') || mode === 'video' ? 'video' : 'image';
+                        const genLabel = raw.startsWith('__generating__:')
+                          ? raw.split(':').slice(2).join(':') || undefined
                           : (genKind === 'video' ? 'Creating video' : 'Creating image');
                         return <GeneratingPlaceholder kind={genKind} label={genLabel} sessionKey={msg.id} />;
                       }
@@ -3144,24 +3832,22 @@ export function AIChat() {
                         </button>
                       </div>
                     )}
-                    {msg.role === 'assistant' && inspectOfferId === msg.id && (
+                    {msg.role === 'assistant' && inspectOfferId === msg.id && studioOfferKind === 'actions' && (
                       <div className="flex flex-wrap gap-1 mt-2">
                         <button
                           type="button"
                           className="text-[10px] rounded-full bg-sky-600 text-white px-2.5 py-1"
                           onClick={() => {
-                            setInspectOfferId(null);
-                            void sendMessageRef.current('Summarize what these files do and how they fit together.');
+                            void sendMessageRef.current('Go into more detail about this project — what the main files do and how they connect.');
                           }}
                         >
-                          Summarize project
+                          More details
                         </button>
                         <button
                           type="button"
                           className="text-[10px] rounded-full border border-surface-border px-2.5 py-1 text-content-secondary"
                           onClick={() => {
-                            setInspectOfferId(null);
-                            void sendMessageRef.current(`${COMPOSER_MODE_PREFIX.debug}Find bugs, risky code, and broken paths in these files.`);
+                            void sendMessageRef.current(`${COMPOSER_MODE_PREFIX.debug}Propose a concrete fix for each bug, risky path, and broken path in these files.`);
                           }}
                         >
                           Debug this
@@ -3170,46 +3856,64 @@ export function AIChat() {
                           type="button"
                           className="text-[10px] rounded-full border border-surface-border px-2.5 py-1 text-content-secondary"
                           onClick={() => {
-                            setInspectOfferId(null);
-                            void sendMessageRef.current('Explain the architecture and how the main pieces connect.');
+                            void sendMessageRef.current('List the most likely problems in these files (no full file dump).');
                           }}
                         >
-                          Explain architecture
+                          Find problems
                         </button>
                         <button
                           type="button"
-                          className="text-[10px] rounded-full border border-surface-border px-2.5 py-1 text-content-secondary"
-                          onClick={() => {
-                            setInspectOfferId(null);
-                            void sendMessageRef.current('Suggest concrete improvements I should make next.');
-                          }}
-                        >
-                          Suggest improvements
-                        </button>
-                        <button
-                          type="button"
-                          className="text-[10px] rounded-full border border-surface-border px-2.5 py-1 text-content-secondary"
-                          onClick={() => {
-                            setInput('Add this feature: ');
-                            setInspectOfferId(null);
-                            requestAnimationFrame(() => textareaRef.current?.focus());
-                          }}
-                        >
-                          Add a feature
-                        </button>
-                        <button
-                          type="button"
-                          className="text-[10px] rounded-full border border-surface-border px-2.5 py-1 text-content-secondary"
+                          className="text-[10px] rounded-full border border-sky-500/40 bg-sky-500/10 px-2.5 py-1 text-sky-200"
                           onClick={() => openCodeWorkspace(
-                            input.trim() || lastInspectReplyRef.current || 'Continue from chat',
+                            Object.keys(chatStudioFilesRef.current).length
+                              ? 'Continue editing this project in Code'
+                              : 'Continue from chat',
                           )}
                         >
-                          Continue in Code
+                          {Object.keys(chatStudioFiles).length ? 'Edit in Code' : 'Open in Code'}
                         </button>
                         <button
                           type="button"
                           className="text-[10px] rounded-full border border-surface-border px-2.5 py-1 text-content-tertiary"
-                          onClick={() => setInspectOfferId(null)}
+                          onClick={() => {
+                            setInspectOfferId(null);
+                            setStudioOfferKind(null);
+                          }}
+                          title="Keep talking in Chat — chips hide, conversation stays"
+                        >
+                          Keep in Chat
+                        </button>
+                      </div>
+                    )}
+                    {msg.role === 'assistant' && inspectOfferId === msg.id && studioOfferKind === 'handoff' && (
+                      <div className="flex flex-wrap gap-1 mt-2">
+                        <button
+                          type="button"
+                          className="text-[10px] rounded-full bg-sky-600 text-white px-2.5 py-1"
+                          onClick={() => openCodeWorkspace(
+                            Object.keys(chatStudioFilesRef.current).length
+                              ? 'Continue editing this project in Code'
+                              : 'Continue from chat',
+                          )}
+                        >
+                          {Object.keys(chatStudioFiles).length ? 'Edit in Code' : 'Start in Code'}
+                        </button>
+                        <button
+                          type="button"
+                          className="text-[10px] rounded-full border border-surface-border px-2.5 py-1 text-content-secondary"
+                          onClick={() => {
+                            setStudioOfferKind('actions');
+                          }}
+                        >
+                          Keep in Chat
+                        </button>
+                        <button
+                          type="button"
+                          className="text-[10px] rounded-full border border-surface-border px-2.5 py-1 text-content-tertiary"
+                          onClick={() => {
+                            setInspectOfferId(null);
+                            setStudioOfferKind(null);
+                          }}
                         >
                           Dismiss
                         </button>

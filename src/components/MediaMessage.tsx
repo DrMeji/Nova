@@ -3,6 +3,8 @@ import { Copy, Download, Check } from 'lucide-react';
 import { resolveMediaRef } from '@/lib/recentStore';
 import { usableAssistantText } from '@/lib/chatHistory';
 import { ChatMarkdown } from '@/lib/chatMarkdown';
+import { isChatAttachMessage, stripChatAttach } from '@/lib/chatAttach';
+import { AttachMessageBody } from '@/components/AttachCard';
 
 const PIXEL_COLS = 18;
 const PIXEL_ROWS = 14;
@@ -73,14 +75,15 @@ export function GeneratingPlaceholder({
   }, [kind, sessionKey]);
 
   if (kind === 'chat') {
+    const shown = label || 'Thinking…';
     return (
-      <div className="flex items-center gap-2 py-1 text-sm text-content-secondary" aria-label={label || 'Thinking'}>
-        <span className="inline-flex gap-1">
-          <span className="w-1.5 h-1.5 rounded-full bg-content-tertiary animate-pulse" />
-          <span className="w-1.5 h-1.5 rounded-full bg-content-tertiary animate-pulse [animation-delay:120ms]" />
-          <span className="w-1.5 h-1.5 rounded-full bg-content-tertiary animate-pulse [animation-delay:240ms]" />
+      <div className="flex items-center gap-2.5 py-1 text-sm text-content-secondary" aria-label={shown}>
+        <span className="inline-flex items-center gap-1.5" aria-hidden>
+          <span className="ark-status-dot" />
+          <span className="ark-status-dot ark-status-dot-2" />
+          <span className="ark-status-dot ark-status-dot-3" />
         </span>
-        <span className="text-content-tertiary text-xs">{label || 'Thinking…'}</span>
+        <span className="text-content-secondary text-xs font-medium tracking-wide">{shown}</span>
       </div>
     );
   }
@@ -254,6 +257,19 @@ function ArkMediaImage({ id, alt, preview }: { id: string; alt: string; preview?
 export function MessageContent({ content }: { content: string }) {
   if (!content) {
     return <GeneratingPlaceholder kind="chat" label="Thinking…" />;
+  }
+
+  if (isChatAttachMessage(content)) {
+    const rest = stripChatAttach(content);
+    if (rest && (/!\[[^\]]*\]\([^)]+\)/.test(rest) || rest.includes('ark-media:'))) {
+      return (
+        <div className="space-y-2">
+          <AttachMessageBody content={content} />
+          <MessageContent content={rest} />
+        </div>
+      );
+    }
+    return <AttachMessageBody content={content} />;
   }
 
   if (content.startsWith('__generating__:')) {

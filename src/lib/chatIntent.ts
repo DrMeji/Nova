@@ -33,6 +33,10 @@ const IMAGE_ASK =
 export function looksLikeImageAsk(text: string): boolean {
   const t = String(text || '').trim();
   if (!t || looksLikeCodeAsk(t)) return false;
+  // Never treat product recommendations / “where to start” as image gen.
+  if (/\brecommend/i.test(t) && !/\b(image|picture|photo|illustration|logo|icon|wallpaper)\b/i.test(t)) {
+    return false;
+  }
   if (/\b(video|clip|animation|mp4|gif|reel|trailer)\b/i.test(t) && /\b(generate|create|make|render)\b/i.test(t)) {
     return false;
   }

@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('arkDesktop', {
   isElectron: true,
@@ -8,6 +8,14 @@ contextBridge.exposeInMainWorld('arkDesktop', {
     electron: process.versions.electron,
     chrome: process.versions.chrome,
     node: process.versions.node,
+  },
+  /** Electron 32+ replacement for removed File.path (needed for Explorer drag-drop). */
+  getPathForFile: (file) => {
+    try {
+      return webUtils.getPathForFile(file) || '';
+    } catch {
+      return '';
+    }
   },
   windowControls: true,
   openExternal: (url) => ipcRenderer.invoke('ark:open-external', url),
@@ -105,6 +113,13 @@ contextBridge.exposeInMainWorld('arkDesktop', {
   projectRead: (projectId) => ipcRenderer.invoke('ark:project-read', projectId),
   projectPath: (projectId) => ipcRenderer.invoke('ark:project-path', projectId),
   projectImportFolder: (payload) => ipcRenderer.invoke('ark:project-import-folder', payload),
+  pickFiles: (payload) => ipcRenderer.invoke('ark:pick-files', payload || {}),
+  pickBrowseFolder: () => ipcRenderer.invoke('ark:pick-browse-folder'),
+  listDir: (dirPath) => ipcRenderer.invoke('ark:list-dir', dirPath),
+  browseRoots: () => ipcRenderer.invoke('ark:browse-roots'),
+  pathStat: (targetPath) => ipcRenderer.invoke('ark:path-stat', targetPath),
+  readTextFile: (payload) => ipcRenderer.invoke('ark:read-text-file', payload),
+  readDataUrl: (payload) => ipcRenderer.invoke('ark:read-data-url', payload),
   projectSearch: (payload) => ipcRenderer.invoke('ark:project-search', payload),
   projectDeleteFiles: (projectId) => ipcRenderer.invoke('ark:project-delete-files', projectId),
   gitStatus: (projectId) => ipcRenderer.invoke('ark:git-status', projectId),
