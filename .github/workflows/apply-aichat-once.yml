@@ -1,15 +1,14 @@
-name: tag-v0.1.138
-# One-shot: apply remaining typecheck view patch (if needed) and create the
-# v0.1.138 git tag so Release.yml builds the Windows installer.
-# Safe to re-run — no-ops if the tag already exists.
+name: apply-composer-agent-prefix
+# One-shot: add Code composer 'agent' prefix so typecheck can pass.
+# Safe to re-run — no-ops if already applied.
 on:
   workflow_dispatch:
   push:
     paths:
       - '.github/workflows/apply-aichat-once.yml'
-      - 'scripts/typecheck-views-v0.1.138.patch'
+      - 'scripts/composer-agent-prefix-v0.1.138.patch'
 jobs:
-  tag:
+  apply:
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -17,24 +16,17 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Apply view typecheck patch, then tag v0.1.138
+      - name: Apply composer agent prefix patch
         run: |
           set -euo pipefail
           git config user.name "DrMeji"
           git config user.email "122752031+DrMeji@users.noreply.github.com"
-          if [ -f scripts/typecheck-views-v0.1.138.patch ] && git apply --check scripts/typecheck-views-v0.1.138.patch; then
-            git apply scripts/typecheck-views-v0.1.138.patch
-            git add src/views/AIChat.tsx src/views/ProjectWorkspace.tsx
-            git commit -m "v0.1.138: typecheck Chat/Code view types (project_id, attach kinds, composer agent)."
+          PATCH=scripts/composer-agent-prefix-v0.1.138.patch
+          if [ -f "$PATCH" ] && git apply --check "$PATCH"; then
+            git apply "$PATCH"
+            git add src/views/ProjectWorkspace.tsx
+            git commit -m "v0.1.138: add Code composer agent prefix so typecheck can index COMPOSER_MODE_PREFIX."
             git push
           else
-            echo "View typecheck patch already applied or does not fit; skipping."
+            echo "Patch already applied or does not fit; skipping."
           fi
-          git fetch --tags origin
-          git pull --ff-only origin main || true
-          if git rev-parse "refs/tags/v0.1.138" >/dev/null 2>&1; then
-            echo "v0.1.138 already exists"
-            exit 0
-          fi
-          git tag -a v0.1.138 -m "ARK 0.1.138 — Chat coding, greenfield routing, delete targeting"
-          git push origin v0.1.138
