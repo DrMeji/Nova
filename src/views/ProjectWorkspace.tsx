@@ -383,7 +383,7 @@ export function ProjectWorkspace() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [chatPlugins, setChatPlugins] = useState(() => getChatEnabledPlugins(loadPluginState()));
   const [chatInput, setChatInput] = useState('');
-  const [composerMode, setComposerMode] = useState<'plan' | 'ask' | 'debug' | 'multitask' | null>(null);
+  const [composerMode, setComposerMode] = useState<'plan' | 'ask' | 'agent' | 'debug' | 'multitask' | null>(null);
   const [composerTall, setComposerTall] = useState(false);
   const [tokenRatio, setTokenRatio] = useState(0);
   const [modelRatio, setModelRatio] = useState(0);
@@ -1214,16 +1214,16 @@ export function ProjectWorkspace() {
           name: res.name,
           root: res.root,
           inPlace: (res as { inPlace?: boolean }).inPlace,
-          skipped: res.skipped as { env?: number; large?: number; binary?: number; limit?: number } | undefined,
+          skipped: (res as { skipped?: { env?: number; large?: number; binary?: number; limit?: number } }).skipped,
         });
       } else {
-        const read = await window.arkDesktop.projectRead?.(pid);
+        const read = await window.arkDesktop?.projectRead?.(pid);
         if (read?.files && Object.keys(read.files).length) {
           await applyOpened(read.files, {
             name: res.name,
             root: read.root,
             inPlace: Boolean(read.meta && (read.meta as { inPlace?: boolean }).inPlace),
-            skipped: res.skipped as { env?: number; large?: number; binary?: number; limit?: number } | undefined,
+            skipped: (res as { skipped?: { env?: number; large?: number; binary?: number; limit?: number } }).skipped,
           });
         } else if (!sourceDir) {
           codeFolderInputRef.current?.click();
@@ -4111,7 +4111,9 @@ export function ProjectWorkspace() {
                       void enterPathAndOpen();
                       return;
                     }
-                    setComposerMode(action);
+                    if (action === 'plan' || action === 'ask' || action === 'agent' || action === 'debug' || action === 'multitask') {
+                      setComposerMode(action);
+                    }
                     requestAnimationFrame(() => textareaRef.current?.focus());
                   }}
                 />
@@ -4171,7 +4173,9 @@ export function ProjectWorkspace() {
                         void enterPathAndOpen();
                         return;
                       }
-                      setComposerMode(action);
+                      if (action === 'plan' || action === 'ask' || action === 'agent' || action === 'debug' || action === 'multitask') {
+                        setComposerMode(action);
+                      }
                       requestAnimationFrame(() => textareaRef.current?.focus());
                     }}
                   />

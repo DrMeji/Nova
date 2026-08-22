@@ -567,7 +567,7 @@ async function resolveStudioFiles(opts: {
           window.arkDesktop.projectRead(pid),
           new Promise<null>((resolve) => { window.setTimeout(() => resolve(null), 3_000); }),
         ]);
-        if (read?.ok && read.files && Object.keys(read.files).length) {
+        if (read?.ok && read.files && Object.keys(read.files || {}).length) {
           return {
             files: read.files as Record<string, string>,
             projectId: pid,
@@ -847,6 +847,7 @@ export function AIChat() {
     const reply: ChatMessage = {
       id: assistantId,
       user_id: user?.id ?? 'guest',
+      project_id: null,
       role: 'assistant',
       content: replyText,
       provider_used: 'ARK',
@@ -1670,7 +1671,7 @@ export function AIChat() {
       return;
     }
     const read = await window.arkDesktop?.projectRead?.(project.id);
-    if (read?.ok && read.files && Object.keys(read.files).length) {
+    if (read?.ok && read.files && Object.keys(read.files || {}).length) {
       setChatStudioFiles(read.files as Record<string, string>);
       chatStudioFilesRef.current = read.files as Record<string, string>;
       setChatStudioProjectId(project.id);
@@ -1690,7 +1691,7 @@ export function AIChat() {
       }
       setPendingAttaches(prev => [
         ...prev.filter(a => a.kind !== 'folder'),
-        { kind: 'folder', name: repo.name, count: Object.keys(read.files).length, projectId: project.id, id: project.id },
+        { kind: 'folder' as const, name: repo.name, count: Object.keys(read.files || {}).length, projectId: project.id, id: project.id },
       ].slice(0, 12));
     }
     setMessages(prev => [...prev, {
@@ -1909,11 +1910,11 @@ export function AIChat() {
     try {
       const useInPlace = Boolean(sourceDir || hasFolderAccessGrant()) && window.arkDesktop?.workspaceOpenRoot;
       const res = useInPlace
-        ? await window.arkDesktop.workspaceOpenRoot({
+        ? await window.arkDesktop?.workspaceOpenRoot?.({
           projectId: pid,
           ...(sourceDir ? { sourceDir } : {}),
         })
-        : await window.arkDesktop.projectImportFolder({
+        : await window.arkDesktop?.projectImportFolder?.({
           projectId: pid,
           ...(sourceDir ? { sourceDir } : {}),
         });
@@ -1934,7 +1935,7 @@ export function AIChat() {
           const read = await window.arkDesktop.readTextFile?.({ path: filePath });
           const text = read?.ok && read.text != null ? read.text : `[Attached file: ${base}]`;
           setChatStudioFiles(prev => ({ ...prev, [base]: text }));
-          setPendingAttaches(prev => [...prev, { kind: 'file', name: base, count: 1, id: `file-${pid}` }].slice(0, 12));
+          setPendingAttaches(prev => [...prev, { kind: 'file' as const, name: base, count: 1, id: `file-${pid}` }].slice(0, 12));
           return { ok: true };
         }
         const err = res?.error || 'Could not open that folder.';
@@ -1962,7 +1963,7 @@ export function AIChat() {
       }
       setPendingAttaches(prev => [
         ...prev,
-        { kind: 'folder', name: folderName, count, projectId: pid, id: pid },
+        { kind: 'folder' as const, name: folderName, count, projectId: pid, id: pid },
       ].slice(0, 12));
       setDropHint(null);
       try {
@@ -2338,6 +2339,7 @@ export function AIChat() {
       const reply: ChatMessage = {
         id: assistantId,
         user_id: user?.id ?? 'guest',
+      project_id: null,
         role: 'assistant',
         content: replyText,
         provider_used: 'ARK',
@@ -3004,6 +3006,7 @@ export function AIChat() {
         const errMsg: ChatMessage = {
           id: assistantId,
           user_id: user?.id ?? 'guest',
+      project_id: null,
           role: 'assistant',
           content: GRANT_OFF_FOLDER_MSG,
           provider_used: 'ARK',
@@ -3022,6 +3025,7 @@ export function AIChat() {
         const errMsg: ChatMessage = {
           id: assistantId,
           user_id: user?.id ?? 'guest',
+      project_id: null,
           role: 'assistant',
           content: 'Which folder on your Desktop? Say the name — for example: *“What is AutoTrade on my desktop?”* or *“On my desktop I have a folder called my-app.”*',
           provider_used: 'ARK',
@@ -3067,6 +3071,7 @@ export function AIChat() {
           const errMsg: ChatMessage = {
             id: assistantId,
             user_id: user?.id ?? 'guest',
+      project_id: null,
             role: 'assistant',
             content: errReply,
             provider_used: 'ARK',
@@ -3083,6 +3088,7 @@ export function AIChat() {
         const errMsg: ChatMessage = {
           id: assistantId,
           user_id: user?.id ?? 'guest',
+      project_id: null,
           role: 'assistant',
           content: located.error,
           provider_used: 'ARK',
@@ -3182,7 +3188,7 @@ export function AIChat() {
         return;
       }
       const read = await window.arkDesktop?.projectRead?.(project.id);
-      if (read?.ok && read.files && Object.keys(read.files).length) {
+      if (read?.ok && read.files && Object.keys(read.files || {}).length) {
         resolvedStudio.files = read.files as Record<string, string>;
         resolvedStudio.projectId = project.id;
         resolvedStudio.name = ref.repo;
@@ -3234,7 +3240,7 @@ export function AIChat() {
       if (studioCmd) {
         if (studioCmd.reload && window.arkDesktop?.projectRead) {
           const read = await window.arkDesktop.projectRead(workspaceProjectId);
-          if (read?.ok && read.files && Object.keys(read.files).length) {
+          if (read?.ok && read.files && Object.keys(read.files || {}).length) {
             resolvedStudio.files = read.files as Record<string, string>;
             setChatStudioFiles(resolvedStudio.files);
             chatStudioFilesRef.current = resolvedStudio.files;
@@ -3719,7 +3725,7 @@ export function AIChat() {
                   window.arkDesktop.projectRead(pid),
                   new Promise<null>((resolve) => { window.setTimeout(() => resolve(null), 4_000); }),
                 ]);
-                if (read?.ok && read.files && Object.keys(read.files).length) {
+                if (read?.ok && read.files && Object.keys(read.files || {}).length) {
                   filesForInspect = read.files as Record<string, string>;
                   setChatStudioFiles(filesForInspect);
                   chatStudioFilesRef.current = filesForInspect;
