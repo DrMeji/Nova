@@ -8,50 +8,8 @@ import {
   normalizeDiskFileName,
 } from './projectNames';
 import { resolveNamedFolderOnDisk, resolveDesktopProjectsFolderOnDisk } from './deleteProjectFlow';
-import { DESKTOP_PROJECTS_PARENT } from './chatDiskIntent';
+import { resolveDiskParentPath } from './diskPathResolve';
 import type { LastListedFolder } from './chatStudioStore';
-
-async function resolveDiskParentPath(opts: {
-  parentHint?: string;
-  workspaceDiskRoot?: string | null;
-  workspaceName?: string | null;
-  stickyTarget?: { path: string; name: string; kind: 'file' | 'folder' } | null;
-  lastListedFolder?: LastListedFolder | null;
-}): Promise<string | null> {
-  const {
-    parentHint,
-    workspaceDiskRoot,
-    workspaceName,
-    stickyTarget,
-    lastListedFolder,
-  } = opts;
-
-  const hint = String(parentHint || '').trim();
-  if (hint === DESKTOP_PROJECTS_PARENT || /^projects?$/i.test(hint)) {
-    const container = await resolveDesktopProjectsFolderOnDisk();
-    if (container?.path) return container.path;
-  }
-
-  if (hint && hint !== DESKTOP_PROJECTS_PARENT) {
-    const resolved = await resolveNamedFolderOnDisk(hint);
-    if (resolved?.path) return resolved.path;
-  }
-
-  if (lastListedFolder?.path) {
-    const stat = await pathStat(lastListedFolder.path);
-    if (stat?.ok && stat.isDirectory) return lastListedFolder.path;
-  }
-
-  if (stickyTarget?.kind === 'folder') return stickyTarget.path;
-  if (workspaceDiskRoot) return workspaceDiskRoot;
-
-  if (workspaceName) {
-    const resolved = await resolveNamedFolderOnDisk(workspaceName);
-    if (resolved?.path) return resolved.path;
-  }
-
-  return null;
-}
 
 function joinPath(root: string, name: string): string {
   const sep = root.includes('\\') ? '\\' : '/';

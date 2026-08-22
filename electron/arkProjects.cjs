@@ -249,6 +249,8 @@ function isUnderGrantedScope(absPath) {
   if (grants.desktop) {
     const desk = path.resolve(path.join(home, 'Desktop'));
     if (isPathUnderRoot(p, desk)) return true;
+    const pictures = path.resolve(path.join(home, 'Pictures'));
+    if (isPathUnderRoot(p, pictures)) return true;
   }
   if (grants.documents) {
     const docs = path.resolve(path.join(home, 'Documents'));

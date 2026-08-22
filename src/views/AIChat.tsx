@@ -97,7 +97,7 @@ import {
 } from '@/lib/pcExplore';
 import { isTraceMessage } from '@/lib/agentTrace';
 import { hasFolderAccessGrant, resolveScopedFolderPath, formatFolderLocatedMessage, syncWorkspaceGrantsFromPrefs, grantsFromPrefs, resolveWorkFolderPath } from '@/lib/workspaceGrants';
-import { saveChatStudio, loadChatStudio, clearChatStudio, setLastListedFolder, getLastListedFolder, clearLastListedFolder, setLastDiskTarget, getLastDiskTarget, clearLastDiskTarget } from '@/lib/chatStudioStore';
+import { saveChatStudio, loadChatStudio, clearChatStudio, setLastListedFolder, getLastListedFolder, clearLastListedFolder, setLastDiskTarget, getLastDiskTarget, clearLastDiskTarget, setLastPendingAddFile, getLastPendingAddFile, clearLastPendingAddFile } from '@/lib/chatStudioStore';
 import { runCodeStudioCommand } from '@/lib/studioCommands';
 import { applyChatReplyEdits } from '@/lib/chatAgentApply';
 import { deleteProjectFolderOnDisk, handleDeleteProjectChatRequest, looksLikeDeleteFolderAsk } from '@/lib/deleteProjectFlow';
@@ -2441,7 +2441,10 @@ export function AIChat() {
       .filter(m => m.role === 'user')
       .map(m => String(m.content || ''));
     const stickyDiskTarget = getLastDiskTarget(activeChatId);
-    const diskIntent = classifyDiskIntent(content, { recentUserMessages: recentUserLines });
+    const diskIntent = classifyDiskIntent(content, {
+      recentUserMessages: recentUserLines,
+      pendingAddFile: getLastPendingAddFile(activeChatId)?.fileName || null,
+    });
     const diskRoot = resolvedStudio.diskRoot || chatStudioDiskRootRef.current;
     const diskProjectId = resolvedStudio.projectId || chatStudioProjectIdRef.current || null;
     const diskWorkspaceName = resolvedStudio.name || loadChatStudio(activeChatId)?.name || null;
@@ -2584,10 +2587,14 @@ export function AIChat() {
         if (mySeq !== genSeqRef.current) return;
 
         if (addOutcome.kind === 'reply') {
+          if (diskIntent.name) {
+            setLastPendingAddFile(activeChatId, diskIntent.name);
+          }
           await finishPlainReply(addOutcome.text);
           return;
         }
         if (addOutcome.kind === 'done') {
+          clearLastPendingAddFile(activeChatId);
           setLastDiskTarget(activeChatId, {
             path: addOutcome.filePath,
             name: addOutcome.fileName,

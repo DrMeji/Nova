@@ -174,3 +174,52 @@ export function clearLastDiskTarget(chatId: string) {
     /* ignore */
   }
 }
+
+export type LastPendingAddFile = {
+  fileName: string;
+  at: number;
+};
+
+export const LAST_PENDING_ADD_FILE_TTL_MS = 30 * 60 * 1000;
+
+function lastPendingAddFileKey(chatId: string) {
+  return `ark:chat-pending-add-file:${chatId}`;
+}
+
+export function setLastPendingAddFile(chatId: string, fileName: string) {
+  if (!chatId || !fileName) return;
+  try {
+    localStorage.setItem(lastPendingAddFileKey(chatId), JSON.stringify({
+      fileName,
+      at: Date.now(),
+    } satisfies LastPendingAddFile));
+  } catch {
+    /* ignore */
+  }
+}
+
+export function getLastPendingAddFile(chatId: string): LastPendingAddFile | null {
+  if (!chatId) return null;
+  try {
+    const raw = localStorage.getItem(lastPendingAddFileKey(chatId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as LastPendingAddFile;
+    if (!parsed?.fileName) return null;
+    if (Date.now() - (parsed.at || 0) > LAST_PENDING_ADD_FILE_TTL_MS) {
+      localStorage.removeItem(lastPendingAddFileKey(chatId));
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+export function clearLastPendingAddFile(chatId: string) {
+  if (!chatId) return;
+  try {
+    localStorage.removeItem(lastPendingAddFileKey(chatId));
+  } catch {
+    /* ignore */
+  }
+}
