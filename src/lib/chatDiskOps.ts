@@ -258,10 +258,10 @@ export async function handleReadFileChatRequest(opts: {
 
   if (stickyTarget?.kind === 'file' && namesRoughlyMatch(stickyTarget.name, wantFile)) {
     const read = await window.arkDesktop?.readTextFile?.({ path: stickyTarget.path, maxBytes: 120_000 });
-    if (read?.ok && read.content != null) {
-      const preview = read.content.length > 8000
-        ? `${read.content.slice(0, 8000)}\n\n…(truncated)`
-        : read.content;
+    if (read?.ok && read.text != null) {
+      const preview = read.text.length > 8000
+        ? `${read.text.slice(0, 8000)}\n\n…(truncated)`
+        : read.text;
       return {
         kind: 'reply',
         text: `**${stickyTarget.name}**\n\`${stickyTarget.path}\`\n\n\`\`\`\n${preview}\n\`\`\``,
@@ -288,15 +288,15 @@ export async function handleReadFileChatRequest(opts: {
   for (const candidatePath of [...new Set(candidatePaths)]) {
     const read = await window.arkDesktop?.readTextFile?.({ path: candidatePath, maxBytes: 120_000 });
     if (!read?.ok) continue;
-    if (read.isBinary) {
+    if (read.binary) {
       return {
         kind: 'reply',
         text: `**${wantFile}** at \`${read.path || candidatePath}\` is a binary file — I can only show text files here.`,
       };
     }
-    const preview = String(read.content || '').length > 8000
-      ? `${String(read.content).slice(0, 8000)}\n\n…(truncated)`
-      : String(read.content || '');
+    const preview = String(read.text || '').length > 8000
+      ? `${String(read.text).slice(0, 8000)}\n\n…(truncated)`
+      : String(read.text || '');
     return {
       kind: 'reply',
       text: `**${wantFile}**\n\`${read.path || candidatePath}\`\n\n\`\`\`\n${preview}\n\`\`\``,
