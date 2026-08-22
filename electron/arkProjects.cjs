@@ -838,6 +838,74 @@ function getProjectPath(projectId) {
   return { ok: true, root, inPlace: Boolean(meta?.inPlace), kind: meta?.kind || 'ark-project' };
 }
 
+function deleteGrantedFolder(targetPath) {
+  const full = path.resolve(String(targetPath || ''));
+  if (!full || !fs.existsSync(full)) return { ok: false, error: 'Folder not found' };
+  if (!isAllowedExternalPath(full)) {
+    return { ok: false, error: 'Path is outside an approved ARK workspace.' };
+  }
+  try {
+    const st = fs.statSync(full);
+    if (st.isDirectory()) {
+      fs.rmSync(full, { recursive: true, force: true, maxRetries: 5, retryDelay: 120 });
+    } else {
+      fs.unlinkSync(full);
+    }
+    return { ok: true, path: full };
+  } catch (err) {
+    if (process.platform === 'win32') {
+      const fallback = deleteGrantedFolderWindows(full);
+      if (fallback.ok) return fallback;
+    }
+    return { ok: false, error: err instanceof Error ? err.message : 'Delete failed' };
+  }
+}
+
+function writeGrantedFile(targetPath, content = '') {
+  const full = path.resolve(String(targetPath || ''));
+  if (!full) return { ok: false, error: 'Invalid path' };
+  if (!isAllowedExternalPath(full)) {
+    return { ok: false, error: 'Path is outside an approved ARK workspace.' };
+  }
+  try {
+    fs.mkdirSync(path.dirname(full), { recursive: true });
+    fs.writeFileSync(full, typeof content === 'string' ? content : String(content ?? ''), 'utf8');
+    return { ok: true, path: full };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'Write failed' };
+  }
+}
+
+function deleteGrantedFolderWindows(full) {
+  const { execFileSync } = require('child_process');
+  try {
+    const escaped = String(full).replace(/'/g, "''");
+    execFileSync(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-Command', `Remove-Item -LiteralPath '${escaped}' -Recurse -Force -ErrorAction Stop`],
+      { windowsHide: true, timeout: 120_000 },
+    );
+    if (!fs.existsSync(full)) return { ok: true, path: full };
+    return { ok: false, error: 'Folder still exists after delete.' };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'Delete failed' };
+  }
+}
+
+function deleteWorkspaceRoot(projectId) {
+  const root = path.resolve(resolveProjectRoot(projectId));
+  if (!fs.existsSync(root)) return { ok: false, error: 'Project folder not found' };
+  if (!isAllowedExternalPath(root)) {
+    return { ok: false, error: 'Path is outside an approved ARK workspace.' };
+  }
+  try {
+    fs.rmSync(root, { recursive: true, force: true });
+    return { ok: true, path: root };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'Delete failed' };
+  }
+}
+
 function deleteWorkspaceRelPath(projectId, relPath) {
   const root = resolveProjectRoot(projectId);
   const rootResolved = path.resolve(root);
@@ -1028,6 +1096,51 @@ function readTextFile(targetPath, maxBytes = 2_000_000) {
   }
 }
 
+/** Create a directory under grants or ARK projects root. */
+function workspaceMkdir(payload = {}) {
+  try {
+    const targetPath = path.resolve(String(payload.targetPath || ''));
+    if (!targetPath) return { ok: false, error: 'No path provided' };
+
+    const parent = path.dirname(targetPath);
+    const pr = path.resolve(projectsRoot());
+    const parentAllowed = isAllowedExternalPath(parent) || isPathUnderRoot(parent, pr);
+    const selfAllowed = isAllowedExternalPath(targetPath) || isPathUnderRoot(targetPath, pr);
+
+    if (!parentAllowed && !selfAllowed) {
+      return { ok: false, error: 'Path is outside an approved ARK workspace.' };
+    }
+
+    if (fs.existsSync(targetPath)) {
+      let entries = [];
+      try {
+        entries = fs.readdirSync(targetPath).filter(n => n && !n.startsWith('.'));
+      } catch {
+        /* ignore */
+      }
+      if (entries.length > 0 && !payload.useExisting) {
+        return { ok: false, error: 'exists_nonempty', path: targetPath };
+      }
+      return { ok: true, path: targetPath, existed: true };
+    }
+
+    fs.mkdirSync(targetPath, { recursive: true });
+    return { ok: true, path: targetPath, created: true };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'mkdir failed' };
+  }
+}
+
+function workspaceSandboxRoot() {
+  try {
+    const root = path.resolve(projectsRoot());
+    fs.mkdirSync(root, { recursive: true });
+    return { ok: true, path: root };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'sandbox failed' };
+  }
+}
+
 module.exports = {
   projectsRoot,
   projectDir,
@@ -1046,11 +1159,16 @@ module.exports = {
   readDataUrl,
   readProjectFiles,
   openWorkspaceRoot,
+  workspaceMkdir,
+  workspaceSandboxRoot,
   importFolder,
   searchProjectFiles,
   deleteProjectFiles,
   getProjectPath,
   deleteWorkspaceRelPath,
+  deleteWorkspaceRoot,
+  deleteGrantedFolder,
+  writeGrantedFile,
   walkProjectFiles,
   walkProjectFilesPaced,
 };

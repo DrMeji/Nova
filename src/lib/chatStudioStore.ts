@@ -67,3 +67,110 @@ export function clearChatStudio(chatId: string) {
     /* ignore */
   }
 }
+
+export type LastListedFolder = {
+  path: string;
+  name: string;
+  at: number;
+};
+
+export const LAST_LISTED_FOLDER_TTL_MS = 30 * 60 * 1000;
+
+function lastListedFolderKey(chatId: string) {
+  return `ark:chat-last-folder:${chatId}`;
+}
+
+export function setLastListedFolder(chatId: string, folder: { path: string; name: string }) {
+  if (!chatId || !folder.path) return;
+  try {
+    localStorage.setItem(lastListedFolderKey(chatId), JSON.stringify({
+      path: folder.path,
+      name: folder.name,
+      at: Date.now(),
+    } satisfies LastListedFolder));
+  } catch {
+    /* ignore */
+  }
+}
+
+export function getLastListedFolder(chatId: string): LastListedFolder | null {
+  if (!chatId) return null;
+  try {
+    const raw = localStorage.getItem(lastListedFolderKey(chatId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as LastListedFolder;
+    if (!parsed?.path) return null;
+    if (Date.now() - (parsed.at || 0) > LAST_LISTED_FOLDER_TTL_MS) {
+      localStorage.removeItem(lastListedFolderKey(chatId));
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+export function clearLastListedFolder(chatId: string) {
+  if (!chatId) return;
+  try {
+    localStorage.removeItem(lastListedFolderKey(chatId));
+  } catch {
+    /* ignore */
+  }
+}
+
+export type LastDiskTarget = {
+  path: string;
+  name: string;
+  kind: 'file' | 'folder';
+  at: number;
+};
+
+export const LAST_DISK_TARGET_TTL_MS = 30 * 60 * 1000;
+
+function lastDiskTargetKey(chatId: string) {
+  return `ark:chat-last-disk-target:${chatId}`;
+}
+
+export function setLastDiskTarget(
+  chatId: string,
+  target: { path: string; name: string; kind: 'file' | 'folder' },
+) {
+  if (!chatId || !target.path) return;
+  try {
+    localStorage.setItem(lastDiskTargetKey(chatId), JSON.stringify({
+      path: target.path,
+      name: target.name,
+      kind: target.kind,
+      at: Date.now(),
+    } satisfies LastDiskTarget));
+  } catch {
+    /* ignore */
+  }
+}
+
+export function getLastDiskTarget(chatId: string): LastDiskTarget | null {
+  if (!chatId) return null;
+  try {
+    const raw = localStorage.getItem(lastDiskTargetKey(chatId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as LastDiskTarget;
+    if (!parsed?.path) return null;
+    if (Date.now() - (parsed.at || 0) > LAST_DISK_TARGET_TTL_MS) {
+      localStorage.removeItem(lastDiskTargetKey(chatId));
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+export function clearLastDiskTarget(chatId: string) {
+  if (!chatId) return;
+  try {
+    localStorage.removeItem(lastDiskTargetKey(chatId));
+  } catch {
+    /* ignore */
+  }
+}

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, useLayoutEffect } from 'react';
+import { useState, useEffect, useRef, useMemo, useLayoutEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useAuth } from '@/context/AuthContext';
 import { useRouter, type ChatMode } from '@/context/RouterContext';
@@ -72,7 +72,6 @@ import {
   getAgentExecutionMode,
 } from '@/lib/agentExecution';
 import {
-  looksLikeDeleteFilesAsk,
   looksLikeFolderPathAsk,
   parseFolderPathAsk,
   GRANT_OFF_FOLDER_MSG,
@@ -98,16 +97,28 @@ import {
 } from '@/lib/pcExplore';
 import { isTraceMessage } from '@/lib/agentTrace';
 import { hasFolderAccessGrant, resolveScopedFolderPath, formatFolderLocatedMessage, syncWorkspaceGrantsFromPrefs, grantsFromPrefs, resolveWorkFolderPath } from '@/lib/workspaceGrants';
-import { saveChatStudio, loadChatStudio, clearChatStudio } from '@/lib/chatStudioStore';
+import { saveChatStudio, loadChatStudio, clearChatStudio, setLastListedFolder, getLastListedFolder, clearLastListedFolder, setLastDiskTarget, getLastDiskTarget, clearLastDiskTarget } from '@/lib/chatStudioStore';
 import { runCodeStudioCommand } from '@/lib/studioCommands';
-import { applyChatReplyEdits, deleteChatWorkspacePath, parseDeleteTargetFromMessage } from '@/lib/chatAgentApply';
+import { applyChatReplyEdits } from '@/lib/chatAgentApply';
+import { deleteProjectFolderOnDisk, handleDeleteProjectChatRequest, looksLikeDeleteFolderAsk } from '@/lib/deleteProjectFlow';
+import { classifyDiskIntent } from '@/lib/chatDiskIntent';
+import { deleteFileOnDisk, handleAddFileChatRequest, handleDeleteFileChatRequest } from '@/lib/chatDiskOps';
 import {
   inferAgentCommand,
   looksLikeRuntimeInstallAsk,
   proposeRuntimeInstall,
   runAgentCommand,
 } from '@/lib/chatAgentExec';
-import { isPlanPrefixedMessage, looksLikeImplementGo } from '@/lib/chatPlanMode';
+import {
+  buildCreateProjectPlan,
+  parseNewProjectIntent,
+  resolveCreateIntentFromThread,
+} from '@/lib/createProjectIntent';
+import {
+  formatCreateProjectReply,
+  runCreateProjectFlow,
+} from '@/lib/createProjectFlow';
+import { looksLikeImplementGo, shouldBlockChatFileWrites } from '@/lib/chatPlanMode';
 import {
   chatTurnAllowsExec,
   chatTurnAllowsFileEdits,
@@ -119,6 +130,9 @@ import {
 } from '@/lib/chatAgentTurn';
 import { githubToken } from '@/lib/codeGitHubWorkflow';
 import { FreeKeyWizard } from '@/components/FreeKeyWizard';
+import { DeleteProjectFolderModal } from '@/components/DeleteProjectFolderModal';
+import { DeleteFileModal } from '@/components/DeleteFileModal';
+import { DeleteFolderClarifyModal } from '@/components/DeleteFolderClarifyModal';
 import { ComposerPlusMenu, type ComposerPlusAction } from '@/components/ComposerPlusMenu';
 import { TokenUsageRing } from '@/components/TokenUsageRing';
 import { ArkErrorInline } from '@/components/ArkErrorInline';
@@ -578,6 +592,16 @@ function persistModeThread(
   }
 }
 
+/** Human-friendly delete prepare error (logs raw error to console for devtools). */
+function deletePrepareErrorReply(err: unknown): string {
+  const msg = err instanceof Error ? err.message : String(err || '');
+  console.error('[delete] failed:', err);
+  if (/before initialization/i.test(msg)) {
+    return 'Delete failed due to an internal app bug (module load). Please restart ARK after update — not a permissions issue.';
+  }
+  return msg || 'Could not prepare delete. Try again.';
+}
+
 export function AIChat() {
   const { user } = useAuth();
   const { route, navigate } = useRouter();
@@ -661,6 +685,42 @@ export function AIChat() {
   const [dropHint, setDropHint] = useState<string | null>(null);
   const [attachUploading, setAttachUploading] = useState<string | null>(null);
   const [githubPickerOpen, setGithubPickerOpen] = useState(false);
+  const [deleteProjectPrompt, setDeleteProjectPrompt] = useState<{ projectName: string; folderPath: string } | null>(null);
+  const [deleteProjectBusy, setDeleteProjectBusy] = useState(false);
+  const [deleteFilePrompt, setDeleteFilePrompt] = useState<{ fileName: string; filePath: string } | null>(null);
+  const [deleteFolderClarifyPrompt, setDeleteFolderClarifyPrompt] = useState<{ folderName: string; folderPath: string } | null>(null);
+  const [deleteFileBusy, setDeleteFileBusy] = useState(false);
+  const pendingProjectDeleteRef = useRef<{
+    assistantId: string;
+    chatId: string;
+    mode: ChatMode;
+    replyStartedAt: number;
+    folderPath: string;
+    projectId: string | null;
+    projectName: string;
+    mySeq: number;
+  } | null>(null);
+  const pendingFileDeleteRef = useRef<{
+    assistantId: string;
+    chatId: string;
+    mode: ChatMode;
+    replyStartedAt: number;
+    filePath: string;
+    fileName: string;
+    projectId: string | null;
+    relPath: string | null;
+    mySeq: number;
+  } | null>(null);
+  const pendingFolderClarifyRef = useRef<{
+    assistantId: string;
+    chatId: string;
+    mode: ChatMode;
+    replyStartedAt: number;
+    folderPath: string;
+    folderName: string;
+    projectId: string | null;
+    mySeq: number;
+  } | null>(null);
   const [inspectOfferId, setInspectOfferId] = useState<string | null>(null);
   /** actions = what next; handoff = after inspect */
   const [studioOfferKind, setStudioOfferKind] = useState<'actions' | 'handoff' | null>(null);
@@ -749,6 +809,243 @@ export function AIChat() {
       diskRoot,
     });
   };
+
+  const clearWorkspaceBinding = useCallback((chatId: string) => {
+    setChatStudioFiles({});
+    chatStudioFilesRef.current = {};
+    setChatStudioProjectId(null);
+    chatStudioProjectIdRef.current = null;
+    setChatStudioDiskRoot(null);
+    chatStudioDiskRootRef.current = null;
+    clearChatStudio(chatId);
+  }, []);
+
+  const finishPendingDeleteReply = useCallback((
+    assistantId: string,
+    chatId: string,
+    threadMode: ChatMode,
+    replyText: string,
+    replyStartedAt: number,
+  ) => {
+    const reply: ChatMessage = {
+      id: assistantId,
+      user_id: user?.id ?? 'guest',
+      role: 'assistant',
+      content: replyText,
+      provider_used: 'ARK',
+      created_at: new Date().toISOString(),
+      elapsed_ms: Date.now() - replyStartedAt,
+    };
+    const next = messagesRef.current.map(m => (m.id === assistantId ? reply : m));
+    messagesRef.current = next;
+    persistModeThread(threadMode, next, { chatId });
+    setMessages(next);
+    generatingRef.current = false;
+    if (activeGenChatIdRef.current === chatId) {
+      activeGenChatIdRef.current = null;
+    }
+    setGenerating(false);
+    notifyChatDone(chatId);
+  }, [user?.id]);
+
+  const handleDeleteProjectCancel = useCallback(() => {
+    const pending = pendingProjectDeleteRef.current;
+    pendingProjectDeleteRef.current = null;
+    setDeleteProjectPrompt(null);
+    if (!pending) return;
+    finishPendingDeleteReply(
+      pending.assistantId,
+      pending.chatId,
+      pending.mode,
+      'Delete canceled.',
+      pending.replyStartedAt,
+    );
+  }, [finishPendingDeleteReply]);
+
+  const handleDeleteProjectConfirm = useCallback(async () => {
+    const pending = pendingProjectDeleteRef.current;
+    if (!pending || deleteProjectBusy) return;
+    setDeleteProjectBusy(true);
+
+    const {
+      assistantId,
+      chatId,
+      mode: threadMode,
+      folderPath,
+      projectId,
+      projectName,
+      replyStartedAt,
+      mySeq,
+    } = pending;
+
+    const statusContent = '__generating__:chat:Deleting project folder…';
+    setMessages(prev => {
+      const next = prev.map(m => (m.id === assistantId ? { ...m, content: statusContent } : m));
+      messagesRef.current = next;
+      return next;
+    });
+
+    try {
+      clearWorkspaceBinding(chatId);
+      clearLastListedFolder(chatId);
+      clearLastDiskTarget(chatId);
+      const del = await deleteProjectFolderOnDisk({ folderPath, projectId });
+      if (mySeq !== genSeqRef.current) return;
+      const text = del.ok
+        ? `Deleted **${projectName}** from your PC.\n\n\`${del.path || folderPath}\``
+        : (del.error || `Could not delete **${projectName}**. Close File Explorer if that folder is open, then try again.`);
+      finishPendingDeleteReply(assistantId, chatId, threadMode, text, replyStartedAt);
+    } catch (err) {
+      if (mySeq !== genSeqRef.current) return;
+      finishPendingDeleteReply(
+        assistantId,
+        chatId,
+        threadMode,
+        err instanceof Error ? err.message : 'Delete failed.',
+        replyStartedAt,
+      );
+    } finally {
+      setDeleteProjectBusy(false);
+      setDeleteProjectPrompt(null);
+      pendingProjectDeleteRef.current = null;
+    }
+  }, [clearWorkspaceBinding, deleteProjectBusy, finishPendingDeleteReply]);
+
+  const handleDeleteFileCancel = useCallback(() => {
+    const pending = pendingFileDeleteRef.current;
+    pendingFileDeleteRef.current = null;
+    setDeleteFilePrompt(null);
+    if (!pending) return;
+    finishPendingDeleteReply(
+      pending.assistantId,
+      pending.chatId,
+      pending.mode,
+      'Delete canceled.',
+      pending.replyStartedAt,
+    );
+  }, [finishPendingDeleteReply]);
+
+  const handleDeleteFileConfirm = useCallback(async () => {
+    const pending = pendingFileDeleteRef.current;
+    if (!pending || deleteFileBusy) return;
+    setDeleteFileBusy(true);
+
+    const {
+      assistantId,
+      chatId,
+      mode: threadMode,
+      filePath,
+      fileName,
+      projectId,
+      relPath,
+      replyStartedAt,
+      mySeq,
+    } = pending;
+
+    const statusContent = '__generating__:chat:Deleting file…';
+    setMessages(prev => {
+      const next = prev.map(m => (m.id === assistantId ? { ...m, content: statusContent } : m));
+      messagesRef.current = next;
+      return next;
+    });
+
+    try {
+      const del = await deleteFileOnDisk({ filePath, projectId, relPath });
+      if (mySeq !== genSeqRef.current) return;
+      if (del.ok && relPath && projectId) {
+        const nextFiles = { ...chatStudioFilesRef.current };
+        delete nextFiles[relPath];
+        setChatStudioFiles(nextFiles);
+        chatStudioFilesRef.current = nextFiles;
+        persistStudioSnapshot(chatId, {
+          files: nextFiles,
+          projectId,
+          diskRoot: chatStudioDiskRootRef.current,
+        });
+      }
+      if (del.ok) clearLastDiskTarget(chatId);
+      const text = del.ok
+        ? `Deleted **${fileName}**.\n\n\`${del.path || filePath}\``
+        : (del.error || `Could not delete **${fileName}**. Close the app using that file, then try again.`);
+      finishPendingDeleteReply(assistantId, chatId, threadMode, text, replyStartedAt);
+    } catch (err) {
+      if (mySeq !== genSeqRef.current) return;
+      finishPendingDeleteReply(
+        assistantId,
+        chatId,
+        threadMode,
+        err instanceof Error ? err.message : 'Delete failed.',
+        replyStartedAt,
+      );
+    } finally {
+      setDeleteFileBusy(false);
+      setDeleteFilePrompt(null);
+      pendingFileDeleteRef.current = null;
+    }
+  }, [deleteFileBusy, finishPendingDeleteReply]);
+
+  const handleFolderClarifyCancel = useCallback(() => {
+    const pending = pendingFolderClarifyRef.current;
+    pendingFolderClarifyRef.current = null;
+    setDeleteFolderClarifyPrompt(null);
+    if (!pending) return;
+    finishPendingDeleteReply(
+      pending.assistantId,
+      pending.chatId,
+      pending.mode,
+      'Delete canceled.',
+      pending.replyStartedAt,
+    );
+  }, [finishPendingDeleteReply]);
+
+  const handleFolderClarifyConfirm = useCallback(async () => {
+    const pending = pendingFolderClarifyRef.current;
+    if (!pending || deleteFileBusy) return;
+    setDeleteFileBusy(true);
+
+    const {
+      assistantId,
+      chatId,
+      mode: threadMode,
+      folderPath,
+      folderName,
+      projectId,
+      replyStartedAt,
+      mySeq,
+    } = pending;
+
+    const statusContent = '__generating__:chat:Deleting project folder…';
+    setMessages(prev => {
+      const next = prev.map(m => (m.id === assistantId ? { ...m, content: statusContent } : m));
+      messagesRef.current = next;
+      return next;
+    });
+
+    try {
+      clearWorkspaceBinding(chatId);
+      clearLastListedFolder(chatId);
+      clearLastDiskTarget(chatId);
+      const del = await deleteProjectFolderOnDisk({ folderPath, projectId });
+      if (mySeq !== genSeqRef.current) return;
+      const text = del.ok
+        ? `Deleted **${folderName}** from your PC.\n\n\`${del.path || folderPath}\``
+        : (del.error || `Could not delete **${folderName}**. Close File Explorer if that folder is open, then try again.`);
+      finishPendingDeleteReply(assistantId, chatId, threadMode, text, replyStartedAt);
+    } catch (err) {
+      if (mySeq !== genSeqRef.current) return;
+      finishPendingDeleteReply(
+        assistantId,
+        chatId,
+        threadMode,
+        err instanceof Error ? err.message : 'Delete failed.',
+        replyStartedAt,
+      );
+    } finally {
+      setDeleteFileBusy(false);
+      setDeleteFolderClarifyPrompt(null);
+      pendingFolderClarifyRef.current = null;
+    }
+  }, [clearWorkspaceBinding, deleteFileBusy, finishPendingDeleteReply]);
 
   useEffect(() => {
     activeModelRef.current = activeModel;
@@ -2077,6 +2374,28 @@ export function AIChat() {
 
       pushAssistantStatus('Preparing answer…');
       await new Promise<void>(r => { window.setTimeout(r, 60); });
+      setLastListedFolder(activeChatId, {
+        path: opts.targetPath,
+        name: opts.displayName,
+      });
+      setLastDiskTarget(activeChatId, {
+        path: opts.targetPath,
+        name: opts.displayName,
+        kind: 'folder',
+      });
+      if (built.data.projects.length === 1) {
+        const only = built.data.projects[0];
+        const onlyPath = `${opts.targetPath.replace(/[/\\]+$/, '')}${opts.targetPath.includes('\\') ? '\\' : '/'}${only.name}`;
+        setLastListedFolder(activeChatId, {
+          path: onlyPath,
+          name: only.name,
+        });
+        setLastDiskTarget(activeChatId, {
+          path: onlyPath,
+          name: only.name,
+          kind: 'folder',
+        });
+      }
       await finishPlainReply(encodeCatalogMessage(built.data));
     };
 
@@ -2103,8 +2422,196 @@ export function AIChat() {
 
       pushAssistantStatus(stages[stages.length - 1] || 'Preparing answer…');
       await new Promise<void>(r => { window.setTimeout(r, 50); });
+      const listedSection = data.sections.find(s => s.path && s.items.length > 0) || data.sections.find(s => s.path);
+      if (listedSection?.path) {
+        setLastListedFolder(activeChatId, {
+          path: listedSection.path,
+          name: listedSection.title || listedSection.path.split(/[/\\]/).pop() || data.headline,
+        });
+        setLastDiskTarget(activeChatId, {
+          path: listedSection.path,
+          name: listedSection.title || listedSection.path.split(/[/\\]/).pop() || data.headline,
+          kind: 'folder',
+        });
+      }
       await finishPlainReply(encodePcExploreMessage(data));
     };
+
+    const recentUserLines = messagesRef.current
+      .filter(m => m.role === 'user')
+      .map(m => String(m.content || ''));
+    const stickyDiskTarget = getLastDiskTarget(activeChatId);
+    const diskIntent = classifyDiskIntent(content, { recentUserMessages: recentUserLines });
+    const diskRoot = resolvedStudio.diskRoot || chatStudioDiskRootRef.current;
+    const diskProjectId = resolvedStudio.projectId || chatStudioProjectIdRef.current || null;
+    const diskWorkspaceName = resolvedStudio.name || loadChatStudio(activeChatId)?.name || null;
+
+    const relPathFromDisk = (filePath: string): string | null => {
+      if (!diskRoot || !filePath) return null;
+      const normRoot = diskRoot.replace(/[/\\]+$/, '');
+      if (!filePath.startsWith(normRoot)) return null;
+      return filePath.slice(normRoot.length).replace(/^[/\\]/, '') || null;
+    };
+
+    // Disk intents — delete_file → delete_project → add_file (before catalog/create).
+    if (mode === 'general' || mode === 'code') {
+      if (diskIntent.type === 'delete_file') {
+        try {
+          const outcome = await handleDeleteFileChatRequest({
+            fileName: diskIntent.name,
+            parentHint: diskIntent.parentHint,
+            workspaceDiskRoot: diskRoot,
+            workspaceProjectId: diskProjectId,
+            workspaceFiles: resolvedStudio.files,
+            stickyTarget: stickyDiskTarget,
+          });
+
+          if (outcome.kind === 'reply') {
+            await finishPlainReply(outcome.text);
+            return;
+          }
+          if (outcome.kind === 'folder_mismatch') {
+            pendingFolderClarifyRef.current = {
+              assistantId,
+              chatId: activeChatId,
+              mode,
+              replyStartedAt,
+              folderPath: outcome.folderPath,
+              folderName: outcome.folderName,
+              projectId: outcome.projectId,
+              mySeq,
+            };
+            setDeleteFolderClarifyPrompt({
+              folderName: outcome.folderName,
+              folderPath: outcome.folderPath,
+            });
+            await finishPlainReply(
+              `**${outcome.folderName}** is a folder at \`${outcome.folderPath}\`, not a single file.\n\n`
+              + 'Confirm in the dialog if you want to delete the **entire project folder**.',
+            );
+            return;
+          }
+          if (outcome.kind === 'prompt') {
+            const relPath = relPathFromDisk(outcome.filePath)
+              || Object.keys(resolvedStudio.files).find(k => k.endsWith(outcome.fileName))
+              || null;
+            pendingFileDeleteRef.current = {
+              assistantId,
+              chatId: activeChatId,
+              mode,
+              replyStartedAt,
+              filePath: outcome.filePath,
+              fileName: outcome.fileName,
+              projectId: outcome.projectId,
+              relPath,
+              mySeq,
+            };
+            setDeleteFilePrompt({
+              fileName: outcome.fileName,
+              filePath: outcome.filePath,
+            });
+            await finishPlainReply(
+              `Ready to delete **${outcome.fileName}**.\n\nConfirm in the dialog — this removes only that file:\n\`${outcome.filePath}\``,
+            );
+            return;
+          }
+        } catch (err) {
+          await finishPlainReply(deletePrepareErrorReply(err));
+          return;
+        }
+      }
+
+      if (diskIntent.type === 'delete_project' || looksLikeDeleteFolderAsk(content)) {
+        console.log('[delete] router hit', content.slice(0, 80));
+        try {
+          const outcome = await handleDeleteProjectChatRequest({
+            content,
+            messages: messagesRef.current,
+            workspaceDiskRoot: diskRoot,
+            workspaceName: diskWorkspaceName,
+            workspaceProjectId: diskProjectId,
+            stickyListedFolder: getLastListedFolder(activeChatId),
+            stickyDiskTarget,
+          });
+
+          if (outcome.kind === 'reply') {
+            await finishPlainReply(outcome.text);
+            return;
+          }
+          if (outcome.kind === 'prompt') {
+            pendingProjectDeleteRef.current = {
+              assistantId,
+              chatId: activeChatId,
+              mode,
+              replyStartedAt,
+              folderPath: outcome.folderPath,
+              projectId: outcome.projectId,
+              projectName: outcome.projectName,
+              mySeq,
+            };
+            setDeleteProjectPrompt({
+              projectName: outcome.projectName,
+              folderPath: outcome.folderPath,
+            });
+            setLastDiskTarget(activeChatId, {
+              path: outcome.folderPath,
+              name: outcome.projectName,
+              kind: 'folder',
+            });
+            await finishPlainReply(
+              `Ready to delete **${outcome.projectName}**.\n\nConfirm in the dialog — this removes the folder from your PC:\n\`${outcome.folderPath}\``,
+            );
+            return;
+          }
+        } catch (err) {
+          await finishPlainReply(deletePrepareErrorReply(err));
+          return;
+        }
+      }
+
+      if (diskIntent.type === 'add_file') {
+        pushAssistantStatus('Creating file…');
+        const addOutcome = await handleAddFileChatRequest({
+          fileName: diskIntent.name,
+          parentHint: diskIntent.parentHint,
+          workspaceDiskRoot: diskRoot,
+          workspaceProjectId: diskProjectId,
+          workspaceName: diskWorkspaceName,
+        });
+        if (mySeq !== genSeqRef.current) return;
+
+        if (addOutcome.kind === 'reply') {
+          await finishPlainReply(addOutcome.text);
+          return;
+        }
+        if (addOutcome.kind === 'done') {
+          setLastDiskTarget(activeChatId, {
+            path: addOutcome.filePath,
+            name: addOutcome.fileName,
+            kind: 'file',
+          });
+          if (diskProjectId) {
+            const nextFiles = {
+              ...resolvedStudio.files,
+              [addOutcome.fileName]: '',
+            };
+            resolvedStudio.files = nextFiles;
+            setChatStudioFiles(nextFiles);
+            chatStudioFilesRef.current = nextFiles;
+            persistStudioSnapshot(activeChatId, {
+              files: nextFiles,
+              projectId: diskProjectId,
+              name: diskWorkspaceName || undefined,
+              diskRoot: diskRoot || null,
+            });
+          }
+          await finishPlainReply(
+            `Created file **${addOutcome.fileName}**.\n\n\`${addOutcome.filePath}\``,
+          );
+          return;
+        }
+      }
+    }
 
     // Switch workspace — user chose a project to work in (bind folder + rename chat).
     if ((mode === 'general' || mode === 'code') && looksLikeStartWorkOnFolderAsk(content)) {
@@ -2196,6 +2703,7 @@ export function AIChat() {
           targetPath = located.path;
           displayName = located.matchedName || folderRef.name;
           resolvedFromDesktop = true;
+          setLastListedFolder(activeChatId, { path: located.path, name: displayName });
         } else if (!looksLikeProjectsInventoryAsk(content)) {
           await finishPlainReply(located.error || 'Could not find that folder.');
           return;
@@ -2213,7 +2721,11 @@ export function AIChat() {
       }
 
       if (!targetPath) {
-        await finishPlainReply('Could not find a Projects folder or Desktop path. Turn on **Settings → Security → Allow Desktop folder access**, then ask again.');
+        await finishPlainReply(
+          hasFolderAccessGrant()
+            ? 'Could not find that folder on your Desktop. Check the name in File Explorer.'
+            : GRANT_OFF_FOLDER_MSG,
+        );
         return;
       }
 
@@ -2246,6 +2758,95 @@ export function AIChat() {
         return;
       }
       await runPcExplore(content);
+      return;
+    }
+
+    // New project create — scaffold on disk, bind workspace (after explore/catalog).
+    const workspaceActiveForCreate = hasActiveWorkspace({
+      files: resolvedStudio.files,
+      projectId: resolvedStudio.projectId || chatStudioProjectIdRef.current,
+      diskRoot: resolvedStudio.diskRoot || chatStudioDiskRootRef.current,
+    });
+    const createIntent = resolveCreateIntentFromThread(
+      content,
+      messagesRef.current.filter(m => m.role === 'user').map(m => String(m.content || '')),
+      { workspaceActive: workspaceActiveForCreate },
+    );
+    if (
+      (mode === 'general' || mode === 'code')
+      && createIntent
+      && diskIntent.type !== 'add_file'
+      && !looksLikeFolderCatalogAsk(content)
+      && !looksLikeProjectsInventoryAsk(content)
+      && !looksLikePcExploreAsk(content)
+    ) {
+      const turnMode = composerModeFromContent(content);
+      const workspaceActive = workspaceActiveForCreate;
+
+      if (workspaceActive && parseNewProjectIntent(content) && !looksLikeImplementGo(content)) {
+        await finishPlainReply(
+          'This chat already has a workspace open.\n\n'
+          + 'To create **another** project, start a new chat or say **“new project called …”** with a different name.',
+        );
+        return;
+      }
+
+      if (
+        createIntent.preferPlan
+        && shouldBlockChatFileWrites(content, turnMode)
+        && !looksLikeImplementGo(content)
+        && !/\bcreate\s+it\b/i.test(content)
+      ) {
+        await finishPlainReply(buildCreateProjectPlan(createIntent));
+        return;
+      }
+
+      pushAssistantStatus('Creating project folder…');
+      await syncWorkspaceGrantsFromPrefs();
+      if (mySeq !== genSeqRef.current) return;
+
+      pushAssistantStatus('Writing scaffold files…');
+      const newProjectId = `proj-${crypto.randomUUID().slice(0, 8)}`;
+      const created = await runCreateProjectFlow(createIntent, newProjectId);
+      if (mySeq !== genSeqRef.current) return;
+
+      if (!created.ok) {
+        await finishPlainReply(created.error || 'Could not create the project.');
+        return;
+      }
+
+      setChatStudioFiles(created.files);
+      chatStudioFilesRef.current = created.files;
+      setChatStudioProjectId(created.projectId || newProjectId);
+      chatStudioProjectIdRef.current = created.projectId || newProjectId;
+      if (created.projectPath) {
+        setChatStudioDiskRoot(created.projectPath);
+        chatStudioDiskRootRef.current = created.projectPath;
+      }
+      renameChat(activeChatId, createIntent.name);
+      addChat({
+        id: activeChatId,
+        mode,
+        title: createIntent.name,
+        updatedAt: new Date().toISOString(),
+        preview: previewFromText(content),
+      });
+      persistStudioSnapshot(activeChatId, {
+        files: created.files,
+        projectId: created.projectId || newProjectId,
+        name: createIntent.name,
+        diskRoot: created.projectPath || null,
+      });
+      if (created.projectPath) {
+        setLastDiskTarget(activeChatId, {
+          path: created.projectPath,
+          name: createIntent.name,
+          kind: 'folder',
+        });
+      }
+
+      pushAssistantStatus('Preparing answer…');
+      await finishPlainReply(formatCreateProjectReply(createIntent, created));
       return;
     }
 
@@ -2467,7 +3068,6 @@ export function AIChat() {
     const turnNeedsWorkspace = (
       chatTurnAllowsExec(content, turnComposerMode)
       || chatTurnAllowsFileEdits(content, turnComposerMode)
-      || looksLikeDeleteFilesAsk(content)
       || Boolean(classifyGitAsk(content))
     ) && !looksLikeFolderPathAsk(content);
 
@@ -2510,44 +3110,6 @@ export function AIChat() {
         finishAgentReply(studioCmd.reply, 'ARK · git');
         return;
       }
-    }
-
-    // STEP 3: Delete file in active workspace
-    if (
-      looksLikeDeleteFilesAsk(content)
-      && workspaceProjectId
-      && studioFileKeys.length
-      && (mode === 'general' || mode === 'code')
-    ) {
-      const target = parseDeleteTargetFromMessage(content);
-      if (!target) {
-        finishAgentReply(
-          'Which file should I delete? Name the path — e.g. *delete `src/old.ts`*.',
-          'ARK',
-        );
-        return;
-      }
-      if (!window.confirm(`Delete from your workspace?\n\n${target}`)) {
-        finishAgentReply('Delete canceled.', 'ARK');
-        return;
-      }
-      const del = await deleteChatWorkspacePath({ projectId: workspaceProjectId, relPath: target });
-      if (del.ok) {
-        const nextFiles = { ...resolvedStudio.files };
-        delete nextFiles[target];
-        resolvedStudio.files = nextFiles;
-        setChatStudioFiles(nextFiles);
-        chatStudioFilesRef.current = nextFiles;
-        persistStudioSnapshot(activeChatId, {
-          files: nextFiles,
-          projectId: workspaceProjectId,
-          name: workspaceLabel,
-        });
-        finishAgentReply(`Deleted \`${target}\` from your workspace.`, 'ARK');
-      } else {
-        finishAgentReply(del.error || `Could not delete \`${target}\`.`, 'ARK');
-      }
-      return;
     }
 
     // STEP 4–5: Agent commands (npm/pip/git shell) and runtime installs
@@ -2620,20 +3182,6 @@ export function AIChat() {
           return;
         }
       }
-    }
-
-    if (looksLikeDeleteFilesAsk(content) && !studioFileKeys.length) {
-      const hint = hasFolderAccessGrant()
-        ? 'Tell me exactly which files or folders to remove (name or path). With Desktop or Full PC access on, I can delete what you point at — or attach a screenshot and describe what to remove.'
-        : 'Turn on **Full PC access** or **Desktop access** in Settings → Security, then tell me exactly which files to remove.';
-      const next = messagesRef.current.map(m => (
-        m.id === assistantId ? { ...m, content: hint, provider_used: 'ARK' } : m
-      ));
-      messagesRef.current = next;
-      persistModeThread(mode, next, { chatId: activeChatId });
-      setMessages(next);
-      clearGeneratingIfMineEarly();
-      return;
     }
 
     // HARD GATE: sticky files → unified answer engine (never bare arkRoute).
@@ -4619,7 +5167,7 @@ export function AIChat() {
                           type="button"
                           className="text-[10px] rounded-full bg-emerald-600 text-white px-2.5 py-1"
                           onClick={() => {
-                            void sendMessageRef.current('Go implement — build this in the attached workspace.');
+                            void sendMessageRef.current('go implement');
                           }}
                         >
                           Go implement
@@ -4733,6 +5281,24 @@ export function AIChat() {
           void probeLiveCapacity().then(setCapacity).catch(() => undefined);
         }}
         preferIds={capacity?.suggestedFreeKeys.map(k => k.id)}
+      />
+      <DeleteProjectFolderModal
+        prompt={deleteProjectPrompt}
+        busy={deleteProjectBusy}
+        onCancel={handleDeleteProjectCancel}
+        onConfirm={() => { void handleDeleteProjectConfirm(); }}
+      />
+      <DeleteFileModal
+        prompt={deleteFilePrompt}
+        busy={deleteFileBusy}
+        onCancel={handleDeleteFileCancel}
+        onConfirm={() => { void handleDeleteFileConfirm(); }}
+      />
+      <DeleteFolderClarifyModal
+        prompt={deleteFolderClarifyPrompt}
+        busy={deleteFileBusy}
+        onCancel={handleFolderClarifyCancel}
+        onConfirmFolder={() => { void handleFolderClarifyConfirm(); }}
       />
     </div>
   );

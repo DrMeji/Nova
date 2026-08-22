@@ -96,15 +96,20 @@ export function parseDesktopSubfolderAsk(message: string): FolderPathRef | null 
     if (name.length >= 2) return { scope: 'desktop', name };
   }
 
+  if (/\b(?:inside|in)\s+(?:of\s+)?(?:the\s+)?projects?\b/i.test(t)) {
+    return { scope: 'desktop', name: 'Projects' };
+  }
+
   return null;
 }
 
 export function parseFolderPathAsk(message: string): FolderPathRef | null {
-  const sub = parseDesktopSubfolderAsk(message);
-  if (sub) return sub;
-
   const t = String(message || '').trim();
   if (!t) return null;
+  if (/\b(delete|remove|trash|wipe|get rid of)\b/i.test(t)) return null;
+
+  const sub = parseDesktopSubfolderAsk(message);
+  if (sub) return sub;
 
   const abs = t.match(ABS_WIN_PATH_RE);
   if (abs?.[1] && !/\.(exe|dll|lnk|bat|cmd|msi)$/i.test(abs[1])) {

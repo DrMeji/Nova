@@ -114,11 +114,16 @@ contextBridge.exposeInMainWorld('arkDesktop', {
   projectPath: (projectId) => ipcRenderer.invoke('ark:project-path', projectId),
   projectImportFolder: (payload) => ipcRenderer.invoke('ark:project-import-folder', payload),
   workspaceOpenRoot: (payload) => ipcRenderer.invoke('ark:workspace-open-root', payload),
+  workspaceMkdir: (payload) => ipcRenderer.invoke('ark:workspace-mkdir', payload || {}),
+  workspaceSandboxRoot: () => ipcRenderer.invoke('ark:workspace-sandbox-root'),
   workspaceStatPath: (targetPath) => ipcRenderer.invoke('ark:workspace-stat-path', targetPath),
   workspaceSetGrants: (grants) => ipcRenderer.invoke('ark:workspace-set-grants', grants),
   workspaceGetGrants: () => ipcRenderer.invoke('ark:workspace-get-grants'),
   agentRun: (payload) => ipcRenderer.invoke('ark:agent-run', payload),
   workspaceDeletePath: (payload) => ipcRenderer.invoke('ark:workspace-delete-path', payload),
+  workspaceDeleteRoot: (payload) => ipcRenderer.invoke('ark:workspace-delete-root', payload),
+  workspaceDeleteFolder: (payload) => ipcRenderer.invoke('ark:workspace-delete-folder', payload),
+  workspaceWriteFile: (payload) => ipcRenderer.invoke('ark:workspace-write-file', payload),
   gitCloneOpen: (payload) => ipcRenderer.invoke('ark:git-clone-open', payload),
   onProjectImportProgress: (handler) => {
     const fn = (_e, payload) => {

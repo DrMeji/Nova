@@ -58,6 +58,57 @@ export async function probeRuntime(command: string): Promise<boolean> {
   return Boolean(ran.ok);
 }
 
+const WINGET_NOISE_RE = [
+  /^this application is licensed to you by its owner\.?$/i,
+  /^microsoft is not responsible for, nor does it grant any licenses to, third-party packages\.?$/i,
+  /^found an existing package already installed/i,
+  /^found .+\] version /i,
+  /^downloading https?:\/\//i,
+  /^successfully verified installer hash/i,
+  /^installer hash verified/i,
+];
+
+function sanitizeAgentOutput(raw: string, command: string): string {
+  const cmd = String(command || '').trim();
+  const text = String(raw || '').trim();
+  if (!text) return 'Done.';
+
+  if (/^winget\b/i.test(cmd)) {
+    const pkg = cmd.match(/winget\s+install\s+(\S+)/i)?.[1] || 'package';
+    if (/\bsuccessfully installed\b/i.test(text)) {
+      return `**${pkg}** installed successfully.`;
+    }
+    if (/\bno available upgrade found\b/i.test(text) || /\balready installed\b/i.test(text)) {
+      return `**${pkg}** is already installed.`;
+    }
+    const lines = text.split('\n').map(l => l.trim()).filter(Boolean)
+      .filter(l => !WINGET_NOISE_RE.some(re => re.test(l)));
+    const tail = lines.slice(-3).join('\n');
+    return tail || 'Install finished.';
+  }
+
+  if (/^npm\s+install\b/i.test(cmd) || /^pnpm\s+install\b/i.test(cmd) || /^yarn(\s+install)?\b/i.test(cmd)) {
+    if (/\badded \d+ package/i.test(text) || /\bup to date\b/i.test(text) || /\baudited \d+ package/i.test(text)) {
+      return 'Dependencies installed successfully.';
+    }
+    const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+    const useful = lines.filter(l => /^(added|removed|changed|up to date|audited)\b/i.test(l));
+    return useful.slice(-4).join('\n') || 'Dependencies installed successfully.';
+  }
+
+  if (/^pip\s+install\b/i.test(cmd)) {
+    if (/\bsuccessfully installed\b/i.test(text)) return 'Python packages installed successfully.';
+    const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+    return lines.filter(l => /successfully installed|requirement already satisfied/i.test(l)).slice(-4).join('\n')
+      || 'Install finished.';
+  }
+
+  const lines = text.split('\n').map(l => l.trim()).filter(Boolean)
+    .filter(l => !WINGET_NOISE_RE.some(re => re.test(l)));
+  if (lines.length <= 8) return lines.join('\n');
+  return [...lines.slice(0, 2), '…', ...lines.slice(-4)].join('\n');
+}
+
 export async function runAgentCommand(opts: {
   command: string;
   cwd: string;
@@ -86,9 +137,9 @@ export async function runAgentCommand(opts: {
     cwd,
     mode: getAgentExecutionMode(),
   });
-  const out = ran.output?.trim();
+  const out = sanitizeAgentOutput(ran.output?.trim() || '', command);
   const reply = ran.ok
-    ? [`Ran \`${command}\` in your workspace.`, out || 'Finished with no output.'].filter(Boolean).join('\n\n')
+    ? out
     : [`Could not run \`${command}\`.`, ran.error || out || 'Command failed.'].filter(Boolean).join('\n\n');
   return { handled: true, reply };
 }

@@ -931,6 +931,22 @@ ipcMain.handle('ark:project-import-folder', async (event, payload) => {
   }
 });
 
+ipcMain.handle('ark:workspace-mkdir', async (_e, payload) => {
+  try {
+    return arkProjects.workspaceMkdir(payload || {});
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'mkdir failed' };
+  }
+});
+
+ipcMain.handle('ark:workspace-sandbox-root', async () => {
+  try {
+    return arkProjects.workspaceSandboxRoot();
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'sandbox failed' };
+  }
+});
+
 /** Open folder in-place — edits go to the real path on disk (no copy). */
 ipcMain.handle('ark:workspace-open-root', async (event, payload) => {
   try {
@@ -1007,6 +1023,30 @@ ipcMain.handle('ark:workspace-delete-path', async (_e, payload) => {
     return arkProjects.deleteWorkspaceRelPath(payload?.projectId, payload?.relPath);
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'delete failed' };
+  }
+});
+
+ipcMain.handle('ark:workspace-delete-root', async (_e, payload) => {
+  try {
+    return arkProjects.deleteWorkspaceRoot(payload?.projectId);
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'delete failed' };
+  }
+});
+
+ipcMain.handle('ark:workspace-delete-folder', async (_e, payload) => {
+  try {
+    return arkProjects.deleteGrantedFolder(payload?.targetPath);
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'delete failed' };
+  }
+});
+
+ipcMain.handle('ark:workspace-write-file', async (_e, payload) => {
+  try {
+    return arkProjects.writeGrantedFile(payload?.targetPath, payload?.content ?? '');
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'write failed' };
   }
 });
 

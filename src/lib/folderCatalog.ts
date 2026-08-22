@@ -45,6 +45,14 @@ export function resolveCatalogFolderRef(message: string): FolderPathRef | null {
     return { scope: 'desktop', name: 'Projects' };
   }
 
+  if (/\b(?:inside|in)\s+(?:of\s+)?(?:the\s+)?projects?\b/i.test(t)) {
+    return { scope: 'desktop', name: 'Projects' };
+  }
+
+  if (/\b(?:files?|folders?|contents?)\b/i.test(t) && /\bprojects?\b/i.test(t)) {
+    return { scope: 'desktop', name: 'Projects' };
+  }
+
   if (/\bwhat(?:'s| is)\s+on\s+(?:my\s+)?desktop\b/i.test(t)) {
     return { scope: 'desktop', name: 'Projects' };
   }
@@ -75,6 +83,7 @@ const KEY_FILE_NAMES = [
 export function looksLikeFolderCatalogAsk(text: string): boolean {
   const t = String(text || '').trim();
   if (!t) return false;
+  if (/\b(delete|remove|trash|wipe|get rid of)\b/i.test(t)) return false;
   if (looksLikeInstalledAppsAsk(t)) return false;
   if (looksLikeProjectsInventoryAsk(t)) return true;
   if (WORK_ON_FOLDER_RE.test(t)) return false;
@@ -96,6 +105,9 @@ export function looksLikeFolderCatalogAsk(text: string): boolean {
     return true;
   }
   if (FOLDER_CATALOG_RE.test(t)) return true;
+  if (/\b(?:files?|folders?|contents?)\b/i.test(t) && /\b(?:inside|in)\s+(?:of\s+)?(?:the\s+)?projects?\b/i.test(t)) {
+    return true;
+  }
   if (/\b(?:folder|project)\b[\s\S]{0,80}\bwhat(?:'s| is)\s+(?:in|inside)\b/i.test(t)) return true;
   if (/\bwhat(?:'s| is)\s+in\s+it\b/i.test(t)) return true;
   if (

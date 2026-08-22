@@ -357,6 +357,17 @@ declare global {
         catalogOnly?: boolean;
         error?: string;
       }>;
+      workspaceMkdir?: (payload: {
+        targetPath: string;
+        useExisting?: boolean;
+      }) => Promise<{
+        ok: boolean;
+        path?: string;
+        created?: boolean;
+        existed?: boolean;
+        error?: string;
+      }>;
+      workspaceSandboxRoot?: () => Promise<{ ok: boolean; path?: string; error?: string }>;
       workspaceStatPath?: (targetPath: string) => Promise<{
         ok: boolean;
         path?: string;
@@ -404,6 +415,16 @@ declare global {
       workspaceDeletePath?: (payload: {
         projectId: string;
         relPath: string;
+      }) => Promise<{ ok: boolean; path?: string; error?: string }>;
+      workspaceDeleteRoot?: (payload: {
+        projectId: string;
+      }) => Promise<{ ok: boolean; path?: string; error?: string }>;
+      workspaceDeleteFolder?: (payload: {
+        targetPath: string;
+      }) => Promise<{ ok: boolean; path?: string; error?: string }>;
+      workspaceWriteFile?: (payload: {
+        targetPath: string;
+        content?: string;
       }) => Promise<{ ok: boolean; path?: string; error?: string }>;
       gitCloneOpen?: (payload: {
         projectId: string;

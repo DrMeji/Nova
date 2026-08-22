@@ -37,9 +37,10 @@ import { AuthAmbientOrbs } from '@/components/auth/AuthAmbientOrbs';
 import {
   Loader2, Cpu, MemoryStick, HardDrive, Zap, CheckCircle2, Download,
   Monitor, MonitorCog, Check, Gauge, KeyRound, Shield, ExternalLink, Wifi, FolderOpen,
+  FolderKanban, HardDriveDownload, Sparkles,
 } from 'lucide-react';
 
-type Phase = 'intro' | 'hardware' | 'speed' | 'models' | 'connect' | 'finishing';
+type Phase = 'intro' | 'hardware' | 'speed' | 'models' | 'access' | 'connect' | 'finishing';
 
 type RecModel = {
   id: string;
@@ -378,22 +379,66 @@ export function OnboardingScreen() {
     'Matching models to this PC',
   ];
 
-  const stepLabels = ['Hardware', 'Speed', 'Models', 'Connect'] as const;
+  const stepLabels = ['Hardware', 'Speed', 'Models', 'Access', 'Connect'] as const;
+  const accessEnabledCount = [desktopAccess, documentsAccess, fullPcAccess].filter(Boolean).length;
+
+  const enableRecommendedAccess = () => {
+    if (!window.confirm(
+      'Enable Desktop, Documents, and Full PC file access?\n\nARK can explore folders and list projects when you ask. Installs and deletes still ask for confirmation.',
+    )) return;
+    setDesktopAccess(true);
+    setDocumentsAccess(true);
+    setFullPcAccess(true);
+  };
+
+  const toggleDesktopAccess = () => {
+    const next = !desktopAccess;
+    if (next && !window.confirm(
+      'Allow ARK to read folders under your Desktop?\n\nScope: Desktop only — not your whole drive.',
+    )) return;
+    setDesktopAccess(next);
+  };
+
+  const toggleDocumentsAccess = () => {
+    const next = !documentsAccess;
+    if (next && !window.confirm(
+      'Allow ARK to read folders under your Documents?\n\nScope: Documents only — not your whole drive.',
+    )) return;
+    setDocumentsAccess(next);
+  };
+
+  const toggleFullPcAccess = () => {
+    const next = !fullPcAccess;
+    if (next && !window.confirm(
+      'Give ARK broad file access on this PC?\n\nARK can list installed apps, scan beyond Desktop, and open folders you name. Windows system folders stay blocked.',
+    )) return;
+    setFullPcAccess(next);
+    if (next) {
+      setDesktopAccess(true);
+      setDocumentsAccess(true);
+    }
+  };
 
   return (
     <div className="h-full bg-ark-navy-950 flex items-center justify-center px-4 relative overflow-hidden">
       <AuthAmbientOrbs />
 
-      <div className="relative z-10 w-full max-w-lg animate-fade-in">
+      <div className="relative z-10 w-full max-w-xl animate-fade-in">
         <div className="text-center mb-8">
           <p className="text-xs uppercase tracking-[0.2em] text-content-tertiary mb-3">First run setup</p>
           <h1 className="text-3xl font-semibold text-content-primary tracking-tight">
-            {phase === 'connect' ? 'Connect free capacity' : "Let's optimize your computer"}
+            {phase === 'access'
+              ? 'Give ARK access'
+              : phase === 'connect'
+                ? 'Connect free capacity'
+                : "Let's optimize your computer"}
           </h1>
           <p className="text-sm text-content-secondary mt-2 max-w-md mx-auto">
-            {phase === 'connect'
-              ? 'Add free keys once (Groq, Google, OpenRouter). ARK Auto fails over between them and your local brain so chat keeps going.'
-              : 'ARK checks your hardware and download speed, installs a fitting local brain, then helps you connect free cloud capacity.'}
+            {phase === 'access'
+              ? 'Let ARK explore your Desktop, list projects, find games, and run installs when you ask. You can change this anytime in Settings → Security.'
+              : phase === 'connect'
+                ? 'Add free keys once (Groq, Google, OpenRouter). ARK Auto fails over between them and your local brain so chat keeps going.'
+                : 'ARK checks your hardware and download speed, installs a fitting local brain, then helps you connect free cloud capacity.'}
           </p>
         </div>
 
@@ -404,18 +449,20 @@ export function OnboardingScreen() {
                 (i === 0 && (phase === 'intro' || phase === 'hardware'))
                 || (i === 1 && phase === 'speed')
                 || (i === 2 && phase === 'models')
-                || (i === 3 && (phase === 'connect' || phase === 'finishing'));
+                || (i === 3 && phase === 'access')
+                || (i === 4 && (phase === 'connect' || phase === 'finishing'));
               const done =
-                (i === 0 && Boolean(hw) && (phase === 'speed' || phase === 'models' || phase === 'connect' || phase === 'finishing'))
-                || (i === 1 && Boolean(speedPlan) && (phase === 'models' || phase === 'connect' || phase === 'finishing'))
-                || (i === 2 && (phase === 'connect' || phase === 'finishing'))
-                || (i === 3 && phase === 'finishing' && progress >= 100);
+                (i === 0 && Boolean(hw) && (phase === 'speed' || phase === 'models' || phase === 'access' || phase === 'connect' || phase === 'finishing'))
+                || (i === 1 && Boolean(speedPlan) && (phase === 'models' || phase === 'access' || phase === 'connect' || phase === 'finishing'))
+                || (i === 2 && (phase === 'access' || phase === 'connect' || phase === 'finishing'))
+                || (i === 3 && (phase === 'connect' || phase === 'finishing'))
+                || (i === 4 && phase === 'finishing' && progress >= 100);
               return (
-                <div key={label} className="flex-1">
+                <div key={label} className="flex-1 min-w-0">
                   <div className={`h-1 rounded-full mb-2 ${
                     done || active ? 'bg-sky-500/80' : 'bg-surface-hover'
                   }`} />
-                  <p className={`text-[11px] ${active || done ? 'text-content-primary' : 'text-content-tertiary'}`}>
+                  <p className={`text-[10px] truncate ${active || done ? 'text-content-primary' : 'text-content-tertiary'}`}>
                     {label}
                   </p>
                 </div>
@@ -651,7 +698,7 @@ export function OnboardingScreen() {
                 type="button"
                 disabled={!selected}
                 onClick={() => {
-                  setPhase('connect');
+                  setPhase('access');
                   const chatId = selectedId || selected?.id;
                   if (chatId) {
                     queueSetupBrainDownloads({
@@ -663,112 +710,125 @@ export function OnboardingScreen() {
                 }}
                 className="ark-btn-primary w-full h-11 rounded-xl"
               >
-                Continue to connect
+                Continue to access
               </button>
+            </div>
+          )}
+
+          {phase === 'access' && (
+            <div className="space-y-4">
+              <div className="flex items-center gap-3">
+                <span className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
+                  <Shield className="w-5 h-5 text-emerald-400" />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium text-content-primary">PC permissions</p>
+                  <p className="text-xs text-content-tertiary mt-0.5">
+                    {accessEnabledCount > 0
+                      ? `${accessEnabledCount} permission${accessEnabledCount === 1 ? '' : 's'} enabled — ARK can answer folder and project asks`
+                      : 'Skip for now if you prefer — enable later in Settings → Security'}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={enableRecommendedAccess}
+                className="w-full flex items-center justify-center gap-2 rounded-xl border border-sky-500/30 bg-sky-500/10 px-4 py-2.5 text-sm font-medium text-sky-300 hover:bg-sky-500/15 transition-colors"
+              >
+                <Sparkles className="w-4 h-4 shrink-0" aria-hidden />
+                Enable recommended access
+              </button>
+
+              <div className="space-y-2">
+                <AccessPermissionCard
+                  icon={FolderOpen}
+                  title="Desktop folder access"
+                  detail="Projects, games, and folders on your Desktop"
+                  enabled={desktopAccess}
+                  onToggle={toggleDesktopAccess}
+                  accent="sky"
+                />
+                <AccessPermissionCard
+                  icon={FolderKanban}
+                  title="Documents folder access"
+                  detail="Open and list projects under Documents"
+                  enabled={documentsAccess}
+                  onToggle={toggleDocumentsAccess}
+                  accent="violet"
+                />
+                <AccessPermissionCard
+                  icon={HardDriveDownload}
+                  title="Full PC access (files)"
+                  detail="Installed apps, Steam libraries, profile-wide search"
+                  enabled={fullPcAccess}
+                  onToggle={toggleFullPcAccess}
+                  accent="emerald"
+                  recommended
+                />
+              </div>
+
+              <div className="rounded-xl border border-surface-border bg-black/20 p-3">
+                <p className="text-xs font-medium text-content-secondary mb-2">Execution &amp; approvals</p>
+                <div className="grid grid-cols-1 gap-1.5">
+                  {([
+                    { id: 'allowlist' as const, label: 'Confirm each command', hint: 'Safest — npm, pip, git ask first' },
+                    { id: 'auto_review' as const, label: 'Auto-review', hint: 'Known tools after one confirm' },
+                    { id: 'run_all' as const, label: 'Run everything', hint: 'Allowlisted tools run when you ask' },
+                  ]).map(opt => {
+                    const on = executionMode === opt.id;
+                    return (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        onClick={() => {
+                          if (opt.id === 'run_all' && !window.confirm(
+                            'Run everything?\n\nAllowlisted commands (npm, pip, git, winget) can run when you ask. Destructive commands stay blocked.',
+                          )) return;
+                          setExecutionMode(opt.id);
+                        }}
+                        className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors ${
+                          on
+                            ? 'bg-surface-hover border border-sky-500/30'
+                            : 'border border-transparent hover:bg-surface-hover/60'
+                        }`}
+                      >
+                        <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border ${
+                          on ? 'border-sky-400 bg-sky-500/20' : 'border-surface-border bg-black/20'
+                        }`}>
+                          {on ? <span className="h-2 w-2 rounded-full bg-sky-400" /> : null}
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-sm text-content-primary">{opt.label}</span>
+                          <span className="block text-[11px] text-content-tertiary">{opt.hint}</span>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="flex gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setPhase('models')}
+                  className="flex-1 h-11 rounded-xl border border-surface-border text-sm text-content-secondary hover:bg-surface-hover"
+                >
+                  Back
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPhase('connect')}
+                  className="ark-btn-primary flex-[2] h-11 rounded-xl"
+                >
+                  {accessEnabledCount > 0 ? 'Continue to connect' : 'Skip for now'}
+                </button>
+              </div>
             </div>
           )}
 
           {phase === 'connect' && (
             <div className="space-y-4">
-              <div className="rounded-xl border border-surface-border bg-surface-hover/30 px-3 py-3 space-y-3">
-                <div>
-                  <p className="text-sm font-medium text-content-primary">Give ARK access to your PC</p>
-                  <p className="text-xs text-content-tertiary mt-0.5 leading-relaxed">
-                    Required for “what projects are on my PC?”, games, installed apps, and opening folders from chat. Same controls live in Settings → Security.
-                  </p>
-                  <button
-                    type="button"
-                    className="mt-2 text-[11px] font-medium text-sky-400 hover:text-sky-300"
-                    onClick={() => {
-                      if (!window.confirm(
-                        'Enable Desktop, Documents, and Full PC file access?\n\nARK can explore folders and list projects when you ask. Installs and deletes still ask for confirmation.',
-                      )) return;
-                      setDesktopAccess(true);
-                      setDocumentsAccess(true);
-                      setFullPcAccess(true);
-                    }}
-                  >
-                    Enable recommended access (Desktop + Documents + Full PC)
-                  </button>
-                </div>
-                <label className="flex items-start gap-3 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={desktopAccess}
-                    onChange={e => {
-                      const v = e.target.checked;
-                      if (v && !window.confirm(
-                        'Allow ARK to read folders under your Desktop?\n\nScope: Desktop only — not your whole drive.',
-                      )) return;
-                      setDesktopAccess(v);
-                    }}
-                    className="mt-1 rounded border-surface-border"
-                  />
-                  <span className="min-w-0">
-                    <span className="block text-sm text-content-primary">Allow Desktop folder access</span>
-                    <span className="block text-xs text-content-tertiary mt-0.5">List Projects, games, and folders on your Desktop</span>
-                  </span>
-                </label>
-                <label className="flex items-start gap-3 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={documentsAccess}
-                    onChange={e => {
-                      const v = e.target.checked;
-                      if (v && !window.confirm(
-                        'Allow ARK to read folders under your Documents?\n\nScope: Documents only — not your whole drive.',
-                      )) return;
-                      setDocumentsAccess(v);
-                    }}
-                    className="mt-1 rounded border-surface-border"
-                  />
-                  <span className="min-w-0">
-                    <span className="block text-sm text-content-primary">Allow Documents folder access</span>
-                    <span className="block text-xs text-content-tertiary mt-0.5">Open and list projects under Documents</span>
-                  </span>
-                </label>
-                <label className="flex items-start gap-3 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={fullPcAccess}
-                    onChange={e => {
-                      const v = e.target.checked;
-                      if (v && !window.confirm(
-                        'Give ARK broad file access on this PC?\n\nARK can list installed apps, scan beyond Desktop, and open folders you name. Windows system folders stay blocked.',
-                      )) return;
-                      setFullPcAccess(v);
-                      if (v) {
-                        setDesktopAccess(true);
-                        setDocumentsAccess(true);
-                      }
-                    }}
-                    className="mt-1 rounded border-surface-border"
-                  />
-                  <span className="min-w-0">
-                    <span className="block text-sm text-content-primary">Full PC access (files)</span>
-                    <span className="block text-xs text-content-tertiary mt-0.5">Installed apps registry, Steam, and profile-wide folder search</span>
-                  </span>
-                </label>
-                <div>
-                  <label className="block text-xs font-medium text-content-secondary mb-1.5">Execution &amp; approvals</label>
-                  <select
-                    value={executionMode}
-                    onChange={e => {
-                      const next = e.target.value as LocalPrefs['agentExecutionMode'];
-                      if (next === 'run_all' && !window.confirm(
-                        'Run everything?\n\nAllowlisted commands (npm, pip, git, winget) can run when you ask. Destructive commands stay blocked.',
-                      )) return;
-                      setExecutionMode(next);
-                    }}
-                    className="w-full rounded-xl border border-surface-border bg-ark-navy-900 px-3 py-2 text-sm text-content-primary"
-                  >
-                    <option value="allowlist">Allowlist — confirm each install/command</option>
-                    <option value="auto_review">Auto-review — known tools after one confirm</option>
-                    <option value="run_all">Run everything — allowlisted tools without extra prompts</option>
-                  </select>
-                </div>
-              </div>
-
               <div className="space-y-2">
                 {CONNECT_PROVIDERS.map(p => {
                   const open = expandedProvider === p.id;
@@ -900,6 +960,74 @@ export function OnboardingScreen() {
         </div>
       </div>
     </div>
+  );
+}
+
+function AccessPermissionCard({
+  icon: Icon,
+  title,
+  detail,
+  enabled,
+  onToggle,
+  accent,
+  recommended,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  title: string;
+  detail: string;
+  enabled: boolean;
+  onToggle: () => void;
+  accent: 'sky' | 'violet' | 'emerald';
+  recommended?: boolean;
+}) {
+  const accentRing = enabled
+    ? accent === 'sky'
+      ? 'border-sky-500/40 bg-sky-500/5'
+      : accent === 'violet'
+        ? 'border-violet-500/40 bg-violet-500/5'
+        : 'border-emerald-500/40 bg-emerald-500/5'
+    : 'border-surface-border bg-black/15 hover:bg-surface-hover/40';
+  const iconTone = enabled
+    ? accent === 'sky'
+      ? 'text-sky-400 bg-sky-500/15'
+      : accent === 'violet'
+        ? 'text-violet-400 bg-violet-500/15'
+        : 'text-emerald-400 bg-emerald-500/15'
+    : 'text-content-tertiary bg-surface-hover';
+
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      className={`w-full flex items-center gap-3 rounded-xl border px-3 py-3 text-left transition-all ${accentRing}`}
+    >
+      <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${iconTone}`}>
+        <Icon className="h-5 w-5" aria-hidden />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="flex items-center gap-2 flex-wrap">
+          <span className="text-sm font-medium text-content-primary">{title}</span>
+          {recommended ? (
+            <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[9px] font-medium uppercase tracking-wide text-emerald-400">
+              Recommended
+            </span>
+          ) : null}
+        </span>
+        <span className="mt-0.5 block text-xs text-content-tertiary leading-snug">{detail}</span>
+      </span>
+      <span
+        className={`relative h-7 w-12 shrink-0 rounded-full transition-colors ${
+          enabled ? 'bg-sky-500/80' : 'bg-surface-hover border border-surface-border'
+        }`}
+        aria-hidden
+      >
+        <span
+          className={`absolute top-0.5 h-6 w-6 rounded-full bg-white shadow-sm transition-transform ${
+            enabled ? 'translate-x-[22px]' : 'translate-x-0.5'
+          }`}
+        />
+      </span>
+    </button>
   );
 }
 
