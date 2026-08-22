@@ -2464,6 +2464,7 @@ export function AIChat() {
             workspaceProjectId: diskProjectId,
             workspaceFiles: resolvedStudio.files,
             stickyTarget: stickyDiskTarget,
+            lastListedFolder: getLastListedFolder(activeChatId),
           });
 
           if (outcome.kind === 'reply') {

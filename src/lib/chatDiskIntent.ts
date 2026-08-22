@@ -103,6 +103,92 @@ function extractFileName(text: string): string | null {
   return null;
 }
 
+/** Parse delete-file asks — disambiguate file name vs project folder name. */
+export function parseDeleteFileTarget(text: string): {
+  fileName: string | null;
+  parentHint?: string;
+} {
+  const t = String(text || '').trim();
+  if (!t) return { fileName: null };
+
+  // "delete the file … in (the) project folder called Starbucks" → file Starbucks, parent Desktop\Projects
+  const fileInProjectsContainer = t.match(
+    /\bfiles?\b[\s\S]*?\b(?:desktop\s+)?project\s+folder\b[\s\S]*?\b(?:called|named)\s+["“']?([A-Za-z][A-Za-z0-9 _.-]{1,48})["”']?/i,
+  );
+  if (fileInProjectsContainer?.[1]) {
+    const name = cleanDiskTargetName(fileInProjectsContainer[1]);
+    if (name) {
+      return { fileName: normalizeDiskFileName(name), parentHint: DESKTOP_PROJECTS_PARENT };
+    }
+  }
+
+  // "file called X … project folder" (no subfolder name after called)
+  const namedFileInProjects = t.match(
+    /\bfiles?\s+(?:called|named)\s+["“']?([A-Za-z][A-Za-z0-9 _.-]{1,48})["”']?[\s\S]*?\bproject\s+folder\b/i,
+  );
+  if (namedFileInProjects?.[1]) {
+    const name = cleanDiskTargetName(namedFileInProjects[1]);
+    if (name) {
+      return { fileName: normalizeDiskFileName(name), parentHint: DESKTOP_PROJECTS_PARENT };
+    }
+  }
+
+  const fileName = extractFileName(t) || (() => {
+    const named = extractNamedDiskTarget(t);
+    if (named && !isBlockedDiskTargetName(named)) return normalizeDiskFileName(named);
+    return null;
+  })();
+
+  let parentHint = extractDeleteFileParentHint(t);
+
+  // "project folder called X" with a file ask — X is the file, not a subfolder
+  if (
+    fileName
+    && parentHint
+    && parentHint !== DESKTOP_PROJECTS_PARENT
+    && fileName.replace(/\.[A-Za-z0-9]{1,12}$/, '').toLowerCase() === parentHint.toLowerCase()
+  ) {
+    parentHint = DESKTOP_PROJECTS_PARENT;
+  }
+
+  if (!parentHint) {
+    const legacy = extractParentHint(t);
+    if (legacy && fileName && legacy.toLowerCase() === fileName.replace(/\.[A-Za-z0-9]{1,12}$/, '').toLowerCase()) {
+      parentHint = DESKTOP_PROJECTS_PARENT;
+    } else if (legacy && !fileName) {
+      parentHint = legacy;
+    } else if (legacy && fileName) {
+      parentHint = legacy;
+    }
+  }
+
+  return { fileName, parentHint };
+}
+
+export function extractDeleteFileParentHint(text: string): string | undefined {
+  const t = String(text || '').trim();
+  if (!t) return undefined;
+
+  // Specific subfolder: "file in folder called DeBloat" (not "project folder called X")
+  const subfolder = t.match(
+    /\b(?:in|inside|within)\s+(?:the\s+)?(?!(?:desktop\s+)?project\s+folder\b)(?:folder\s+)?(?:called|named)\s+([A-Za-z][A-Za-z0-9 _-]{1,48})/i,
+  );
+  if (subfolder?.[1]) {
+    const cleaned = cleanDiskTargetName(subfolder[1]);
+    if (cleaned) return cleaned;
+  }
+
+  if (
+    /\b(?:desktop\s+)?projects?\s+folder\b/i.test(t)
+    || /\bproject\s+folder\b/i.test(t)
+    || (/\b(?:on|in)\s+(?:my\s+)?desktop\b/i.test(t) && /\bprojects?\b/i.test(t))
+  ) {
+    return DESKTOP_PROJECTS_PARENT;
+  }
+
+  return undefined;
+}
+
 function extractParentHint(text: string): string | undefined {
   const t = String(text || '').trim();
   const patterns = [
@@ -209,11 +295,13 @@ export function classifyDiskIntent(
   const recent = opts?.recentUserMessages || [];
 
   if (looksLikeDeleteFileAsk(t)) {
-    const name = extractFileName(t) || (looksLikeDeleteFollowUp(t) ? nameFromThread(recent, true) : null);
+    const parsed = parseDeleteFileTarget(t);
+    const name = parsed.fileName
+      || (looksLikeDeleteFollowUp(t) ? nameFromThread(recent, true) : null);
     return {
       type: 'delete_file',
-      name: name || (looksLikeDeleteFollowUp(t) ? null : extractNamedDiskTarget(t)),
-      parentHint: extractParentHint(t),
+      name,
+      parentHint: parsed.parentHint || extractDeleteFileParentHint(t),
     };
   }
 

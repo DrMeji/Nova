@@ -41,7 +41,23 @@ const diskCases = [
   {
     input: 'Delete the file that is inside the project folder called Starbucks',
     want: 'delete_file',
-    wantParent: 'Starbucks',
+    wantName: 'Starbucks',
+    wantNameLoose: true,
+    wantParent: '__desktop_projects__',
+  },
+  {
+    input: 'Delete the file in project folder called Starbucks',
+    want: 'delete_file',
+    wantName: 'Starbucks',
+    wantNameLoose: true,
+    wantParent: '__desktop_projects__',
+  },
+  {
+    input: 'There is a file called Starbucks inside a project folder. Can you delete it',
+    want: 'delete_file',
+    wantName: 'Starbucks',
+    wantNameLoose: true,
+    wantParent: '__desktop_projects__',
   },
   {
     input: 'create a web app called MyShop',
