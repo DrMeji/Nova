@@ -1700,7 +1700,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
 
                 <ToggleRow
                   label="Chat-first layout"
-                  description="Hide the Code tab from the sidebar — Chat handles projects; Edit in Code still works from handoff chips"
+                  description="Prefer Chat for project work (Code tab is removed from the sidebar)"
                   value={prefs.chatFirst}
                   onChange={v => patchPrefs({ chatFirst: v })}
                 />

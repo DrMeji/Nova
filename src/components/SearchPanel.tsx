@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type ComponentType, type KeyboardEvent } from 'react';
 import {
   Search, Clock3, Settings, Briefcase, Database, Bot, Blocks, SquarePen, ArrowLeft,
-  ImageIcon, Video, Code2, MessageSquare, Globe, Bell,
+  ImageIcon, Video, MessageSquare, Globe, Bell,
 } from 'lucide-react';
 import { useRouter, type Route } from '@/context/RouterContext';
 import { useRecentProjects } from '@/context/RecentProjectsContext';
 import { CLOUD_MODELS } from '@/views/ModelsView';
-import { isRevealed, isVideoTabEnabled, isCodeTabEnabled } from '@/lib/featurePark';
+import { isRevealed, isVideoTabEnabled } from '@/lib/featurePark';
 import { getEngineStatus } from '@/lib/arkEngine';
 
 type SearchItem = {
@@ -24,7 +24,6 @@ const CATALOG: SearchItem[] = [
   { id: 'new-chat', label: 'Chat', group: 'Navigate', description: 'Start a conversation', icon: SquarePen, route: { name: 'chat' } },
   { id: 'image', label: 'Image', group: 'Navigate', description: 'Generate a picture', icon: ImageIcon, route: { name: 'chat', mode: 'image' } },
   { id: 'video', label: 'Video', group: 'Navigate', description: 'Generate a short clip', icon: Video, route: { name: 'chat', mode: 'video' } },
-  { id: 'code', label: 'Code', group: 'Navigate', description: 'Build and edit a project', icon: Code2, route: { name: 'code' } },
   { id: 'projects', label: 'Projects', group: 'Navigate', description: 'Browse your projects', icon: Briefcase, route: { name: 'projects' } },
   { id: 'history', label: 'History', group: 'Navigate', description: 'Recent chats and creations', icon: Clock3, route: { name: 'dashboard' } },
   { id: 'plugins', label: 'Plugins', group: 'Navigate', description: 'Integrations and tools', icon: Blocks, route: { name: 'build' } },
@@ -43,7 +42,6 @@ const CATALOG: SearchItem[] = [
 function navigateCatalog(): SearchItem[] {
   return CATALOG.filter(item => {
     if (item.id === 'video' && !isVideoTabEnabled()) return false;
-    if (item.id === 'code' && !isCodeTabEnabled()) return false;
     return true;
   });
 }

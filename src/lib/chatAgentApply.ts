@@ -1,14 +1,20 @@
 /**
  * Apply @@@FILE edits from Chat to the sticky workspace (Step 3).
+ * Falls back to deterministic React/web micro-patches when the model only describes changes.
+ * Also falls back to absolute disk writes when projectId write fails but diskRoot is known.
  */
 
 import {
   applyFileEdits,
   buildFileTreeFromPaths,
   extractChatStyleFileEdits,
+  formatCodeChatReply,
   parseFileEdits,
+  scaffoldFallbackEdits,
+  stripFileBlocks,
   type ProjectFileMap,
 } from '@/lib/projectCodeEdit';
+import { finalizeWebEdits, reactUiMicroAskEdits } from '@/lib/webProjectCanon';
 import { safeProjectWrite } from '@/lib/projectWriteSafe';
 
 export type ChatApplyResult = {
@@ -20,17 +26,57 @@ export type ChatApplyResult = {
   error?: string;
 };
 
+function joinDisk(root: string, rel: string): string {
+  const sep = root.includes('\\') ? '\\' : '/';
+  const cleanRoot = root.replace(/[/\\]+$/, '');
+  const cleanRel = rel.replace(/^[/\\]+/, '').replace(/\//g, sep);
+  return `${cleanRoot}${sep}${cleanRel}`;
+}
+
+async function writeViaDiskRoot(
+  diskRoot: string,
+  files: Record<string, string>,
+): Promise<{ ok: boolean; error?: string }> {
+  if (!window.arkDesktop?.workspaceWriteFile) {
+    return { ok: false, error: 'Project write unavailable' };
+  }
+  for (const [rel, content] of Object.entries(files)) {
+    const targetPath = joinDisk(diskRoot, rel);
+    const written = await window.arkDesktop.workspaceWriteFile({
+      targetPath,
+      content,
+    });
+    if (!written.ok) {
+      return { ok: false, error: written.error || `Could not write ${rel}` };
+    }
+  }
+  return { ok: true };
+}
+
 export async function applyChatReplyEdits(opts: {
   reply: string;
-  projectId: string;
+  projectId: string | null;
   projectName?: string;
   files: ProjectFileMap;
   userMessage?: string;
+  diskRoot?: string | null;
 }): Promise<ChatApplyResult> {
+  const userMessage = opts.userMessage || '';
   let edits = parseFileEdits(opts.reply);
   if (!edits.length) {
-    edits = extractChatStyleFileEdits(opts.reply, opts.userMessage || '');
+    edits = extractChatStyleFileEdits(opts.reply, userMessage, opts.files);
   }
+
+  // Prefer deterministic React/web patches for common UI asks — models often describe without writing.
+  const finalized = finalizeWebEdits(opts.files, userMessage, edits, { projectName: opts.projectName });
+  if (finalized.length) {
+    edits = finalized;
+  } else if (!edits.length) {
+    const react = reactUiMicroAskEdits(opts.files, userMessage, { projectName: opts.projectName });
+    if (react.length) edits = react;
+    else edits = scaffoldFallbackEdits(userMessage, opts.files, { projectName: opts.projectName });
+  }
+
   if (!edits.length) {
     return {
       ok: false,
@@ -57,31 +103,50 @@ export async function applyChatReplyEdits(opts: {
   }
 
   const next = applied.files;
-  const write = await safeProjectWrite({
-    projectId: opts.projectId,
-    projectName: opts.projectName,
-    files: Object.fromEntries(changed.map((p: string) => [p, next[p]])),
-  });
+  const payloadFiles = Object.fromEntries(changed.map((p: string) => [p, next[p]]));
 
-  if (!write.ok) {
+  let wroteOk = false;
+  let writeError: string | undefined;
+
+  if (opts.projectId) {
+    const write = await safeProjectWrite({
+      projectId: opts.projectId,
+      projectName: opts.projectName,
+      files: payloadFiles,
+    });
+    wroteOk = write.ok;
+    writeError = write.error;
+  }
+
+  if (!wroteOk && opts.diskRoot) {
+    const disk = await writeViaDiskRoot(opts.diskRoot, payloadFiles);
+    wroteOk = disk.ok;
+    writeError = disk.error;
+  }
+
+  if (!wroteOk) {
     return {
       ok: false,
       updated: [],
       deleted: [],
       files: opts.files,
-      reply: write.error || 'Write failed.',
-      error: write.error,
+      reply: writeError || (!opts.projectId && !opts.diskRoot ? 'No project bound' : 'Write failed.'),
+      error: writeError || (!opts.projectId ? 'no_project' : 'write_failed'),
     };
   }
 
-  const lines = changed.slice(0, 8).map((p: string) => `- \`${p}\``);
-  const more = changed.length > 8 ? `\n- …and ${changed.length - 8} more` : '';
+  const spoken = formatCodeChatReply(
+    userMessage,
+    changed,
+    stripFileBlocks(opts.reply),
+    { surface: 'chat' },
+  );
   return {
     ok: true,
     updated: changed,
     deleted: [],
     files: next,
-    reply: `Updated **${changed.length}** file${changed.length === 1 ? '' : 's'} on disk:\n${lines.join('\n')}${more}`,
+    reply: spoken,
   };
 }
 

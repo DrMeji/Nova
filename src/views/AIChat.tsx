@@ -75,6 +75,7 @@ import {
   looksLikeFolderPathAsk,
   parseFolderPathAsk,
   GRANT_OFF_FOLDER_MSG,
+  looksLikeInstallDepsAsk,
 } from '@/lib/folderPathAsk';
 import {
   buildFolderCatalogData,
@@ -100,6 +101,7 @@ import { hasFolderAccessGrant, resolveScopedFolderPath, formatFolderLocatedMessa
 import { saveChatStudio, loadChatStudio, clearChatStudio, setLastListedFolder, getLastListedFolder, clearLastListedFolder, setLastDiskTarget, getLastDiskTarget, clearLastDiskTarget, setLastPendingAddFile, getLastPendingAddFile, clearLastPendingAddFile, setLastPendingGreenfield, getLastPendingGreenfield, clearLastPendingGreenfield } from '@/lib/chatStudioStore';
 import { runCodeStudioCommand } from '@/lib/studioCommands';
 import { applyChatReplyEdits } from '@/lib/chatAgentApply';
+import { reactUiMicroAskEdits } from '@/lib/webProjectCanon';
 import { deleteProjectFolderOnDisk, handleDeleteProjectChatRequest, looksLikeDeleteFolderAsk } from '@/lib/deleteProjectFlow';
 import { classifyDiskIntent, shouldRouteDeleteToStickyFile } from '@/lib/chatDiskIntent';
 import { deleteFileOnDisk, handleAddFileChatRequest, handleDeleteFileChatRequest, handleReadFileChatRequest } from '@/lib/chatDiskOps';
@@ -125,14 +127,17 @@ import {
 import {
   formatCreateProjectReply,
   runCreateProjectFlow,
+  bootstrapProjectWorkspace,
 } from '@/lib/createProjectFlow';
 import { looksLikeImplementGo, shouldBlockChatFileWrites } from '@/lib/chatPlanMode';
+import { looksLikeProjectBuildAsk } from '@/lib/chatBuildIntent';
 import {
   buildGreenfieldPlanReply,
   buildMissingWorkFolderReply,
   looksLikeGreenfieldHaveFolder,
   looksLikeGreenfieldIdea,
   looksLikeGreenfieldKeepPlanning,
+  looksLikeGreenfieldStartWorkGo,
   parseGreenfieldIdea,
 } from '@/lib/chatIdeaIntent';
 import {
@@ -140,11 +145,17 @@ import {
   chatTurnAllowsFileEdits,
   hasActiveWorkspace,
   isChatPlanTurn,
+  looksLikeCodeEditAsk,
   NO_WORKSPACE_MSG,
   normalizeComposerMode,
   stripComposerPrefix,
   workspacePathLabel,
 } from '@/lib/chatAgentTurn';
+import {
+  buildStudioTraceMessage,
+  finalizeCodingChatBubble,
+  liveCodingStatusText,
+} from '@/lib/chatCodeReply';
 import { githubToken } from '@/lib/codeGitHubWorkflow';
 import { FreeKeyWizard } from '@/components/FreeKeyWizard';
 import { DeleteProjectFolderModal } from '@/components/DeleteProjectFolderModal';
@@ -739,8 +750,9 @@ export function AIChat() {
     mySeq: number;
   } | null>(null);
   const [inspectOfferId, setInspectOfferId] = useState<string | null>(null);
-  /** actions = what next; handoff = after inspect */
-  const [studioOfferKind, setStudioOfferKind] = useState<'actions' | 'handoff' | null>(null);
+  /** actions = what next; handoff = after inspect; details = coding trace expand */
+  const [studioOfferKind, setStudioOfferKind] = useState<'actions' | 'handoff' | 'details' | null>(null);
+  const [traceDetailsId, setTraceDetailsId] = useState<string | null>(null);
   const [githubOfferId, setGithubOfferId] = useState<string | null>(null);
   const [composerTall, setComposerTall] = useState(false);
   const [composerMode, setComposerMode] = useState<'plan' | 'ask' | 'agent' | 'debug' | 'multitask' | null>(null);
@@ -1418,8 +1430,11 @@ export function AIChat() {
     messagesRef.current = [];
     setThreadBrain(null);
     setChatStudioFiles({});
+    chatStudioFilesRef.current = {};
     setChatStudioProjectId(null);
+    chatStudioProjectIdRef.current = null;
     setChatStudioDiskRoot(null);
+    chatStudioDiskRootRef.current = null;
     setPendingAttaches([]);
     setPendingImages([]);
     lastStudioIntentRef.current = null;
@@ -1648,7 +1663,7 @@ export function AIChat() {
   };
 
   const openCodeWorkspace = (_seedPrompt?: string, _seedFiles?: Record<string, string>) => {
-    setDropHint('Code workspace is coming back inside Chat. Use + → Open folder to work on projects here.');
+    /* Code tab removed — project work stays in Chat. */
   };
 
   const clonePickedRepo = async (repo: GitHubRepo) => {
@@ -2179,6 +2194,14 @@ export function AIChat() {
       activeChatId = `chat-${crypto.randomUUID().slice(0, 10)}`;
       skipChatLoadIdsRef.current.add(activeChatId);
       messagesRef.current = [];
+      // Fresh chat must not inherit the previous thread's workspace / preview.
+      chatStudioFilesRef.current = {};
+      chatStudioProjectIdRef.current = null;
+      chatStudioDiskRootRef.current = null;
+      setChatStudioFiles({});
+      setChatStudioProjectId(null);
+      setChatStudioDiskRoot(null);
+      lastStudioIntentRef.current = null;
     } else {
       const existing = chats.find(c => c.id === activeChatId);
       addChat({
@@ -2193,8 +2216,8 @@ export function AIChat() {
     persistChatIdRef.current = activeChatId;
     routeChatIdRef.current = activeChatId;
     activeGenChatIdRef.current = activeChatId;
-    // Bind any pending folder attach to this chat id for follow-ups.
-    if (Object.keys(chatStudioFilesRef.current).length) {
+    // Bind any pending folder attach to this chat id for follow-ups — never on a brand-new chat.
+    if (!isNewChat && Object.keys(chatStudioFilesRef.current).length) {
       const meta = parseChatAttach(content) || parseChatAttaches(content)[0];
       persistStudioSnapshot(activeChatId, {
         name: meta?.name,
@@ -2611,7 +2634,7 @@ export function AIChat() {
         }
       }
 
-      if (diskIntent.type === 'add_file') {
+      if (diskIntent.type === 'add_file' && !looksLikeCodeEditAsk(intentText)) {
         pushAssistantStatus('Creating file…');
         const addOutcome = await handleAddFileChatRequest({
           fileName: diskIntent.name,
@@ -2726,7 +2749,7 @@ export function AIChat() {
         const pending = getLastPendingGreenfield(activeChatId);
         if (pending) {
           await finishPlainReply(
-            `Still planning **${pending.name}**.\n\nTell me what to change — features, stack, or MVP scope — and I'll refine the plan. Say **Create project ${pending.name}** when you're ready to scaffold.`,
+            `Still planning **${pending.name}**.\n\nTell me what to change — features, stack, or MVP scope — and I'll refine the plan. Or click **Create project ${pending.name}** when you're ready.`,
           );
           return;
         }
@@ -2743,6 +2766,22 @@ export function AIChat() {
         setLastPendingGreenfield(activeChatId, idea);
         await finishPlainReply(buildGreenfieldPlanReply(idea));
         return;
+      }
+    }
+
+    // "Start working on this project" with a pending idea → ensure pending is set for create below.
+    if (
+      (mode === 'general' || mode === 'code')
+      && looksLikeGreenfieldStartWorkGo(intentText)
+      && !parseWorkOnFolderName(intentText)
+    ) {
+      const pending = getLastPendingGreenfield(activeChatId);
+      if (!pending) {
+        const prior = [...messagesRef.current]
+          .reverse()
+          .find(m => m.role === 'user' && parseGreenfieldIdea(String(m.content || '')));
+        const fromThread = prior ? parseGreenfieldIdea(String(prior.content || '')) : null;
+        if (fromThread) setLastPendingGreenfield(activeChatId, fromThread);
       }
     }
 
@@ -2821,9 +2860,10 @@ export function AIChat() {
       return;
     }
 
-    // Projects / folder catalog — list only (no workspace bind, no "say the folder name" template).
+    // Projects / folder catalog — ONLY when the user is asking to list folders (never for create/build).
     if (
       (mode === 'general' || mode === 'code')
+      && !looksLikeProjectBuildAsk(content)
       && (looksLikeFolderCatalogAsk(content) || looksLikeProjectsInventoryAsk(content))
     ) {
       if (!hasFolderAccessGrant()) {
@@ -2879,9 +2919,10 @@ export function AIChat() {
       return;
     }
 
-    // PC explore — games, desktop top-level, installed apps (not folder catalog asks).
+    // PC explore — games, desktop top-level, installed apps (never for create/build apps).
     if (
       (mode === 'general' || mode === 'code')
+      && !looksLikeProjectBuildAsk(content)
       && looksLikePcExploreAsk(content)
       && !looksLikeFolderCatalogAsk(content)
       && !looksLikeProjectsInventoryAsk(content)
@@ -2894,7 +2935,7 @@ export function AIChat() {
       return;
     }
 
-    // New project create — scaffold on disk, bind workspace (after explore/catalog).
+    // New project create — scaffold on disk, bind workspace (BEFORE explore/catalog false positives).
     const workspaceActiveForCreate = hasActiveWorkspace({
       files: resolvedStudio.files,
       projectId: resolvedStudio.projectId || chatStudioProjectIdRef.current,
@@ -2919,9 +2960,6 @@ export function AIChat() {
       (mode === 'general' || mode === 'code')
       && createIntent
       && diskIntent.type !== 'add_file'
-      && !looksLikeFolderCatalogAsk(content)
-      && !looksLikeProjectsInventoryAsk(content)
-      && !looksLikePcExploreAsk(content)
     ) {
       const turnMode = composerModeFromContent(content);
       const workspaceActive = workspaceActiveForCreate;
@@ -2990,8 +3028,38 @@ export function AIChat() {
         });
       }
 
+      pushAssistantStatus('Installing dependencies…');
+      const bootstrap = created.projectPath
+        ? await bootstrapProjectWorkspace(created.projectPath, createIntent.kind)
+        : { npmInstalled: false };
+
+      // Same message may also ask for layout / logo — apply those now instead of stopping at empty scaffold.
+      let followNote = '';
+      const pid = created.projectId || newProjectId;
+      if (pid && created.files) {
+        const applied = await applyChatReplyEdits({
+          reply: '',
+          projectId: pid,
+          projectName: createIntent.name,
+          files: created.files,
+          userMessage: content,
+          diskRoot: created.projectPath || chatStudioDiskRootRef.current,
+        });
+        if (applied.ok) {
+          setChatStudioFiles(applied.files);
+          chatStudioFilesRef.current = applied.files;
+          persistStudioSnapshot(activeChatId, {
+            files: applied.files,
+            projectId: pid,
+            name: createIntent.name,
+            diskRoot: created.projectPath || null,
+          });
+          followNote = `\n\nAlso applied your layout ask (${applied.updated.join(', ')}). Refresh the preview to see it.`;
+        }
+      }
+
       pushAssistantStatus('Preparing answer…');
-      await finishPlainReply(formatCreateProjectReply(createIntent, created));
+      await finishPlainReply(`${formatCreateProjectReply(createIntent, created, bootstrap)}${followNote}`);
       return;
     }
 
@@ -3268,38 +3336,6 @@ export function AIChat() {
       && window.arkDesktop?.agentRun
       && chatTurnAllowsExec(content, turnComposerMode)
     ) {
-      if (looksLikeRuntimeInstallAsk(content)) {
-        const runtimeCmd = proposeRuntimeInstall(content);
-        if (runtimeCmd) {
-          const runtimeOutcome = await runAgentCommand({
-            command: runtimeCmd,
-            cwd: agentCwd,
-            confirmLabel: runtimeCmd,
-          });
-          if (runtimeOutcome.needsConfirm) {
-            const { command, cwd, label } = runtimeOutcome.needsConfirm;
-            const modeLabel = executionModeLabel(getAgentExecutionMode());
-            if (!window.confirm(`Install on your PC?\n\n${label}\n\nMode: ${modeLabel}`)) {
-              finishAgentReply(
-                'Install canceled. Say it again when ready, or switch to Run everything in Settings → Security.',
-                'ARK',
-              );
-              return;
-            }
-            const ran = await runAgentCommand({ command, cwd, skipConfirm: true });
-            finishAgentReply(
-              ran.reply || 'Install finished.',
-              'ARK · agent',
-            );
-            return;
-          }
-          if (runtimeOutcome.handled && runtimeOutcome.reply) {
-            finishAgentReply(runtimeOutcome.reply, 'ARK · agent');
-            return;
-          }
-        }
-      }
-
       const agentCmd = inferAgentCommand(content, hasPackageJson);
       if (agentCmd) {
         const agentOutcome = await runAgentCommand({
@@ -3331,19 +3367,71 @@ export function AIChat() {
           return;
         }
       }
+
+      if (looksLikeRuntimeInstallAsk(content) && !looksLikeInstallDepsAsk(content)) {
+        const runtimeCmd = proposeRuntimeInstall(content);
+        if (runtimeCmd) {
+          const runtimeOutcome = await runAgentCommand({
+            command: runtimeCmd,
+            cwd: agentCwd,
+            confirmLabel: runtimeCmd,
+          });
+          if (runtimeOutcome.needsConfirm) {
+            const { command, cwd, label } = runtimeOutcome.needsConfirm;
+            const modeLabel = executionModeLabel(getAgentExecutionMode());
+            if (!window.confirm(`Install on your PC?\n\n${label}\n\nMode: ${modeLabel}`)) {
+              finishAgentReply(
+                'Install canceled. Say it again when ready, or switch to Run everything in Settings → Security.',
+                'ARK',
+              );
+              return;
+            }
+            const ran = await runAgentCommand({ command, cwd, skipConfirm: true });
+            finishAgentReply(
+              ran.reply || 'Install finished.',
+              'ARK · agent',
+            );
+            return;
+          }
+          if (runtimeOutcome.handled && runtimeOutcome.reply) {
+            finishAgentReply(runtimeOutcome.reply, 'ARK · agent');
+            return;
+          }
+        }
+      }
+    }
+    const stickyFiles = resolvedStudio.files;
+    let stickyCount = Object.keys(stickyFiles).length;
+    const diskBound = Boolean(chatStudioDiskRootRef.current || resolvedStudio.projectId || chatStudioProjectIdRef.current);
+    const wantsCodeEdit = chatTurnAllowsFileEdits(content, turnComposerMode);
+
+    // Reload files from disk/project if sticky is empty but a workspace is bound.
+    if (stickyCount === 0 && diskBound && wantsCodeEdit) {
+      const pid = resolvedStudio.projectId || chatStudioProjectIdRef.current;
+      if (pid && window.arkDesktop?.projectRead) {
+        try {
+          const read = await window.arkDesktop.projectRead(pid);
+          if (read?.ok && read.files && Object.keys(read.files).length) {
+            Object.assign(stickyFiles, read.files as Record<string, string>);
+            stickyCount = Object.keys(stickyFiles).length;
+            setChatStudioFiles({ ...stickyFiles });
+            chatStudioFilesRef.current = { ...stickyFiles };
+            resolvedStudio.files = stickyFiles;
+          }
+        } catch {
+          /* ignore */
+        }
+      }
     }
 
-    // HARD GATE: sticky files → unified answer engine (never bare arkRoute).
-    const stickyFiles = resolvedStudio.files;
-    const stickyCount = Object.keys(stickyFiles).length;
     if (
       (mode === 'general' || mode === 'code')
-      && stickyCount > 0
-      && shouldInspectInChat(content, true, content.startsWith(COMPOSER_MODE_PREFIX.debug))
+      && (stickyCount > 0 || (diskBound && wantsCodeEdit))
+      && shouldInspectInChat(content, stickyCount > 0 || diskBound, content.startsWith(COMPOSER_MODE_PREFIX.debug))
     ) {
       setMessages(prev => prev.map(m => (
         m.id === assistantId
-          ? { ...m, content: `__generating__:chat:Reading ${stickyCount} file${stickyCount === 1 ? '' : 's'}…` }
+          ? { ...m, content: `__generating__:chat:${wantsCodeEdit ? 'Updating project files…' : `Reading ${stickyCount || 'project'} file${stickyCount === 1 ? '' : 's'}…`}` }
           : m
       )));
       await new Promise<void>(r => { window.setTimeout(r, 40); });
@@ -3356,7 +3444,75 @@ export function AIChat() {
       const sticky = pinnedModel.source === 'auto' ? threadBrainRef.current : null;
 
       const planTurn = isChatPlanTurn(content) && !looksLikeImplementGo(content);
-      const allowEdits = chatTurnAllowsFileEdits(content, turnComposerMode);
+      const allowEdits = wantsCodeEdit;
+
+      // Fast path: deterministic UI patches (logo/center) — do not wait on a slow model.
+      if (allowEdits && (workspaceProjectId || chatStudioDiskRootRef.current)) {
+        const micro = reactUiMicroAskEdits(stickyFiles, content, { projectName: projectLabel });
+        if (micro.length) {
+          setMessages(prev => prev.map(m => (
+            m.id === assistantId
+              ? { ...m, content: '__generating__:chat:Adding logo to the project…' }
+              : m
+          )));
+          const applied = await applyChatReplyEdits({
+            reply: '',
+            projectId: workspaceProjectId,
+            projectName: projectLabel,
+            files: stickyFiles,
+            userMessage: content,
+            diskRoot: chatStudioDiskRootRef.current,
+          });
+          const elapsedMs = Date.now() - replyStartedAt;
+          if (applied.ok) {
+            setChatStudioFiles(applied.files);
+            chatStudioFilesRef.current = applied.files;
+            resolvedStudio.files = applied.files;
+            persistStudioSnapshot(activeChatId, {
+              files: applied.files,
+              projectId: workspaceProjectId,
+              name: projectLabel,
+            });
+            const answer = finalizeCodingChatBubble({
+              userMessage: content,
+              rawReply: '',
+              changedPaths: applied.updated,
+              applied: true,
+            });
+            const reply = buildStudioTraceMessage({
+              startedAt: replyStartedAt,
+              elapsedMs,
+              userMessage: content,
+              answer,
+              wrotePaths: applied.updated,
+              projectName: projectLabel,
+            });
+            const next = messagesRef.current.map(m => (
+              m.id === assistantId
+                ? {
+                  ...m,
+                  content: reply,
+                  provider_used: 'ARK · local patch',
+                  elapsed_ms: elapsedMs,
+                }
+                : m
+            ));
+            messagesRef.current = next;
+            persistModeThread(mode, next, { chatId: activeChatId });
+            setMessages(next);
+            setInspectOfferId(assistantId);
+            setStudioOfferKind('details');
+            setTraceDetailsId(null);
+            clearGeneratingIfMineEarly();
+            lastInspectReplyRef.current = reply;
+            window.setTimeout(() => {
+              if (mySeq === genSeqRef.current) flushQueuedSend();
+            }, 0);
+            return;
+          }
+        }
+      }
+
       const result = await answerStudio(
         {
           userMessage: content,
@@ -3379,9 +3535,12 @@ export function AIChat() {
           if (mySeq !== genSeqRef.current || stopRequestedRef.current) return;
           const text = String(live || '').trim();
           if (text.length < 2) return;
+          const bubble = allowEdits
+            ? `__generating__:chat:${liveCodingStatusText(text)}`
+            : text;
           setMessages(prev => {
             const next = prev.map(m => (
-              m.id === assistantId ? { ...m, content: text } : m
+              m.id === assistantId ? { ...m, content: bubble } : m
             ));
             messagesRef.current = next;
             return next;
@@ -3399,10 +3558,12 @@ export function AIChat() {
 
       const locateNote = lastFolderLocateNoteRef.current;
       lastFolderLocateNoteRef.current = null;
-      let reply = locateNote ? `${locateNote}\n\n${result.text}` : result.text;
+      let changedPaths: string[] = [];
+      let appliedOk = false;
+      let applyError: string | undefined;
 
       if (
-        workspaceProjectId
+        (workspaceProjectId || chatStudioDiskRootRef.current)
         && allowEdits
         && !looksLikePromptEcho(result.text)
       ) {
@@ -3412,8 +3573,11 @@ export function AIChat() {
           projectName: projectLabel,
           files: stickyFiles,
           userMessage: content,
+          diskRoot: chatStudioDiskRootRef.current,
         });
         if (applied.ok) {
+          appliedOk = true;
+          changedPaths = applied.updated;
           setChatStudioFiles(applied.files);
           chatStudioFilesRef.current = applied.files;
           resolvedStudio.files = applied.files;
@@ -3422,13 +3586,34 @@ export function AIChat() {
             projectId: workspaceProjectId,
             name: projectLabel,
           });
-          reply = locateNote
-            ? `${locateNote}\n\n${result.text}\n\n${applied.reply}`
-            : `${result.text}\n\n${applied.reply}`;
+        } else {
+          applyError = applied.error || 'write_failed';
         }
+      } else if (allowEdits && !workspaceProjectId && !chatStudioDiskRootRef.current) {
+        applyError = 'no_project';
       }
 
+      const bubble = finalizeCodingChatBubble({
+        userMessage: content,
+        rawReply: result.text,
+        changedPaths,
+        applied: appliedOk,
+        applyError: appliedOk ? undefined : (applyError || (allowEdits ? 'no_edits' : undefined)),
+      });
+      const plainReply = locateNote ? `${locateNote}\n\n${bubble}` : bubble;
       const elapsedMs = Date.now() - replyStartedAt;
+      const reply = allowEdits
+        ? buildStudioTraceMessage({
+          startedAt: replyStartedAt,
+          elapsedMs,
+          userMessage: content,
+          answer: plainReply,
+          readPaths: Object.keys(stickyFiles).slice(0, 10),
+          wrotePaths: changedPaths,
+          projectName: projectLabel,
+        })
+        : plainReply;
+
       const next = messagesRef.current.map(m => (
         m.id === assistantId
           ? {
@@ -3442,8 +3627,14 @@ export function AIChat() {
       messagesRef.current = next;
       persistModeThread(mode, next, { chatId: activeChatId });
       setMessages(next);
-      setInspectOfferId(assistantId);
-      setStudioOfferKind('actions');
+      if (allowEdits) {
+        setInspectOfferId(assistantId);
+        setStudioOfferKind('details');
+        setTraceDetailsId(null);
+      } else {
+        setInspectOfferId(null);
+        setStudioOfferKind(null);
+      }
       clearGeneratingIfMineEarly();
       lastInspectReplyRef.current = reply;
       window.setTimeout(() => {
@@ -3797,9 +3988,12 @@ export function AIChat() {
                 if (abandoned || stopRequestedRef.current || mySeq !== genSeqRef.current) return;
                 const text = String(live || '').trim();
                 if (text.length < 2) return;
+                const bubble = allowEdits
+                  ? `__generating__:chat:${liveCodingStatusText(text)}`
+                  : text;
                 setMessages(prev => {
                   const next = prev.map(m => (
-                    m.id === assistantId ? { ...m, content: text } : m
+                    m.id === assistantId ? { ...m, content: bubble } : m
                   ));
                   messagesRef.current = next;
                   return next;
@@ -3811,10 +4005,12 @@ export function AIChat() {
             if (engineResult.packedTokens != null) {
               setTokenRatio(syncTokenUsage(activeChatId, engineResult.packedTokens));
             }
-            response = engineResult.text;
+            let changedPaths: string[] = [];
+            let appliedOk = false;
+            let applyError: string | undefined;
             const inspectProjectId = chatStudioProjectIdRef.current || attachMeta?.projectId || null;
             if (
-              inspectProjectId
+              (inspectProjectId || chatStudioDiskRootRef.current)
               && allowEdits
               && !looksLikePromptEcho(engineResult.text)
             ) {
@@ -3824,8 +4020,11 @@ export function AIChat() {
                 projectName: projectLabel,
                 files: filesForInspect,
                 userMessage: content,
+                diskRoot: chatStudioDiskRootRef.current,
               });
               if (applied.ok) {
+                appliedOk = true;
+                changedPaths = applied.updated;
                 setChatStudioFiles(applied.files);
                 chatStudioFilesRef.current = applied.files;
                 persistStudioSnapshot(activeChatId, {
@@ -3833,14 +4032,42 @@ export function AIChat() {
                   projectId: inspectProjectId,
                   name: projectLabel,
                 });
-                response = `${engineResult.text}\n\n${applied.reply}`;
+              } else {
+                applyError = applied.error || 'write_failed';
               }
+            } else if (allowEdits && !inspectProjectId && !chatStudioDiskRootRef.current) {
+              applyError = 'no_project';
             }
+            const bubble = finalizeCodingChatBubble({
+              userMessage: content,
+              rawReply: engineResult.text,
+              changedPaths,
+              applied: appliedOk,
+              applyError: appliedOk ? undefined : (applyError || (allowEdits ? 'no_edits' : undefined)),
+            });
+            const elapsedMs = Date.now() - replyStartedAt;
+            response = allowEdits
+              ? buildStudioTraceMessage({
+                startedAt: replyStartedAt,
+                elapsedMs,
+                userMessage: content,
+                answer: bubble,
+                readPaths: Object.keys(filesForInspect).slice(0, 10),
+                wrotePaths: changedPaths,
+                projectName: projectLabel,
+              })
+              : bubble;
             lastInspectReplyRef.current = response;
             resolvedProvider = engineResult.meta || `${providerLabel} · files`;
             usedPlugin = true;
-            setInspectOfferId(assistantId);
-            setStudioOfferKind('actions');
+            if (allowEdits) {
+              setInspectOfferId(assistantId);
+              setStudioOfferKind('details');
+              setTraceDetailsId(null);
+            } else {
+              setInspectOfferId(null);
+              setStudioOfferKind(null);
+            }
           }
         } catch (err) {
           const studio = chatStudioFilesRef.current;
@@ -5258,6 +5485,8 @@ export function AIChat() {
                         <MessageContent
                           content={msg.content}
                           live={Boolean(generating && isLast && isAssistant && isTraceMessage(raw))}
+                          traceExpanded={traceDetailsId === msg.id}
+                          onPromptChipPick={(prompt) => void sendMessageRef.current(prompt)}
                         />
                       );
                     })()}
@@ -5312,63 +5541,14 @@ export function AIChat() {
                         </button>
                       </div>
                     )}
-                    {msg.role === 'assistant' && inspectOfferId === msg.id && studioOfferKind === 'actions' && (
+                    {msg.role === 'assistant' && inspectOfferId === msg.id && studioOfferKind === 'details' && (
                       <div className="flex flex-wrap gap-1 mt-2">
                         <button
                           type="button"
-                          className="text-[10px] rounded-full bg-emerald-600 text-white px-2.5 py-1"
-                          onClick={() => {
-                            void sendMessageRef.current('go implement');
-                          }}
-                        >
-                          Go implement
-                        </button>
-                        <button
-                          type="button"
                           className="text-[10px] rounded-full bg-sky-600 text-white px-2.5 py-1"
-                          onClick={() => {
-                            void sendMessageRef.current('Go into more detail about this project — what the main files do and how they connect.');
-                          }}
+                          onClick={() => setTraceDetailsId(traceDetailsId === msg.id ? null : msg.id)}
                         >
-                          More details
-                        </button>
-                        <button
-                          type="button"
-                          className="text-[10px] rounded-full border border-surface-border px-2.5 py-1 text-content-secondary"
-                          onClick={() => {
-                            void sendMessageRef.current(`${COMPOSER_MODE_PREFIX.debug}Propose a concrete fix for each bug, risky path, and broken path in these files.`);
-                          }}
-                        >
-                          Debug this
-                        </button>
-                        <button
-                          type="button"
-                          className="text-[10px] rounded-full border border-surface-border px-2.5 py-1 text-content-secondary"
-                          onClick={() => {
-                            void sendMessageRef.current('List the most likely problems in these files (no full file dump).');
-                          }}
-                        >
-                          Find problems
-                        </button>
-                        <button
-                          type="button"
-                          className="text-[10px] rounded-full border border-surface-border px-2.5 py-1 text-content-secondary"
-                          onClick={() => {
-                            void sendMessageRef.current(`${COMPOSER_MODE_PREFIX.agent}Install npm dependencies in this workspace.`);
-                          }}
-                        >
-                          Install deps
-                        </button>
-                        <button
-                          type="button"
-                          className="text-[10px] rounded-full border border-surface-border px-2.5 py-1 text-content-tertiary"
-                          onClick={() => {
-                            setInspectOfferId(null);
-                            setStudioOfferKind(null);
-                          }}
-                          title="Keep talking in Chat — chips hide, conversation stays"
-                        >
-                          Keep in Chat
+                          {traceDetailsId === msg.id ? 'Hide details' : 'More details'}
                         </button>
                       </div>
                     )}

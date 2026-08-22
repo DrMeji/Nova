@@ -3,9 +3,16 @@
  */
 
 import type { NewProjectIntent } from '@/lib/createProjectIntent';
-import { buildScaffoldFiles } from '@/lib/projectScaffolds';
+import { buildScaffoldFiles, projectUsesNpm } from '@/lib/projectScaffolds';
 import { grantsFromPrefs, hasFolderAccessGrant, syncWorkspaceGrantsFromPrefs } from '@/lib/workspaceGrants';
 import { safeProjectWrite } from '@/lib/projectWriteSafe';
+import { runAgentCommand } from '@/lib/chatAgentExec';
+
+export type ProjectBootstrapResult = {
+  npmInstalled: boolean;
+  devServerUrl?: string;
+  bootstrapNote?: string;
+};
 
 export type CreateProjectResult = {
   ok: boolean;
@@ -154,9 +161,45 @@ export async function runCreateProjectFlow(
   };
 }
 
+/** npm install + dev server — runs automatically after create (no extra user step). */
+export async function bootstrapProjectWorkspace(
+  projectPath: string,
+  kind: NewProjectIntent['kind'],
+): Promise<ProjectBootstrapResult> {
+  if (!projectPath || !projectUsesNpm(kind)) {
+    return { npmInstalled: true };
+  }
+
+  const install = await runAgentCommand({
+    command: 'npm install',
+    cwd: projectPath,
+    skipConfirm: true,
+  });
+
+  if (!install.handled || (install.reply && /could not run/i.test(install.reply))) {
+    return {
+      npmInstalled: false,
+      bootstrapNote: install.reply || 'npm install did not complete — say **install npm dependencies** to retry.',
+    };
+  }
+
+  const dev = await window.arkDesktop?.agentStartDevServer?.({ cwd: projectPath });
+  if (dev?.ok && dev.url) {
+    return { npmInstalled: true, devServerUrl: dev.url };
+  }
+
+  return {
+    npmInstalled: true,
+    bootstrapNote: dev?.error
+      ? `Dependencies installed. Dev server did not start (${dev.error}) — say **run dev server** or open \`index.html\`.`
+      : undefined,
+  };
+}
+
 export function formatCreateProjectReply(
   intent: NewProjectIntent,
   result: CreateProjectResult,
+  bootstrap?: ProjectBootstrapResult,
 ): string {
   if (!result.ok) {
     return result.error || 'Could not create the project.';
@@ -172,13 +215,18 @@ export function formatCreateProjectReply(
     ...result.written.slice(0, 12).map(p => `- \`${p}\``),
     result.written.length > 12 ? `- …and ${result.written.length - 12} more` : '',
     '',
-    intent.kind === 'python'
-      ? '**Next:** say **“install python packages”** or run `run.bat`.'
-      : intent.kind === 'static-web'
-        ? '**Next:** open `index.html` or ask me to add pages.'
-        : '**Next:** say **“install npm dependencies”** then **“run dev server”**.',
+    bootstrap?.npmInstalled === false
+      ? `**Setup:** ${bootstrap.bootstrapNote || 'Run npm install manually.'}`
+      : intent.kind === 'python'
+        ? '**Ready** — edit `app/main.py` and say what to build next.'
+        : intent.kind === 'static-web'
+          ? '**Ready** — open `index.html` in your browser and tell me what to add.'
+          : bootstrap?.devServerUrl
+            ? `**Ready** — dependencies installed, dev server running at **${bootstrap.devServerUrl}**.\n\nOpen that URL in your browser. Tell me what to build (layout, pages, features) and I will edit the files here.`
+            : '**Ready** — dependencies installed. Tell me what to build and I will edit the files here.',
+    bootstrap?.bootstrapNote && bootstrap.npmInstalled ? `\n${bootstrap.bootstrapNote}` : '',
     '',
-    'This chat is now bound to that folder — ask me to add features and I will edit files here.',
+    'This chat is bound to that folder.',
     result.grantHint || '',
   ].filter(Boolean);
 

@@ -1018,6 +1018,15 @@ ipcMain.handle('ark:agent-run', async (_e, payload) => {
   }
 });
 
+ipcMain.handle('ark:agent-start-dev-server', async (_e, payload) => {
+  try {
+    const arkAgentExec = require('./arkAgentExec.cjs');
+    return await arkAgentExec.agentStartDevServer(payload || {});
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'dev server failed' };
+  }
+});
+
 ipcMain.handle('ark:workspace-delete-path', async (_e, payload) => {
   try {
     return arkProjects.deleteWorkspaceRelPath(payload?.projectId, payload?.relPath);

@@ -246,7 +246,7 @@ export function packStudioContext(input: StudioAnswerInput): {
   const fileRule = input.planOnly
     ? 'PLAN ONLY — output a step-by-step plan. No @@@FILE blocks, no file writes. End with: Say "go implement" when you want me to build this.'
     : input.allowFileEdits
-      ? 'The user wants you to CHANGE THE CODE NOW. Emit @@@FILE blocks with COMPLETE file contents for every file you change. Do not only describe the change. Keep edits surgical — only files that need to change. After the files, add a short summary of what you changed.'
+      ? 'The user wants you to CHANGE THE CODE NOW. Emit @@@FILE blocks with COMPLETE file contents for every file you change. Do not only describe the change. Keep edits surgical — only files that need to change. After the files, add ONE short plain-English sentence (no code fences, no file dumps). Example: "Added the logo centered on screen."'
       : 'Do NOT write @@@FILE blocks. Do not dump whole files.';
 
   const system = [

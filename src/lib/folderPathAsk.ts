@@ -171,8 +171,15 @@ export function looksLikeDeleteFilesAsk(text: string): boolean {
   );
 }
 
+export function looksLikeRunDevServerAsk(text: string): boolean {
+  const t = String(text || '').trim();
+  return /\b(?:run|start)\b[\s\S]{0,24}\b(?:dev\s+server|dev\s+server|npm\s+run\s+dev|dev\s+mode)\b/i.test(t)
+    || /\bopen\s+(?:the\s+)?(?:dev\s+)?(?:site|page|app)\b/i.test(t);
+}
+
 export function inferInstallCommand(text: string, hasPackageJson: boolean): string | null {
   const t = String(text || '').trim();
+  if (looksLikeRunDevServerAsk(t) && hasPackageJson) return 'npm run dev';
   if (/\bpip\s+install\b/i.test(t)) {
     const m = t.match(/\bpip\s+install\b[\s\S]*/i);
     return m?.[0]?.trim() || 'pip install -r requirements.txt';

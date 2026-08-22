@@ -6,6 +6,7 @@ import {
   finalizeWebEdits,
   isPlaceholderJunkPath,
   prunePlaceholderJunk,
+  reactUiMicroAskEdits,
   touchesPreviewServing,
   webMicroAskEdits,
 } from '@/lib/webProjectCanon';
@@ -404,6 +405,9 @@ export function planFilesForBuild(message: string): string[] {
   if (/\breact\b|\btsx\b/.test(t)) {
     return ['index.html', 'src/App.tsx', 'src/main.tsx', 'src/index.css'];
   }
+  if (/\b(?:vite|jsx)\b/.test(t) || /\.jsx\b/.test(t)) {
+    return ['index.html', 'src/App.jsx', 'src/main.jsx', 'src/App.css', 'src/index.css'];
+  }
   if (/\b(express|node\.js|nodejs)\b/.test(t) && /\b(server|api|backend)\b/.test(t)) {
     return ['package.json', 'server.js'];
   }
@@ -481,11 +485,102 @@ export function parseFileEdits(reply: string): ParsedFileEdit[] {
   return found;
 }
 
-/** When the model returns chat-style fences instead of @@@FILE blocks. */
-export function extractChatStyleFileEdits(reply: string, userMessage: string): ParsedFileEdit[] {
+function workspacePaths(files?: ProjectFileMap): string[] {
+  if (!files) return [];
+  return Object.keys(files).filter(p => p.includes('.')).map(normalizePath);
+}
+
+function pickWorkspacePath(
+  paths: string[],
+  tests: Array<(p: string) => boolean>,
+  fallback: string,
+): string {
+  for (const test of tests) {
+    const hit = paths.find(test);
+    if (hit) return hit;
+  }
+  return fallback;
+}
+
+function inferLangPath(lang: string, userMessage: string, existing?: ProjectFileMap): string {
   const planned = planFilesForBuild(userMessage);
-  const cssPath = planned.find(p => p.endsWith('.css')) || 'css/styles.css';
-  const jsPath = planned.find(p => p.endsWith('.js')) || 'js/app.js';
+  const paths = workspacePaths(existing);
+  const lower = String(lang || '').toLowerCase();
+
+  if (lower === 'css') {
+    return pickWorkspacePath(
+      paths,
+      [
+        p => /src\/App\.css$/i.test(p),
+        p => /src\/index\.css$/i.test(p),
+        p => /\.css$/i.test(p),
+      ],
+      planned.find(p => p.endsWith('.css')) || 'src/App.css',
+    );
+  }
+  if (lower === 'jsx') {
+    return pickWorkspacePath(
+      paths,
+      [
+        p => /src\/App\.jsx$/i.test(p),
+        p => /App\.jsx$/i.test(p),
+        p => /\.jsx$/i.test(p),
+      ],
+      'src/App.jsx',
+    );
+  }
+  if (lower === 'tsx') {
+    return pickWorkspacePath(
+      paths,
+      [
+        p => /src\/App\.tsx$/i.test(p),
+        p => /App\.tsx$/i.test(p),
+        p => /\.tsx$/i.test(p),
+      ],
+      'src/App.tsx',
+    );
+  }
+  if (lower === 'javascript' || lower === 'js') {
+    return pickWorkspacePath(
+      paths,
+      [
+        p => /src\/main\.jsx$/i.test(p),
+        p => /src\/App\.jsx$/i.test(p),
+        p => /js\/app\.js$/i.test(p),
+        p => /\.jsx?$/i.test(p),
+      ],
+      planned.find(p => p.endsWith('.js')) || 'js/app.js',
+    );
+  }
+  if (lower === 'html' || lower === 'htm') {
+    return pickWorkspacePath(paths, [p => /index\.html$/i.test(p)], 'index.html');
+  }
+  if (lower === 'python' || lower === 'py') return 'main.py';
+  if (lower === 'ts' || lower === 'typescript') {
+    return pickWorkspacePath(paths, [p => /src\/main\.ts$/i.test(p)], 'src/main.ts');
+  }
+  if (lower === 'json') {
+    return pickWorkspacePath(paths, [p => /package\.json$/i.test(p)], 'package.json');
+  }
+  return '';
+}
+
+function pathFromProseBeforeFence(reply: string, fenceIndex: number): string | null {
+  const before = reply.slice(Math.max(0, fenceIndex - 280), fenceIndex);
+  const backtick = before.match(/`([A-Za-z0-9_./@+-]+\.[A-Za-z0-9]+)`\s*:?\s*$/);
+  if (backtick?.[1]) return backtick[1];
+  const named = before.match(/(?:update|edit|modify|change|in)\s+([A-Za-z0-9_./@+-]+\.[A-Za-z0-9]+)\s*:?\s*$/i);
+  if (named?.[1]) return named[1];
+  return null;
+}
+
+/** When the model returns chat-style fences instead of @@@FILE blocks. */
+export function extractChatStyleFileEdits(
+  reply: string,
+  userMessage: string,
+  existingFiles?: ProjectFileMap,
+): ParsedFileEdit[] {
+  const planned = planFilesForBuild(userMessage);
   const edits: ParsedFileEdit[] = [];
   const seen = new Set<string>();
 
@@ -511,14 +606,14 @@ export function extractChatStyleFileEdits(reply: string, userMessage: string): P
       push(pathHit[0], body);
       continue;
     }
+    const prosePath = typeof f.index === 'number' ? pathFromProseBeforeFence(reply, f.index) : null;
+    if (prosePath) {
+      push(prosePath, body);
+      continue;
+    }
     const lang = (meta.split(/\s+/)[0] || '').toLowerCase();
-    if (lang === 'css') push(cssPath, body);
-    else if (lang === 'javascript' || lang === 'js') push(jsPath, body);
-    else if (lang === 'html' || lang === 'htm') push('index.html', body);
-    else if (lang === 'python' || lang === 'py') push('main.py', body);
-    else if (lang === 'tsx') push('src/App.tsx', body);
-    else if (lang === 'ts' || lang === 'typescript') push('src/main.ts', body);
-    else if (lang === 'json') push('package.json', body);
+    const inferred = inferLangPath(lang, userMessage, existingFiles);
+    if (inferred) push(inferred, body);
   }
 
   if (edits.length === 1 && edits[0].path === 'index.html' && planned.length > 1) {
@@ -716,7 +811,11 @@ createRoot(document.getElementById('root')!).render(
 }
 
 /** Offline fallback when the brain times out or returns no file blocks. */
-export function scaffoldFallbackEdits(userMessage: string, files?: ProjectFileMap): ParsedFileEdit[] {
+export function scaffoldFallbackEdits(
+  userMessage: string,
+  files?: ProjectFileMap,
+  opts?: { projectName?: string },
+): ParsedFileEdit[] {
   const mobile = classifyMobileTarget(userMessage);
   const nativeTree = files && Object.keys(files).some(p =>
     /ios\/[^/]+\/ContentView\.swift$/i.test(p) || /MainActivity\.kt$/i.test(p),
@@ -729,6 +828,13 @@ export function scaffoldFallbackEdits(userMessage: string, files?: ProjectFileMa
 
   const flat = files ? flattenProjectFiles(files) : {};
   const hasHtml = Object.keys(flat).some(p => /\.html?$/i.test(p));
+  const hasReactApp = Object.keys(flat).some(p => /(^|\/)App\.(jsx|tsx)$/i.test(p));
+
+  // Vite / React projects: deterministic logo/layout patches (scoped by project name).
+  if (hasReactApp && files) {
+    const react = reactUiMicroAskEdits(flat, userMessage, { projectName: opts?.projectName });
+    if (react.length) return react;
+  }
 
   // Existing project: micro-asks first (bg, search bar, rename…), then layout, then color.
   if (hasHtml) {
@@ -1112,7 +1218,7 @@ export function formatCodeChatReply(
   userMessage: string,
   changedPaths: string[],
   spoken?: string,
-  opts?: { previewTouched?: boolean },
+  opts?: { previewTouched?: boolean; surface?: 'chat' | 'code' },
 ): string {
   const ask = String(userMessage || '').replace(/^\[(?:Plan|Ask|Debug|Tasks)\]\s*/i, '').trim();
   const clean = stripFileBlocks(spoken || '');
@@ -1133,6 +1239,10 @@ export function formatCodeChatReply(
     && !/\b(css|js|html)\/[\w.-]+\.(css|js|html?)\b/i.test(clean);
 
   const previewOk = opts?.previewTouched !== false;
+  const surface = opts?.surface || 'code';
+  const doneFooter = surface === 'chat'
+    ? 'Refresh your browser tab to see the change.'
+    : 'Press **Start** to see the preview.';
 
   if (changedPaths.length && previewOk) {
     const hello = /\bhello\s*world\b/i.test(ask) && /\b(build|create|make)\b/i.test(ask);
@@ -1141,17 +1251,20 @@ export function formatCodeChatReply(
     const search = /\bsearch\b/i.test(ask);
     const rgb = /\b(rgb|multi[- ]?colou?r|gradient)\b/i.test(ask);
     const toggle = /\b(toggle|theme)\b/i.test(ask) && /\b(remove|delete)\b/i.test(ask);
-    if (usable) return `${clean}\n\nPress **Start** to see the preview.`;
-    if (hello) return 'Done — Hello World is ready. Press **Start** to open the preview.';
-    if (pizza) return 'Done — updated the page text. Press **Start** to see it.';
-    if (bg) return 'Done — background and colors are updated. Press **Start** to check the preview.';
-    if (search) return 'Done — search is in the top-right. Press **Start** to see it.';
-    if (rgb) return 'Done — multi-color title is applied. Press **Start** to see it.';
-    if (toggle) return 'Done — removed the theme toggle. Press **Start** to check the preview.';
-    if (/\b(icon|profile|account|center)\b/i.test(ask)) {
-      return 'Done — layout updated. Press **Start** to see the preview.';
+    if (usable) return `${clean}\n\n${doneFooter}`;
+    if (hello) return `Done — Hello World is ready. ${doneFooter}`;
+    if (pizza) return `Done — updated the page text. ${doneFooter}`;
+    if (bg) return `Done — background and colors are updated. ${doneFooter}`;
+    if (search) return `Done — search is in the top-right. ${doneFooter}`;
+    if (rgb) return `Done — multi-color title is applied. ${doneFooter}`;
+    if (toggle) return `Done — removed the theme toggle. ${doneFooter}`;
+    if (/\b(logo|icon)\b/i.test(ask) && /\b(center|middle|screen)\b/i.test(ask)) {
+      return `Done — added the logo centered on screen. ${doneFooter}`;
     }
-    return `Done — I updated the project. Press **Start** to see the preview.`;
+    if (/\b(icon|profile|account|center|logo|button)\b/i.test(ask)) {
+      return `Done — updated the layout. ${doneFooter}`;
+    }
+    return `Done — I updated the project. ${doneFooter}`;
   }
 
   if (changedPaths.length && !previewOk) {

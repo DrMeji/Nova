@@ -11,6 +11,8 @@ import { isCatalogMessage, parseCatalogMessage } from '@/lib/folderCatalog';
 import { FolderCatalogCard } from '@/components/FolderCatalogCard';
 import { isPcExploreMessage, parsePcExploreMessage } from '@/lib/pcExplore';
 import { PcExploreCard } from '@/components/PcExploreCard';
+import { isPromptChipsMessage, parsePromptChipsMessage } from '@/lib/chatPromptChips';
+import { PromptChipsCard } from '@/components/PromptChipsCard';
 import { AgentProgressStatus } from '@/components/AgentProgressStatus';
 
 const PIXEL_COLS = 18;
@@ -261,7 +263,17 @@ function ArkMediaImage({ id, alt, preview }: { id: string; alt: string; preview?
   return <ResolvedMedia src={src} alt={alt} preview={preview} />;
 }
 
-export function MessageContent({ content, live }: { content: string; live?: boolean }) {
+export function MessageContent({
+  content,
+  live,
+  traceExpanded,
+  onPromptChipPick,
+}: {
+  content: string;
+  live?: boolean;
+  traceExpanded?: boolean;
+  onPromptChipPick?: (prompt: string) => void;
+}) {
   if (!content) {
     return <GeneratingPlaceholder kind="chat" label="Thinking…" />;
   }
@@ -276,15 +288,30 @@ export function MessageContent({ content, live }: { content: string; live?: bool
     if (data) return <FolderCatalogCard data={data} />;
   }
 
+  if (isPromptChipsMessage(content)) {
+    const { body, chips } = parsePromptChipsMessage(content);
+    if (onPromptChipPick && chips.length) {
+      return <PromptChipsCard body={body} chips={chips} onPick={onPromptChipPick} />;
+    }
+    return body ? <ChatMarkdown text={body} /> : null;
+  }
+
   if (isTraceMessage(content)) {
     const { payload, answer } = parseTraceMessage(content);
     if (payload) {
+      const shown = (answer || payload.answer || '').trim() || 'Done.';
       return (
-        <AgentTracePanel
-          payload={payload}
-          answer={answer}
-          live={live ?? (!payload.done && !answer)}
-        />
+        <div className="space-y-2">
+          <ChatMarkdown text={shown} />
+          {traceExpanded ? (
+            <AgentTracePanel
+              payload={payload}
+              answer={shown}
+              live={live ?? (!payload.done && !answer)}
+              stepsOnly
+            />
+          ) : null}
+        </div>
       );
     }
   }

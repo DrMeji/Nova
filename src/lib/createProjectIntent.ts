@@ -12,6 +12,8 @@ import {
 import { looksLikeFolderCatalogAsk } from '@/lib/folderCatalog';
 import { looksLikeFolderPathAsk } from '@/lib/folderPathAsk';
 import { looksLikePcExploreAsk, looksLikeInstalledAppsAsk } from '@/lib/pcExplore';
+import { looksLikeProjectBuildAsk } from '@/lib/chatBuildIntent';
+import { slugifyProjectName } from '@/lib/projectNames';
 
 export type ProjectKind = 'static-web' | 'vite-react' | 'python' | 'node-cli' | 'unknown';
 
@@ -33,11 +35,6 @@ const NEW_PROJECT_RE =
 const PROJECT_NOUN_RE =
   /\b(?:app|application|project|website|site|web\s*app|webapp|bot|program|starter)\b/i;
 
-const RICH_FEATURE_RE =
-  /\b(discord|webrtc|call\s+and\s+text|marketplace|full\s+stack|social|chat\s+app|video\s+call|e-?commerce|dashboard)\b/i;
-
-import { slugifyProjectName } from '@/lib/projectNames';
-
 export { slugifyProjectName } from '@/lib/projectNames';
 
 export function detectProjectKind(text: string): ProjectKind {
@@ -52,6 +49,7 @@ export function detectProjectKind(text: string): ProjectKind {
 function extractProjectName(text: string): string | null {
   const t = String(text || '').trim();
   const patterns = [
+    /\bcreate\s+(?:a\s+)?(?:new\s+)?project\s+["“']?([A-Za-z][A-Za-z0-9 _-]{1,40})/i,
     /\b(?:called|named|name(?:d)?\s+it|call\s+it)\s+["“']([^"”']{2,48})["”']/i,
     /\b(?:called|named|name(?:d)?\s+it|call\s+it)\s+([A-Za-z][A-Za-z0-9 _-]{1,40})/i,
     /\b(?:app|project|website|site)\s+["“']([^"”']{2,48})["”']/i,
@@ -84,26 +82,28 @@ export function parseNewProjectIntent(message: string): NewProjectIntent | null 
     return null;
   }
 
-  const isCreate = CREATE_RE.test(t) || NEW_PROJECT_RE.test(t);
+  const isCreate = CREATE_RE.test(t) || NEW_PROJECT_RE.test(t) || looksLikeProjectBuildAsk(t);
   if (!isCreate || !PROJECT_NOUN_RE.test(t)) return null;
 
-  if (looksLikePcExploreAsk(t)) return null;
-  if (looksLikeFolderCatalogAsk(t)) return null;
-  if (looksLikeInstalledAppsAsk(t)) return null;
-  if (/\b(?:what|which|list|show|find|tell me)\b/i.test(t) && /\b(?:on|in)\s+(?:my\s+)?(?:pc|desktop)\b/i.test(t)) {
-    return null;
+  // Build/create always wins over explore/catalog false positives.
+  if (!looksLikeProjectBuildAsk(t)) {
+    if (looksLikePcExploreAsk(t)) return null;
+    if (looksLikeFolderCatalogAsk(t)) return null;
+    if (looksLikeInstalledAppsAsk(t)) return null;
+    if (/\b(?:what|which|list|show|find|tell me)\b/i.test(t) && /\b(?:on|in)\s+(?:my\s+)?(?:pc|desktop)\b/i.test(t)) {
+      return null;
+    }
   }
   if (looksLikeFolderPathAsk(t) && !isCreate) return null;
-  if (/\b(?:open|attach|import)\s+(?:folder|project)\b/i.test(t) && !/\bnew\b/i.test(t)) return null;
-  if (/\b(?:install|npm\s+i|pip\s+install)\b/i.test(t) && !/\bnew\b/i.test(t)) return null;
+  if (/\b(?:open|attach|import)\s+(?:folder|project)\b/i.test(t) && !/\bnew\b/i.test(t) && !/\bcreate\s+project\b/i.test(t)) return null;
+  if (/\b(?:install|npm\s+i|pip\s+install)\b/i.test(t) && !/\bnew\b/i.test(t) && !looksLikeProjectBuildAsk(t)) return null;
   if (/\b(delete|remove|trash|wipe)\b/i.test(t) && /\b(project|workspace|folder|directory)\b/i.test(t)) return null;
 
   const name = extractProjectName(t);
   if (!name) return null;
 
   const kind = detectProjectKind(t);
-  const preferPlan = RICH_FEATURE_RE.test(t)
-    || (kind === 'vite-react' && /\b(full|complete|production|marketplace|platform)\b/i.test(t));
+  const preferPlan = false;
 
   return {
     name,

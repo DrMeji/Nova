@@ -35,6 +35,17 @@ if not exist "node_modules\" (
   )
 )
 
+set "ELECTRON_EXE=%~dp0node_modules\electron\dist\electron.exe"
+if not exist "%ELECTRON_EXE%" (
+  echo Downloading Electron binary...
+  node "%~dp0node_modules\electron\install.js"
+  if errorlevel 1 (
+    echo ERROR: Electron download failed.
+    pause
+    exit /b 1
+  )
+)
+
 echo Stopping any old Electron window...
 taskkill /F /IM electron.exe >nul 2>&1
 
@@ -48,11 +59,10 @@ if errorlevel 1 (
 
 REM Launch Electron binary directly — never "npx electron" on Windows.
 REM npx resolves to npx.ps1 which can open in Notepad instead of running ARK.
-set "ELECTRON_EXE=%~dp0node_modules\electron\dist\electron.exe"
 if not exist "%ELECTRON_EXE%" (
   echo ERROR: Electron not found at:
   echo   %ELECTRON_EXE%
-  echo Run npm install, then try again.
+  echo Run: node node_modules\electron\install.js
   pause
   exit /b 1
 )

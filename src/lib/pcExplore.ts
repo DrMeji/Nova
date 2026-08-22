@@ -5,6 +5,7 @@
 
 import type { CatalogItem } from '@/lib/folderCatalog';
 import { parseDesktopSubfolderAsk } from '@/lib/folderPathAsk';
+import { looksLikeProjectBuildAsk } from '@/lib/chatBuildIntent';
 import { grantsFromPrefs, type WorkspaceGrants } from '@/lib/workspaceGrants';
 
 const FOLDER_NAMED_RE = /\b(?:folder|project)\s+(?:called|named)\b/i;
@@ -14,6 +15,7 @@ export type PcExploreMode = 'desktop_top' | 'desktop_subfolder' | 'games' | 'ins
 export function looksLikeInstalledAppsAsk(text: string): boolean {
   const t = String(text || '').trim();
   if (!/\b(?:apps?|applications?|programs?|software)\b/i.test(t)) return false;
+  if (looksLikeProjectBuildAsk(t)) return false;
   if (/\b(?:installed|install(?:ed|ation)?s?|do\s+i\s+have|have\s+(?:on|in)\s+(?:my\s+)?(?:pc|computer)|other\s+(?:apps?|applications?|programs?))\b/i.test(t)) {
     if (/\b(?:on|in)\s+(?:my\s+)?desktop\b/i.test(t) && !/\binstalled\b/i.test(t)) return false;
     return true;
@@ -24,12 +26,18 @@ export function looksLikeInstalledAppsAsk(text: string): boolean {
 export function classifyPcExploreMode(text: string): PcExploreMode | null {
   const t = String(text || '').trim();
   if (!t) return null;
+  if (looksLikeProjectBuildAsk(t)) return null;
   if (FOLDER_NAMED_RE.test(t)) return null;
 
   if (looksLikeInstalledAppsAsk(t)) return 'installed_apps';
 
-  if (/\bprojects?\b/i.test(t)
-    && /\b(?:inside|in|on|have|what|which|type|kind|tell|show|pc|computer|desktop)\b/i.test(t)) {
+  // Inventory only — "Create project … Desktop window" must NOT match.
+  if (
+    /\bprojects?\b/i.test(t)
+    && /\b(?:what|which|list|show|tell|inside|have)\b/i.test(t)
+    && /\b(?:pc|computer|desktop|projects?)\b/i.test(t)
+    && !/\b(?:create|build|scaffold|want\s+a|called|named)\b/i.test(t)
+  ) {
     return 'desktop_subfolder';
   }
 

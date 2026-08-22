@@ -48,18 +48,6 @@ function getNavGroups(): {
     comingSoon?: boolean;
   }[];
 }[] {
-  const codeBlocked = !isCodeTabEnabled();
-  const workItems = [
-    {
-      label: 'Code',
-      icon: Code2,
-      route: { name: 'code' as const },
-      activity: 'code' as const,
-      comingSoon: codeBlocked,
-    },
-    { label: 'Projects', icon: Briefcase, route: { name: 'projects' as const } },
-    { label: 'History', icon: History, route: { name: 'dashboard' as const } },
-  ];
   return [
     {
       id: 'create',
@@ -70,7 +58,10 @@ function getNavGroups(): {
     {
       id: 'work',
       label: 'Work',
-      items: workItems,
+      items: [
+        { label: 'Projects', icon: Briefcase, route: { name: 'projects' as const } },
+        { label: 'History', icon: History, route: { name: 'dashboard' as const } },
+      ],
     },
     {
       id: 'tools',

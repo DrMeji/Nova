@@ -70,18 +70,20 @@ export function looksLikeCodeEditAsk(text: string): boolean {
   const t = String(text || '').trim();
   if (!t) return false;
   if (looksLikeImplementGo(t) || looksLikeBuildStart(t)) return true;
+  if (/\bturn\s+(?:this|it)\s+into\b/i.test(t)) return true;
+  if (/\b(title\s*bar|sidebar|note\s*list|main\s+editor|dark\s+theme|localStorage)\b/i.test(t)) return true;
   if (
-    /\b(add|put|place|move|insert|create)\b[\s\S]{0,100}\b(button|icon|logo|header|footer|nav|navbar|search|settings|sidebar|menu|title|page|tab|modal|form|input|link|preference)\b/i.test(t)
+    /\b(add|put|place|move|insert|create)\b[\s\S]{0,100}\b(button|icon|logo|header|footer|nav|navbar|search|settings|sidebar|menu|title|page|tab|modal|form|input|link|preference|note)\b/i.test(t)
   ) {
     return true;
   }
   if (
-    /\b(change|update|set|make|edit|fix|rename|restyle)\b[\s\S]{0,100}\b(background|color|colour|font|title|text|layout|style|css|button|icon|logo|header|copy|wording)\b/i.test(t)
+    /\b(change|update|set|make|edit|fix|rename|restyle)\b[\s\S]{0,100}\b(background|color|colour|font|title|text|layout|style|css|button|icon|logo|header|copy|wording|theme)\b/i.test(t)
   ) {
     return true;
   }
   if (
-    /\b(add|implement|build|create|write)\b[\s\S]{0,100}\b(settings|preferences|search|login|profile|dashboard|page|component|feature|section)\b/i.test(t)
+    /\b(add|implement|build|create|write)\b[\s\S]{0,100}\b(settings|preferences|search|login|profile|dashboard|page|component|feature|section|layout)\b/i.test(t)
   ) {
     return true;
   }

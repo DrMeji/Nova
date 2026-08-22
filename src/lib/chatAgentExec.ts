@@ -8,7 +8,7 @@ import {
   agentExecutionBlockedMessage,
   getAgentExecutionMode,
 } from '@/lib/agentExecution';
-import { inferInstallCommand, looksLikeInstallDepsAsk } from '@/lib/folderPathAsk';
+import { inferInstallCommand, looksLikeInstallDepsAsk, looksLikeRunDevServerAsk } from '@/lib/folderPathAsk';
 import { classifyGitAsk } from '@/lib/arkGitClient';
 
 export type AgentRunOutcome = {
@@ -41,12 +41,28 @@ const RUNTIME_INSTALL_RE =
   /\b(don'?t|do not)\s+have\s+(node|npm|python|pip|git)\b|\b(install|get|need)\s+(node|npm|python|git)\b|\bno\s+(node|python|git)\b/i;
 
 export function looksLikeRuntimeInstallAsk(message: string): boolean {
-  return RUNTIME_INSTALL_RE.test(String(message || '').trim());
+  const t = String(message || '').trim();
+  if (!t) return false;
+  // "install npm dependencies" = project deps, not winget Node.js
+  if (looksLikeInstallDepsAsk(t)) return false;
+  if (/\b(install|add|get)\b[\s\S]{0,32}\b(dependencies|packages|node_modules|requirements)\b/i.test(t)) {
+    return false;
+  }
+  if (/\bnpm\s+install\b/i.test(t) || /\bpip\s+install\b/i.test(t)) return false;
+  return RUNTIME_INSTALL_RE.test(t);
 }
 
 export function proposeRuntimeInstall(message: string): string | null {
   const t = String(message || '').toLowerCase();
-  if (/\bnode\b|\bnpm\b/.test(t)) return 'winget install OpenJS.NodeJS.LTS --accept-package-agreements --accept-source-agreements';
+  if (looksLikeInstallDepsAsk(message)) return null;
+  if (/\bnpm\s+install\b/i.test(t) || /\bpip\s+install\b/i.test(t)) return null;
+  if (/\b(install|need|get)\s+npm\b/.test(t) && /\b(dependencies|packages)\b/.test(t)) return null;
+  if (/\bnode\b/.test(t) && !/\bnode_modules\b/.test(t)) {
+    return 'winget install OpenJS.NodeJS.LTS --accept-package-agreements --accept-source-agreements';
+  }
+  if (/\bnpm\b/.test(t) && /\b(install|need|get)\s+node\b/.test(t)) {
+    return 'winget install OpenJS.NodeJS.LTS --accept-package-agreements --accept-source-agreements';
+  }
   if (/\bpython\b|\bpip\b/.test(t)) return 'winget install Python.Python.3.12 --accept-package-agreements --accept-source-agreements';
   if (/\bgit\b/.test(t)) return 'winget install Git.Git --accept-package-agreements --accept-source-agreements';
   return null;
@@ -147,5 +163,6 @@ export async function runAgentCommand(opts: {
 export function looksLikeAgentCommandAsk(message: string, hasPackageJson: boolean): boolean {
   return Boolean(inferAgentCommand(message, hasPackageJson))
     || looksLikeInstallDepsAsk(message)
+    || looksLikeRunDevServerAsk(message)
     || looksLikeRuntimeInstallAsk(message);
 }

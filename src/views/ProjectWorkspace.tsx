@@ -2111,7 +2111,7 @@ export function ProjectWorkspace() {
       const nativeTree = isNativeMobileTree(fileContentsRef.current);
       const webFinal = nativeTree
         ? edits
-        : finalizeWebEdits(fileContentsRef.current, content, edits);
+        : finalizeWebEdits(fileContentsRef.current, content, edits, { projectName: project?.name || buildLabel });
       if (!webFinal.length) return { changedPaths: [] as string[], summary: '', previewTouched: false };
       const nativeEdits = finalizeMobileEdits(content, webFinal, fileContentsRef.current);
       if (!nativeEdits.length) return { changedPaths: [] as string[], summary: '', previewTouched: false };

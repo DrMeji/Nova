@@ -13,6 +13,7 @@ import {
   looksLikeGreenfieldIdea,
   looksLikeGreenfieldCreateGo,
   parseGreenfieldIdea,
+  buildGreenfieldPlanReply,
 } from '../src/lib/chatIdeaIntent.ts';
 import { isBlockedDiskTargetName } from '../src/lib/projectNames.ts';
 
@@ -277,6 +278,12 @@ const greenfieldCases = [
     input: 'Add a search button on the top right corner',
     wantGreenfield: false,
   },
+  {
+    input: 'I want to build a website for copy shop like people can get up early they can pick what coffee they want and schedule and get a message on their phone when coffee is ready where should we start',
+    wantGreenfield: true,
+    wantName: 'Coffee Shop',
+    noDoorbell: true,
+  },
 ];
 
 for (const c of greenfieldCases) {
@@ -292,6 +299,14 @@ for (const c of greenfieldCases) {
       console.error(`FAIL greenfield name: "${c.input.slice(0, 60)}" got ${idea?.name}`);
       failed += 1;
       continue;
+    }
+    if (c.noDoorbell) {
+      const reply = buildGreenfieldPlanReply(idea);
+      if (/doorbell/i.test(reply)) {
+        console.error(`FAIL greenfield plan should not mention doorbell: "${c.input.slice(0, 60)}"`);
+        failed += 1;
+        continue;
+      }
     }
   }
   if (c.wantCreateGo && !looksLikeGreenfieldCreateGo('Create project Ring System')) {

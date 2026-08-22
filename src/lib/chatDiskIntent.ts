@@ -218,6 +218,13 @@ export function extractAddFileParentHint(text: string): string | undefined {
 export function looksLikeAddFileDestinationClarify(text: string): boolean {
   const t = String(text || '').trim();
   if (!t) return false;
+  // UI / layout asks that mention "desktop" are not file destinations.
+  if (/\b(?:into|to)\s+(?:a\s+|the\s+)?desktop\s+(?:app|application|layout|window|ui)\b/i.test(t)) {
+    return false;
+  }
+  if (/\b(title\s*bar|sidebar|note\s*list|main\s+editor|localStorage|dark\s+theme)\b/i.test(t)) {
+    return false;
+  }
   if (looksLikeAddFileAsk(t)) return true;
   if (/\b(?:go\s+ahead\s+and\s+)?(?:put|place|save|add)\s+(?:it|the\s+file)\s+(?:to|in|into|inside)\b/i.test(t)) return true;
   if (/\b(?:should|needs to|needs)\s+go\s+(?:in|into|inside)\b/i.test(t)) return true;
@@ -358,9 +365,10 @@ export function classifyDiskIntent(
   }
 
   if (looksLikeAddFileLocationFollowUp(t)) {
+    // Only continue an add-file flow when we already asked where to put a file.
     const allLines = [...recent, t];
-    const fileName = fileNameFromAddFileThread(allLines) || pendingAddFile;
-    if (fileName) {
+    const fileName = pendingAddFile || fileNameFromAddFileThread(allLines);
+    if (fileName && pendingAddFile) {
       return {
         type: 'add_file',
         name: fileName,

@@ -118,7 +118,34 @@ async function agentRun(payload) {
   };
 }
 
+/** Start npm run dev in the background (Vite default port 5173). */
+async function agentStartDevServer(payload) {
+  const { spawn } = require('child_process');
+  const cwdRes = resolveCwd(payload?.cwd);
+  if (!cwdRes.ok) return cwdRes;
+
+  const pkgPath = path.join(cwdRes.path, 'package.json');
+  if (!fs.existsSync(pkgPath)) {
+    return { ok: false, error: 'No package.json in this folder.' };
+  }
+
+  const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+  try {
+    const child = spawn(npm, ['run', 'dev'], {
+      cwd: cwdRes.path,
+      detached: true,
+      stdio: 'ignore',
+      shell: process.platform === 'win32',
+    });
+    child.unref();
+    return { ok: true, cwd: cwdRes.path, url: 'http://localhost:5173' };
+  } catch (err) {
+    return { ok: false, error: err?.message || 'Could not start dev server.' };
+  }
+}
+
 module.exports = {
   agentRun,
+  agentStartDevServer,
   commandAllowed,
 };

@@ -7,18 +7,23 @@ import { parseFolderPathAsk, parseDesktopSubfolderAsk, type FolderPathRef } from
 import { looksLikeInstalledAppsAsk } from '@/lib/pcExplore';
 import { looksLikeAddFileDestinationClarify } from '@/lib/chatDiskIntent';
 import { looksLikeGreenfieldIdea } from '@/lib/chatIdeaIntent';
+import { looksLikeProjectBuildAsk } from '@/lib/chatBuildIntent';
 import { isBlockedDiskTargetName } from '@/lib/projectNames';
 
 /** "What projects do I have on my PC / desktop?" — not installed-apps asks. */
 export function looksLikeProjectsInventoryAsk(text: string): boolean {
   const t = String(text || '').trim();
   if (!/\bprojects?\b/i.test(t)) return false;
+  if (looksLikeProjectBuildAsk(t)) return false;
   if (looksLikeInstalledAppsAsk(t)) return false;
-  if (/\b(?:work\s+on|start\s+work|implement|build|fix|edit)\b/i.test(t)) return false;
-  return (
-    /\b(what|which|tell me|show|list|type|kind|sort|do i have|have got|got|can you)\b/i.test(t)
-    || /\b(?:inside|in|on)\s+(?:of\s+)?(?:my\s+)?(?:pc|computer|desktop)\b/i.test(t)
+  if (/\b(?:work\s+on|start\s+work|implement|build|fix|edit|create\s+project)\b/i.test(t)) return false;
+  // Must be a real inventory question — not just the words project + desktop in a build brief.
+  const asksInventory = (
+    /\b(what|which|tell me|show|list|type|kind|sort|do i have|have got)\b/i.test(t)
+    || /\b(?:what(?:'s| is)|list|show).{0,40}\b(?:on|in)\s+(?:my\s+)?(?:pc|computer|desktop)\b/i.test(t)
   );
+  if (!asksInventory) return false;
+  return true;
 }
 
 /** Best-guess folder for a catalog ask — no "say the folder name" template needed. */
@@ -28,13 +33,17 @@ export function resolveCatalogFolderRef(message: string): FolderPathRef | null {
 
   const t = String(message || '').trim();
   if (!t) return null;
+  if (looksLikeProjectBuildAsk(t)) return null;
   if (looksLikeAddFileDestinationClarify(t)) return null;
 
   if (looksLikeProjectsInventoryAsk(t)) {
     return { scope: 'desktop', name: 'Projects' };
   }
 
-  if (/\bprojects?\b/i.test(t) && /\bdesktop\b/i.test(t)) {
+  // Require an inventory-style ask — never treat "Create project X … Desktop window" as a list.
+  if (/\bprojects?\b/i.test(t) && /\bdesktop\b/i.test(t)
+    && /\b(?:what|which|list|show|tell|inside|contents?)\b/i.test(t)
+    && !/\b(?:create|build|scaffold|want\s+a)\b/i.test(t)) {
     return { scope: 'desktop', name: 'Projects' };
   }
 
@@ -87,6 +96,7 @@ const KEY_FILE_NAMES = [
 export function looksLikeFolderCatalogAsk(text: string): boolean {
   const t = String(text || '').trim();
   if (!t) return false;
+  if (looksLikeProjectBuildAsk(t)) return false;
   if (looksLikeAddFileDestinationClarify(t)) return false;
   if (/\b(delete|remove|trash|wipe|get rid of)\b/i.test(t)) return false;
   if (looksLikeInstalledAppsAsk(t)) return false;
@@ -117,7 +127,7 @@ export function looksLikeFolderCatalogAsk(text: string): boolean {
   if (/\bwhat(?:'s| is)\s+in\s+it\b/i.test(t)) return true;
   if (
     /\b(?:what(?:'s| is)|tell\s+me\s+about|describe|explain)\s+[\w.-]+\s+(?:on|in)\s+(?:my\s+)?desktop\b/i.test(t)
-    && !/\b(fix|bug|scan|security|build|implement|edit|install|work\s+on|start\s+work)\b/i.test(t)
+    && !/\b(fix|bug|scan|security|build|implement|edit|install|work\s+on|start\s+work|create)\b/i.test(t)
   ) {
     return true;
   }
@@ -130,12 +140,12 @@ export function looksLikeStartWorkOnFolderAsk(text: string): boolean {
   if (!t) return false;
   if (looksLikeGreenfieldIdea(t)) return false;
   if (FOLDER_CATALOG_RE.test(t) || /\bwhat(?:'s| is)\s+in\s+it\b/i.test(t)) return false;
-  // "work on a/this/the project" without a folder name is a new-idea chat, not bind-existing.
+  // "start working on this/the/a/my project" without a folder name = continue current idea, not bind-existing.
   if (
-    /\bwork\s+on\s+(?:a\s+|this\s+|the\s+|my\s+)?project\b/i.test(t)
+    /\b(?:start\s+)?work(?:ing)?\s+on\s+(?:a\s+|this\s+|the\s+|my\s+)?project\b/i.test(t)
     && !/\blet'?s\s+work\s+on\s+[A-Za-z]/i.test(t)
     && !/\b(?:called|named)\s+[A-Za-z]/i.test(t)
-    && !/\bstart\s+work(?:ing)?\s+on\s+[A-Za-z]/i.test(t)
+    && !/\bstart\s+work(?:ing)?\s+on\s+[A-Za-z][A-Za-z0-9_-]/i.test(t)
   ) {
     return false;
   }

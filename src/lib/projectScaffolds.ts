@@ -1,5 +1,5 @@
 /**
- * Deterministic project scaffolds — valid trees ARK writes before optional model pass.
+ * Minimal project files — empty starting point, no placeholder pages or demo copy.
  */
 
 import type { ProjectKind } from '@/lib/createProjectIntent';
@@ -17,16 +17,15 @@ export function buildScaffoldFiles(
 ): ScaffoldFile[] {
   const title = opts.name.trim() || 'New Project';
   const pkg = pkgName(title);
-  const summary = String(opts.summary || '').trim();
 
-  if (kind === 'python') return pythonScaffold(title, pkg, summary);
-  if (kind === 'static-web') return staticWebScaffold(title, summary);
-  if (kind === 'node-cli') return nodeCliScaffold(title, pkg, summary);
-  return viteReactScaffold(title, pkg, summary);
+  if (kind === 'python') return pythonScaffold(title);
+  if (kind === 'static-web') return staticWebScaffold(title);
+  if (kind === 'node-cli') return nodeCliScaffold(title, pkg);
+  return viteReactScaffold(title, pkg);
 }
 
 function gitignore(kind: 'node' | 'python' | 'web'): string {
-  const common = ['.DS_Store', 'Thumbs.db', '*.log', '.env', '.env.*', '!.env.example'];
+  const common = ['.DS_Store', 'Thumbs.db', '*.log', '.env', '.env.*'];
   if (kind === 'node') {
     return [...common, 'node_modules/', 'dist/', 'build/', '.vite/'].join('\n') + '\n';
   }
@@ -36,12 +35,7 @@ function gitignore(kind: 'node' | 'python' | 'web'): string {
   return common.join('\n') + '\n';
 }
 
-function readme(title: string, body: string): string {
-  return `# ${title}\n\n${body}\n`;
-}
-
-function staticWebScaffold(title: string, summary: string): ScaffoldFile[] {
-  const hint = summary ? `\n> ${summary.slice(0, 200)}\n` : '';
+function staticWebScaffold(title: string): ScaffoldFile[] {
   return [
     {
       path: 'index.html',
@@ -54,10 +48,7 @@ function staticWebScaffold(title: string, summary: string): ScaffoldFile[] {
   <link rel="stylesheet" href="css/styles.css" />
 </head>
 <body>
-  <main class="wrap">
-    <h1>${title}</h1>
-    <p>Your site is ready — edit <code>index.html</code> and <code>css/styles.css</code>.</p>
-  </main>
+  <div id="app"></div>
   <script src="js/app.js"></script>
 </body>
 </html>
@@ -65,38 +56,20 @@ function staticWebScaffold(title: string, summary: string): ScaffoldFile[] {
     },
     {
       path: 'css/styles.css',
-      content: `* { box-sizing: border-box; }
-body {
-  margin: 0;
-  font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-  background: #0b1020;
-  color: #e8ecf4;
-  min-height: 100vh;
-}
-.wrap {
-  max-width: 42rem;
-  margin: 0 auto;
-  padding: 3rem 1.25rem;
-}
-h1 { font-size: 2rem; margin-bottom: 0.5rem; }
-code { background: rgba(255,255,255,0.08); padding: 0.15rem 0.35rem; border-radius: 0.35rem; }
+      content: `* { box-sizing: border-box; margin: 0; }
+body { font-family: system-ui, sans-serif; min-height: 100vh; }
 `,
     },
     {
       path: 'js/app.js',
-      content: `document.title = ${JSON.stringify(title)};\nconsole.log('${title} loaded');\n`,
-    },
-    {
-      path: 'README.md',
-      content: readme(title, `${hint}\nOpen \`index.html\` in a browser or serve this folder with any static server.`),
+      content: `const root = document.getElementById('app');\n`,
     },
     { path: '.gitignore', content: gitignore('web') },
   ];
 }
 
-function viteReactScaffold(title: string, pkg: string, summary: string): ScaffoldFile[] {
-  const chatLike = /\b(discord|call|chat|webrtc)\b/i.test(summary);
-  const files: ScaffoldFile[] = [
+function viteReactScaffold(title: string, pkg: string): ScaffoldFile[] {
+  return [
     {
       path: 'package.json',
       content: JSON.stringify({
@@ -155,124 +128,44 @@ ReactDOM.createRoot(document.getElementById('root')).render(
 
 export default function App() {
   return (
-    <div className="app">
-      <header>
-        <h1>${title}</h1>
-        <p>Scaffold ready — run <code>npm install</code> then <code>npm run dev</code>.</p>
-      </header>
-    </div>
+    <div className="app" />
   );
 }
 `,
     },
     {
       path: 'src/App.css',
-      content: `.app {
-  min-height: 100vh;
-  display: grid;
-  place-items: center;
-  padding: 2rem;
-  text-align: center;
-}
-header h1 { font-size: 2rem; margin-bottom: 0.5rem; }
-code { background: rgba(255,255,255,0.08); padding: 0.15rem 0.35rem; border-radius: 0.35rem; }
-`,
+      content: `.app { min-height: 100vh; }\n`,
     },
     {
       path: 'src/index.css',
-      content: `body {
-  margin: 0;
-  font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-  background: #0b1020;
-  color: #e8ecf4;
-}
-`,
-    },
-    {
-      path: 'README.md',
-      content: readme(
-        title,
-        `Vite + React scaffold created by ARK.\n\n\`\`\`bash\nnpm install\nnpm run dev\n\`\`\`\n\nThen open the local URL Vite prints.`,
-      ),
+      content: `body { margin: 0; font-family: system-ui, sans-serif; }\n`,
     },
     { path: '.gitignore', content: gitignore('node') },
   ];
-
-  if (chatLike) {
-    files.push(
-      {
-        path: 'src/pages/Chat.jsx',
-        content: `export default function Chat() {
-  return (
-    <section>
-      <h2>Chat</h2>
-      <p>Placeholder — wire messaging UI here.</p>
-    </section>
-  );
-}
-`,
-      },
-      {
-        path: 'src/pages/Call.jsx',
-        content: `export default function Call() {
-  return (
-    <section>
-      <h2>Call</h2>
-      <p>Placeholder — WebRTC / voice can be added in a follow-up Agent turn.</p>
-    </section>
-  );
-}
-`,
-      },
-    );
-  }
-
-  return files;
 }
 
-function pythonScaffold(title: string, pkg: string, summary: string): ScaffoldFile[] {
+function pythonScaffold(title: string): ScaffoldFile[] {
   return [
     {
-      path: 'app/__init__.py',
-      content: `"""${title}"""\n`,
-    },
-    {
       path: 'app/main.py',
-      content: `"""${title} entrypoint."""
+      content: `"""${title}"""
+
 
 def main() -> None:
-    print("Hello from ${title}!")
-    print("Edit app/main.py and iterate from Chat.")
+    pass
 
 
 if __name__ == "__main__":
     main()
 `,
     },
-    {
-      path: 'requirements.txt',
-      content: '# Add dependencies here, e.g. requests>=2.31\n',
-    },
-    {
-      path: 'run.bat',
-      content: `@echo off
-cd /d "%~dp0"
-python app\\main.py
-pause
-`,
-    },
-    {
-      path: 'README.md',
-      content: readme(
-        title,
-        `Python project scaffold.\n\n\`\`\`bash\npip install -r requirements.txt\npython app/main.py\n\`\`\`\n\nOr double-click \`run.bat\` on Windows.`,
-      ),
-    },
+    { path: 'requirements.txt', content: '' },
     { path: '.gitignore', content: gitignore('python') },
   ];
 }
 
-function nodeCliScaffold(title: string, pkg: string, summary: string): ScaffoldFile[] {
+function nodeCliScaffold(title: string, pkg: string): ScaffoldFile[] {
   return [
     {
       path: 'package.json',
@@ -281,20 +174,17 @@ function nodeCliScaffold(title: string, pkg: string, summary: string): ScaffoldF
         version: '0.1.0',
         private: true,
         type: 'module',
-        bin: { [pkg]: './bin/cli.js' },
         scripts: { start: 'node bin/cli.js' },
       }, null, 2) + '\n',
     },
     {
       path: 'bin/cli.js',
-      content: `#!/usr/bin/env node
-console.log('${title} CLI ready');
-`,
-    },
-    {
-      path: 'README.md',
-      content: readme(title, 'Node CLI scaffold. Run `node bin/cli.js`.'),
+      content: `#!/usr/bin/env node\n`,
     },
     { path: '.gitignore', content: gitignore('node') },
   ];
+}
+
+export function projectUsesNpm(kind: ProjectKind): boolean {
+  return kind === 'vite-react' || kind === 'node-cli';
 }

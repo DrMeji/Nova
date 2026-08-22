@@ -120,6 +120,7 @@ contextBridge.exposeInMainWorld('arkDesktop', {
   workspaceSetGrants: (grants) => ipcRenderer.invoke('ark:workspace-set-grants', grants),
   workspaceGetGrants: () => ipcRenderer.invoke('ark:workspace-get-grants'),
   agentRun: (payload) => ipcRenderer.invoke('ark:agent-run', payload),
+  agentStartDevServer: (payload) => ipcRenderer.invoke('ark:agent-start-dev-server', payload),
   workspaceDeletePath: (payload) => ipcRenderer.invoke('ark:workspace-delete-path', payload),
   workspaceDeleteRoot: (payload) => ipcRenderer.invoke('ark:workspace-delete-root', payload),
   workspaceDeleteFolder: (payload) => ipcRenderer.invoke('ark:workspace-delete-folder', payload),

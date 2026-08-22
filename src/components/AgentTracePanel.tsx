@@ -72,10 +72,12 @@ export function AgentTracePanel({
   payload,
   answer,
   live = false,
+  stepsOnly = false,
 }: {
   payload: AgentTracePayload;
   answer?: string;
   live?: boolean;
+  stepsOnly?: boolean;
 }) {
   const shownAnswer = (answer || payload.answer || '').trim();
   const actionSteps = useMemo(
@@ -111,7 +113,7 @@ export function AgentTracePanel({
         </div>
       ) : null}
 
-      {shownAnswer ? (
+      {shownAnswer && !stepsOnly ? (
         <div className={`${payload.steps.length ? 'mt-3 border-t border-surface-border/70 pt-3' : ''}`}>
           <ChatMarkdown text={shownAnswer} />
         </div>

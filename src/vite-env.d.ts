@@ -412,6 +412,12 @@ declare global {
         output?: string;
         error?: string;
       }>;
+      agentStartDevServer?: (payload: { cwd?: string }) => Promise<{
+        ok: boolean;
+        cwd?: string;
+        url?: string;
+        error?: string;
+      }>;
       workspaceDeletePath?: (payload: {
         projectId: string;
         relPath: string;

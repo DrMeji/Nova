@@ -7,6 +7,7 @@
 import { isTraceMessage, parseTraceMessage, stripAgentTrace } from '@/lib/agentTrace';
 import { isCatalogMessage, parseCatalogMessage, catalogToPlainText } from '@/lib/folderCatalog';
 import { isPcExploreMessage, parsePcExploreMessage, pcExploreToPlainText } from '@/lib/pcExplore';
+import { isPromptChipsMessage, parsePromptChipsMessage, promptChipsToPlainText } from '@/lib/chatPromptChips';
 
 export type RouterChatTurn = {
   role: 'user' | 'assistant';
@@ -141,6 +142,11 @@ export function slimTurnContent(content: string, maxChars = MAX_TURN_CHARS): str
   if (isPcExploreMessage(raw)) {
     const data = parsePcExploreMessage(raw);
     return data ? pcExploreToPlainText(data) : '';
+  }
+  if (isPromptChipsMessage(raw)) {
+    const { body, chips } = parsePromptChipsMessage(raw);
+    const chipNote = chips.length ? `\n[Options: ${promptChipsToPlainText(chips)}]` : '';
+    return `${body}${chipNote}`.trim();
   }
 
   if (raw.includes('ark-media:')) {
