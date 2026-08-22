@@ -6,6 +6,7 @@
 import { parseFolderPathAsk, parseDesktopSubfolderAsk, type FolderPathRef } from '@/lib/folderPathAsk';
 import { looksLikeInstalledAppsAsk } from '@/lib/pcExplore';
 import { looksLikeAddFileDestinationClarify } from '@/lib/chatDiskIntent';
+import { looksLikeGreenfieldIdea } from '@/lib/chatIdeaIntent';
 
 /** "What projects do I have on my PC / desktop?" — not installed-apps asks. */
 export function looksLikeProjectsInventoryAsk(text: string): boolean {
@@ -126,6 +127,7 @@ export function looksLikeFolderCatalogAsk(text: string): boolean {
 export function looksLikeStartWorkOnFolderAsk(text: string): boolean {
   const t = String(text || '').trim();
   if (!t) return false;
+  if (looksLikeGreenfieldIdea(t)) return false;
   if (FOLDER_CATALOG_RE.test(t) || /\bwhat(?:'s| is)\s+in\s+it\b/i.test(t)) return false;
   if (WORK_ON_FOLDER_RE.test(t)) return true;
   if (/\b(?:folder|project)\b/i.test(t) && /\b(work\s+on|start\s+work|want\s+to\s+work|begin\s+work)\b/i.test(t)) {
@@ -139,6 +141,7 @@ export function parseWorkOnFolderName(text: string): string | null {
   if (!t) return null;
 
   const patterns = [
+    /\b(?:start\s+work(?:ing)?\s+on|work(?:ing)?\s+on|let'?s\s+(?:work\s+on|open)|switch\s+(?:this\s+chat\s+)?to|move\s+(?:to|into)|open)\s+(?:the\s+)?(?:folder|project)\s+(?:called|named)\s+["“']?([A-Za-z][A-Za-z0-9 _-]{1,48})/i,
     /\b(?:start\s+work(?:ing)?\s+on|work(?:ing)?\s+on|let'?s\s+(?:work\s+on|open)|switch\s+(?:this\s+chat\s+)?to|move\s+(?:to|into)|open)\s+(?:the\s+(?:folder|project)\s+)?(.+)/i,
   ];
   for (const re of patterns) {

@@ -61,8 +61,12 @@ export function extractDiskParentHintFromText(text: string): string | undefined 
     return DESKTOP_PROJECTS_PARENT;
   }
 
+  if (/\b(?:pictures?|photos?)\s+folder\b/i.test(t)) {
+    return rootParentHint('pictures');
+  }
+
   const inXFolder = t.match(
-    /\b(?:in|inside|within|to|into)\s+(?:the\s+)?(?:of\s+)?(?:the\s+)?(?:my\s+)?([A-Za-z][A-Za-z0-9 _-]{0,32})\s+folder\b/i,
+    /\b(?:in|inside|within|to|into)\s+(?:the\s+)?(?:of\s+)?(?:the\s+)?(?:my\s+)?(?:a\s+)?([A-Za-z][A-Za-z0-9 _-]{0,32})\s+folder\b/i,
   );
   if (inXFolder?.[1]) {
     const rootId = aliasToRootId(inXFolder[1]);
@@ -72,7 +76,7 @@ export function extractDiskParentHintFromText(text: string): string | undefined 
   }
 
   const inRoot = t.match(
-    /\b(?:in|inside|within|to|into|put\s+it\s+in|add\s+it\s+to|go\s+ahead\s+and\s+put\s+it\s+in)\s+(?:the\s+)?(?:my\s+)?(pictures?|photos?|desktop|documents?|docs|downloads?|home)\b/i,
+    /\b(?:in|inside|within|to|into|put\s+it\s+in|add\s+it\s+to|go\s+ahead\s+and\s+put\s+it\s+in|(?:should|needs to|needs)\s+go\s+(?:in|into|inside)|it\s+should\s+go\s+(?:in|into|inside))\s+(?:the\s+)?(?:my\s+)?(?:a\s+)?(pictures?|photos?|desktop|documents?|docs|downloads?|home)\b/i,
   );
   if (inRoot?.[1]) {
     const rootId = aliasToRootId(inRoot[1]);
@@ -198,6 +202,14 @@ export async function resolveDiskParentPath(opts: {
   if (lastListedFolder?.path) {
     const stat = await pathStat(lastListedFolder.path);
     if (stat?.ok && stat.isDirectory) return lastListedFolder.path;
+  }
+
+  if (stickyTarget?.kind === 'file' && stickyTarget.path) {
+    const parent = stickyTarget.path.replace(/[/\\][^/\\]+$/, '');
+    if (parent) {
+      const stat = await pathStat(parent);
+      if (stat?.ok && stat.isDirectory) return stat.path || parent;
+    }
   }
 
   if (stickyTarget?.kind === 'folder') return stickyTarget.path;

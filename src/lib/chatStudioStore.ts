@@ -223,3 +223,65 @@ export function clearLastPendingAddFile(chatId: string) {
     /* ignore */
   }
 }
+
+export type LastPendingGreenfield = {
+  name: string;
+  slug: string;
+  kind: string;
+  summary: string;
+  problemLine: string;
+  at: number;
+};
+
+export const LAST_PENDING_GREENFIELD_TTL_MS = 60 * 60 * 1000;
+
+function lastPendingGreenfieldKey(chatId: string) {
+  return `ark:chat-pending-greenfield:${chatId}`;
+}
+
+export function setLastPendingGreenfield(
+  chatId: string,
+  idea: {
+    name: string;
+    slug: string;
+    kind: string;
+    summary: string;
+    problemLine: string;
+  },
+) {
+  if (!chatId || !idea.name) return;
+  try {
+    localStorage.setItem(lastPendingGreenfieldKey(chatId), JSON.stringify({
+      ...idea,
+      at: Date.now(),
+    } satisfies LastPendingGreenfield));
+  } catch {
+    /* ignore */
+  }
+}
+
+export function getLastPendingGreenfield(chatId: string): LastPendingGreenfield | null {
+  if (!chatId) return null;
+  try {
+    const raw = localStorage.getItem(lastPendingGreenfieldKey(chatId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as LastPendingGreenfield;
+    if (!parsed?.name) return null;
+    if (Date.now() - (parsed.at || 0) > LAST_PENDING_GREENFIELD_TTL_MS) {
+      localStorage.removeItem(lastPendingGreenfieldKey(chatId));
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+export function clearLastPendingGreenfield(chatId: string) {
+  if (!chatId) return;
+  try {
+    localStorage.removeItem(lastPendingGreenfieldKey(chatId));
+  } catch {
+    /* ignore */
+  }
+}

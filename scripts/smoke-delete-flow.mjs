@@ -7,7 +7,13 @@ import {
   parseDeleteProjectTarget,
 } from '../src/lib/deleteProjectFlow.ts';
 import { classifyDiskIntent } from '../src/lib/chatDiskIntent.ts';
+import { extractDiskParentHintFromText } from '../src/lib/diskPathResolve.ts';
 import { looksLikeRestorePointAsk } from '../src/lib/chatPcTasks.ts';
+import {
+  looksLikeGreenfieldIdea,
+  looksLikeGreenfieldCreateGo,
+  parseGreenfieldIdea,
+} from '../src/lib/chatIdeaIntent.ts';
 import { isBlockedDiskTargetName } from '../src/lib/projectNames.ts';
 
 const cases = [
@@ -115,6 +121,42 @@ const diskCases = [
     wantName: 'Starbucks',
     recent: [],
   },
+  {
+    input: 'Oh, can you go ahead and delete that folder, please',
+    want: 'delete_file',
+    wantName: 'Starbucks',
+    wantNameLoose: true,
+    sticky: { path: 'C:\\Users\\test\\Pictures\\Starbucks.txt', name: 'Starbucks.txt', kind: 'file' },
+  },
+  {
+    input: 'Now, I want you to go ahead and delete Starbucks inside a picture folder',
+    want: 'delete_file',
+    wantName: 'Starbucks',
+    wantNameLoose: true,
+    wantParent: '__root:pictures__',
+  },
+  {
+    input: 'I want you to create a file called picture inside a picture folder',
+    want: 'add_file',
+    wantName: 'picture',
+    wantNameLoose: true,
+    wantParent: '__root:pictures__',
+  },
+  {
+    input: 'It should go inside a picture',
+    want: 'add_file',
+    wantName: 'Starbucks',
+    wantNameLoose: true,
+    wantParent: '__root:pictures__',
+    recent: ['Can you add a file called Starbucks inside the picture folder'],
+  },
+  {
+    input: 'Can you add a file called Starbucks inside the picture folder, please',
+    want: 'add_file',
+    wantName: 'Starbucks',
+    wantNameLoose: true,
+    wantParent: '__root:pictures__',
+  },
 ];
 
 let failed = 0;
@@ -147,7 +189,10 @@ for (const c of cases) {
 }
 
 for (const c of diskCases) {
-  const intent = classifyDiskIntent(c.input, { recentUserMessages: c.recent || [] });
+  const intent = classifyDiskIntent(c.input, {
+    recentUserMessages: c.recent || [],
+    stickyDiskTarget: c.sticky || null,
+  });
   if (intent.type !== c.want) {
     console.error(`FAIL classifyDiskIntent type: "${c.input}" got ${intent.type} want ${c.want}`);
     failed += 1;
@@ -185,6 +230,62 @@ if (looksLikeRestorePointAsk('create a restore point for today')) {
 } else {
   console.error('FAIL restore point detection');
   failed += 1;
+}
+
+const pathHints = [
+  ['inside a picture folder', '__root:pictures__'],
+  ['It should go inside a picture', '__root:pictures__'],
+  ['inside the pictures', '__root:pictures__'],
+];
+for (const [input, want] of pathHints) {
+  const got = extractDiskParentHintFromText(input);
+  if (got !== want) {
+    console.error(`FAIL extractDiskParentHintFromText: "${input}" got ${got} want ${want}`);
+    failed += 1;
+  } else {
+    console.log(`OK path hint: "${input}"`);
+  }
+}
+
+const greenfieldCases = [
+  {
+    input: 'I want to work on a project called Ring System — when someone presses the doorbell they get a phone notification. What is the best way to start?',
+    wantGreenfield: true,
+    wantWorkOn: false,
+    wantName: 'Ring System',
+  },
+  {
+    input: 'Let\'s work on DeBloat',
+    wantGreenfield: false,
+  },
+  {
+    input: 'Create web app called Ring System',
+    wantGreenfield: false,
+    wantCreateGo: true,
+  },
+];
+
+for (const c of greenfieldCases) {
+  const isGreen = looksLikeGreenfieldIdea(c.input);
+  if (isGreen !== c.wantGreenfield) {
+    console.error(`FAIL greenfield detect: "${c.input.slice(0, 60)}…" got ${isGreen} want ${c.wantGreenfield}`);
+    failed += 1;
+    continue;
+  }
+  if (c.wantName) {
+    const idea = parseGreenfieldIdea(c.input);
+    if (!idea?.name?.toLowerCase().includes(c.wantName.toLowerCase())) {
+      console.error(`FAIL greenfield name: "${c.input.slice(0, 60)}" got ${idea?.name}`);
+      failed += 1;
+      continue;
+    }
+  }
+  if (c.wantCreateGo && !looksLikeGreenfieldCreateGo('Create project Ring System')) {
+    console.error('FAIL greenfield create go');
+    failed += 1;
+    continue;
+  }
+  console.log(`OK greenfield: "${c.input.slice(0, 50)}…"`);
 }
 
 if (failed > 0) {

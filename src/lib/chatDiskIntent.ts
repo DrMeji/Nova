@@ -81,10 +81,38 @@ function looksLikeDeleteFollowUp(text: string): boolean {
   if (looksLikeDeleteProjectAsk(t) || looksLikeDeleteFileAsk(t)) return false;
   return (
     /\b(it|this|that)\b/i.test(t)
+    || /\b(that|this)\s+(?:file|folder)\b/i.test(t)
     || /^(yes\s+)?delete\b/i.test(t)
     || /\bgo ahead and delete\b/i.test(t)
     || /\bjust\s+delete\b/i.test(t)
+    || /\bi\s+want\s+you\s+to\s+(?:go\s+ahead\s+and\s+)?delete\b/i.test(t)
   );
+}
+
+/** "delete Starbucks in pictures" — no "file" word required. */
+function extractDeleteNamedTarget(text: string): string | null {
+  const t = String(text || '').trim();
+  const patterns = [
+    /\bdelete\s+(?:the\s+)?([A-Za-z][A-Za-z0-9 _.-]{1,48})\s+(?:inside|in|from|within)\s+(?:the\s+)?(?:a\s+)?/i,
+    /\b(?:go\s+ahead\s+and\s+)?delete\s+(?:the\s+)?([A-Za-z][A-Za-z0-9 _.-]{1,48})\s+(?:inside|in|from|within)\b/i,
+  ];
+  for (const re of patterns) {
+    const m = t.match(re);
+    if (m?.[1]) {
+      const raw = cleanDiskTargetName(m[1]);
+      if (!raw || isBlockedDiskTargetName(raw)) continue;
+      if (/^(picture|pictures|photo|photos|folder|file|project)$/i.test(raw)) continue;
+      return normalizeDiskFileName(raw);
+    }
+  }
+  return null;
+}
+
+function looksLikeDeleteNamedItemAsk(text: string): boolean {
+  const t = String(text || '').trim();
+  if (!DELETE_RE.test(t)) return false;
+  if (looksLikeDeleteFileAsk(t) || looksLikeDeleteProjectAsk(t)) return false;
+  return Boolean(extractDeleteNamedTarget(t));
 }
 
 function extractFileName(text: string): string | null {
@@ -189,6 +217,8 @@ export function looksLikeAddFileDestinationClarify(text: string): boolean {
   if (!t) return false;
   if (looksLikeAddFileAsk(t)) return true;
   if (/\b(?:go\s+ahead\s+and\s+)?(?:put|place|save|add)\s+(?:it|the\s+file)\s+(?:to|in|into|inside)\b/i.test(t)) return true;
+  if (/\b(?:should|needs to|needs)\s+go\s+(?:in|into|inside)\b/i.test(t)) return true;
+  if (/\bit\s+should\s+go\s+(?:in|into|inside)?\b/i.test(t)) return true;
   if (/^\s*(?:the\s+)?projects?\s+folder\s*$/i.test(t)) return true;
   if (extractDiskParentHintFromText(t)) return true;
   if (/\b(?:in|into|inside|to)\s+(?:the\s+)?(?:my\s+)?(pictures?|photos?|desktop|documents?|downloads?)\b/i.test(t)) {
@@ -246,13 +276,34 @@ function nameFromThread(userMessages: string[], preferFile: boolean): string | n
   return null;
 }
 
+export function shouldRouteDeleteToStickyFile(
+  message: string,
+  sticky?: { kind: 'file' | 'folder' } | null,
+): boolean {
+  if (sticky?.kind !== 'file') return false;
+  const t = String(message || '').trim();
+  if (!DELETE_RE.test(t)) return false;
+  if (
+    /\bdelete\s+(?:the\s+)?(?:project|workspace)\s+(?:named|called)\s+/i.test(t)
+    || /\bdelete\s+(?:the\s+)?[A-Za-z][\w-]+\s+project\b/i.test(t)
+  ) {
+    return false;
+  }
+  return looksLikeDeleteFollowUp(t) || looksLikeDeleteNamedItemAsk(t);
+}
+
 export function classifyDiskIntent(
   message: string,
-  opts?: { recentUserMessages?: string[]; pendingAddFile?: string | null },
+  opts?: {
+    recentUserMessages?: string[];
+    pendingAddFile?: string | null;
+    stickyDiskTarget?: { path: string; name: string; kind: 'file' | 'folder' } | null;
+  },
 ): DiskIntent {
   const t = String(message || '').trim();
   const recent = opts?.recentUserMessages || [];
   const pendingAddFile = opts?.pendingAddFile || null;
+  const stickyDiskTarget = opts?.stickyDiskTarget || null;
 
   if (looksLikeDeleteFileAsk(t)) {
     const parsed = parseDeleteFileTarget(t);
@@ -261,6 +312,31 @@ export function classifyDiskIntent(
     return {
       type: 'delete_file',
       name,
+      parentHint: parsed.parentHint || extractDeleteFileParentHint(t),
+    };
+  }
+
+  // "delete Starbucks in picture folder" — location + name, no "file" word
+  if (looksLikeDeleteNamedItemAsk(t)) {
+    const parsed = parseDeleteFileTarget(t);
+    const name = parsed.fileName || extractDeleteNamedTarget(t);
+    return {
+      type: 'delete_file',
+      name,
+      parentHint: parsed.parentHint || extractDeleteFileParentHint(t),
+    };
+  }
+
+  // After creating/touching a file: "delete it", "delete that folder" → delete the file
+  if (
+    DELETE_RE.test(t)
+    && stickyDiskTarget?.kind === 'file'
+    && looksLikeDeleteFollowUp(t)
+  ) {
+    const parsed = parseDeleteFileTarget(t);
+    return {
+      type: 'delete_file',
+      name: parsed.fileName || stickyDiskTarget.name || nameFromThread(recent, true),
       parentHint: parsed.parentHint || extractDeleteFileParentHint(t),
     };
   }

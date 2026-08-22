@@ -97,11 +97,11 @@ import {
 } from '@/lib/pcExplore';
 import { isTraceMessage } from '@/lib/agentTrace';
 import { hasFolderAccessGrant, resolveScopedFolderPath, formatFolderLocatedMessage, syncWorkspaceGrantsFromPrefs, grantsFromPrefs, resolveWorkFolderPath } from '@/lib/workspaceGrants';
-import { saveChatStudio, loadChatStudio, clearChatStudio, setLastListedFolder, getLastListedFolder, clearLastListedFolder, setLastDiskTarget, getLastDiskTarget, clearLastDiskTarget, setLastPendingAddFile, getLastPendingAddFile, clearLastPendingAddFile } from '@/lib/chatStudioStore';
+import { saveChatStudio, loadChatStudio, clearChatStudio, setLastListedFolder, getLastListedFolder, clearLastListedFolder, setLastDiskTarget, getLastDiskTarget, clearLastDiskTarget, setLastPendingAddFile, getLastPendingAddFile, clearLastPendingAddFile, setLastPendingGreenfield, getLastPendingGreenfield, clearLastPendingGreenfield } from '@/lib/chatStudioStore';
 import { runCodeStudioCommand } from '@/lib/studioCommands';
 import { applyChatReplyEdits } from '@/lib/chatAgentApply';
 import { deleteProjectFolderOnDisk, handleDeleteProjectChatRequest, looksLikeDeleteFolderAsk } from '@/lib/deleteProjectFlow';
-import { classifyDiskIntent } from '@/lib/chatDiskIntent';
+import { classifyDiskIntent, shouldRouteDeleteToStickyFile } from '@/lib/chatDiskIntent';
 import { deleteFileOnDisk, handleAddFileChatRequest, handleDeleteFileChatRequest, handleReadFileChatRequest } from '@/lib/chatDiskOps';
 import {
   buildRestorePointCommand,
@@ -120,12 +120,21 @@ import {
   buildCreateProjectPlan,
   parseNewProjectIntent,
   resolveCreateIntentFromThread,
+  type ProjectKind,
 } from '@/lib/createProjectIntent';
 import {
   formatCreateProjectReply,
   runCreateProjectFlow,
 } from '@/lib/createProjectFlow';
 import { looksLikeImplementGo, shouldBlockChatFileWrites } from '@/lib/chatPlanMode';
+import {
+  buildGreenfieldPlanReply,
+  buildMissingWorkFolderReply,
+  looksLikeGreenfieldHaveFolder,
+  looksLikeGreenfieldIdea,
+  looksLikeGreenfieldKeepPlanning,
+  parseGreenfieldIdea,
+} from '@/lib/chatIdeaIntent';
 import {
   chatTurnAllowsExec,
   chatTurnAllowsFileEdits,
@@ -2451,6 +2460,7 @@ export function AIChat() {
     const diskIntent = classifyDiskIntent(content, {
       recentUserMessages: recentUserLines,
       pendingAddFile: getLastPendingAddFile(activeChatId)?.fileName || null,
+      stickyDiskTarget,
     });
     const diskRoot = resolvedStudio.diskRoot || chatStudioDiskRootRef.current;
     const diskProjectId = resolvedStudio.projectId || chatStudioProjectIdRef.current || null;
@@ -2465,11 +2475,17 @@ export function AIChat() {
 
     // Disk intents — delete_file → delete_project → add_file (before catalog/create).
     if (mode === 'general' || mode === 'code') {
-      if (diskIntent.type === 'delete_file') {
+      if (diskIntent.type === 'delete_file' || shouldRouteDeleteToStickyFile(content, stickyDiskTarget)) {
         try {
+          const deleteFileName = diskIntent.type === 'delete_file'
+            ? diskIntent.name
+            : (stickyDiskTarget?.name ?? null);
+          const deleteParentHint = diskIntent.type === 'delete_file'
+            ? diskIntent.parentHint
+            : undefined;
           const outcome = await handleDeleteFileChatRequest({
-            fileName: diskIntent.name,
-            parentHint: diskIntent.parentHint,
+            fileName: deleteFileName,
+            parentHint: deleteParentHint,
             workspaceDiskRoot: diskRoot,
             workspaceProjectId: diskProjectId,
             workspaceFiles: resolvedStudio.files,
@@ -2532,7 +2548,10 @@ export function AIChat() {
         }
       }
 
-      if (diskIntent.type === 'delete_project' || looksLikeDeleteFolderAsk(content)) {
+      if (
+        (diskIntent.type === 'delete_project' || looksLikeDeleteFolderAsk(content))
+        && !shouldRouteDeleteToStickyFile(content, stickyDiskTarget)
+      ) {
         console.log('[delete] router hit', content.slice(0, 80));
         try {
           const outcome = await handleDeleteProjectChatRequest({
@@ -2608,6 +2627,13 @@ export function AIChat() {
             name: addOutcome.fileName,
             kind: 'file',
           });
+          const parentDir = addOutcome.filePath.replace(/[/\\][^/\\]+$/, '');
+          if (parentDir) {
+            setLastListedFolder(activeChatId, {
+              path: parentDir,
+              name: parentDir.split(/[/\\]/).pop() || 'folder',
+            });
+          }
           if (diskProjectId) {
             const nextFiles = {
               ...resolvedStudio.files,
@@ -2682,6 +2708,32 @@ export function AIChat() {
       }
     }
 
+    // Greenfield product idea — plan + create offer (before "work on existing folder").
+    if ((mode === 'general' || mode === 'code') && looksLikeGreenfieldIdea(content)) {
+      if (looksLikeGreenfieldKeepPlanning(content)) {
+        const pending = getLastPendingGreenfield(activeChatId);
+        if (pending) {
+          await finishPlainReply(
+            `Still planning **${pending.name}**.\n\nTell me what to change — features, stack, or MVP scope — and I'll refine the plan. Say **Create project ${pending.name}** when you're ready to scaffold.`,
+          );
+          return;
+        }
+      }
+      if (looksLikeGreenfieldHaveFolder(content)) {
+        await finishPlainReply(
+          'Got it — you already have a folder.\n\nSay **Let’s work on YourFolderName** or *On my desktop I have a folder called …* and I’ll bind that workspace.',
+        );
+        return;
+      }
+
+      const idea = parseGreenfieldIdea(content);
+      if (idea) {
+        setLastPendingGreenfield(activeChatId, idea);
+        await finishPlainReply(buildGreenfieldPlanReply(idea));
+        return;
+      }
+    }
+
     // Switch workspace — user chose a project to work in (bind folder + rename chat).
     if ((mode === 'general' || mode === 'code') && looksLikeStartWorkOnFolderAsk(content)) {
       if (!hasFolderAccessGrant()) {
@@ -2701,7 +2753,14 @@ export function AIChat() {
       const parentHint = chatStudioDiskRootRef.current;
       const located = await resolveWorkFolderPath(wantName, parentHint);
       if (!located.ok || !located.path) {
-        await finishPlainReply(located.error || 'Could not find that folder.');
+        setLastPendingGreenfield(activeChatId, {
+          name: wantName,
+          slug: wantName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'new-project',
+          kind: 'vite-react',
+          summary: content,
+          problemLine: `Open or create **${wantName}**.`,
+        });
+        await finishPlainReply(buildMissingWorkFolderReply(wantName));
         return;
       }
 
@@ -2836,10 +2895,20 @@ export function AIChat() {
       projectId: resolvedStudio.projectId || chatStudioProjectIdRef.current,
       diskRoot: resolvedStudio.diskRoot || chatStudioDiskRootRef.current,
     });
+    const pendingGreenfieldRaw = getLastPendingGreenfield(activeChatId);
+    const pendingGreenfield = pendingGreenfieldRaw
+      ? {
+          name: pendingGreenfieldRaw.name,
+          slug: pendingGreenfieldRaw.slug,
+          kind: pendingGreenfieldRaw.kind as ProjectKind,
+          summary: pendingGreenfieldRaw.summary,
+          problemLine: pendingGreenfieldRaw.problemLine,
+        }
+      : null;
     const createIntent = resolveCreateIntentFromThread(
       content,
       messagesRef.current.filter(m => m.role === 'user').map(m => String(m.content || '')),
-      { workspaceActive: workspaceActiveForCreate },
+      { workspaceActive: workspaceActiveForCreate, pendingGreenfield },
     );
     if (
       (mode === 'general' || mode === 'code')
@@ -2883,6 +2952,8 @@ export function AIChat() {
         await finishPlainReply(created.error || 'Could not create the project.');
         return;
       }
+
+      clearLastPendingGreenfield(activeChatId);
 
       setChatStudioFiles(created.files);
       chatStudioFilesRef.current = created.files;

@@ -3,6 +3,12 @@
  */
 
 import { looksLikeImplementGo } from '@/lib/chatPlanMode';
+import {
+  greenfieldToCreateIntent,
+  looksLikeGreenfieldCreateGo,
+  resolveGreenfieldFromThread,
+  type GreenfieldIdeaIntent,
+} from './chatIdeaIntent';
 import { looksLikeFolderCatalogAsk } from '@/lib/folderCatalog';
 import { looksLikeFolderPathAsk } from '@/lib/folderPathAsk';
 import { looksLikePcExploreAsk, looksLikeInstalledAppsAsk } from '@/lib/pcExplore';
@@ -140,10 +146,26 @@ export function buildCreateProjectPlan(intent: NewProjectIntent): string {
 export function resolveCreateIntentFromThread(
   message: string,
   recentUserLines: string[],
-  opts?: { workspaceActive?: boolean },
+  opts?: { workspaceActive?: boolean; pendingGreenfield?: GreenfieldIdeaIntent | null },
 ): NewProjectIntent | null {
   const direct = parseNewProjectIntent(message);
   if (direct) return direct;
+
+  const greenfield = resolveGreenfieldFromThread(
+    message,
+    recentUserLines,
+    opts?.pendingGreenfield || null,
+  );
+  if (greenfield && (looksLikeGreenfieldCreateGo(message) || looksLikeImplementGo(message) || /\bcreate\s+it\b/i.test(message))) {
+    const payload = greenfieldToCreateIntent(greenfield);
+    return {
+      name: payload.name,
+      slug: payload.slug,
+      kind: payload.kind,
+      summary: payload.summary,
+      preferPlan: payload.preferPlan,
+    };
+  }
 
   if (!looksLikeImplementGo(message) && !/\bcreate\s+it\b/i.test(message)) return null;
 
