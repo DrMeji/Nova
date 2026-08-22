@@ -41,9 +41,9 @@ import { SettingsSystemHealth } from '@/components/SettingsSystemHealth';
 import { StatusCheck } from '@/components/BrandMark';
 
 const REVEAL_FEATURES: { id: ParkId; label: string; description: string }[] = [
-  { id: 'networking', label: 'Networking', description: 'Social feed and contacts — shows Networking in the sidebar.' },
-  { id: 'message', label: 'Message', description: 'Direct messages between ARK users.' },
-  { id: 'call', label: 'Call', description: 'Voice calls (microphone + WebRTC). Video is not available yet.' },
+  { id: 'networking', label: 'Networking', description: 'Live — help feed, add/message builders (always on).' },
+  { id: 'message', label: 'Message', description: 'Live — direct messages between ARK users (always on).' },
+  { id: 'call', label: 'Call', description: 'Voice calls (microphone + WebRTC). Still parked until you reveal it.' },
 ];
 
 const AUTO_LOCK_OPTIONS = [
@@ -1797,6 +1797,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                   </p>
                   {REVEAL_FEATURES.map(opt => {
                     void featureTick;
+                    const lockedOn = opt.id === 'networking' || opt.id === 'message';
                     return (
                       <ToggleRow
                         key={opt.id}
@@ -1804,6 +1805,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                         description={opt.description}
                         value={isRevealed(opt.id)}
                         onChange={v => setRevealed(opt.id, v)}
+                        disabled={lockedOn}
                       />
                     );
                   })}
@@ -2003,22 +2005,25 @@ function ToggleRow({
   description,
   value,
   onChange,
+  disabled,
 }: {
   label: string;
   description: string;
   value: boolean;
   onChange: (v: boolean) => void;
+  disabled?: boolean;
 }) {
   return (
-    <div className="flex items-center justify-between gap-3 p-4 ark-card min-w-0">
+    <div className={`flex items-center justify-between gap-3 p-4 ark-card min-w-0 ${disabled ? 'opacity-70' : ''}`}>
       <div className="flex-1 min-w-0">
         <p className="text-sm font-medium text-content-primary">{label}</p>
         <p className="text-xs text-content-tertiary mt-0.5 leading-snug">{description}</p>
       </div>
       <button
         type="button"
+        disabled={disabled}
         onClick={() => onChange(!value)}
-        className={`relative rounded-full transition-colors shrink-0 ${value ? 'bg-content-primary' : 'bg-ark-navy-700'}`}
+        className={`relative rounded-full transition-colors shrink-0 disabled:cursor-not-allowed ${value ? 'bg-content-primary' : 'bg-ark-navy-700'}`}
         style={{ height: '22px', width: '40px' }}
         aria-pressed={value}
       >

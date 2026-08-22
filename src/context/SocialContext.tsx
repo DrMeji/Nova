@@ -3,8 +3,11 @@ import { useAuth } from '@/context/AuthContext';
 import { useRouter } from '@/context/RouterContext';
 import {
   addContact,
+  blockArkId,
+  hideDemoContact,
   listContacts,
   persistContact,
+  removeContact,
   subscribeMessages,
   type ArkContact,
   type DirectMessage,
@@ -12,6 +15,7 @@ import {
 import { sendCallSignal, subscribeUserSignals, type IncomingCall } from '@/lib/arkCall';
 import { isRevealed, isSocialParked } from '@/lib/featurePark';
 import { notifyWorkDone } from '@/lib/activityIndicators';
+import { pushSidebarToast } from '@/lib/sidebarToast';
 
 type SocialContextValue = {
   contacts: ArkContact[];
@@ -19,6 +23,8 @@ type SocialContextValue = {
   unreadFrom: string[];
   refreshContacts: () => Promise<void>;
   inviteByArkId: (arkId: string, displayName?: string) => Promise<ArkContact | null>;
+  removeFriend: (arkId: string) => void;
+  blockFriend: (arkId: string) => void;
   acceptCall: () => void;
   declineCall: () => void;
 };
@@ -46,11 +52,16 @@ export function SocialProvider({ children }: { children: ReactNode }) {
     if (!myArkId) return;
     const unsub = subscribeMessages(myArkId, (msg: DirectMessage) => {
       if (msg.recipientArkId !== myArkId) return;
-      const viewing = route.name === 'message' && route.peer === msg.senderArkId;
-      if (!viewing) {
+      const viewingMessage = route.name === 'message';
+      const viewingThisPeer = viewingMessage && route.peer === msg.senderArkId;
+      if (!viewingThisPeer) {
         setUnreadFrom(prev => (prev.includes(msg.senderArkId) ? prev : [...prev, msg.senderArkId]));
       }
-      if (isRevealed('message')) {
+      if (!viewingMessage && isRevealed('message')) {
+        const who = msg.senderArkId;
+        pushSidebarToast(`New message from ${who}`, { ttlMs: 10_000, id: `dm-${who}` });
+        notifyWorkDone('message');
+      } else if (isRevealed('message') && !viewingThisPeer) {
         notifyWorkDone('message');
       }
     }, user?.id);
@@ -89,6 +100,18 @@ export function SocialProvider({ children }: { children: ReactNode }) {
     return contact;
   };
 
+  const removeFriend = (arkId: string) => {
+    removeContact(arkId);
+    hideDemoContact(arkId);
+    void refreshContacts();
+  };
+
+  const blockFriend = (arkId: string) => {
+    blockArkId(arkId);
+    hideDemoContact(arkId);
+    void refreshContacts();
+  };
+
   const acceptCall = () => {
     if (!incoming) return;
     const peer = incoming.from;
@@ -104,7 +127,17 @@ export function SocialProvider({ children }: { children: ReactNode }) {
   };
 
   const value = useMemo(
-    () => ({ contacts, incoming, unreadFrom, refreshContacts, inviteByArkId, acceptCall, declineCall }),
+    () => ({
+      contacts,
+      incoming,
+      unreadFrom,
+      refreshContacts,
+      inviteByArkId,
+      removeFriend,
+      blockFriend,
+      acceptCall,
+      declineCall,
+    }),
     [contacts, incoming, unreadFrom],
   );
 

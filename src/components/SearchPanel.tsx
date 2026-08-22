@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ComponentType, type KeyboardEvent } from 'react';
 import {
   Search, Clock3, Settings, Briefcase, Database, Bot, Blocks, SquarePen, ArrowLeft,
-  ImageIcon, Video, Code2, MessageSquare, Globe, Phone,
+  ImageIcon, Video, Code2, MessageSquare, Globe, Bell,
 } from 'lucide-react';
 import { useRouter, type Route } from '@/context/RouterContext';
 import { useRecentProjects } from '@/context/RecentProjectsContext';
@@ -52,9 +52,7 @@ function socialSearchItems(): SearchItem[] {
   if (isRevealed('message')) {
     items.push({ id: 'message', label: 'Message', group: 'Navigate', description: 'Direct messages', icon: MessageSquare, route: { name: 'message' } });
   }
-  if (isRevealed('call')) {
-    items.push({ id: 'call', label: 'Call', group: 'Navigate', description: 'Voice calls', icon: Phone, route: { name: 'call' } });
-  }
+  items.push({ id: 'notifications', label: 'Notifications', group: 'Navigate', description: 'Updates, friends, and downloads', icon: Bell, route: { name: 'notifications' } });
   return items;
 }
 

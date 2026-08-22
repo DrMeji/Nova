@@ -18,10 +18,33 @@ export type NetworkPost = {
   ownerName: string;
   title: string;
   summary: string;
+  /** Longer description shown when the post is opened. */
+  details?: string;
+  /** Help wanted vs sharing finished work. */
+  intent?: 'help' | 'share';
+  /** Willing to pay for help — UI badge only until payments ship. */
+  paying?: boolean;
   visibility: 'public' | 'private';
   githubUrl: string;
   allowedArkIds: string[];
   createdAt: string;
+  /** Feed filters / card meta (demo + future posts). */
+  projectType?: string;
+  platform?: string;
+  categoryLabel?: string;
+  views?: number;
+  replies?: number;
+  saves?: number;
+  /** Allow public chat on the post. */
+  allowDiscussion?: boolean;
+  /** Others must ask before viewing project code. */
+  codeRequiresApproval?: boolean;
+};
+
+export type MessageAttachment = {
+  name: string;
+  sizeLabel: string;
+  kind: 'file' | 'image' | 'folder';
 };
 
 export type DirectMessage = {
@@ -30,6 +53,7 @@ export type DirectMessage = {
   recipientArkId: string;
   body: string;
   createdAt: string;
+  attachment?: MessageAttachment;
 };
 
 const CONTACTS_KEY = 'ark:contacts';
@@ -106,6 +130,41 @@ export function removeContact(arkId: string) {
   saveLocalContacts(loadLocalContacts().filter(c => c.arkId !== arkId));
 }
 
+const BLOCKED_KEY = 'ark:blocked-ark-ids';
+const HIDDEN_DEMOS_KEY = 'ark:hidden-demo-contacts';
+
+export function loadBlockedArkIds(): string[] {
+  const list = readJson<string[]>(BLOCKED_KEY, []);
+  return Array.isArray(list) ? list.filter(isArkUserId) : [];
+}
+
+export function isBlockedArkId(arkId: string): boolean {
+  return loadBlockedArkIds().includes(normalizeArkId(arkId));
+}
+
+export function blockArkId(arkIdRaw: string) {
+  const arkId = normalizeArkId(arkIdRaw);
+  if (!isArkUserId(arkId)) return;
+  const next = [...new Set([...loadBlockedArkIds(), arkId])];
+  writeJson(BLOCKED_KEY, next);
+  saveLocalContacts(loadLocalContacts().filter(c => c.arkId !== arkId));
+}
+
+export function unblockArkId(arkIdRaw: string) {
+  const arkId = normalizeArkId(arkIdRaw);
+  writeJson(BLOCKED_KEY, loadBlockedArkIds().filter(id => id !== arkId));
+}
+
+export function loadHiddenDemoContacts(): string[] {
+  const list = readJson<string[]>(HIDDEN_DEMOS_KEY, []);
+  return Array.isArray(list) ? list : [];
+}
+
+export function hideDemoContact(arkIdRaw: string) {
+  const arkId = normalizeArkId(arkIdRaw);
+  writeJson(HIDDEN_DEMOS_KEY, [...new Set([...loadHiddenDemoContacts(), arkId])]);
+}
+
 export async function listContacts(userId?: string | null): Promise<ArkContact[]> {
   const local = loadLocalContacts();
   if (!canUseCloud(userId)) return local;
@@ -146,12 +205,16 @@ export async function persistContact(userId: string | null | undefined, contact:
 }
 
 function mapPost(row: Record<string, unknown>): NetworkPost {
+  const local = loadLocalPosts().find(p => p.id === String(row.id));
   return {
     id: String(row.id),
     ownerArkId: String(row.owner_ark_id || ''),
     ownerName: String(row.owner_name || ''),
     title: String(row.title || 'Untitled'),
     summary: String(row.summary || ''),
+    details: local?.details || String(row.details || ''),
+    intent: local?.intent || (row.intent === 'share' ? 'share' : 'help'),
+    paying: Boolean(local?.paying ?? row.paying),
     visibility: row.visibility === 'private' ? 'private' : 'public',
     githubUrl: String(row.github_url || ''),
     allowedArkIds: Array.isArray(row.allowed_ark_ids) ? row.allowed_ark_ids.map(String) : [],
@@ -197,9 +260,14 @@ export async function publishNetworkPost(opts: {
   ownerName: string;
   title: string;
   summary: string;
+  details?: string;
+  intent?: 'help' | 'share';
+  paying?: boolean;
   visibility: 'public' | 'private';
   githubUrl?: string;
   allowedArkIds?: string[];
+  allowDiscussion?: boolean;
+  codeRequiresApproval?: boolean;
 }): Promise<NetworkPost> {
   const post: NetworkPost = {
     id: crypto.randomUUID(),
@@ -207,26 +275,40 @@ export async function publishNetworkPost(opts: {
     ownerName: opts.ownerName,
     title: opts.title.trim() || 'Untitled',
     summary: opts.summary.trim(),
+    details: (opts.details || '').trim(),
+    intent: opts.intent || 'help',
+    paying: Boolean(opts.paying),
     visibility: opts.visibility,
     githubUrl: (opts.githubUrl || '').trim(),
     allowedArkIds: (opts.allowedArkIds || []).map(normalizeArkId).filter(isArkUserId),
     createdAt: new Date().toISOString(),
+    allowDiscussion: opts.allowDiscussion !== false,
+    codeRequiresApproval: opts.codeRequiresApproval !== false,
   };
   saveLocalPosts([post, ...loadLocalPosts().filter(p => p.id !== post.id)]);
   if (canUseCloud(opts.userId)) {
     try {
+      const cloudSummary = [post.summary, post.details].filter(Boolean).join('\n\n');
       const { data, error } = await supabase.from('ark_network_posts').insert({
         id: post.id,
         owner_id: opts.userId,
         owner_ark_id: post.ownerArkId,
         owner_name: post.ownerName,
         title: post.title,
-        summary: post.summary,
+        summary: cloudSummary || post.summary,
         visibility: post.visibility,
         github_url: post.githubUrl || null,
         allowed_ark_ids: post.allowedArkIds,
       }).select('*').maybeSingle();
-      if (!error && data) return mapPost(data as Record<string, unknown>);
+      if (!error && data) {
+        const mapped = mapPost(data as Record<string, unknown>);
+        return {
+          ...mapped,
+          details: post.details,
+          intent: post.intent,
+          paying: post.paying,
+        };
+      }
     } catch {
       /* keep local */
     }
@@ -309,6 +391,7 @@ export async function sendDirectMessage(opts: {
   senderArkId: string;
   recipientArkId: string;
   body: string;
+  attachment?: MessageAttachment;
 }): Promise<DirectMessage> {
   const msg: DirectMessage = {
     id: crypto.randomUUID(),
@@ -316,9 +399,10 @@ export async function sendDirectMessage(opts: {
     recipientArkId: opts.recipientArkId,
     body: opts.body.trim(),
     createdAt: new Date().toISOString(),
+    attachment: opts.attachment,
   };
   saveLocalMessages([...loadLocalMessages(), msg]);
-  if (canUseCloud(opts.userId)) {
+  if (canUseCloud(opts.userId) && !opts.attachment) {
     try {
       await supabase.from('ark_direct_messages').insert({
         id: msg.id,

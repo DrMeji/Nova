@@ -18,6 +18,7 @@ import { Settings } from '@/views/Settings';
 import { NetworkingView } from '@/views/NetworkingView';
 import { MessageView } from '@/views/MessageView';
 import { CallView } from '@/views/CallView';
+import { NotificationsView } from '@/views/NotificationsView';
 import { SocialProvider } from '@/context/SocialContext';
 import { ParkedNotice } from '@/components/ParkedNotice';
 import { PinLockGate } from '@/components/PinLockGate';
@@ -47,6 +48,7 @@ function AppRoutes() {
     case 'local-ai': return <LocalAI />;
     case 'networking': return isSocialParked('networking') ? <ParkedNotice feature="networking" /> : <NetworkingView />;
     case 'message': return isSocialParked('message') ? <ParkedNotice feature="message" /> : <MessageView />;
+    case 'notifications': return <NotificationsView />;
     case 'call': return isSocialParked('call') ? <ParkedNotice feature="call" /> : <CallView />;
     case 'settings': return <Settings />;
     default: return <Dashboard />;

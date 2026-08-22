@@ -1,11 +1,26 @@
-import { useEffect, useRef, useState } from 'react';
-import { Mic, MicOff, Phone, PhoneOff } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Mic, MicOff, PanelLeft, Phone, PhoneOff } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useRouter } from '@/context/RouterContext';
 import { useSocial } from '@/context/SocialContext';
 import { ArkVoiceCall, sendCallSignal } from '@/lib/arkCall';
+import {
+  isBlockedArkId,
+  loadHiddenDemoContacts,
+  threadPreview,
+  type ArkContact,
+} from '@/lib/arkSocial';
 import { formatArkId, isArkUserId, normalizeArkId } from '@/lib/arkUserId';
 import { GuestSocialBanner } from '@/components/GuestSocialBanner';
+import { ConnectShell } from '@/components/ConnectShell';
+import { buildDemoContacts, buildDemoThread } from '@/lib/socialDemo';
+
+function initials(name: string) {
+  const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return '?';
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return `${parts[0][0] || ''}${parts[1][0] || ''}`.toUpperCase();
+}
 
 export function CallView() {
   const { user, profile } = useAuth();
@@ -19,7 +34,33 @@ export function CallView() {
   const [muted, setMuted] = useState(false);
   const [error, setError] = useState('');
   const [round, setRound] = useState(0);
+  const [railCompact, setRailCompact] = useState(false);
   const callRef = useRef<ArkVoiceCall | null>(null);
+
+  const people = useMemo(() => {
+    const hidden = new Set(loadHiddenDemoContacts());
+    const demos = buildDemoContacts().filter(c => !hidden.has(c.arkId) && !isBlockedArkId(c.arkId));
+    const byId = new Map<string, ArkContact>();
+    for (const c of demos) byId.set(c.arkId, c);
+    for (const c of contacts) {
+      if (!isBlockedArkId(c.arkId)) byId.set(c.arkId, c);
+    }
+    const me = myArkId || '3218815';
+    const activityAt = (arkId: string) => {
+      const last = threadPreview(me, arkId);
+      const demoLast = !last && arkId === '3301882'
+        ? buildDemoThread(me, arkId).slice(-1)[0]
+        : null;
+      return (last || demoLast)?.createdAt || '';
+    };
+    return [...byId.values()].sort((a, b) => activityAt(b.arkId).localeCompare(activityAt(a.arkId)));
+  }, [contacts, myArkId]);
+
+  useEffect(() => {
+    const compact = () => setRailCompact(true);
+    window.addEventListener('ark:compact-connect-rail', compact);
+    return () => window.removeEventListener('ark:compact-connect-rail', compact);
+  }, []);
 
   const hangUp = () => {
     if (myArkId && peer) {
@@ -66,6 +107,7 @@ export function CallView() {
     }
 
     setStatus('ringing');
+    setError('');
     void sendCallSignal({
       kind: 'ring',
       from: myArkId,
@@ -100,59 +142,83 @@ export function CallView() {
       callRef.current?.stop();
       callRef.current = null;
     };
-  }, [myArkId, peer, asCallee, user?.id, round]);
+  }, [myArkId, peer, asCallee, user?.id, profile?.display_name, round]);
 
   useEffect(() => {
     callRef.current?.setMuted(muted);
   }, [muted]);
 
-  const person = contacts.find(c => c.arkId === peer);
+  const person = people.find(c => c.arkId === peer);
 
   return (
-    <div className="h-full flex overflow-hidden animate-fade-in bg-ark-navy-950">
-      <aside className="w-64 shrink-0 border-r border-surface-border flex flex-col">
-        <div className="px-4 pt-[min(12vh,6rem)] pb-3">
-          <GuestSocialBanner feature="call" />
-          <h1 className="text-xl font-semibold text-content-primary tracking-tight mb-3">Voice calls</h1>
-          <div className="flex gap-1">
-            <input
-              value={addId}
-              onChange={e => setAddId(e.target.value)}
-              placeholder="ARK ID"
-              className="flex-1 bg-ark-navy-900 border border-surface-border rounded-lg px-2 py-1.5 text-xs font-mono text-content-primary"
-            />
-            <button
-              type="button"
-              className="text-[11px] px-2 rounded-lg bg-surface-hover text-content-secondary"
-              onClick={async () => {
-                const id = normalizeArkId(addId);
-                if (!isArkUserId(id)) return;
-                await inviteByArkId(id);
-                setAddId('');
-                navigate({ name: 'call', peer: id });
-              }}
-            >
-              Call
-            </button>
+    <ConnectShell
+      railVisible
+      railCompact={railCompact}
+      rail={(
+        <>
+          <div className={`shrink-0 ${railCompact ? 'px-1.5 pt-3 pb-2' : 'px-2.5 pt-3 pb-2'} space-y-2`}>
+            {!railCompact && <GuestSocialBanner feature="call" />}
+            <div className={`flex items-center gap-1.5 ${railCompact ? 'flex-col' : ''}`}>
+              {!railCompact && (
+                <div className="flex-1 min-w-0 flex items-center gap-1 rounded-full bg-ark-navy-950/60 border border-white/10 p-1 pl-2.5">
+                  <input
+                    value={addId}
+                    onChange={e => setAddId(e.target.value)}
+                    placeholder="ARK ID"
+                    className="flex-1 min-w-0 bg-transparent text-xs font-mono text-content-primary placeholder:text-content-tertiary outline-none py-1"
+                  />
+                  <button
+                    type="button"
+                    className="shrink-0 rounded-full bg-surface-hover hover:bg-white/10 text-[11px] text-content-primary px-2.5 py-1"
+                    onClick={async () => {
+                      const id = normalizeArkId(addId);
+                      if (!isArkUserId(id)) return;
+                      await inviteByArkId(id);
+                      setAddId('');
+                      navigate({ name: 'call', peer: id });
+                    }}
+                  >
+                    Call
+                  </button>
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={() => setRailCompact(v => !v)}
+                className="shrink-0 h-8 w-8 rounded-lg flex items-center justify-center text-content-tertiary hover:text-content-primary hover:bg-surface-hover"
+                title={railCompact ? 'Expand people' : 'Collapse to icons'}
+                aria-label={railCompact ? 'Expand people' : 'Collapse to icons'}
+              >
+                <PanelLeft className={`w-4 h-4 transition-transform ${railCompact ? 'rotate-180' : ''}`} />
+              </button>
+            </div>
           </div>
-        </div>
-        <div className="flex-1 overflow-y-auto px-2 pb-4">
-          {contacts.map(c => (
-            <button
-              key={c.arkId}
-              type="button"
-              onClick={() => navigate({ name: 'call', peer: c.arkId })}
-              className={`w-full text-left rounded-xl px-3 py-2 mb-0.5 ${
-                peer === c.arkId ? 'bg-surface-hover' : 'hover:bg-surface-hover/60'
-              }`}
-            >
-              <p className="text-sm text-content-primary truncate">{c.displayName}</p>
-              <p className="text-[10px] font-mono tracking-wider text-content-tertiary">{formatArkId(c.arkId)}</p>
-            </button>
-          ))}
-        </div>
-      </aside>
-
+          <div className={`flex-1 overflow-y-auto pb-3 ${railCompact ? 'px-1.5 space-y-1' : 'px-2 pt-1 space-y-1'}`}>
+            {people.map(c => (
+              <button
+                key={c.arkId}
+                type="button"
+                title={c.displayName}
+                onClick={() => navigate({ name: 'call', peer: c.arkId })}
+                className={`w-full flex items-center gap-2.5 text-left rounded-xl ${
+                  railCompact ? 'justify-center py-2' : 'px-2.5 py-3'
+                } ${peer === c.arkId ? 'bg-surface-hover' : 'hover:bg-surface-hover/60'}`}
+              >
+                <span className="h-9 w-9 shrink-0 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-[11px] font-semibold text-content-primary">
+                  {initials(c.displayName)}
+                </span>
+                {!railCompact && (
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm text-content-primary truncate">{c.displayName}</span>
+                    <span className="block text-[10px] font-mono text-content-tertiary tracking-wider">{formatArkId(c.arkId)}</span>
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    >
       <div className="flex-1 min-w-0 flex flex-col items-center justify-center px-6 text-center">
         {!peer ? (
           <p className="text-sm text-content-tertiary max-w-sm">
@@ -161,7 +227,7 @@ export function CallView() {
         ) : (
           <>
             <div className="w-20 h-20 rounded-2xl bg-surface-hover border border-surface-border flex items-center justify-center text-2xl font-semibold text-content-primary mb-4">
-              {(person?.displayName || peer).slice(0, 1).toUpperCase()}
+              {initials(person?.displayName || peer)}
             </div>
             <p className="text-lg font-medium text-content-primary">{person?.displayName || formatArkId(peer)}</p>
             <p className="text-xs font-mono tracking-wider text-content-tertiary mt-1">{formatArkId(peer)}</p>
@@ -204,6 +270,6 @@ export function CallView() {
           </>
         )}
       </div>
-    </div>
+    </ConnectShell>
   );
 }

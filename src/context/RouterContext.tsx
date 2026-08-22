@@ -13,7 +13,8 @@ export type Route =
   | { name: 'build' }
   | { name: 'local-ai' }
   | { name: 'networking' }
-  | { name: 'message'; peer?: string }
+  | { name: 'message'; peer?: string; groupId?: string }
+  | { name: 'notifications' }
   | { name: 'call'; peer?: string; incoming?: boolean }
   | { name: 'settings' };
 

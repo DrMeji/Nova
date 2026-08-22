@@ -4,7 +4,7 @@ import {
   SquarePen, Briefcase, Blocks, Database,
   Settings, Search, PanelLeft, ChevronDown, History, Clock3,
   ImageIcon, Video, MessageSquare, Archive, Trash2, Code2, Pencil,
-  Globe, Phone, Copy, Star, Download, Brain,
+  Globe, Bell, Copy, Star, Download, Brain,
 } from 'lucide-react';
 import { Modal } from './Modal';
 import { SettingsContent } from './SettingsContent';
@@ -14,6 +14,12 @@ import { useAuth } from '@/context/AuthContext';
 import { isSocialParked, isRevealed } from '@/lib/featurePark';
 import { useSocial } from '@/context/SocialContext';
 import { getLocalPrefs, setLocalPrefs } from '@/lib/localPrefs';
+import {
+  PRESENCE_OPTIONS,
+  presenceDotClass,
+  presenceTextClass,
+  type PresenceStatus,
+} from '@/lib/presenceStatus';
 import { probeLiveCapacity, type LiveCapacity } from '@/lib/arkCapacity';
 import { probeAiModeLabel, type AiModeLabel } from '@/lib/aiModeStatus';
 import { JobsStrip } from '@/components/JobsStrip';
@@ -73,7 +79,7 @@ function getNavGroups(): {
       items: [
         { label: 'Networking', icon: Globe, route: { name: 'networking' }, activity: 'networking', comingSoon: isSocialParked('networking') },
         { label: 'Message', icon: MessageSquare, route: { name: 'message' }, activity: 'message', comingSoon: isSocialParked('message') },
-        { label: 'Call', icon: Phone, route: { name: 'call' }, activity: 'call', comingSoon: isSocialParked('call') },
+        { label: 'Notifications', icon: Bell, route: { name: 'notifications' }, activity: 'notifications' },
       ],
     },
   ];
@@ -104,6 +110,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [projectsOpen, setProjectsOpen] = useState(true);
   const [prefsName, setPrefsName] = useState(() => getLocalPrefs().displayName);
   const [avatarUrl, setAvatarUrl] = useState(() => getLocalPrefs().avatarDataUrl);
+  const [presence, setPresence] = useState<PresenceStatus>(() => getLocalPrefs().presenceStatus || 'online');
+  const [statusMenuOpen, setStatusMenuOpen] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     const w = getLocalPrefs().sidebarWidth;
     return Number.isFinite(w) ? Math.min(360, Math.max(200, w)) : 256;
@@ -144,6 +152,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       const next = getLocalPrefs();
       setPrefsName(next.displayName);
       setAvatarUrl(next.avatarDataUrl);
+      setPresence(next.presenceStatus || 'online');
       if (!narrowForced) setCollapsed(next.compactSidebar);
     };
     window.addEventListener('ark:prefs-changed', onPrefs);
@@ -164,8 +173,22 @@ export function AppShell({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    if (!settingsOpen) setPrefsName(getLocalPrefs().displayName);
-  }, [settingsOpen]);
+    if (!statusMenuOpen) return;
+    const onDoc = (e: MouseEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t?.closest('[data-status-menu]')) return;
+      setStatusMenuOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setStatusMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [statusMenuOpen]);
 
   useEffect(() => {
     void reattachEngineDownloads('models');
@@ -270,8 +293,15 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   const openSettings = (section = 'account') => {
     setSearchOpen(false);
+    setStatusMenuOpen(false);
     setSettingsSection(section);
     setSettingsOpen(true);
+  };
+
+  const setPresenceStatus = (next: PresenceStatus) => {
+    setPresence(next);
+    setLocalPrefs({ presenceStatus: next });
+    setStatusMenuOpen(false);
   };
 
   useEffect(() => {
@@ -554,6 +584,18 @@ export function AppShell({ children }: { children: ReactNode }) {
     if (item.route) navigate(item.route);
   };
 
+  const toggleMainSidebar = () => {
+    setCollapsed(c => {
+      const next = !c;
+      // On Message / Networking / Call the people/filter rail stays visible;
+      // collapsing the main nav only compacts that rail to icons.
+      if (next && (route.name === 'message' || route.name === 'networking' || route.name === 'call')) {
+        window.dispatchEvent(new CustomEvent('ark:compact-connect-rail'));
+      }
+      return next;
+    });
+  };
+
   const renderNavItem = (item: {
     label: string;
     icon: React.ComponentType<{ className?: string }>;
@@ -635,7 +677,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               {collapsed ? (
                 <button
                   type="button"
-                  onClick={() => setCollapsed(c => !c)}
+                  onClick={toggleMainSidebar}
                   className="ark-nav-item w-full !justify-center"
                   title="Expand sidebar"
                   aria-label="Expand sidebar"
@@ -683,7 +725,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                   ) : null}
                   <button
                     type="button"
-                    onClick={() => setCollapsed(c => !c)}
+                    onClick={toggleMainSidebar}
                     className="ark-btn-ghost !p-1.5"
                     title="Toggle sidebar"
                     aria-label="Toggle sidebar"
@@ -790,46 +832,93 @@ export function AppShell({ children }: { children: ReactNode }) {
             </div>
           </nav>
 
-          <div className={`mt-auto flex-none shrink-0 ${collapsed ? 'p-2 pb-3' : 'p-3 pt-2 pb-3'}`}>
-            {collapsed ? (
-              <button
-                type="button"
-                onClick={() => openSettings('account')}
-                title="Open Settings"
-                className="w-9 h-9 rounded-xl border border-surface-border bg-ark-navy-900/80 flex items-center justify-center text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors mx-auto"
-                aria-label="Open Settings"
+          <div className={`mt-auto flex-none shrink-0 relative ${collapsed ? 'p-2 pb-3' : 'p-3 pt-2 pb-3'}`} data-status-menu>
+            <JobsStrip variant="sidebar" />
+            {statusMenuOpen && (
+              <div
+                className={`absolute z-50 rounded-xl border border-white/10 bg-ark-navy-900 shadow-2xl shadow-black/50 overflow-hidden min-w-[14rem] p-0 ${
+                  collapsed ? 'left-full bottom-2 ml-2' : 'left-3 right-3 bottom-full mb-2'
+                }`}
+                role="menu"
               >
-                <Settings className="w-4 h-4" />
-              </button>
+                {PRESENCE_OPTIONS.map(opt => {
+                  const active = presence === opt.id;
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      role="menuitem"
+                      onClick={() => setPresenceStatus(opt.id)}
+                      className={`w-full flex items-start gap-2.5 px-3 py-2 text-left hover:bg-white/5 first:rounded-t-xl last:rounded-b-xl ${
+                        active ? 'bg-white/[0.04]' : ''
+                      }`}
+                    >
+                      <span className={`mt-1 shrink-0 h-3.5 w-3.5 rounded-full ${presenceDotClass(opt.id)}`} />
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-sm text-content-primary">{opt.label}</span>
+                        {opt.hint && (
+                          <span className="block text-[11px] text-content-tertiary leading-snug mt-0.5">{opt.hint}</span>
+                        )}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            {collapsed ? (
+              <div className="flex flex-col items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setStatusMenuOpen(v => !v)}
+                  title="Change status"
+                  className="w-9 h-9 rounded-xl border border-surface-border bg-ark-navy-900/80 flex items-center justify-center text-sm font-semibold overflow-hidden hover:bg-surface-hover transition-colors"
+                  aria-label="Change status"
+                  aria-expanded={statusMenuOpen}
+                >
+                  {avatarUrl ? (
+                    <img src={avatarUrl} alt="" className="w-full h-full object-cover" />
+                  ) : (
+                    <span className={presenceTextClass(presence)}>{initial}</span>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => openSettings('account')}
+                  title="Open Settings"
+                  className="w-9 h-9 rounded-xl border border-surface-border bg-ark-navy-900/80 flex items-center justify-center text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors"
+                  aria-label="Open Settings"
+                >
+                  <Settings className="w-4 h-4" />
+                </button>
+              </div>
             ) : (
               <div className="space-y-2">
                 <div className="flex items-center gap-2 rounded-xl border border-surface-border bg-ark-navy-950/80 px-2.5 py-2">
                   <button
                     type="button"
-                    onClick={() => openSettings('account')}
-                    className="w-8 h-8 shrink-0 rounded-lg bg-surface-hover border border-surface-border flex items-center justify-center text-sm font-semibold text-content-primary overflow-hidden"
-                    title="Account settings"
-                    aria-label="Open account settings"
+                    onClick={() => setStatusMenuOpen(v => !v)}
+                    className="w-8 h-8 shrink-0 rounded-lg bg-surface-hover border border-surface-border flex items-center justify-center text-sm font-semibold overflow-hidden"
+                    title="Change status"
+                    aria-label="Change status"
+                    aria-expanded={statusMenuOpen}
                   >
                     {avatarUrl ? (
                       <img src={avatarUrl} alt="" className="w-full h-full object-cover" />
                     ) : (
-                      initial
+                      <span className={presenceTextClass(presence)}>{initial}</span>
                     )}
                   </button>
                   <button
                     type="button"
-                    onClick={() => openSettings('account')}
+                    onClick={() => setStatusMenuOpen(v => !v)}
                     className="flex-1 min-w-0 text-left"
-                    title="Account settings"
+                    title="Change status"
                   >
-                    <span className="flex items-center gap-1.5 min-w-0">
-                      <span className="block text-xs font-medium text-content-primary truncate">
-                        {displayName}
-                      </span>
+                    <span className="block text-xs font-medium text-content-primary truncate">
+                      {displayName}
                     </span>
                     {(profile?.ark_id || (user?.email && ['thomaskrishnan0107@gmail.com'].includes(user.email))) ? (
-                      <span className="block text-[10px] font-mono tracking-[0.22em] text-content-tertiary truncate">
+                      <span className="block text-[10px] font-mono tracking-[0.22em] text-content-tertiary truncate mt-0.5">
                         {user?.email && ['thomaskrishnan0107@gmail.com'].includes(user.email)
                           ? 'DEV'
                           : formatArkId(profile!.ark_id!)}
@@ -892,7 +981,6 @@ export function AppShell({ children }: { children: ReactNode }) {
           ) : null}
           {children}
           </div>
-          <JobsStrip />
         </main>
 
       <Modal

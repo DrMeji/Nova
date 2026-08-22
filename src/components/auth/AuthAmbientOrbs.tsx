@@ -10,17 +10,20 @@ type OrbSpec = {
 };
 
 const ORB_SETUP: Array<{ size: number; colorClass: string }> = [
-  { size: 420, colorClass: 'auth-orb-tone-a' }, // large
-  { size: 300, colorClass: 'auth-orb-tone-b' }, // medium
-  { size: 240, colorClass: 'auth-orb-tone-c' }, // mid
-  { size: 170, colorClass: 'auth-orb-tone-d' }, // small
-  { size: 210, colorClass: 'auth-orb-tone-e' }, // mid-small
-  { size: 140, colorClass: 'auth-orb-tone-f' }, // smallest
+  { size: 420, colorClass: 'auth-orb-tone-a' },
+  { size: 300, colorClass: 'auth-orb-tone-b' },
+  { size: 240, colorClass: 'auth-orb-tone-c' },
+  { size: 170, colorClass: 'auth-orb-tone-d' },
+  { size: 210, colorClass: 'auth-orb-tone-e' },
+  { size: 140, colorClass: 'auth-orb-tone-f' },
+  { size: 190, colorClass: 'auth-orb-tone-g' },
+  { size: 260, colorClass: 'auth-orb-tone-h' },
+  { size: 155, colorClass: 'auth-orb-tone-i' },
 ];
 
-/** Soft px/frame speed — slow roam, still readable movement */
-const SPEED_MIN = 0.28;
-const SPEED_MAX = 0.55;
+/** Soft px/frame — slow roam, still readable */
+const SPEED_MIN = 0.22;
+const SPEED_MAX = 0.42;
 
 function rand(min: number, max: number) {
   return min + Math.random() * (max - min);
@@ -69,7 +72,6 @@ function bouncePair(a: OrbSpec, b: OrbSpec) {
   const minDist = a.size / 2 + b.size / 2;
   if (dist >= minDist) return;
 
-  // Separate so they don't stick
   const overlap = (minDist - dist) / 2;
   const nx = dx / dist;
   const ny = dy / dist;
@@ -78,13 +80,12 @@ function bouncePair(a: OrbSpec, b: OrbSpec) {
   b.x += nx * overlap;
   b.y += ny * overlap;
 
-  // Elastic exchange along collision normal (equal mass feel by size ratio)
   const massA = a.size;
   const massB = b.size;
   const dvx = a.vx - b.vx;
   const dvy = a.vy - b.vy;
   const vn = dvx * nx + dvy * ny;
-  if (vn > 0) return; // already separating
+  if (vn > 0) return;
 
   const impulse = (2 * vn) / (massA + massB);
   a.vx -= impulse * massB * nx;
@@ -92,7 +93,6 @@ function bouncePair(a: OrbSpec, b: OrbSpec) {
   b.vx += impulse * massA * nx;
   b.vy += impulse * massA * ny;
 
-  // Keep speeds in a gentle band so motion stays calm
   for (const orb of [a, b]) {
     const s = Math.hypot(orb.vx, orb.vy);
     if (s < SPEED_MIN) {
@@ -128,11 +128,8 @@ export function AuthAmbientOrbs() {
     const layer = layerRef.current;
     if (!layer) return;
 
-    // Always place orbs on screen. Windows "reduce motion" used to bail early and
-    // leave them at translate(-9999px) — invisible forever on login/setup.
-    const motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
-    let animate = !motionQuery.matches;
-
+    // Soft ambient drift always runs — Windows "reduce motion" used to freeze
+    // orbs in place (or hide them). Login atmosphere should keep moving slowly.
     const ensureSeeded = () => {
       const w = layer.clientWidth;
       const h = layer.clientHeight;
@@ -148,12 +145,7 @@ export function AuthAmbientOrbs() {
       return true;
     };
 
-    const resize = () => {
-      ensureSeeded();
-    };
-
     const tick = () => {
-      if (!animate) return;
       const w = layer.clientWidth;
       const h = layer.clientHeight;
       const orbs = stateRef.current;
@@ -179,25 +171,16 @@ export function AuthAmbientOrbs() {
       rafRef.current = requestAnimationFrame(tick);
     };
 
-    const startOrStop = () => {
-      cancelAnimationFrame(rafRef.current);
-      animate = !motionQuery.matches;
-      ensureSeeded();
-      if (animate) {
-        rafRef.current = requestAnimationFrame(tick);
-      }
-    };
-
     ensureSeeded();
-    startOrStop();
-    const ro = new ResizeObserver(resize);
+    rafRef.current = requestAnimationFrame(tick);
+    const ro = new ResizeObserver(() => {
+      ensureSeeded();
+    });
     ro.observe(layer);
-    motionQuery.addEventListener('change', startOrStop);
 
     return () => {
       cancelAnimationFrame(rafRef.current);
       ro.disconnect();
-      motionQuery.removeEventListener('change', startOrStop);
     };
   }, []);
 

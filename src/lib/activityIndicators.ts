@@ -10,6 +10,7 @@ export type ActivityKey =
   | 'plugins'
   | 'networking'
   | 'message'
+  | 'notifications'
   | 'call';
 
 type Listener = () => void;
@@ -24,6 +25,7 @@ const flags: Record<ActivityKey, boolean> = {
   plugins: false,
   networking: false,
   message: false,
+  notifications: false,
   call: false,
 };
 
@@ -109,6 +111,7 @@ export function notifyWorkDone(key: ActivityKey) {
     || (key === 'plugins' && viewing.route === 'build')
     || (key === 'networking' && viewing.route === 'networking')
     || (key === 'message' && viewing.route === 'message')
+    || (key === 'notifications' && viewing.route === 'notifications')
     || (key === 'call' && viewing.route === 'call');
 
   if (onSurface) return;

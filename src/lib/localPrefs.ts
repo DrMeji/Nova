@@ -7,10 +7,13 @@ export type AiModePref = 'automatic' | 'local_only' | 'cloud_when_available' | '
 export type DensityPref = 'comfortable' | 'compact';
 export type AccentPref = 'sky' | 'emerald' | 'amber' | 'rose';
 export type UpdateChannel = 'stable' | 'beta';
+export type PresenceStatusPref = 'online' | 'idle' | 'dnd' | 'inactive';
 
 export type LocalPrefs = {
   displayName: string;
   avatarDataUrl?: string;
+  /** Sidebar / Message presence (Online, Idle, DND, Inactive). */
+  presenceStatus: PresenceStatusPref;
   defaultModelId: string;
   /** Last model that successfully answered in Chat (for picker restore). */
   lastChatModelId?: string;
@@ -71,6 +74,7 @@ export type LocalPrefs = {
 
 const DEFAULT_PREFS: LocalPrefs = {
   displayName: 'Guest',
+  presenceStatus: 'online',
   defaultModelId: 'ark-auto',
   defaultCodeModelId: 'ark-auto',
   fontSizePx: 16,
@@ -290,6 +294,18 @@ export function clearPluginToken(pluginId: string) {
 
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
+  {
+    version: '0.1.102',
+    channel: 'stable' as const,
+    date: 'Aug 21, 2026',
+    title: 'Connect refresh: Networking, Message, Notifications, login orbs',
+    notes: [
+      'Networking: centered type + Platform filters, single expanding platform pill, report with proof + 24h review notification, cleaner post chat',
+      'Message: group chats, presence status, unread dots, DM toasts; Notifications under CONNECT',
+      'Login ambient orbs move again (slow bounce) with three extra colors — no longer frozen by Windows reduce-motion',
+      'Update via Settings → Updates → Check → Download when this build is published',
+    ],
+  },
   {
     version: '0.1.101',
     channel: 'stable' as const,
