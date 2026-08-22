@@ -7,6 +7,7 @@ import { parseFolderPathAsk, parseDesktopSubfolderAsk, type FolderPathRef } from
 import { looksLikeInstalledAppsAsk } from '@/lib/pcExplore';
 import { looksLikeAddFileDestinationClarify } from '@/lib/chatDiskIntent';
 import { looksLikeGreenfieldIdea } from '@/lib/chatIdeaIntent';
+import { isBlockedDiskTargetName } from '@/lib/projectNames';
 
 /** "What projects do I have on my PC / desktop?" — not installed-apps asks. */
 export function looksLikeProjectsInventoryAsk(text: string): boolean {
@@ -129,9 +130,18 @@ export function looksLikeStartWorkOnFolderAsk(text: string): boolean {
   if (!t) return false;
   if (looksLikeGreenfieldIdea(t)) return false;
   if (FOLDER_CATALOG_RE.test(t) || /\bwhat(?:'s| is)\s+in\s+it\b/i.test(t)) return false;
+  // "work on a/this/the project" without a folder name is a new-idea chat, not bind-existing.
+  if (
+    /\bwork\s+on\s+(?:a\s+|this\s+|the\s+|my\s+)?project\b/i.test(t)
+    && !/\blet'?s\s+work\s+on\s+[A-Za-z]/i.test(t)
+    && !/\b(?:called|named)\s+[A-Za-z]/i.test(t)
+    && !/\bstart\s+work(?:ing)?\s+on\s+[A-Za-z]/i.test(t)
+  ) {
+    return false;
+  }
   if (WORK_ON_FOLDER_RE.test(t)) return true;
   if (/\b(?:folder|project)\b/i.test(t) && /\b(work\s+on|start\s+work|want\s+to\s+work|begin\s+work)\b/i.test(t)) {
-    return true;
+    return Boolean(parseWorkOnFolderName(t));
   }
   return false;
 }
@@ -141,7 +151,7 @@ export function parseWorkOnFolderName(text: string): string | null {
   if (!t) return null;
 
   const patterns = [
-    /\b(?:start\s+work(?:ing)?\s+on|work(?:ing)?\s+on|let'?s\s+(?:work\s+on|open)|switch\s+(?:this\s+chat\s+)?to|move\s+(?:to|into)|open)\s+(?:the\s+)?(?:folder|project)\s+(?:called|named)\s+["“']?([A-Za-z][A-Za-z0-9 _-]{1,48})/i,
+    /\b(?:start\s+work(?:ing)?\s+on|work(?:ing)?\s+on|let'?s\s+(?:work\s+on|open)|switch\s+(?:this\s+chat\s+)?to|move\s+(?:to|into)|open)\s+(?:the\s+)?(?:folder|project)\s+(?:called|named)\s+["\u201c']?([A-Za-z][A-Za-z0-9 _-]{1,48})/i,
     /\b(?:start\s+work(?:ing)?\s+on|work(?:ing)?\s+on|let'?s\s+(?:work\s+on|open)|switch\s+(?:this\s+chat\s+)?to|move\s+(?:to|into)|open)\s+(?:the\s+(?:folder|project)\s+)?(.+)/i,
   ];
   for (const re of patterns) {
@@ -150,8 +160,10 @@ export function parseWorkOnFolderName(text: string): string | null {
       let raw = m[1].trim();
       raw = raw.replace(/\s+(?:folder|project|app|repo)\b.*$/i, '').trim();
       raw = raw.replace(/[?.!,;:]+$/g, '').trim();
-      const quoted = raw.match(/^["“'](.+)["”']$/);
+      const quoted = raw.match(/^["\u201c'](.+)["\u201d']$/);
       const name = (quoted?.[1] || raw.split(/\s+(?:on|in|and|to|for)\b/i)[0] || '').trim();
+      if (isBlockedDiskTargetName(name)) continue;
+      if (/^(a|this|the|my)\s+project$/i.test(name)) continue;
       if (name.length >= 2 && name.length <= 80) return name;
     }
   }
@@ -196,7 +208,7 @@ function hintFromPackageJson(text: string): string | null {
     const j = JSON.parse(text) as { name?: string; description?: string; version?: string };
     const parts: string[] = [];
     if (j.description) parts.push(String(j.description).trim().slice(0, 140));
-    else if (j.name) parts.push(`Node project “${j.name}”.`);
+    else if (j.name) parts.push(`Node project \u201c${j.name}\u201d.`);
     if (j.version && parts[0]) parts[0] = `${parts[0].replace(/\.$/, '')} (v${j.version}).`;
     return parts[0] || null;
   } catch {
