@@ -129,11 +129,11 @@ export function extractDeleteNameFromMessage(message: string): string | null {
     /\bdelete\s+(?:the\s+)?project\s+named\s+([A-Za-z][A-Za-z0-9 _-]{1,48})/i,
     /\b([A-Za-z][A-Za-z0-9 _-]{2,48})\b[\s,]+(?:that(?:'s| is)|which is)[\s\S]{0,60}\bdelete\b/i,
     /\b([A-Za-z][A-Za-z0-9 _-]{2,48})\b[\s,]+(?:inside|in)\b[\s\S]{0,60}\bdelete\b/i,
-    /\b(?:project|workspace|folder)\s+(?:named|called)\s+["“']([^"”']+)["”']/i,
+    /\b(?:project|workspace|folder)\s+(?:named|called)\s+["\u201c']([^"\u201d']+)["\u201d']/i,
     /\b(?:project|workspace|folder)\s+(?:named|called)\s+([A-Za-z][A-Za-z0-9 _-]{1,48})/i,
     /\bdelete\s+(?:the\s+)?([A-Za-z][A-Za-z0-9 _-]{2,48})\s+project\b/i,
     /\bproject\s+name\s+([A-Za-z][A-Za-z0-9 _-]{1,48})/i,
-    /\bdelete\s+(?:the\s+)?(?:project|workspace|folder)\s+["“']([^"”']+)["”']/i,
+    /\bdelete\s+(?:the\s+)?(?:project|workspace|folder)\s+["\u201c']([^"\u201d']+)["\u201d']/i,
     /\bdelete\s+(?:the\s+)?(?:project|workspace)\s+([A-Za-z][A-Za-z0-9 _-]{1,48})/i,
   ];
   for (const re of patterns) {
@@ -322,7 +322,7 @@ export async function resolveDeleteProjectFolder(opts: {
   if (target === 'follow-up' || target === 'current') {
     if (lastListedFolder?.path && await pathIsDirectory(lastListedFolder.path)) {
       const isContainer = isProjectsContainerPath(lastListedFolder.path);
-      if (!isContainer || target === 'follow-up') {
+      if (!isContainer) {
         return { path: lastListedFolder.path, name: lastListedFolder.name, source: 'lastListedFolder' };
       }
     }
@@ -377,9 +377,14 @@ export async function deleteProjectFolderOnDisk(opts: {
   folderPath: string;
   projectId?: string | null;
 }): Promise<{ ok: boolean; path?: string; error?: string }> {
-  if (opts.projectId && window.arkDesktop?.workspaceDeleteRoot) {
-    const viaProject = await window.arkDesktop.workspaceDeleteRoot({ projectId: opts.projectId });
-    if (viaProject.ok) return viaProject;
+  const want = String(opts.folderPath || '').replace(/[/\\]+$/, '').toLowerCase();
+  if (opts.projectId && window.arkDesktop?.workspaceDeleteRoot && window.arkDesktop?.projectPath) {
+    const info = await window.arkDesktop.projectPath(opts.projectId);
+    const root = info?.ok ? String(info.root || '').replace(/[/\\]+$/, '').toLowerCase() : '';
+    if (root && want && root === want) {
+      const viaProject = await window.arkDesktop.workspaceDeleteRoot({ projectId: opts.projectId });
+      if (viaProject.ok) return viaProject;
+    }
   }
   if (!window.arkDesktop?.workspaceDeleteFolder) {
     return { ok: false, error: 'Delete is only available in the desktop app.' };
@@ -470,7 +475,11 @@ export async function handleDeleteProjectChatRequest(opts: {
         ? folderPath.split(/[/\\]/).pop() || 'this project'
         : deleteTarget);
 
-  const boundProjectId = workspaceProjectId || null;
+  const boundRoot = String(workspaceDiskRoot || '').replace(/[/\\]+$/, '').toLowerCase();
+  const deletedRoot = String(folderPath || '').replace(/[/\\]+$/, '').toLowerCase();
+  const boundProjectId = (boundRoot && deletedRoot && boundRoot === deletedRoot)
+    ? (workspaceProjectId || null)
+    : null;
 
   return {
     kind: 'prompt',
