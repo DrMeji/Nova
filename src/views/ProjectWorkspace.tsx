@@ -171,9 +171,10 @@ const CLOUD_CODE_WHEN_KEYED: (CodeModel & { keyId: string })[] = [
   { id: 'deepseek-chat', name: 'DeepSeek Chat', source: 'cloud', detail: 'DeepSeek', keyId: 'deepseek' },
 ];
 
-const COMPOSER_MODE_PREFIX: Record<'plan' | 'ask' | 'debug' | 'multitask', string> = {
+const COMPOSER_MODE_PREFIX: Record<'plan' | 'ask' | 'agent' | 'debug' | 'multitask', string> = {
   plan: 'Plan this out step by step, then we can build:\n\n',
   ask: '',
+  agent: 'Agent mode — edit files and run approved tools in this workspace:\n\n',
   debug: 'Debug this — find the issue and propose a fix:\n\n',
   multitask: 'Break this into parallel tasks and tackle them clearly:\n\n',
 };
