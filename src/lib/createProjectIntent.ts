@@ -52,8 +52,8 @@ export function detectProjectKind(text: string): ProjectKind {
 function extractProjectName(text: string): string | null {
   const t = String(text || '').trim();
   const patterns = [
-    /\b(?:called|named|name(?:d)?\s+it)\s+["“']([^"”']{2,48})["”']/i,
-    /\b(?:called|named|name(?:d)?\s+it)\s+([A-Za-z][A-Za-z0-9 _-]{1,40})/i,
+    /\b(?:called|named|name(?:d)?\s+it|call\s+it)\s+["“']([^"”']{2,48})["”']/i,
+    /\b(?:called|named|name(?:d)?\s+it|call\s+it)\s+([A-Za-z][A-Za-z0-9 _-]{1,40})/i,
     /\b(?:app|project|website|site)\s+["“']([^"”']{2,48})["”']/i,
     /\bnew\s+(?:web\s+)?(?:app|project|website|site)\s+([A-Za-z][A-Za-z0-9_-]{1,40})/i,
   ];
