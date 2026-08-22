@@ -4,6 +4,10 @@
 
 Chat coding, new-product routing, and delete targeting.
 
+**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.138/ARK-Setup.exe) · [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.138)
+
+Remaining product request: [issue #1](https://github.com/DrMeji/Ark/issues/1).
+
 ### Chat can edit code (default)
 
 Default Chat is Agent, not Ask. Asks like **add a search button** or **change the header** write files in the open workspace via `@@@FILE` apply. Composer prefixes (`[Plan]`, Agent mode, Debug) are stripped before intent routing.
@@ -17,6 +21,10 @@ Default Chat is Agent, not Ask. Asks like **add a search button** or **change th
 - Delete only the **named** folder. Never wipe the bound workspace by mistake.
 - Listing a catalog no longer unbinds the open project.
 - Add-file intent requires a real file name (not “Agent edit files”).
+
+### Typecheck (follow-up on main)
+
+Chat/Code view types: `ChatMessage.project_id`, attach `kind as const`, optional `window.arkDesktop`, Code composer `'agent'` mode, `readTextFile` `text`/`binary`.
 
 ### Also in this line (0.1.118–0.1.137)
 
