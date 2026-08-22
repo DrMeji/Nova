@@ -5,6 +5,7 @@
 import {
   applyFileEdits,
   buildFileTreeFromPaths,
+  extractChatStyleFileEdits,
   parseFileEdits,
   type ProjectFileMap,
 } from '@/lib/projectCodeEdit';
@@ -24,8 +25,12 @@ export async function applyChatReplyEdits(opts: {
   projectId: string;
   projectName?: string;
   files: ProjectFileMap;
+  userMessage?: string;
 }): Promise<ChatApplyResult> {
-  const edits = parseFileEdits(opts.reply);
+  let edits = parseFileEdits(opts.reply);
+  if (!edits.length) {
+    edits = extractChatStyleFileEdits(opts.reply, opts.userMessage || '');
+  }
   if (!edits.length) {
     return {
       ok: false,
@@ -95,7 +100,7 @@ export async function deleteChatWorkspacePath(opts: {
 
 export function parseDeleteTargetFromMessage(message: string): string | null {
   const t = String(message || '').trim();
-  const quoted = t.match(/(?:delete|remove|trash)\s+(?:file|folder)?\s*["“']([^"”']+)["”']/i);
+  const quoted = t.match(/(?:delete|remove|trash)\s+(?:file|folder)?\s*["\u201c']([^"\u201d']+)["\u201d']/i);
   if (quoted?.[1]) return quoted[1].trim();
   const bare = t.match(/(?:delete|remove)\s+(?:the\s+)?(?:file\s+)?([A-Za-z0-9_./\\-]+\.[A-Za-z0-9]+)/i);
   return bare?.[1]?.trim() || null;
