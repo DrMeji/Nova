@@ -7,7 +7,9 @@ import {
   namesRoughlyMatch,
   normalizeDiskFileName,
 } from './projectNames';
-import { resolveNamedFolderOnDisk } from './deleteProjectFlow';
+import { resolveNamedFolderOnDisk, resolveDesktopProjectsFolderOnDisk } from './deleteProjectFlow';
+import { DESKTOP_PROJECTS_PARENT } from './chatDiskIntent';
+import type { LastListedFolder } from './chatStudioStore';
 
 function joinPath(root: string, name: string): string {
   const sep = root.includes('\\') ? '\\' : '/';
@@ -135,33 +137,83 @@ export type AddFileChatOutcome =
   | { kind: 'reply'; text: string }
   | { kind: 'done'; fileName: string; filePath: string };
 
+async function resolveAddFileParentPath(opts: {
+  parentHint?: string;
+  workspaceDiskRoot?: string | null;
+  workspaceName?: string | null;
+  stickyTarget?: { path: string; name: string; kind: 'file' | 'folder' } | null;
+  lastListedFolder?: LastListedFolder | null;
+}): Promise<string | null> {
+  const {
+    parentHint,
+    workspaceDiskRoot,
+    workspaceName,
+    stickyTarget,
+    lastListedFolder,
+  } = opts;
+
+  const hint = String(parentHint || '').trim();
+  if (hint === DESKTOP_PROJECTS_PARENT || /^projects?$/i.test(hint)) {
+    const container = await resolveDesktopProjectsFolderOnDisk();
+    if (container?.path) return container.path;
+  }
+
+  if (hint && hint !== DESKTOP_PROJECTS_PARENT) {
+    const resolved = await resolveNamedFolderOnDisk(hint);
+    if (resolved?.path) return resolved.path;
+  }
+
+  if (lastListedFolder?.path) {
+    const stat = await pathStat(lastListedFolder.path);
+    if (stat?.ok && stat.isDirectory) return lastListedFolder.path;
+  }
+
+  if (stickyTarget?.kind === 'folder') return stickyTarget.path;
+  if (workspaceDiskRoot) return workspaceDiskRoot;
+
+  if (workspaceName) {
+    const resolved = await resolveNamedFolderOnDisk(workspaceName);
+    if (resolved?.path) return resolved.path;
+  }
+
+  return null;
+}
+
 export async function handleAddFileChatRequest(opts: {
   fileName: string;
   parentHint?: string;
   workspaceDiskRoot?: string | null;
   workspaceProjectId?: string | null;
   workspaceName?: string | null;
+  stickyTarget?: { path: string; name: string; kind: 'file' | 'folder' } | null;
+  lastListedFolder?: LastListedFolder | null;
 }): Promise<AddFileChatOutcome> {
-  const { fileName, parentHint, workspaceDiskRoot, workspaceProjectId, workspaceName } = opts;
+  const {
+    fileName,
+    parentHint,
+    workspaceDiskRoot,
+    workspaceProjectId,
+    workspaceName,
+    stickyTarget,
+    lastListedFolder,
+  } = opts;
   const wantFile = normalizeDiskFileName(fileName);
   if (!wantFile) {
     return { kind: 'reply', text: 'What should the file be called?' };
   }
 
-  let parentPath = workspaceDiskRoot || null;
-  if (parentHint) {
-    const resolved = await resolveNamedFolderOnDisk(parentHint);
-    if (resolved?.path) parentPath = resolved.path;
-  }
-  if (!parentPath && workspaceName) {
-    const resolved = await resolveNamedFolderOnDisk(workspaceName);
-    if (resolved?.path) parentPath = resolved.path;
-  }
+  const parentPath = await resolveAddFileParentPath({
+    parentHint,
+    workspaceDiskRoot,
+    workspaceName,
+    stickyTarget,
+    lastListedFolder,
+  });
 
   if (!parentPath) {
     return {
       kind: 'reply',
-      text: 'Which project folder should I add this file to?\n\nOpen a workspace first, or say *Let\'s work on Starbucks* so I know the folder.',
+      text: 'Where should this file go?\n\nSay e.g. *add it to Desktop\\Projects* or *inside DeBloat* — or open a project folder first.',
     };
   }
 

@@ -106,7 +106,8 @@ function extractFileName(text: string): string | null {
 function extractParentHint(text: string): string | undefined {
   const t = String(text || '').trim();
   const patterns = [
-    /\b(?:in|inside|within)\s+(?:the\s+)?(?:project\s+)?(?:folder\s+)?(?:called|named)?\s*([A-Za-z][A-Za-z0-9 _-]{1,48})/i,
+    /\bproject\s+folder\s+(?:called|named)\s+([A-Za-z][A-Za-z0-9 _-]{1,48})/i,
+    /\b(?:in|inside|within|to)\s+(?:the\s+)?(?:project\s+)?(?:folder\s+)?(?:called|named)\s+([A-Za-z][A-Za-z0-9 _-]{1,48})/i,
     /\b(?:project|folder)\s+(?:called|named)\s+([A-Za-z][A-Za-z0-9 _-]{1,48})/i,
     /\bin\s+([A-Za-z][A-Za-z0-9 _-]{1,48})\s*$/i,
   ];
@@ -118,6 +119,61 @@ function extractParentHint(text: string): string | undefined {
     }
   }
   return undefined;
+}
+
+/** Desktop\\Projects container — not a subfolder named Projects inside another project. */
+export const DESKTOP_PROJECTS_PARENT = '__desktop_projects__';
+
+export function extractAddFileParentHint(text: string): string | undefined {
+  const t = String(text || '').trim();
+  if (!t) return undefined;
+
+  const namedSub = extractParentHint(t);
+  if (namedSub) return namedSub;
+
+  if (
+    /\b(?:desktop\s+)?projects?\s+folder\b/i.test(t)
+    || /\bproject\s+folder\b/i.test(t)
+    || /\b(?:add|put|place|save)\s+it\s+(?:to|in|inside)\s+(?:the\s+)?(?:desktop\s+)?projects?\b/i.test(t)
+    || /\binside\s+(?:of\s+)?(?:the\s+)?project\s+folder\b/i.test(t)
+    || /^\s*(?:the\s+)?projects?\s+folder\s*$/i.test(t)
+    || (/\b(?:on|in)\s+(?:my\s+)?desktop\b/i.test(t) && /\bprojects?\b/i.test(t))
+  ) {
+    return DESKTOP_PROJECTS_PARENT;
+  }
+
+  return undefined;
+}
+
+export function looksLikeAddFileDestinationClarify(text: string): boolean {
+  const t = String(text || '').trim();
+  if (!t) return false;
+  if (looksLikeAddFileAsk(t)) return true;
+  if (/\b(?:add|put|place|save)\s+it\s+(?:to|in|inside)\b/i.test(t)) return true;
+  if (/^\s*(?:the\s+)?projects?\s+folder\s*$/i.test(t)) return true;
+  if (extractAddFileParentHint(t)) return true;
+  if (/\bproject\s+folder\b/i.test(t) && !/\b(?:what|list|show|tell|which|delete|remove)\b/i.test(t)) {
+    return true;
+  }
+  return false;
+}
+
+function looksLikeAddFileLocationFollowUp(text: string): boolean {
+  const t = String(text || '').trim();
+  if (looksLikeAddFileAsk(t)) return false;
+  return looksLikeAddFileDestinationClarify(t);
+}
+
+function fileNameFromAddFileThread(userMessages: string[]): string | null {
+  for (let i = userMessages.length - 1; i >= 0; i--) {
+    const line = String(userMessages[i] || '').trim();
+    if (!/\b(?:add|create|make|write|put)\b/i.test(line) || !/\bfiles?\b/i.test(line)) continue;
+    const file = extractFileName(line);
+    if (file) return file;
+    const named = extractNamedDiskTarget(line);
+    if (named && !isBlockedDiskTargetName(named)) return normalizeDiskFileName(named);
+  }
+  return nameFromThread(userMessages, true);
 }
 
 function extractProjectName(text: string): string | null {
@@ -174,10 +230,26 @@ export function classifyDiskIntent(
     return { type: 'delete_project', name: name || null };
   }
 
+  if (looksLikeAddFileLocationFollowUp(t)) {
+    const allLines = [...recent, t];
+    const fileName = fileNameFromAddFileThread(allLines);
+    if (fileName) {
+      return {
+        type: 'add_file',
+        name: fileName,
+        parentHint: extractAddFileParentHint(t) || extractParentHint(t),
+      };
+    }
+  }
+
   if (looksLikeAddFileAsk(t)) {
     const name = extractFileName(t) || extractNamedDiskTarget(t);
     if (!name) return { type: 'none' };
-    return { type: 'add_file', name: normalizeDiskFileName(name), parentHint: extractParentHint(t) };
+    return {
+      type: 'add_file',
+      name: normalizeDiskFileName(name),
+      parentHint: extractAddFileParentHint(t) || extractParentHint(t),
+    };
   }
 
   if (looksLikeCreateProjectAsk(t)) {

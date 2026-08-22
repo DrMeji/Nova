@@ -49,6 +49,27 @@ const diskCases = [
     wantName: 'MyShop',
   },
   {
+    input: 'Add it to the desktop Project folder',
+    want: 'add_file',
+    wantName: 'Starbucks',
+    wantNameLoose: true,
+    recent: ['Add a file... Call it Starbucks'],
+  },
+  {
+    input: 'I want you to add a file called Starbucks inside the project folder, please',
+    want: 'add_file',
+    wantName: 'Starbucks',
+    wantNameLoose: true,
+    wantParent: '__desktop_projects__',
+  },
+  {
+    input: 'project folder',
+    want: 'add_file',
+    wantName: 'Starbucks',
+    wantNameLoose: true,
+    recent: ['Add a file... Call it Starbucks'],
+  },
+  {
     input: 'Starbucks, that is inside the project folder. Can you go ahead and delete it',
     want: 'delete_project',
     wantName: 'Starbucks',

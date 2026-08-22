@@ -352,6 +352,18 @@ export async function resolveDeleteProjectFolder(opts: {
   return { path: null, name: target };
 }
 
+export async function resolveDesktopProjectsFolderOnDisk(): Promise<{ path: string; name: string } | null> {
+  if (!hasFolderAccessGrant()) return null;
+  const roots = await window.arkDesktop?.browseRoots?.();
+  const desktop = roots?.roots?.find(r => r.id === 'desktop')?.path;
+  if (!desktop) return null;
+  const projectsPath = joinPath(desktop, 'Projects');
+  if (await pathIsDirectory(projectsPath)) {
+    return { path: projectsPath, name: 'Projects' };
+  }
+  return null;
+}
+
 /** Resolve a named folder on Desktop / Projects (shared with add/delete file). */
 export async function resolveNamedFolderOnDisk(
   wantName: string,

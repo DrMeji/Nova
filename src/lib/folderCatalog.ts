@@ -5,6 +5,7 @@
 
 import { parseFolderPathAsk, parseDesktopSubfolderAsk, type FolderPathRef } from '@/lib/folderPathAsk';
 import { looksLikeInstalledAppsAsk } from '@/lib/pcExplore';
+import { looksLikeAddFileDestinationClarify } from '@/lib/chatDiskIntent';
 
 /** "What projects do I have on my PC / desktop?" — not installed-apps asks. */
 export function looksLikeProjectsInventoryAsk(text: string): boolean {
@@ -25,6 +26,7 @@ export function resolveCatalogFolderRef(message: string): FolderPathRef | null {
 
   const t = String(message || '').trim();
   if (!t) return null;
+  if (looksLikeAddFileDestinationClarify(t)) return null;
 
   if (looksLikeProjectsInventoryAsk(t)) {
     return { scope: 'desktop', name: 'Projects' };
@@ -83,6 +85,7 @@ const KEY_FILE_NAMES = [
 export function looksLikeFolderCatalogAsk(text: string): boolean {
   const t = String(text || '').trim();
   if (!t) return false;
+  if (looksLikeAddFileDestinationClarify(t)) return false;
   if (/\b(delete|remove|trash|wipe|get rid of)\b/i.test(t)) return false;
   if (looksLikeInstalledAppsAsk(t)) return false;
   if (looksLikeProjectsInventoryAsk(t)) return true;

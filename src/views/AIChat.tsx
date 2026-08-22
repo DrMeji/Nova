@@ -2577,6 +2577,8 @@ export function AIChat() {
           workspaceDiskRoot: diskRoot,
           workspaceProjectId: diskProjectId,
           workspaceName: diskWorkspaceName,
+          stickyTarget: stickyDiskTarget,
+          lastListedFolder: getLastListedFolder(activeChatId),
         });
         if (mySeq !== genSeqRef.current) return;
 
