@@ -41,7 +41,10 @@ function detectProjectKind(text: string): ProjectKind {
 
 function looksLikeAddFileAsk(text: string): boolean {
   const t = String(text || '').trim();
-  if (/\b(?:add|create|make|write|put)\b/i.test(t) && /\bfiles?\b/i.test(t)) return true;
+  if (/\bedit files\b/i.test(t) && !/\b(?:add|create|make|write|put)\s+(?:a\s+|the\s+|new\s+)?files?\b/i.test(t)) {
+    return false;
+  }
+  if (/\b(?:add|create|make|write|put)\b[\s\S]{0,48}\b(?:a\s+|the\s+|new\s+)?file\b/i.test(t)) return true;
   if (/\bput\s+the\s+file\b/i.test(t)) return true;
   return false;
 }
@@ -119,11 +122,11 @@ function extractFileName(text: string): string | null {
   const t = String(text || '').trim();
   const patterns = [
     /\bcall\s+it\s+([A-Za-z][A-Za-z0-9 _.-]{1,48})/i,
-    /\bfile\s+(?:called|named)\s+["“']([^"”']+)["”']/i,
+    /\bfile\s+(?:called|named)\s+["\u201c']([^"\u201d']+)["\u201d']/i,
     /\bfile\s+(?:called|named)\s+([A-Za-z0-9 _.-]{1,64})/i,
-    /\bdelete\s+(?:the\s+)?file\s+["“']([^"”']+)["”']/i,
+    /\bdelete\s+(?:the\s+)?file\s+["\u201c']([^"\u201d']+)["\u201d']/i,
     /\bdelete\s+(?:the\s+)?(?:file\s+)?([A-Za-z0-9_./\\-]+\.[A-Za-z0-9]{1,12})\b/i,
-    /\b(?:add|create)\s+(?:a\s+)?file\s+(?:called|named)\s+["“']?([A-Za-z0-9 _.-]{1,64})["”']?/i,
+    /\b(?:add|create)\s+(?:a\s+)?file\s+(?:called|named)\s+["\u201c']?([A-Za-z0-9 _.-]{1,64})["\u201d']?/i,
   ];
   for (const re of patterns) {
     const m = t.match(re);
@@ -146,9 +149,9 @@ export function parseDeleteFileTarget(text: string): {
   const t = String(text || '').trim();
   if (!t) return { fileName: null };
 
-  // "delete the file … in (the) project folder called Starbucks" → file Starbucks, parent Desktop\Projects
+  // "delete the file … in (the) project folder called Starbucks" → file Starbucks, parent Desktop\\Projects
   const fileInProjectsContainer = t.match(
-    /\bfiles?\b[\s\S]*?\b(?:desktop\s+)?project\s+folder\b[\s\S]*?\b(?:called|named)\s+["“']?([A-Za-z][A-Za-z0-9 _.-]{1,48})["”']?/i,
+    /\bfiles?\b[\s\S]*?\b(?:desktop\s+)?project\s+folder\b[\s\S]*?\b(?:called|named)\s+["\u201c']?([A-Za-z][A-Za-z0-9 _.-]{1,48})["\u201d']?/i,
   );
   if (fileInProjectsContainer?.[1]) {
     const name = cleanDiskTargetName(fileInProjectsContainer[1]);
@@ -159,7 +162,7 @@ export function parseDeleteFileTarget(text: string): {
 
   // "file called X … project folder" (no subfolder name after called)
   const namedFileInProjects = t.match(
-    /\bfiles?\s+(?:called|named)\s+["“']?([A-Za-z][A-Za-z0-9 _.-]{1,48})["”']?[\s\S]*?\bproject\s+folder\b/i,
+    /\bfiles?\s+(?:called|named)\s+["\u201c']?([A-Za-z][A-Za-z0-9 _.-]{1,48})["\u201d']?[\s\S]*?\bproject\s+folder\b/i,
   );
   if (namedFileInProjects?.[1]) {
     const name = cleanDiskTargetName(namedFileInProjects[1]);
