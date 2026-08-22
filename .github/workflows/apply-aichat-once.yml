@@ -1,0 +1,27 @@
+name: apply-aichat-once
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/apply-aichat-once.yml'
+      - 'scripts/AIChat-v0.1.138.patch'
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply AIChat patch if not already applied
+        run: |
+          set -euo pipefail
+          if git apply --check scripts/AIChat-v0.1.138.patch; then
+            git apply scripts/AIChat-v0.1.138.patch
+            git config user.name "DrMeji"
+            git config user.email "122752031+DrMeji@users.noreply.github.com"
+            git add src/views/AIChat.tsx
+            git commit -m "v0.1.138: wire Chat send path (strip prefix, keep workspace, apply edits)"
+            git push
+          else
+            echo "AIChat patch already applied or does not fit; skipping."
+          fi
