@@ -21,12 +21,13 @@ export function looksLikeBuildStart(message: string): boolean {
   const t = String(message || '');
   if (wantsInspectOnly(t, false) && !/\b(build|create|make)\b/i.test(t)) return false;
   return (
-    /\b(build|create|make|scaffold|start)\b[\s\S]{0,90}\b(app|website|site|page|tool|dashboard|ui|chat\s*gpt|blank page|iphone|ipad|ios|android)\b/i.test(t)
+    /\b(build|create|make|scaffold|start)\b[\s\S]{0,90}\b(app|website|site|page|tool|dashboard|ui|chat\s*gpt|blank page|iphone|ipad|ios|android|button|icon|search|settings)\b/i.test(t)
     || (/\b(iphone|ipad|ios|android|app store|play store)\b/i.test(t)
       && /\b(build|create|make|start|want|need|app)\b/i.test(t))
     || /\b(let'?s|lets)\s+(build|make|create|start)\b/i.test(t)
     || /\bstart with a blank\b/i.test(t)
     || /\banother chat\s*gpt\b/i.test(t)
+    || /\b(add|put|place)\b[\s\S]{0,60}\b(button|icon|logo|search|settings)\b/i.test(t)
   );
 }
 
@@ -67,7 +68,7 @@ function cleanStudioAsk(message: string): string {
   return String(message || '')
     .replace(/<!--ark-attach:[\s\S]*?-->/g, '')
     .replace(/<!--ark-auto-read-->/g, '')
-    .replace(/^\[(?:Plan|Ask|Debug|Tasks)\]\s*/i, '')
+    .replace(/^[\[](?:Plan|Ask|Debug|Tasks)[\]]\s*/i, '')
     .trim();
 }
 
