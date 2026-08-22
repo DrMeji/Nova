@@ -13,6 +13,7 @@ export type ProjectWriteResult = {
   files?: string[];
   error?: string;
   sandboxBlocked?: string[];
+  meta?: { inPlace?: boolean };
 };
 
 export async function safeProjectWrite(payload: ProjectWritePayload): Promise<ProjectWriteResult> {

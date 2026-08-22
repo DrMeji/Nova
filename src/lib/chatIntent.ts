@@ -40,10 +40,11 @@ export function shouldSuggestCodeSwitch(
   return false;
 }
 
-const IMAGE_ASK =
-  /\b(draw me|paint me|picture of|photo of|image of|wallpaper of|logo for|icon for)\b/i
-  || /\b(generate|create|make|draw|render|design|paint|produce)\b[\s\S]{0,48}\b(an?\s+)?(image|picture|photo|illustration|wallpaper|logo|icon|artwork|portrait|avatar|banner|poster)\b/i
-  || /\b(image|picture|photo|illustration|wallpaper|logo|icon|artwork|portrait)\b[\s\S]{0,32}\b(of|for|showing|with)\b/i;
+const IMAGE_ASK = [
+  /\b(draw me|paint me|picture of|photo of|image of|wallpaper of|logo for|icon for)\b/i,
+  /\b(generate|create|make|draw|render|design|paint|produce)\b[\s\S]{0,48}\b(an?\s+)?(image|picture|photo|illustration|wallpaper|logo|icon|artwork|portrait|avatar|banner|poster)\b/i,
+  /\b(image|picture|photo|illustration|wallpaper|logo|icon|artwork|portrait)\b[\s\S]{0,32}\b(of|for|showing|with)\b/i,
+];
 
 /** User wants a generated image — route to Image tab (not chat text). */
 export function looksLikeImageAsk(text: string): boolean {
@@ -56,7 +57,7 @@ export function looksLikeImageAsk(text: string): boolean {
   if (/\b(video|clip|animation|mp4|gif|reel|trailer)\b/i.test(t) && /\b(generate|create|make|render)\b/i.test(t)) {
     return false;
   }
-  return IMAGE_ASK.test(t);
+  return IMAGE_ASK.some(re => re.test(t));
 }
 
 export function classifyChatIntent(message: string, kind?: string): ChatIntent {

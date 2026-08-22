@@ -1,27 +1,40 @@
-name: apply-aichat-once
+name: tag-v0.1.138
+# One-shot: apply remaining typecheck view patch (if needed) and create the
+# v0.1.138 git tag so Release.yml builds the Windows installer.
+# Safe to re-run — no-ops if the tag already exists.
 on:
   workflow_dispatch:
   push:
     paths:
       - '.github/workflows/apply-aichat-once.yml'
-      - 'scripts/AIChat-v0.1.138.patch'
+      - 'scripts/typecheck-views-v0.1.138.patch'
 jobs:
-  apply:
+  tag:
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - name: Apply AIChat patch if not already applied
+        with:
+          fetch-depth: 0
+      - name: Apply view typecheck patch, then tag v0.1.138
         run: |
           set -euo pipefail
-          if git apply --check scripts/AIChat-v0.1.138.patch; then
-            git apply scripts/AIChat-v0.1.138.patch
-            git config user.name "DrMeji"
-            git config user.email "122752031+DrMeji@users.noreply.github.com"
-            git add src/views/AIChat.tsx
-            git commit -m "v0.1.138: wire Chat send path (strip prefix, keep workspace, apply edits)"
+          git config user.name "DrMeji"
+          git config user.email "122752031+DrMeji@users.noreply.github.com"
+          if [ -f scripts/typecheck-views-v0.1.138.patch ] && git apply --check scripts/typecheck-views-v0.1.138.patch; then
+            git apply scripts/typecheck-views-v0.1.138.patch
+            git add src/views/AIChat.tsx src/views/ProjectWorkspace.tsx
+            git commit -m "v0.1.138: typecheck Chat/Code view types (project_id, attach kinds, composer agent)."
             git push
           else
-            echo "AIChat patch already applied or does not fit; skipping."
+            echo "View typecheck patch already applied or does not fit; skipping."
           fi
+          git fetch --tags origin
+          git pull --ff-only origin main || true
+          if git rev-parse "refs/tags/v0.1.138" >/dev/null 2>&1; then
+            echo "v0.1.138 already exists"
+            exit 0
+          fi
+          git tag -a v0.1.138 -m "ARK 0.1.138 — Chat coding, greenfield routing, delete targeting"
+          git push origin v0.1.138

@@ -2,6 +2,8 @@
 
 **ARK** is a Windows desktop AI creation studio.
 
+Current source: **v0.1.138** · [Changelog](docs/CHANGELOG.md) · [Releases](https://github.com/DrMeji/Ark/releases)
+
 It combines local and cloud AI so you can chat, generate images and video, manage models, and connect tools — without depending on a third-party local runtime like Ollama.
 
 ## What you get
@@ -20,6 +22,7 @@ In the app: **Settings → Updates → Check** to download newer builds.
 
 ## Docs
 
+- [Changelog](docs/CHANGELOG.md) — what shipped in each version  
 - [Brain API](docs/ark-brain-api.md) — point external clients at ARK  
 - [Product brain](docs/product-brain.md) — ARK Engine and creation product rules  
 - [Lindsay migration](docs/lindsay-migration.md) — switch from Ollama-style setups  
