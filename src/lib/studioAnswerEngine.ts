@@ -83,7 +83,7 @@ function cleanAsk(message: string): string {
   return String(message || '')
     .replace(/<!--ark-attach:[\s\S]*?-->/g, '')
     .replace(/<!--ark-auto-read-->/g, '')
-    .replace(/^\[(?:Plan|Ask|Debug|Tasks)\]\s*/i, '')
+    .replace(/^[\[](?:Plan|Ask|Debug|Tasks)[\]]\s*/i, '')
     .trim();
 }
 
@@ -91,7 +91,7 @@ function cleanAsk(message: string): string {
 export function stripStudioMeta(text: string): string {
   return String(text || '')
     .replace(/^ANSWER THE USER QUESTION FIRST\.?\s*/gim, '')
-    .replace(/^User asked:\s*[“"][^”"]*[”"]\s*/gim, '')
+    .replace(/^User asked:\s*[\u201c"][^\u201d"]*[\u201d"]\s*/gim, '')
     .replace(/\(not a product overview\)\s*/gi, '')
     .replace(/^CRITICAL RULES[\s\S]*?User:\s*/i, '')
     .trim();
@@ -111,7 +111,6 @@ export function classifyStudioIntent(
   }
   if (STUDIO_RECOMMEND_RE.test(ask)) return 'recommend';
 
-  // Continue: after a scan, short “more” / “fix” without full phrase.
   if (last && (last === 'security' || last === 'debug' || last === 'problems' || last === 'wider' || last === 'ui')) {
     if (/^(yes|ok|okay|go on|continue|go deeper)\b/i.test(ask)) return last === 'ui' ? 'debug' : last;
   }
@@ -160,7 +159,6 @@ export function classifyStudioIntent(
     return 'problems';
   }
 
-  // Sticky files: unclear ask → freeform (model + files), NOT overview template.
   return 'freeform';
 }
 
@@ -179,16 +177,16 @@ function formatRecommend(
   const label = projectName && !/^code$/i.test(projectName) ? `**${projectName}**` : 'this folder';
   if (!findings.length) {
     return [
-      `For ${label} (${fileCount} source files), I don’t have prior scan hits to prioritize.`,
+      `For ${label} (${fileCount} source files), I don\u2019t have prior scan hits to prioritize.`,
       '',
-      '**Recommended first:** run **Find problems** or **Debug**, then ask again — I’ll rank those findings.',
+      '**Recommended first:** run **Find problems** or **Debug**, then ask again — I\u2019ll rank those findings.',
       '',
-      'Or tell me a goal (ship safer, clean UI, finish stubs) and I’ll pick a starting file.',
+      'Or tell me a goal (ship safer, clean UI, finish stubs) and I\u2019ll pick a starting file.',
     ].join('\n');
   }
   const top = findings.slice(0, 5);
   const bits: string[] = [
-    `Here’s what I’d tackle first in ${label}, based on the latest scan:`,
+    `Here\u2019s what I\u2019d tackle first in ${label}, based on the latest scan:`,
     '',
   ];
   top.forEach((f, i) => {
@@ -201,7 +199,7 @@ function formatRecommend(
     bits.push(`   **Why first:** ${why}`);
     bits.push('');
   });
-  bits.push('Say **how can we fix #1** (or Edit in Code) when you’re ready.');
+  bits.push('Say **how can we fix #1** (or Edit in Code) when you\u2019re ready.');
   return bits.join('\n');
 }
 
@@ -248,17 +246,17 @@ export function packStudioContext(input: StudioAnswerInput): {
   const fileRule = input.planOnly
     ? 'PLAN ONLY — output a step-by-step plan. No @@@FILE blocks, no file writes. End with: Say "go implement" when you want me to build this.'
     : input.allowFileEdits
-      ? 'When implementing, use @@@FILE blocks to create or edit files under the project root. Keep edits focused — only files that need to change.'
+      ? 'The user wants you to CHANGE THE CODE NOW. Emit @@@FILE blocks with COMPLETE file contents for every file you change. Do not only describe the change. Keep edits surgical — only files that need to change. After the files, add a short summary of what you changed.'
       : 'Do NOT write @@@FILE blocks. Do not dump whole files.';
 
   const system = [
     'You can see the attached project files. Never say you cannot see them.',
     'Never ask the user to paste code.',
     'Answer ONLY about this codebase. No world news, climate, politics, or generic life advice.',
-    'Answer the user’s question directly and specifically.',
+    'Answer the user\u2019s question directly and specifically.',
     'If unsure, say what you inspected. Do not invent issues.',
     fileRule,
-    'Never output lines like “ANSWER THE USER QUESTION FIRST” or “User asked:”.',
+    'Never output lines like \u201cANSWER THE USER QUESTION FIRST\u201d or \u201cUser asked:\u201d.',
   ].join(' ');
 
   const intentHint =
@@ -331,7 +329,6 @@ function localScanAnswer(
   if (intent === 'file-detail') {
     return describeProjectInDetail(files, projectName);
   }
-  // overview / freeform fallback
   let spoken = describeProjectFromFiles(files, projectName);
   if (/\b(can you |do you )?see\b/i.test(ask) || /\bwhat (am i|i'?m)/i.test(ask)) {
     const n = Object.keys(flattenProjectFiles(files)).length;
@@ -350,53 +347,48 @@ export async function answerStudio(
   let findings = packed.findings;
   const packedTokens = packed.packedTokens;
 
-  // Fast structured path — scan formats, no meta.
   if (usesLocalScan(intent) && !prefersModel(intent)) {
     const text = stripStudioMeta(localScanAnswer(intent, input.files, input.projectName, findings, ask));
     return {
       text,
       intent,
       findings,
-      meta: 'Local scan · attached files',
+      meta: 'Local scan \u00b7 attached files',
       streamed: false,
       packedTokens,
     };
   }
 
-  // Fix / recommend with prior findings: structured first if we have data (instant + accurate).
   if ((intent === 'fix' || intent === 'recommend') && findings.length) {
     const structured = stripStudioMeta(localScanAnswer(intent, input.files, input.projectName, findings, ask));
-    // Still try a short model polish only when stream is wanted and no findings? Prefer structured.
     return {
       text: structured,
       intent,
       findings,
-      meta: 'Local scan · attached files',
+      meta: 'Local scan \u00b7 attached files',
       streamed: false,
       packedTokens,
     };
   }
 
-  // Overview with a clear describe ask can stay local (fast) unless freeform-ish.
   if (intent === 'overview' || intent === 'file-detail') {
     const text = stripStudioMeta(localScanAnswer(intent, input.files, input.projectName, findings, ask));
     return {
       text,
       intent,
       findings,
-      meta: 'Local scan · attached files',
+      meta: 'Local scan \u00b7 attached files',
       streamed: false,
       packedTokens,
     };
   }
 
-  // Model path: debug / freeform (and fix/recommend without prior findings).
   if (input.shouldAbort?.()) {
     return {
       text: stripStudioMeta(localScanAnswer(intent, input.files, input.projectName, findings, ask)),
       intent,
       findings,
-      meta: 'Local scan · attached files',
+      meta: 'Local scan \u00b7 attached files',
       streamed: false,
       packedTokens,
     };
@@ -443,7 +435,7 @@ export async function answerStudio(
         text: stripStudioMeta(streamed) || stripStudioMeta(localScanAnswer(intent, input.files, input.projectName, findings, ask)),
         intent,
         findings,
-        meta: 'Local model · attached files',
+        meta: 'Local model \u00b7 attached files',
         streamed: Boolean(streamed),
       packedTokens,
       };
@@ -462,7 +454,7 @@ export async function answerStudio(
         text: fallback,
         intent,
         findings,
-        meta: 'Local scan · attached files',
+        meta: 'Local scan \u00b7 attached files',
         streamed: false,
       packedTokens,
       };
@@ -483,7 +475,7 @@ export async function answerStudio(
         text: spoken,
         intent,
         findings,
-        meta: 'Local scan · attached files',
+        meta: 'Local scan \u00b7 attached files',
         streamed: false,
       packedTokens,
       };
@@ -494,7 +486,7 @@ export async function answerStudio(
       text: spoken,
       intent,
       findings: findings.length ? findings : collectProjectFindings(input.files, 'all'),
-      meta: `${label} · attached files`,
+      meta: `${label} \u00b7 attached files`,
       streamed: Boolean(streamed) || prefs.streamResponses,
       packedTokens,
     };
@@ -510,7 +502,7 @@ export async function answerStudio(
       )),
       intent,
       findings,
-      meta: 'Local scan · attached files',
+      meta: 'Local scan \u00b7 attached files',
       streamed: false,
       packedTokens,
     };
