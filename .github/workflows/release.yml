@@ -6,6 +6,7 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -45,7 +46,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          $tag = "${{ github.ref_name }}"
+          $tag = if ("${{ github.ref_type }}" -eq "tag") { "${{ github.ref_name }}" } else { "v0.1.138" }
           $ver = $tag.TrimStart("v")
           $setup = "release/ARK-Setup.exe"
           $portable = "release/ARK-Portable.exe"
@@ -70,8 +71,10 @@ jobs:
 
           After install, use **Settings → Updates → Check → Download** for newer builds in-app.
 
+          Chat: default Chat can edit code; new-product ideas (Ring System) plan instead of binding DeBloat; delete only the named folder.
+
           External brain API: Models → Engine (Brain API). Port may differ from 8787.
-          Docs: docs/ark-brain-api.md · docs/lindsay-migration.md
+          Docs: docs/ark-brain-api.md · docs/CHANGELOG.md · docs/lindsay-migration.md
           "@
 
           $exists = gh release view $tag --repo DrMeji/Ark 2>$null
