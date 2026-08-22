@@ -26,6 +26,9 @@ export function looksLikeCodeAsk(text: string): boolean {
   if (/\b(typescript|javascript|python|react|node\.?js|html|css)\b/i.test(t) && /\b(build|write|create|fix|add)\b/i.test(t)) {
     return true;
   }
+  if (/\b(add|put|place|move|insert)\b[\s\S]{0,80}\b(button|icon|logo|search|settings|header|nav|page)\b/i.test(t)) {
+    return true;
+  }
   return false;
 }
 
