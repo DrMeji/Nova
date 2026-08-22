@@ -255,6 +255,16 @@ const greenfieldCases = [
     wantName: 'Ring System',
   },
   {
+    input: 'Hey, I want to work on a project. I want to call it Ring System. Now, I don\'t know, it\'s basically what it is. It\'s like a ring doorbell when people press it, the app get a notification on their phone. What do you think is the best way to start',
+    wantGreenfield: true,
+    wantName: 'Ring System',
+  },
+  {
+    input: 'I want to build Ring System',
+    wantGreenfield: true,
+    wantName: 'Ring System',
+  },
+  {
     input: 'Let\'s work on DeBloat',
     wantGreenfield: false,
   },
@@ -262,6 +272,10 @@ const greenfieldCases = [
     input: 'Create web app called Ring System',
     wantGreenfield: false,
     wantCreateGo: true,
+  },
+  {
+    input: 'Add a search button on the top right corner',
+    wantGreenfield: false,
   },
 ];
 

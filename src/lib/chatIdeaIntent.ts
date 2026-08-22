@@ -66,6 +66,7 @@ export function extractGreenfieldName(text: string): string | null {
     /\b(?:called|named|name(?:d)?\s+it|call\s+it)\s+["“']([^"”']{2,48})["”']/i,
     /\b(?:called|named|name(?:d)?\s+it|call\s+it)\s+([A-Za-z][A-Za-z0-9 _-]{1,40})/i,
     /\b(?:project|app|product|system)\s+(?:called|named)\s+["“']?([A-Za-z][A-Za-z0-9 _-]{1,40})/i,
+    /\bi\s+want\s+to\s+(?:work\s+on|build|create|make)\s+([A-Za-z][A-Za-z0-9 _-]{1,40})/i,
     /\b(?:build|create|make|design|develop|start)\s+(?:a\s+)?(?:new\s+)?([A-Za-z][A-Za-z0-9 _-]{2,40})(?:\s*[—–-]|\s+that\b|\s+when\b|\s+so\b|\s*$)/i,
     /\b(?:build|create|make)\s+([A-Za-z][A-Za-z0-9 _-]{2,40})\s+(?:app|system|platform|product)\b/i,
   ];
@@ -81,15 +82,15 @@ export function extractGreenfieldName(text: string): string | null {
 
 function summarizeProblem(text: string, name: string): string {
   const t = String(text || '').trim();
-  const dash = t.match(/[—–-]\s*(.+)$/);
-  if (dash?.[1] && dash[1].length > 12) return dash[1].trim();
-  if (/\bdoorbell\b/i.test(t) && /\b(notif|phone|alert)/i.test(t)) {
-    return 'Doorbell events should notify the phone — like a smart doorbell MVP.';
+  if (/\b(door\s*bell|doorbell|ring)\b/i.test(t) && /\b(notif|phone|alert|press)\b/i.test(t)) {
+    return 'When someone presses the doorbell, the phone should get a notification — a smart-doorbell MVP.';
   }
-  if (FEATURE_DESC_RE.test(t)) {
-    const snippet = t.replace(/^[\s\S]{0,80}/i, '').trim().slice(0, 160);
-    if (snippet.length > 20) return snippet;
-  }
+  const dash = t.match(/[—–]\s*(.{12,180})/);
+  if (dash?.[1]) return dash[1].trim();
+  const basically = t.match(/\bbasically[,:]?\s+(.{20,180})/i);
+  if (basically?.[1]) return basically[1].trim().replace(/\s+/g, ' ');
+  const likeA = t.match(/\bit'?s like a\s+(.{20,160})/i);
+  if (likeA?.[1]) return likeA[1].trim().replace(/\s+/g, ' ');
   return `A new product idea: **${name}**.`;
 }
 
@@ -142,6 +143,10 @@ export function looksLikeGreenfieldIdea(text: string): boolean {
   if (hasBuild && name && (hasPlanAsk || hasFeatures)) return true;
   if (hasPlanAsk && name && (hasBuild || NEW_PRODUCT_RE.test(t) || /\bproject\b/i.test(t))) return true;
   if (NEW_PRODUCT_RE.test(t) && (hasPlanAsk || hasFeatures)) return true;
+  // Short "I want to build Ring System" / "call it X" — still a new product, not an existing folder.
+  if (hasBuild && name) return true;
+  if (name && WORK_ON_NEW_PROJECT_RE.test(t)) return true;
+  if (name && /\bi\s+want\s+to\s+work\s+on\b/i.test(t) && !/\blet'?s\s+work\s+on\b/i.test(t)) return true;
 
   return false;
 }
