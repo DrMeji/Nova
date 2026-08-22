@@ -33,6 +33,8 @@ const ENTRY_CANDIDATES = [
 const INSPECT_BUDGET = 8_000;
 const INSPECT_FILE_CHARS = 2_400;
 const INSPECT_MAX_FILES = 10;
+/** Cap regex scan so 300+ file uploads don’t freeze the desktop. */
+const SCAN_MAX_FILES = 56;
 
 /** Skip bundled / generated trees so we do not “find” the same issue twice in dist. */
 export function isBuildArtifactPath(path: string): boolean {
@@ -229,8 +231,12 @@ export function pathsMentionedInText(text: string, files: ProjectFileMap): strin
       if (hit) found.add(hit);
     }
   }
-  for (const path of Object.keys(flat)) {
-    if (text.includes(path)) found.add(path);
+  if (found.size < 8) {
+    for (const path of Object.keys(flat)) {
+      const base = path.split('/').pop() || path;
+      if (base.length >= 5 && text.includes(base)) found.add(path);
+      if (found.size >= 12) break;
+    }
   }
   return [...found];
 }
@@ -285,8 +291,20 @@ export function scanProjectFindings(files: ProjectFileMap, message: string): Ins
     findings.push({ path, detail });
   };
 
-  for (const [path, raw] of Object.entries(flat)) {
-    if (isBuildArtifactPath(path) || sourceTwinOfArtifact(path, flat)) continue;
+  const eligible = Object.keys(flat).filter(
+    path => !isBuildArtifactPath(path) && !sourceTwinOfArtifact(path, flat),
+  );
+  const scanPaths = eligible.length <= SCAN_MAX_FILES
+    ? eligible
+    : [...new Set([
+      ...pickFilesForInspect(files, message),
+      ...ENTRY_CANDIDATES.filter(p => flat[p]),
+      ...eligible.filter(p => /\.(tsx?|jsx?|py|html?|css|swift|kt|md)$/i.test(p)).slice(0, 24),
+    ])].slice(0, SCAN_MAX_FILES);
+
+  for (const path of scanPaths) {
+    const raw = flat[path];
+    if (!raw) continue;
     const content = String(raw || '');
     if (!content.trim() || /^\[(image|binary|file)/i.test(content.trim())) continue;
     const lines = content.split('\n');
@@ -649,7 +667,7 @@ export function buildInspectPrompt(
     used += block.length;
   }
 
-  const tree = Object.keys(flat).sort().slice(0, 80).join('\n');
+  const tree = Object.keys(flat).sort().slice(0, 40).join('\n');
   const local = findings.length
     ? `Local scan hints (verify, do not copy blindly):\n${findings.map(f => `- ${f.path}: ${f.detail}`).join('\n')}`
     : '';

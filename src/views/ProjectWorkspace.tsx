@@ -52,10 +52,10 @@ import { MessageContent } from '@/components/MediaMessage';
 import {
   applyFileEdits,
   buildDoneSummary,
+  classifyCodeTurnSize,
   buildProjectCodingPrompt,
   buildFileTreeFromPaths,
   BUILD_PROGRESS_STEPS,
-  classifyCodeTurnSize,
   composePreviewHtml,
   editsFromWorkingHtml,
   extractStreamingFileEdits,
@@ -68,6 +68,7 @@ import {
   parseClosedFileEdits,
   parseFileEdits,
   planFilesForBuild,
+  rankFilesForTurnPack,
   fileContentLooksComplete,
   replyHasUnclosedFileBlock,
   scaffoldFallbackEdits,
@@ -105,7 +106,9 @@ import { ComposerPlusMenu, type ComposerPlusAction } from '@/components/Composer
 import { CodeEditor } from '@/components/CodeEditor';
 import { fileTintClass, languageFromPath } from '@/lib/syntaxHighlight';
 import { TokenUsageRing } from '@/components/TokenUsageRing';
-import { estimateTokens, getTokenUsageRatio, recordTokenUsage, syncTokenUsage } from '@/lib/tokenUsage';
+import { estimateTokens, getTokenUsageRatio, resetTokenUsage, syncTokenUsage } from '@/lib/tokenUsage';
+import { getModelHealthRatio, recordModelTurn } from '@/lib/modelHealth';
+import { applyFilesInBatches, yieldFrame } from '@/lib/chunkedImport';
 import { prepareBrainRotation } from '@/lib/modelRotation';
 import { getEngineStatus, setEngineModel, engineGenerateCancel } from '@/lib/arkEngine';
 import { honestNoLiveChatReply, probeLiveCapacity } from '@/lib/arkCapacity';
@@ -131,7 +134,14 @@ import {
   wantsNamedPatch,
   type SearchHit,
 } from '@/lib/projectInspect';
-import { gitPush, gitCommit, gitStatus, gitClone, githubCloneUrl, parseGithubRemote, type GitStatus } from '@/lib/arkGitClient';
+import { gitPush, gitCommit, gitStatus, gitClone, gitPull, githubCloneUrl, parseGithubRemote, formatGitReview, type GitStatus } from '@/lib/arkGitClient';
+import {
+  githubToken,
+  needGithubWrite,
+  repoNameFromProject,
+  workflowCreateGitHubRepo,
+  workflowOpenPullRequest,
+} from '@/lib/codeGitHubWorkflow';
 import { runCodeStudioCommand } from '@/lib/studioCommands';
 import { StudioEmptyState } from '@/components/StudioEmptyState';
 import { GitHubRepoPicker } from '@/components/GitHubRepoPicker';
@@ -376,6 +386,9 @@ export function ProjectWorkspace() {
   const [composerMode, setComposerMode] = useState<'plan' | 'ask' | 'debug' | 'multitask' | null>(null);
   const [composerTall, setComposerTall] = useState(false);
   const [tokenRatio, setTokenRatio] = useState(0);
+  const [modelRatio, setModelRatio] = useState(0);
+  const [attachBusy, setAttachBusy] = useState(false);
+  const [attachProgressLabel, setAttachProgressLabel] = useState('');
   const [activeModel, setActiveModel] = useState<CodeModel>(() => defaultCodeModel());
   const [threadBrain, setThreadBrain] = useState<ThreadBrain | null>(null);
   const threadBrainRef = useRef<ThreadBrain | null>(null);
@@ -413,6 +426,8 @@ export function ProjectWorkspace() {
   const [creating, setCreating] = useState<null | { kind: 'file' | 'folder'; parentPath: string }>(null);
   const [createName, setCreateName] = useState('');
   const [diskRoot, setDiskRoot] = useState<string | null>(null);
+  const [workspaceInPlace, setWorkspaceInPlace] = useState(false);
+  const [githubMenuOpen, setGithubMenuOpen] = useState(false);
   const [findOpen, setFindOpen] = useState(false);
   const [findQuery, setFindQuery] = useState('');
   const [findHits, setFindHits] = useState<SearchHit[]>([]);
@@ -489,6 +504,28 @@ export function ProjectWorkspace() {
       setRightTab('code');
     }
   }, []);
+
+  /** Pace large imports — only touch React state once at the end (tree rebuild is expensive). */
+  const applyProjectFilesPaced = useCallback(async (files: Record<string, string>) => {
+    const count = Object.keys(files).length;
+    if (count <= 40) {
+      applyProjectFiles(files);
+      return;
+    }
+    await applyFilesInBatches(files, (accumulated, done, total) => {
+      if (done < total) {
+        setAttachProgressLabel(`Loading files ${done}/${total}`);
+        return;
+      }
+      applyProjectFiles(accumulated);
+    }, {
+      onProgress: (p) => {
+        if (p.phase === 'apply') {
+          setAttachProgressLabel(p.label || `Loading ${p.done}/${p.total}`);
+        }
+      },
+    });
+  }, [applyProjectFiles]);
 
   const refreshGit = useCallback(async (id?: string) => {
     const pid = id || projectId;
@@ -645,6 +682,7 @@ export function ProjectWorkspace() {
         files: packDiskFiles(applied.files, messagesRef.current),
       }).then(res => {
         if (res.root) setDiskRoot(res.root);
+        setWorkspaceInPlace(Boolean(res.meta && (res.meta as { inPlace?: boolean }).inPlace));
         if (res.sandboxBlocked?.length) {
           const note = `Sandbox blocked ${res.sandboxBlocked.length} path(s): ${res.sandboxBlocked.slice(0, 3).join(', ')}`;
           setSandboxNote(note);
@@ -728,6 +766,7 @@ export function ProjectWorkspace() {
   useEffect(() => {
     if (!projectId) return;
     setTokenRatio(getTokenUsageRatio(projectId));
+    setModelRatio(getModelHealthRatio(projectId));
   }, [projectId]);
 
   useEffect(() => {
@@ -934,6 +973,7 @@ export function ProjectWorkspace() {
         const res = await window.arkDesktop!.projectRead!(projectId);
         if (cancelled) return;
         if (res.root) setDiskRoot(res.root);
+        setWorkspaceInPlace(Boolean(res.meta && (res.meta as { inPlace?: boolean }).inPlace));
         const mapped: Record<string, string> = {};
         let diskChat: ChatMessage[] = [];
         if (res.ok && res.files) {
@@ -1019,6 +1059,7 @@ export function ProjectWorkspace() {
         files: payloadFiles,
       }).then(res => {
         if (res.root) setDiskRoot(res.root);
+        setWorkspaceInPlace(Boolean(res.meta && (res.meta as { inPlace?: boolean }).inPlace));
       });
     }, 800);
     return () => window.clearTimeout(t);
@@ -1077,7 +1118,7 @@ export function ProjectWorkspace() {
     return () => window.clearInterval(t);
   }, [projectId, refreshGit]);
 
-  const openProjectFolder = async (sourceDir?: string) => {
+  const openProjectFolder = async (sourceDir?: string, mode: 'in-place' | 'import' = 'in-place') => {
     const uid = user?.id ?? 'guest';
     let active = project;
     let pid = project?.id || projectId;
@@ -1089,17 +1130,30 @@ export function ProjectWorkspace() {
       setProject(active);
       navigate({ name: 'project', id: created.id });
     }
-    const applyImported = (files: Record<string, string>, name?: string, skipped?: { env?: number; large?: number; binary?: number; limit?: number }) => {
-      applyProjectFiles(files);
+    const applyOpened = async (
+      files: Record<string, string>,
+      opts: {
+        name?: string;
+        root?: string;
+        inPlace?: boolean;
+        skipped?: { env?: number; large?: number; binary?: number; limit?: number };
+      },
+    ) => {
+      await applyProjectFilesPaced(files);
       const count = Object.keys(files).length;
-      if (name) touchRecentProject(pid, name);
+      if (opts.name) touchRecentProject(pid, opts.name);
+      if (opts.root) {
+        setDiskRoot(opts.root);
+        setWorkspaceInPlace(Boolean(opts.inPlace));
+      }
       const skipBits: string[] = [];
+      const skipped = opts.skipped;
       if (skipped?.env) skipBits.push(`${skipped.env} secret .env file${skipped.env === 1 ? '' : 's'}`);
       if (skipped?.large) skipBits.push(`${skipped.large} large file${skipped.large === 1 ? '' : 's'}`);
       if (skipped?.binary) skipBits.push(`${skipped.binary} binary file${skipped.binary === 1 ? '' : 's'}`);
       if (skipped?.limit) skipBits.push('import limit reached');
       const skipNote = skipBits.length ? ` Skipped: ${skipBits.join(', ')}.` : '';
-      const folderLabel = name || 'folder';
+      const folderLabel = opts.name || 'folder';
       const firstPath = Object.keys(files)[0];
       if (firstPath) {
         setSelectedFile(firstPath);
@@ -1110,39 +1164,154 @@ export function ProjectWorkspace() {
         postAssistantNote(`That folder opened, but I could not read any text files from it.${skipNote}`);
         return;
       }
+      resetTokenUsage(pid);
+      setTokenRatio(0);
+      setModelRatio(getModelHealthRatio(pid));
+      const pathLine = opts.inPlace && opts.root
+        ? `Opened **${folderLabel}** at \`${opts.root}\` (${count} source files). Editing on disk.${skipNote}`
+        : `Imported **${folderLabel}** (${count} files) into ARK.${skipNote}`;
       postAttachInChat(
         encodeChatAttach({ kind: 'folder', name: folderLabel, count, projectId: pid }),
         [
-          `Got **${folderLabel}** — files are in Explorer on the left.${skipNote}`,
+          pathLine,
           '',
-          'What should I do? Debug, explain what this app is, find problems — or type your own ask.',
+          'What should I do? Debug, explain what this app is, find problems — or describe a change.',
         ].join('\n'),
         true,
       );
       ignoreEnterUntilRef.current = Date.now() + 600;
     };
-    if (!window.arkDesktop?.projectImportFolder) {
+    const openApi = mode === 'import'
+      ? window.arkDesktop?.projectImportFolder
+      : window.arkDesktop?.workspaceOpenRoot;
+    if (!openApi) {
       codeFolderInputRef.current?.click();
       return;
     }
-    const res = await window.arkDesktop.projectImportFolder({
-      projectId: pid,
-      projectName: active?.name,
-      ...(sourceDir ? { sourceDir } : {}),
-    });
-    if (!res?.ok || res.canceled) {
-      if (!res?.canceled && !sourceDir) codeFolderInputRef.current?.click();
+    setAttachBusy(true);
+    setAttachProgressLabel(mode === 'import' ? 'Importing folder…' : 'Opening folder…');
+    const onProg = (ev: Event) => {
+      const d = (ev as CustomEvent).detail as { label?: string; done?: number; total?: number } | undefined;
+      if (d?.label) setAttachProgressLabel(d.label);
+      else if (d?.total) setAttachProgressLabel(`Reading ${d.done || 0}/${d.total}`);
+    };
+    window.addEventListener('ark:project-import-progress', onProg);
+    try {
+      const res = await openApi({
+        projectId: pid,
+        projectName: active?.name || project?.name,
+        ...(sourceDir ? { sourceDir } : {}),
+      });
+      if (!res?.ok || res.canceled) {
+        if (!res?.canceled && !sourceDir) codeFolderInputRef.current?.click();
+        return;
+      }
+      if (res.root) setDiskRoot(res.root);
+      setWorkspaceInPlace(Boolean((res as { inPlace?: boolean }).inPlace));
+      setAttachProgressLabel('Loading into Explorer…');
+      if (res.files && Object.keys(res.files).length) {
+        await applyOpened(res.files, {
+          name: res.name,
+          root: res.root,
+          inPlace: (res as { inPlace?: boolean }).inPlace,
+          skipped: res.skipped as { env?: number; large?: number; binary?: number; limit?: number } | undefined,
+        });
+      } else {
+        const read = await window.arkDesktop.projectRead?.(pid);
+        if (read?.files && Object.keys(read.files).length) {
+          await applyOpened(read.files, {
+            name: res.name,
+            root: read.root,
+            inPlace: Boolean(read.meta && (read.meta as { inPlace?: boolean }).inPlace),
+            skipped: res.skipped as { env?: number; large?: number; binary?: number; limit?: number } | undefined,
+          });
+        } else if (!sourceDir) {
+          codeFolderInputRef.current?.click();
+        }
+        if (read?.root) {
+          setDiskRoot(read.root);
+          setWorkspaceInPlace(Boolean(read.meta && (read.meta as { inPlace?: boolean }).inPlace));
+        }
+      }
+      void refreshGit(pid);
+    } finally {
+      window.removeEventListener('ark:project-import-progress', onProg);
+      setAttachBusy(false);
+      setAttachProgressLabel('');
+    }
+  };
+
+  const openWorkspaceInPlace = (sourceDir?: string) => openProjectFolder(sourceDir, 'in-place');
+  const importProjectFolderCopy = (sourceDir?: string) => openProjectFolder(sourceDir, 'import');
+
+  const enterPathAndOpen = async () => {
+    const typed = window.prompt('Folder path on this PC (e.g. D:\\Projects\\MyApp):');
+    if (!typed?.trim()) return;
+    const stat = await window.arkDesktop?.workspaceStatPath?.(typed.trim());
+    if (!stat?.ok || !stat.isDirectory) {
+      window.alert(stat?.error || 'That path is not a folder.');
       return;
     }
-    if (res.root) setDiskRoot(res.root);
-    if (res.files && Object.keys(res.files).length) applyImported(res.files, res.name, res.skipped as { env?: number; large?: number; binary?: number; limit?: number } | undefined);
-    else {
-      const read = await window.arkDesktop.projectRead?.(pid);
-      if (read?.files && Object.keys(read.files).length) applyImported(read.files, res.name, res.skipped as { env?: number; large?: number; binary?: number; limit?: number } | undefined);
-      else if (!sourceDir) codeFolderInputRef.current?.click();
-      if (read?.root) setDiskRoot(read.root);
+    const ok = window.confirm(
+      `Allow ARK to read and edit files under this folder?\n\n${stat.path || typed.trim()}`,
+    );
+    if (!ok) return;
+    await openWorkspaceInPlace(stat.path || typed.trim());
+  };
+
+  const cloneFromUrl = async () => {
+    const url = window.prompt('Git clone URL (https://github.com/user/repo.git):');
+    if (!url?.trim()) return;
+    const uid = user?.id ?? 'guest';
+    let pid = project?.id || projectId;
+    if (!pid) {
+      const created = addRecent('Code');
+      pid = created.id;
+      skipHydrateRef.current = true;
+      setProject(emptyWorkspaceProject(uid, created.id, created.name));
+      navigate({ name: 'project', id: created.id });
     }
-    void refreshGit(pid);
+    const token = getPluginRuntime('github', loadPluginState()).token?.trim();
+    setAttachBusy(true);
+    setAttachProgressLabel('Cloning repository…');
+    const onProg = (ev: Event) => {
+      const d = (ev as CustomEvent).detail as { label?: string } | undefined;
+      if (d?.label) setAttachProgressLabel(d.label);
+    };
+    window.addEventListener('ark:project-import-progress', onProg);
+    try {
+      const res = await window.arkDesktop?.gitCloneOpen?.({
+        projectId: pid,
+        projectName: project?.name,
+        url: url.trim(),
+        token,
+      });
+      if (!res?.ok || res.canceled) {
+        if (res?.error) {
+          postAssistantNote(res.error);
+        }
+        return;
+      }
+      if (res.root) setDiskRoot(res.root);
+      setWorkspaceInPlace(true);
+      if (res.files && Object.keys(res.files).length) {
+        await applyProjectFilesPaced(res.files);
+        resetTokenUsage(pid);
+        setTokenRatio(0);
+        postAttachInChat(
+          encodeChatAttach({ kind: 'folder', name: res.name || 'repo', count: Object.keys(res.files).length, projectId: pid }),
+          [
+            `Cloned and opened at \`${res.root}\`. What should we do first?`,
+          ].join('\n'),
+          true,
+        );
+      }
+      void refreshGit(pid);
+    } finally {
+      window.removeEventListener('ark:project-import-progress', onProg);
+      setAttachBusy(false);
+      setAttachProgressLabel('');
+    }
   };
 
   const [dragOverCode, setDragOverCode] = useState(false);
@@ -1244,7 +1413,7 @@ export function ProjectWorkspace() {
   };
 
   const pickCodeFolder = () => {
-    void openProjectFolder();
+    void openWorkspaceInPlace();
   };
 
   const attachCodeImagesFromPaths = async (paths: string[]) => {
@@ -1351,8 +1520,41 @@ export function ProjectWorkspace() {
     }
   };
 
+  const headerGitStatus = async () => {
+    if (!projectId || gitBusy) return;
+    setGitBusy(true);
+    try {
+      const st = await gitStatus(projectId);
+      postAssistantNote(formatGitReview(st));
+    } finally {
+      setGitBusy(false);
+    }
+  };
+
+  const headerPull = async () => {
+    if (!projectId || gitBusy || !canEdit) return;
+    const token = getPluginRuntime('github', loadPluginState()).token?.trim();
+    setGitBusy(true);
+    try {
+      const pulled = await gitPull(projectId, token);
+      if (!pulled.ok) {
+        postAssistantNote(pulled.error || 'Pull failed.');
+        return;
+      }
+      const read = await window.arkDesktop?.projectRead?.(projectId);
+      if (read?.files) applyProjectFiles(read.files);
+      postAssistantNote(pulled.message || 'Pulled latest from origin.');
+      await refreshGit(projectId);
+    } finally {
+      setGitBusy(false);
+    }
+  };
+
   const headerPush = async () => {
     if (!projectId || gitBusy || !canEdit) return;
+    if (!window.confirm('Push committed changes to GitHub? This sends your local commits to the remote repository.')) {
+      return;
+    }
     setGitBusy(true);
     try {
       await safeProjectWrite({
@@ -1425,6 +1627,115 @@ export function ProjectWorkspace() {
           return next;
         });
       }
+      await refreshGit(projectId);
+    } finally {
+      setGitBusy(false);
+    }
+  };
+
+  const headerCommit = async () => {
+    if (!projectId || gitBusy || !canEdit) return;
+    const msg = window.prompt('Commit message:', 'Update from ARK')?.trim();
+    if (!msg) return;
+    setGitBusy(true);
+    try {
+      await safeProjectWrite({
+        projectId,
+        projectName: project?.name,
+        files: packDiskFiles(fileContentsRef.current, messagesRef.current),
+      });
+      const committed = await gitCommit(projectId, msg);
+      if (!committed.ok) {
+        postAssistantNote(committed.error || 'Commit failed.');
+        return;
+      }
+      postAssistantNote(committed.message || formatGitReview(committed));
+      await refreshGit(projectId);
+    } finally {
+      setGitBusy(false);
+    }
+  };
+
+  const headerCreateRepo = async () => {
+    if (!projectId || gitBusy || !canEdit) return;
+    const token = githubToken();
+    if (!token) {
+      setGithubPickerOpen(true);
+      postAssistantNote('Connect GitHub in Plugins first — then create a repo.');
+      return;
+    }
+    const blocked = needGithubWrite();
+    if (blocked) {
+      postAssistantNote(blocked);
+      return;
+    }
+    if (gitInfo?.remote && !window.confirm('This folder already has a GitHub remote. Create a new repo anyway?')) {
+      return;
+    }
+    const defaultName = repoNameFromProject(project?.name || 'ark-project');
+    const name = window.prompt('Repository name on GitHub:', defaultName)?.trim();
+    if (!name) return;
+    const isPrivate = window.confirm('Create as private repo? (Cancel = public)');
+    if (!window.confirm(`Create GitHub repo "${name}" and push this folder?`)) return;
+
+    setGitBusy(true);
+    try {
+      await safeProjectWrite({
+        projectId,
+        projectName: project?.name,
+        files: packDiskFiles(fileContentsRef.current, messagesRef.current),
+      });
+      const result = await workflowCreateGitHubRepo({
+        projectId,
+        projectName: project?.name || 'Code project',
+        token,
+        repoName: name,
+        isPrivate,
+      });
+      postAssistantNote(result.reply);
+      await refreshGit(projectId);
+    } finally {
+      setGitBusy(false);
+    }
+  };
+
+  const headerCreatePR = async () => {
+    if (!projectId || gitBusy || !canEdit) return;
+    const token = githubToken();
+    if (!token) {
+      setGithubPickerOpen(true);
+      postAssistantNote('Connect GitHub in Plugins first — then open a pull request.');
+      return;
+    }
+    const blocked = needGithubWrite();
+    if (blocked) {
+      postAssistantNote(blocked);
+      return;
+    }
+    const st = await gitStatus(projectId);
+    const head = st.branch && st.branch !== 'HEAD' ? st.branch : '';
+    if (!head || head === 'main' || head === 'master') {
+      postAssistantNote(`You're on ${head || 'HEAD'}. Create or switch to a feature branch first.`);
+      return;
+    }
+    const title = window.prompt('Pull request title:', st.log?.[0]?.replace(/^[a-f0-9]+\s+/i, '') || 'Changes from ARK')?.trim();
+    if (!title) return;
+    if (!window.confirm(`Push branch "${head}" and open a pull request on GitHub?`)) return;
+
+    setGitBusy(true);
+    try {
+      await safeProjectWrite({
+        projectId,
+        projectName: project?.name,
+        files: packDiskFiles(fileContentsRef.current, messagesRef.current),
+      });
+      const result = await workflowOpenPullRequest({
+        projectId,
+        token,
+        title,
+        pushFirst: true,
+      });
+      postAssistantNote(result.reply);
       await refreshGit(projectId);
     } finally {
       setGitBusy(false);
@@ -1590,6 +1901,7 @@ export function ProjectWorkspace() {
           files: packDiskFiles(fileContentsRef.current, msgs),
         }).then(res => {
           if (res.root) setDiskRoot(res.root);
+        setWorkspaceInPlace(Boolean(res.meta && (res.meta as { inPlace?: boolean }).inPlace));
         });
     };
 
@@ -1622,6 +1934,7 @@ export function ProjectWorkspace() {
       return buildDoneSummary(buildLabel, opts);
     };
     setTokenRatio(getTokenUsageRatio(pid));
+    setModelRatio(getModelHealthRatio(pid));
     const revisingId = reviseUserMsgId;
     setReviseUserMsgId(null);
     setEditingUserId(null);
@@ -1864,6 +2177,7 @@ export function ProjectWorkspace() {
           files: packDiskFiles(cleaned, messagesRef.current),
         }).then(res => {
           if (res.root) setDiskRoot(res.root);
+        setWorkspaceInPlace(Boolean(res.meta && (res.meta as { inPlace?: boolean }).inPlace));
           if (!res.ok && res.error) {
             setSandboxNote(res.error);
             window.setTimeout(() => setSandboxNote(null), 5000);
@@ -1924,8 +2238,13 @@ export function ProjectWorkspace() {
       let waitOpen = true;
       let abortReject: ((err: Error) => void) | null = null;
       const buildStartedAt = Date.now();
-      const withTiming = (body: string) =>
-        `${body.trim()}\n\nWorked for ${formatElapsed(Date.now() - buildStartedAt)}`;
+      const withTiming = (body: string) => {
+        setModelRatio(recordModelTurn(pid, {
+          tokens: estimateTokens(body),
+          activeMs: Date.now() - buildStartedAt,
+        }));
+        return `${body.trim()}\n\nWorked for ${formatElapsed(Date.now() - buildStartedAt)}`;
+      };
       const snapshotChanged = () => {
         changedPaths = Object.entries(fileContentsRef.current)
           .filter(([, v]) => String(v || '').trim().length > 24)
@@ -2062,7 +2381,9 @@ export function ProjectWorkspace() {
           const keepContinuity = true;
           // Inspect: fresh history only (Chat parity) — packing prior dumps hung GGUF.
           const turnSize = classifyCodeTurnSize(rawContent, fileContentsRef.current);
-          const historyMaxTurns = turnSize === 'micro' ? 4 : turnSize === 'small' ? 6 : 8;
+          const historyMaxTurns = inspectOnly
+            ? 4
+            : turnSize === 'micro' ? 3 : turnSize === 'small' ? 4 : 6;
           const historyBase = inspectOnly
             ? buildRouterHistory([], content)
             : prefs.rememberContext
@@ -2072,8 +2393,18 @@ export function ProjectWorkspace() {
                 maxTurns: historyMaxTurns,
               })
               : buildRouterHistory([], content);
-          const findings = scanProjectFindings(fileContentsRef.current, rawContent);
-          const inspectPaths = pickFilesForInspect(fileContentsRef.current, rawContent);
+          await yieldFrame();
+          const findings = inspectOnly
+            ? scanProjectFindings(fileContentsRef.current, rawContent)
+            : [];
+          const inspectPaths = inspectOnly
+            ? pickFilesForInspect(fileContentsRef.current, rawContent)
+            : rankFilesForTurnPack(
+              flattenProjectFiles(fileContentsRef.current),
+              rawContent,
+              turnSize,
+            );
+          await yieldFrame();
           const mentioned = pathsMentionedInText(
             `${rawContent}\n${messages.slice(-4).map(m => m.content).join('\n')}`,
             fileContentsRef.current,
@@ -2107,11 +2438,6 @@ export function ProjectWorkspace() {
             : patchOnlyNamed
               ? buildNamedPatchPrompt(rawContent, fileContentsRef.current, allowedPatchPaths, buildLabel)
               : buildProjectCodingPrompt(content, fileContentsRef.current, buildLabel);
-          // Budget ring = this packed prompt + short history, not unbounded accumulation.
-          setTokenRatio(syncTokenUsage(
-            pid,
-            estimateTokens(codingMessage) + historyBase.reduce((n, t) => n + estimateTokens(t.content), 0),
-          ));
           const history = historyBase.map((turn, i) =>
             i === historyBase.length - 1 && turn.role === 'user'
               ? { ...turn, content: codingMessage }
@@ -2129,13 +2455,12 @@ export function ProjectWorkspace() {
             threadBrainRef.current = rotation.brain;
             setThreadBrain(rotation.brain);
           }
+          if (rotation.swapped) setModelRatio(0);
+          else setModelRatio(getModelHealthRatio(pid));
           const routeHistory = rotation.history;
-          // Prefer packed prompt size over rotation guess so micro edits don’t spike the ring.
-          setTokenRatio(syncTokenUsage(
-            pid,
-            estimateTokens(codingMessage)
-              + routeHistory.reduce((n, t) => n + estimateTokens(t.content), 0),
-          ));
+          // Inner ring = this turn’s routed history only (codingMessage is already in the last user turn).
+          const turnPackTokens = routeHistory.reduce((n, t) => n + estimateTokens(t.content), 0);
+          setTokenRatio(syncTokenUsage(pid, turnPackTokens));
 
           const paintFiles = (edits: ReturnType<typeof parseFileEdits>, focusLast = true) => {
             if (!canEdit) return;
@@ -2173,6 +2498,18 @@ export function ProjectWorkspace() {
               setBuildLive(prev => prev?.assistantId === assistantId ? { ...prev, focusFile: focus } : prev);
             }
             bumpStep('generate');
+          };
+          let paintQueued: ReturnType<typeof parseFileEdits> | null = null;
+          let paintRaf = 0;
+          const queuePaint = (edits: ReturnType<typeof parseFileEdits>) => {
+            paintQueued = edits;
+            if (paintRaf) return;
+            paintRaf = window.requestAnimationFrame(() => {
+              paintRaf = 0;
+              const batch = paintQueued;
+              paintQueued = null;
+              if (batch?.length) paintFiles(batch);
+            });
           };
           if (typeTimerRef.current) window.clearInterval(typeTimerRef.current);
 
@@ -2245,7 +2582,7 @@ export function ProjectWorkspace() {
                     window.clearInterval(typeTimerRef.current);
                     typeTimerRef.current = undefined;
                   }
-                  paintFiles(patchOnlyNamed ? filterEditsToPaths(streamedFiles, allowedPatchPaths) : streamedFiles);
+                  queuePaint(patchOnlyNamed ? filterEditsToPaths(streamedFiles, allowedPatchPaths) : streamedFiles);
                   return;
                 }
                 const partial = extractStreamingHtml(streamDraftRef.current);
@@ -2254,7 +2591,7 @@ export function ProjectWorkspace() {
                     window.clearInterval(typeTimerRef.current);
                     typeTimerRef.current = undefined;
                   }
-                  paintFiles(editsFromWorkingHtml(partial, plannedFiles));
+                  queuePaint(editsFromWorkingHtml(partial, plannedFiles));
                 }
               },
             }),
@@ -2896,6 +3233,12 @@ export function ProjectWorkspace() {
       );
     });
 
+  const explorerTree = useMemo(
+    () => (fileTree.length > 0 ? fileTree : buildFileTreeFromPaths(fileContents)),
+    [fileTree, fileContents],
+  );
+  const livePageHtml = useMemo(() => composePreviewHtml(fileContents).trim(), [fileContents]);
+
   if (!project) {
     return (
       <div className="flex items-center justify-center h-full text-content-tertiary">
@@ -2904,12 +3247,10 @@ export function ProjectWorkspace() {
     );
   }
 
-  const explorerTree = fileTree.length > 0 ? fileTree : buildFileTreeFromPaths(fileContents);
   const fileKey = selectedFile ? (selectedFile.split('/').pop() ?? selectedFile) : '';
   const codeBody = selectedFile
     ? (fileContents[selectedFile] ?? fileContents[fileKey] ?? '')
     : '';
-  const livePageHtml = composePreviewHtml(fileContents).trim();
   const showBrowserChrome = Boolean(
     (livePreviewUrl && !livePreviewUrl.includes('127.0.0.1:0')) || previewReady,
   ) && !isNativeMobileTree(fileContents);
@@ -2952,13 +3293,45 @@ export function ProjectWorkspace() {
             </span>
           )}
           {diskRoot ? (
-            <span className="text-[10px] text-content-tertiary truncate max-w-[220px]" title={diskRoot}>
-              {diskRoot}
+            <span
+              className={`text-[10px] truncate max-w-[min(420px,42vw)] ${workspaceInPlace ? 'text-sky-300/90' : 'text-content-tertiary'}`}
+              title={diskRoot}
+            >
+              {workspaceInPlace ? 'Editing on disk: ' : 'Project: '}{diskRoot}
             </span>
           ) : null}
         </div>
 
         <div className="flex items-center gap-1.5 shrink-0">
+          {projectId ? (
+            <div className="relative hidden sm:block">
+              <button
+                type="button"
+                onClick={() => setGithubMenuOpen(v => !v)}
+                className="h-8 px-2 rounded-lg flex items-center gap-1 text-[11px] text-content-secondary hover:text-content-primary hover:bg-surface-hover"
+              >
+                <GitBranch className="w-3.5 h-3.5" />
+                GitHub
+                <ChevronDown className="w-3 h-3 opacity-60" />
+              </button>
+              {githubMenuOpen && (
+                <>
+                  <button type="button" className="fixed inset-0 z-40 cursor-default" aria-label="Close menu" onClick={() => setGithubMenuOpen(false)} />
+                  <div className="absolute right-0 top-full mt-1 z-50 w-52 rounded-lg border border-surface-border bg-ark-navy-900 shadow-xl py-1">
+                    <button type="button" className="w-full text-left px-3 py-1.5 text-[11px] hover:bg-surface-hover" onClick={() => { setGithubMenuOpen(false); void cloneFromUrl(); }}>Clone from URL…</button>
+                    <button type="button" className="w-full text-left px-3 py-1.5 text-[11px] hover:bg-surface-hover" onClick={() => { setGithubMenuOpen(false); setGithubPickerOpen(true); }}>My repositories…</button>
+                    <button type="button" className="w-full text-left px-3 py-1.5 text-[11px] hover:bg-surface-hover" onClick={() => { setGithubMenuOpen(false); void headerGitStatus(); }}>Git status</button>
+                    <button type="button" className="w-full text-left px-3 py-1.5 text-[11px] hover:bg-surface-hover disabled:opacity-40" disabled={gitBusy || !canEdit} onClick={() => { setGithubMenuOpen(false); void headerCommit(); }}>Commit changes…</button>
+                    <button type="button" className="w-full text-left px-3 py-1.5 text-[11px] hover:bg-surface-hover disabled:opacity-40" disabled={gitBusy || !canEdit} onClick={() => { setGithubMenuOpen(false); void headerPull(); }}>Pull latest</button>
+                    <button type="button" className="w-full text-left px-3 py-1.5 text-[11px] hover:bg-surface-hover disabled:opacity-40" disabled={gitBusy || !canEdit} onClick={() => { setGithubMenuOpen(false); void headerPush(); }}>Push to GitHub…</button>
+                    <div className="my-1 border-t border-surface-border/70" />
+                    <button type="button" className="w-full text-left px-3 py-1.5 text-[11px] hover:bg-surface-hover disabled:opacity-40" disabled={gitBusy || !canEdit} onClick={() => { setGithubMenuOpen(false); void headerCreateRepo(); }}>Create repository…</button>
+                    <button type="button" className="w-full text-left px-3 py-1.5 text-[11px] hover:bg-surface-hover disabled:opacity-40" disabled={gitBusy || !canEdit} onClick={() => { setGithubMenuOpen(false); void headerCreatePR(); }}>Open pull request…</button>
+                  </div>
+                </>
+              )}
+            </div>
+          ) : null}
           {gitInfo?.git ? (
             <div className="hidden md:flex items-center gap-1 pl-1 ml-0.5 border-l border-surface-border/70">
               <span className="flex items-center gap-1 text-[11px] text-content-tertiary px-1" title={gitInfo.remote || 'Local git'}>
@@ -2979,14 +3352,6 @@ export function ProjectWorkspace() {
                 Push
             </button>
         </div>
-          ) : projectId ? (
-            <button
-              type="button"
-              onClick={() => setGithubPickerOpen(true)}
-              className="hidden sm:inline text-[10px] text-content-tertiary pl-1 hover:text-content-secondary"
-            >
-              Connect GitHub
-            </button>
           ) : null}
           <button
             type="button"
@@ -3514,6 +3879,11 @@ export function ProjectWorkspace() {
 
           {/* Composer: grows with text + image attach */}
           <div className="shrink-0 p-3 space-y-2 overflow-visible">
+            {attachBusy && (
+              <p className="text-[11px] text-sky-300/90 px-1 tabular-nums">
+                {attachProgressLabel || 'Uploading…'}
+              </p>
+            )}
             {sandboxNote && (
               <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-200/90 flex items-start justify-between gap-2">
                 <p>{sandboxNote}</p>
@@ -3718,6 +4088,7 @@ export function ProjectWorkspace() {
               {!composerTall && (
                 <ComposerPlusMenu
                   scope="code"
+                  busy={attachBusy}
                   buttonClassName="w-8 h-8 rounded-full flex items-center justify-center text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors shrink-0"
                   onAction={(action: ComposerPlusAction) => {
                     if (action === 'image') {
@@ -3730,6 +4101,14 @@ export function ProjectWorkspace() {
                     }
                     if (action === 'folder') {
                       pickCodeFolder();
+                      return;
+                    }
+                    if (action === 'import-folder') {
+                      void importProjectFolderCopy();
+                      return;
+                    }
+                    if (action === 'enter-path') {
+                      void enterPathAndOpen();
                       return;
                     }
                     setComposerMode(action);
@@ -3769,6 +4148,7 @@ export function ProjectWorkspace() {
                 {composerTall && (
                   <ComposerPlusMenu
                     scope="code"
+                    busy={attachBusy}
                     buttonClassName="w-8 h-8 rounded-full flex items-center justify-center text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors shrink-0"
                     onAction={(action: ComposerPlusAction) => {
                       if (action === 'image') {
@@ -3781,6 +4161,14 @@ export function ProjectWorkspace() {
                       }
                       if (action === 'folder') {
                         pickCodeFolder();
+                        return;
+                      }
+                      if (action === 'import-folder') {
+                        void importProjectFolderCopy();
+                        return;
+                      }
+                      if (action === 'enter-path') {
+                        void enterPathAndOpen();
                         return;
                       }
                       setComposerMode(action);
@@ -3884,8 +4272,9 @@ export function ProjectWorkspace() {
               </div>
             </div>
             <TokenUsageRing
-              ratio={tokenRatio}
-              size={16}
+              contextRatio={tokenRatio}
+              modelRatio={modelRatio}
+              size={20}
               className={`text-content-primary shrink-0 ${composerTall ? 'mb-2' : 'self-center'}`}
               modelName={activeModel.source === 'auto' ? autoPillLabel(threadBrain) : activeModel.name}
               modelDetail={

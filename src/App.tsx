@@ -22,7 +22,7 @@ import { NotificationsView } from '@/views/NotificationsView';
 import { SocialProvider } from '@/context/SocialContext';
 import { ParkedNotice } from '@/components/ParkedNotice';
 import { PinLockGate } from '@/components/PinLockGate';
-import { isSocialParked } from '@/lib/featurePark';
+import { isSocialParked, isCodeTabEnabled } from '@/lib/featurePark';
 import { runCleanBootIfNeeded } from '@/lib/clearSession';
 import { getLocalPrefs } from '@/lib/localPrefs';
 import { startModelHuntCycle } from '@/lib/arkHuntBootstrap';
@@ -40,7 +40,9 @@ function AppRoutes() {
     case 'dashboard': return <Dashboard />;
     case 'projects': return <ProjectsView />;
     case 'code':
-    case 'project': return <ProjectWorkspace />;
+      return isCodeTabEnabled() ? <ProjectWorkspace /> : <ParkedNotice feature="code" />;
+    case 'project':
+      return isCodeTabEnabled() ? <ProjectWorkspace /> : <ParkedNotice feature="project" />;
     case 'creation': return <CreationViewer />;
     case 'chat': return <AIChat key={route.mode ?? 'general'} />;
     case 'models': return <ModelsView />;
@@ -64,6 +66,7 @@ function AppContent() {
       const p = getLocalPrefs();
       document.documentElement.style.fontSize = `${p.fontSizePx || 15}px`;
       document.documentElement.dataset.density = p.density;
+      void import('@/lib/workspaceGrants').then(m => m.syncWorkspaceGrantsFromPrefs());
     };
     applyPrefs();
     window.addEventListener('ark:prefs-changed', applyPrefs);
@@ -130,6 +133,7 @@ function OpenLastProjectOnLaunch() {
   const did = useRef(false);
   useEffect(() => {
     if (did.current) return;
+    if (!isCodeTabEnabled()) return;
     if (!getLocalPrefs().openLastProjectOnLaunch) return;
     const last = recent[0];
     if (!last?.id) return;

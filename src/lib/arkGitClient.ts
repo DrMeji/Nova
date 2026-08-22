@@ -82,6 +82,11 @@ export async function gitPush(projectId: string, token?: string): Promise<GitSta
   return res || { ok: false, error: 'Git push needs the ARK desktop app.' };
 }
 
+export async function gitPull(projectId: string, token?: string): Promise<GitStatus> {
+  const res = await window.arkDesktop?.gitPull?.({ projectId, token });
+  return res || { ok: false, error: 'Git pull needs the ARK desktop app.' };
+}
+
 export async function gitDiff(projectId: string): Promise<GitStatus> {
   const res = await window.arkDesktop?.gitDiff?.(projectId);
   return res || { ok: false, error: 'Git diff needs the ARK desktop app.' };

@@ -11,6 +11,7 @@ import {
   type InspectFinding,
 } from '@/lib/projectInspect';
 import { looksLikeCodeAsk } from '@/lib/chatIntent';
+import { looksLikeFolderCatalogAsk } from '@/lib/folderCatalog';
 import { listGitHubRepos, type GitHubRepo } from '@/lib/github';
 import { parseGithubRepoRef } from '@/lib/arkGitClient';
 
@@ -36,6 +37,7 @@ export function looksLikeExpandAsk(message: string): boolean {
 }
 
 export type StudioAskKind =
+  | 'catalog'
   | 'overview'
   | 'file-detail'
   | 'problems'
@@ -102,6 +104,8 @@ export function classifyStudioAsk(message: string, hasFiles = false): StudioAskK
   const ask = cleanStudioAsk(message);
   if (!ask) return null;
   if (SMALLTALK_RE.test(ask) && ask.length < 24) return null;
+
+  if (looksLikeFolderCatalogAsk(ask)) return 'catalog';
 
   if (STUDIO_WIDER_RE.test(ask)) return 'wider';
 
@@ -204,7 +208,9 @@ export function shouldInspectInChat(
 ): boolean {
   const t = String(message || '');
   if (t.includes('<!--ark-attach:') || t.includes('<!--ark-auto-read-->')) return true;
-  if (classifyStudioAsk(t, hasFiles) != null) return true;
+  const kind = classifyStudioAsk(t, hasFiles);
+  if (kind === 'catalog') return false;
+  if (kind != null) return true;
   if (!hasFiles) return false;
   const ask = cleanStudioAsk(t).replace(/!\[[^\]]*\]\([^)]+\)/g, '').trim();
   if (!ask || (SMALLTALK_RE.test(ask) && ask.length < 24)) return false;

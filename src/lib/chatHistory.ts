@@ -4,6 +4,10 @@
  * so failover continues mid-task instead of greeting like a new chat.
  */
 
+import { isTraceMessage, parseTraceMessage, stripAgentTrace } from '@/lib/agentTrace';
+import { isCatalogMessage, parseCatalogMessage, catalogToPlainText } from '@/lib/folderCatalog';
+import { isPcExploreMessage, parsePcExploreMessage, pcExploreToPlainText } from '@/lib/pcExplore';
+
 export type RouterChatTurn = {
   role: 'user' | 'assistant';
   content: string;
@@ -130,13 +134,31 @@ export function slimTurnContent(content: string, maxChars = MAX_TURN_CHARS): str
   const raw = (content || '').trim();
   if (!raw) return '';
   if (raw.startsWith('__generating__:')) return '';
-  if (raw.includes('ark-media:')) {
-    const text = raw.replace(/!\[[^\]]*]\(ark-media:[^)]+\)/g, '').trim();
-    const note = '[Attached image]';
-    return text ? `${text}\n\n${note}` : note;
+  if (isCatalogMessage(raw)) {
+    const data = parseCatalogMessage(raw);
+    return data ? catalogToPlainText(data) : '';
   }
+  if (isPcExploreMessage(raw)) {
+    const data = parsePcExploreMessage(raw);
+    return data ? pcExploreToPlainText(data) : '';
+  }
+
+  if (raw.includes('ark-media:')) {
+    const stripped = stripAgentTrace(raw.replace(/!\[[^\]]*]\(ark-media:[^)]+\)/g, '').trim());
+    const note = '[Attached image]';
+    return stripped ? `${stripped}\n\n${note}` : note;
+  }
+
+  let text = stripAgentTrace(raw);
+  if (!text && isTraceMessage(raw)) {
+    const { payload } = parseTraceMessage(raw);
+    if (payload?.answer) text = payload.answer;
+    else if (payload) return '[Working…]';
+  }
+  if (!text) return '';
+
   // Drop giant data-URLs / markdown images
-  let text = raw
+  text = text
     .replace(/!\[[^\]]*]\(data:[^)]+\)/g, '[image]')
     .replace(/!\[[^\]]*]\(https?:[^)]+\)/g, '[image]')
     .replace(/data:image\/[a-zA-Z+]+;base64,[A-Za-z0-9+/=]+/g, '[image]');
@@ -381,6 +403,7 @@ export function sanitizeAssistantReply(
 ): string {
   let text = String(raw || '').replace(/\r\n/g, '\n').trim();
   if (!text) return '';
+  text = stripAgentTrace(text);
 
   // Drop full system-prompt echoes from GGUF / packed prompts.
   text = text.replace(SYSTEM_ECHO_RE, '').trim();

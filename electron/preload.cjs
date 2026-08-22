@@ -113,10 +113,29 @@ contextBridge.exposeInMainWorld('arkDesktop', {
   projectRead: (projectId) => ipcRenderer.invoke('ark:project-read', projectId),
   projectPath: (projectId) => ipcRenderer.invoke('ark:project-path', projectId),
   projectImportFolder: (payload) => ipcRenderer.invoke('ark:project-import-folder', payload),
+  workspaceOpenRoot: (payload) => ipcRenderer.invoke('ark:workspace-open-root', payload),
+  workspaceStatPath: (targetPath) => ipcRenderer.invoke('ark:workspace-stat-path', targetPath),
+  workspaceSetGrants: (grants) => ipcRenderer.invoke('ark:workspace-set-grants', grants),
+  workspaceGetGrants: () => ipcRenderer.invoke('ark:workspace-get-grants'),
+  agentRun: (payload) => ipcRenderer.invoke('ark:agent-run', payload),
+  workspaceDeletePath: (payload) => ipcRenderer.invoke('ark:workspace-delete-path', payload),
+  gitCloneOpen: (payload) => ipcRenderer.invoke('ark:git-clone-open', payload),
+  onProjectImportProgress: (handler) => {
+    const fn = (_e, payload) => {
+      try {
+        handler?.(payload);
+      } catch {
+        /* ignore */
+      }
+    };
+    ipcRenderer.on('ark:project-import-progress', fn);
+    return () => ipcRenderer.removeListener('ark:project-import-progress', fn);
+  },
   pickFiles: (payload) => ipcRenderer.invoke('ark:pick-files', payload || {}),
   pickBrowseFolder: () => ipcRenderer.invoke('ark:pick-browse-folder'),
   listDir: (dirPath) => ipcRenderer.invoke('ark:list-dir', dirPath),
   browseRoots: () => ipcRenderer.invoke('ark:browse-roots'),
+  pcInstalledApps: (payload) => ipcRenderer.invoke('ark:pc-installed-apps', payload || {}),
   pathStat: (targetPath) => ipcRenderer.invoke('ark:path-stat', targetPath),
   readTextFile: (payload) => ipcRenderer.invoke('ark:read-text-file', payload),
   readDataUrl: (payload) => ipcRenderer.invoke('ark:read-data-url', payload),
@@ -126,6 +145,7 @@ contextBridge.exposeInMainWorld('arkDesktop', {
   gitClone: (payload) => ipcRenderer.invoke('ark:git-clone', payload),
   gitCommit: (payload) => ipcRenderer.invoke('ark:git-commit', payload),
   gitPush: (payload) => ipcRenderer.invoke('ark:git-push', payload),
+  gitPull: (payload) => ipcRenderer.invoke('ark:git-pull', payload),
   gitDiff: (projectId) => ipcRenderer.invoke('ark:git-diff', projectId),
   gitSetOrigin: (payload) => ipcRenderer.invoke('ark:git-set-origin', payload),
   secretsStatus: () => ipcRenderer.invoke('ark:secrets-status'),
@@ -137,4 +157,7 @@ contextBridge.exposeInMainWorld('arkDesktop', {
 // Forward IPC push messages from main as DOM CustomEvents so the React app can listen.
 ipcRenderer.on('ark:open-settings', (_event, payload) => {
   window.dispatchEvent(new CustomEvent('ark:open-settings', { detail: payload || {} }));
+});
+ipcRenderer.on('ark:project-import-progress', (_event, payload) => {
+  window.dispatchEvent(new CustomEvent('ark:project-import-progress', { detail: payload || {} }));
 });

@@ -26,14 +26,17 @@ import {
 } from '@/lib/providerSpeed';
 import {
   getProviderApiKeys,
+  getLocalPrefs,
   setLocalPrefs,
   setProviderApiKey,
+  type LocalPrefs,
 } from '@/lib/localPrefs';
+import { syncWorkspaceGrantsFromPrefs } from '@/lib/workspaceGrants';
 import { openInSystemBrowser } from '@/lib/openExternal';
 import { AuthAmbientOrbs } from '@/components/auth/AuthAmbientOrbs';
 import {
   Loader2, Cpu, MemoryStick, HardDrive, Zap, CheckCircle2, Download,
-  Monitor, MonitorCog, Check, Gauge, KeyRound, Shield, ExternalLink, Wifi,
+  Monitor, MonitorCog, Check, Gauge, KeyRound, Shield, ExternalLink, Wifi, FolderOpen,
 } from 'lucide-react';
 
 type Phase = 'intro' | 'hardware' | 'speed' | 'models' | 'connect' | 'finishing';
@@ -195,6 +198,12 @@ export function OnboardingScreen() {
     for (const p of CONNECT_PROVIDERS) map[p.id] = Boolean(keys[p.id]);
     return map;
   });
+  const [desktopAccess, setDesktopAccess] = useState(() => getLocalPrefs().allowDesktopFolderAccess);
+  const [documentsAccess, setDocumentsAccess] = useState(() => getLocalPrefs().allowDocumentsFolderAccess);
+  const [fullPcAccess, setFullPcAccess] = useState(() => getLocalPrefs().allowFullPcAccess);
+  const [executionMode, setExecutionMode] = useState<LocalPrefs['agentExecutionMode']>(
+    () => getLocalPrefs().agentExecutionMode || 'allowlist',
+  );
 
   const pcClass = useMemo(() => (hw ? getHardwareClass(hw) : null), [hw]);
   const selected = models.find(m => m.id === selectedId) ?? models.find(m => m.recommended) ?? null;
@@ -266,7 +275,12 @@ export function OnboardingScreen() {
       defaultModelId: 'ark-auto',
       aiMode: 'automatic',
       autoFailover: true,
+      allowDesktopFolderAccess: desktopAccess,
+      allowDocumentsFolderAccess: documentsAccess,
+      allowFullPcAccess: fullPcAccess,
+      agentExecutionMode: executionMode,
     });
+    void syncWorkspaceGrantsFromPrefs();
 
     // Install default local brain (llama-cli + GGUF) so zero-key chat works.
     let downloadStarted = false;
@@ -423,6 +437,10 @@ export function OnboardingScreen() {
                 <p className="flex items-start gap-2.5">
                   <KeyRound className="w-4 h-4 mt-0.5 shrink-0 text-content-tertiary" />
                   Optionally connect free providers once — keys stay encrypted on this device.
+                </p>
+                <p className="flex items-start gap-2.5">
+                  <FolderOpen className="w-4 h-4 mt-0.5 shrink-0 text-content-tertiary" />
+                  Choose Desktop or full PC access so ARK can explore folders and answer “what’s on my PC?” without templates.
                 </p>
                 <p className="flex items-start gap-2.5">
                   <Shield className="w-4 h-4 mt-0.5 shrink-0 text-content-tertiary" />
@@ -652,6 +670,105 @@ export function OnboardingScreen() {
 
           {phase === 'connect' && (
             <div className="space-y-4">
+              <div className="rounded-xl border border-surface-border bg-surface-hover/30 px-3 py-3 space-y-3">
+                <div>
+                  <p className="text-sm font-medium text-content-primary">Give ARK access to your PC</p>
+                  <p className="text-xs text-content-tertiary mt-0.5 leading-relaxed">
+                    Required for “what projects are on my PC?”, games, installed apps, and opening folders from chat. Same controls live in Settings → Security.
+                  </p>
+                  <button
+                    type="button"
+                    className="mt-2 text-[11px] font-medium text-sky-400 hover:text-sky-300"
+                    onClick={() => {
+                      if (!window.confirm(
+                        'Enable Desktop, Documents, and Full PC file access?\n\nARK can explore folders and list projects when you ask. Installs and deletes still ask for confirmation.',
+                      )) return;
+                      setDesktopAccess(true);
+                      setDocumentsAccess(true);
+                      setFullPcAccess(true);
+                    }}
+                  >
+                    Enable recommended access (Desktop + Documents + Full PC)
+                  </button>
+                </div>
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={desktopAccess}
+                    onChange={e => {
+                      const v = e.target.checked;
+                      if (v && !window.confirm(
+                        'Allow ARK to read folders under your Desktop?\n\nScope: Desktop only — not your whole drive.',
+                      )) return;
+                      setDesktopAccess(v);
+                    }}
+                    className="mt-1 rounded border-surface-border"
+                  />
+                  <span className="min-w-0">
+                    <span className="block text-sm text-content-primary">Allow Desktop folder access</span>
+                    <span className="block text-xs text-content-tertiary mt-0.5">List Projects, games, and folders on your Desktop</span>
+                  </span>
+                </label>
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={documentsAccess}
+                    onChange={e => {
+                      const v = e.target.checked;
+                      if (v && !window.confirm(
+                        'Allow ARK to read folders under your Documents?\n\nScope: Documents only — not your whole drive.',
+                      )) return;
+                      setDocumentsAccess(v);
+                    }}
+                    className="mt-1 rounded border-surface-border"
+                  />
+                  <span className="min-w-0">
+                    <span className="block text-sm text-content-primary">Allow Documents folder access</span>
+                    <span className="block text-xs text-content-tertiary mt-0.5">Open and list projects under Documents</span>
+                  </span>
+                </label>
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={fullPcAccess}
+                    onChange={e => {
+                      const v = e.target.checked;
+                      if (v && !window.confirm(
+                        'Give ARK broad file access on this PC?\n\nARK can list installed apps, scan beyond Desktop, and open folders you name. Windows system folders stay blocked.',
+                      )) return;
+                      setFullPcAccess(v);
+                      if (v) {
+                        setDesktopAccess(true);
+                        setDocumentsAccess(true);
+                      }
+                    }}
+                    className="mt-1 rounded border-surface-border"
+                  />
+                  <span className="min-w-0">
+                    <span className="block text-sm text-content-primary">Full PC access (files)</span>
+                    <span className="block text-xs text-content-tertiary mt-0.5">Installed apps registry, Steam, and profile-wide folder search</span>
+                  </span>
+                </label>
+                <div>
+                  <label className="block text-xs font-medium text-content-secondary mb-1.5">Execution &amp; approvals</label>
+                  <select
+                    value={executionMode}
+                    onChange={e => {
+                      const next = e.target.value as LocalPrefs['agentExecutionMode'];
+                      if (next === 'run_all' && !window.confirm(
+                        'Run everything?\n\nAllowlisted commands (npm, pip, git, winget) can run when you ask. Destructive commands stay blocked.',
+                      )) return;
+                      setExecutionMode(next);
+                    }}
+                    className="w-full rounded-xl border border-surface-border bg-ark-navy-900 px-3 py-2 text-sm text-content-primary"
+                  >
+                    <option value="allowlist">Allowlist — confirm each install/command</option>
+                    <option value="auto_review">Auto-review — known tools after one confirm</option>
+                    <option value="run_all">Run everything — allowlisted tools without extra prompts</option>
+                  </select>
+                </div>
+              </div>
+
               <div className="space-y-2">
                 {CONNECT_PROVIDERS.map(p => {
                   const open = expandedProvider === p.id;

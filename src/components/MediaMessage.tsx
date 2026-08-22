@@ -5,6 +5,13 @@ import { usableAssistantText } from '@/lib/chatHistory';
 import { ChatMarkdown } from '@/lib/chatMarkdown';
 import { isChatAttachMessage, stripChatAttach } from '@/lib/chatAttach';
 import { AttachMessageBody } from '@/components/AttachCard';
+import { isTraceMessage, parseTraceMessage } from '@/lib/agentTrace';
+import { AgentTracePanel } from '@/components/AgentTracePanel';
+import { isCatalogMessage, parseCatalogMessage } from '@/lib/folderCatalog';
+import { FolderCatalogCard } from '@/components/FolderCatalogCard';
+import { isPcExploreMessage, parsePcExploreMessage } from '@/lib/pcExplore';
+import { PcExploreCard } from '@/components/PcExploreCard';
+import { AgentProgressStatus } from '@/components/AgentProgressStatus';
 
 const PIXEL_COLS = 18;
 const PIXEL_ROWS = 14;
@@ -254,9 +261,32 @@ function ArkMediaImage({ id, alt, preview }: { id: string; alt: string; preview?
   return <ResolvedMedia src={src} alt={alt} preview={preview} />;
 }
 
-export function MessageContent({ content }: { content: string }) {
+export function MessageContent({ content, live }: { content: string; live?: boolean }) {
   if (!content) {
     return <GeneratingPlaceholder kind="chat" label="Thinking…" />;
+  }
+
+  if (isPcExploreMessage(content)) {
+    const data = parsePcExploreMessage(content);
+    if (data) return <PcExploreCard data={data} />;
+  }
+
+  if (isCatalogMessage(content)) {
+    const data = parseCatalogMessage(content);
+    if (data) return <FolderCatalogCard data={data} />;
+  }
+
+  if (isTraceMessage(content)) {
+    const { payload, answer } = parseTraceMessage(content);
+    if (payload) {
+      return (
+        <AgentTracePanel
+          payload={payload}
+          answer={answer}
+          live={live ?? (!payload.done && !answer)}
+        />
+      );
+    }
   }
 
   if (isChatAttachMessage(content)) {
@@ -265,7 +295,7 @@ export function MessageContent({ content }: { content: string }) {
       return (
         <div className="space-y-2">
           <AttachMessageBody content={content} />
-          <MessageContent content={rest} />
+          <MessageContent content={rest} live={live} />
         </div>
       );
     }
@@ -277,6 +307,9 @@ export function MessageContent({ content }: { content: string }) {
     const kind = parts[1] === 'video' ? 'video' : parts[1] === 'chat' ? 'chat' : 'image';
     const label = parts.slice(2).join(':') || undefined;
     const sessionKey = `${kind}`;
+    if (kind === 'chat') {
+      return <AgentProgressStatus label={label || 'Thinking…'} />;
+    }
     return <GeneratingPlaceholder kind={kind} label={label} sessionKey={sessionKey} />;
   }
 

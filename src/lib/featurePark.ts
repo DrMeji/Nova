@@ -60,3 +60,8 @@ export function isSocialParked(name: 'networking' | 'message' | 'call'): boolean
 export function isVideoTabEnabled(): boolean {
   return false;
 }
+
+/** Code workspace tab parked — all project work happens in Chat until panels return. */
+export function isCodeTabEnabled(): boolean {
+  return false;
+}

@@ -319,7 +319,7 @@ declare global {
         ok: boolean;
         root?: string;
         files?: Record<string, string>;
-        meta?: { id?: string; name?: string; root?: string } | null;
+        meta?: { id?: string; name?: string; root?: string; inPlace?: boolean; kind?: string } | null;
         error?: string;
       }>;
       projectPath?: (projectId: string) => Promise<{ ok: boolean; root?: string; error?: string }>;
@@ -337,9 +337,95 @@ declare global {
         imagePaths?: string[];
         name?: string;
         path?: string;
+        inPlace?: boolean;
         skipped?: { env?: number; large?: number; binary?: number; limit?: number };
         error?: string;
       }>;
+      workspaceOpenRoot?: (payload?: {
+        projectId: string;
+        projectName?: string;
+        sourceDir?: string;
+        catalogOnly?: boolean;
+      }) => Promise<{
+        ok: boolean;
+        canceled?: boolean;
+        root?: string;
+        files?: Record<string, string>;
+        listed?: number;
+        name?: string;
+        inPlace?: boolean;
+        catalogOnly?: boolean;
+        error?: string;
+      }>;
+      workspaceStatPath?: (targetPath: string) => Promise<{
+        ok: boolean;
+        path?: string;
+        name?: string;
+        isDirectory?: boolean;
+        isFile?: boolean;
+        error?: string;
+      }>;
+      workspaceSetGrants?: (grants: {
+        desktop?: boolean;
+        documents?: boolean;
+        fullPc?: boolean;
+        executionMode?: 'allowlist' | 'auto_review' | 'run_all';
+      }) => Promise<{
+        ok: boolean;
+        grants?: {
+          desktop: boolean;
+          documents: boolean;
+          fullPc: boolean;
+          executionMode: 'allowlist' | 'auto_review' | 'run_all';
+        };
+        error?: string;
+      }>;
+      workspaceGetGrants?: () => Promise<{
+        ok: boolean;
+        grants?: {
+          desktop: boolean;
+          documents: boolean;
+          fullPc: boolean;
+          executionMode: 'allowlist' | 'auto_review' | 'run_all';
+        };
+        error?: string;
+      }>;
+      agentRun?: (payload: {
+        command: string;
+        cwd?: string;
+        mode?: 'allowlist' | 'auto_review' | 'run_all';
+      }) => Promise<{
+        ok: boolean;
+        command?: string;
+        cwd?: string;
+        output?: string;
+        error?: string;
+      }>;
+      workspaceDeletePath?: (payload: {
+        projectId: string;
+        relPath: string;
+      }) => Promise<{ ok: boolean; path?: string; error?: string }>;
+      gitCloneOpen?: (payload: {
+        projectId: string;
+        projectName?: string;
+        url: string;
+        token?: string;
+        destDir?: string;
+      }) => Promise<{
+        ok: boolean;
+        canceled?: boolean;
+        root?: string;
+        files?: Record<string, string>;
+        name?: string;
+        error?: string;
+        cloneMessage?: string;
+      }>;
+      onProjectImportProgress?: (handler: (payload: {
+        phase?: string;
+        done?: number;
+        total?: number;
+        label?: string;
+      }) => void) => () => void;
       /** Native file picker — shows files inside folders (unlike Open folder). */
       pickFiles?: (payload?: { imagesOnly?: boolean }) => Promise<{
         ok: boolean;
@@ -366,6 +452,14 @@ declare global {
       browseRoots?: () => Promise<{
         ok: boolean;
         roots?: Array<{ id: string; label: string; path: string }>;
+        error?: string;
+      }>;
+      pcInstalledApps?: (payload?: { limit?: number }) => Promise<{
+        ok: boolean;
+        apps?: Array<{ name: string; source?: string }>;
+        source?: string;
+        limited?: boolean;
+        note?: string;
         error?: string;
       }>;
       pathStat?: (targetPath: string) => Promise<{
@@ -436,6 +530,10 @@ declare global {
         projectId: string;
         token?: string;
       }) => Promise<{ ok: boolean; message?: string; remote?: string; error?: string }>;
+      gitPull?: (payload: {
+        projectId: string;
+        token?: string;
+      }) => Promise<{ ok: boolean; message?: string; remote?: string; error?: string; git?: boolean; branch?: string | null; dirty?: number }>;
       gitDiff?: (projectId: string) => Promise<{
         ok: boolean;
         text?: string;

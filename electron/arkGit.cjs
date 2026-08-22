@@ -2,6 +2,7 @@
  * Local git for ARK Code — uses the Git binary on this PC.
  */
 
+const fs = require('fs');
 const { execFile } = require('child_process');
 const path = require('path');
 const { tryCleanup } = require('./ignoreCleanup.cjs');
@@ -180,12 +181,51 @@ async function diffSummary(cwd) {
   return { ok: true, text: parts.join('\n'), ...st };
 }
 
+async function pull(cwd, token) {
+  if (!cwd) return { ok: false, error: 'No project folder' };
+  const st = await status(cwd);
+  if (!st.git) return { ok: false, error: 'This folder is not a git repo yet.' };
+  if (!st.remote) return { ok: false, error: 'No origin remote. Clone or add origin first.' };
+  const result = await runGit(cwd, ['pull', '--ff-only'], {
+    env: authEnv(token),
+    timeout: 180_000,
+  });
+  if (!result.ok) {
+    if (/conflict/i.test(result.error || '')) {
+      return { ok: false, error: 'Pull stopped — merge conflicts. Resolve in your editor, then try again.' };
+    }
+    return result;
+  }
+  const after = await status(cwd);
+  return { ok: true, message: result.stdout || result.stderr || 'Pulled latest.', ...after };
+}
+
+async function cloneToPath(url, destPath, token) {
+  const dest = path.resolve(String(destPath || ''));
+  if (!dest) return { ok: false, error: 'No destination folder.' };
+  if (fs.existsSync(dest) && fs.readdirSync(dest).filter(n => n !== '.git').length > 0) {
+    return { ok: false, error: 'Destination folder is not empty.', needsConfirm: true };
+  }
+  fs.mkdirSync(path.dirname(dest), { recursive: true });
+  const parent = path.dirname(dest);
+  const base = path.basename(dest);
+  const cloned = await runGit(parent, ['clone', '--depth', '1', url, base], {
+    timeout: 180_000,
+    env: authEnv(token),
+  });
+  if (!cloned.ok) return cloned;
+  const st = await status(dest);
+  return { ok: true, message: `Cloned ${url}`, path: dest, ...st };
+}
+
 module.exports = {
   runGit,
   status,
   commitAll,
   push,
+  pull,
   cloneRepo,
+  cloneToPath,
   setOrigin,
   initIfNeeded,
   diffSummary,

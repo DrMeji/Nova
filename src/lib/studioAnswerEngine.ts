@@ -11,17 +11,17 @@ import {
   STUDIO_FIX_ASK_RE,
   STUDIO_WIDER_RE,
 } from '@/lib/chatStudio';
-import { flattenProjectFiles, type ProjectFileMap } from '@/lib/projectCodeEdit';
+import { flattenProjectFiles, rankFilesForTurnPack, classifyCodeTurnSize, type ProjectFileMap } from '@/lib/projectCodeEdit';
 import {
   collectProjectFindings,
   describeProjectFromFiles,
   describeProjectInDetail,
   isBuildArtifactPath,
-  pickFilesForInspect,
   reportProjectFocusAsk,
   reportProjectProblems,
   type InspectFinding,
 } from '@/lib/projectInspect';
+import { estimateTokens } from '@/lib/tokenUsage';
 
 export type StudioIntent =
   | 'overview'
@@ -51,6 +51,10 @@ export type StudioAnswerInput = {
   stickyPinnedSource?: string;
   /** Abort if returns true (e.g. genSeq changed / stop). */
   shouldAbort?: () => boolean;
+  /** Plan-only turn — no file writes until user says go. */
+  planOnly?: boolean;
+  /** User asked to implement — model may emit @@@FILE blocks. */
+  allowFileEdits?: boolean;
 };
 
 export type StudioAnswerResult = {
@@ -59,6 +63,7 @@ export type StudioAnswerResult = {
   findings?: InspectFinding[];
   meta?: string;
   streamed?: boolean;
+  packedTokens?: number;
 };
 
 const SMALLTALK_RE =
@@ -68,7 +73,10 @@ const STUDIO_RECOMMEND_RE =
   /\b(i want (some |a )?recommendations?|recommendations?\b|what (do you |would you )?recommend|where (should|do|to) (we|i|you) start|where (do you think )?(we|i) should start|what (should|do) (we|i) (do )?first|recommend(ed)? (next|first)|priorit(y|ize)|next step)\b/i;
 
 const PACK_BUDGET = 40_000;
+const PACK_BUDGET_CODE = 10_000;
 const PACK_FILE_CHARS = 4_500;
+const PACK_FILE_CHARS_CODE = 2_600;
+const PACK_MAX_FILES_CODE = 12;
 const MODEL_TIMEOUT_MS = 55_000;
 
 function cleanAsk(message: string): string {
@@ -202,6 +210,7 @@ export function packStudioContext(input: StudioAnswerInput): {
   user: string;
   findings: InspectFinding[];
   prompt: string;
+  packedTokens: number;
 } {
   const ask = cleanAsk(input.userMessage);
   const intent = classifyStudioIntent(input.userMessage, input.lastIntent);
@@ -212,25 +221,35 @@ export function packStudioContext(input: StudioAnswerInput): {
     ? input.lastFindings
     : collectProjectFindings(input.files, focus === 'wider' ? 'wider' : focus === 'security' ? 'security' : focus === 'ui' ? 'ui' : 'all');
 
-  const picked = pickFilesForInspect(input.files, ask);
+  const turnSize = classifyCodeTurnSize(ask, input.files);
+  const maxFiles = input.mode === 'code' ? PACK_MAX_FILES_CODE : turnSize === 'micro' ? 6 : turnSize === 'small' ? 12 : 24;
+  const picked = rankFilesForTurnPack(flat, ask, turnSize).slice(0, maxFiles);
+  const packBudget = input.mode === 'code' ? PACK_BUDGET_CODE : PACK_BUDGET;
+  const packFileChars = input.mode === 'code' ? PACK_FILE_CHARS_CODE : PACK_FILE_CHARS;
   let used = 0;
   const chunks: string[] = [];
   for (const path of picked) {
     const content = flat[path];
     if (!content) continue;
-    const body = content.length > PACK_FILE_CHARS
-      ? `${content.slice(0, PACK_FILE_CHARS)}\n/* …truncated… */`
+    const body = content.length > packFileChars
+      ? `${content.slice(0, packFileChars)}\n/* …truncated… */`
       : content;
     const block = `--- ${path} ---\n${body}`;
-    if (used + block.length > PACK_BUDGET) break;
+    if (used + block.length > packBudget) break;
     chunks.push(block);
     used += block.length;
   }
 
-  const tree = sourceKeys.sort().slice(0, 100).join('\n');
+  const tree = sourceKeys.sort().slice(0, input.mode === 'code' ? 48 : 100).join('\n');
   const findingsBlock = findings.length
     ? `Optional prior findings from local scan:\n${findings.map(f => `- ${f.path}: ${f.detail}`).join('\n')}`
     : 'Optional prior findings from local scan: (none yet)';
+
+  const fileRule = input.planOnly
+    ? 'PLAN ONLY — output a step-by-step plan. No @@@FILE blocks, no file writes. End with: Say "go implement" when you want me to build this.'
+    : input.allowFileEdits
+      ? 'When implementing, use @@@FILE blocks to create or edit files under the project root. Keep edits focused — only files that need to change.'
+      : 'Do NOT write @@@FILE blocks. Do not dump whole files.';
 
   const system = [
     'You can see the attached project files. Never say you cannot see them.',
@@ -238,7 +257,7 @@ export function packStudioContext(input: StudioAnswerInput): {
     'Answer ONLY about this codebase. No world news, climate, politics, or generic life advice.',
     'Answer the user’s question directly and specifically.',
     'If unsure, say what you inspected. Do not invent issues.',
-    'Do NOT write @@@FILE blocks. Do not dump whole files.',
+    fileRule,
     'Never output lines like “ANSWER THE USER QUESTION FIRST” or “User asked:”.',
   ].join(' ');
 
@@ -266,7 +285,7 @@ export function packStudioContext(input: StudioAnswerInput): {
   ].join('\n');
 
   const prompt = `${system}\n\n${user}`;
-  return { system, user, findings, prompt };
+  return { system, user, findings, prompt, packedTokens: estimateTokens(prompt) };
 }
 
 function usesLocalScan(intent: StudioIntent): boolean {
@@ -329,6 +348,7 @@ export async function answerStudio(
   const intent = classifyStudioIntent(input.userMessage, input.lastIntent);
   const packed = packStudioContext({ ...input, userMessage: ask });
   let findings = packed.findings;
+  const packedTokens = packed.packedTokens;
 
   // Fast structured path — scan formats, no meta.
   if (usesLocalScan(intent) && !prefersModel(intent)) {
@@ -339,6 +359,7 @@ export async function answerStudio(
       findings,
       meta: 'Local scan · attached files',
       streamed: false,
+      packedTokens,
     };
   }
 
@@ -352,6 +373,7 @@ export async function answerStudio(
       findings,
       meta: 'Local scan · attached files',
       streamed: false,
+      packedTokens,
     };
   }
 
@@ -364,6 +386,7 @@ export async function answerStudio(
       findings,
       meta: 'Local scan · attached files',
       streamed: false,
+      packedTokens,
     };
   }
 
@@ -375,6 +398,7 @@ export async function answerStudio(
       findings,
       meta: 'Local scan · attached files',
       streamed: false,
+      packedTokens,
     };
   }
 
@@ -421,6 +445,7 @@ export async function answerStudio(
         findings,
         meta: 'Local model · attached files',
         streamed: Boolean(streamed),
+      packedTokens,
       };
     }
 
@@ -439,6 +464,7 @@ export async function answerStudio(
         findings,
         meta: 'Local scan · attached files',
         streamed: false,
+      packedTokens,
       };
     }
 
@@ -459,6 +485,7 @@ export async function answerStudio(
         findings,
         meta: 'Local scan · attached files',
         streamed: false,
+      packedTokens,
       };
     }
 
@@ -469,6 +496,7 @@ export async function answerStudio(
       findings: findings.length ? findings : collectProjectFindings(input.files, 'all'),
       meta: `${label} · attached files`,
       streamed: Boolean(streamed) || prefs.streamResponses,
+      packedTokens,
     };
   } catch {
     if (!findings.length) findings = collectProjectFindings(input.files, 'all');
@@ -484,6 +512,7 @@ export async function answerStudio(
       findings,
       meta: 'Local scan · attached files',
       streamed: false,
+      packedTokens,
     };
   }
 }

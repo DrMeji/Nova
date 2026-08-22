@@ -1,43 +1,47 @@
-/** Circular token-budget indicator — click for model + usage detail. */
+/** Circular dual-ring: turn context (inner) + model freshness (outer). */
 
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 type Props = {
-  /** 0–1 */
-  ratio: number;
+  /** 0–1 how full this turn’s packed prompt is */
+  contextRatio: number;
+  /** 0–1 how worn the current model session is (0 = fresh) */
+  modelRatio?: number;
   size?: number;
   className?: string;
   title?: string;
-  /** Active model label shown in the popover */
   modelName?: string;
-  /** Optional subtitle (e.g. Local · failover) */
   modelDetail?: string;
 };
 
 export function TokenUsageRing({
-  ratio,
+  contextRatio,
+  modelRatio = 0,
   size = 18,
   className = '',
   title,
   modelName,
   modelDetail,
 }: Props) {
-  const r = Math.max(0, Math.min(1, ratio));
-  const stroke = 2.25;
-  const radius = (size - stroke) / 2;
-  const c = 2 * Math.PI * radius;
-  const dash = c * r;
-  const pct = Math.round(r * 100);
+  const ctx = Math.max(0, Math.min(1, contextRatio));
+  const mdl = Math.max(0, Math.min(1, modelRatio));
+  const stroke = 2.1;
+  const gap = 2.4;
+  const outerR = (size - stroke) / 2;
+  const innerR = Math.max(3, outerR - stroke - gap);
+  const outerC = 2 * Math.PI * outerR;
+  const innerC = 2 * Math.PI * innerR;
+  const ctxPct = Math.round(ctx * 100);
+  const mdlPct = Math.round(mdl * 100);
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ left: number; bottom: number } | null>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
   const popRef = useRef<HTMLDivElement>(null);
 
   const label = modelName?.trim() || 'ARK Auto';
-  const detail = modelDetail?.trim() || 'Session turn budget';
+  const detail = modelDetail?.trim() || 'Session';
   const isLocal = /\blocal\b|on-device/i.test(detail);
-  const budgetLabel = isLocal ? 'On-device context budget' : 'Turn budget';
 
   useEffect(() => {
     if (!open) return;
@@ -46,7 +50,7 @@ export function TokenUsageRing({
       if (!btn) return;
       const rect = btn.getBoundingClientRect();
       setPos({
-        left: Math.min(rect.left, window.innerWidth - 220),
+        left: Math.min(rect.left, window.innerWidth - 240),
         bottom: window.innerHeight - rect.top + 8,
       });
     };
@@ -84,55 +88,91 @@ export function TokenUsageRing({
         type="button"
         onClick={() => setOpen(o => !o)}
         className={`inline-flex items-center justify-center shrink-0 rounded-full hover:opacity-90 transition-opacity focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/40 ${className}`}
-        title={title || `${label} · ${pct}% of ${isLocal ? 'on-device context' : 'turn'} budget`}
-        aria-label={`${label}, token usage ${pct} percent`}
+        title={title || `${label} · context ${ctxPct}% · model ${mdlPct}%`}
+        aria-label={`${label}, context ${ctxPct} percent, model ${mdlPct} percent`}
         aria-expanded={open}
       >
         <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="-rotate-90" aria-hidden>
-          <circle
-            cx={size / 2}
-            cy={size / 2}
-            r={radius}
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={stroke}
-            className="text-white/15"
-          />
-          <circle
-            cx={size / 2}
-            cy={size / 2}
-            r={radius}
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={stroke}
-            strokeLinecap="round"
-            strokeDasharray={`${dash} ${c}`}
-            className={r > 0.85 ? 'text-amber-300' : 'text-white/90'}
-          />
+          {/* Outer — model freshness (color only when used; no white donut) */}
+          {mdl > 0.008 && (
+            <circle
+              cx={size / 2}
+              cy={size / 2}
+              r={outerR}
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={stroke}
+              strokeLinecap="round"
+              strokeDasharray={`${outerC * mdl} ${outerC}`}
+              className={mdl > 0.85 ? 'text-rose-400' : mdl > 0.55 ? 'text-amber-300' : 'text-violet-300'}
+            />
+          )}
+          {/* Inner — turn context */}
+          {ctx > 0.008 && (
+            <circle
+              cx={size / 2}
+              cy={size / 2}
+              r={innerR}
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={stroke}
+              strokeLinecap="round"
+              strokeDasharray={`${innerC * ctx} ${innerC}`}
+              className={ctx > 0.85 ? 'text-amber-300' : 'text-sky-300'}
+            />
+          )}
         </svg>
       </button>
 
       {open && pos && createPortal(
         <div
           ref={popRef}
-          className="fixed z-[80] w-[200px] rounded-xl border border-surface-border bg-ark-navy-900/95 shadow-xl backdrop-blur-md p-3"
+          className="fixed z-[80] w-[220px] rounded-xl border border-surface-border bg-ark-navy-900/95 shadow-xl backdrop-blur-md p-3"
           style={{ left: pos.left, bottom: pos.bottom }}
           role="dialog"
-          aria-label="Model usage"
+          aria-label="Usage rings"
         >
           <p className="text-[10px] uppercase tracking-wider text-content-tertiary font-semibold">Using now</p>
           <p className="text-sm font-medium text-content-primary mt-1 truncate" title={label}>{label}</p>
           <p className="text-[11px] text-content-tertiary mt-0.5 truncate">{detail}</p>
-          <div className="mt-3">
-            <div className="flex items-center justify-between text-[11px] mb-1.5">
-              <span className="text-content-secondary">{budgetLabel}</span>
-              <span className={`font-medium ${r > 0.85 ? 'text-amber-300' : 'text-content-primary'}`}>{pct}%</span>
+
+          <div className="mt-3 space-y-3">
+            <div>
+              <div className="flex items-center justify-between text-[11px] mb-1.5">
+                <span className="inline-flex items-center gap-1.5 text-content-secondary">
+                  <span className="w-2 h-2 rounded-full bg-sky-300 shrink-0" aria-hidden />
+                  {isLocal ? 'Context budget' : 'Turn context'}
+                </span>
+                <span className={`font-medium ${ctx > 0.85 ? 'text-amber-300' : 'text-content-primary'}`}>{ctxPct}%</span>
+              </div>
+              <div className="h-1.5 rounded-full bg-black/60 border border-white/[0.06] overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-[width] ${ctx > 0.85 ? 'bg-amber-400' : 'bg-sky-400'}`}
+                  style={{ width: `${ctxPct}%` }}
+                />
+              </div>
+              <p className="text-[10px] text-content-tertiary mt-1">How full this turn’s prompt is.</p>
             </div>
-            <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
-              <div
-                className={`h-full rounded-full transition-[width] ${r > 0.85 ? 'bg-amber-400' : 'bg-sky-400'}`}
-                style={{ width: `${pct}%` }}
-              />
+
+            <div>
+              <div className="flex items-center justify-between text-[11px] mb-1.5">
+                <span className="inline-flex items-center gap-1.5 text-content-secondary">
+                  <span className={`w-2 h-2 rounded-full shrink-0 ${mdl > 0.85 ? 'bg-rose-400' : 'bg-violet-300'}`} aria-hidden />
+                  Model freshness
+                </span>
+                <span className={`font-medium ${mdl > 0.85 ? 'text-rose-300' : mdl > 0.55 ? 'text-amber-300' : 'text-content-primary'}`}>{mdlPct}%</span>
+              </div>
+              <div className="h-1.5 rounded-full bg-black/60 border border-white/[0.06] overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-[width] ${
+                    mdl > 0.85 ? 'bg-rose-400' : mdl > 0.55 ? 'bg-amber-400' : 'bg-violet-400'
+                  }`}
+                  style={{ width: `${mdlPct}%` }}
+                />
+              </div>
+              <p className="text-[10px] text-content-tertiary mt-1">
+                How hard this brain has been worked. High = may slow down; Auto can rotate.
+              </p>
             </div>
           </div>
         </div>,

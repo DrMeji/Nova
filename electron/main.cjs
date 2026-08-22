@@ -18,6 +18,7 @@ const arkCrashLog = require('./arkCrashLog.cjs');
 const arkGguf = require('./arkGguf.cjs');
 const arkBrainApi = require('./arkBrainApi.cjs');
 const arkConfig = require('./arkConfig.cjs');
+const arkPcInventory = require('./arkPcInventory.cjs');
 
 const DEV_URL = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173';
 const isDev = process.env.ARK_DEV === '1';
@@ -891,14 +892,16 @@ ipcMain.handle('ark:project-path', async (_e, projectId) => {
   }
 });
 
-ipcMain.handle('ark:project-import-folder', async (_e, payload) => {
+ipcMain.handle('ark:project-import-folder', async (event, payload) => {
   try {
-    const win = BrowserWindow.getFocusedWindow() || mainWindow;
+    const win = BrowserWindow.fromWebContents(event.sender)
+      || BrowserWindow.getFocusedWindow()
+      || mainWindow;
     let sourceDir = payload?.sourceDir;
     if (!sourceDir) {
       const result = await dialog.showOpenDialog(win || undefined, {
-        title: 'Choose a folder',
-        message: 'Select the folder. Everything inside stays in that folder attach until you send.',
+        title: 'Import folder into ARK (copy)',
+        message: 'ARK will copy this folder into its project storage. For in-place editing, use Open folder instead.',
         properties: ['openDirectory'],
       });
       if (result.canceled || !result.filePaths?.[0]) {
@@ -906,13 +909,149 @@ ipcMain.handle('ark:project-import-folder', async (_e, payload) => {
       }
       sourceDir = result.filePaths[0];
     }
-    return arkProjects.importFolder(payload?.projectId, payload?.projectName, sourceDir);
+    const sendProgress = (p) => {
+      try {
+        event.sender.send('ark:project-import-progress', p);
+      } catch {
+        /* ignore */
+      }
+    };
+    return await arkProjects.importFolder(
+      payload?.projectId,
+      payload?.projectName,
+      sourceDir,
+      sendProgress,
+    );
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'import failed';
     if (/ENOTDIR/i.test(msg)) {
       return { ok: false, error: 'Could not open that folder. Try the real folder (not a broken shortcut).' };
     }
     return { ok: false, error: msg };
+  }
+});
+
+/** Open folder in-place — edits go to the real path on disk (no copy). */
+ipcMain.handle('ark:workspace-open-root', async (event, payload) => {
+  try {
+    const win = BrowserWindow.fromWebContents(event.sender)
+      || BrowserWindow.getFocusedWindow()
+      || mainWindow;
+    let sourceDir = payload?.sourceDir;
+    if (!sourceDir) {
+      const result = await dialog.showOpenDialog(win || undefined, {
+        title: 'Open folder on this PC',
+        message: 'ARK will read and edit files in this folder directly. Allow access to this path?',
+        properties: ['openDirectory'],
+      });
+      if (result.canceled || !result.filePaths?.[0]) {
+        return { ok: false, canceled: true };
+      }
+      sourceDir = result.filePaths[0];
+    }
+    const sendProgress = (p) => {
+      try {
+        event.sender.send('ark:project-import-progress', p);
+      } catch {
+        /* ignore */
+      }
+    };
+    return await arkProjects.openWorkspaceRoot(
+      payload?.projectId,
+      payload?.projectName,
+      sourceDir,
+      sendProgress,
+      { catalogOnly: Boolean(payload?.catalogOnly) },
+    );
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'open failed' };
+  }
+});
+
+/** Validate a typed path before opening in-place. */
+ipcMain.handle('ark:workspace-stat-path', async (_e, targetPath) => {
+  try {
+    return arkProjects.pathStat(targetPath);
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'stat failed' };
+  }
+});
+
+ipcMain.handle('ark:workspace-set-grants', async (_e, grants) => {
+  try {
+    return { ok: true, grants: arkProjects.setWorkspaceGrants(grants || {}) };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'grants failed' };
+  }
+});
+
+ipcMain.handle('ark:workspace-get-grants', async () => {
+  try {
+    return { ok: true, grants: arkProjects.loadWorkspaceGrants() };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'grants failed' };
+  }
+});
+
+ipcMain.handle('ark:agent-run', async (_e, payload) => {
+  try {
+    const arkAgentExec = require('./arkAgentExec.cjs');
+    return await arkAgentExec.agentRun(payload || {});
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'agent run failed' };
+  }
+});
+
+ipcMain.handle('ark:workspace-delete-path', async (_e, payload) => {
+  try {
+    return arkProjects.deleteWorkspaceRelPath(payload?.projectId, payload?.relPath);
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'delete failed' };
+  }
+});
+
+/** Clone a repo to a folder, then open it in-place as the workspace. */
+ipcMain.handle('ark:git-clone-open', async (event, payload) => {
+  try {
+    const url = String(payload?.url || '').trim();
+    if (!url) return { ok: false, error: 'Paste a git clone URL.' };
+    const win = BrowserWindow.fromWebContents(event.sender)
+      || BrowserWindow.getFocusedWindow()
+      || mainWindow;
+    let dest = payload?.destDir;
+    if (!dest) {
+      const os = require('os');
+      const defaultPath = path.join(os.homedir(), 'Documents');
+      const result = await dialog.showOpenDialog(win || undefined, {
+        title: 'Clone into folder',
+        message: 'Pick the parent folder. ARK will create a subfolder for the repo.',
+        defaultPath,
+        properties: ['openDirectory', 'createDirectory'],
+      });
+      if (result.canceled || !result.filePaths?.[0]) {
+        return { ok: false, canceled: true };
+      }
+      const repoName = url.replace(/\.git$/i, '').split('/').pop() || 'repo';
+      dest = path.join(result.filePaths[0], repoName);
+    }
+    const cloned = await arkGit.cloneToPath(url, dest, payload?.token);
+    if (!cloned.ok) return cloned;
+    const sendProgress = (p) => {
+      try {
+        event.sender.send('ark:project-import-progress', p);
+      } catch {
+        /* ignore */
+      }
+    };
+    const opened = await arkProjects.openWorkspaceRoot(
+      payload?.projectId,
+      payload?.projectName || path.basename(dest),
+      dest,
+      sendProgress,
+    );
+    return { ...opened, cloneMessage: cloned.message };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'clone failed' };
   }
 });
 
@@ -976,6 +1115,19 @@ ipcMain.handle('ark:browse-roots', async () => {
     return arkProjects.browseRoots();
   } catch (err) {
     return { ok: false, roots: [], error: err instanceof Error ? err.message : 'roots failed' };
+  }
+});
+
+ipcMain.handle('ark:pc-installed-apps', async (_e, payload) => {
+  try {
+    const grants = arkProjects.loadWorkspaceGrants();
+    return await arkPcInventory.listInstalledApps(grants, payload || {});
+  } catch (err) {
+    return {
+      ok: false,
+      apps: [],
+      error: err instanceof Error ? err.message : 'installed apps failed',
+    };
   }
 });
 
@@ -1066,6 +1218,14 @@ ipcMain.handle('ark:git-push', async (_e, payload) => {
     return await arkGit.push(projectCwd(payload?.projectId), payload?.token);
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'push failed' };
+  }
+});
+
+ipcMain.handle('ark:git-pull', async (_e, payload) => {
+  try {
+    return await arkGit.pull(projectCwd(payload?.projectId), payload?.token);
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'pull failed' };
   }
 });
 

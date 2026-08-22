@@ -65,6 +65,16 @@ export type LocalPrefs = {
   lockOnSleep: boolean;
   autoLockMinutes: number;
   sandboxAgent: boolean;
+  /** Allow in-place workspace under ~/Desktop (still not all of C:). */
+  allowDesktopFolderAccess: boolean;
+  /** Allow in-place workspace under ~/Documents (still not all of C:). */
+  allowDocumentsFolderAccess: boolean;
+  /** Broad PC access for agent file ops under your user profile (with confirm). */
+  allowFullPcAccess: boolean;
+  /** Agent shell command policy — allowlist, auto-review, or run everything. */
+  agentExecutionMode: 'allowlist' | 'auto_review' | 'run_all';
+  /** Chat-first shell — hide Code tab from sidebar (Code still works via handoff). */
+  chatFirst: boolean;
   // Updates
   updateChannel: UpdateChannel;
   autoCheckUpdates: boolean;
@@ -108,6 +118,11 @@ const DEFAULT_PREFS: LocalPrefs = {
   lockOnSleep: true,
   autoLockMinutes: 30,
   sandboxAgent: true,
+  allowDesktopFolderAccess: false,
+  allowDocumentsFolderAccess: false,
+  allowFullPcAccess: false,
+  agentExecutionMode: 'allowlist',
+  chatFirst: true,
   updateChannel: 'stable',
   autoCheckUpdates: true,
   notifyOnUpdate: true,

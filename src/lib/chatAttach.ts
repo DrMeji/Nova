@@ -11,6 +11,8 @@ export type ChatAttachMeta = {
   id?: string;
   /** Optional thumb / media id for image cards already in markdown. */
   mediaId?: string;
+  /** Path bound for listing only — file contents not loaded into chat. */
+  catalogOnly?: boolean;
 };
 
 const MARKER_RE = /<!--ark-attach:([\s\S]*?)-->/g;
@@ -63,6 +65,9 @@ export function isChatAttachMessage(content: string): boolean {
 export function attachSubtitle(meta: ChatAttachMeta): string {
   const n = meta.count ?? 0;
   if (meta.kind === 'folder') {
+    if (meta.catalogOnly) {
+      return n === 1 ? '1 item at top level' : `${n} items at top level`;
+    }
     return n === 1 ? '1 file inside' : `${n} files inside`;
   }
   if (meta.kind === 'files') {

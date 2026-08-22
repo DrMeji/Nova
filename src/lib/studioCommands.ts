@@ -9,15 +9,19 @@ import {
   gitCommit,
   gitDiff,
   gitPush,
-  gitSetOrigin,
   gitStatus,
   githubCloneUrl,
-  parseGithubRemote,
   parseGithubRepoRef,
 } from '@/lib/arkGitClient';
 import { findQueryFromMessage, formatSearchHits, isFindInFilesAsk, searchInFiles } from '@/lib/projectInspect';
 import { getPluginRuntime, loadPluginState } from '@/lib/plugins';
-import { createGitHubPullRequest, createGitHubRepo } from '@/lib/github';
+import {
+  githubToken,
+  needGithubWrite,
+  repoNameFromProject,
+  workflowCreateGitHubRepo,
+  workflowOpenPullRequest,
+} from '@/lib/codeGitHubWorkflow';
 import { postSlackMessage } from '@/lib/slack';
 
 export type StudioCommandResult = {
@@ -25,36 +29,12 @@ export type StudioCommandResult = {
   reload?: boolean;
 };
 
-function githubToken() {
-  return getPluginRuntime('github', loadPluginState()).token?.trim() || '';
-}
-
 function slackToken() {
   return getPluginRuntime('slack', loadPluginState()).token?.trim() || '';
 }
 
 function slackPerms() {
   return getPluginRuntime('slack', loadPluginState()).permissions || [];
-}
-
-function githubPerms() {
-  return getPluginRuntime('github', loadPluginState()).permissions || [];
-}
-
-function needGithubWrite() {
-  const perms = githubPerms();
-  if (perms.length && !perms.includes('write')) {
-    return 'GitHub · permission needed\n\nThis needs Write. Enable it under Plugins → GitHub → Permissions.';
-  }
-  return null;
-}
-
-function repoNameFromProject(name: string) {
-  return (name || 'ark-project')
-    .toLowerCase()
-    .replace(/[^a-z0-9._-]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 80) || 'ark-project';
 }
 
 async function postSlackSummary(channelName: string, text: string) {
@@ -156,24 +136,14 @@ export async function runCodeStudioCommand(opts: {
     if (blocked) return { reply: blocked };
     const isPrivate = !/\bpublic\b/i.test(message);
     const named = message.match(/repo(?:sitory)?\s+(?:named|called)\s+([\w.-]+)/i)?.[1];
-    const created = await createGitHubRepo(token, named || repoNameFromProject(projectName), {
-      private: isPrivate,
-      description: `${projectName} from ARK`,
+    const result = await workflowCreateGitHubRepo({
+      projectId,
+      projectName,
+      token,
+      repoName: named || repoNameFromProject(projectName),
+      isPrivate,
     });
-    const remote = created.clone_url || (created.html_url ? `${created.html_url}.git` : '');
-    if (!remote) return { reply: 'GitHub created the repo but no clone URL came back.' };
-    await gitCommit(projectId, 'Initial commit from ARK');
-    const origin = await gitSetOrigin(projectId, remote);
-    if (!origin.ok) return { reply: origin.error || 'Could not set origin.' };
-    const pushed = await gitPush(projectId, token);
-    return {
-      reply: [
-        `GitHub · ${isPrivate ? 'private' : 'public'} repo`,
-        created.full_name || '',
-        created.html_url || '',
-        pushed.ok ? 'Pushed this folder.' : (pushed.error || 'Repo created; push failed — try Push in the header.'),
-      ].filter(Boolean).join('\n'),
-    };
+    return { reply: result.reply };
   }
 
   if (gitKind === 'pr') {
@@ -182,58 +152,16 @@ export async function runCodeStudioCommand(opts: {
     const blocked = needGithubWrite();
     if (blocked) return { reply: blocked };
     const st = await gitStatus(projectId);
-    const parsed = parseGithubRemote(st.remote || '');
-    const named = parseGithubRepoRef(message);
-    const owner = named?.owner || parsed?.owner;
-    const repo = named?.repo || parsed?.repo;
-    if (!owner || !repo) {
-      return { reply: 'No GitHub remote on this folder. Push or create a repo first, then ask for a PR.' };
-    }
     const title = message.match(/titled?\s+["“]?([^"”\n]+)["”]?/i)?.[1]?.trim()
       || st.log?.[0]?.replace(/^[a-f0-9]+\s+/i, '')
       || 'Changes from ARK';
-    const head = st.branch && st.branch !== 'HEAD' ? st.branch : '';
-    if (!head || head === 'main' || head === 'master') {
-      return {
-        reply: `You're on ${head || 'HEAD'}. Create or switch to a feature branch, push, then ask me to open a PR.`,
-      };
-    }
-    const preferredBases = ['main', 'master'];
-    const body = (await gitDiff(projectId)).text || 'Opened from ARK Code.';
-    let lastError = 'Could not open PR';
-    for (const base of preferredBases) {
-      if (head === base) continue;
-      try {
-        const pr = await createGitHubPullRequest(token, owner, repo, { title, head, base, body });
-        return {
-          reply: [
-            'GitHub · pull request',
-            `${owner}/${repo}#${pr.number ?? '?'} “${pr.title || title}”`,
-            pr.html_url || '',
-            `Compared ${head} → ${base}.`,
-          ].filter(Boolean).join('\n'),
-        };
-      } catch (err) {
-        lastError = err instanceof Error ? err.message : lastError;
-      }
-    }
-    try {
-      const pr = await createGitHubPullRequest(token, owner, repo, {
-        title,
-        head,
-        base: 'main',
-        body,
-      });
-      return {
-        reply: [
-          'GitHub · pull request',
-          `${owner}/${repo}#${pr.number ?? '?'} “${pr.title || title}”`,
-          pr.html_url || '',
-        ].filter(Boolean).join('\n'),
-      };
-    } catch {
-      return { reply: `Could not open a PR (${lastError}). Push the branch first, then try again.` };
-    }
+    const result = await workflowOpenPullRequest({
+      projectId,
+      token,
+      title,
+      pushFirst: true,
+    });
+    return { reply: result.reply };
   }
 
   if (gitKind === 'slack') {

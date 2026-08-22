@@ -26,6 +26,7 @@ import {
   syncTokenUsage,
   USABLE_TOKENS,
 } from '@/lib/tokenUsage';
+import { resetModelHealth } from '@/lib/modelHealth';
 
 export type RotationKind = 'chat' | 'coding' | 'image' | 'video';
 
@@ -158,6 +159,7 @@ export async function prepareBrainRotation(opts: {
       };
       saveThreadBrain(opts.scopeId, brain, opts.kind);
       resetTokenUsage(opts.scopeId);
+      resetModelHealth(opts.scopeId);
       pressure = 0;
       swapped = true;
       void warmIfPossible(pendingId);

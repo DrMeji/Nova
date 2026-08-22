@@ -1,16 +1,19 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  Plus, FilePlus2, ListTree, MessageCircleQuestion, Bug, Layers2, FolderOpen, ImagePlus,
+  Plus, FilePlus2, ListTree, MessageCircleQuestion, Bug, Layers2, FolderOpen, ImagePlus, Zap,
 } from 'lucide-react';
 
 export type ComposerPlusAction =
   | 'plan'
   | 'ask'
+  | 'agent'
   | 'debug'
   | 'multitask'
   | 'file'
   | 'folder'
+  | 'import-folder'
+  | 'enter-path'
   | 'image';
 
 type Props = {
@@ -19,6 +22,8 @@ type Props = {
   scope?: 'chat' | 'image' | 'code';
   /** @deprecated Image is handled via Add file */
   showImage?: boolean;
+  /** Spinning ring around + while folder/files upload */
+  busy?: boolean;
   className?: string;
   buttonClassName?: string;
 };
@@ -29,30 +34,39 @@ const ITEMS: {
   hint: string;
   icon: typeof ListTree;
 }[] = [
-  { id: 'plan', label: 'Plan', hint: 'Prefix: step-by-step plan before building', icon: ListTree },
-  { id: 'ask', label: 'Ask', hint: 'Prefix: direct Q&A, no code changes', icon: MessageCircleQuestion },
-  { id: 'debug', label: 'Debug', hint: 'Prefix: find and fix the problem', icon: Bug },
-  { id: 'multitask', label: 'Tasks', hint: 'Prefix: split work into a numbered list', icon: Layers2 },
+  { id: 'plan', label: 'Plan', hint: 'Steps only — no file writes until Go implement', icon: ListTree },
+  { id: 'ask', label: 'Ask', hint: 'Answer only — no disk writes or commands', icon: MessageCircleQuestion },
+  { id: 'agent', label: 'Agent', hint: 'Edit files and run approved tools in workspace', icon: Zap },
+  { id: 'debug', label: 'Debug', hint: 'Find bugs and propose fixes', icon: Bug },
+  { id: 'multitask', label: 'Tasks', hint: 'Split work into a numbered list', icon: Layers2 },
   { id: 'file', label: 'Add file', hint: 'Windows File Explorer — pick one or more files', icon: FilePlus2 },
   { id: 'image', label: 'Add photo', hint: 'Windows File Explorer — pick photo(s)', icon: ImagePlus },
-  { id: 'folder', label: 'Open folder', hint: 'Windows File Explorer — attach a whole folder', icon: FolderOpen },
+  { id: 'folder', label: 'Open folder', hint: 'Edit files in place on your PC (recommended)', icon: FolderOpen },
+  { id: 'import-folder', label: 'Import copy', hint: 'Copy folder into ARK storage (sandbox)', icon: FolderOpen },
+  { id: 'enter-path', label: 'Enter path…', hint: 'Type a folder path and approve access', icon: FolderOpen },
 ];
 
-const MODE_IDS = new Set<ComposerPlusAction>(['plan', 'ask', 'debug', 'multitask']);
+const MODE_IDS = new Set<ComposerPlusAction>(['plan', 'ask', 'agent', 'debug', 'multitask']);
 
 function itemsForScope(scope: 'chat' | 'image' | 'code') {
   if (scope === 'image') {
     return ITEMS.filter(m => m.id === 'image');
   }
   if (scope === 'code') {
-    return ITEMS.filter(m => m.id === 'file' || m.id === 'image' || m.id === 'folder' || MODE_IDS.has(m.id));
+    return ITEMS.filter(m =>
+      m.id === 'file' || m.id === 'image' || m.id === 'folder'
+      || m.id === 'import-folder' || m.id === 'enter-path' || MODE_IDS.has(m.id));
   }
-  return ITEMS;
+  // Chat: Ask / Plan / Agent + open folder — no import-copy confusion.
+  return ITEMS.filter(m =>
+    m.id === 'file' || m.id === 'image' || m.id === 'folder'
+    || m.id === 'plan' || m.id === 'ask' || m.id === 'agent');
 }
 
 export function ComposerPlusMenu({
   onAction,
   scope = 'chat',
+  busy = false,
   className = '',
   buttonClassName = '',
 }: Props) {
@@ -65,7 +79,7 @@ export function ComposerPlusMenu({
   const attach = visible.filter(m => !MODE_IDS.has(m.id));
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || busy) return;
     const place = () => {
       const btn = btnRef.current;
       if (!btn) return;
@@ -79,7 +93,7 @@ export function ComposerPlusMenu({
       window.removeEventListener('resize', place);
       window.removeEventListener('scroll', place, true);
     };
-  }, [open]);
+  }, [open, busy]);
 
   useEffect(() => {
     if (!open) return;
@@ -99,12 +113,16 @@ export function ComposerPlusMenu({
     };
   }, [open]);
 
+  useEffect(() => {
+    if (busy) setOpen(false);
+  }, [busy]);
+
   const pick = (action: ComposerPlusAction) => {
     setOpen(false);
     onAction(action);
   };
 
-  const menu: ReactNode = open && pos
+  const menu: ReactNode = open && pos && !busy
     ? createPortal(
       <div
         ref={menuRef}
@@ -173,13 +191,24 @@ export function ComposerPlusMenu({
       <button
         ref={btnRef}
         type="button"
-        onClick={() => setOpen(o => !o)}
-        className={buttonClassName || 'w-9 h-9 rounded-full flex items-center justify-center text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors shrink-0'}
-        title={scope === 'image' ? 'Add photo' : 'Add mode or file'}
-        aria-label={scope === 'image' ? 'Add photo' : 'Add mode or file'}
+        onClick={() => {
+          if (busy) return;
+          setOpen(o => !o);
+        }}
+        disabled={busy}
+        className={`relative ${buttonClassName || 'w-9 h-9 rounded-full flex items-center justify-center text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors shrink-0'} ${busy ? 'opacity-90 cursor-wait' : ''}`}
+        title={busy ? 'Uploading…' : scope === 'image' ? 'Add photo' : 'Add mode or file'}
+        aria-label={busy ? 'Uploading' : scope === 'image' ? 'Add photo' : 'Add mode or file'}
         aria-expanded={open}
+        aria-busy={busy}
       >
-        <Plus className="w-4 h-4" />
+        {busy && (
+          <span
+            className="pointer-events-none absolute inset-0 rounded-full border-2 border-sky-400/25 border-t-sky-400 animate-spin"
+            aria-hidden
+          />
+        )}
+        <Plus className={`w-4 h-4 relative z-[1] ${busy ? 'opacity-70' : ''}`} />
       </button>
       {menu}
     </div>

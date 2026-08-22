@@ -3,6 +3,7 @@
  */
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { app } = require('electron');
 
@@ -176,6 +177,143 @@ function metaPath(projectId) {
   return path.join(projectDir(projectId), 'ark-meta.json');
 }
 
+function approvedRootsPath() {
+  return path.join(app.getPath('userData'), 'ark-workspace-roots.json');
+}
+
+function workspaceGrantsPath() {
+  return path.join(app.getPath('userData'), 'ark-workspace-grants.json');
+}
+
+function loadWorkspaceGrants() {
+  try {
+    const raw = fs.readFileSync(workspaceGrantsPath(), 'utf8');
+    const parsed = JSON.parse(raw);
+    return {
+      desktop: Boolean(parsed.desktop),
+      documents: Boolean(parsed.documents),
+      fullPc: Boolean(parsed.fullPc),
+      executionMode: parsed.executionMode === 'run_all' || parsed.executionMode === 'auto_review'
+        ? parsed.executionMode
+        : 'allowlist',
+    };
+  } catch {
+    return { desktop: false, documents: false, fullPc: false, executionMode: 'allowlist' };
+  }
+}
+
+function setWorkspaceGrants(grants) {
+  const prev = loadWorkspaceGrants();
+  const next = {
+    desktop: grants?.desktop != null ? Boolean(grants.desktop) : prev.desktop,
+    documents: grants?.documents != null ? Boolean(grants.documents) : prev.documents,
+    fullPc: grants?.fullPc != null ? Boolean(grants.fullPc) : prev.fullPc,
+    executionMode: grants?.executionMode != null
+      ? (grants.executionMode === 'run_all' || grants.executionMode === 'auto_review'
+        ? grants.executionMode
+        : 'allowlist')
+      : prev.executionMode,
+    updatedAt: Date.now(),
+  };
+  fs.mkdirSync(path.dirname(workspaceGrantsPath()), { recursive: true });
+  fs.writeFileSync(workspaceGrantsPath(), JSON.stringify(next, null, 2), 'utf8');
+  return next;
+}
+
+function isUnderFullPcGrant(absPath) {
+  const grants = loadWorkspaceGrants();
+  if (!grants.fullPc) return false;
+  const p = path.resolve(String(absPath || ''));
+  const home = path.resolve(os.homedir());
+  if (isPathUnderRoot(p, home)) return true;
+  const blockedRoots = [
+    path.resolve('C:\\Windows'),
+    path.resolve('C:\\Program Files'),
+    path.resolve('C:\\Program Files (x86)'),
+  ];
+  for (const br of blockedRoots) {
+    if (isPathUnderRoot(p, br)) return false;
+  }
+  try {
+    return fs.existsSync(p);
+  } catch {
+    return false;
+  }
+}
+
+function isUnderGrantedScope(absPath) {
+  const grants = loadWorkspaceGrants();
+  if (!grants.desktop && !grants.documents) return false;
+  const home = os.homedir();
+  const p = path.resolve(String(absPath || ''));
+  if (grants.desktop) {
+    const desk = path.resolve(path.join(home, 'Desktop'));
+    if (isPathUnderRoot(p, desk)) return true;
+  }
+  if (grants.documents) {
+    const docs = path.resolve(path.join(home, 'Documents'));
+    if (isPathUnderRoot(p, docs)) return true;
+  }
+  return false;
+}
+
+function loadApprovedRoots() {
+  try {
+    const raw = fs.readFileSync(approvedRootsPath(), 'utf8');
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed?.roots) ? parsed.roots : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveApprovedRoot(entry) {
+  const roots = loadApprovedRoots().filter(r => r.id !== entry.id);
+  roots.unshift(entry);
+  fs.mkdirSync(path.dirname(approvedRootsPath()), { recursive: true });
+  fs.writeFileSync(approvedRootsPath(), JSON.stringify({ roots: roots.slice(0, 48) }, null, 2), 'utf8');
+}
+
+/** True when child is inside root (no .. escape). */
+function isPathUnderRoot(child, root) {
+  const c = path.resolve(String(child || ''));
+  const r = path.resolve(String(root || ''));
+  if (!c || !r) return false;
+  if (c === r) return true;
+  const rel = path.relative(r, c);
+  return Boolean(rel) && !rel.startsWith('..') && !path.isAbsolute(rel);
+}
+
+function readMeta(projectId) {
+  try {
+    const mp = metaPath(projectId);
+    if (!fs.existsSync(mp)) return null;
+    return JSON.parse(fs.readFileSync(mp, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+/** Disk root for reads/writes — in-place workspace or copied project dir. */
+function resolveProjectRoot(projectId) {
+  const meta = readMeta(projectId);
+  if (meta?.inPlace && meta?.root) {
+    const root = path.resolve(String(meta.root));
+    if (fs.existsSync(root)) return root;
+  }
+  return resolveProjectDir(projectId);
+}
+
+function isAllowedExternalPath(absPath) {
+  const p = path.resolve(String(absPath || ''));
+  if (!p) return false;
+  const pr = path.resolve(projectsRoot());
+  if (isPathUnderRoot(p, pr)) return true;
+  if (isUnderFullPcGrant(p)) return true;
+  if (isUnderGrantedScope(p)) return true;
+  return loadApprovedRoots().some(r => isPathUnderRoot(p, path.resolve(String(r.path || ''))));
+}
+
 function shouldSkipDir(name) {
   const n = String(name || '');
   if (n === '.' || n === '..') return true;
@@ -216,7 +354,9 @@ function isSandboxBlockedPath(rel) {
 }
 
 function writeProjectFiles(projectId, projectName, files, sandbox) {
-  const root = projectDir(projectId);
+  const root = resolveProjectRoot(projectId);
+  const rootResolved = path.resolve(root);
+  const prior = readMeta(projectId);
   const written = [];
   const blocked = [];
   for (const [rel, content] of Object.entries(files || {})) {
@@ -230,13 +370,10 @@ function writeProjectFiles(projectId, projectName, files, sandbox) {
       continue;
     }
     const full = path.join(root, ...safe.split('/'));
-    if (sandbox) {
-      const resolved = path.resolve(full);
-      const rootResolved = path.resolve(root);
-      if (!resolved.startsWith(rootResolved + path.sep) && resolved !== rootResolved) {
-        blocked.push(safe);
-        continue;
-      }
+    const resolved = path.resolve(full);
+    if (!isPathUnderRoot(resolved, rootResolved)) {
+      blocked.push(safe);
+      continue;
     }
     fs.mkdirSync(path.dirname(full), { recursive: true });
     fs.writeFileSync(full, typeof content === 'string' ? content : String(content ?? ''), 'utf8');
@@ -251,16 +388,28 @@ function writeProjectFiles(projectId, projectName, files, sandbox) {
       files: written,
     };
   }
+  if (blocked.length && written.length === 0) {
+    return {
+      ok: false,
+      error: `Refused to write outside approved folder: ${blocked.slice(0, 3).join(', ')}`,
+      root,
+      files: written,
+    };
+  }
   const meta = {
+    ...(prior || {}),
     id: projectId,
-    name: projectName || projectId,
+    name: projectName || prior?.name || projectId,
     category: 'code',
+    kind: prior?.kind || (prior?.inPlace ? 'disk' : 'ark-project'),
+    inPlace: Boolean(prior?.inPlace),
     root,
     updatedAt: new Date().toISOString(),
     files: written,
   };
+  fs.mkdirSync(projectDir(projectId), { recursive: true });
   fs.writeFileSync(metaPath(projectId), JSON.stringify(meta, null, 2), 'utf8');
-  return { ok: true, root, files: written };
+  return { ok: true, root, files: written, inPlace: Boolean(meta.inPlace) };
 }
 
 function walkProjectFiles(root) {
@@ -304,17 +453,86 @@ function walkProjectFiles(root) {
   return files;
 }
 
-function readProjectFiles(projectId) {
-  const root = projectDir(projectId);
-  const files = walkProjectFiles(root);
-  let meta = null;
-  try {
-    if (fs.existsSync(metaPath(projectId))) {
-      meta = JSON.parse(fs.readFileSync(metaPath(projectId), 'utf8'));
+function listReadableProjectFiles(root) {
+  const out = [];
+  const seen = new Set();
+  function walk(dir, prefix) {
+    if (!fs.existsSync(dir)) return;
+    let real = dir;
+    try {
+      real = fs.realpathSync(dir);
+    } catch {
+      /* keep */
     }
-  } catch {
-    meta = null;
+    if (seen.has(real)) return;
+    seen.add(real);
+    const entries = safeReaddir(dir);
+    for (const name of entries) {
+      if (name === 'ark-meta.json' || name === 'ark-chat.json') continue;
+      if (shouldSkipDir(name)) continue;
+      const full = path.join(dir, name);
+      const rel = prefix ? `${prefix}/${name}` : name;
+      const st = safeStatFollow(full);
+      if (!st) continue;
+      if (st.isDirectory()) {
+        walk(full, rel);
+        continue;
+      }
+      if (!st.isFile()) continue;
+      if (shouldSkipFile(name, st.size)) continue;
+      if (out.length >= MAX_IMPORT_FILES) return;
+      out.push({ full, rel, size: st.size });
+    }
   }
+  walk(root, '');
+  return out;
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Read project text files in paced batches so the UI / OS stay responsive.
+ * onProgress({ phase, done, total, label })
+ */
+async function walkProjectFilesPaced(root, onProgress) {
+  const listed = listReadableProjectFiles(root);
+  const total = listed.length;
+  const files = {};
+  const batch = total > 200 ? 10 : total > 80 ? 14 : 20;
+  const pauseMs = total > 200 ? 16 : total > 80 ? 10 : 4;
+
+  onProgress?.({ phase: 'read', done: 0, total, label: `Reading 0/${total}` });
+
+  for (let i = 0; i < listed.length; i++) {
+    const item = listed[i];
+    try {
+      const buf = fs.readFileSync(item.full);
+      if (!isProbablyBinary(buf)) {
+        files[item.rel] = buf.toString('utf8');
+      }
+    } catch {
+      /* skip */
+    }
+    const done = i + 1;
+    if (done % batch === 0 || done === total) {
+      onProgress?.({
+        phase: 'read',
+        done,
+        total,
+        label: `Reading files ${done}/${total}`,
+      });
+      await sleep(pauseMs);
+    }
+  }
+  return files;
+}
+
+function readProjectFiles(projectId) {
+  const meta = readMeta(projectId);
+  const root = resolveProjectRoot(projectId);
+  const files = walkProjectFiles(root);
   return { ok: true, root, files, meta };
 }
 
@@ -402,7 +620,93 @@ function copyTree(srcRoot, destRoot) {
   };
 }
 
-function importFolder(projectId, projectName, sourceDir) {
+/** Open a folder in-place — no copy into userData. User approved this root. */
+async function openWorkspaceRoot(projectId, projectName, sourceDir, onProgress, options = {}) {
+  try {
+    const resolved = resolveFolderRoot(sourceDir);
+    if (!resolved.ok) {
+      if (resolved.error === 'file') {
+        return { ok: false, error: 'file', path: resolved.path, name: resolved.name };
+      }
+      return { ok: false, error: resolved.error || 'That folder could not be opened.' };
+    }
+    const src = resolved.path;
+    const folderName = resolved.name || path.basename(src);
+    const hint = String(projectName || '').trim();
+    const placeholder = /^(inspect|opened folder|new project|code project|code)$/i.test(hint);
+    const name = (!hint || placeholder) ? folderName : hint;
+
+    saveApprovedRoot({
+      id: projectId,
+      path: src,
+      name,
+      kind: 'disk',
+      approvedAt: Date.now(),
+    });
+
+    const meta = {
+      id: projectId,
+      name,
+      category: 'code',
+      kind: 'disk',
+      inPlace: true,
+      root: src,
+      approvedAt: Date.now(),
+      updatedAt: new Date().toISOString(),
+    };
+    fs.mkdirSync(projectDir(projectId), { recursive: true });
+    fs.writeFileSync(metaPath(projectId), JSON.stringify(meta, null, 2), 'utf8');
+
+    if (options.catalogOnly) {
+      const entries = safeReaddir(src).filter((name) => !shouldSkipDir(name));
+      onProgress?.({
+        phase: 'done',
+        done: 0,
+        total: 0,
+        label: 'Ready',
+      });
+      return {
+        ok: true,
+        root: src,
+        files: {},
+        listed: entries.length,
+        name,
+        inPlace: true,
+        catalogOnly: true,
+      };
+    }
+
+    const files = await walkProjectFilesPaced(src, onProgress);
+    const inventory = listTreeFiles(src);
+    for (const item of inventory) {
+      if (files[item.path] != null) continue;
+      const ext = (item.name.split('.').pop() || '').toLowerCase();
+      let kind = 'file';
+      if (IMAGE_EXT.has(ext)) kind = 'image';
+      else if (SKIP_EXT.has(ext) || item.size > MAX_FILE_BYTES) kind = ext || 'binary';
+      files[item.path] = `[${kind} · ${item.size} bytes · ${item.path}]`;
+    }
+    onProgress?.({
+      phase: 'done',
+      done: Object.keys(files).length,
+      total: Object.keys(files).length,
+      label: 'Ready',
+    });
+    return {
+      ok: true,
+      root: src,
+      files,
+      listed: inventory.length,
+      name,
+      inPlace: true,
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg || 'open failed' };
+  }
+}
+
+async function importFolder(projectId, projectName, sourceDir, onProgress) {
   try {
     const resolved = resolveFolderRoot(sourceDir);
     if (!resolved.ok) {
@@ -418,7 +722,9 @@ function importFolder(projectId, projectName, sourceDir) {
     }
     const src = resolved.path;
     const root = projectDir(projectId);
+    onProgress?.({ phase: 'copy', done: 0, total: 1, label: 'Copying folder…' });
     const tree = copyTree(src, root);
+    onProgress?.({ phase: 'copy', done: 1, total: 1, label: 'Copied' });
     const copied = tree.copied || [];
     const folderName = resolved.name || path.basename(src);
     const hint = String(projectName || '').trim();
@@ -427,13 +733,15 @@ function importFolder(projectId, projectName, sourceDir) {
       id: projectId,
       name: (!hint || placeholder) ? folderName : hint,
       category: 'code',
+      kind: 'ark-project',
+      inPlace: false,
       root,
       importedFrom: src,
       updatedAt: new Date().toISOString(),
       files: copied,
     };
     fs.writeFileSync(metaPath(projectId), JSON.stringify(meta, null, 2), 'utf8');
-    const files = walkProjectFiles(root);
+    const files = await walkProjectFilesPaced(root, onProgress);
     const inventory = listTreeFiles(src);
     for (const item of inventory) {
       if (files[item.path] != null) continue;
@@ -443,6 +751,7 @@ function importFolder(projectId, projectName, sourceDir) {
       else if (SKIP_EXT.has(ext) || item.size > MAX_FILE_BYTES) kind = ext || 'binary';
       files[item.path] = `[${kind} · ${item.size} bytes · ${item.path}]`;
     }
+    onProgress?.({ phase: 'done', done: Object.keys(files).length, total: Object.keys(files).length, label: 'Ready' });
     return {
       ok: true,
       root,
@@ -490,7 +799,8 @@ function readDataUrl(targetPath, maxBytes = 6_000_000) {
 function searchProjectFiles(projectId, query, limit = 50) {
   const q = String(query || '').trim().toLowerCase();
   if (!q) return { ok: true, hits: [], total: 0 };
-  const { files } = readProjectFiles(projectId);
+  const root = resolveProjectRoot(projectId);
+  const files = walkProjectFiles(root);
   const hits = [];
   let total = 0;
   for (const [rel, content] of Object.entries(files)) {
@@ -523,7 +833,32 @@ function deleteProjectFiles(projectId) {
 }
 
 function getProjectPath(projectId) {
-  return { ok: true, root: projectDir(projectId) };
+  const meta = readMeta(projectId);
+  const root = resolveProjectRoot(projectId);
+  return { ok: true, root, inPlace: Boolean(meta?.inPlace), kind: meta?.kind || 'ark-project' };
+}
+
+function deleteWorkspaceRelPath(projectId, relPath) {
+  const root = resolveProjectRoot(projectId);
+  const rootResolved = path.resolve(root);
+  const safe = String(relPath || '').replace(/\\/g, '/').replace(/^\/+/, '').replace(/^\.\//, '');
+  if (!safe || safe.includes('..')) return { ok: false, error: 'Invalid path' };
+  const full = path.resolve(path.join(root, ...safe.split('/')));
+  if (!isPathUnderRoot(full, rootResolved)) {
+    return { ok: false, error: 'Path is outside the workspace folder.' };
+  }
+  if (!isAllowedExternalPath(full)) {
+    return { ok: false, error: 'Path is outside an approved ARK workspace.' };
+  }
+  if (!fs.existsSync(full)) return { ok: false, error: 'Path not found' };
+  try {
+    const st = fs.statSync(full);
+    if (st.isDirectory()) fs.rmSync(full, { recursive: true, force: true });
+    else fs.unlinkSync(full);
+    return { ok: true, path: full };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'Delete failed' };
+  }
 }
 
 function pathStat(targetPath) {
@@ -554,6 +889,9 @@ function pathStat(targetPath) {
 function listDir(dirPath) {
   let p = path.resolve(String(dirPath || ''));
   if (!p || !fs.existsSync(p)) return { ok: false, error: 'Folder not found', items: [] };
+  if (!isAllowedExternalPath(p)) {
+    return { ok: false, error: 'Folder is outside an approved ARK workspace.', items: [] };
+  }
   if (/\.lnk$/i.test(p)) {
     const target = resolveWindowsShortcut(p);
     if (target) p = path.resolve(target);
@@ -652,6 +990,9 @@ function browseRoots() {
 function readTextFile(targetPath, maxBytes = 2_000_000) {
   const p = path.resolve(String(targetPath || ''));
   if (!p || !fs.existsSync(p)) return { ok: false, error: 'File not found' };
+  if (!isAllowedExternalPath(p)) {
+    return { ok: false, error: 'Path is outside an approved ARK workspace folder.' };
+  }
   let st;
   try {
     st = fs.statSync(p);
@@ -690,6 +1031,13 @@ function readTextFile(targetPath, maxBytes = 2_000_000) {
 module.exports = {
   projectsRoot,
   projectDir,
+  resolveProjectRoot,
+  readMeta,
+  isPathUnderRoot,
+  isAllowedExternalPath,
+  loadApprovedRoots,
+  loadWorkspaceGrants,
+  setWorkspaceGrants,
   writeProjectFiles,
   pathStat,
   listDir,
@@ -697,9 +1045,12 @@ module.exports = {
   readTextFile,
   readDataUrl,
   readProjectFiles,
+  openWorkspaceRoot,
   importFolder,
   searchProjectFiles,
   deleteProjectFiles,
   getProjectPath,
+  deleteWorkspaceRelPath,
   walkProjectFiles,
+  walkProjectFilesPaced,
 };

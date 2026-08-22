@@ -254,8 +254,8 @@ export function Dashboard() {
                 <button type="button" className="ark-btn-secondary text-xs" onClick={() => navigate({ name: 'chat', mode: 'image' })}>
                   Create image
                 </button>
-                <button type="button" className="ark-btn-secondary text-xs" onClick={() => navigate({ name: 'code' })}>
-                  Open Code
+                <button type="button" className="ark-btn-secondary text-xs" onClick={() => navigate({ name: 'chat' })}>
+                  Open Chat
                 </button>
               </div>
             </div>

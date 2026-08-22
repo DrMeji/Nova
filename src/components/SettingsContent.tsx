@@ -15,6 +15,7 @@ import {
   type UpdateChannel,
 } from '@/lib/localPrefs';
 import { clearSetupCompleted } from '@/lib/setup';
+import { syncWorkspaceGrantsFromPrefs } from '@/lib/workspaceGrants';
 import {
   detectHardware,
   getAccurateHardware,
@@ -275,6 +276,10 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
     setPrefs(next);
     setSavedFlash('Saved on this device');
     window.setTimeout(() => setSavedFlash(''), 2200);
+    if ('allowDesktopFolderAccess' in patch || 'allowDocumentsFolderAccess' in patch
+      || 'allowFullPcAccess' in patch || 'agentExecutionMode' in patch) {
+      void syncWorkspaceGrantsFromPrefs();
+    }
   };
 
   const aiMode = (settings?.ai_mode as AiModePref | undefined) ?? prefs.aiMode;
@@ -1627,6 +1632,77 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                   description="Block agent writes to .env, node_modules, lockfiles, and paths outside the project folder"
                   value={prefs.sandboxAgent}
                   onChange={v => patchPrefs({ sandboxAgent: v })}
+                />
+
+                <ToggleRow
+                  label="Allow Desktop folder access"
+                  description="Read and edit projects under your Desktop — not all of C:"
+                  value={prefs.allowDesktopFolderAccess}
+                  onChange={v => {
+                    if (v && !window.confirm(
+                      'Allow ARK to read and edit folders under your Desktop?\n\nScope: Desktop only — not your whole drive.',
+                    )) return;
+                    patchPrefs({ allowDesktopFolderAccess: v });
+                  }}
+                />
+                <ToggleRow
+                  label="Allow Documents folder access"
+                  description="Read and edit projects under your Documents — not all of C:"
+                  value={prefs.allowDocumentsFolderAccess}
+                  onChange={v => {
+                    if (v && !window.confirm(
+                      'Allow ARK to read and edit folders under your Documents?\n\nScope: Documents only — not your whole drive.',
+                    )) return;
+                    patchPrefs({ allowDocumentsFolderAccess: v });
+                  }}
+                />
+
+                <ToggleRow
+                  label="Full PC access (files)"
+                  description="Let ARK read and edit folders across your user profile when you ask — e.g. Desktop projects by name in chat"
+                  value={prefs.allowFullPcAccess}
+                  onChange={v => {
+                    if (v && !window.confirm(
+                      'Give ARK broad file access on this PC?\n\nARK can open folders you name (Desktop, Documents, projects) and run installs you approve.\n\nWindows and Program Files stay blocked.',
+                    )) return;
+                    patchPrefs({ allowFullPcAccess: v });
+                  }}
+                />
+
+                <div>
+                  <label className="block text-xs font-medium text-content-secondary mb-2">Execution &amp; approvals</label>
+                  <p className="text-[11px] text-content-tertiary mb-2">
+                    How ARK runs tools like npm install, pip, and file cleanup when you ask in Chat or Code.
+                  </p>
+                  <select
+                    value={prefs.agentExecutionMode}
+                    onChange={e => {
+                      const next = e.target.value as LocalPrefs['agentExecutionMode'];
+                      if (next === 'run_all' && !window.confirm(
+                        'Run everything?\n\nARK can run allowlisted commands without asking each time. Destructive commands stay blocked.',
+                      )) return;
+                      patchPrefs({ agentExecutionMode: next });
+                    }}
+                    className="w-full rounded-xl border border-surface-border bg-ark-navy-900 px-3 py-2.5 text-sm text-content-primary"
+                  >
+                    <option value="allowlist">Allowlist — npm, pip, git only (confirm each time)</option>
+                    <option value="auto_review">Auto-review — allowlisted runs automatically; others ask</option>
+                    <option value="run_all">Run everything — allowlisted tools run without extra prompts</option>
+                  </select>
+                  <p className="text-[11px] text-content-tertiary mt-2">
+                    {prefs.agentExecutionMode === 'run_all'
+                      ? 'Allowlisted installs and git commands can run when you ask. System folders stay protected.'
+                      : prefs.agentExecutionMode === 'auto_review'
+                        ? 'Known installs (npm, pip, …) run after one confirm; unknown commands need approval.'
+                        : 'Each install or shell command asks before it runs.'}
+                  </p>
+                </div>
+
+                <ToggleRow
+                  label="Chat-first layout"
+                  description="Hide the Code tab from the sidebar — Chat handles projects; Edit in Code still works from handoff chips"
+                  value={prefs.chatFirst}
+                  onChange={v => patchPrefs({ chatFirst: v })}
                 />
 
                 <div className="flex items-center gap-3 p-4 ark-card min-w-0">

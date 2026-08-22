@@ -3,6 +3,8 @@
  * Ollama is never part of this decision.
  */
 
+import { looksLikeFolderPathAsk } from '@/lib/folderPathAsk';
+
 export type ChatIntent = 'chat' | 'coding' | 'media';
 
 const BUILD_ASK =
@@ -13,6 +15,9 @@ const CODE_FILE =
 export function looksLikeCodeAsk(text: string): boolean {
   const t = String(text || '').trim();
   if (!t) return false;
+  if (looksLikeFolderPathAsk(t) && !/\b(build|create|make|scaffold|implement|fix|add|debug|code)\b/i.test(t)) {
+    return false;
+  }
   if (/```[\w]*\n/.test(t)) return true;
   if (BUILD_ASK.test(t)) return true;
   if (/\b(write|create|build|make)\b[\s\S]{0,64}\b(calculator|html|website|app|component|page|iphone|ipad|ios|android)\b/i.test(t)) return true;
@@ -21,6 +26,14 @@ export function looksLikeCodeAsk(text: string): boolean {
   if (/\b(typescript|javascript|python|react|node\.?js|html|css)\b/i.test(t) && /\b(build|write|create|fix|add)\b/i.test(t)) {
     return true;
   }
+  return false;
+}
+
+/** Show the “Switch to Code” banner — disabled while Code tab is parked. */
+export function shouldSuggestCodeSwitch(
+  _text: string,
+  _opts?: { hasStudioFiles?: boolean; composerAsk?: boolean },
+): boolean {
   return false;
 }
 

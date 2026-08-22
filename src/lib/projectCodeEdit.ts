@@ -34,11 +34,29 @@ export type ApplyEditsResult = {
   fileDiffs: { path: string; added: number; removed: number }[];
 };
 
-const MAX_CONTEXT_CHARS = 14_000;
-const MAX_FILE_CHARS = 3_500;
+const MAX_CONTEXT_CHARS = 12_000;
+const MAX_FILE_CHARS = 3_200;
 const MICRO_CONTEXT_CHARS = 4_500;
-const SMALL_CONTEXT_CHARS = 9_000;
-const MICRO_FILE_CHARS = 2_800;
+const SMALL_CONTEXT_CHARS = 8_000;
+const OVERVIEW_CONTEXT_CHARS = 8_000;
+const MICRO_FILE_CHARS = 2_400;
+const FULL_PACK_MAX_FILES = 24;
+const SMALL_PACK_MAX_FILES = 8;
+const MICRO_PACK_MAX_FILES = 3;
+
+const ENTRY_PRIORITY = [
+  'package.json',
+  'README.md',
+  'readme.md',
+  'index.html',
+  'src/App.tsx',
+  'src/main.tsx',
+  'src/index.tsx',
+  'electron/main.cjs',
+  'electron/main.ts',
+  'main.py',
+  'engine.py',
+];
 
 export type CodeTurnSize = 'micro' | 'small' | 'full';
 
@@ -65,6 +83,8 @@ Prefer small, correct diffs as full-file rewrites. If the user mentions GitHub o
 
 Rules:
 - Use real paths with folders: css/styles.css, js/app.js, src/App.tsx, package.json (forward slashes). Parent folders are created automatically.
+- Change only what the user asked. Emit @@@FILE with FULL content for each file you touch, but do NOT rewrite unrelated files.
+- For a one-line CSS tweak, touch only the CSS (and HTML only if needed). Do not regenerate the whole app.
 - Never create a folder named path/to — that phrase is not a real path. Always write index.html, css/styles.css, js/app.js (or src/…).
 - For typical web UIs, split markup, styles, and behavior:
   - index.html — markup only; link css/styles.css and js/app.js
@@ -139,23 +159,59 @@ export function classifyCodeTurnSize(userMessage: string, files?: ProjectFileMap
   return 'full';
 }
 
-function pickFilesForTurnSize(flat: ProjectFileMap, size: CodeTurnSize, userMessage: string): string[] {
-  const keys = Object.keys(flat).filter(k => !isInternalProjectFile(k));
+/** Rank paths for the turn pack — never dump the whole tree alphabetically. */
+export function rankFilesForTurnPack(
+  flat: ProjectFileMap,
+  userMessage: string,
+  size: CodeTurnSize,
+): string[] {
+  const keys = Object.keys(flat).filter(k => !isInternalProjectFile(k) && !isPlaceholderJunkPath(k));
   if (!keys.length) return [];
+  const limit = size === 'micro' ? MICRO_PACK_MAX_FILES : size === 'small' ? SMALL_PACK_MAX_FILES : FULL_PACK_MAX_FILES;
+  const scores = new Map<string, number>();
+  const bump = (path: string, n: number) => scores.set(path, (scores.get(path) || 0) + n);
+  const lower = userMessage.toLowerCase();
+
+  for (const ep of ENTRY_PRIORITY) {
+    if (flat[ep]) bump(ep, 22);
+    const nested = keys.find(k => k.endsWith(`/${ep}`));
+    if (nested) bump(nested, 20);
+  }
+
   const html = keys.find(k => /(^|\/)index\.html$/i.test(k)) || keys.find(k => /\.html?$/i.test(k));
   const css = keys.find(k => /(^|\/)(styles?|index)\.css$/i.test(k)) || keys.find(k => /\.css$/i.test(k));
   const js = keys.find(k => /(^|\/)app\.js$/i.test(k)) || keys.find(k => /\.js$/i.test(k) && !/node_modules/.test(k));
 
+  for (const k of keys) {
+    const base = k.split('/').pop() || k;
+    if (lower.includes(k.toLowerCase())) bump(k, 28);
+    else if (base.length >= 4 && lower.includes(base.toLowerCase())) bump(k, 18);
+    if (/(^|\/)readme(\.md)?$/i.test(k)) bump(k, 16);
+    if (/(^|\/)package\.json$/i.test(k)) bump(k, 14);
+  }
+
   if (size === 'micro') {
-    if (/\b(background|color|colour|css|style)\b/i.test(userMessage) && css) return [css, html].filter(Boolean) as string[];
-    if (html) return [html, css].filter(Boolean) as string[];
-    return keys.slice(0, 2);
+    if (/\b(background|color|colour|css|style)\b/i.test(userMessage) && css) bump(css, 30);
+    if (html) bump(html, 14);
+    if (css) bump(css, 12);
+  } else if (size === 'small') {
+    [html, css, js].forEach(p => { if (p) bump(p, 24); });
+  } else {
+    [html, css, js].forEach(p => { if (p) bump(p, 16); });
   }
-  if (size === 'small') {
-    const picked = [html, css, js].filter(Boolean) as string[];
-    return picked.length ? picked : keys.slice(0, 3);
+
+  const ranked = [...scores.entries()].sort((a, b) => b[1] - a[1]).map(([p]) => p);
+  const out: string[] = [];
+  for (const p of ranked) {
+    if (out.length >= limit) break;
+    if (!out.includes(p)) out.push(p);
   }
-  return keys;
+  if (!out.length) return keys.slice(0, limit);
+  return out;
+}
+
+function pickFilesForTurnSize(flat: ProjectFileMap, size: CodeTurnSize, userMessage: string): string[] {
+  return rankFilesForTurnPack(flat, userMessage, size);
 }
 
 function normalizePath(raw: string): string {
@@ -231,10 +287,7 @@ export function buildProjectCodingPrompt(
   const budget = size === 'micro' ? MICRO_CONTEXT_CHARS : size === 'small' ? SMALL_CONTEXT_CHARS : MAX_CONTEXT_CHARS;
   const fileCap = size === 'full' ? MAX_FILE_CHARS : MICRO_FILE_CHARS;
   const picked = pickFilesForTurnSize(flat, size, userMessage);
-  const entries = (size === 'full'
-    ? Object.keys(flat).sort()
-    : picked
-  ).map(path => [path, flat[path]] as const);
+  const entries = picked.map(path => [path, flat[path]] as const);
 
   let used = 0;
   const chunks: string[] = [];
@@ -271,6 +324,19 @@ ${Object.values(flat).some(v => String(v || '').trim())
 
 User request:
 ${userMessage.trim()}`;
+}
+
+/** Estimate tokens for the packed coding prompt (inner ring). */
+export function estimateCodingTurnTokens(
+  userMessage: string,
+  files: ProjectFileMap,
+  projectName?: string,
+): number {
+  const flat = flattenProjectFiles(files);
+  if (!Object.keys(flat).length) {
+    return Math.max(1, Math.ceil(buildProjectCodingPromptLite(userMessage, projectName).length / 4));
+  }
+  return Math.max(1, Math.ceil(buildProjectCodingPrompt(userMessage, files, projectName).length / 4));
 }
 
 /** Shorter prompt for empty projects — faster on local GGUF. */

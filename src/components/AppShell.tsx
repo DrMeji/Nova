@@ -11,7 +11,7 @@ import { SettingsContent } from './SettingsContent';
 import { SearchPanel } from './SearchPanel';
 import { useRecentProjects } from '@/context/RecentProjectsContext';
 import { useAuth } from '@/context/AuthContext';
-import { isSocialParked, isRevealed } from '@/lib/featurePark';
+import { isSocialParked, isRevealed, isCodeTabEnabled } from '@/lib/featurePark';
 import { useSocial } from '@/context/SocialContext';
 import { getLocalPrefs, setLocalPrefs } from '@/lib/localPrefs';
 import {
@@ -48,6 +48,18 @@ function getNavGroups(): {
     comingSoon?: boolean;
   }[];
 }[] {
+  const codeBlocked = !isCodeTabEnabled();
+  const workItems = [
+    {
+      label: 'Code',
+      icon: Code2,
+      route: { name: 'code' as const },
+      activity: 'code' as const,
+      comingSoon: codeBlocked,
+    },
+    { label: 'Projects', icon: Briefcase, route: { name: 'projects' as const } },
+    { label: 'History', icon: History, route: { name: 'dashboard' as const } },
+  ];
   return [
     {
       id: 'create',
@@ -58,11 +70,7 @@ function getNavGroups(): {
     {
       id: 'work',
       label: 'Work',
-      items: [
-        { label: 'Code', icon: Code2, route: { name: 'code' }, activity: 'code' },
-        { label: 'Projects', icon: Briefcase, route: { name: 'projects' } },
-        { label: 'History', icon: History, route: { name: 'dashboard' } },
-      ],
+      items: workItems,
     },
     {
       id: 'tools',
@@ -425,6 +433,8 @@ export function AppShell({ children }: { children: ReactNode }) {
         mode: item.mode === 'general' ? undefined : (item.mode as 'image' | 'video' | 'code' | undefined),
         chatId: item.id,
       });
+    } else if (!isCodeTabEnabled()) {
+      navigate({ name: 'chat' });
     } else {
       navigate({ name: 'project', id: item.id });
     }
@@ -575,10 +585,6 @@ export function AppShell({ children }: { children: ReactNode }) {
     if (item.activity) clearActivity(item.activity);
     if (item.label === 'Chat') {
       navigate({ name: 'chat' });
-      return;
-    }
-    if (item.label === 'Code') {
-      navigate({ name: 'code', session: crypto.randomUUID() });
       return;
     }
     if (item.route) navigate(item.route);

@@ -52,13 +52,18 @@ export function recordTokenUsage(scopeId: string, text: string) {
   return getTokenUsageRatio(scopeId);
 }
 
-/** Replace accumulated usage with a measurement of the full thread. */
+/** Set inner ring from **this turn’s packed prompt** (not cumulative import / session). */
 export function syncTokenUsage(scopeId: string, tokens: number) {
   if (!scopeId) return 0;
   const map = readMap();
   map[scopeId] = Math.max(0, tokens);
   writeMap(map);
   return getTokenUsageRatio(scopeId);
+}
+
+/** Alias — inner ring tracks the current turn pack only. */
+export function setTurnPackTokens(scopeId: string, tokens: number) {
+  return syncTokenUsage(scopeId, tokens);
 }
 
 export function resetTokenUsage(scopeId: string) {
