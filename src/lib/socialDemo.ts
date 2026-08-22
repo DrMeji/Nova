@@ -1,8 +1,14 @@
-/** Demo Networking posts + Message contacts for layout preview (local only). */
+/** Demo Networking / Message / Notifications data for local UI work.
+ * Production (GitHub) builds never include these — Connect stays empty until real users post.
+ */
 
 import type { ArkContact, DirectMessage, MessageAttachment, NetworkPost } from '@/lib/arkSocial';
 
+/** True only in `npm run electron:dev` / Vite DEV. Packaged releases are always clean. */
+export const SOCIAL_DEMO_ENABLED = import.meta.env.DEV;
+
 export function buildDemoNetworkPosts(myArkId: string): NetworkPost[] {
+  if (!SOCIAL_DEMO_ENABLED) return [];
   const mine = myArkId || '1110000';
   const now = Date.now();
   const ago = (h: number) => new Date(now - h * 3600_000).toISOString();
@@ -370,6 +376,7 @@ function attachFeedMeta(posts: NetworkPost[]): NetworkPost[] {
 }
 
 export function buildDemoContacts(): ArkContact[] {
+  if (!SOCIAL_DEMO_ENABLED) return [];
   const agoDays = (d: number) => new Date(Date.now() - d * 86400_000).toISOString();
   return [
     { arkId: '4820193', displayName: 'Maya Chen', addedAt: agoDays(14) },
@@ -389,8 +396,9 @@ export function buildDemoContacts(): ArkContact[] {
   ];
 }
 
-/** Demo peers who “texted you” and are waiting — green unread dot preview. */
-export const DEMO_UNREAD_ARK_IDS = ['4820193', '9056711', '5521190', '4482011'] as const;
+/** Demo peers who “texted you” and are waiting — green unread dot preview (dev only). */
+const DEMO_UNREAD_LIST = ['4820193', '9056711', '5521190', '4482011'] as const;
+export const DEMO_UNREAD_ARK_IDS: readonly string[] = SOCIAL_DEMO_ENABLED ? DEMO_UNREAD_LIST : [];
 
 const RANDOM_CHATS: Record<string, string[]> = {
   '4820193': ['Did you see that game last night?', 'lol that ending was wild', 'You free later?'],
@@ -437,6 +445,7 @@ export function demoPreviewLine(peerArkId: string): string | null {
 
 /** Demo thread with Sam (files) or light random back-and-forth for others. */
 export function buildDemoThread(myArkId: string, peerArkId: string): DirectMessage[] {
+  if (!SOCIAL_DEMO_ENABLED) return [];
   const me = myArkId || '3218815';
   const t = Date.now();
   const at = (m: number) => new Date(t - m * 60_000).toISOString();
@@ -545,6 +554,7 @@ export type DemoGroup = {
 };
 
 export function buildDemoGroups(myArkId: string): DemoGroup[] {
+  if (!SOCIAL_DEMO_ENABLED) return [];
   const me = myArkId || '3218815';
   const t = Date.now();
   const at = (m: number) => new Date(t - m * 60_000).toISOString();
@@ -583,6 +593,7 @@ export type DemoNotification = {
 };
 
 export function buildDemoNotifications(): DemoNotification[] {
+  if (!SOCIAL_DEMO_ENABLED) return [];
   const t = Date.now();
   const at = (h: number) => new Date(t - h * 3600_000).toISOString();
   return [

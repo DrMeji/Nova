@@ -67,7 +67,7 @@ export function NotificationsView() {
             {shown.length === 0 ? (
               <div className="text-center py-16 text-content-tertiary">
                 <Bell className="w-6 h-6 mx-auto mb-2 opacity-70" />
-                <p className="text-sm">No notifications match that search.</p>
+                <p className="text-sm">{query.trim() ? 'No notifications match that search.' : 'No notifications yet.'}</p>
               </div>
             ) : (
               shown.map(n => {

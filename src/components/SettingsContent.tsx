@@ -38,7 +38,7 @@ import { probeProviderKey } from '@/lib/providerSpeed';
 import { setCloudProviderEnabled } from '@/lib/cloudSources';
 import { getBrainUrl } from '@/lib/brainUrl';
 import { SettingsSystemHealth } from '@/components/SettingsSystemHealth';
-import { StatusCheck } from '@/components/BrandMark';
+import { BrandMark, StatusCheck } from '@/components/BrandMark';
 
 const REVEAL_FEATURES: { id: ParkId; label: string; description: string }[] = [
   { id: 'networking', label: 'Networking', description: 'Live — help feed, add/message builders (always on).' },
@@ -927,9 +927,12 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                         className={`rounded-xl border border-surface-border p-2.5 ${editing ? 'col-span-2 lg:col-span-3' : ''}`}
                       >
                         <div className="flex items-center justify-between gap-2">
-                          <div className="min-w-0">
-                            <p className="text-sm font-medium text-content-primary truncate">{p.name}</p>
-                            <p className="text-[11px] text-content-tertiary truncate">{p.hint}</p>
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <BrandMark id={p.id} name={p.name} size="sm" />
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium text-content-primary truncate">{p.name}</p>
+                              <p className="text-[11px] text-content-tertiary truncate">{p.hint}</p>
+                            </div>
                           </div>
                           <div className="flex items-center gap-1.5 shrink-0">
                             {hasKey && (

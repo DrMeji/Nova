@@ -295,6 +295,18 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.103',
+    channel: 'stable' as const,
+    date: 'Aug 21, 2026',
+    title: 'Clean Connect for new installs + sharper brand icons',
+    notes: [
+      'Networking, Message, and Notifications ship empty — no fake demo posts, chats, or alerts in production builds (dev still has local templates)',
+      'Real network posts and messages still appear when people actually use Connect',
+      'Plugin / Models / Local AI / Settings API key brand marks cleaned up (Gmail, Slack, Discord, Drive, GitHub, Groq, and more)',
+      'Update via Settings → Updates → Check → Download when this build is published',
+    ],
+  },
+  {
     version: '0.1.102',
     channel: 'stable' as const,
     date: 'Aug 21, 2026',
