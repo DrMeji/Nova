@@ -102,7 +102,14 @@ import { runCodeStudioCommand } from '@/lib/studioCommands';
 import { applyChatReplyEdits } from '@/lib/chatAgentApply';
 import { deleteProjectFolderOnDisk, handleDeleteProjectChatRequest, looksLikeDeleteFolderAsk } from '@/lib/deleteProjectFlow';
 import { classifyDiskIntent } from '@/lib/chatDiskIntent';
-import { deleteFileOnDisk, handleAddFileChatRequest, handleDeleteFileChatRequest } from '@/lib/chatDiskOps';
+import { deleteFileOnDisk, handleAddFileChatRequest, handleDeleteFileChatRequest, handleReadFileChatRequest } from '@/lib/chatDiskOps';
+import {
+  buildRestorePointCommand,
+  extractWriteFileContent,
+  looksLikeReadFileAsk,
+  looksLikeRestorePointAsk,
+  parseReadFileTarget,
+} from '@/lib/chatPcTasks';
 import {
   inferAgentCommand,
   looksLikeRuntimeInstallAsk,
@@ -2578,6 +2585,7 @@ export function AIChat() {
         const addOutcome = await handleAddFileChatRequest({
           fileName: diskIntent.name,
           parentHint: diskIntent.parentHint,
+          content: extractWriteFileContent(content) ?? '',
           workspaceDiskRoot: diskRoot,
           workspaceProjectId: diskProjectId,
           workspaceName: diskWorkspaceName,
@@ -2620,6 +2628,57 @@ export function AIChat() {
           );
           return;
         }
+      }
+    }
+
+    // PC system tasks — restore point, read file (no workspace required; Full PC / Desktop grant).
+    if ((mode === 'general' || mode === 'code') && hasFolderAccessGrant()) {
+      await syncWorkspaceGrantsFromPrefs();
+      const homeCwd = (await window.arkDesktop?.browseRoots?.())?.roots?.find(r => r.id === 'home')?.path
+        || chatStudioDiskRootRef.current
+        || diskRoot
+        || undefined;
+
+      if (looksLikeRestorePointAsk(content) && window.arkDesktop?.agentRun) {
+        const cmd = buildRestorePointCommand(`ARK ${new Date().toLocaleDateString()}`);
+        const restoreOutcome = await runAgentCommand({
+          command: cmd,
+          cwd: homeCwd || 'C:\\Users',
+          confirmLabel: `Create a Windows restore point for today?\n\n${cmd}\n\nWindows may ask for administrator permission.`,
+        });
+        if (restoreOutcome.needsConfirm) {
+          const { command, cwd, label } = restoreOutcome.needsConfirm;
+          if (!window.confirm(`Run on your PC?\n\n${label}`)) {
+            await finishPlainReply('Restore point canceled.');
+            return;
+          }
+          setMessages(prev => prev.map(m => (
+            m.id === assistantId ? { ...m, content: '__generating__:chat:Creating restore point…' } : m
+          )));
+          const ran = await runAgentCommand({ command, cwd, skipConfirm: true });
+          const text = ran.reply?.includes('Access is denied') || ran.reply?.toLowerCase().includes('elevated')
+            ? `${ran.reply}\n\nWindows restore points need **Run as administrator**. Approve the UAC prompt if it appears, or run ARK as admin once.`
+            : (ran.reply || 'Restore point finished.');
+          await finishPlainReply(text);
+          return;
+        }
+        if (restoreOutcome.handled && restoreOutcome.reply) {
+          await finishPlainReply(restoreOutcome.reply);
+          return;
+        }
+      }
+
+      if (looksLikeReadFileAsk(content)) {
+        const parsed = parseReadFileTarget(content);
+        const readOutcome = await handleReadFileChatRequest({
+          fileName: parsed.fileName,
+          parentHint: parsed.parentHint,
+          workspaceDiskRoot: diskRoot,
+          stickyTarget: stickyDiskTarget,
+          lastListedFolder: getLastListedFolder(activeChatId),
+        });
+        await finishPlainReply(readOutcome.text);
+        return;
       }
     }
 

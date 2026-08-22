@@ -7,6 +7,7 @@ import {
   parseDeleteProjectTarget,
 } from '../src/lib/deleteProjectFlow.ts';
 import { classifyDiskIntent } from '../src/lib/chatDiskIntent.ts';
+import { looksLikeRestorePointAsk } from '../src/lib/chatPcTasks.ts';
 import { isBlockedDiskTargetName } from '../src/lib/projectNames.ts';
 
 const cases = [
@@ -176,6 +177,13 @@ if (isBlockedDiskTargetName('this project')) {
   console.log('OK blocklist: this project');
 } else {
   console.error('FAIL blocklist: this project should be blocked');
+  failed += 1;
+}
+
+if (looksLikeRestorePointAsk('create a restore point for today')) {
+  console.log('OK restore point ask');
+} else {
+  console.error('FAIL restore point detection');
   failed += 1;
 }
 

@@ -29,6 +29,9 @@ const ALLOWLIST_PATTERNS: RegExp[] = [
   /^git(\s|$)/i,
   /^winget(\s|$)/i,
   /^choco(\s|$)/i,
+  /^Checkpoint-Computer\b/i,
+  /^Get-ComputerRestorePoint\b/i,
+  /^Enable-ComputerRestore\b/i,
 ];
 
 const BLOCKED_PATTERNS: RegExp[] = [

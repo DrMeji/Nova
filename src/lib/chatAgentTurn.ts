@@ -66,7 +66,7 @@ export function chatTurnAllowsExec(content: string, composerMode: ComposerAgentM
   const mode = normalizeComposerMode(composerMode);
   if (modeBlocksExec(mode)) return false;
   return isChatAgentTurn(content, composerMode)
-    || /\b(install|npm|pip|git|run|execute|winget|choco)\b/i.test(content);
+    || /\b(install|npm|pip|git|run|execute|winget|choco|restore\s+point|checkpoint)\b/i.test(content);
 }
 
 export function workspacePathLabel(opts: {

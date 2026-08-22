@@ -21,6 +21,9 @@ const ALLOWLIST = [
   /^git(\s|$)/i,
   /^winget(\s|$)/i,
   /^choco(\s|$)/i,
+  /^Checkpoint-Computer\b/i,
+  /^Get-ComputerRestorePoint\b/i,
+  /^Enable-ComputerRestore\b/i,
 ];
 
 const BLOCKED = [
@@ -62,7 +65,9 @@ function commandAllowed(command, mode) {
 }
 
 function resolveCwd(cwd) {
-  const p = path.resolve(String(cwd || process.cwd()));
+  const os = require('os');
+  const fallback = os.homedir();
+  const p = path.resolve(String(cwd || fallback));
   if (!fs.existsSync(p)) return { ok: false, error: 'Working folder not found.' };
   if (!arkProjects.isAllowedExternalPath(p)) {
     return { ok: false, error: 'That folder is outside ARK access. Enable Desktop/Documents or Full PC access in Settings.' };

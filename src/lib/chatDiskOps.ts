@@ -167,6 +167,7 @@ async function resolveAddFileParentPath(opts: {
 export async function handleAddFileChatRequest(opts: {
   fileName: string;
   parentHint?: string;
+  content?: string;
   workspaceDiskRoot?: string | null;
   workspaceProjectId?: string | null;
   workspaceName?: string | null;
@@ -176,6 +177,7 @@ export async function handleAddFileChatRequest(opts: {
   const {
     fileName,
     parentHint,
+    content = '',
     workspaceDiskRoot,
     workspaceProjectId,
     workspaceName,
@@ -217,7 +219,7 @@ export async function handleAddFileChatRequest(opts: {
 
   const written = await window.arkDesktop.workspaceWriteFile({
     targetPath: fullPath,
-    content: '',
+    content: typeof content === 'string' ? content : '',
   });
   if (!written.ok) {
     return { kind: 'reply', text: written.error || `Could not create \`${wantFile}\`.` };
@@ -227,9 +229,82 @@ export async function handleAddFileChatRequest(opts: {
     await window.arkDesktop.projectWrite({
       projectId: workspaceProjectId,
       projectName: workspaceName || undefined,
-      files: { [wantFile]: '' },
+      files: { [wantFile]: typeof content === 'string' ? content : '' },
     });
   }
 
   return { kind: 'done', fileName: wantFile, filePath: written.path || fullPath };
+}
+
+export async function handleReadFileChatRequest(opts: {
+  fileName: string | null;
+  parentHint?: string;
+  workspaceDiskRoot?: string | null;
+  stickyTarget?: { path: string; name: string; kind: 'file' | 'folder' } | null;
+  lastListedFolder?: LastListedFolder | null;
+}): Promise<{ kind: 'reply'; text: string }> {
+  const { fileName, parentHint, workspaceDiskRoot, stickyTarget, lastListedFolder } = opts;
+
+  let wantFile = fileName ? normalizeDiskFileName(fileName) : null;
+  if (!wantFile && stickyTarget?.kind === 'file') {
+    wantFile = stickyTarget.name;
+  }
+  if (!wantFile) {
+    return {
+      kind: 'reply',
+      text: 'Which file should I read? Say e.g. *read the file notes.txt in Pictures*.',
+    };
+  }
+
+  if (stickyTarget?.kind === 'file' && namesRoughlyMatch(stickyTarget.name, wantFile)) {
+    const read = await window.arkDesktop?.readTextFile?.({ path: stickyTarget.path, maxBytes: 120_000 });
+    if (read?.ok && read.content != null) {
+      const preview = read.content.length > 8000
+        ? `${read.content.slice(0, 8000)}\n\n…(truncated)`
+        : read.content;
+      return {
+        kind: 'reply',
+        text: `**${stickyTarget.name}**\n\`${stickyTarget.path}\`\n\n\`\`\`\n${preview}\n\`\`\``,
+      };
+    }
+  }
+
+  const parentPath = await resolveDiskParentPath({
+    parentHint,
+    workspaceDiskRoot,
+    stickyTarget,
+    lastListedFolder,
+  });
+
+  const candidatePaths: string[] = [];
+  if (parentPath) candidatePaths.push(joinPath(parentPath, wantFile));
+  if (/^[A-Za-z]:\\/i.test(wantFile)) candidatePaths.push(wantFile);
+
+  const projectsContainer = await resolveDesktopProjectsFolderOnDisk();
+  if (projectsContainer?.path) {
+    candidatePaths.push(joinPath(projectsContainer.path, wantFile));
+  }
+
+  for (const candidatePath of [...new Set(candidatePaths)]) {
+    const read = await window.arkDesktop?.readTextFile?.({ path: candidatePath, maxBytes: 120_000 });
+    if (!read?.ok) continue;
+    if (read.isBinary) {
+      return {
+        kind: 'reply',
+        text: `**${wantFile}** at \`${read.path || candidatePath}\` is a binary file — I can only show text files here.`,
+      };
+    }
+    const preview = String(read.content || '').length > 8000
+      ? `${String(read.content).slice(0, 8000)}\n\n…(truncated)`
+      : String(read.content || '');
+    return {
+      kind: 'reply',
+      text: `**${wantFile}**\n\`${read.path || candidatePath}\`\n\n\`\`\`\n${preview}\n\`\`\``,
+    };
+  }
+
+  return {
+    kind: 'reply',
+    text: `Couldn't find **${wantFile}**${parentPath ? ` in \`${parentPath}\`` : ''}. Check the path in File Explorer.`,
+  };
 }
