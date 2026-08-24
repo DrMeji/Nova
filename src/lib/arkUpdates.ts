@@ -1,6 +1,6 @@
-/** In-app updates via public DrMeji/Ark Releases (never open the browser). */
+/** In-app updates via public DrMeji/Ark-Releases (installers only; source stays private). */
 
-export const ARK_UPDATE_REPO = 'DrMeji/Ark';
+export const ARK_UPDATE_REPO = 'DrMeji/Ark-Releases';
 export const ARK_GITHUB_REPO = 'DrMeji/Ark';
 
 export type ArkUpdateInfo = {

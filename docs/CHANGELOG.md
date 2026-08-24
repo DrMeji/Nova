@@ -1,23 +1,32 @@
 # ARK changelog
 
-## 0.1.145 — 2026-08-24
+## 0.1.146 â€” 2026-08-24
+
+In-app updates work while source stays private.
+
+**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark-Releases/releases/download/v0.1.146/ARK-Setup.exe) Â· [Release notes](https://github.com/DrMeji/Ark-Releases/releases/tag/v0.1.146)
+
+### Updates
+- Check/Download now reads the public **DrMeji/Ark-Releases** feed (installers only).
+- Private `DrMeji/Ark` source no longer blocks anonymous update checks (GitHub 404).
+## 0.1.145 ï¿½ 2026-08-24
 
 Chat continuity, setup Connect links, and image download / enlarge fixes.
 
-**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.145/ARK-Setup.exe) · [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.145)
+**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.145/ARK-Setup.exe) ï¿½ [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.145)
 
 ### Chat
-- Soft follow-ups (“more details”, “dive deeper”, “recommended area”) keep history and a thread topic so local models stay on coding instead of inventing EcoBuddy or movies/TV.
+- Soft follow-ups (ï¿½more detailsï¿½, ï¿½dive deeperï¿½, ï¿½recommended areaï¿½) keep history and a thread topic so local models stay on coding instead of inventing EcoBuddy or movies/TV.
 - Bare teach-me follow-ups no longer force product-planning framing.
 
 ### Setup Connect
-- Connect / Add opens the system browser immediately (no “Open external link?” confirm) for OpenAI, NVIDIA NIM, and other hosts.
+- Connect / Add opens the system browser immediately (no ï¿½Open external link?ï¿½ confirm) for OpenAI, NVIDIA NIM, and other hosts.
 
 ### Images
-- Download saves a real **JPG/PNG** (was wrongly named `.svg` when “svg” appeared inside base64).
+- Download saves a real **JPG/PNG** (was wrongly named `.svg` when ï¿½svgï¿½ appeared inside base64).
 - Click an image to open a larger clear preview; Esc or backdrop closes it.
 - Portrait prompts nudge better eye anatomy (Flux still has limits).
-## 0.1.144 GÇö 2026-08-24
+## 0.1.144 Gï¿½ï¿½ 2026-08-24
 
 Setup access toggles apply instantly (no OK popups). Decorative em dashes cleaned from UI copy.
 
@@ -25,12 +34,12 @@ Setup access toggles apply instantly (no OK popups). Decorative em dashes cleane
 
 ### Setup / Security
 - Desktop, Documents, Full PC, and Run everything toggles no longer show a second confirm dialog.
-- Same for Settings GåÆ Security access and execution mode.
+- Same for Settings Gï¿½ï¿½ Security access and execution mode.
 
 ### Copy
 - Removed decorative em dashes in user-facing text (e.g. GÇ£Gemini free tier. One key.GÇ¥).
 
-## 0.1.143 GÇö 2026-08-24
+## 0.1.143 Gï¿½ï¿½ 2026-08-24
 
 Fresh installs always open on Sign in / Sign up before first-run setup.
 
@@ -40,7 +49,7 @@ Fresh installs always open on Sign in / Sign up before first-run setup.
 - New installs clear leftover saved sessions so setup cannot skip Sign in / Sign up.
 - Installer deletes `ark-auth-storage.dat` on a fresh install (not upgrades).
 
-## 0.1.142 GÇö 2026-08-24
+## 0.1.142 Gï¿½ï¿½ 2026-08-24
 
 Plugins Soon locks, profile photos across Connect, and presence-colored sidebar ring.
 
@@ -53,7 +62,7 @@ Plugins Soon locks, profile photos across Connect, and presence-colored sidebar 
 - Uploaded profile photo syncs to your account and shows on Network, Message, and Notifications.
 - Sidebar profile avatar ring + ARK ID color follow Online / Idle / Do Not Disturb / Inactive.
 
-## 0.1.141 GÇö 2026-08-24
+## 0.1.141 Gï¿½ï¿½ 2026-08-24
 
 Live social: cloud friend requests, real-time DMs, and internet voice calls.
 
@@ -61,18 +70,18 @@ Live social: cloud friend requests, real-time DMs, and internet voice calls.
 
 ### Social (production)
 
-- **Friend requests** sync through Supabase (`ark_friend_requests`) GÇö add by ARK ID, accept in Notifications on the other device.
+- **Friend requests** sync through Supabase (`ark_friend_requests`) Gï¿½ï¿½ add by ARK ID, accept in Notifications on the other device.
 - **Direct messages** already use Supabase Realtime; friend flow is now wired for cross-user use when signed in.
 - **Voice calls** use Supabase signaling + WebRTC audio; offer/answer/ICE persist for reconnect catch-up.
 - **Call tab** enabled by default (no Testers toggle required).
 - **Call UI** on message pill + sidebar dock (colored ring, mute, timer).
-- Docs: [social-connectivity.md](./social-connectivity.md) GÇö how messaging and calls work over the internet.
+- Docs: [social-connectivity.md](./social-connectivity.md) Gï¿½ï¿½ how messaging and calls work over the internet.
 
 ### Backend migration
 
 Apply `supabase/migrations/20260824100000_ark_friend_requests.sql` on the hosted Supabase project and enable Realtime on `ark_friend_requests`.
 
-## 0.1.140 GÇö 2026-08-24
+## 0.1.140 Gï¿½ï¿½ 2026-08-24
 
 Image quality, chat keep-alive, NSFW gate, and static-project fixes.
 
@@ -83,7 +92,7 @@ Image quality, chat keep-alive, NSFW gate, and static-project fixes.
 - Flux-first pipeline (no dual Pollinations race that caused 429 GÇ£busyGÇ¥ errors).
 - Stronger sharp-focus prompts and blur negative prompts; rejects soft/fast cache stubs.
 - Optional ffmpeg upscale+unsharp when frames arrive below 1100px.
-- NSFW off adds SFW constraints on free hosts; Settings GåÆ AI toggle controls adult content.
+- NSFW off adds SFW constraints on free hosts; Settings Gï¿½ï¿½ AI toggle controls adult content.
 
 ### Chat / navigation
 
@@ -98,7 +107,7 @@ Image quality, chat keep-alive, NSFW gate, and static-project fixes.
 
 Download: [Releases](https://github.com/DrMeji/Ark/releases)
 
-## 0.1.138 GÇö 2026-08-22
+## 0.1.138 Gï¿½ï¿½ 2026-08-22
 
 Chat coding, new-product routing, and delete targeting.
 
@@ -112,7 +121,7 @@ Default Chat is Agent, not Ask. Asks like **add a search button** or **change th
 
 ### New product ideas (Ring System)
 
-GÇ£I want to work on a project called Ring SystemGÇªGÇ¥ is a **new app**, not GÇ£which existing folder? DeBloat.GÇ¥ Greenfield plan GåÆ Create project. `LetGÇÖs work on DeBloat` still binds an existing folder.
+GÇ£I want to work on a project called Ring SystemGÇªGÇ¥ is a **new app**, not GÇ£which existing folder? DeBloat.GÇ¥ Greenfield plan Gï¿½ï¿½ Create project. `LetGï¿½ï¿½s work on DeBloat` still binds an existing folder.
 
 ### Delete / catalog safety
 
@@ -124,7 +133,7 @@ GÇ£I want to work on a project called Ring SystemGÇªGÇ¥ is a **new app**, not GÇ
 
 Chat/Code view types: `ChatMessage.project_id`, attach `kind as const`, optional `window.arkDesktop`, Code composer `'agent'` mode, `readTextFile` `text`/`binary`.
 
-### Also in this line (0.1.118GÇô0.1.137)
+### Also in this line (0.1.118Gï¿½ï¿½0.1.137)
 
 - Chat-first PC agent: explore, folder catalog, Desktop / Documents / Full PC grants
 - Create / delete project from Chat (TDZ delete bug fixed)

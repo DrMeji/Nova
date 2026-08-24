@@ -1,5 +1,6 @@
 /**
- * In-app updates via public DrMeji/Ark Releases.
+ * In-app updates via public DrMeji/Ark-Releases (installer feed only).
+ * Source stays private in DrMeji/Ark — GitHub blocks anonymous release API on private repos.
  *
  * 1) Download installer inside the main ARK app
  * 2) Breakaway-launch ARK.exe --ark-updater (survives parent quit; no PowerShell UI)
@@ -13,7 +14,10 @@ const http = require('http');
 const { spawn, execFileSync } = require('child_process');
 const { app, BrowserWindow } = require('electron');
 
-const UPDATE_REPO = 'DrMeji/Ark';
+/** Public feed (no source). Prefer this so Check works without GitHub login. */
+const UPDATE_REPO = 'DrMeji/Ark-Releases';
+/** Legacy private source repo — only used as a fallback if the public feed is empty. */
+const UPDATE_REPO_FALLBACK = 'DrMeji/Ark';
 const POST_UPDATE_FLAG = 'ark-post-update.json';
 const UI_SHOWN_FLAG = 'ark-ui-shown.flag';
 const SPLASH_ALIVE_FLAG = 'ark-update-splash-alive.flag';
@@ -938,15 +942,29 @@ async function runStandaloneSplash(argv) {
   }
 }
 
+async function fetchReleases(repo) {
+  return httpsJson(`https://api.github.com/repos/${repo}/releases?per_page=30`);
+}
+
 async function checkForUpdate() {
   const currentVersion = app.getVersion();
   // Silent check — indicator lives in the sidebar near Search, not the bottom strip.
 
   try {
-    // Prefer scanning all releases so we don't get stuck on a "latest" release that
-    // either isn't the newest semver or is missing the installer asset.
-    const res = await httpsJson(`https://api.github.com/repos/${UPDATE_REPO}/releases?per_page=30`);
+    // Prefer the public installer feed. Private DrMeji/Ark returns 404 without a GitHub login.
+    let res = await fetchReleases(UPDATE_REPO);
+    let usedRepo = UPDATE_REPO;
     if (res.status !== 200 || !Array.isArray(res.data)) {
+      const fallback = await fetchReleases(UPDATE_REPO_FALLBACK);
+      if (fallback.status === 200 && Array.isArray(fallback.data)) {
+        res = fallback;
+        usedRepo = UPDATE_REPO_FALLBACK;
+      }
+    }
+    if (res.status !== 200 || !Array.isArray(res.data)) {
+      const privateHint = res.status === 404
+        ? ` GitHub returned 404 for ${UPDATE_REPO} (private or missing). Updates need a public release feed.`
+        : ` HTTP ${res.status}.`;
       sendProgress({
         status: 'error',
         percent: 0,
@@ -957,7 +975,7 @@ async function checkForUpdate() {
         ok: false,
         newerAvailable: false,
         currentVersion,
-        message: 'Could not check for updates right now. Try again in a moment.',
+        message: `Could not check for updates right now.${privateHint}`,
       };
     }
 
@@ -1026,7 +1044,7 @@ async function checkForUpdate() {
         newerAvailable: true,
         currentVersion,
         latestTag: tag,
-        message: `Update ${tag} is listed but ARK-Setup.exe was not found.`,
+        message: `Update ${tag} is listed on ${usedRepo} but ARK-Setup.exe was not found.`,
       };
     }
 
