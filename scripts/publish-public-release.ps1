@@ -17,7 +17,7 @@ if ($Tag -notmatch '^v\d+\.\d+\.\d+') {
 }
 
 if (-not (Test-Path $Setup)) {
-  throw "Missing $Setup — run npm run electron:build first."
+  throw "Missing $Setup - run npm run electron:build first."
 }
 
 $ver = $Tag.TrimStart('v')
@@ -28,7 +28,6 @@ foreach ($extra in @('release/ARK-Setup.exe.blockmap', 'release/latest.yml', 're
   if (Test-Path $extra) { $files += $extra }
 }
 
-# Guard: refuse if someone pointed this at a repo that already has source paths.
 $names = @(gh api "repos/$PublicRepo/contents" --jq '.[].name' 2>$null)
 $blocked = @($names | Where-Object { $_ -match '^(src|electron|package\.json|dist|node_modules)$' })
 if ($blocked.Count -gt 0) {
@@ -40,8 +39,8 @@ $notes = @"
 
 Windows desktop installer.
 
-- **ARK-Setup.exe** — install ARK
-- After install: **Settings → Updates → Check → Download** for newer builds
+- ARK-Setup.exe - install ARK
+- After install: Settings -> Updates -> Check -> Download for newer builds
 
 Source code is not included in this repository.
 "@
