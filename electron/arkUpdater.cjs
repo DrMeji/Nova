@@ -1,6 +1,6 @@
 /**
- * In-app updates via public DrMeji/Ark-Releases (installer feed only).
- * Source stays private in DrMeji/Ark — GitHub blocks anonymous release API on private repos.
+ * In-app updates via public DrMeji/Ark (installer feed only).
+ * Source stays private in DrMeji/Ark-Source — never publish app source to the public repo.
  *
  * 1) Download installer inside the main ARK app
  * 2) Breakaway-launch ARK.exe --ark-updater (survives parent quit; no PowerShell UI)
@@ -14,10 +14,10 @@ const http = require('http');
 const { spawn, execFileSync } = require('child_process');
 const { app, BrowserWindow } = require('electron');
 
-/** Public feed (no source). Prefer this so Check works without GitHub login. */
-const UPDATE_REPO = 'DrMeji/Ark-Releases';
-/** Legacy private source repo — only used as a fallback if the public feed is empty. */
-const UPDATE_REPO_FALLBACK = 'DrMeji/Ark';
+/** Public installer feed (no source). */
+const UPDATE_REPO = 'DrMeji/Ark';
+/** Private source repo — fallback only; anonymous GitHub API returns 404 here. */
+const UPDATE_REPO_FALLBACK = 'DrMeji/Ark-Source';
 const POST_UPDATE_FLAG = 'ark-post-update.json';
 const UI_SHOWN_FLAG = 'ark-ui-shown.flag';
 const SPLASH_ALIVE_FLAG = 'ark-update-splash-alive.flag';

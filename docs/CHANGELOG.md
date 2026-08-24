@@ -1,5 +1,15 @@
 # ARK changelog
 
+## 0.1.147 — 2026-08-24
+
+Public downloads without public source.
+
+**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.147/ARK-Setup.exe) · [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.147)
+
+### Distribution
+- Public **DrMeji/Ark** is README + Releases (installers) only.
+- Full source lives in private **DrMeji/Ark-Source**.
+- In-app updates check the public Ark feed.
 ## 0.1.146 — 2026-08-24
 
 In-app updates work while source stays private.

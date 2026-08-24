@@ -1,16 +1,16 @@
 {
   "name": "ark",
   "private": true,
-  "version": "0.1.146",
+  "version": "0.1.147",
   "type": "module",
   "main": "electron/main.cjs",
   "description": "ARK — AI Creation Studio desktop app",
   "author": "DrMeji",
   "repository": {
     "type": "git",
-    "url": "https://github.com/DrMeji/Ark.git"
+    "url": "https://github.com/DrMeji/Ark-Source.git"
   },
-  "homepage": "https://github.com/DrMeji/Ark-Releases",
+  "homepage": "https://github.com/DrMeji/Ark/releases",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
@@ -103,7 +103,7 @@
       {
         "provider": "github",
         "owner": "DrMeji",
-        "repo": "Ark-Releases",
+        "repo": "Ark",
         "releaseType": "release"
       }
     ]

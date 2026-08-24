@@ -1,7 +1,6 @@
 name: Release
 
-# Windows build + GitHub Release for tags like v0.1.0
-# Single public repo: DrMeji/Ark (source + installers + in-app update feed).
+# Build on private Ark-Source; publish installer assets only to public DrMeji/Ark.
 on:
   push:
     tags:
@@ -25,15 +24,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # Vite must run before electron-builder. Without this, dist/ is empty on CI
-      # and the installer opens to a black window. .env.production supplies the
-      # public Supabase anon client config (safe to ship in the desktop app).
       - name: Build renderer (Vite)
         run: npm run build
 
-      - name: Build Windows installer + portable
+      - name: Build Windows installer
         env:
-          # Optional Authenticode: set repo secrets CSC_LINK (base64 .pfx) + CSC_KEY_PASSWORD.
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
           WIN_CSC_LINK: ${{ secrets.CSC_LINK }}
@@ -41,45 +36,11 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npx electron-builder --win --publish never
 
-      - name: Create GitHub release on DrMeji/Ark
+      - name: Publish installers to public DrMeji/Ark only
         shell: pwsh
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Prefer a PAT that can write Releases on DrMeji/Ark (cross-repo).
+          GH_TOKEN: ${{ secrets.ARK_PUBLIC_RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
-          $tag = if ("${{ github.ref_type }}" -eq "tag") { "${{ github.ref_name }}" } else { "v0.1.138" }
-          $ver = $tag.TrimStart("v")
-          $setup = "release/ARK-Setup.exe"
-          $portable = "release/ARK-Portable.exe"
-          if (-not (Test-Path $setup)) {
-            $setupAlt = Get-ChildItem release -Filter "ARK-Setup*.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
-            if ($setupAlt) { $setup = $setupAlt.FullName } else { throw "Missing ARK-Setup.exe" }
-          }
-          $files = @($setup)
-          if (Test-Path $portable) { $files += $portable }
-          $yml = "release/latest.yml"
-          $blockmap = "release/ARK-Setup.exe.blockmap"
-          if (Test-Path $yml) { $files += $yml }
-          if (Test-Path $blockmap) { $files += $blockmap }
-          $body = @"
-          ## ARK $tag
-
-          Windows desktop build.
-
-          - **ARK-Setup.exe** — installer (recommended)
-          - **ARK-Portable.exe** — portable (no install), when present
-          - **latest.yml** / blockmap — in-app differential updates when present
-
-          After install, use **Settings → Updates → Check → Download** for newer builds in-app.
-
-          Chat: default Chat can edit code; new-product ideas (Ring System) plan instead of binding DeBloat; delete only the named folder.
-
-          External brain API: Models → Engine (Brain API). Port may differ from 8787.
-          Docs: docs/ark-brain-api.md · docs/CHANGELOG.md · docs/lindsay-migration.md
-          "@
-
-          $exists = gh release view $tag --repo DrMeji/Ark 2>$null
-          if ($LASTEXITCODE -eq 0) {
-            gh release upload $tag @files --repo DrMeji/Ark --clobber
-          } else {
-            gh release create $tag @files --repo DrMeji/Ark --title "ARK $ver" --notes $body
-          }
+          $tag = if ("${{ github.ref_type }}" -eq "tag") { "${{ github.ref_name }}" } else { throw "Tag required" }
+          pwsh scripts/publish-public-release.ps1 -Tag $tag
