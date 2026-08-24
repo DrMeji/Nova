@@ -84,7 +84,7 @@ export function isInspectAsk(message: string): boolean {
     );
 }
 
-/** First-time “what is this repo?” — not “how do we make it better.” */
+/** First-time “what is this repo?”. not “how do we make it better.” */
 export function isExplainAsk(message: string): boolean {
   const t = String(message || '').trim();
   if (isImproveAsk(t)) return false;
@@ -319,7 +319,7 @@ export function scanProjectFindings(files: ProjectFileMap, message: string): Ins
     lines.forEach((line, i) => {
       const t = line.trim();
       if (/\bTODO\b|\bFIXME\b|\bHACK\b|\bXXX\b/.test(line)) {
-        push(path, `Line ${i + 1}: unfinished marker — ${t.slice(0, 120)}`);
+        push(path, `Line ${i + 1}: unfinished marker. ${t.slice(0, 120)}`);
       }
       if (/password\s*=\s*['"][^'"]+['"]|api[_-]?key\s*=\s*['"][^'"]+['"]|secret\s*=\s*['"][^'"]+['"]/i.test(line)
         && !/\.example|sample|placeholder|your_/i.test(line)) {
@@ -329,13 +329,13 @@ export function scanProjectFindings(files: ProjectFileMap, message: string): Ins
         push(path, `Line ${i + 1}: bare/silent exception handler hides errors.`);
       }
       if (/\beval\s*\(|\bexec\s*\(/.test(line)) {
-        push(path, `Line ${i + 1}: uses eval/exec — risky if fed untrusted input.`);
+        push(path, `Line ${i + 1}: uses eval/exec. risky if fed untrusted input.`);
       }
       if (/\bdangerouslySetInnerHTML\b|\.innerHTML\s*=/.test(line) && !/sanitize|DOMPurify/i.test(line)) {
         push(path, `Line ${i + 1}: HTML injection risk (innerHTML / dangerouslySetInnerHTML).`);
       }
       if (/\bchild_process\b|\bexecSync\s*\(|\bspawnSync\s*\(/.test(line)) {
-        push(path, `Line ${i + 1}: shell/process spawn — risky if args come from untrusted input.`);
+        push(path, `Line ${i + 1}: shell/process spawn. risky if args come from untrusted input.`);
       }
       if (/shell\s*:\s*true/i.test(line)) {
         push(path, `Line ${i + 1}: shell:true enables shell injection if args are unsanitized.`);
@@ -346,18 +346,18 @@ export function scanProjectFindings(files: ProjectFileMap, message: string): Ins
     });
 
     if (/\.env$/i.test(lowerPath) && !/\.example/i.test(lowerPath)) {
-      push(path, 'Real .env file is in the tree — secrets should not be committed.');
+      push(path, 'Real .env file is in the tree. secrets should not be committed.');
     }
     if (/raise\s+NotImplementedError|NotImplementedError\(/.test(content)) {
-      push(path, 'Contains NotImplementedError — incomplete feature path.');
+      push(path, 'Contains NotImplementedError. incomplete feature path.');
     }
     if (/\bpass\s*$/m.test(content) && /def\s+\w+\([^)]*\):\s*\n\s*pass\b/.test(content)) {
-      push(path, 'Has empty function bodies (`pass`) — stubs not finished.');
+      push(path, 'Has empty function bodies (`pass`). stubs not finished.');
     }
     if (/\bprint\s*\(/.test(content) && /\.py$/i.test(path) && !/if\s+__name__|logging|debug/i.test(content.slice(0, 400))) {
       const prints = (content.match(/\bprint\s*\(/g) || []).length;
       if (prints >= 4) {
-        push(path, `${prints} print() calls — likely debug noise left in.`);
+        push(path, `${prints} print() calls. likely debug noise left in.`);
       }
     }
     if (/TODO|FIXME|coming soon|not implemented yet/i.test(content) && findings.filter(f => f.path === path).length < 2) {
@@ -394,7 +394,7 @@ export function scanProjectFindings(files: ProjectFileMap, message: string): Ins
           const asInit = `${imp.replace(/\./g, '/')}/__init__.py`;
           const hit = Object.keys(flat).some(k => k.endsWith(asPath) || k.endsWith(asInit) || k.replace(/\\/g, '/').includes(`/${imp.split('.').slice(1).join('/')}`));
           if (!hit && /app\.(trading|api|core)/.test(imp)) {
-            // soft — skip aggressive false positives
+            // soft. skip aggressive false positives
           }
           void candidates;
         }
@@ -435,7 +435,7 @@ function fixHintForFinding(detail: string): string {
     return 'Finish or remove the stub so that path cannot be hit in production.';
   }
   if (/except|silent exception/i.test(detail)) {
-    return 'Catch a specific error type and log or surface it — do not swallow with bare `except`.';
+    return 'Catch a specific error type and log or surface it. do not swallow with bare `except`.';
   }
   if (/href="#"|handler/i.test(detail)) {
     return 'Wire a real onClick/onSubmit (or real href) so the control does something.';
@@ -444,7 +444,7 @@ function fixHintForFinding(detail: string): string {
     return 'Replace debug prints with proper logging or remove them.';
   }
   if (/innerHTML|dangerouslySetInnerHTML/i.test(detail)) {
-    return 'Sanitize HTML (DOMPurify or textContent) — never assign unsanitized user HTML.';
+    return 'Sanitize HTML (DOMPurify or textContent). never assign unsanitized user HTML.';
   }
   if (/child_process|shell:true|spawn/i.test(detail)) {
     return 'Avoid shell:true; pass args as an array; never concatenate untrusted input into a shell command.';
@@ -458,7 +458,7 @@ function fixHintForFinding(detail: string): string {
 export type ProblemReportFocus = 'all' | 'security' | 'ui' | 'debug' | 'wider';
 
 export type ProblemReportOptions = {
-  /** User asked how to fix — lead with fix steps, never a product overview. */
+  /** User asked how to fix. lead with fix steps, never a product overview. */
   focusFix?: boolean;
   /** Reuse findings from the previous security/debug turn. */
   priorFindings?: InspectFinding[];
@@ -467,7 +467,7 @@ export type ProblemReportOptions = {
   wider?: boolean;
 };
 
-/** Find-problems / debug / security / UI — never falls back to a folder overview dump. */
+/** Find-problems / debug / security / UI. never falls back to a folder overview dump. */
 export function reportProjectProblems(
   files: ProjectFileMap,
   projectName?: string,
@@ -498,7 +498,7 @@ export function reportProjectProblems(
   }
 
   const label = projectName && !/^code$/i.test(projectName) ? `**${projectName}**` : 'this folder';
-  // focusFix ONLY when explicitly requested — not for every debug.
+  // focusFix ONLY when explicitly requested. not for every debug.
   const focusFix = Boolean(opts?.focusFix);
 
   if (focusFix && findings.length) {
@@ -509,7 +509,7 @@ export function reportProjectProblems(
       '',
     ];
     findings.forEach((f, i) => {
-      bits.push(`${i + 1}. \`${f.path}\` — ${f.detail}`);
+      bits.push(`${i + 1}. \`${f.path}\`. ${f.detail}`);
       bits.push(`   **Fix:** ${fixHintForFinding(f.detail)}`);
       bits.push('');
     });
@@ -527,18 +527,18 @@ export function reportProjectProblems(
     if (!findings.length) {
       bits.push('No additional hard red flags showed up beyond a basic static pass.');
       bits.push('');
-      bits.push('That does not mean the app is bug-free — only that these patterns were not in the attached text. Ask about a specific file, or **Edit in Code** to dig deeper.');
+      bits.push('That does not mean the app is bug-free. only that these patterns were not in the attached text. Ask about a specific file, or **Edit in Code** to dig deeper.');
       return bits.join('\n');
     }
     bits.push(`Issues (**${findings.length}**):`);
     bits.push('');
     findings.forEach((f, i) => {
-      bits.push(`${i + 1}. \`${f.path}\` — ${f.detail}`);
+      bits.push(`${i + 1}. \`${f.path}\`. ${f.detail}`);
       bits.push(`   **Fix:** ${fixHintForFinding(f.detail)}`);
       bits.push('');
     });
     if (findings.length === 1) {
-      bits.push('_Only one issue matched this wider static pass — that can be normal; ask for a specific area if you want a deeper look._');
+      bits.push('_Only one issue matched this wider static pass. that can be normal; ask for a specific area if you want a deeper look._');
       bits.push('');
     }
     bits.push('Want **how we can fix** these, or **Edit in Code**?');
@@ -560,7 +560,7 @@ export function reportProjectProblems(
         '',
         'No clear **security** red flags showed up in a static scan (no hardcoded secrets, no eval/exec in source, no committed `.env`).',
         '',
-        'That does **not** prove the app is secure — only that those patterns were not in the attached text. Ask about a specific file, or use **Find problems** for a wider scan.',
+        'That does **not** prove the app is secure. only that those patterns were not in the attached text. Ask about a specific file, or use **Find problems** for a wider scan.',
       ].join('\n');
     }
     if (focus === 'ui') {
@@ -577,14 +577,14 @@ export function reportProjectProblems(
       '',
       'No hard red flags showed up in a static scan.',
       '',
-      'That does **not** mean the app is bug-free — it means I did not see TODO/FIXME markers, empty `pass` stubs, bare `except:`, or obvious hardcoded secrets in the attached text.',
+      'That does **not** mean the app is bug-free. it means I did not see TODO/FIXME markers, empty `pass` stubs, bare `except:`, or obvious hardcoded secrets in the attached text.',
       '',
       'Next: pick **More details** to walk the main files, or **Edit in Code** so we can run and fix things live.',
     ].join('\n');
   }
 
   const lines = findings.map((f, i) => {
-    const base = `${i + 1}. \`${f.path}\` — ${f.detail}`;
+    const base = `${i + 1}. \`${f.path}\`. ${f.detail}`;
     if (!withFixes && focus !== 'security' && focus !== 'ui') return base;
     return `${base}\n   **Fix:** ${fixHintForFinding(f.detail)}`;
   });
@@ -646,7 +646,7 @@ export function formatLocalFindings(findings: InspectFinding[]): string {
   return [
     'Problems found in the attached files:',
     '',
-    ...findings.map((f, i) => `${i + 1}. \`${f.path}\` — ${f.detail}`),
+    ...findings.map((f, i) => `${i + 1}. \`${f.path}\`. ${f.detail}`),
   ].join('\n');
 }
 
@@ -681,9 +681,9 @@ export function buildInspectPrompt(
   const rules = mode === 'explain'
     ? `Rules:
 - Answer the user’s latest question about these files directly. If they asked what they are building / what the folder is about: explain the product goal in plain language (who it is for, what it automates or shows), not a generic “Python trading app” one-liner alone.
-- Then give 3–5 concrete next steps to make it better or where to start coding — specific to THIS repo.
+- Then give 3–5 concrete next steps to make it better or where to start coding. specific to THIS repo.
 - If they asked security, UI, one file, or ideas for a feature, answer that topic only.
-- The file contents below ARE the folder. You already have them — do not ask the user what is inside.
+- The file contents below ARE the folder. You already have them. do not ask the user what is inside.
 - Never invent a project ID story or say you lack context when Selected files is non-empty.
 - Do NOT start editing. Do NOT write @@@FILE blocks and do NOT dump whole files.
 - Do not repeat the user's wording as the answer.
@@ -699,12 +699,12 @@ export function buildInspectPrompt(
 - Be specific (missing onClick, dead button, TODO, broken import). Do not paste a folder overview instead.
 - End with: Would you like me to fix these, or only list the rest?
 - If nothing looks broken, say what the app appears to do and one improvement.
-- You have the file contents below — do not claim you cannot see them.`;
+- You have the file contents below. do not claim you cannot see them.`;
 
   const job = mode === 'explain'
-    ? 'You are reading the attached project files now. Answer the user’s question from those files only — especially what they are building and what to do next.'
+    ? 'You are reading the attached project files now. Answer the user’s question from those files only. especially what they are building and what to do next.'
     : mode === 'improve'
-      ? 'Propose concrete upgrades from the files — only what they asked.'
+      ? 'Propose concrete upgrades from the files. only what they asked.'
       : 'Report findings from the attached files that match their ask.';
 
   return `You are ARK reviewing a local project on this PC. ${job} Do NOT write @@@FILE blocks and do NOT dump whole files.
@@ -714,7 +714,7 @@ CRITICAL RULES (read first):
 - Never ask the user to paste the code.
 - Answer ONLY about this codebase. Do not discuss world news, climate, politics, taxes, healthcare, or generic life advice.
 - Answer the user's question directly using the files.
-- If unsure, say what you inspected (file names) and what is missing — do not invent unrelated topics.
+- If unsure, say what you inspected (file names) and what is missing. do not invent unrelated topics.
 
 Answer the user’s latest request directly; do not substitute a different topic or repeat a canned overview.
 
@@ -727,8 +727,8 @@ ${tree || '(empty)'}
 
 ${local}
 
-Selected file contents (AUTHORITATIVE — answer from this):
-${chunks.join('\n\n') || '(no files picked — say you could not load the attachment and ask them to re-attach)'}
+Selected file contents (AUTHORITATIVE. answer from this):
+${chunks.join('\n\n') || '(no files picked. say you could not load the attachment and ask them to re-attach)'}
 
 User:
 ${userMessage.trim()}`;
@@ -813,12 +813,12 @@ function fileRoleBlurb(path: string, raw: string): string {
   if (doc) return doc;
 
   const lower = path.replace(/\\/g, '/').toLowerCase();
-  if (/(^|\/)readme(\.md)?$/i.test(lower)) return 'Project readme — what the app is and how to run it.';
-  if (/(^|\/)package\.json$/i.test(lower)) return 'Node package manifest — scripts, dependencies, and app name.';
-  if (/electron\/main\.(ts|js)$/i.test(lower)) return 'Electron main process — window, tray, and native shell.';
-  if (/preload\.(ts|js|cjs)$/i.test(lower)) return 'Preload bridge — safe APIs exposed to the renderer.';
-  if (/apps?catalog/i.test(lower)) return 'App catalog data — categories, icons, and listed apps.';
-  if (/\/(app|main)\.(tsx|jsx|ts|js)$/i.test(lower)) return 'UI entry — mounts the main React/app shell.';
+  if (/(^|\/)readme(\.md)?$/i.test(lower)) return 'Project readme. what the app is and how to run it.';
+  if (/(^|\/)package\.json$/i.test(lower)) return 'Node package manifest. scripts, dependencies, and app name.';
+  if (/electron\/main\.(ts|js)$/i.test(lower)) return 'Electron main process. window, tray, and native shell.';
+  if (/preload\.(ts|js|cjs)$/i.test(lower)) return 'Preload bridge. safe APIs exposed to the renderer.';
+  if (/apps?catalog/i.test(lower)) return 'App catalog data. categories, icons, and listed apps.';
+  if (/\/(app|main)\.(tsx|jsx|ts|js)$/i.test(lower)) return 'UI entry. mounts the main React/app shell.';
 
   const firstDef = codeLines.find(l => /^(async\s+)?def\s+\w+|^class\s+\w+|^export\s+(default\s+)?(function|class|const)|^function\s+\w+/.test(l.trim()));
   if (firstDef) {
@@ -830,7 +830,7 @@ function fileRoleBlurb(path: string, raw: string): string {
   return 'Supporting source for this project.';
 }
 
-/** Honest local summary — what the folder *is*, not a function dump. */
+/** Honest local summary. what the folder *is*, not a function dump. */
 export function describeProjectFromFiles(files: ProjectFileMap, projectName?: string): string {
   const flat = flattenProjectFiles(files);
   const keys = Object.keys(flat).filter(k => !isBuildArtifactPath(k)).sort();
@@ -933,7 +933,7 @@ export function describeProjectFromFiles(files: ProjectFileMap, projectName?: st
   return bits.join('\n');
 }
 
-/** Deeper follow-up — main *source* files only; narrative roles, not symbol dumps. */
+/** Deeper follow-up. main *source* files only; narrative roles, not symbol dumps. */
 export function describeProjectInDetail(files: ProjectFileMap, projectName?: string): string {
   const flat = flattenProjectFiles(files);
   const keys = Object.keys(flat).filter(k => !isBuildArtifactPath(k));
@@ -941,7 +941,7 @@ export function describeProjectInDetail(files: ProjectFileMap, projectName?: str
   const label = projectName && !/^code$/i.test(projectName) ? projectName : 'this folder';
   const picked = pickFilesForInspect(files, 'explain overview main files connect entry electron package readme');
   const sections: string[] = [
-    `Here is a closer look at **${label}** — the main **source** files (${count} after skipping build/output folders), and how they fit together:`,
+    `Here is a closer look at **${label}**. the main **source** files (${count} after skipping build/output folders), and how they fit together:`,
     '',
   ];
 
@@ -964,7 +964,7 @@ export function describeProjectInDetail(files: ProjectFileMap, projectName?: str
   }
 
   sections.push(
-    '**How they connect:** entry files (e.g. `electron/main`, `src/main`, or `package.json` scripts) start the app; UI / catalog modules render screens; shared data modules feed those screens. Build folders like `dist-electron` are compiled copies — use the `.ts` / `.tsx` sources when editing.',
+    '**How they connect:** entry files (e.g. `electron/main`, `src/main`, or `package.json` scripts) start the app; UI / catalog modules render screens; shared data modules feed those screens. Build folders like `dist-electron` are compiled copies. use the `.ts` / `.tsx` sources when editing.',
     '',
     'Want **one specific file** explained, a **security** check, **Find problems**, or **Edit in Code**?',
   );

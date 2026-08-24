@@ -10,7 +10,7 @@ export function isArkPackagedApp(): boolean {
   return window.arkDesktop?.isPackaged === true;
 }
 
-/** True for Open-ARK-Build.bat, electron:dev, and Vite dev — not retail installs. */
+/** True for Open-ARK-Build.bat, electron:dev, and Vite dev. not retail installs. */
 export function isArkDevSession(): boolean {
   if (import.meta.env.DEV) return true;
   if (typeof window !== 'undefined' && window.arkDesktop?.isPackaged === false) return true;
@@ -22,7 +22,7 @@ export function isSocialDemoEnabled(): boolean {
   return isArkDevSession();
 }
 
-/** @deprecated Prefer isSocialDemoEnabled() — kept for existing imports. */
+/** @deprecated Prefer isSocialDemoEnabled(). kept for existing imports. */
 export const SOCIAL_DEMO_ENABLED = typeof window !== 'undefined'
   ? isArkDevSession()
   : import.meta.env.DEV;

@@ -1,4 +1,4 @@
-/** First-run setup gate — localStorage + Electron userData (source of truth on desktop). */
+/** First-run setup gate. localStorage + Electron userData (source of truth on desktop). */
 
 const SETUP_KEY = 'ark:setup-completed';
 const BYPASS_KEY = 'ark:bypass-enabled';
@@ -19,7 +19,7 @@ export function needsFirstRunSetup() {
   return !isSetupCompleted();
 }
 
-/** Fresh / reinstalled desktop install — leftover sessions must not skip Auth. */
+/** Fresh / reinstalled desktop install. leftover sessions must not skip Auth. */
 export function isFreshInstallGate() {
   return freshInstallGate;
 }
@@ -73,7 +73,7 @@ export async function ensureFirstRunGate(): Promise<void> {
         /* ignore */
       }
 
-      // No desktop file yet — treat as not completed until onboarding finishes.
+      // No desktop file yet. treat as not completed until onboarding finishes.
       if (window.arkDesktop?.setupGet) {
         localStorage.removeItem(SETUP_KEY);
         freshInstallGate = true;

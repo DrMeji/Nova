@@ -13,7 +13,7 @@ export const PRESENCE_OPTIONS: {
   { id: 'inactive', label: 'Inactive', hint: 'You will appear offline.' },
 ];
 
-/** Solid status circle — same shape for every status, only the color changes. */
+/** Solid status circle. same shape for every status, only the color changes. */
 export function presenceDotClass(status: PresenceStatus): string {
   if (status === 'online') return 'bg-emerald-400';
   if (status === 'idle') return 'bg-amber-400';
@@ -37,7 +37,7 @@ export function presenceRingClass(status: PresenceStatus): string {
   return 'border-zinc-500/70 ring-1 ring-zinc-500/25';
 }
 
-/** ARK ID / DEV label under the name — matches presence. */
+/** ARK ID / DEV label under the name. matches presence. */
 export function presenceIdClass(status: PresenceStatus): string {
   if (status === 'online') return 'text-emerald-400/90';
   if (status === 'idle') return 'text-amber-400/90';

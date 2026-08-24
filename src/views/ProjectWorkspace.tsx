@@ -174,8 +174,8 @@ const CLOUD_CODE_WHEN_KEYED: (CodeModel & { keyId: string })[] = [
 const COMPOSER_MODE_PREFIX: Record<'plan' | 'ask' | 'agent' | 'debug' | 'multitask', string> = {
   plan: 'Plan this out step by step, then we can build:\n\n',
   ask: '',
-  agent: 'Agent mode — edit files and run approved tools in this workspace:\n\n',
-  debug: 'Debug this — find the issue and propose a fix:\n\n',
+  agent: 'Agent mode. edit files and run approved tools in this workspace:\n\n',
+  debug: 'Debug this. find the issue and propose a fix:\n\n',
   multitask: '[Multi-agent] ',
 };
 
@@ -404,7 +404,7 @@ export function ProjectWorkspace() {
   const [codeOpen, setCodeOpen] = useState(true);
   const [explorerWidth, setExplorerWidth] = useState(260);
   const [codeWidth, setCodeWidth] = useState(520);
-  /** Code from Chat is files+editor only — planning stays in Chat. */
+  /** Code from Chat is files+editor only. planning stays in Chat. */
   const showWorkspaceChat = false;
   const [buildLive, setBuildLive] = useState<{
     assistantId: string;
@@ -508,7 +508,7 @@ export function ProjectWorkspace() {
     }
   }, []);
 
-  /** Pace large imports — only touch React state once at the end (tree rebuild is expensive). */
+  /** Pace large imports. only touch React state once at the end (tree rebuild is expensive). */
   const applyProjectFilesPaced = useCallback(async (files: Record<string, string>) => {
     const count = Object.keys(files).length;
     if (count <= 40) {
@@ -1029,7 +1029,7 @@ export function ProjectWorkspace() {
               project_id: projectId,
               role: 'assistant',
               content: [
-                `Got **${name}** — ${fileCount} file${fileCount === 1 ? '' : 's'} are in Explorer.`,
+                `Got **${name}**. ${fileCount} file${fileCount === 1 ? '' : 's'} are in Explorer.`,
                 '',
                 'What should I do with it? Pick a prompt below, or type your own.',
               ].join('\n'),
@@ -1178,7 +1178,7 @@ export function ProjectWorkspace() {
         [
           pathLine,
           '',
-          'What should I do? Debug, explain what this app is, find problems — or describe a change.',
+          'What should I do? Debug, explain what this app is, find problems. or describe a change.',
         ].join('\n'),
         true,
       );
@@ -1357,7 +1357,7 @@ export function ProjectWorkspace() {
       postAttachInChat(
         encodeChatAttach(result.attach || { kind: 'files', name: labels, count, projectId: pid }),
         [
-          `Got **${labels}** from drag-and-drop — files are in Explorer.`,
+          `Got **${labels}** from drag-and-drop. files are in Explorer.`,
           '',
           'What should I do next?',
         ].join('\n'),
@@ -1474,7 +1474,7 @@ export function ProjectWorkspace() {
           projectId: pid,
           id: `files-${pid}`,
         }),
-        `Got **${label}** — in Explorer.`,
+        `Got **${label}**. in Explorer.`,
         true,
       );
     }
@@ -1574,7 +1574,7 @@ export function ProjectWorkspace() {
             user_id: user?.id ?? 'guest',
             project_id: projectId,
             role: 'assistant',
-            content: 'Connect GitHub in Plugins first — then Push will send your commit.',
+            content: 'Connect GitHub in Plugins first. then Push will send your commit.',
             provider_used: 'Git',
             created_at: new Date().toISOString(),
           };
@@ -1664,7 +1664,7 @@ export function ProjectWorkspace() {
     const token = githubToken();
     if (!token) {
       setGithubPickerOpen(true);
-      postAssistantNote('Connect GitHub in Plugins first — then create a repo.');
+      postAssistantNote('Connect GitHub in Plugins first. then create a repo.');
       return;
     }
     const blocked = needGithubWrite();
@@ -1707,7 +1707,7 @@ export function ProjectWorkspace() {
     const token = githubToken();
     if (!token) {
       setGithubPickerOpen(true);
-      postAssistantNote('Connect GitHub in Plugins first — then open a pull request.');
+      postAssistantNote('Connect GitHub in Plugins first. then open a pull request.');
       return;
     }
     const blocked = needGithubWrite();
@@ -1768,7 +1768,7 @@ export function ProjectWorkspace() {
         user_id: user?.id ?? 'guest',
         project_id: project.id || projectId || 'draft',
         role: 'assistant',
-        content: 'Read access — you can inspect and ask questions, but cannot edit files or push.',
+        content: 'Read access. you can inspect and ask questions, but cannot edit files or push.',
         provider_used: 'ARK',
         created_at: new Date().toISOString(),
       }]);
@@ -1998,10 +1998,10 @@ export function ProjectWorkspace() {
       };
       const assistantId = crypto.randomUUID();
       const familyAsk = knownTarget === 'android'
-        ? 'Which Android size should I lock? The preview stays that width × height — zoom only, no stretching.'
+        ? 'Which Android size should I lock? The preview stays that width × height. zoom only, no stretching.'
         : knownTarget === 'ios'
-          ? 'Which Apple size should I lock? Example: iPhone 16 is 393×852. The preview stays that size — zoom only, no stretching.'
-          : 'Which canvas size should I lock? The preview stays that width × height — zoom only, no stretching.';
+          ? 'Which Apple size should I lock? Example: iPhone 16 is 393×852. The preview stays that size. zoom only, no stretching.'
+          : 'Which canvas size should I lock? The preview stays that width × height. zoom only, no stretching.';
       const assistantMsg: ChatMessage = {
         id: assistantId,
         user_id: uid,
@@ -2202,7 +2202,7 @@ export function ProjectWorkspace() {
             setPreviewReady(true);
             if (opts?.openPreview) setRightTab('preview');
           } else if (res && (res.ok === false || !res.url || String(res.url).includes(':0'))) {
-            setSandboxNote('Preview server did not start — static HTML is still in the Preview tab.');
+            setSandboxNote('Preview server did not start. static HTML is still in the Preview tab.');
             window.setTimeout(() => setSandboxNote(null), 4200);
           }
         }).catch(err => {
@@ -2358,7 +2358,7 @@ export function ProjectWorkspace() {
           }
         }
 
-        // Micro web asks (bg, search bar, rename, RGB…): apply local patch immediately — don’t wait on the model.
+        // Micro web asks (bg, search bar, rename, RGB…): apply local patch immediately. don’t wait on the model.
         if (!replyText && canEdit && !inspectOnly && isWebMicroAsk(rawContent)) {
           const micro = webMicroAskEdits(fileContentsRef.current, rawContent);
           if (micro.length) {
@@ -2382,7 +2382,7 @@ export function ProjectWorkspace() {
             ? messages.filter(m => m.id !== revisingId).concat(userMsg)
             : [...messages, userMsg];
           const keepContinuity = true;
-          // Inspect: fresh history only (Chat parity) — packing prior dumps hung GGUF.
+          // Inspect: fresh history only (Chat parity). packing prior dumps hung GGUF.
           const turnSize = classifyCodeTurnSize(rawContent, fileContentsRef.current);
           const historyMaxTurns = inspectOnly
             ? 4
@@ -2635,7 +2635,7 @@ export function ProjectWorkspace() {
               replyText = [
                 describeProjectFromFiles(fileContentsRef.current, buildLabel),
                 '',
-                'The coding brain did not finish a full read. This is a local file scan — ask again to try the model.',
+                'The coding brain did not finish a full read. This is a local file scan. ask again to try the model.',
               ].join('\n');
             } else {
               replyText = [
@@ -2655,7 +2655,7 @@ export function ProjectWorkspace() {
               setCodeOpen(true);
             }
             if (!canEdit) {
-              replyText = `${replyText.trim()}\n\nYou have Read on this repo — you can look and discuss, not edit or push.`;
+              replyText = `${replyText.trim()}\n\nYou have Read on this repo. you can look and discuss, not edit or push.`;
             }
           } else {
             const draft = streamDraftRef.current || routed.reply || '';
@@ -2686,7 +2686,7 @@ export function ProjectWorkspace() {
                   changedPaths = applied.changedPaths;
               previewTouched = Boolean((applied as { previewTouched?: boolean }).previewTouched);
                   if (changedPaths.length) {
-                    replyText = `Updated ${changedPaths.join(', ')} with a local color/name patch from your files — not a full model rewrite.`;
+                    replyText = `Updated ${changedPaths.join(', ')} with a local color/name patch from your files. not a full model rewrite.`;
                   }
                 }
               }
@@ -2715,7 +2715,7 @@ export function ProjectWorkspace() {
                     : unfinishedNote;
                 }
               } else if (cutOff) {
-                replyText = `Saved ${changedPaths.join(', ')}. The last file was cut off — send again to finish it.`;
+                replyText = `Saved ${changedPaths.join(', ')}. The last file was cut off. send again to finish it.`;
               } else {
                 replyText = spoken && spoken.length > 24
                   ? spoken
@@ -2770,7 +2770,7 @@ export function ProjectWorkspace() {
                 changedPaths = applied.changedPaths;
               previewTouched = Boolean((applied as { previewTouched?: boolean }).previewTouched);
                 if (changedPaths.length) {
-                  replyText = `Updated ${changedPaths.join(', ')} with a local color/name patch from your files — not a full model rewrite.`;
+                  replyText = `Updated ${changedPaths.join(', ')} with a local color/name patch from your files. not a full model rewrite.`;
                 }
               }
             }
@@ -2783,7 +2783,7 @@ export function ProjectWorkspace() {
                 if (changedPaths.length) {
                   replyText = [
                     `Created **${changedPaths.join(', ')}** so you can run this in Start.`,
-                    stalled ? '(Brain stalled — used a local starter.)' : '',
+                    stalled ? '(Brain stalled. used a local starter.)' : '',
                     'Press **Start** to open the preview.',
                   ].filter(Boolean).join('\n');
                 }
@@ -2792,7 +2792,7 @@ export function ProjectWorkspace() {
             if (!replyText) {
             replyText = changedPaths.length
               ? (cutOff
-                ? `Saved ${changedPaths.join(', ')}. The last file was cut off — send again to finish it.`
+                ? `Saved ${changedPaths.join(', ')}. The last file was cut off. send again to finish it.`
                 : (stripFileBlocks(draft) || nativeDoneReply({ continued: hadExistingFiles || Boolean(revisingId) })))
               : (stalled || cutOff
                 ? unfinishedNote
@@ -2816,7 +2816,7 @@ export function ProjectWorkspace() {
               replyText = [
                 describeProjectFromFiles(fileContentsRef.current, buildLabel),
                 '',
-                'The coding brain did not finish a full read. This is a local file scan — ask again to try the model.',
+                'The coding brain did not finish a full read. This is a local file scan. ask again to try the model.',
               ].join('\n');
             } else {
               replyText = [
@@ -2839,7 +2839,7 @@ export function ProjectWorkspace() {
             }
             setInspectOfferId(assistantId);
             if (!canEdit) {
-              replyText = `${replyText.trim()}\n\nYou have Read on this repo — you can look and discuss, not edit or push.`;
+              replyText = `${replyText.trim()}\n\nYou have Read on this repo. you can look and discuss, not edit or push.`;
             }
             bumpStep('done');
           }
@@ -2991,7 +2991,7 @@ export function ProjectWorkspace() {
       user_id: uid,
       project_id: pid,
       role: 'assistant',
-      content: 'Got your image in the chat. Ask me what you want — describe it, debug from a screenshot, or use it as a reference.',
+      content: 'Got your image in the chat. Ask me what you want. describe it, debug from a screenshot, or use it as a reference.',
       provider_used: 'ARK',
       created_at: new Date().toISOString(),
     };
@@ -3170,7 +3170,7 @@ export function ProjectWorkspace() {
   const openPreviewInBrowser = () => {
     const url = livePreviewUrl || previewUrl;
     if (!url || url.startsWith('blob:') || url.includes('127.0.0.1:0')) {
-      setSandboxNote('No preview URL yet — ask ARK to create a page, then open Preview.');
+      setSandboxNote('No preview URL yet. ask ARK to create a page, then open Preview.');
       window.setTimeout(() => setSandboxNote(null), 3200);
       return;
     }
@@ -3348,7 +3348,7 @@ export function ProjectWorkspace() {
               type="button"
                 onClick={() => void headerPush()}
                 disabled={gitBusy || !canEdit}
-                title={canEdit ? 'Save a commit if needed, then push to GitHub' : 'Read access — you cannot push'}
+                title={canEdit ? 'Save a commit if needed, then push to GitHub' : 'Read access. you cannot push'}
                 className="h-8 px-2 rounded-lg flex items-center gap-1 text-[11px] text-content-secondary hover:text-content-primary hover:bg-surface-hover disabled:opacity-50"
               >
                 <Upload className="w-3.5 h-3.5" />
@@ -3428,7 +3428,7 @@ export function ProjectWorkspace() {
                   <button
                     type="button"
                     onClick={() => startCreate('file')}
-                    title={canEdit ? 'New file' : 'Read access — you cannot add files'}
+                    title={canEdit ? 'New file' : 'Read access. you cannot add files'}
                     aria-label="New file"
                     disabled={!canEdit}
                     className="w-6 h-6 rounded-md flex items-center justify-center text-content-tertiary hover:text-content-primary hover:bg-surface-hover disabled:opacity-40"
@@ -3438,7 +3438,7 @@ export function ProjectWorkspace() {
                   <button
                     type="button"
                     onClick={() => startCreate('folder')}
-                    title={canEdit ? 'New folder' : 'Read access — you cannot add folders'}
+                    title={canEdit ? 'New folder' : 'Read access. you cannot add folders'}
                     aria-label="New folder"
                     disabled={!canEdit}
                     className="w-6 h-6 rounded-md flex items-center justify-center text-content-tertiary hover:text-content-primary hover:bg-surface-hover disabled:opacity-40"
@@ -3524,7 +3524,7 @@ export function ProjectWorkspace() {
                 {explorerTree.length === 0 ? (
                   myAccess === 'read' ? (
                     <p className="text-[11px] text-content-tertiary px-2 py-6 leading-relaxed text-center">
-                      You have Read on this project. You can inspect and discuss in chat — you cannot add files.
+                      You have Read on this project. You can inspect and discuss in chat. you cannot add files.
                     </p>
                   ) : (
                   <StudioEmptyState />
@@ -3538,10 +3538,10 @@ export function ProjectWorkspace() {
           </>
         )}
 
-        {/* Chat center — hidden when opened from Chat Code pill (planning stays in Chat) */}
+        {/* Chat center. hidden when opened from Chat Code pill (planning stays in Chat) */}
         {showWorkspaceChat && (
         <div className="flex-1 min-w-0 flex flex-col bg-ark-navy-950">
-          {/* Compact toolbar — no permanent ARK Agent header */}
+          {/* Compact toolbar. no permanent ARK Agent header */}
           <div className="shrink-0 h-10 px-3 flex items-center justify-between gap-2">
             <div className="flex items-center gap-1.5 min-w-0">
               <button
@@ -3651,7 +3651,7 @@ export function ProjectWorkspace() {
                 <p className="text-xs text-content-tertiary max-w-sm mx-auto">
                   {canEdit
                     ? 'Ask ARK to add a page, fix a bug, or build an iPhone / Android app. Fresh builds show progress briefly, then in History.'
-                    : 'You have Read on this project — you can inspect and discuss the code, but you cannot edit or push.'}
+                    : 'You have Read on this project. you can inspect and discuss the code, but you cannot edit or push.'}
                 </p>
               </div>
             )}
@@ -3814,7 +3814,7 @@ export function ProjectWorkspace() {
                                 );
                                 if (locked.length) {
                                   applyWorkspaceEdits(locked);
-                                  postAssistantNote(`Locked the canvas to ${deviceChipLabel(device)}. Zoom with Ctrl +/- — the window stays ${device.width}×${device.height}.`);
+                                  postAssistantNote(`Locked the canvas to ${deviceChipLabel(device)}. Zoom with Ctrl +/-. the window stays ${device.width}×${device.height}.`);
                                   return;
                                 }
                               }
@@ -3849,7 +3849,7 @@ export function ProjectWorkspace() {
                                 const locked = layoutLockEdits(fileContentsRef.current, layoutLockPrompt(device), target);
                                 if (locked.length) {
                                   applyWorkspaceEdits(locked);
-                                  postAssistantNote(`Locked the canvas to ${deviceChipLabel(device)}. Zoom with Ctrl +/- — the window stays ${device.width}×${device.height}.`);
+                                  postAssistantNote(`Locked the canvas to ${deviceChipLabel(device)}. Zoom with Ctrl +/-. the window stays ${device.width}×${device.height}.`);
                                   return;
                                 }
                               }
@@ -3944,7 +3944,7 @@ export function ProjectWorkspace() {
             )}
             {Object.keys(fileContents).length > 0 && (
               <div className="px-1 text-[10px] text-content-tertiary">
-                {Object.keys(fileContents).length} file{Object.keys(fileContents).length === 1 ? '' : 's'} in Explorer — ask in chat to debug or explain
+                {Object.keys(fileContents).length} file{Object.keys(fileContents).length === 1 ? '' : 's'} in Explorer. ask in chat to debug or explain
               </div>
             )}
             <div className={`flex gap-2 min-w-0 ${composerTall ? 'items-end' : 'items-center'}`}>
@@ -3957,7 +3957,7 @@ export function ProjectWorkspace() {
             >
               {attachedImages.length > 0 && (
                 <div className="px-3 pt-2 text-[10px] text-content-tertiary">
-                  {attachedImages.length} image{attachedImages.length === 1 ? '' : 's'} in chat — send a message to ask about {attachedImages.length === 1 ? 'it' : 'them'}
+                  {attachedImages.length} image{attachedImages.length === 1 ? '' : 's'} in chat. send a message to ask about {attachedImages.length === 1 ? 'it' : 'them'}
                 </div>
               )}
               <input
@@ -4031,9 +4031,9 @@ export function ProjectWorkspace() {
                       count,
                     }),
                     [
-                      `Got **${label}** — ${count === 1 ? 'it is' : 'they are'} in Explorer.`,
+                      `Got **${label}**. ${count === 1 ? 'it is' : 'they are'} in Explorer.`,
                       '',
-                      'What should I do? Debug, explain, find problems — or type your own ask.',
+                      'What should I do? Debug, explain, find problems. or type your own ask.',
                     ].join('\n'),
                     true,
                   );
@@ -4080,10 +4080,10 @@ export function ProjectWorkspace() {
                     }),
                     [
                       asFolder
-                        ? `Got **${label}** — files are in Explorer.`
+                        ? `Got **${label}**. files are in Explorer.`
                         : `Got **${label}**.`,
                       '',
-                      'What should I do? Debug, explain, find problems — or type your own ask.',
+                      'What should I do? Debug, explain, find problems. or type your own ask.',
                     ].join('\n'),
                     true,
                   );
@@ -4270,7 +4270,7 @@ export function ProjectWorkspace() {
                       type="button"
                       onClick={() => void handleSendChat()}
                       disabled={(!chatInput.trim() && attachedImages.length === 0) || (!canEdit && !isExplainAsk(chatInput) && !wantsInspectOnly(chatInput, composerMode === 'debug'))}
-                      title={!canEdit ? 'Read access — inspect/explain only' : 'Send'}
+                      title={!canEdit ? 'Read access. inspect/explain only' : 'Send'}
                       className="w-8 h-8 rounded-full bg-content-primary text-ark-navy-950 flex items-center justify-center hover:opacity-90 transition-opacity disabled:opacity-30 disabled:cursor-not-allowed"
                 >
                   <ArrowUp className="w-4 h-4" strokeWidth={2.5} />
@@ -4405,7 +4405,7 @@ export function ProjectWorkspace() {
                       <FileCode className="w-5 h-5 text-content-tertiary" />
                       <p className="text-sm text-content-secondary">No code yet</p>
                       <p className="text-xs text-content-tertiary max-w-xs">
-                        Ask ARK in chat to create files — they’ll show up here.
+                        Ask ARK in chat to create files. they’ll show up here.
                       </p>
                     </div>
                   ) : (
@@ -4486,7 +4486,7 @@ export function ProjectWorkspace() {
                       <Play className="w-5 h-5 text-sky-400" />
                       <p className="text-sm text-content-secondary">No static preview yet</p>
                       <p className="text-xs text-content-tertiary max-w-xs">
-                        Ask ARK in chat to create the page, then open Preview. This is static HTML in a sandbox (scripts only — no forms posting out). It is not a running npm server.
+                        Ask ARK in chat to create the page, then open Preview. This is static HTML in a sandbox (scripts only. no forms posting out). It is not a running npm server.
                       </p>
                     </div>
                   )}
@@ -4541,7 +4541,7 @@ export function ProjectWorkspace() {
         onPick={repo => void clonePickedRepo(repo)}
       />
 
-      {/* Status strip — only meaningful activity */}
+      {/* Status strip. only meaningful activity */}
       {(buildLabel || showBrowserChrome || !explorerOpen || !codeOpen) ? (
       <div className="shrink-0 px-3 py-1.5 flex items-center justify-between gap-3 bg-ark-navy-900/40">
         <div className="flex items-center gap-3 min-w-0 text-[11px]">

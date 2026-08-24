@@ -34,8 +34,8 @@ const ITEMS: {
   hint: string;
   icon: typeof ListTree;
 }[] = [
-  { id: 'plan', label: 'Plan', hint: 'Steps only — no file writes until Go implement', icon: ListTree },
-  { id: 'ask', label: 'Ask', hint: 'Answer only — no disk writes or commands', icon: MessageCircleQuestion },
+  { id: 'plan', label: 'Plan', hint: 'Steps only. no file writes until Go implement', icon: ListTree },
+  { id: 'ask', label: 'Ask', hint: 'Answer only. no disk writes or commands', icon: MessageCircleQuestion },
   { id: 'agent', label: 'Agent', hint: 'Edit files and run approved tools in workspace', icon: Zap },
   { id: 'debug', label: 'Debug', hint: 'Find bugs and propose fixes', icon: Bug },
   { id: 'multitask', label: 'Multi-agent', hint: 'Design → Code → Verify on this project together', icon: Users },

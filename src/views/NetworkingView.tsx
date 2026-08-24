@@ -218,7 +218,7 @@ export function NetworkingView() {
       return {
         ...prev,
         [postId]: [
-          { id: `${postId}-d1`, name: 'Riley Park', body: 'Cool project — are you still looking for feedback?', at: new Date(t - 50 * 60_000).toISOString() },
+          { id: `${postId}-d1`, name: 'Riley Park', body: 'Cool project. are you still looking for feedback?', at: new Date(t - 50 * 60_000).toISOString() },
           { id: `${postId}-d2`, name: 'Jordan Lee', body: 'What’s the stack here?', at: new Date(t - 32 * 60_000).toISOString() },
           { id: `${postId}-d3`, name: 'Maya Chen', body: 'Happy to chime in on the layout if you want.', at: new Date(t - 12 * 60_000).toISOString() },
         ],
@@ -256,7 +256,7 @@ export function NetworkingView() {
       title: 'Your report is being reviewed',
       body: `We typically review within 24 hours. Reported: ${who} (${id}) · “${reportPost.title}”.${reportProofName ? ` Proof attached: ${reportProofName}.` : ''} You’ll get another notice when it’s done.`,
     });
-    pushSidebarToast('Report sent — under review for up to 24 hours.', { ttlMs: 10_000, id: 'report-sent' });
+    pushSidebarToast('Report sent. under review for up to 24 hours.', { ttlMs: 10_000, id: 'report-sent' });
     setNote('Report sent. Check Notifications for status.');
     setReportBusy(false);
     setReportPost(null);
@@ -290,7 +290,7 @@ export function NetworkingView() {
         <div className="h-full min-h-0 flex flex-col rounded-2xl border border-surface-border bg-ark-navy-900/55 shadow-[0_8px_32px_rgba(0,0,0,0.35)] overflow-hidden">
           <div className="shrink-0 px-5 sm:px-8 pt-5 pb-3">
             <GuestSocialBanner feature="networking" />
-            {/* Centered toolbar — Search and filter pill match size */}
+            {/* Centered toolbar. Search and filter pill match size */}
             <div className="mt-3 flex items-center justify-center gap-2.5 flex-wrap">
               <div className="h-10 w-56 flex items-center gap-2 rounded-full bg-ark-navy-950/70 border border-white/10 px-3">
                 <Search className="w-3.5 h-3.5 text-content-tertiary shrink-0" />
@@ -434,7 +434,7 @@ export function NetworkingView() {
                       ? 'No saved projects yet. Bookmark a post to find it here.'
                       : tab === 'paid'
                         ? 'No paid posts yet.'
-                        : 'Nothing here yet. Post what you’re building — or that you need help.'}
+                        : 'Nothing here yet. Post what you’re building. or that you need help.'}
                   </p>
                 </div>
               ) : (
@@ -754,7 +754,7 @@ export function NetworkingView() {
               <textarea
                 value={reportReason}
                 onChange={e => setReportReason(e.target.value)}
-                placeholder="e.g. This is my project — they copied it without permission…"
+                placeholder="e.g. This is my project. they copied it without permission…"
                 rows={4}
                 className="w-full rounded-xl bg-black/40 border border-white/10 px-3 py-2 text-sm text-content-primary placeholder:text-content-tertiary/70 outline-none focus:border-sky-500/40 resize-none leading-relaxed"
               />
@@ -905,7 +905,7 @@ export function NetworkingView() {
             >
               <span className="min-w-0">
                 <span className="block text-sm text-content-primary">Willing to pay for help</span>
-                <span className="block text-[11px] text-content-tertiary mt-0.5">Shows a $ badge — payments come later</span>
+                <span className="block text-[11px] text-content-tertiary mt-0.5">Shows a $ badge. payments come later</span>
               </span>
               <span className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
                 paying ? 'bg-emerald-500 text-white' : 'border border-white/15 text-content-tertiary'

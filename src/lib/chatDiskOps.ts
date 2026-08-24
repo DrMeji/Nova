@@ -61,7 +61,7 @@ export async function handleDeleteFileChatRequest(opts: {
     };
   }
 
-  // Sticky file from a recent create/delete target — use exact path
+  // Sticky file from a recent create/delete target. use exact path
   if (stickyTarget?.kind === 'file' && namesRoughlyMatch(stickyTarget.name, wantFile)) {
     const stickyStat = await pathStat(stickyTarget.path);
     if (stickyStat?.ok && stickyStat.isFile) {
@@ -200,7 +200,7 @@ export async function handleAddFileChatRequest(opts: {
   if (!parentPath) {
     return {
       kind: 'reply',
-      text: 'Where should this file go?\n\nSay e.g. *add it to Desktop\\Projects* or *inside DeBloat* — or open a project folder first.',
+      text: 'Where should this file go?\n\nSay e.g. *add it to Desktop\\Projects* or *inside DeBloat*. or open a project folder first.',
     };
   }
 
@@ -291,7 +291,7 @@ export async function handleReadFileChatRequest(opts: {
     if (read.binary) {
       return {
         kind: 'reply',
-        text: `**${wantFile}** at \`${read.path || candidatePath}\` is a binary file — I can only show text files here.`,
+        text: `**${wantFile}** at \`${read.path || candidatePath}\` is a binary file. I can only show text files here.`,
       };
     }
     const preview = String(read.text || '').length > 8000

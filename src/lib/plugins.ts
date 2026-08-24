@@ -240,7 +240,7 @@ export function loadPluginState(): PluginStateMap {
 }
 
 export function savePluginState(map: PluginStateMap) {
-  // Never persist raw tokens in localStorage — vault holds them.
+  // Never persist raw tokens in localStorage. vault holds them.
   const scrubbed: PluginStateMap = {};
   for (const [id, state] of Object.entries(map)) {
     const { token: legacyToken, ...rest } = state;
@@ -529,7 +529,7 @@ export async function runPluginAction(
   return runPluginStub(pluginId, userText);
 }
 
-/** Honest reply when a plugin is named but not connected — never invent account data. */
+/** Honest reply when a plugin is named but not connected. never invent account data. */
 export function runPluginStub(pluginId: string, userText: string): string | null {
   const lower = userText.toLowerCase();
   const mentions =

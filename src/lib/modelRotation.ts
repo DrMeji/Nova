@@ -104,7 +104,7 @@ function withPending(
 /**
  * Call at the start of a generate. Applies a pending swap if the next GGUF
  * is ready; otherwise may enqueue a background download. Always returns
- * history (possibly compressed) — never an empty thread.
+ * history (possibly compressed). never an empty thread.
  */
 export async function prepareBrainRotation(opts: {
   scopeId: string;
@@ -209,12 +209,12 @@ export async function prepareBrainRotation(opts: {
             forceUnknownDisk: true,
           }).catch(() => undefined);
         } else {
-          emitRotationNote('No second on-device brain fits this PC — Auto can use a free cloud path if a key is saved.');
+          emitRotationNote('No second on-device brain fits this PC. Auto can use a free cloud path if a key is saved.');
         }
       }
     }
   } catch {
-    /* rotation is best-effort — never block the user's message */
+    /* rotation is best-effort. never block the user's message */
   }
 
   return { brain, history, swapped, pressure, threshold };

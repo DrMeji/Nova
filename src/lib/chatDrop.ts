@@ -1,7 +1,7 @@
 /**
  * Desktop drag-and-drop for Chat / Image / Code.
  * Electron folder drops are a single File with a disk path (via webUtils),
- * not nested browser File entries — resolve through pathStat + importFolder.
+ * not nested browser File entries. resolve through pathStat + importFolder.
  */
 
 import type { ChatAttachMeta } from '@/lib/chatAttach';
@@ -11,7 +11,7 @@ export type DroppedImage = { id: string; name: string; dataUrl: string };
 export type DropApplyResult = {
   images: DroppedImage[];
   files: Record<string, string>;
-  /** @deprecated prefer attaches — kept for callers that read a single chip */
+  /** @deprecated prefer attaches. kept for callers that read a single chip */
   attach: ChatAttachMeta | null;
   attaches: ChatAttachMeta[];
   projectId?: string;
@@ -187,7 +187,7 @@ export async function resolveChatDrop(
           `[Video file: ${base}]`,
           `Path: ${disk}`,
           `Size: ${stat.size ?? 0} bytes`,
-          'Video generation is not live yet — describe what you want to recreate or review from this clip.',
+          'Video generation is not live yet. describe what you want to recreate or review from this clip.',
         ].join('\n');
         notes.push(`Attached video ${base}`);
         continue;
@@ -196,7 +196,7 @@ export async function resolveChatDrop(
       if (read?.ok && read.text != null) {
         seedFiles[base] = read.text;
       } else {
-        seedFiles[base] = `[Attached file: ${base}, ${stat.size ?? 0} bytes${read?.error ? ` — ${read.error}` : ''}]`;
+        seedFiles[base] = `[Attached file: ${base}, ${stat.size ?? 0} bytes${read?.error ? `. ${read.error}` : ''}]`;
       }
     }
   }
@@ -222,7 +222,7 @@ export async function resolveChatDrop(
       seedFiles[rel] = [
         `[Video file: ${f.name}]`,
         `Size: ${f.size} bytes`,
-        'Video generation is not live yet — describe what you want from this clip.',
+        'Video generation is not live yet. describe what you want from this clip.',
       ].join('\n');
       continue;
     }
@@ -281,7 +281,7 @@ export async function resolveChatDrop(
       attaches.push(attach);
     }
   }
-  // Images only go in `images` (thumbnail strip) — never as a second AttachCard.
+  // Images only go in `images` (thumbnail strip). never as a second AttachCard.
 
   if (!attaches.length && !images.length && notes.length) {
     return { ...empty, note: notes[0] };

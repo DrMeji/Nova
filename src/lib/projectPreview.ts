@@ -44,7 +44,7 @@ export async function ensureInAppPreview(opts: {
   preferUrl?: string | null;
 }): Promise<string | null> {
   const { projectId, title, files, preferUrl } = opts;
-  // Vite / already-running localhost URL — open that host in the ARK window.
+  // Vite / already-running localhost URL. open that host in the ARK window.
   if (preferUrl && /localhost|127\.0\.0\.1/.test(preferUrl) && isViteProject(files)) {
     await openInAppPreview(preferUrl, { projectId, title });
     return preferUrl;
@@ -83,7 +83,7 @@ export async function ensureInAppPreview(opts: {
   return null;
 }
 
-/** After chat writes files — push into the live preview window if one is open (or start it). */
+/** After chat writes files. push into the live preview window if one is open (or start it). */
 export async function refreshLivePreview(opts: {
   projectId: string | null | undefined;
   title?: string;

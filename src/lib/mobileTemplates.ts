@@ -69,7 +69,7 @@ function readme(opts: {
   const lines = [
     `# ${name}`,
     '',
-    'Native phone app authored in ARK. This repo is the source — ship it from Xcode (Apple) or Android Studio (Play).',
+    'Native phone app authored in ARK. This repo is the source. ship it from Xcode (Apple) or Android Studio (Play).',
     '',
   ];
   if (ios) lines.push(`Designed for **${deviceLine(ios)}**.`, '');
@@ -78,7 +78,7 @@ function readme(opts: {
     lines.push(
       '## iPhone / iPad (App Store)',
       '',
-      'Needs a Mac with Xcode. This Windows PC cannot compile or sign iOS — that is Apple’s rule.',
+      'Needs a Mac with Xcode. This Windows PC cannot compile or sign iOS. that is Apple’s rule.',
       '',
       '1. In ARK, tap **Push to GitHub**.',
       '2. On the Mac: `git clone` this repo and open `ios/' + name + '.xcodeproj`.',
@@ -952,7 +952,7 @@ export function formatNativeBuildReply(label: string, message: string, files: Re
   return [
     `I wrote a native **${label}**${size ? ` for ${size}` : ''}.`,
     '',
-    'This is not a website in a browser — Start shows a device-sized preview in ARK.',
+    'This is not a website in a browser. Start shows a device-sized preview in ARK.',
     ios ? 'On a Mac: clone from GitHub and open `ios/*.xcodeproj` in Xcode, then Archive for the App Store.' : '',
     android ? 'Anywhere: open the `android` folder in Android Studio, then ship an AAB to Play Console.' : '',
     '',

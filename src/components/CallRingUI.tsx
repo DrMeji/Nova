@@ -142,7 +142,7 @@ function CallControls({
   );
 }
 
-/** DM header pill — colored ring + bottom timer when live. */
+/** DM header pill. colored ring + bottom timer when live. */
 export function MessageDmCallPill({
   displayName,
   peerArkId,
@@ -216,7 +216,7 @@ export function MessageDmCallPill({
   );
 }
 
-/** Group header pill — call + stacked member avatars when live. */
+/** Group header pill. call + stacked member avatars when live. */
 export function MessageGroupCallPill({
   groupId,
   groupName,
@@ -359,7 +359,7 @@ export function SidebarCallDock() {
   );
 }
 
-/** @deprecated Bottom bar removed — use Message pills + SidebarCallDock. */
+/** @deprecated Bottom bar removed. use Message pills + SidebarCallDock. */
 export function ActiveCallBar() {
   return null;
 }

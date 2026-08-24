@@ -74,7 +74,7 @@ export function recordModelTurn(
   return getModelHealthRatio(scopeId);
 }
 
-/** New on-device brain / rotation — start fresh. */
+/** New on-device brain / rotation. start fresh. */
 export function resetModelHealth(scopeId: string) {
   if (!scopeId) return;
   const map = readMap();

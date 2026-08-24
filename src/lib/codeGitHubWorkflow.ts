@@ -69,7 +69,7 @@ export async function workflowCreateGitHubRepo(opts: {
     `GitHub · ${isPrivate ? 'private' : 'public'} repo`,
     created.full_name || repoName,
     created.html_url || '',
-    pushed.ok ? 'Pushed this folder.' : (pushed.error || 'Repo created; push failed — try Push in the header.'),
+    pushed.ok ? 'Pushed this folder.' : (pushed.error || 'Repo created; push failed. try Push in the header.'),
   ].filter(Boolean);
 
   return { ok: true, reply: lines.join('\n') };
@@ -142,7 +142,7 @@ export async function workflowOpenPullRequest(opts: {
   void openInSystemBrowser(compareUrl);
   return {
     ok: false,
-    reply: `Could not open a PR automatically (${lastError}). Opened the compare page — finish it in the browser.\n${compareUrl}`,
+    reply: `Could not open a PR automatically (${lastError}). Opened the compare page. finish it in the browser.\n${compareUrl}`,
     url: compareUrl,
   };
 }

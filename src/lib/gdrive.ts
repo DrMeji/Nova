@@ -98,7 +98,7 @@ export async function runDriveLive(
     const rest = uploadMatch[1].trim();
     const parts = rest.split(/\s+[—–]\s+|\s+-{1,2}\s+/);
     const title = (parts[0] || 'ARK note').trim();
-    const content = (parts.slice(1).join(' — ').trim() || title);
+    const content = (parts.slice(1).join('. ').trim() || title);
     const file = await uploadDriveTextFile(token, title, content);
     return [
       `Drive · uploaded (@${account.label})`,
@@ -135,6 +135,6 @@ export async function runDriveLive(
       return `${i + 1}. ${f.name || f.id} · ${kind}${f.webViewLink ? `\n   ${f.webViewLink}` : ''}`;
     }),
     '',
-    'Live data from Google Drive. Try “search budget spreadsheet” or “upload note: Title — body”.',
+    'Live data from Google Drive. Try “search budget spreadsheet” or “upload note: Title. body”.',
   ].join('\n');
 }

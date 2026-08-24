@@ -1,5 +1,5 @@
 /**
- * Minimal project files — empty starting point unless the brief describes a real landing page.
+ * Minimal project files. empty starting point unless the brief describes a real landing page.
  */
 
 import type { ProjectKind } from '@/lib/createProjectIntent';

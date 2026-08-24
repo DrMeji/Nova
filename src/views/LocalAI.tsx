@@ -261,7 +261,7 @@ export function LocalAI() {
         setHunted(found);
         setHuntNote(
           found.length
-            ? `${found.length} online ${found.length === 1 ? 'fit' : 'fits'} from Hugging Face + ModelScope — waiting here until you install, or until the current model runs out`
+            ? `${found.length} online ${found.length === 1 ? 'fit' : 'fits'} from Hugging Face + ModelScope. waiting here until you install, or until the current model runs out`
             : '',
         );
       } catch {
@@ -656,7 +656,7 @@ export function LocalAI() {
                       const label = phase === 'canceling'
                         ? 'Canceling…'
                         : phase === 'queued'
-                        ? 'Queued — waiting for slot'
+                        ? 'Queued. waiting for slot'
                         : phase === 'runtime'
                           ? 'Installing runtime…'
                           : phase === 'weights'
@@ -1025,7 +1025,7 @@ export function LocalAI() {
                   <h2 className="text-base font-semibold text-content-primary">Connected APIs</h2>
                 </div>
                 <p className="text-xs text-content-tertiary mb-4 px-1 leading-relaxed">
-                  These are the keys you plugged in on Models. ARK chats through them — it does not
+                  These are the keys you plugged in on Models. ARK chats through them. it does not
                   download their weights. Latency is time to list models / authenticate, not MB/s.
                 </p>
                 {apiProbes.length === 0 ? (
@@ -1060,7 +1060,7 @@ export function LocalAI() {
                   <div className="py-3 px-1">
                     <p className="text-content-primary font-medium">1. Measure every model host</p>
                     <p className="text-xs text-content-tertiary mt-1">
-                      Hugging Face, HF Mirror, and ModelScope — plus a ping to each connected API key.
+                      Hugging Face, HF Mirror, and ModelScope. plus a ping to each connected API key.
                     </p>
                   </div>
                   <div className="py-3 px-1">
@@ -1226,7 +1226,7 @@ export function LocalAI() {
                     });
                   }}
                 >
-                  Drop .gguf files here, or use Import GGUF — they appear in Chat as soon as they’re ready.
+                  Drop .gguf files here, or use Import GGUF. they appear in Chat as soon as they’re ready.
                 </div>
                 {(engineMeta?.modelFiles?.length ?? 0) === 0 ? (
                   <p className="text-sm text-content-tertiary">

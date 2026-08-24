@@ -155,7 +155,7 @@ export function TeammateBar({
           )}
           {myAccess === 'read' && (
             <p className="mt-2 text-[10px] text-amber-300/90 leading-relaxed">
-              You have Read on this repo — you can look and discuss, not edit or push.
+              You have Read on this repo. you can look and discuss, not edit or push.
             </p>
           )}
         </div>

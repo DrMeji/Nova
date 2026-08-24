@@ -67,9 +67,9 @@ const LAYOUT_RULES = `Layout rules for simple pages:
 - Do not float the title left. Do not leave Hello World stuck top-left unless the user asked for that.
 - Keep HTML, CSS, and JS in sync (if you add .top-bar icons, include CSS for them).`;
 
-const CODING_INSTRUCTIONS = `You are ARK inside a developer project workspace — not a generic chatbot and not a local-engine toy.
+const CODING_INSTRUCTIONS = `You are ARK inside a developer project workspace. not a generic chatbot and not a local-engine toy.
 Your job is to help the user build and change real software in this project.
-Answer the user’s latest request directly (build / edit / fix / explain). Do not substitute a different feature, dump unrelated files, or “improve” something they did not ask for. If they only asked a question, answer it — do not invent file edits.
+Answer the user’s latest request directly (build / edit / fix / explain). Do not substitute a different feature, dump unrelated files, or “improve” something they did not ask for. If they only asked a question, answer it. do not invent file edits.
 
 When the user asks you to build, add, remove, upgrade, fix, or change code, you MUST emit @@@FILE blocks with FULL file contents. Do not only explain how to create files. The left tree and Start preview only update when you write files.
 
@@ -80,20 +80,20 @@ Format every create/update exactly:
 ...entire file contents here...
 \`\`\`
 
-Prefer small, correct diffs as full-file rewrites. If the user mentions GitHub or a remote repo, still write real files into this local project first — cloning/PRs can come after the files exist on disk.
+Prefer small, correct diffs as full-file rewrites. If the user mentions GitHub or a remote repo, still write real files into this local project first. cloning/PRs can come after the files exist on disk.
 
 Rules:
 - Use real paths with folders: css/styles.css, js/app.js, src/App.tsx, package.json (forward slashes). Parent folders are created automatically.
 - Change only what the user asked. Emit @@@FILE with FULL content for each file you touch, but do NOT rewrite unrelated files.
 - For a one-line CSS tweak, touch only the CSS (and HTML only if needed). Do not regenerate the whole app.
-- Never create a folder named path/to — that phrase is not a real path. Always write index.html, css/styles.css, js/app.js (or src/…).
+- Never create a folder named path/to. that phrase is not a real path. Always write index.html, css/styles.css, js/app.js (or src/…).
 - For typical web UIs, split markup, styles, and behavior:
-  - index.html — markup only; link css/styles.css and js/app.js
-  - css/styles.css — all CSS
-  - js/app.js — all JavaScript
+  - index.html. markup only; link css/styles.css and js/app.js
+  - css/styles.css. all CSS
+  - js/app.js. all JavaScript
 - Only put CSS and JS inline in one index.html if the user asked for a single file.
 - After the file blocks, write a short plain-language summary of what you changed and that they can press Start to preview. Never echo the user’s message.
-- Never put “Summary:” paragraphs, changelog text, or assistant notes inside the HTML/CSS/JS page itself — only in the short chat summary after the files.
+- Never put “Summary:” paragraphs, changelog text, or assistant notes inside the HTML/CSS/JS page itself. only in the short chat summary after the files.
 - Keep text readable on the background (dark bg → light text; light bg → dark text). Do not add a Theme Toggle unless the user asked for one.
 - Match the ask: add new files/features, remove dead UI, upgrade the page, or fix a bug. Do not only patch unless that is what they asked.
 - Empty projects: start from a blank working page and grow it. Do not refuse because the folder is empty.
@@ -123,7 +123,7 @@ full file
 full file
 \`\`\`
 
-Use those real paths (or src/… for React). Never write path/to/… — that is only an example people say in chat, not a folder.
+Use those real paths (or src/… for React). Never write path/to/…. that is only an example people say in chat, not a folder.
 
 Then one short chat summary only (no code). Press Start to preview. Never write Summary text into the page files.
 
@@ -160,7 +160,7 @@ export function classifyCodeTurnSize(userMessage: string, files?: ProjectFileMap
   return 'full';
 }
 
-/** Rank paths for the turn pack — never dump the whole tree alphabetically. */
+/** Rank paths for the turn pack. never dump the whole tree alphabetically. */
 export function rankFilesForTurnPack(
   flat: ProjectFileMap,
   userMessage: string,
@@ -309,12 +309,12 @@ export function buildProjectCodingPrompt(
 
   const fileSection = chunks.length
     ? chunks.join('\n\n')
-    : '(empty project — create the files that are needed)';
+    : '(empty project. create the files that are needed)';
 
   return `${codingInstructionsFor(userMessage, flat, size)}
 
 Project: ${projectName || 'ARK project'}
-Turn size: ${size} — edit only what was asked; keep context small.
+Turn size: ${size}. edit only what was asked; keep context small.
 
 Current files:
 ${fileSection}
@@ -340,7 +340,7 @@ export function estimateCodingTurnTokens(
   return Math.max(1, Math.ceil(buildProjectCodingPrompt(userMessage, files, projectName).length / 4));
 }
 
-/** Shorter prompt for empty projects — faster on local GGUF. */
+/** Shorter prompt for empty projects. faster on local GGUF. */
 export function buildProjectCodingPromptLite(userMessage: string, projectName?: string): string {
   const target = classifyMobileTarget(userMessage);
   const extra = target
@@ -709,11 +709,11 @@ export function buildDoneSummary(
 ): string {
   if (opts?.stopped) {
     return opts.hadFiles
-      ? `Stopped. I kept what was already in Explorer. Edit your prompt and send — I’ll continue from those files.`
+      ? `Stopped. I kept what was already in Explorer. Edit your prompt and send. I’ll continue from those files.`
       : `Stopped. Edit your prompt and send when you’re ready.`;
   }
   if (opts?.continued) {
-    return `Done — I updated the project. Press **Start** to see the preview.`;
+    return `Done. I updated the project. Press **Start** to see the preview.`;
   }
   const safe = String(label || 'Project').trim();
   // Never echo a full user ask as the project title in chat.
@@ -721,9 +721,9 @@ export function buildDoneSummary(
     || safe.length > 48
     || /\?$/.test(safe);
   if (lookslikeAsk) {
-    return `Done — I updated the project. Press **Start** to see the preview.`;
+    return `Done. I updated the project. Press **Start** to see the preview.`;
   }
-  return `I built **${safe}**. It’s in Explorer — hit Start when you want to try it, or tell me what to change.`;
+  return `I built **${safe}**. It’s in Explorer. hit Start when you want to try it, or tell me what to change.`;
 }
 
 function escapeHtml(s: string) {
@@ -743,7 +743,7 @@ function titleFromAsk(message: string) {
 function pythonFallback(userMessage: string): string {
   const title = escapeHtml(titleFromAsk(userMessage)).replace(/&quot;/g, '"');
   return `# ${title}
-# Local ARK project — run with: python main.py
+# Local ARK project. run with: python main.py
 
 def main():
     print(${JSON.stringify(titleFromAsk(userMessage))})
@@ -992,7 +992,7 @@ export function wantsProjectFileEdits(message: string): boolean {
   return false;
 }
 
-/** Static HTML/CSS/JS starter — Start preview works with no npm. */
+/** Static HTML/CSS/JS starter. Start preview works with no npm. */
 export function webScaffoldFallbackEdits(userMessage: string): ParsedFileEdit[] {
   const title = titleFromAsk(userMessage);
   const hello = /\bhello\s*world\b/i.test(userMessage);
@@ -1013,7 +1013,7 @@ export function webScaffoldFallbackEdits(userMessage: string): ParsedFileEdit[] 
 <body>
   <main class="page">
     <h1>${safeHeading}</h1>
-    <p class="tagline">Built in ARK Code — press Start to preview, then ask for changes.</p>
+    <p class="tagline">Built in ARK Code. press Start to preview, then ask for changes.</p>
   </main>
   <script src="js/app.js"></script>
 </body>
@@ -1157,7 +1157,7 @@ export function replyHasUnclosedFileBlock(reply: string): boolean {
   return !lastFileBlockClosed(reply);
 }
 
-/** Final commit only — closed fences / finished HTML. Streaming preview may still show a draft. */
+/** Final commit only. closed fences / finished HTML. Streaming preview may still show a draft. */
 export function parseClosedFileEdits(reply: string): ParsedFileEdit[] {
   const all = parseFileEdits(reply);
   const lastAt = (reply || '').lastIndexOf('@@@FILE');
@@ -1213,7 +1213,7 @@ export function stripFileBlocks(reply: string): string {
   return text.replace(/\n{3,}/g, '\n\n').trim();
 }
 
-/** Natural-language Code chat reply — never dump source into the bubble. */
+/** Natural-language Code chat reply. never dump source into the bubble. */
 export function formatCodeChatReply(
   userMessage: string,
   changedPaths: string[],
@@ -1252,23 +1252,23 @@ export function formatCodeChatReply(
     const rgb = /\b(rgb|multi[- ]?colou?r|gradient)\b/i.test(ask);
     const toggle = /\b(toggle|theme)\b/i.test(ask) && /\b(remove|delete)\b/i.test(ask);
     if (usable) return `${clean}\n\n${doneFooter}`;
-    if (hello) return `Done — Hello World is ready. ${doneFooter}`;
-    if (pizza) return `Done — updated the page text. ${doneFooter}`;
-    if (bg) return `Done — background and colors are updated. ${doneFooter}`;
-    if (search) return `Done — search is in the top-right. ${doneFooter}`;
-    if (rgb) return `Done — multi-color title is applied. ${doneFooter}`;
-    if (toggle) return `Done — removed the theme toggle. ${doneFooter}`;
+    if (hello) return `Done. Hello World is ready. ${doneFooter}`;
+    if (pizza) return `Done. updated the page text. ${doneFooter}`;
+    if (bg) return `Done. background and colors are updated. ${doneFooter}`;
+    if (search) return `Done. search is in the top-right. ${doneFooter}`;
+    if (rgb) return `Done. multi-color title is applied. ${doneFooter}`;
+    if (toggle) return `Done. removed the theme toggle. ${doneFooter}`;
     if (/\b(logo|icon)\b/i.test(ask) && /\b(center|middle|screen)\b/i.test(ask)) {
-      return `Done — added the logo centered on screen. ${doneFooter}`;
+      return `Done. added the logo centered on screen. ${doneFooter}`;
     }
     if (/\b(icon|profile|account|center|logo|button)\b/i.test(ask)) {
-      return `Done — updated the layout. ${doneFooter}`;
+      return `Done. updated the layout. ${doneFooter}`;
     }
-    return `Done — I updated the project. ${doneFooter}`;
+    return `Done. I updated the project. ${doneFooter}`;
   }
 
   if (changedPaths.length && !previewOk) {
-    return 'I wrote files, but they were not on the live preview page. Try the ask again — I’ll target index.html / css / js.';
+    return 'I wrote files, but they were not on the live preview page. Try the ask again. I’ll target index.html / css / js.';
   }
 
   if (usable) return clean;

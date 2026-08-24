@@ -3,7 +3,7 @@ import { createClient, type SupportedStorage } from '@supabase/supabase-js';
 const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.trim() || '';
 const supabaseAnonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined)?.trim() || '';
 
-/** Set when the production bundle was built without Vite env — UI should show this, not go blank. */
+/** Set when the production bundle was built without Vite env. UI should show this, not go blank. */
 export const supabaseConfigError =
   !supabaseUrl || !supabaseAnonKey
     ? 'ARK was built without Supabase config (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY).'

@@ -395,7 +395,7 @@ export async function runGitHubLive(
     return [
       `GitHub · open pull requests (@${user.login})`,
       '',
-      ...prs.map((pr, i) => `${i + 1}. ${repoNameFromIssue(pr)} — #${pr.number} “${pr.title}”\n   ${pr.html_url}`),
+      ...prs.map((pr, i) => `${i + 1}. ${repoNameFromIssue(pr)}. #${pr.number} “${pr.title}”\n   ${pr.html_url}`),
       '',
       'Live data from your GitHub account. Open a link above in your browser.',
     ].join('\n');
@@ -446,7 +446,7 @@ export async function runGitHubLive(
       `GitHub · open issues (@${user.login})`,
       '',
       ...issues.slice(0, 10).map((issue, i) =>
-        `${i + 1}. ${repoNameFromIssue(issue)} — #${issue.number} “${issue.title}”\n   ${issue.html_url}`,
+        `${i + 1}. ${repoNameFromIssue(issue)}. #${issue.number} “${issue.title}”\n   ${issue.html_url}`,
       ),
       '',
       'Live data from your GitHub account.',
@@ -472,10 +472,10 @@ export async function runGitHubLive(
     ...repos.map(repo => {
       const vis = repo.private ? 'private' : 'public';
       const lang = repo.language ? ` · ${repo.language}` : '';
-      return `• ${repo.full_name} — ${vis}${lang} · updated ${formatDate(repo.updated_at)}\n  ${repo.html_url}`;
+      return `• ${repo.full_name}. ${vis}${lang} · updated ${formatDate(repo.updated_at)}\n  ${repo.html_url}`;
     }),
     '',
-    'Say **open owner/repo in Code** to clone it and start adding, removing, or upgrading files. Empty repos are fine — we start from a blank page.',
+    'Say **open owner/repo in Code** to clone it and start adding, removing, or upgrading files. Empty repos are fine. we start from a blank page.',
     '',
     'Ask about open PRs or issues next. Live data from your GitHub account.',
   ].join('\n');

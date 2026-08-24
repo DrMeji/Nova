@@ -1,5 +1,5 @@
 /**
- * In-chat Code overlay — file tree left, editor right.
+ * In-chat Code overlay. file tree left, editor right.
  * Not a separate Code chat / ProjectWorkspace route.
  */
 

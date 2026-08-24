@@ -14,7 +14,7 @@ export function looksLikeImplementGo(message: string): boolean {
   const t = String(message || '').trim();
   if (!t) return false;
   if (/\b(delete|remove|trash|wipe|uninstall)\b/i.test(t)) return false;
-  // Chip: "Create project SignalDesk" — always execute, never re-plan.
+  // Chip: "Create project SignalDesk". always execute, never re-plan.
   if (/^create\s+project\s+[A-Za-z]/i.test(t) && t.length < 80) return true;
   if (IMPLEMENT_GO_RE.test(t)) return true;
   if (/\bbuild\s+it\s+now\b/i.test(t)) return true;
@@ -30,21 +30,21 @@ export function shouldBlockChatFileWrites(message: string, composerMode: string 
 }
 
 export function planModeSystemHint(): string {
-  return 'The user is in **Plan** mode. Output a step-by-step plan only — no @@@FILE blocks, no file writes. End with: *Say “lets build this” when you want me to create files.*';
+  return 'The user is in **Plan** mode. Output a step-by-step plan only. no @@@FILE blocks, no file writes. End with: *Say “lets build this” when you want me to create files.*';
 }
 
-/** Soft planning chat — thorough unique advice, never scaffold. */
+/** Soft planning chat. thorough unique advice, never scaffold. */
 export function planningConversationHint(topicHint?: string): string {
   const topic = topicHint ? ` Focus on: ${topicHint.slice(0, 280)}` : '';
   return [
-    'Planning conversation only — do not create files, folders, or projects.',
+    'Planning conversation only. do not create files, folders, or projects.',
     'Answer THIS specific product idea with concrete, unique detail (not a generic questionnaire).',
     'Match their latest question: stack, PC requirements, timeline, open-source/GitHub refs, inspiration sites,',
-    'mockups/references, or tradeoffs — do not force a generic “give me more details” script.',
+    'mockups/references, or tradeoffs. do not force a generic “give me more details” script.',
     'When useful, offer: (1) product variants, (2) stack + why, (3) v1 scope, (4) build path,',
     '(5) real reference repos/sites, (6) 2–4 clarifying questions phrased naturally.',
     'Never invent UI chips like Create project or Keep planning.',
-    'Do not greet empty — jump into useful content about their idea.',
+    'Do not greet empty. jump into useful content about their idea.',
     topic,
   ].filter(Boolean).join(' ');
 }

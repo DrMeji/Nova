@@ -67,7 +67,7 @@ export function looksLikeMobileBuild(message: string): boolean {
   return /\b(build|create|make|start|want|need)\b/i.test(t);
 }
 
-/** New product in an empty (or rebuild) Code folder — calculator, todo, game, app, … */
+/** New product in an empty (or rebuild) Code folder. calculator, todo, game, app, … */
 export function looksLikeNewAppBuild(message: string): boolean {
   const t = String(message || '');
   if (looksLikeFollowUpNotBuild(t)) return false;
@@ -119,8 +119,8 @@ ${iterate}`;
   }
   return `This is one product on two native stacks.
 Write BOTH:
-- ios/ — SwiftUI + Xcode project (App Store)
-- android/ — Kotlin/Compose + Gradle (Play Store)
+- ios/. SwiftUI + Xcode project (App Store)
+- android/. Kotlin/Compose + Gradle (Play Store)
 Do NOT substitute a website. Same app name and idea on both sides.
 ${iterate}`;
 }

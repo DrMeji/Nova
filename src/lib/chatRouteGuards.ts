@@ -1,5 +1,5 @@
 /**
- * Mutually-exclusive chat route guards — single source of truth.
+ * Mutually-exclusive chat route guards. single source of truth.
  *
  * Any handler that lists folders, reads files, or explores the PC must call
  * `isProjectCreateBrief` first so build briefs are never misrouted.
@@ -10,14 +10,14 @@ import { looksLikeCreateProjectBrief } from './createProjectIntent';
 
 export { isProjectCreateBrief, normalizeChatIntentText } from './chatCreateBrief';
 
-/** User wants to CREATE / BUILD / SCAFFOLD — includes parsed create intents. */
+/** User wants to CREATE / BUILD / SCAFFOLD. includes parsed create intents. */
 export function isAnyCreateBrief(text: string): boolean {
   const t = normalizeChatIntentText(text);
   if (!t) return false;
   return isProjectCreateBrief(t) || looksLikeCreateProjectBrief(t);
 }
 
-/** Read a file from disk — never for create/build briefs. */
+/** Read a file from disk. never for create/build briefs. */
 export function shouldRouteReadFile(text: string): boolean {
   const t = normalizeChatIntentText(text);
   if (!t) return false;
@@ -35,17 +35,17 @@ export function shouldRouteReadFile(text: string): boolean {
   return /\.[A-Za-z0-9]{1,12}\b/.test(t) || (/\bfiles?\b/i.test(t) && /\b(?:read|open\s+the)\b/i.test(t));
 }
 
-/** Folder catalog / project inventory — never for create/build briefs. */
+/** Folder catalog / project inventory. never for create/build briefs. */
 export function shouldRouteFolderCatalog(text: string): boolean {
   return !isAnyCreateBrief(text);
 }
 
-/** PC explore (games, desktop, installed apps) — never for create/build briefs. */
+/** PC explore (games, desktop, installed apps). never for create/build briefs. */
 export function shouldRoutePcExplore(text: string): boolean {
   return !isAnyCreateBrief(text);
 }
 
-/** Natural-language folder path open — never for create/build briefs. */
+/** Natural-language folder path open. never for create/build briefs. */
 export function shouldRouteFolderPath(text: string): boolean {
   return !isAnyCreateBrief(text);
 }

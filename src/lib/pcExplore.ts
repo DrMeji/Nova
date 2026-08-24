@@ -1,5 +1,5 @@
 /**
- * Natural-language PC exploration — games, desktop, installed apps, subfolders.
+ * Natural-language PC exploration. games, desktop, installed apps, subfolders.
  * No folder-name templates required.
  */
 
@@ -33,7 +33,7 @@ export function classifyPcExploreMode(text: string): PcExploreMode | null {
 
   if (looksLikeInstalledAppsAsk(t)) return 'installed_apps';
 
-  // Inventory only — soft “hobby project / tell me more” must NOT match.
+  // Inventory only. soft “hobby project / tell me more” must NOT match.
   if (
     /\b(?:what|which)\s+projects?\b/i.test(t)
     || /\b(?:list|show)\s+(?:my\s+)?projects?\b/i.test(t)
@@ -46,7 +46,7 @@ export function classifyPcExploreMode(text: string): PcExploreMode | null {
     return 'desktop_subfolder';
   }
 
-  // "gaming PC build / CPU GPU recommend" is advice — not inventory of Desktop\Games.
+  // "gaming PC build / CPU GPU recommend" is advice. not inventory of Desktop\Games.
   if (
     /\b(games?|gaming|steam)\b/i.test(t)
     && /\b(desktop|pc|computer|downloaded|installed|have|found|find|any|whole|my)\b/i.test(t)
@@ -384,7 +384,7 @@ export async function buildPcExploreData(userMessage: string, modeHint?: PcExplo
       ? 'No game folders or shortcuts turned up on Desktop or in Steam/common paths.'
       : mode === 'desktop_subfolder'
         ? 'That folder is empty or could not be read.'
-        : 'Nothing listed — turn on Desktop access in Settings → Security.';
+        : 'Nothing listed. turn on Desktop access in Settings → Security.';
   }
 
   return {

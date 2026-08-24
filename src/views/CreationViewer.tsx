@@ -140,7 +140,7 @@ export function CreationViewer() {
         {isPreview ? (
           <div className="w-full max-w-3xl rounded-xl border border-amber-400/35 bg-amber-500/15 px-4 py-3 text-sm text-amber-100">
             <span className="font-semibold">Preview only</span>
-            {' — '}
+            {'. '}
             {honesty === 'Motion still'
               ? 'This is a still preview, not a generated video.'
               : 'This fallback is not a finished generated image or video.'}

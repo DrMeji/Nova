@@ -123,7 +123,7 @@ export function BuildRun() {
   const startConnect = () => {
     if (!selected) return;
     if (!isPluginWired(selected.id)) {
-      setAuthError('Coming soon — not connected to a live API yet.');
+      setAuthError('Coming soon. not connected to a live API yet.');
       return;
     }
     setPermDraft(
@@ -141,7 +141,7 @@ export function BuildRun() {
   const finishConnect = () => {
     if (!selected) return;
     if (!isPluginWired(selected.id)) {
-      setAuthError('Coming soon — not connected to a live API yet.');
+      setAuthError('Coming soon. not connected to a live API yet.');
       return;
     }
     if (selected.authKind !== 'none' && !tokenDraft.trim() && !selectedRuntime?.token) {
@@ -170,7 +170,7 @@ export function BuildRun() {
     setAuthError('');
 
     if (!isPluginWired(selected.id)) {
-      setAuthError('Coming soon — not connected to a live API yet.');
+      setAuthError('Coming soon. not connected to a live API yet.');
       return;
     }
 
@@ -218,7 +218,7 @@ export function BuildRun() {
         const user = await verifyStripeToken(tokenDraft);
         setVerifiedLogin(user.label);
       } else {
-        setAuthError('Coming soon — not connected to a live API yet.');
+        setAuthError('Coming soon. not connected to a live API yet.');
         return;
       }
       setConnectStep('permissions');
@@ -367,7 +367,7 @@ export function BuildRun() {
                   </p>
                 )}
                 {installedPlugins.length === 0 ? (
-                  <p className="text-sm text-content-tertiary">Nothing added yet — pick a plugin above to start.</p>
+                  <p className="text-sm text-content-tertiary">Nothing added yet. pick a plugin above to start.</p>
                 ) : (
                   <div className="flex flex-wrap gap-2">
                     {installedPlugins.map(plugin => {
@@ -545,7 +545,7 @@ export function BuildRun() {
                   <div className="flex flex-col gap-2 pt-1">
                     {!isPluginWired(selected.id) ? (
                       <p className="text-sm text-content-tertiary rounded-xl border border-surface-border px-3 py-3">
-                        Coming soon — listed for discovery only. Not connected to a live API yet.
+                        Coming soon. listed for discovery only. Not connected to a live API yet.
                       </p>
                     ) : !selectedRuntime.installed ? (
                       <button type="button" className="ark-btn-primary w-full" onClick={() => install(selected.id)}>
@@ -740,7 +740,7 @@ export function BuildRun() {
                   ) : (
                     <>
                       <p className="text-xs text-content-tertiary leading-relaxed">
-                        No account needed — continue to grant permissions.
+                        No account needed. continue to grant permissions.
                       </p>
                       <button type="button" className="ark-btn-primary w-full" onClick={() => setConnectStep('permissions')}>
                         Continue

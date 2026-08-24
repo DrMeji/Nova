@@ -43,8 +43,8 @@ import { isArkDevSession } from '@/lib/arkRuntime';
 import { BrandMark, StatusCheck } from '@/components/BrandMark';
 
 const REVEAL_FEATURES: { id: ParkId; label: string; description: string }[] = [
-  { id: 'networking', label: 'Networking', description: 'Live — help feed, add/message builders (always on).' },
-  { id: 'message', label: 'Message', description: 'Live — direct messages between ARK users (always on).' },
+  { id: 'networking', label: 'Networking', description: 'Live. help feed, add/message builders (always on).' },
+  { id: 'message', label: 'Message', description: 'Live. direct messages between ARK users (always on).' },
   { id: 'call', label: 'Call', description: 'Voice calls (microphone + WebRTC). Still parked until you reveal it.' },
 ];
 
@@ -106,7 +106,7 @@ const PROVIDER_ROWS = [
   { id: 'sambanova', name: 'SambaNova', hint: 'SambaNova Cloud open models' },
   { id: 'perplexity', name: 'Perplexity', hint: 'Sonar chat + search' },
   { id: 'xai', name: 'xAI', hint: 'Grok models' },
-  { id: 'github-models', name: 'GitHub Models', hint: 'Retired — use Groq / Google / OpenRouter' },
+  { id: 'github-models', name: 'GitHub Models', hint: 'Retired. use Groq / Google / OpenRouter' },
 ];
 
 const ACCENTS: { id: AccentPref; label: string; swatch: string }[] = [
@@ -204,11 +204,11 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
     void window.arkDesktop?.signingStatus?.()
       .then((row) => {
         if (!row?.packaged) {
-          setSigningStatus('Dev build — signing not checked');
+          setSigningStatus('Dev build. signing not checked');
           return;
         }
         if (row.signed) setSigningStatus('Windows Authenticode signature valid');
-        else setSigningStatus(row.status || 'Unsigned — SmartScreen may warn on first run');
+        else setSigningStatus(row.status || 'Unsigned. SmartScreen may warn on first run');
       })
       .catch(() => setSigningStatus(null));
   }, []);
@@ -263,7 +263,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
       if (payload?.status === 'downloading') {
         setDownloadingUpdate(true);
       } else if (payload?.status === 'handoff' || payload?.status === 'installing') {
-        // App is about to exit for the Updating window — keep button busy briefly.
+        // App is about to exit for the Updating window. keep button busy briefly.
         setDownloadingUpdate(true);
       } else if (payload?.status === 'error' || payload?.status === 'idle' || payload?.status === 'available') {
         setDownloadingUpdate(false);
@@ -341,7 +341,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
         const info = await checkArkGitHubUpdate();
         setUpdateMsg(
           info.newerAvailable && !info.setupAssetUrl
-            ? `${info.message} (installer file not published yet — try again later)`
+            ? `${info.message} (installer file not published yet. try again later)`
             : info.message,
         );
         setUpdateInfo(
@@ -644,7 +644,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                     </button>
                   </div>
                   <p className="text-[11px] text-content-tertiary mt-1.5 leading-relaxed">
-                    This 7-digit ID belongs to this account only. Friends add you with this — not your email.
+                    This 7-digit ID belongs to this account only. Friends add you with this. not your email.
                   </p>
                 </div>
                 <Field label="Email" value={user?.email ?? 'guest@ark.local'} onChange={() => {}} disabled />
@@ -858,7 +858,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                   </div>
                 </SettingsGroup>
 
-                {/* Content safety — NSFW in one self-contained card */}
+                {/* Content safety. NSFW in one self-contained card */}
                 <SettingsGroup
                   title="Content safety (Image)"
                   description="Controls adult image generation and how free image hosts are prompted."
@@ -868,8 +868,8 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                       label="Allow NSFW content"
                       description={
                         Boolean(prefs.allowNsfw)
-                          ? 'On — Image mode may generate nude or adult content. Chat still follows your routing mode.'
-                          : 'Off (default) — Image requests for nudity or porn are blocked in chat. Free image hosts also receive SFW constraints so they stay family-safe.'
+                          ? 'On. Image mode may generate nude or adult content. Chat still follows your routing mode.'
+                          : 'Off (default). Image requests for nudity or porn are blocked in chat. Free image hosts also receive SFW constraints so they stay family-safe.'
                       }
                       value={Boolean(prefs.allowNsfw)}
                       onChange={v => patchPrefs({ allowNsfw: v })}
@@ -971,7 +971,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                     <GgufSliderRow
                       label="Max output tokens"
                       valueLabel={String(prefs.ggufNPredict ?? 4096)}
-                      hint="Cap on how many tokens the local model may write per reply — not your chat history size. 4096 is the recommended default (~3k words max). Higher values can mean slower replies and more RAM while generating, but nothing is “used up” over time."
+                      hint="Cap on how many tokens the local model may write per reply. not your chat history size. 4096 is the recommended default (~3k words max). Higher values can mean slower replies and more RAM while generating, but nothing is “used up” over time."
                       min={4096}
                       max={8192}
                       step={256}
@@ -1146,7 +1146,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                                       setCloudProviderEnabled(p.id, true);
                                       setEditingProvider(null);
                                       setKeyDraft('');
-                                      setSavedFlash('Key saved — those models can appear in Chat now');
+                                      setSavedFlash('Key saved. those models can appear in Chat now');
                                       window.setTimeout(() => setSavedFlash(''), 1600);
                                     } catch (err) {
                                       setSavedFlash(err instanceof Error ? err.message : 'Could not save key');
@@ -1235,7 +1235,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                     <p className="text-xs text-content-tertiary mt-0.5 leading-relaxed">
                       Provider keys are stored locally
                       {window.arkDesktop ? ' with OS-level encryption in Desktop' : ''}
-                      . They are only sent to the provider you connected — never to an ARK cloud for storage.
+                      . They are only sent to the provider you connected. never to an ARK cloud for storage.
                     </p>
                   </div>
                 </div>
@@ -1251,8 +1251,8 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                 <ToggleRow
                   label="Allow optional cloud sync"
                   description={prefs.allowCloudSync
-                    ? 'On — ARK still has no live multi-device sync. This toggle is saved for later.'
-                    : 'Off — not syncing. Multi-device project sync is not live yet.'}
+                    ? 'On. ARK still has no live multi-device sync. This toggle is saved for later.'
+                    : 'Off. not syncing. Multi-device project sync is not live yet.'}
                   value={allowSync}
                   onChange={v => {
                     patchPrefs({ allowCloudSync: v });
@@ -1261,7 +1261,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                 />
                 <ToggleRow
                   label="Send anonymous diagnostics"
-                  description="Off by default. When on, crash-style notes would stay on this PC unless you add a backend — ARK does not send them today."
+                  description="Off by default. When on, crash-style notes would stay on this PC unless you add a backend. ARK does not send them today."
                   value={diagnostics}
                   onChange={v => {
                     patchPrefs({ sendDiagnostics: v });
@@ -1686,7 +1686,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                 />
                 <ToggleRow
                   label="Lock when this PC sleeps"
-                  description={hasPinSet() ? 'Require PIN after Windows sleep. Locks the app UI only — keys stay in OS encryption.' : 'Set a PIN first'}
+                  description={hasPinSet() ? 'Require PIN after Windows sleep. Locks the app UI only. keys stay in OS encryption.' : 'Set a PIN first'}
                   value={prefs.lockOnSleep}
                   onChange={v => {
                     if (v && !hasPinSet()) {
@@ -1810,37 +1810,22 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
 
                 <ToggleRow
                   label="Allow Desktop folder access"
-                  description="Read and edit projects under your Desktop — not all of C:"
+                  description="Read and edit projects under your Desktop, not all of C:"
                   value={prefs.allowDesktopFolderAccess}
-                  onChange={v => {
-                    if (v && !window.confirm(
-                      'Allow ARK to read and edit folders under your Desktop?\n\nScope: Desktop only — not your whole drive.',
-                    )) return;
-                    patchPrefs({ allowDesktopFolderAccess: v });
-                  }}
+                  onChange={v => patchPrefs({ allowDesktopFolderAccess: v })}
                 />
                 <ToggleRow
                   label="Allow Documents folder access"
-                  description="Read and edit projects under your Documents — not all of C:"
+                  description="Read and edit projects under your Documents, not all of C:"
                   value={prefs.allowDocumentsFolderAccess}
-                  onChange={v => {
-                    if (v && !window.confirm(
-                      'Allow ARK to read and edit folders under your Documents?\n\nScope: Documents only — not your whole drive.',
-                    )) return;
-                    patchPrefs({ allowDocumentsFolderAccess: v });
-                  }}
+                  onChange={v => patchPrefs({ allowDocumentsFolderAccess: v })}
                 />
 
                 <ToggleRow
                   label="Full PC access (files)"
-                  description="Let ARK read and edit folders across your user profile when you ask — e.g. Desktop projects by name in chat"
+                  description="Let ARK read and edit folders across your user profile when you ask, e.g. Desktop projects by name in chat"
                   value={prefs.allowFullPcAccess}
-                  onChange={v => {
-                    if (v && !window.confirm(
-                      'Give ARK broad file access on this PC?\n\nARK can open folders you name (Desktop, Documents, projects) and run installs you approve.\n\nWindows and Program Files stay blocked.',
-                    )) return;
-                    patchPrefs({ allowFullPcAccess: v });
-                  }}
+                  onChange={v => patchPrefs({ allowFullPcAccess: v })}
                 />
 
                 <div>
@@ -1853,7 +1838,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                       {
                         value: 'allowlist' as const,
                         title: 'Allowlist',
-                        detail: 'npm, pip, git only — confirm each time',
+                        detail: 'npm, pip, git only. Confirm each time',
                       },
                       {
                         value: 'auto_review' as const,
@@ -1871,12 +1856,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                         <button
                           key={opt.value}
                           type="button"
-                          onClick={() => {
-                            if (opt.value === 'run_all' && prefs.agentExecutionMode !== 'run_all' && !window.confirm(
-                              'Run everything?\n\nARK can run allowlisted commands without asking each time. Destructive commands stay blocked.',
-                            )) return;
-                            patchPrefs({ agentExecutionMode: opt.value });
-                          }}
+                          onClick={() => patchPrefs({ agentExecutionMode: opt.value })}
                           className={`w-full text-left px-4 py-3 flex items-start gap-3 transition-colors ${
                             active
                               ? 'bg-sky-500/10'
@@ -1973,7 +1953,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                     </div>
                   </div>
                   <p className="text-[11px] text-content-tertiary leading-relaxed">
-                    Check looks at GitHub Releases for a newer ARK-Setup.exe. Pushing code to main is not enough — a <code className="text-[10px]">v*</code> tag has to publish the installer first.
+                    Check looks at GitHub Releases for a newer ARK-Setup.exe. Pushing code to main is not enough. a <code className="text-[10px]">v*</code> tag has to publish the installer first.
                   </p>
                   {signingStatus ? (
                     <p className="text-[11px] text-content-tertiary leading-relaxed">
@@ -2079,7 +2059,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
             <SettingsSection
               title="For testers"
               description={isArkDevSession()
-                ? 'Source build (Open-ARK-Build.bat) — reveal parked features and test before you ship an installer.'
+                ? 'Source build (Open-ARK-Build.bat). reveal parked features and test before you ship an installer.'
                 : 'Quick path to a first real reply, reveal parked features, then tell us what to improve'}
             >
               {isArkDevSession() && (
@@ -2091,7 +2071,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                 <div className="rounded-xl border border-surface-border p-4 space-y-3">
                   <p className="text-sm font-medium text-content-primary">Reveal parked features</p>
                   <p className="text-xs text-content-tertiary leading-relaxed">
-                    These surfaces are wired and working. Toggles only affect this PC — sidebar items appear when turned on.
+                    These surfaces are wired and working. Toggles only affect this PC. sidebar items appear when turned on.
                   </p>
                   {REVEAL_FEATURES.map(opt => {
                     void featureTick;
@@ -2113,13 +2093,13 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                   <ol className="text-xs text-content-tertiary space-y-1.5 list-decimal list-inside leading-relaxed">
                     <li>Connect a free key (Settings → Providers or the Chat “Connect free key” link), or</li>
                     <li>Open Models → Engine (or Local AI) → Install recommended → wait until it says ready</li>
-                    <li>Chat with ARK Auto selected — try “Hello”</li>
+                    <li>Chat with ARK Auto selected. try “Hello”</li>
                   </ol>
                 </div>
                 <div className="rounded-xl border border-surface-border p-4 space-y-2">
                   <p className="text-sm font-medium text-content-primary">Image &amp; video</p>
                   <p className="text-xs text-content-tertiary leading-relaxed">
-                    Expect real images when a free path works. Video may show a labeled motion-still preview when MP4 hosts need credits — reopen creations from Recent.
+                    Expect real images when a free path works. Video may show a labeled motion-still preview when MP4 hosts need credits. reopen creations from Recent.
                   </p>
                 </div>
                 <div className="rounded-xl border border-surface-border p-4 space-y-2">
@@ -2151,7 +2131,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                     className="ark-btn-secondary text-xs"
                     onClick={() => {
                       clearSetupCompleted();
-                      setSavedFlash('Setup cleared — restart ARK to see onboarding');
+                      setSavedFlash('Setup cleared. restart ARK to see onboarding');
                       window.setTimeout(() => setSavedFlash(''), 2500);
                     }}
                   >

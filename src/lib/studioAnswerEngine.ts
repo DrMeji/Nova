@@ -1,5 +1,5 @@
 /**
- * Unified studio answer engine — Chat (and later Code) sticky-folder replies.
+ * Unified studio answer engine. Chat (and later Code) sticky-folder replies.
  * One path: classify hint → optional local scan → fresh packed context → scan format and/or streamed model.
  * Never show system scaffolding in user-visible text. Never reuse prior prose as the next answer.
  */
@@ -51,9 +51,9 @@ export type StudioAnswerInput = {
   stickyPinnedSource?: string;
   /** Abort if returns true (e.g. genSeq changed / stop). */
   shouldAbort?: () => boolean;
-  /** Plan-only turn — no file writes until user says go. */
+  /** Plan-only turn. no file writes until user says go. */
   planOnly?: boolean;
-  /** User asked to implement — model may emit @@@FILE blocks. */
+  /** User asked to implement. model may emit @@@FILE blocks. */
   allowFileEdits?: boolean;
 };
 
@@ -179,7 +179,7 @@ function formatRecommend(
     return [
       `For ${label} (${fileCount} source files), I don\u2019t have prior scan hits to prioritize.`,
       '',
-      '**Recommended first:** run **Find problems** or **Debug**, then ask again — I\u2019ll rank those findings.',
+      '**Recommended first:** run **Find problems** or **Debug**, then ask again. I\u2019ll rank those findings.',
       '',
       'Or tell me a goal (ship safer, clean UI, finish stubs) and I\u2019ll pick a starting file.',
     ].join('\n');
@@ -191,11 +191,11 @@ function formatRecommend(
   ];
   top.forEach((f, i) => {
     const why = i === 0
-      ? 'Highest leverage / risk — fix this before polishing elsewhere.'
+      ? 'Highest leverage / risk. fix this before polishing elsewhere.'
       : i === 1
         ? 'Next most important after #1.'
         : 'Worth doing once the top items are clear.';
-    bits.push(`${i + 1}. \`${f.path}\` — ${f.detail}`);
+    bits.push(`${i + 1}. \`${f.path}\`. ${f.detail}`);
     bits.push(`   **Why first:** ${why}`);
     bits.push('');
   });
@@ -244,9 +244,9 @@ export function packStudioContext(input: StudioAnswerInput): {
     : 'Optional prior findings from local scan: (none yet)';
 
   const fileRule = input.planOnly
-    ? 'PLAN ONLY — output a step-by-step plan. No @@@FILE blocks, no file writes. End with: Say "go implement" when you want me to build this.'
+    ? 'PLAN ONLY. output a step-by-step plan. No @@@FILE blocks, no file writes. End with: Say "go implement" when you want me to build this.'
     : input.allowFileEdits
-      ? 'The user wants you to CHANGE THE CODE NOW. Emit @@@FILE blocks with COMPLETE file contents for every file you change. Do not only describe the change. Keep edits surgical — only files that need to change. After the files, add ONE short plain-English sentence (no code fences, no file dumps). Example: "Added the logo centered on screen."'
+      ? 'The user wants you to CHANGE THE CODE NOW. Emit @@@FILE blocks with COMPLETE file contents for every file you change. Do not only describe the change. Keep edits surgical. only files that need to change. After the files, add ONE short plain-English sentence (no code fences, no file dumps). Example: "Added the logo centered on screen."'
       : 'Do NOT write @@@FILE blocks. Do not dump whole files.';
 
   const system = [
@@ -271,7 +271,7 @@ export function packStudioContext(input: StudioAnswerInput): {
     `Question: ${ask}`,
     '',
     `Project: ${input.projectName || 'Attached project'}`,
-    `Intent hint: ${intent} — ${intentHint}`,
+    `Intent hint: ${intent}. ${intentHint}`,
     '',
     'File tree (summary):',
     tree || '(empty)',
@@ -279,7 +279,7 @@ export function packStudioContext(input: StudioAnswerInput): {
     findingsBlock,
     '',
     'Relevant file excerpts:',
-    chunks.join('\n\n') || '(no excerpts — say re-attach the folder)',
+    chunks.join('\n\n') || '(no excerpts. say re-attach the folder)',
   ].join('\n');
 
   const prompt = `${system}\n\n${user}`;
@@ -332,7 +332,7 @@ function localScanAnswer(
   let spoken = describeProjectFromFiles(files, projectName);
   if (/\b(can you |do you )?see\b/i.test(ask) || /\bwhat (am i|i'?m)/i.test(ask)) {
     const n = Object.keys(flattenProjectFiles(files)).length;
-    spoken = `Yes — I can see **${n} file${n === 1 ? '' : 's'}** from **${projectName || 'this folder'}** in this chat.\n\n${spoken}`;
+    spoken = `Yes. I can see **${n} file${n === 1 ? '' : 's'}** from **${projectName || 'this folder'}** in this chat.\n\n${spoken}`;
   }
   return spoken;
 }

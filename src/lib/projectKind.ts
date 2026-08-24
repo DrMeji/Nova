@@ -1,5 +1,5 @@
 /**
- * Project stack detection — leaf module (no chat/disk imports).
+ * Project stack detection. leaf module (no chat/disk imports).
  */
 
 import { looksLikeLandingBrief, prefersReactAppScaffold } from '@/lib/webLandingFromBrief';
@@ -40,7 +40,7 @@ export function detectProjectKind(text: string): ProjectKind {
     return 'static-web';
   }
   if (/\b(node\s+cli|command\s+line\s+tool|cli\s+tool)\b/.test(lower)) return 'node-cli';
-  // Bare "website/site" alone is not enough for Vite — landings already handled above.
+  // Bare "website/site" alone is not enough for Vite. landings already handled above.
   if (/\b(react|vite|next|web\s+app|electron|discord|call|chat\s+app)\b/.test(lower)) return 'vite-react';
   if (/\b(website|site)\b/.test(lower) && /\b(react|vite|spa|dashboard|app)\b/.test(lower)) return 'vite-react';
   return 'vite-react';

@@ -1,4 +1,4 @@
-/** Ranked free media engines — implemented in electron/arkMedia.cjs. */
+/** Ranked free media engines. implemented in electron/arkMedia.cjs. */
 
 export const IMAGE_ENGINE_RANK = ['local-sd', 'huggingface', 'pollinations'] as const;
 export const VIDEO_ENGINE_RANK = ['pollinations-mp4', 'huggingface-video', 'motion-still'] as const;

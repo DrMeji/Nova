@@ -1,4 +1,4 @@
-/** Small profile / contact avatar — photo when set, else initials. */
+/** Small profile / contact avatar. photo when set, else initials. */
 
 function initials(name: string) {
   const parts = String(name || '').trim().split(/\s+/).filter(Boolean);

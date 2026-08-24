@@ -1,6 +1,6 @@
 /**
  * Deterministic landing-page HTML/CSS/JS from a chat brief
- * (hero URL, CTAs, product cards) — never leave an empty #app.
+ * (hero URL, CTAs, product cards). never leave an empty #app.
  */
 
 export type LandingFile = { path: string; content: string };
@@ -89,7 +89,7 @@ type Card = { title: string; meta: string; image: string };
 function pickCards(text: string, images: string[]): Card[] {
   const t = String(text || '');
   const cards: Card[] = [];
-  // "Name — $189/night" or "Name - $189"
+  // "Name. $189/night" or "Name - $189"
   const priceLines = [...t.matchAll(
     /([A-Z][A-Za-z0-9][A-Za-z0-9 '’-]{1,40})\s*[—–-]\s*(\$?\d[\d,]*(?:\/\w+)?(?:\s*[-—–]\s*[A-Za-z0-9 :]+)?)/g,
   )];
@@ -133,7 +133,7 @@ export function wantsChatAppScaffold(text: string): boolean {
   const chatNoun = /\b(chat\s+app|messaging\s+app|desktop[- ]style\s+chat|team\s+messaging|discord)\b/.test(t)
     || (/\b(channel|direct\s+messages?|\bdms?\b|voice\s+channel|screen\s+share|mute|deafen)\b/.test(t)
       && /\b(ui|app|react|sidebar|rail|layout|server)\b/.test(t));
-  // "left rail" alone is used by finance/notes/desktop apps — only counts with chat nouns.
+  // "left rail" alone is used by finance/notes/desktop apps. only counts with chat nouns.
   const railChat = /\bleft\s+rail\b/.test(t) && /\b(channel|dm|voice|message|thread|server|discord|chat)\b/.test(t);
   return (
     chatNoun
@@ -159,12 +159,12 @@ export function wantsInteractiveSpaScaffold(text: string): boolean {
     && /\b(react|vite|localStorage)\b/i.test(t)) {
     return true;
   }
-  // Dense tool UI / trading cockpit — tabs + live controls, not a marketing landing.
+  // Dense tool UI / trading cockpit. tabs + live controls, not a marketing landing.
   if (/\b(watchlist|orders?\s+tab|trading\s+cockpit|trade\s*rail|desktop[- ]style)\b/i.test(t)
     && /\b(tab|settings|panel|button|cockpit|software)\b/i.test(t)) {
     return true;
   }
-  // Calculators ship as static HTML/CSS/JS — not a Vite React SPA.
+  // Calculators ship as static HTML/CSS/JS. not a Vite React SPA.
   return false;
 }
 
@@ -173,10 +173,10 @@ function looksLikeMarketingLanding(text: string): boolean {
   const t = String(text || '');
   if (t.length < 60) return false;
   if (wantsInteractiveSpaScaffold(t)) return false;
-  // Festival / concert / event landings — even short briefs must not become empty Vite shells.
+  // Festival / concert / event landings. even short briefs must not become empty Vite shells.
   if (/\b(festival|lineup|ticket\s+cta|jazz|concert|velvet|landing\s+page)\b/i.test(t)) return true;
   const hasMedia = /unsplash|https?:\/\/\S+\.(?:jpg|jpeg|png|webp)|images\.unsplash/i.test(t);
-  // Do not treat lone "card" as marketing — kanban "Add Card" would false-positive.
+  // Do not treat lone "card" as marketing. kanban "Add Card" would false-positive.
   const hasLayout = /\b(hero|cta|headline|subtitle|gallery|masonry|portfolio|menu|cabin|class(?:es)?|booking|restaurant|dish(?:es)?)\b/i.test(t)
     || (/\bcards?\b/i.test(t) && /\b(hero|unsplash|menu|gallery|portfolio|restaurant)\b/i.test(t));
   return hasMedia || (hasLayout && t.length > 100);
@@ -211,7 +211,7 @@ function buildPortfolioFiles(title: string, brief: string, urls: string[]): Land
       'https://images.unsplash.com/photo-1447752875215-b2761acb3c5d?w=900&q=80',
     ];
   const about = /about[^.!\n]{0,40}(.{20,180})/i.exec(brief)?.[1]?.trim()
-    || `${title} is a photography portfolio — real frames, quiet composition, and work you can feel.`;
+    || `${title} is a photography portfolio. real frames, quiet composition, and work you can feel.`;
   const gallery = images.map((src, i) => (
     `      <figure class="tile tile-${(i % 3) + 1}"><img src="${escapeHtml(src)}" alt="Frame ${i + 1}" loading="lazy" /></figure>`
   )).join('\n');
@@ -703,7 +703,7 @@ document.getElementById('btn-save-settings')?.addEventListener('click', () => {
   ];
 }
 
-/** Professional / scientific calculator — history tape, memory, trig, deg/rad. */
+/** Professional / scientific calculator. history tape, memory, trig, deg/rad. */
 function buildProCalculatorFiles(title: string, _brief: string): LandingFile[] {
   const safe = escapeHtml(title);
   const html = `<!DOCTYPE html>
@@ -1155,7 +1155,7 @@ export function buildLandingPageFiles(name: string, brief: string): LandingFile[
     return buildProCalculatorFiles(title, brief);
   }
 
-  // "Use Unsplash" with no concrete URLs — still ship a real hero + menu photos.
+  // "Use Unsplash" with no concrete URLs. still ship a real hero + menu photos.
   if (!urls.length && /\b(restaurant|menu|dining|cafe|food|platehouse|unsplash)\b/i.test(brief)) {
     urls = [
       'https://images.unsplash.com/photo-1414235077428-338989a2e8c0?w=1600&q=80',
@@ -1215,7 +1215,7 @@ export function buildLandingPageFiles(name: string, brief: string): LandingFile[
   </header>
   <main>
     <section id="menu" class="grid" aria-label="Menu">
-${cardsHtml || '      <p class="empty">Add sections in chat — this page is ready to edit.</p>'}
+${cardsHtml || '      <p class="empty">Add sections in chat. this page is ready to edit.</p>'}
     </section>
   </main>
   <footer>

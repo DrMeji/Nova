@@ -34,7 +34,7 @@ export function DeleteFileModal({ prompt, busy, onCancel, onConfirm }: Props) {
             <p className="text-sm text-content-secondary leading-relaxed mt-2">
               Permanently remove{' '}
               <span className="text-content-primary font-medium">“{prompt?.fileName || 'this file'}”</span>
-              . This only deletes that file — not the whole project folder.
+              . This only deletes that file. not the whole project folder.
             </p>
             {prompt?.filePath ? (
               <p className="mt-3 text-xs text-content-tertiary font-mono break-all leading-relaxed rounded-lg border border-surface-border bg-surface-hover/40 px-3 py-2">

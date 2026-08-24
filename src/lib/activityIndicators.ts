@@ -67,7 +67,7 @@ export function clearChatDone(chatId: string) {
   emit();
 }
 
-/** Light the Recent row for this thread — never the New Chat nav item. */
+/** Light the Recent row for this thread. never the New Chat nav item. */
 export function notifyChatDone(chatId: string | undefined) {
   if (!chatId) return;
   const onThisThread = viewing.route === 'chat' && viewing.chatId === chatId;

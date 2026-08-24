@@ -83,7 +83,7 @@ export function AuthScreen() {
   useEffect(() => {
     void window.arkDesktop?.appMeta?.()
       .then(meta => {
-        // Guest continue is unpackaged/dev only — never on Setup.exe installs.
+        // Guest continue is unpackaged/dev only. never on Setup.exe installs.
         setShowBypass(!meta?.isPackaged);
       })
       .catch(() => setShowBypass(false));

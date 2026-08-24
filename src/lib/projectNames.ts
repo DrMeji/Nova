@@ -1,4 +1,4 @@
-/** Shared project / disk target name helpers — keep dependency-free to avoid import cycles. */
+/** Shared project / disk target name helpers. keep dependency-free to avoid import cycles. */
 
 const DISK_TARGET_BLOCKLIST = new Set([
   'it',

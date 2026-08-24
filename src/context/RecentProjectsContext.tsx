@@ -27,7 +27,7 @@ interface RecentProjectsContextValue {
   creations: RecentCreation[];
   /** All chats including archived (History). */
   chats: RecentChat[];
-  /** Sidebar Recent — excludes archived. */
+  /** Sidebar Recent. excludes archived. */
   activeChats: RecentChat[];
   addRecent: (name: string) => RecentProject;
   renameRecent: (id: string, name: string) => void;

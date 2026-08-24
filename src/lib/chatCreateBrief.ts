@@ -33,7 +33,7 @@ export function isProjectCreateBrief(text: string): boolean {
     && !/\b(?:web\s+)?(?:app|application|project|website|site)\b/i.test(t)) {
     return false;
   }
-  // "do not create any project" still contains the word project — ignore that noun hit.
+  // "do not create any project" still contains the word project. ignore that noun hit.
   const nounText = t.replace(/\b(?:do\s+not|don't|dont|never|without)\s+create(?:\s+any)?\s+project\b/gi, ' ');
   return (CREATE_RE.test(t) || NEW_PROJECT_RE.test(t)) && PROJECT_NOUN_RE.test(nounText);
 }

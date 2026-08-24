@@ -154,7 +154,7 @@ export async function runGmailLive(
       '',
       'Hi,',
       '',
-      'Thanks for your note — I saw this in my inbox and wanted to follow up. Happy to continue the conversation whenever works for you.',
+      'Thanks for your note. I saw this in my inbox and wanted to follow up. Happy to continue the conversation whenever works for you.',
       '',
       'Best,',
       'You',
@@ -163,7 +163,7 @@ export async function runGmailLive(
         ? `To send for real (needs Send permission + gmail.send scope):`
         : 'Draft only until you confirm send.',
       toAddr
-        ? `confirm send to ${toAddr} subject Re: ${subject} body Thanks for your note — following up from ARK.`
+        ? `confirm send to ${toAddr} subject Re: ${subject} body Thanks for your note. following up from ARK.`
         : '',
     ].filter(Boolean).join('\n');
   }
@@ -185,7 +185,7 @@ export async function runGmailLive(
       const from = header(msg, 'From') || 'Unknown';
       const subject = header(msg, 'Subject') || '(no subject)';
       const snip = msg.snippet ? ` · ${msg.snippet.slice(0, 80)}` : '';
-      return `${i + 1}. ${from} — “${subject}”${snip}`;
+      return `${i + 1}. ${from}. “${subject}”${snip}`;
     }),
     '',
     'Ask me to draft a reply, or “confirm send to …” when Send is enabled.',

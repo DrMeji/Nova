@@ -1,5 +1,5 @@
 /**
- * Disk intent classifier — create project vs add file vs delete file vs delete folder.
+ * Disk intent classifier. create project vs add file vs delete file vs delete folder.
  * Depends only on projectNames (zero-dep leaf).
  */
 
@@ -96,7 +96,7 @@ function looksLikeDeleteFollowUp(text: string): boolean {
   );
 }
 
-/** "delete Starbucks in pictures" — no "file" word required. */
+/** "delete Starbucks in pictures". no "file" word required. */
 function extractDeleteNamedTarget(text: string): string | null {
   const t = String(text || '').trim();
   const patterns = [
@@ -145,7 +145,7 @@ function extractFileName(text: string): string | null {
   return null;
 }
 
-/** Parse delete-file asks — disambiguate file name vs project folder name. */
+/** Parse delete-file asks. disambiguate file name vs project folder name. */
 export function parseDeleteFileTarget(text: string): {
   fileName: string | null;
   parentHint?: string;
@@ -183,7 +183,7 @@ export function parseDeleteFileTarget(text: string): {
 
   let parentHint = extractDeleteFileParentHint(t);
 
-  // "project folder called X" with a file ask — X is the file, not a subfolder
+  // "project folder called X" with a file ask. X is the file, not a subfolder
   if (
     fileName
     && parentHint
@@ -331,7 +331,7 @@ export function classifyDiskIntent(
     };
   }
 
-  // "delete Starbucks in picture folder" — location + name, no "file" word
+  // "delete Starbucks in picture folder". location + name, no "file" word
   if (looksLikeDeleteNamedItemAsk(t)) {
     const parsed = parseDeleteFileTarget(t);
     const name = parsed.fileName || extractDeleteNamedTarget(t);

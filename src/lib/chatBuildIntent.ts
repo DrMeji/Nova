@@ -1,8 +1,8 @@
 /**
- * High-priority intent: user wants to CREATE / BUILD an app — never list Desktop folders.
+ * High-priority intent: user wants to CREATE / BUILD an app. never list Desktop folders.
  */
 
-/** Scrap/rebuild the open (or named) folder in place — never spin up a sibling project. */
+/** Scrap/rebuild the open (or named) folder in place. never spin up a sibling project. */
 export function looksLikeInPlaceRebuildAsk(text: string): boolean {
   const t = String(text || '').trim();
   if (!t) return false;
@@ -28,7 +28,7 @@ export function looksLikeProjectBuildAsk(text: string): boolean {
   // Explicit create / scaffold
   if (/\bcreate\s+(?:a\s+)?(?:new\s+)?project\b/i.test(t)) return true;
   if (/\bcreate\s+(?:a\s+)?(?:new\s+)?(?:website|site|web\s*app|app|application)\b/i.test(t)) return true;
-  // "Create a React + Vite app named SignalDesk" — words between create and app are OK.
+  // "Create a React + Vite app named SignalDesk". words between create and app are OK.
   if (/\bcreate\s+(?:a\s+)?(?:new\s+)?[\s\S]{0,120}?\b(?:app|application|website|site|project)\b/i.test(t)) return true;
   if (/\b(?:react|vite)\b/i.test(t) && /\b(?:create|build|named|called)\b/i.test(t)) return true;
   if (/\bscaffold\b/i.test(t) && /\b(?:project|app|application|website|site)\b/i.test(t)) return true;

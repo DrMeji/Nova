@@ -1,5 +1,5 @@
 /**
- * Delete project/folder from Chat — zero external imports (avoids Vite pulling main bundle → TDZ).
+ * Delete project/folder from Chat. zero external imports (avoids Vite pulling main bundle → TDZ).
  */
 
 const PREFS_KEY = 'ark:local-prefs';

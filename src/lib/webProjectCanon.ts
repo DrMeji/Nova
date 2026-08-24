@@ -229,7 +229,7 @@ function readHeading(html: string): string {
   return (m?.[1] || 'Hello World').replace(/<[^>]+>/g, '').trim() || 'Hello World';
 }
 
-/** Deterministic patches for simple web asks — do not depend on the model. */
+/** Deterministic patches for simple web asks. do not depend on the model. */
 export function webMicroAskEdits(files: WebFileMap, message: string): WebFileEdit[] {
   const t = String(message || '');
   const flat = flatten(files);
@@ -449,7 +449,7 @@ document.getElementById('ark-search')?.addEventListener('keydown', (e) => {
     touched = true;
   }
 
-  // Festival / landing layout edits (static HTML) — models often describe without @@@FILE.
+  // Festival / landing layout edits (static HTML). models often describe without @@@FILE.
   const dropAbout = /\b(drop|remove|delete|fold)\b[\s\S]{0,80}\babout\b/i.test(t)
     || /\b(?:no|without)\s+(?:a\s+)?(?:separate\s+)?about\b/i.test(t);
   const stickyTicket = /\bsticky\b/i.test(t) && /\b(ticket|cta|bottom)\b/i.test(t);
@@ -503,9 +503,9 @@ body { padding-bottom: 4.5rem; }
       <a class="back-home" href="#">Back to home</a>
       <h2>${scheduleTitle}</h2>
       <ul class="slots">
-        <li><strong>8:00 PM</strong> — Doors · warm-up set</li>
-        <li><strong>9:30 PM</strong> — Headliner one</li>
-        <li><strong>11:00 PM</strong> — Headliner two · late set</li>
+        <li><strong>8:00 PM</strong>. Doors · warm-up set</li>
+        <li><strong>9:30 PM</strong>. Headliner one</li>
+        <li><strong>11:00 PM</strong>. Headliner two · late set</li>
       </ul>
     </section>`;
     if (/<\/main>/i.test(html)) html = html.replace(/<\/main>/i, `${block}\n  </main>`);
@@ -534,7 +534,7 @@ body { padding-bottom: 4.5rem; }
         <label>Email <input type="email" name="email" required placeholder="you@email.com" /></label>
         <button type="submit" class="btn">Join waitlist</button>
       </form>
-      <p id="waitlist-thanks" hidden>Thanks — you are on the list.</p>
+      <p id="waitlist-thanks" hidden>Thanks. you are on the list.</p>
     </section>`;
     if (/<section[^>]*id=["']contact["'][^>]*>[\s\S]*?<\/section>/i.test(html)) {
       html = html.replace(/<section[^>]*id=["']contact["'][^>]*>[\s\S]*?<\/section>/i, waitlistBlock);
@@ -575,7 +575,7 @@ document.getElementById('waitlist-form')?.addEventListener('submit', (e) => {
         <h1>Help</h1>
         <ul class="faq">
           <li>Watchlist stores symbols locally in this session.</li>
-          <li>Orders are demo-only — nothing is routed to a broker.</li>
+          <li>Orders are demo-only. nothing is routed to a broker.</li>
           <li>Settings risk limit is a soft reminder, not a hard block.</li>
         </ul>
       </section>\n      $1`,
@@ -620,7 +620,7 @@ export function isWebMicroAsk(message: string): boolean {
   const t = String(message || '');
   if (!t.trim()) return false;
   if (/\b(build|create|make|scaffold)\b.{0,40}\b(app|website|site|page)\b/i.test(t) && /\bhello\s*world\b/i.test(t) === false) {
-    // brand-new big builds are not micro — except hello world follow-ups with change verbs
+    // brand-new big builds are not micro. except hello world follow-ups with change verbs
   }
   if (/\bbackground\b/i.test(t) && /\b(black|white|blue|dark|red|green|teal)\b/i.test(t)) return true;
   if (/\b(rgb|multi[- ]?colou?r|multiple\s+colou?rs?|rainbow|gradient|teal)\b/i.test(t)) return true;
@@ -645,7 +645,7 @@ export function isWebMicroAsk(message: string): boolean {
   return false;
 }
 
-/** Surgical React SPA tweaks — must win over full kanban/finance rebuilds from project name. */
+/** Surgical React SPA tweaks. must win over full kanban/finance rebuilds from project name. */
 export function reactSurgicalMicroAskEdits(
   files: WebFileMap,
   message: string,
@@ -740,7 +740,7 @@ function findReactCssPath(flat: WebFileMap, appPath: string): string {
   return 'src/App.css';
 }
 
-/** Original geometric mark — not Discord's logo. */
+/** Original geometric mark. not Discord's logo. */
 function brandLogoSvg(initial: string): string {
   const letter = escapeHtml(initial.slice(0, 1).toUpperCase() || 'N');
   return `<svg className="brand-mark" viewBox="0 0 48 48" aria-hidden="true" role="img">
@@ -1115,7 +1115,7 @@ export default function App() {
           <textarea
             value={note}
             onChange={(e) => setNote(e.target.value)}
-            placeholder="Quick notes — saved locally…"
+            placeholder="Quick notes. saved locally…"
           />
         </section>
       </div>
@@ -1357,7 +1357,7 @@ const MEMBERS = [
   { name: 'Guest', status: 'idle' },
 ];
 const SEED = [
-  { id: '1', channel: 'general', author: 'Ark Bot', text: 'Welcome to ${safeTitle} — pick a channel or open DMs.' },
+  { id: '1', channel: 'general', author: 'Ark Bot', text: 'Welcome to ${safeTitle}. pick a channel or open DMs.' },
 ];
 
 export default function App() {
@@ -1401,7 +1401,7 @@ export default function App() {
           id: String(Date.now() + 1),
           dm: dmUser,
           author: dmUser,
-          text: \`Got it — "\${text.slice(0, 80)}"\`,
+          text: \`Got it. "\${text.slice(0, 80)}"\`,
         }]);
       }, 600);
     }
@@ -1549,9 +1549,9 @@ export default function App() {
                     <label>Accent color<input type="color" value={accent} onChange={e => setAccent(e.target.value)} /></label>
                   </>
                 )}
-                {settingsTab === 'notifications' && <p>Notification toggles (demo) — all on.</p>}
-                {settingsTab === 'privacy' && <p>Privacy toggles (demo) — DMs from friends only.</p>}
-                {settingsTab === 'keybinds' && <p>Ctrl+Enter — send message (read-only list for v1).</p>}
+                {settingsTab === 'notifications' && <p>Notification toggles (demo). all on.</p>}
+                {settingsTab === 'privacy' && <p>Privacy toggles (demo). DMs from friends only.</p>}
+                {settingsTab === 'keybinds' && <p>Ctrl+Enter. send message (read-only list for v1).</p>}
                 {settingsTab === 'voice' && <p>Input / output device dropdowns (demo).</p>}
               </div>
             </div>
@@ -1685,7 +1685,7 @@ function buildChatAppCss(): string {
 
 /**
  * When the user pastes several project prompts, only use the segment that
- * mentions this project — so NightChat's Discord text cannot patch TaskBox.
+ * mentions this project. so NightChat's Discord text cannot patch TaskBox.
  */
 function segmentForProject(message: string, projectName: string): string {
   const full = String(message || '');
@@ -1916,7 +1916,7 @@ export function reactUiMicroAskEdits(
     /\b(server\s+rail|channel\s+list|chat\s+pane|member\s+list|welcome\s+screen)\b/i.test(t)
     || (/\bdiscord\b/i.test(t) && /\b(layout|channels?|sidebar|chat)\b/i.test(t))
   );
-  // Strong chat signals only — do NOT treat lucide / settings modal / left rail alone as Discord.
+  // Strong chat signals only. do NOT treat lucide / settings modal / left rail alone as Discord.
   const wantsChatAppLayout = (
     wantsDiscordLayout
     || /\b(direct\s+messages?|voice\s+channel|screen\s+share|server\s+sidebar|threads?\s+panel|command\s+palette|call\s+bar|team\s+messaging|chat\s+app)\b/i.test(t)
@@ -1964,7 +1964,7 @@ export function reactUiMicroAskEdits(
 
   if (!kind) return [];
 
-  // Empty sticky map (after reload) — still patch the standard Vite React paths.
+  // Empty sticky map (after reload). still patch the standard Vite React paths.
   if (!appPath) {
     const looksVite = Object.keys(flat).some(p => /vite\.config|package\.json|src\//i.test(p));
     if (looksVite || Object.keys(flat).length === 0) {
@@ -2129,7 +2129,7 @@ export default function App() {
     return out;
   }
 
-  // Weather / coffee layouts are not hard-coded here yet — leave to model/scaffold.
+  // Weather / coffee layouts are not hard-coded here yet. leave to model/scaffold.
   if (kind === 'weather' || kind === 'coffee') return [];
 
   if (kind === 'notes') {
@@ -2322,7 +2322,7 @@ export function finalizeWebEdits(
 ): WebFileEdit[] {
   const remapped = canonicalizeWebEdits(modelEdits, files);
 
-  // Surgical tweaks first — never let project-name full rebuilds clobber them.
+  // Surgical tweaks first. never let project-name full rebuilds clobber them.
   const surgical = reactSurgicalMicroAskEdits(files, message);
   if (surgical.length) return surgical;
 
@@ -2332,7 +2332,7 @@ export function finalizeWebEdits(
   const micro = isWebMicroAsk(message) ? webMicroAskEdits(files, message) : [];
 
   if (micro.length) {
-    // Micro-asks: local patch only — models often write the wrong tree and still "succeed".
+    // Micro-asks: local patch only. models often write the wrong tree and still "succeed".
     return micro;
   }
 
@@ -2340,6 +2340,6 @@ export function finalizeWebEdits(
     return remapped;
   }
 
-  // Model only hit junk / nothing previewable — keep remapped if any, else empty (caller may scaffold).
+  // Model only hit junk / nothing previewable. keep remapped if any, else empty (caller may scaffold).
   return remapped;
 }

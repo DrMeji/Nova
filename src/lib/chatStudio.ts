@@ -64,11 +64,11 @@ export type StudioAskKind =
 const SMALLTALK_RE =
   /^(hi|hello|hey|yo|sup|howdy|thanks|thank you|ok|okay|cool|nice|sure)[.!\s]*$/i;
 
-/** “How can we fix” / “tell me how we can fix” — always debug, never overview. */
+/** “How can we fix” / “tell me how we can fix”. always debug, never overview. */
 export const STUDIO_FIX_ASK_RE =
   /\b(how (can|do|should|to) (we|i|you) fix|how (we|i) can fix|tell me how (we|to|i) (can )?fix|can you (tell me how|help .+)?\s*fix|fix (it|this|them|all|the problems?)|how to fix|fix all)\b/i;
 
-/** Bigger / wider scan — never fall through to overview. */
+/** Bigger / wider scan. never fall through to overview. */
 export const STUDIO_WIDER_RE =
   /\b(bigger scan|wider scan|deeper scan|full(er)? scan|scan (more|again|everything)|find more (issues|problems|bugs)|more issues|more problems)\b/i;
 
@@ -124,7 +124,7 @@ export function classifyStudioAsk(message: string, hasFiles = false): StudioAskK
     return 'recommend';
   }
 
-  // Fix-how questions — “Can you tell me how we can fix” must never become overview.
+  // Fix-how questions. “Can you tell me how we can fix” must never become overview.
   if (STUDIO_FIX_ASK_RE.test(ask) || /^(fix|how)\??$/i.test(ask) || /\bfix\s*#?\s*\d+\b/i.test(ask)) {
     return 'fix';
   }
@@ -221,7 +221,7 @@ export function shouldInspectInChat(
 ): boolean {
   const t = String(message || '');
   if (t.includes('<!--ark-attach:') || t.includes('<!--ark-auto-read-->')) return true;
-  // Soft planning / “give me more details” about an idea is normal chat — not folder inspect.
+  // Soft planning / “give me more details” about an idea is normal chat. not folder inspect.
   if (
     /\b(?:more\s+details?|give\s+me\s+more|go\s+deeper|tell\s+me\s+more|expand\s+on\s+(?:that|this|it))\b/i.test(t)
     && !hasFiles
@@ -237,7 +237,7 @@ export function shouldInspectInChat(
   }
   const kind = classifyStudioAsk(t, hasFiles);
   if (kind === 'catalog') return false;
-  // Studio intents (file-detail, overview, …) need real attached files — otherwise stay in chat.
+  // Studio intents (file-detail, overview, …) need real attached files. otherwise stay in chat.
   if (kind != null) return hasFiles;
   if (!hasFiles) return false;
   const ask = cleanStudioAsk(t).replace(/!\[[^\]]*\]\([^)]+\)/g, '').trim();
@@ -262,7 +262,7 @@ export function shouldHandoffToCode(
 
 export function isGithubPullAsk(message: string): boolean {
   const t = message.toLowerCase();
-  // Planning: "is there an open GitHub repo / starter out there?" — not account/clone.
+  // Planning: "is there an open GitHub repo / starter out there?". not account/clone.
   if (looksLikeConversationalPlanningAsk(message) || /\b(?:starter|template|out there|inspiration|faster than)\b/i.test(message)) {
     if (!/\b(?:clone|pull in|bring in|my github|list (?:my )?repos|what repos)\b/i.test(t)) {
       return false;
@@ -274,7 +274,7 @@ export function isGithubPullAsk(message: string): boolean {
   if (/\b(clone|pull in|bring in)\b/.test(t) && (/github|repo/.test(t) || parseGithubRepoRef(message))) {
     return true;
   }
-  // "open owner/repo" / "open my github repos" — not "an open GitHub repo out there".
+  // "open owner/repo" / "open my github repos". not "an open GitHub repo out there".
   if (
     /\bopen\b/.test(t)
     && !/\ban\s+open\b/.test(t)
@@ -334,7 +334,7 @@ export function formatRepoCatalog(repos: GitHubRepo[], login: string): string {
     ...repos.slice(0, 12).map((r) => {
       const vis = r.private ? 'private' : 'public';
       const empty = (r.size ?? 1) === 0 ? ' · empty' : '';
-      return `• ${r.full_name} — ${vis}${empty}\n  ${r.html_url}`;
+      return `• ${r.full_name}. ${vis}${empty}\n  ${r.html_url}`;
     }),
     '',
     'Say **open owner/repo in Code** (or “pull in the empty one”) and I will clone it into Code so we can add, remove, or upgrade files there.',

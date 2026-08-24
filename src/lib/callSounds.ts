@@ -1,4 +1,4 @@
-/** Outgoing / incoming call ring tones (Web Audio — no asset files). */
+/** Outgoing / incoming call ring tones (Web Audio. no asset files). */
 
 let audioCtx: AudioContext | null = null;
 let ringTimer: number | null = null;
@@ -25,7 +25,7 @@ function beep(freq: number, ms: number, gain = 0.08) {
     osc.start(t);
     osc.stop(t + ms / 1000 + 0.02);
   } catch {
-    /* ignore — autoplay may block until user gesture (call button satisfies this) */
+    /* ignore. autoplay may block until user gesture (call button satisfies this) */
   }
 }
 

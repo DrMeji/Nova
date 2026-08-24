@@ -1,5 +1,18 @@
 # ARK changelog
 
+## 0.1.144 — 2026-08-24
+
+Setup access toggles apply instantly (no OK popups). Decorative em dashes cleaned from UI copy.
+
+**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.144/ARK-Setup.exe) · [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.144)
+
+### Setup / Security
+- Desktop, Documents, Full PC, and Run everything toggles no longer show a second confirm dialog.
+- Same for Settings → Security access and execution mode.
+
+### Copy
+- Removed decorative em dashes in user-facing text (e.g. “Gemini free tier. One key.”).
+
 ## 0.1.143 — 2026-08-24
 
 Fresh installs always open on Sign in / Sign up before first-run setup.

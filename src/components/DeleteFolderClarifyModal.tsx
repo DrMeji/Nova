@@ -33,7 +33,7 @@ export function DeleteFolderClarifyModal({ prompt, busy, onCancel, onConfirmFold
             </h2>
             <p className="text-sm text-content-secondary leading-relaxed mt-2">
               <span className="text-content-primary font-medium">“{prompt?.folderName || 'this item'}”</span>
-              {' '}is a project folder at the path below — not a single file. Delete the whole folder?
+              {' '}is a project folder at the path below. not a single file. Delete the whole folder?
             </p>
             {prompt?.folderPath ? (
               <p className="mt-3 text-xs text-content-tertiary font-mono break-all leading-relaxed rounded-lg border border-surface-border bg-surface-hover/40 px-3 py-2">

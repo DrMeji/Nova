@@ -16,13 +16,13 @@ const FREE_KEYS: FreeKeyProvider[] = [
     id: 'groq',
     name: 'Groq',
     signupUrl: 'https://console.groq.com/keys',
-    blurb: 'Fast free Llama — best first free key.',
+    blurb: 'Fast free Llama. best first free key.',
   },
   {
     id: 'google',
     name: 'Google AI Studio',
     signupUrl: 'https://aistudio.google.com/apikey',
-    blurb: 'Gemini free tier — one key.',
+    blurb: 'Gemini free tier. One key.',
   },
   {
     id: 'openrouter',
@@ -123,7 +123,7 @@ export function FreeKeyWizard({
             <KeyRound className="w-4 h-4 text-sky-400 shrink-0" />
             <div>
               <h2 className="text-base font-semibold text-content-primary">Connect a free key</h2>
-              <p className="text-[11px] text-content-tertiary">Unlock ARK Auto failover — keys stay on this device.</p>
+              <p className="text-[11px] text-content-tertiary">Unlock ARK Auto failover. keys stay on this device.</p>
             </div>
           </div>
           <button type="button" className="w-8 h-8 rounded-lg hover:bg-surface-hover flex items-center justify-center" onClick={onClose}>

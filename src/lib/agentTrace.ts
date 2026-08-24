@@ -59,19 +59,19 @@ export function nextTraceStepId(steps: AgentTraceStep[]): string {
 export function traceThoughtFromAsk(userMessage: string): string {
   const t = String(userMessage || '').trim();
   if (/\bwhat(?:'s| is)\s+(?:in|inside)\b/i.test(t)) {
-    return 'The user wants to know what is inside a folder — list top level and summarize subfolders without importing every file into chat.';
+    return 'The user wants to know what is inside a folder. list top level and summarize subfolders without importing every file into chat.';
   }
   if (/\b(delete|remove|trash)\b/i.test(t)) {
-    return 'The user wants files removed — I need to locate the path, confirm scope, then delete only what they asked for.';
+    return 'The user wants files removed. I need to locate the path, confirm scope, then delete only what they asked for.';
   }
   if (/\b(clone|pull|github|push)\b/i.test(t)) {
-    return 'The user wants a Git/GitHub action — locate the repo or remote, run the command, and report the result.';
+    return 'The user wants a Git/GitHub action. locate the repo or remote, run the command, and report the result.';
   }
   if (/\b(install|npm|pip)\b/i.test(t)) {
-    return 'The user wants dependencies installed — use the workspace folder, run the install command, and show output.';
+    return 'The user wants dependencies installed. use the workspace folder, run the install command, and show output.';
   }
   if (/\b(image|picture|photo|draw)\b/i.test(t)) {
-    return 'The user wants an image generated — pick a model route and produce real media, not a placeholder.';
+    return 'The user wants an image generated. pick a model route and produce real media, not a placeholder.';
   }
   return 'Understand the request, plan the steps, run only what is needed, then answer directly.';
 }

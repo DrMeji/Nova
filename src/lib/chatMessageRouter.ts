@@ -1,5 +1,5 @@
 /**
- * Static chat message routing — documents handler priority and powers smoke tests.
+ * Static chat message routing. documents handler priority and powers smoke tests.
  *
  * Priority (highest first):
  *  1. Disk delete / add file
@@ -7,9 +7,9 @@
  *  3. Greenfield chips (keep planning)
  *  4. Greenfield plan
  *  5. Work on existing folder
- *  6. Folder catalog / PC explore  — blocked by isProjectCreateBrief
- *  7. Create project              — blocked by isProjectCreateBrief upstream
- *  8. PC read file                — AFTER create; blocked by isProjectCreateBrief
+ *  6. Folder catalog / PC explore . blocked by isProjectCreateBrief
+ *  7. Create project             . blocked by isProjectCreateBrief upstream
+ *  8. PC read file               . AFTER create; blocked by isProjectCreateBrief
  *  9. Folder path open / catalog
  * 10. Agent / LLM fallback
  */

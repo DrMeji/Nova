@@ -92,7 +92,7 @@ export async function runCodeStudioCommand(opts: {
     const cloned = await gitClone(projectId, githubCloneUrl(ref.owner, ref.repo), token || undefined);
     if (!cloned.ok) return { reply: cloned.error || 'Clone failed.' };
     return {
-      reply: `Cloned ${ref.owner}/${ref.repo} into this workspace.\n${cloned.branch ? `Branch: ${cloned.branch}` : ''}\nOpen Explorer — files are on disk.`.trim(),
+      reply: `Cloned ${ref.owner}/${ref.repo} into this workspace.\n${cloned.branch ? `Branch: ${cloned.branch}` : ''}\nOpen Explorer. files are on disk.`.trim(),
       reload: true,
     };
   }

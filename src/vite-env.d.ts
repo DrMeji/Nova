@@ -474,7 +474,7 @@ declare global {
         total?: number;
         label?: string;
       }) => void) => () => void;
-      /** Native file picker — shows files inside folders (unlike Open folder). */
+      /** Native file picker. shows files inside folders (unlike Open folder). */
       pickFiles?: (payload?: { imagesOnly?: boolean }) => Promise<{
         ok: boolean;
         canceled?: boolean;

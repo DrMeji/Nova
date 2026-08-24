@@ -1,5 +1,5 @@
 /**
- * Create project from Chat — resolve path → mkdir → bind → scaffold write.
+ * Create project from Chat. resolve path → mkdir → bind → scaffold write.
  */
 
 import type { NewProjectIntent } from '@/lib/createProjectIntent';
@@ -65,7 +65,7 @@ export async function resolveNewProjectParent(
       parentPath: joinPath(sandbox.path, intent.slug),
       source: 'ARK projects folder',
       grantHint: !hasFolderAccessGrant()
-        ? 'Desktop access is off — created inside ARK storage. Enable **Settings → Security → Desktop** to use Desktop\\Projects next time.'
+        ? 'Desktop access is off. created inside ARK storage. Enable **Settings → Security → Desktop** to use Desktop\\Projects next time.'
         : undefined,
     };
   }
@@ -201,7 +201,7 @@ function sanitizeBootstrapNote(raw: string | undefined): string | undefined {
   return t.slice(0, 280);
 }
 
-/** npm install + dev server — only when the project actually uses npm. */
+/** npm install + dev server. only when the project actually uses npm. */
 export async function bootstrapProjectWorkspace(
   projectPath: string,
   kind: NewProjectIntent['kind'],
@@ -245,7 +245,7 @@ export async function bootstrapProjectWorkspace(
     npmInstalled: true,
     bootstrapNote: sanitizeBootstrapNote(
       dev?.error
-        ? `Dependencies installed. Dev server did not start (${dev.error}) — say **run dev server** or use **Preview**.`
+        ? `Dependencies installed. Dev server did not start (${dev.error}). say **run dev server** or use **Preview**.`
         : undefined,
     ),
   };
@@ -276,12 +276,12 @@ export function formatCreateProjectReply(
     bootstrap?.npmInstalled === false
       ? `**Setup:** ${bootstrap.bootstrapNote || 'Dependencies need a one-time install.'}`
       : intent.kind === 'python'
-        ? '**Ready** — edit `app/main.py` and say what to build next.'
+        ? '**Ready**. edit `app/main.py` and say what to build next.'
         : isStatic || intent.kind === 'static-web'
-          ? '**Ready** — use **Preview** under the chat box to open the site, or **Code** to edit files. Tell me what to add.'
+          ? '**Ready**. use **Preview** under the chat box to open the site, or **Code** to edit files. Tell me what to add.'
           : bootstrap?.devServerUrl
-            ? `**Ready** — dependencies installed. Dev server is at **${bootstrap.devServerUrl}** — click **Localhost** under the chat box to open it.\n\nTell me what to build (layout, pages, features) and I will edit the files here.`
-            : '**Ready** — dependencies installed. Tell me what to build and I will edit the files here.',
+            ? `**Ready**. dependencies installed. Dev server is at **${bootstrap.devServerUrl}**. click **Localhost** under the chat box to open it.\n\nTell me what to build (layout, pages, features) and I will edit the files here.`
+            : '**Ready**. dependencies installed. Tell me what to build and I will edit the files here.',
     bootstrap?.bootstrapNote && bootstrap.npmInstalled ? `\n${bootstrap.bootstrapNote}` : '',
     '',
     'This chat is bound to that folder.',

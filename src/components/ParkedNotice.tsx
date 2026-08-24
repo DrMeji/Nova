@@ -33,7 +33,7 @@ export function ParkedNotice({ feature }: { feature: ParkedFeature }) {
           </div>
           <p className="text-xs text-content-tertiary leading-relaxed">
             {feature === 'code' || feature === 'project'
-              ? 'Use Chat to open a folder, plan, edit files, run npm/git, and connect GitHub — all in one thread.'
+              ? 'Use Chat to open a folder, plan, edit files, run npm/git, and connect GitHub. all in one thread.'
               : 'This feature is being built. Check back in a future update.'}
           </p>
         </div>

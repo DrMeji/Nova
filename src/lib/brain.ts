@@ -1,4 +1,4 @@
-/** ARK brain localhost API — backed by ARK Engine only. */
+/** ARK brain localhost API. backed by ARK Engine only. */
 
 import { desktopRequest } from '@/lib/httpDesktop';
 import { engineGenerate } from '@/lib/arkEngine';
@@ -138,12 +138,12 @@ export async function brainGenerateStream(
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err || '');
-    // Never restart a full generate after Stop / cancel — that re-locks the engine
+    // Never restart a full generate after Stop / cancel. that re-locks the engine
     // and leaves Chat/Code stuck on Thinking / Reviewing.
     if (/stopp?ed|cancel|abort|Generation already running/i.test(msg)) {
       throw err instanceof Error ? err : new Error(msg || 'Generation stopped');
     }
-    // Stream IPC missing or failed — fall through to non-stream once.
+    // Stream IPC missing or failed. fall through to non-stream once.
   }
   const fallback = await brainGenerate(message, modelId, kind);
   return { ...fallback, streamed: false, streamFallback: true };

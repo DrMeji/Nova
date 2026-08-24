@@ -73,7 +73,7 @@ export async function runFigmaLive(
       return [
         'Figma · comment',
         '',
-        'Try: comment on figma.com/file/ABC123 Looks good — ship it',
+        'Try: comment on figma.com/file/ABC123 Looks good. ship it',
       ].join('\n');
     }
     const posted = await postFigmaComment(token, fileKey, body);

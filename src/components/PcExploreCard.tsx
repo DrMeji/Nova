@@ -47,7 +47,7 @@ export function PcExploreCard({ data }: { data: PcExploreData }) {
           {data.limited ? (
             <p className="text-[10px] text-amber-400/90 mt-1 flex items-center gap-1">
               <LayoutGrid className="h-3 w-3 shrink-0" aria-hidden />
-              Limited scan — not a full Windows install inventory
+              Limited scan. not a full Windows install inventory
             </p>
           ) : null}
         </div>

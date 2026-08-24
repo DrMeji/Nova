@@ -51,7 +51,7 @@ export function SocialProvider({ children }: { children: ReactNode }) {
     const unsub = subscribeFriendRequests(myArkId, user?.id, {
       onAccepted: () => {
         void refreshContacts();
-        pushSidebarToast('Friend request accepted — you’re connected', { ttlMs: 8_000, id: 'fr-accepted' });
+        pushSidebarToast('Friend request accepted. you’re connected', { ttlMs: 8_000, id: 'fr-accepted' });
       },
     });
     return unsub;

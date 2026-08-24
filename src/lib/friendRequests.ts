@@ -1,5 +1,5 @@
 /**
- * Friend requests — Supabase when signed in; local cache for offline / same-device dev.
+ * Friend requests. Supabase when signed in; local cache for offline / same-device dev.
  */
 
 import { supabase } from '@/lib/supabase';

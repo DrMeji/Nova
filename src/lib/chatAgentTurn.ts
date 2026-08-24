@@ -1,5 +1,5 @@
 /**
- * Chat agent turn helpers — workspace gates, Ask/Plan/Agent modes, edit/exec policy.
+ * Chat agent turn helpers. workspace gates, Ask/Plan/Agent modes, edit/exec policy.
  */
 
 import { looksLikeBuildStart } from '@/lib/chatStudio';
@@ -8,7 +8,7 @@ import { looksLikePromptEcho } from '@/lib/chatHistory';
 import { looksLikeConversationalPlanningAsk, wantsPlanningOnly } from '@/lib/chatIdeaIntent';
 
 export const NO_WORKSPACE_MSG =
-  'No workspace yet. Use **+ → Open folder** or name a folder on your Desktop (turn on access in **Settings → Security**).\n\nIf you want to talk through an app idea first, just keep chatting — say **lets build this** only when you want files on disk.';
+  'No workspace yet. Use **+ → Open folder** or name a folder on your Desktop (turn on access in **Settings → Security**).\n\nIf you want to talk through an app idea first, just keep chatting. say **lets build this** only when you want files on disk.';
 
 export type ComposerAgentMode = 'ask' | 'plan' | 'agent' | 'debug' | 'multitask' | null;
 
@@ -33,8 +33,8 @@ export function normalizeComposerMode(mode: ComposerAgentMode): 'ask' | 'plan' |
 }
 
 const PLAN_PREFIX = 'Plan this out step by step, then we can build:\n\n';
-const AGENT_PREFIX = 'Agent mode — edit files and run approved tools in this workspace:\n\n';
-const DEBUG_PREFIX = 'Debug this — find the issue and propose a fix:\n\n';
+const AGENT_PREFIX = 'Agent mode. edit files and run approved tools in this workspace:\n\n';
+const DEBUG_PREFIX = 'Debug this. find the issue and propose a fix:\n\n';
 const TASKS_PREFIX = 'Break this into parallel tasks and tackle them clearly:\n\n';
 
 export function stripComposerPrefix(text: string): string {
@@ -70,7 +70,7 @@ export function modeBlocksExec(mode: 'ask' | 'plan' | 'agent'): boolean {
 export function looksLikeCodeEditAsk(text: string): boolean {
   const t = String(text || '').trim();
   if (!t) return false;
-  // Planning / MVP sequencing — not a disk edit.
+  // Planning / MVP sequencing. not a disk edit.
   if (wantsPlanningOnly(t)) return false;
   if (/\b(?:mvp\s+order|what\s+should\s+i\s+build|build\s+first|sequence\s+the\s+work|week\s+one)\b/i.test(t)) return false;
   if (/\b(?:also\s+)?add\b/i.test(t) && /\b(?:plan|reminder|chart|report|bill|feature|panel|modal|screen)\b/i.test(t)
@@ -97,7 +97,7 @@ export function looksLikeCodeEditAsk(text: string): boolean {
   if (
     /\b(change|update|set|make|edit|fix|rename|restyle)\b[\s\S]{0,100}\b(background|color|colour|font|title|text|layout|style|css|button|icon|logo|header|copy|wording|theme|column|label|hint|gradient|teal|notes?)\b/i.test(t)
   ) {
-    // Casual science / Q&A ("how do octopuses change color?") — not a UI edit.
+    // Casual science / Q&A ("how do octopuses change color?"). not a UI edit.
     if (
       /\?\s*$/.test(t)
       || /\b(?:how|why|what|when|where)\s+(?:do|does|did|can|would|is|are)\b/i.test(t)
@@ -131,7 +131,7 @@ export function chatTurnAllowsFileEdits(content: string, composerMode: ComposerA
   }
   if (mode === 'agent') {
     const t = String(content || '').trim();
-    // Casual Q&A like "what can you help me build?" must hit the model — not the no-workspace wall.
+    // Casual Q&A like "what can you help me build?" must hit the model. not the no-workspace wall.
     if (
       /\?/.test(t)
       && /\b(what|how|why|which|can you|could you|help me|tell me|explain|would|will)\b/i.test(t)
@@ -143,7 +143,7 @@ export function chatTurnAllowsFileEdits(content: string, composerMode: ComposerA
     if (/\b(?:not\s+ready|just\s+(?:talk|discuss|conversation)|no\s+project\s+yet|do\s+not\s+create)\b/i.test(t)) {
       return false;
     }
-    // Timeline / feasibility ("how quick could a first usable version") — not an edit.
+    // Timeline / feasibility ("how quick could a first usable version"). not an edit.
     if (/\b(?:how\s+(?:quick|long|fast|soon)|usable\s+version|scope\s+tiny|overthinking)\b/i.test(t)) {
       return false;
     }
@@ -157,7 +157,7 @@ export function chatTurnAllowsExec(content: string, composerMode: ComposerAgentM
   if (modeBlocksExec(mode)) return false;
   if (isChatAgentTurn(content, composerMode)) return true;
   const t = String(content || '');
-  // "will it run fine on my PC" is planning — not shell exec.
+  // "will it run fine on my PC" is planning. not shell exec.
   if (/\brun\b/i.test(t) && /\b(?:run\s+(?:fine|well|ok|okay|smooth|alright)|run\s+on\s+(?:my|a|the)|run\s+in\s+(?:the\s+)?browser)\b/i.test(t)) {
     return false;
   }

@@ -14,7 +14,7 @@ export type RecentCreation = {
   title: string;
   prompt: string;
   modelName: string;
-  /** In-memory only when large — Engine mediaLibrary / mediaGet for reopen */
+  /** In-memory only when large. Engine mediaLibrary / mediaGet for reopen */
   dataUrl?: string;
   createdAt: string;
   real?: boolean;
@@ -159,7 +159,7 @@ export function loadRecentCreations(): RecentCreation[] {
 }
 
 export function saveRecentCreations(list: RecentCreation[]) {
-  // Metadata only — never persist base64 media in localStorage
+  // Metadata only. never persist base64 media in localStorage
   const metaOnly = list.slice(0, 60).map(({ dataUrl: _d, ...rest }) => rest);
   try {
     localStorage.setItem(CREATIONS_KEY, JSON.stringify(metaOnly));

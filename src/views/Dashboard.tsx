@@ -97,7 +97,7 @@ export function Dashboard() {
         : undefined,
     }));
 
-    // Orphans only — not live Recent, not already represented by an archived chat
+    // Orphans only. not live Recent, not already represented by an archived chat
     const fromCreations: HistoryItem[] = creations
       .filter(c => !activeCreationIds.has(c.id) && !archivedCreationIds.has(c.id))
       .map(c => ({
@@ -245,7 +245,7 @@ export function Dashboard() {
               <FileText className="w-10 h-10 text-content-tertiary mb-3" strokeWidth={1.5} />
               <p className="text-base font-semibold text-content-primary mb-1">Nothing in History yet</p>
               <p className="text-sm text-content-tertiary mb-4 max-w-sm">
-                Keep working in Recent — when it fills up, older chats move here automatically.
+                Keep working in Recent. when it fills up, older chats move here automatically.
               </p>
               <div className="flex flex-wrap items-center justify-center gap-2">
                 <button type="button" className="ark-btn-secondary text-xs" onClick={() => navigate({ name: 'chat' })}>

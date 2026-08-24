@@ -1,4 +1,4 @@
-/** Local second factor — hash only, never store the code itself. */
+/** Local second factor. hash only, never store the code itself. */
 
 const HASH_KEY = 'ark:2fa-hash';
 const SALT_KEY = 'ark:2fa-salt';

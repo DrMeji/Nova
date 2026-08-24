@@ -23,7 +23,7 @@ export type NetworkPost = {
   details?: string;
   /** Help wanted vs sharing finished work. */
   intent?: 'help' | 'share';
-  /** Willing to pay for help — UI badge only until payments ship. */
+  /** Willing to pay for help. UI badge only until payments ship. */
   paying?: boolean;
   visibility: 'public' | 'private';
   githubUrl: string;

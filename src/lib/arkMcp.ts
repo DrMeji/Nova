@@ -5,7 +5,7 @@
  * same capabilities as an MCP tool list so we can wire stdio MCP servers later
  * without inventing a second agent surface.
  *
- * Not a full MCP host yet — inventory + future connect points only.
+ * Not a full MCP host yet. inventory + future connect points only.
  */
 
 export type ArkMcpTool = {
@@ -56,7 +56,7 @@ export function formatMcpToolsHelp(): string {
   const lines = [
     'ARK local tools (MCP-style):',
     '',
-    ...tools.map(t => `• **${t.name}** — ${t.description} (${t.status})`),
+    ...tools.map(t => `• **${t.name}**. ${t.description} (${t.status})`),
     '',
     'External MCP servers are planned next: Settings will list connectable servers; Chat `+` will expose their tools.',
   ];

@@ -24,7 +24,7 @@ export function GuestSocialBanner({ feature }: Props) {
     <div className="mb-4 rounded-xl border border-amber-500/25 bg-amber-500/10 px-4 py-3 text-sm text-amber-100/90 leading-relaxed flex items-start justify-between gap-3">
       <div>
         <span className="font-medium text-amber-200">Guest mode</span>
-        {' — '}
+        {'. '}
         {COPY[feature]}
         {' '}
         <span className="text-amber-200/80">Settings → Sign in</span>

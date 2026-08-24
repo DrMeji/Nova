@@ -11,7 +11,7 @@ export type ChatAttachMeta = {
   id?: string;
   /** Optional thumb / media id for image cards already in markdown. */
   mediaId?: string;
-  /** Path bound for listing only — file contents not loaded into chat. */
+  /** Path bound for listing only. file contents not loaded into chat. */
   catalogOnly?: boolean;
 };
 

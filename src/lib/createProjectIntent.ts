@@ -46,7 +46,7 @@ const NEW_PROJECT_RE =
 const PROJECT_NOUN_RE =
   /\b(?:app|application|project|website|site|web\s*app|webapp|bot|program|starter)\b/i;
 
-/** Lightweight create detect — no project name required (used by route guards). */
+/** Lightweight create detect. no project name required (used by route guards). */
 export function looksLikeCreateProjectBrief(message: string): boolean {
   const t = String(message || '').trim();
   if (!t) return false;
@@ -194,7 +194,7 @@ export function buildCreateProjectPlan(intent: NewProjectIntent): string {
   return buildGreenfieldPlanReply(idea);
 }
 
-/** After a plan, user says "go implement" — recover create intent from recent turns. */
+/** After a plan, user says "go implement". recover create intent from recent turns. */
 export function resolveCreateIntentFromThread(
   message: string,
   recentUserLines: string[],
@@ -202,7 +202,7 @@ export function resolveCreateIntentFromThread(
 ): NewProjectIntent | null {
   const direct = parseNewProjectIntent(message);
   if (direct && !direct.preferPlan) {
-    // Chip / short create — prefer the pending brief so landing pages are not empty.
+    // Chip / short create. prefer the pending brief so landing pages are not empty.
     if (opts?.pendingGreenfield && namesMatch(opts.pendingGreenfield.name, direct.name)) {
       return {
         ...direct,
@@ -246,7 +246,7 @@ export function resolveCreateIntentFromThread(
   }
 
   if (opts?.workspaceActive && looksLikeImplementGo(message)) {
-    // Already bound to a folder — only skip create when this is a short go-chip with no new product name.
+    // Already bound to a folder. only skip create when this is a short go-chip with no new product name.
     const named = extractProjectName(message) || extractGreenfieldName(message);
     if (!named) return null;
   }
@@ -278,7 +278,7 @@ export function resolveCreateIntentFromThread(
         preferPlan: false,
       };
     }
-    // Brief recovered but parsers were picky — still create from the brief text.
+    // Brief recovered but parsers were picky. still create from the brief text.
     const named = bestBrief.match(/\b(?:called|named|leaning|name(?:d)?\s+it)\s+([A-Za-z][A-Za-z0-9_-]{1,40})\b/i)?.[1]
       || bestBrief.match(/\bleaning\s+([A-Za-z][A-Za-z0-9_-]{1,40})\s+as\s+the\s+name\b/i)?.[1]
       || bestBrief.match(/\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\b/)?.[1]

@@ -1,11 +1,11 @@
 /** Demo Networking / Message / Notifications data for local UI work.
- * Production (GitHub) builds never include these — Connect stays empty until real users post.
+ * Production (GitHub) builds never include these. Connect stays empty until real users post.
  */
 
 import type { ArkContact, DirectMessage, MessageAttachment, NetworkPost } from '@/lib/arkSocial';
 import { isSocialDemoEnabled } from '@/lib/arkRuntime';
 
-/** True for bat/source builds and Vite dev — false for installed Setup.exe. */
+/** True for bat/source builds and Vite dev. false for installed Setup.exe. */
 export const SOCIAL_DEMO_ENABLED = isSocialDemoEnabled();
 
 export function buildDemoNetworkPosts(myArkId: string): NetworkPost[] {
@@ -35,7 +35,7 @@ export function buildDemoNetworkPosts(myArkId: string): NetworkPost[] {
       ownerName: 'Jordan Lee',
       title: 'Habit tracker iPhone mock',
       summary: 'Sharing a first SwiftUI layout for feedback on spacing.',
-      details: 'Not stuck — just want eyes on the home screen and streak ring before I lock the design.',
+      details: 'Not stuck. just want eyes on the home screen and streak ring before I lock the design.',
       intent: 'share',
       paying: false,
       visibility: 'public',
@@ -62,8 +62,8 @@ export function buildDemoNetworkPosts(myArkId: string): NetworkPost[] {
       ownerArkId: '9056711',
       ownerName: 'Riley Park',
       title: 'Local recipe notebook',
-      summary: 'Offline-first notes app — open to co-build the search UI.',
-      details: 'ARK Code project. Search should filter by tag and cook time. No payment — just collaboration.',
+      summary: 'Offline-first notes app. open to co-build the search UI.',
+      details: 'ARK Code project. Search should filter by tag and cook time. No payment. just collaboration.',
       intent: 'help',
       paying: false,
       visibility: 'public',
@@ -76,7 +76,7 @@ export function buildDemoNetworkPosts(myArkId: string): NetworkPost[] {
       ownerArkId: '2288440',
       ownerName: 'Alex Rivera',
       title: 'Pixel pet idle game',
-      summary: 'Finished v1 loop — sharing for playtest notes.',
+      summary: 'Finished v1 loop. sharing for playtest notes.',
       details: 'Feed / play / sleep buttons work. Want feedback on whether the pet feels alive enough.',
       intent: 'share',
       paying: false,
@@ -90,7 +90,7 @@ export function buildDemoNetworkPosts(myArkId: string): NetworkPost[] {
       ownerArkId: '6612039',
       ownerName: 'Chris Nguyen',
       title: 'Expense splitter for roommates',
-      summary: 'Stuck on equal vs custom split math — will pay for a fix.',
+      summary: 'Stuck on equal vs custom split math. will pay for a fix.',
       details: 'Need fair split when one person covers dinner and another covers rent. Web UI already sketched.',
       intent: 'help',
       paying: true,
@@ -118,7 +118,7 @@ export function buildDemoNetworkPosts(myArkId: string): NetworkPost[] {
       ownerArkId: '8733001',
       ownerName: 'Nina Patel',
       title: 'Indie band merch store',
-      summary: 'Need product grid + cart before tour weekend — will pay.',
+      summary: 'Need product grid + cart before tour weekend. will pay.',
       details: 'Simple static site first. Size chart page and checkout placeholder.',
       intent: 'help',
       paying: true,
@@ -132,7 +132,7 @@ export function buildDemoNetworkPosts(myArkId: string): NetworkPost[] {
       ownerArkId: '5521190',
       ownerName: 'Omar Hassan',
       title: 'Study timer with playlists',
-      summary: 'Pomodoro UI done — open to co-build the sound picker.',
+      summary: 'Pomodoro UI done. open to co-build the sound picker.',
       details: 'Focus / break modes work. Want nicer animation when a cycle ends.',
       intent: 'help',
       paying: false,
@@ -146,7 +146,7 @@ export function buildDemoNetworkPosts(myArkId: string): NetworkPost[] {
       ownerArkId: '4482011',
       ownerName: 'Elena Vogt',
       title: 'Photo booth strip generator',
-      summary: 'Finished strip layout — sharing for playtest.',
+      summary: 'Finished strip layout. sharing for playtest.',
       details: 'Four frames + caption. Curious if the print preview feels right.',
       intent: 'share',
       paying: false,
@@ -160,7 +160,7 @@ export function buildDemoNetworkPosts(myArkId: string): NetworkPost[] {
       ownerArkId: '9910334',
       ownerName: 'Dev Patel',
       title: 'Kanban for freelancers',
-      summary: 'Drag-and-drop columns are buggy on touch — will pay for a fix.',
+      summary: 'Drag-and-drop columns are buggy on touch. will pay for a fix.',
       details: 'Todo / Doing / Done. Need smooth mobile drag without jumping cards.',
       intent: 'help',
       paying: true,
@@ -174,7 +174,7 @@ export function buildDemoNetworkPosts(myArkId: string): NetworkPost[] {
       ownerArkId: '7766502',
       ownerName: 'Priya Shah',
       title: 'Language flashcards',
-      summary: 'Deck flip animation ready — feedback on empty states welcome.',
+      summary: 'Deck flip animation ready. feedback on empty states welcome.',
       details: 'Front/back cards with keyboard shortcuts. Dark mode only for now.',
       intent: 'share',
       paying: false,
@@ -188,7 +188,7 @@ export function buildDemoNetworkPosts(myArkId: string): NetworkPost[] {
       ownerArkId: '3344556',
       ownerName: 'Marcus Cole',
       title: 'Gym PR logger',
-      summary: 'Need charts for weekly progress — open to paid help.',
+      summary: 'Need charts for weekly progress. open to paid help.',
       details: 'Log sets/reps locally. Want a simple line chart without a heavy library.',
       intent: 'help',
       paying: true,
@@ -202,7 +202,7 @@ export function buildDemoNetworkPosts(myArkId: string): NetworkPost[] {
       ownerArkId: '2200987',
       ownerName: 'Sofia Berg',
       title: 'Minimal markdown notes',
-      summary: 'Live preview works — sharing for typography notes.',
+      summary: 'Live preview works. sharing for typography notes.',
       details: 'Split pane editor. Prefer opinions on line height and code blocks.',
       intent: 'share',
       paying: false,
@@ -216,7 +216,7 @@ export function buildDemoNetworkPosts(myArkId: string): NetworkPost[] {
       ownerArkId: '6677881',
       ownerName: 'Kenji Sato',
       title: 'RGB lighting controller UI',
-      summary: 'Color picker + presets — stuck on saved scenes list.',
+      summary: 'Color picker + presets. stuck on saved scenes list.',
       details: 'Web mock only. Need a clean list with rename/delete actions.',
       intent: 'help',
       paying: false,
@@ -230,7 +230,7 @@ export function buildDemoNetworkPosts(myArkId: string): NetworkPost[] {
       ownerArkId: '8899002',
       ownerName: 'Aisha Rahman',
       title: 'Wedding RSVP microsite',
-      summary: 'Form works — will pay for prettier confirmation page.',
+      summary: 'Form works. will pay for prettier confirmation page.',
       details: 'Names + meal choice. Want a calm thank-you screen that matches the invite.',
       intent: 'help',
       paying: true,
@@ -244,7 +244,7 @@ export function buildDemoNetworkPosts(myArkId: string): NetworkPost[] {
       ownerArkId: '1122334',
       ownerName: 'Luis Ortega',
       title: 'Street food map pins',
-      summary: 'Map markers done — open for icon/style feedback.',
+      summary: 'Map markers done. open for icon/style feedback.',
       details: 'Static map with hover cards. No backend yet.',
       intent: 'share',
       paying: false,
@@ -258,7 +258,7 @@ export function buildDemoNetworkPosts(myArkId: string): NetworkPost[] {
       ownerArkId: '5566778',
       ownerName: 'Hannah Kim',
       title: 'Podcast episode page',
-      summary: 'Need waveform + chapter list before launch — can pay.',
+      summary: 'Need waveform + chapter list before launch. can pay.',
       details: 'Single episode template. Prefer accessible play controls.',
       intent: 'help',
       paying: true,
@@ -272,7 +272,7 @@ export function buildDemoNetworkPosts(myArkId: string): NetworkPost[] {
       ownerArkId: '4455667',
       ownerName: 'Grace Lin',
       title: 'Plant watering reminders',
-      summary: 'Calendar chips work — want nicer empty-day art.',
+      summary: 'Calendar chips work. want nicer empty-day art.',
       details: 'Local reminders only. Open to icon suggestions.',
       intent: 'share',
       paying: false,
@@ -286,7 +286,7 @@ export function buildDemoNetworkPosts(myArkId: string): NetworkPost[] {
       ownerArkId: '7788990',
       ownerName: 'Ben Carter',
       title: 'Board game score tracker',
-      summary: 'Need a rematch flow — happy to pay for a clean pass.',
+      summary: 'Need a rematch flow. happy to pay for a clean pass.',
       details: 'Multiplayer local scores. Rematch should reset without losing history.',
       intent: 'help',
       paying: true,
@@ -300,7 +300,7 @@ export function buildDemoNetworkPosts(myArkId: string): NetworkPost[] {
       ownerArkId: '2233445',
       ownerName: 'Yuki Tanaka',
       title: 'Tea shop menu board',
-      summary: 'Digital menu mock — feedback on type hierarchy welcome.',
+      summary: 'Digital menu mock. feedback on type hierarchy welcome.',
       details: 'Categories + prices. Prefer mobile-first columns.',
       intent: 'share',
       paying: false,
@@ -317,7 +317,7 @@ export function buildDemoNetworkPosts(myArkId: string): NetworkPost[] {
       ownerArkId: mine,
       ownerName: 'You',
       title: 'Hello World page',
-      summary: 'My first ARK Code page — open to polish tips.',
+      summary: 'My first ARK Code page. open to polish tips.',
       details: 'Black background, white title, optional theme toggle. Curious if the layout feels centered on phone.',
       intent: 'share',
       paying: false,
@@ -344,7 +344,7 @@ export function buildDemoNetworkPosts(myArkId: string): NetworkPost[] {
       id: 'demo-mine-3',
       ownerArkId: mine,
       ownerName: 'You',
-      title: 'Private draft — client dashboard',
+      title: 'Private draft. client dashboard',
       summary: 'Only visible to you in Yours while testing the feed.',
       details: 'Placeholder private post so the Yours tab isn’t empty.',
       intent: 'help',
@@ -397,7 +397,7 @@ export function buildDemoContacts(): ArkContact[] {
   ];
 }
 
-/** Demo peers who “texted you” and are waiting — green unread dot preview (dev only). */
+/** Demo peers who “texted you” and are waiting. green unread dot preview (dev only). */
 const DEMO_UNREAD_LIST = ['4820193', '9056711', '5521190', '4482011'] as const;
 export const DEMO_UNREAD_ARK_IDS: readonly string[] = SOCIAL_DEMO_ENABLED ? DEMO_UNREAD_LIST : [];
 
@@ -405,12 +405,12 @@ const RANDOM_CHATS: Record<string, string[]> = {
   '4820193': ['Did you see that game last night?', 'lol that ending was wild', 'You free later?'],
   '7193044': ['I’m grabbing tacos, want anything?', 'Bring hot sauce', 'On my way'],
   '3301882': [], // full demo thread below
-  '9056711': ['Movie night Friday?', 'I’m down for anything funny', 'Deal — my place at 8'],
+  '9056711': ['Movie night Friday?', 'I’m down for anything funny', 'Deal. my place at 8'],
   '2288440': ['That playlist is fire', 'Send me the link again', 'Got it, thanks!'],
   '6612039': ['Traffic is ridiculous today', 'Take the side street', 'Already did 🙌'],
   '1044882': ['Happy birthday!!', 'Thank you 🎂', 'Party pics later'],
   '8733001': ['Dogs or cats?', 'Dogs forever', 'Fair enough haha'],
-  '5521190': ['Rain again…', 'Stay inside and game', 'Hey — you there?'],
+  '5521190': ['Rain again…', 'Stay inside and game', 'Hey. you there?'],
   '4482011': ['New cafe opened downtown', 'Is the matcha good?', 'Ping me when you’re free'],
   '9910334': ['Forgot my charger 😭', 'I have an extra', 'You’re a lifesaver'],
   '7766502': ['Random: pineapple on pizza?', 'Never', 'Correct answer'],
@@ -418,7 +418,7 @@ const RANDOM_CHATS: Record<string, string[]> = {
   '2200987': ['That show is so good', 'No spoilers!!', 'Okay okay 🤐'],
 };
 
-/** Minutes ago for last demo message — newer = higher in list. Unread peers are freshest. */
+/** Minutes ago for last demo message. newer = higher in list. Unread peers are freshest. */
 const DEMO_LAST_MSG_MINUTES: Record<string, number> = {
   '4820193': 4,
   '9056711': 12,
@@ -438,7 +438,7 @@ const DEMO_LAST_MSG_MINUTES: Record<string, number> = {
 
 /** Short preview line for the people list. */
 export function demoPreviewLine(peerArkId: string): string | null {
-  if (peerArkId === '3301882') return 'On it — ping me when you’re free to hop on a quick call.';
+  if (peerArkId === '3301882') return 'On it. ping me when you’re free to hop on a quick call.';
   const lines = RANDOM_CHATS[peerArkId];
   if (!lines?.length) return null;
   return lines[lines.length - 1] || null;
@@ -458,7 +458,7 @@ export function buildDemoThread(myArkId: string, peerArkId: string): DirectMessa
         id: 'demo-dm-1',
         senderArkId: them,
         recipientArkId: me,
-        body: 'Hey — saw your Networking post. Still need help on the booking flow?',
+        body: 'Hey. saw your Networking post. Still need help on the booking flow?',
         createdAt: at(48),
       },
       {
@@ -517,7 +517,7 @@ export function buildDemoThread(myArkId: string, peerArkId: string): DirectMessa
         id: 'demo-dm-8',
         senderArkId: them,
         recipientArkId: me,
-        body: 'On it — ping me when you’re free to hop on a quick call.',
+        body: 'On it. ping me when you’re free to hop on a quick call.',
         createdAt: at(8),
       },
     ];
@@ -567,7 +567,7 @@ export function buildDemoGroups(myArkId: string): DemoGroup[] {
       messages: [
         { id: 'dg1-1', senderArkId: '4820193', body: 'Beach or brunch?', createdAt: at(90) },
         { id: 'dg1-2', senderArkId: '7193044', body: 'Brunch first, beach after', createdAt: at(85) },
-        { id: 'dg1-3', senderArkId: me, body: 'I’m in — 11am?', createdAt: at(80) },
+        { id: 'dg1-3', senderArkId: me, body: 'I’m in. 11am?', createdAt: at(80) },
         { id: 'dg1-4', senderArkId: '8733001', body: 'Perfect. I’ll grab a table.', createdAt: at(70) },
       ],
     },
@@ -610,7 +610,7 @@ export function buildDemoNotifications(): DemoNotification[] {
       id: 'n2',
       kind: 'update',
       title: 'New update available',
-      body: 'ARK 0.1.102 is ready — restart to install.',
+      body: 'ARK 0.1.102 is ready. restart to install.',
       createdAt: at(2),
       unread: true,
     },
@@ -668,7 +668,7 @@ export function buildDemoNotifications(): DemoNotification[] {
       id: 'n10',
       kind: 'model',
       title: 'Download paused',
-      body: 'A model download paused — open Models to resume.',
+      body: 'A model download paused. open Models to resume.',
       createdAt: at(48),
     },
   ];

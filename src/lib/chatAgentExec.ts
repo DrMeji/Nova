@@ -1,5 +1,5 @@
 /**
- * Chat agent command routing — npm/pip/git/runtime installs (Steps 4–5).
+ * Chat agent command routing. npm/pip/git/runtime installs (Steps 4–5).
  */
 
 import {

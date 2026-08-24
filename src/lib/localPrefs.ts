@@ -76,9 +76,9 @@ export type LocalPrefs = {
   allowDocumentsFolderAccess: boolean;
   /** Broad PC access for agent file ops under your user profile (with confirm). */
   allowFullPcAccess: boolean;
-  /** Agent shell command policy — allowlist, auto-review, or run everything. */
+  /** Agent shell command policy. allowlist, auto-review, or run everything. */
   agentExecutionMode: 'allowlist' | 'auto_review' | 'run_all';
-  /** Chat-first shell — hide Code tab from sidebar (Code still works via handoff). */
+  /** Chat-first shell. hide Code tab from sidebar (Code still works via handoff). */
   chatFirst: boolean;
   // Updates
   updateChannel: UpdateChannel;
@@ -167,7 +167,7 @@ export function setLocalPrefs(patch: Partial<LocalPrefs>): LocalPrefs {
 
 export type ProviderKeyMap = Record<string, string>;
 
-/** In-memory cache — Desktop stores encrypted via OS; browser uses localStorage. */
+/** In-memory cache. Desktop stores encrypted via OS; browser uses localStorage. */
 let providerKeyCache: ProviderKeyMap | null = null;
 let keysHydrated = false;
 let keysEncrypted = false;
@@ -321,7 +321,7 @@ export const ARK_CHANGELOG = [
     date: 'Aug 21, 2026',
     title: 'Clean Connect for new installs + sharper brand icons',
     notes: [
-      'Networking, Message, and Notifications ship empty — no fake demo posts, chats, or alerts in production builds (dev still has local templates)',
+      'Networking, Message, and Notifications ship empty. no fake demo posts, chats, or alerts in production builds (dev still has local templates)',
       'Real network posts and messages still appear when people actually use Connect',
       'Plugin / Models / Local AI / Settings API key brand marks cleaned up (Gmail, Slack, Discord, Drive, GitHub, Groq, and more)',
       'Update via Settings → Updates → Check → Download when this build is published',
@@ -335,7 +335,7 @@ export const ARK_CHANGELOG = [
     notes: [
       'Networking: centered type + Platform filters, single expanding platform pill, report with proof + 24h review notification, cleaner post chat',
       'Message: group chats, presence status, unread dots, DM toasts; Notifications under CONNECT',
-      'Login ambient orbs move again (slow bounce) with three extra colors — no longer frozen by Windows reduce-motion',
+      'Login ambient orbs move again (slow bounce) with three extra colors. no longer frozen by Windows reduce-motion',
       'Update via Settings → Updates → Check → Download when this build is published',
     ],
   },
@@ -385,7 +385,7 @@ export const ARK_CHANGELOG = [
     notes: [
       'More reliable free images: simplify Pollinations URLs, AI Horde fallback, quality-first Flux path, wallpaper 16:9',
       'Vague image prompts ask a short brief (style/subject/size); upload a photo to recreate via img2img',
-      'In Chat, image asks show Stay/Yes like Code — Yes opens Image and starts generating',
+      'In Chat, image asks show Stay/Yes like Code. Yes opens Image and starts generating',
       'Video tab disabled (coming soon) until generative video is ready; Search hides Video',
       'Update via Settings → Updates → Check → Download when this build is published',
     ],
@@ -410,7 +410,7 @@ export const ARK_CHANGELOG = [
     date: 'Aug 19, 2026',
     title: 'Quality-first image & video generation',
     notes: [
-      'Image mode no longer races fast turbo models — ARK tries flux-realism, flux, then openjourney sequentially (up to ~30s)',
+      'Image mode no longer races fast turbo models. ARK tries flux-realism, flux, then openjourney sequentially (up to ~30s)',
       'Product prompts (iPhone, devices) get hero-shot hints: sharp studio render, no hands unless you ask',
       'Live generation animation with elapsed seconds and progress bar while images/videos render',
       'Video tab: pick 10 / 20 / 30 second clip length before send (max 30s)',
@@ -512,7 +512,7 @@ export const ARK_CHANGELOG = [
     version: '0.1.85',
     channel: 'stable' as const,
     date: 'Aug 19, 2026',
-    title: 'Bug fixes — tray, sidebar, Engine tab, model colors',
+    title: 'Bug fixes. tray, sidebar, Engine tab, model colors',
     notes: [
       'Tray "Open Settings" now correctly opens the Account section',
       'Sidebar: Local AI and Models no longer both highlight at once',
@@ -547,7 +547,7 @@ export const ARK_CHANGELOG = [
       'Tray menu redesigned; Open Settings routes to Account section',
       'Settings > Models: single click to select (no split Chat/Code rows)',
       'Font size default raised to 16px; dev badge for designated emails',
-      'Update checker scans all releases — finds v0.1.83+ correctly',
+      'Update checker scans all releases. finds v0.1.83+ correctly',
       'App always opens to a fresh chat on launch',
     ],
   },
@@ -601,7 +601,7 @@ export const ARK_CHANGELOG = [
     version: '0.1.78',
     channel: 'stable' as const,
     date: 'Aug 18, 2026',
-    title: 'Quality pass 5 — edges, clarity, jobs strip',
+    title: 'Quality pass 5. edges, clarity, jobs strip',
     notes: [
       'Packaged brain: auth required for /api/tags, /v1/models, /v1/engine',
       'Concurrent GGUF returns busy error; truncation footer; disk confirm before download',
@@ -614,7 +614,7 @@ export const ARK_CHANGELOG = [
     version: '0.1.77',
     channel: 'stable' as const,
     date: 'Aug 18, 2026',
-    title: 'Quality pass 4 — complete fix list',
+    title: 'Quality pass 4. complete fix list',
     notes: [
       'Ask-before-cloud failover, vision key errors, main-process cloud auth injection',
       'Download errors persist with Dismiss/Retry; queue survives restart; FLUX part errors',
@@ -627,7 +627,7 @@ export const ARK_CHANGELOG = [
     version: '0.1.76',
     channel: 'stable' as const,
     date: 'Aug 18, 2026',
-    title: 'Quality pass 3 — complete wiring sweep',
+    title: 'Quality pass 3. complete wiring sweep',
     notes: [
       'Studio read-only guard, no-capacity honesty, clone overwrite warning, import skip counts',
       'Auth session refuses plaintext; download errors persist; Windows disk space check',
@@ -640,7 +640,7 @@ export const ARK_CHANGELOG = [
     version: '0.1.75',
     channel: 'stable' as const,
     date: 'Aug 18, 2026',
-    title: 'Quality pass 2 — control, hardening, honesty',
+    title: 'Quality pass 2. control, hardening, honesty',
     notes: [
       'Media preview badges always show for SVG / real:false fallbacks',
       'Brain API rate limits, body size cap, empty-output errors, stream error events',
@@ -654,7 +654,7 @@ export const ARK_CHANGELOG = [
     version: '0.1.74',
     channel: 'stable' as const,
     date: 'Aug 18, 2026',
-    title: 'Review pass — trust, security, and work trace',
+    title: 'Review pass. trust, security, and work trace',
     notes: [
       'GGUF failures and brain API errors return real 503s instead of fake success replies',
       'Packaged installs get a brain bearer token; copy or rotate it in Settings → AI',
@@ -669,7 +669,7 @@ export const ARK_CHANGELOG = [
     date: 'Aug 18, 2026',
     title: 'Code waits for Enter, reads your folder, and locks device size',
     notes: [
-      'Yes from Chat opens Code with your prompt ready — nothing runs until you press Enter',
+      'Yes from Chat opens Code with your prompt ready. nothing runs until you press Enter',
       'If the brain does not finish, ARK says so instead of pasting an offline starter app',
       '“What is this project about?” reads the opened files, describes them, then offers Debug / Work on this',
       'While code is writing, the right editor follows the live file; device previews stay the real phone size (zoom only, no stretching)',
@@ -683,7 +683,7 @@ export const ARK_CHANGELOG = [
     notes: [
       'Chat and Code wait long enough to finish lists instead of stopping mid-sentence or repeating the same answer',
       'Simple edits (background, device name) update the existing iOS/Android files instead of spawning ArkApp / Calculator / IphoneApp folders',
-      'Start opens a separate preview window — phone frame for native apps, full page for websites',
+      'Start opens a separate preview window. phone frame for native apps, full page for websites',
       'Code Plus → Open folder loads files like New Chat, and Plan / Ask / Debug / Multitask chips sit above the input so they stay aligned',
     ],
   },
@@ -695,7 +695,7 @@ export const ARK_CHANGELOG = [
     notes: [
       'Every tab reflows when you shrink the window: sidebar collapses, Settings stacks, grids wrap instead of overflowing',
       'Clear local chat cache and Storage → Clear cache actually wipe local threads and reports (keys and models stay)',
-      'Installed models get a trash control next to the check — Settings Storage, Models, and Local AI can delete the GGUF from this PC',
+      'Installed models get a trash control next to the check. Settings Storage, Models, and Local AI can delete the GGUF from this PC',
       'Security 2FA is blanketed as Coming soon until that feature ships',
     ],
   },
@@ -808,7 +808,7 @@ export const ARK_CHANGELOG = [
     date: 'Aug 17, 2026',
     title: 'Networking marked Coming soon (update splash test)',
     notes: [
-      'Networking is disabled in the sidebar with Coming soon — Message and Call stay available',
+      'Networking is disabled in the sidebar with Coming soon. Message and Call stay available',
       'Use this build to confirm the Updating screen stays until ARK reopens',
     ],
   },
@@ -829,7 +829,7 @@ export const ARK_CHANGELOG = [
     title: 'Code studio, native iPhone/Android apps, and honest brains',
     notes: [
       'Code can author real iPhone (Xcode) and Android (Android Studio) projects and push to GitHub',
-      'Updating splash and install path unchanged in 0.1.58 — 0.1.59 keeps that screen until reopen',
+      'Updating splash and install path unchanged in 0.1.58. 0.1.59 keeps that screen until reopen',
     ],
   },
   {
@@ -850,7 +850,7 @@ export const ARK_CHANGELOG = [
     date: 'Aug 17, 2026',
     title: 'Code builds show progress in chat; Explorer names your project',
     notes: [
-      'Build steps live in the bot bubble (understand → plan → write → save) — not a bar at the top',
+      'Build steps live in the bot bubble (understand → plan → write → save). not a bar at the top',
       'Explorer shows what you are building (Calculator, Website, etc.) and file names as they appear',
       'Faster path: lighter prompts, live streaming on the right, scaffold in ~5s if the brain stalls',
     ],
@@ -859,7 +859,7 @@ export const ARK_CHANGELOG = [
     version: '0.1.55',
     channel: 'stable' as const,
     date: 'Aug 17, 2026',
-    title: 'Code builds that finish — Explorer, scaffolds, compact build chip',
+    title: 'Code builds that finish. Explorer, scaffolds, compact build chip',
     notes: [
       'Build hint is a short centered pill above the chat box; composer is slightly taller',
       'Code workspace auto-sends when you click Yes, streams into Explorer, and scaffolds calculator if the brain times out',
@@ -883,7 +883,7 @@ export const ARK_CHANGELOG = [
     date: 'Aug 17, 2026',
     title: 'Sticky Auto brain across chat, image, video, and code',
     notes: [
-      'Auto picks a brain once per thread and stays on it until failover — pill shows ARK · model name',
+      'Auto picks a brain once per thread and stays on it until failover. pill shows ARK · model name',
       'Image and video chats remember their equipped path; code workspace uses the same sticky coder brain',
       'Token ring and model pill reflect the active brain instead of generic ARK',
       'Sidebar profile restored at the bottom (name + settings gear)',
@@ -897,19 +897,19 @@ export const ARK_CHANGELOG = [
     notes: [
       'Dev Electron builds no longer register Windows startup (that caused the raw Electron splash on boot)',
       'Packaged ARK cleans up stale dev startup entries and re-registers the real ARK.exe when Launch on startup is on',
-      'Lindsay / brain API unchanged — ARK still starts from the installed app only',
+      'Lindsay / brain API unchanged. ARK still starts from the installed app only',
     ],
   },
   {
     version: '0.1.51',
     channel: 'stable' as const,
     date: 'Aug 16, 2026',
-    title: 'ARK Engine is the brain — Auto picks the right local model',
+    title: 'ARK Engine is the brain. Auto picks the right local model',
     notes: [
-      'Auto routes chat vs code vs media on the same ARK pill, and uses a ready Engine GGUF that fits this PC (7B / 3B when installed — not stuck on 1.5B)',
+      'Auto routes chat vs code vs media on the same ARK pill, and uses a ready Engine GGUF that fits this PC (7B / 3B when installed. not stuck on 1.5B)',
       'Build asks load a Coder GGUF when you have one; Lindsay on :8787 gets the same pick instead of Ollama',
       'Local llama-cli now uses a real chat template and stop strings so answers stay on-topic',
-      'Ollama stays optional last — never the default brain',
+      'Ollama stays optional last. never the default brain',
     ],
   },
   {
@@ -919,7 +919,7 @@ export const ARK_CHANGELOG = [
     title: 'New Chat answers the question you asked',
     notes: [
       'Local chat no longer pastes the previous reply into the next one (the “c. Is there anything…” leak)',
-      'ARK knows it is this app — not Ark: Survival Evolved — and won’t “correct” the name',
+      'ARK knows it is this app. not Ark: Survival Evolved. and won’t “correct” the name',
       'Follow-ups like “tell me a story” start a fresh answer; build asks still keep useful context',
     ],
   },
@@ -940,7 +940,7 @@ export const ARK_CHANGELOG = [
     date: 'Aug 16, 2026',
     title: 'Background downloads + done indicators',
     notes: [
-      'Collapsed sidebar: no logo / no profile — logo only when expanded; Settings alone at bottom',
+      'Collapsed sidebar: no logo / no profile. logo only when expanded; Settings alone at bottom',
       'Queue banner matches composer width; token ring click shows model + budget',
       'Model downloads keep going when you leave Models / Local AI; nav blinks green when ready',
       'Chat reply finished while away blinks New Chat / Image / Video until you open it',
@@ -975,7 +975,7 @@ export const ARK_CHANGELOG = [
     title: 'Code cleanup + update screen stays open',
     notes: [
       'Updating window stays through install until ARK reopens (Installing → Opening ARK)',
-      'Code starts empty — no fake files; Browser/Run chrome only when you build',
+      'Code starts empty. no fake files; Browser/Run chrome only when you build',
       'Chat asks before switching to Code; Recent is one list with rename',
     ],
   },
@@ -1042,7 +1042,7 @@ export const ARK_CHANGELOG = [
     notes: [
       'Fixed blank “Updating ARK” hang caused by killing Electron helper processes',
       'Install now runs via a standalone apply script after download (no stuck black window)',
-      'Single download progress in Settings — no second overlay',
+      'Single download progress in Settings. no second overlay',
       'Installer is staged to a stable temp path before ARK exits',
     ],
   },
@@ -1052,7 +1052,7 @@ export const ARK_CHANGELOG = [
     date: 'Aug 17, 2026',
     title: 'Settings polish and chat continuity',
     notes: [
-      'Save lives in the Settings nav — no black sticky bar',
+      'Save lives in the Settings nav. no black sticky bar',
       'Short Settings tabs no longer phantom-scroll; Updates drops GitHub URL and signing/reports',
       'Locked Beta tab reserved for advanced tooling',
       'Follow-up messages stay in the same Recent chat; queue/stop clear correctly',
@@ -1066,7 +1066,7 @@ export const ARK_CHANGELOG = [
     title: 'Updater actually closes and installs',
     notes: [
       'After download, ARK force-exits so the Updating window is not stuck waiting',
-      'No second “Closing…” overlay — download in-app, then only the Updating splash',
+      'No second “Closing…” overlay. download in-app, then only the Updating splash',
       'Updater force-kills a stuck parent process and continues install',
     ],
   },
@@ -1113,7 +1113,7 @@ export const ARK_CHANGELOG = [
     title: 'Fix black screen and duplicate tray icons',
     notes: [
       'Packaged UI loads correctly (no blank black window from file:// module CORS)',
-      'Single-instance lock — reopening focuses ARK instead of spawning more trays',
+      'Single-instance lock. reopening focuses ARK instead of spawning more trays',
       'Tray shows the ARK icon with tooltip “ARK” (not brain port text)',
     ],
   },
@@ -1155,7 +1155,7 @@ export const ARK_CHANGELOG = [
     date: 'Aug 16, 2026',
     title: 'Local image + real MP4 + brain polish',
     notes: [
-      'On-device Stable Diffusion 1.5 via ARK Engine (sd.cpp) — install from Local AI',
+      'On-device Stable Diffusion 1.5 via ARK Engine (sd.cpp). install from Local AI',
       'Video: stronger free MP4 hosts + Ken Burns real MP4 when generative video is offline',
       'Download cancel/disk checks, chat Ready/Installing/Cloud picker, tray keep-alive, Lindsay aliases',
       'Live plugin depth (GitHub issues, Linear close, Discord #channel, Drive upload); Creations delete',
@@ -1179,7 +1179,7 @@ export const ARK_CHANGELOG = [
     date: 'Aug 16, 2026',
     title: 'Accurate hardware + ARK as external brain',
     notes: [
-      'One PC scan saved everywhere — Models / Local AI / onboarding show real specs and fit lists',
+      'One PC scan saved everywhere. Models / Local AI / onboarding show real specs and fit lists',
       'Brain API 0.4: Ollama-shaped /api/* + OpenAI chat completions so Lindsay (and any app) can use ARK instead of Ollama',
       'More Engine downloads (Coder 14B/32B, DeepSeek, StarCoder, Llama 8B, …), multi-download queue + disk check, Import/drop GGUF',
       'Chat failover “Switched to…” chip + capacity meter; Calendar create + Notion update; video catalog honesty',
@@ -1347,7 +1347,7 @@ export const ARK_CHANGELOG = [
     date: 'Aug 15, 2026',
     title: 'Clean silent updates',
     notes: [
-      'Single Updating screen with logo + percent — no terminals',
+      'Single Updating screen with logo + percent. no terminals',
       'Silent install helper (no ping / cmd windows)',
       'Local AI Speed tab grayed out for now',
     ],
@@ -1383,7 +1383,7 @@ export const ARK_CHANGELOG = [
     notes: [
       'Project chat calls ARK Router and writes real files',
       'Explorer and editor update from model file blocks',
-      'Honest routing status — no fake install steps',
+      'Honest routing status. no fake install steps',
     ],
   },
   {

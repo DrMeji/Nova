@@ -84,7 +84,7 @@ export async function installNextWhenCurrentRanOut(opts?: {
   kind?: RunOutKind;
   reason?: RunOutReason;
   currentModelId?: string;
-  /** Catalog successor for context rotation — do not require hunt toggles. */
+  /** Catalog successor for context rotation. do not require hunt toggles. */
   ignoreHuntPrefs?: boolean;
 }): Promise<{ id: string; name: string } | null> {
   const prefs = getLocalPrefs();

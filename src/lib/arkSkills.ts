@@ -1,5 +1,5 @@
 /**
- * ARK design Skill packs — built-in playbooks auto-attached by project kind.
+ * ARK design Skill packs. built-in playbooks auto-attached by project kind.
  * Separate from SaaS Plugins (GitHub/Notion/…). Inspired by taste/arsenal-style skills.
  */
 
@@ -26,14 +26,14 @@ export const ARK_SKILL_PACKS: ArkSkillPack[] = [
   {
     id: 'design-taste',
     name: 'Design taste',
-    summary: 'Anti-generic UI — unique type, color, and composition per brief.',
+    summary: 'Anti-generic UI. unique type, color, and composition per brief.',
     tags: ['landing', 'web', 'brand'],
     rules: [
       'Infer a distinct design language from the brief (industry, mood, audience).',
       'Never ship purple-on-white or cream+terracotta AI-default themes unless the brief asks.',
       'Brand or product name is hero-level; one composition in the first viewport.',
       'Expressive typography (not Inter/Roboto/Arial/system-only stacks).',
-      'Atmosphere via gradients, imagery, or subtle pattern — not a flat single fill.',
+      'Atmosphere via gradients, imagery, or subtle pattern. not a flat single fill.',
       'No card grids in the hero; one job per section; reduce pill/stat clutter.',
     ].join(' '),
   },
@@ -45,7 +45,7 @@ export const ARK_SKILL_PACKS: ArkSkillPack[] = [
     rules: [
       'Pick one layout family (full-bleed hero, split narrative, editorial magazine, or tool dashboard) and commit.',
       'Vary section rhythm (dense then open); avoid identical card rows on every section.',
-      'Use 2–3 intentional motions (entrance, hover, scroll) — presence not noise.',
+      'Use 2–3 intentional motions (entrance, hover, scroll). presence not noise.',
     ].join(' '),
   },
   {
@@ -89,7 +89,7 @@ export const ARK_SKILL_PACKS: ArkSkillPack[] = [
     rules: [
       'Ship at least two intentional motions on marketing surfaces.',
       'Prefer CSS transitions/keyframes; keep reduced-motion friendly.',
-      'Motion supports hierarchy — never decorative noise on every element.',
+      'Motion supports hierarchy. never decorative noise on every element.',
     ].join(' '),
   },
 ];

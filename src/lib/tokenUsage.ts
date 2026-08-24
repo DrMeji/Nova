@@ -1,4 +1,4 @@
-/** Approximate token budget for the UI ring — driven by real thread pressure. */
+/** Approximate token budget for the UI ring. driven by real thread pressure. */
 
 /** Matches electron/arkGguf.cjs GGUF_CTX. */
 export const GGUF_CTX = 8192;
@@ -61,7 +61,7 @@ export function syncTokenUsage(scopeId: string, tokens: number) {
   return getTokenUsageRatio(scopeId);
 }
 
-/** Alias — inner ring tracks the current turn pack only. */
+/** Alias. inner ring tracks the current turn pack only. */
 export function setTurnPackTokens(scopeId: string, tokens: number) {
   return syncTokenUsage(scopeId, tokens);
 }

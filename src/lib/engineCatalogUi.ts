@@ -1,4 +1,4 @@
-/** UI catalog for Local AI — ids/sizes must match electron/arkCatalog.cjs (enforced by smoke-catalog-ssot). */
+/** UI catalog for Local AI. ids/sizes must match electron/arkCatalog.cjs (enforced by smoke-catalog-ssot). */
 
 import { sortModelsByCategoryThenSizeDesc } from '@/lib/modelSort';
 

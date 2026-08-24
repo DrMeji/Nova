@@ -6,7 +6,7 @@ export type DesktopHttpOptions = {
   method?: string;
   headers?: Record<string, string>;
   body?: string;
-  /** Inject Authorization from main-process secrets — never pass keys in headers when set. */
+  /** Inject Authorization from main-process secrets. never pass keys in headers when set. */
   authProviderId?: string;
 };
 

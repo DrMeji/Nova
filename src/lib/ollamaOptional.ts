@@ -1,5 +1,5 @@
 /**
- * Optional Ollama bridge — never required for ARK.
+ * Optional Ollama bridge. never required for ARK.
  * Only used when the user opts in from Models.
  */
 

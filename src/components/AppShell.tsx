@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useRouter, type Route } from '@/context/RouterContext';
 import {
   SquarePen, Briefcase, Blocks, Database,
@@ -226,7 +226,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       if (item.label === 'Projects') return false;
       if (item.label === 'Code') return false;
     }
-    // Once a conversation is in Recent, highlight that item — not Chat.
+    // Once a conversation is in Recent, highlight that item. not Chat.
     if (inRecentChat && item.route.name === 'chat') return false;
 
     if (item.label === 'Chat') {
@@ -343,7 +343,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    // Lightweight update indicator (near Search) — cached so we don't hammer GitHub.
+    // Lightweight update indicator (near Search). cached so we don't hammer GitHub.
     let alive = true;
     const CACHE_KEY = 'ark:update-indicator-cache-v1';
     const CACHE_MS = 30 * 60 * 1000; // 30 minutes
@@ -729,7 +729,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               </div>
             ))}
 
-            {/* Recent — chats and projects stay separate */}
+            {/* Recent. chats and projects stay separate */}
             <div className={`mt-4 ${collapsed ? '' : 'pt-2 border-t border-surface-border'}`}>
               <button
                 type="button"

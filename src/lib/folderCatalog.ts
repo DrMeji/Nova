@@ -1,5 +1,5 @@
 /**
- * Cursor-style folder catalog — list top level + light README/package.json peek.
+ * Cursor-style folder catalog. list top level + light README/package.json peek.
  * Never imports thousands of files into chat context.
  */
 
@@ -10,7 +10,7 @@ import { looksLikeConversationalPlanningAsk, looksLikeGreenfieldIdea } from '@/l
 import { isProjectCreateBrief } from '@/lib/chatCreateBrief';
 import { isBlockedDiskTargetName } from '@/lib/projectNames';
 
-/** "What projects do I have on my PC / desktop?" — not installed-apps asks. */
+/** "What projects do I have on my PC / desktop?". not installed-apps asks. */
 export function looksLikeProjectsInventoryAsk(text: string): boolean {
   const t = String(text || '').trim();
   if (!/\bprojects?\b/i.test(t)) return false;
@@ -26,7 +26,7 @@ export function looksLikeProjectsInventoryAsk(text: string): boolean {
   if (/\btell\s+me\s+more\b/i.test(t) || /\bmore\s+details?\b/i.test(t) || /\babout\s+auth\b/i.test(t)) {
     return false;
   }
-  // Must be a real inventory question — not just the words project + “tell me” in a planning reply.
+  // Must be a real inventory question. not just the words project + “tell me” in a planning reply.
   const asksInventory = (
     /\b(?:what|which)\s+projects?\b/i.test(t)
     || /\bprojects?\s+(?:do\s+i\s+have|have\s+i|are\s+on|on\s+my)\b/i.test(t)
@@ -37,7 +37,7 @@ export function looksLikeProjectsInventoryAsk(text: string): boolean {
   return true;
 }
 
-/** Best-guess folder for a catalog ask — no "say the folder name" template needed. */
+/** Best-guess folder for a catalog ask. no "say the folder name" template needed. */
 export function resolveCatalogFolderRef(message: string): FolderPathRef | null {
   const parsed = parseFolderPathAsk(message);
   if (parsed) return parsed;
@@ -51,7 +51,7 @@ export function resolveCatalogFolderRef(message: string): FolderPathRef | null {
     return { scope: 'desktop', name: 'Projects' };
   }
 
-  // Require an inventory-style ask — never treat "Create project X … Desktop window" as a list.
+  // Require an inventory-style ask. never treat "Create project X … Desktop window" as a list.
   if (/\bprojects?\b/i.test(t) && /\bdesktop\b/i.test(t)
     && /\b(?:what|which|list|show|tell|inside|contents?)\b/i.test(t)
     && !/\b(?:create|build|scaffold|want\s+a)\b/i.test(t)) {
@@ -149,7 +149,7 @@ export function looksLikeFolderCatalogAsk(text: string): boolean {
   return false;
 }
 
-/** User wants to open / work in a specific project folder — bind workspace + rename chat. */
+/** User wants to open / work in a specific project folder. bind workspace + rename chat. */
 export function looksLikeStartWorkOnFolderAsk(text: string): boolean {
   const t = String(text || '').trim();
   if (!t) return false;
@@ -198,7 +198,7 @@ export function parseWorkOnFolderName(text: string): string | null {
   return null;
 }
 
-/** Full file import only when the user clearly wants deep code work — not a listing ask. */
+/** Full file import only when the user clearly wants deep code work. not a listing ask. */
 export function shouldFullImportFolderAsk(text: string): boolean {
   const t = String(text || '').trim();
   if (looksLikeFolderCatalogAsk(t)) return false;

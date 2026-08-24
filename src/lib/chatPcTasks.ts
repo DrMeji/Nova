@@ -1,5 +1,5 @@
 /**
- * PC system tasks from Chat — restore points, read file on disk, safe PowerShell.
+ * PC system tasks from Chat. restore points, read file on disk, safe PowerShell.
  */
 
 import { extractDiskParentHintFromText } from './diskPathResolve';

@@ -189,7 +189,7 @@ export type HardwareClass = 'light' | 'standard' | 'strong';
 
 export function getHardwareClass(hw: HardwareInfo): HardwareClass {
   const ramGb = parseRamGb(hw);
-  // Only dedicated GPU accel counts — Intel iGPU (CPU+iGPU) is not "strong".
+  // Only dedicated GPU accel counts. Intel iGPU (CPU+iGPU) is not "strong".
   const hasDedicatedAccel =
     hw.acceleration === 'CUDA'
     || hw.acceleration === 'Vulkan'
@@ -214,7 +214,7 @@ export function getRecommendedModel(hw: HardwareInfo): { name: string; size: str
   return { name: 'Qwen2.5 1.5B Instruct', size: '1.0 GB', id: 'qwen25-15b' };
 }
 
-/** Default chat brain for Auto / onboarding — instruct, not the tiny 1.5B, when RAM allows. */
+/** Default chat brain for Auto / onboarding. instruct, not the tiny 1.5B, when RAM allows. */
 export function getRecommendedChatModel(hw: HardwareInfo): { name: string; size: string; id: string } {
   const ramGb = parseRamGb(hw);
   if (ramGb >= 16) {
@@ -242,8 +242,8 @@ export function getRecommendedCoderModel(hw: HardwareInfo): { name: string; size
 export function suggestedKeysForHardware(hw: HardwareInfo): { id: string; name: string; why: string }[] {
   const tier = getHardwareClass(hw);
   const base = [
-    { id: 'groq', name: 'Groq', why: 'Fast free chat — best first key on any PC' },
-    { id: 'google', name: 'Google AI Studio', why: 'Gemini free tier — solid coding backup' },
+    { id: 'groq', name: 'Groq', why: 'Fast free chat. best first key on any PC' },
+    { id: 'google', name: 'Google AI Studio', why: 'Gemini free tier. solid coding backup' },
     { id: 'openrouter', name: 'OpenRouter', why: 'Many free routes when others rate-limit' },
   ];
   if (tier === 'light') {

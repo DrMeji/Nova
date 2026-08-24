@@ -1,5 +1,5 @@
 /**
- * ARK Router — ARK-owned routing for chat / image / video.
+ * ARK Router. ARK-owned routing for chat / image / video.
  *
  * Auto hops (ARK is the brain; Ollama is never identity):
  *   capable ARK Engine GGUF (intent + RAM) → free-key cloud if local is
@@ -56,7 +56,7 @@ export type ArkRouterResult = {
     real?: boolean;
   };
   modelName: string;
-  /** Engine / catalog id when known — for chips only; never hijack the picker. */
+  /** Engine / catalog id when known. for chips only; never hijack the picker. */
   modelId?: string;
   source: string;
   tier: RouterTier;
@@ -239,7 +239,7 @@ async function tryLocalChat(
     }
   }
 
-  // Chat: one brain attempt — hopping local GGUFs can stall for minutes with no answer.
+  // Chat: one brain attempt. hopping local GGUFs can stall for minutes with no answer.
   const maxLocalFailover = modelId ? 0 : 1;
   for (const id of extras.slice(0, maxLocalFailover)) {
     const hit = await runOne(id);
@@ -568,7 +568,7 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
         reply: [
           'Local-only mode is on, but no live local brain is ready.',
           'Install a GGUF model into ARK Engine (Local AI / Models), or enable optional Ollama.',
-          'ARK Core’s template replies are not a live model — they won’t answer like ChatGPT.',
+          'ARK Core’s template replies are not a live model. they won’t answer like ChatGPT.',
         ].join('\n'),
         modelName: 'ARK Engine',
         source: 'none',
@@ -668,7 +668,7 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
       reply: [
         'Local-only mode is on, but no live local brain is ready.',
         'Install a GGUF model into ARK Engine (Local AI / Models), or enable optional Ollama.',
-        'ARK Core’s template replies are not a live model — they won’t answer like ChatGPT.',
+        'ARK Core’s template replies are not a live model. they won’t answer like ChatGPT.',
       ].join('\n'),
       modelName: 'ARK Engine',
       source: 'none',
@@ -704,7 +704,7 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
   const ollama = await tryOllama(history, opts.message, preferredId, attempted);
   if (ollama) return ollama;
 
-  // Never return ARK Core template as a finished answer — be honest.
+  // Never return ARK Core template as a finished answer. be honest.
   return {
     reply: honestNoLiveChatReply(),
     modelName: 'ARK Auto',
@@ -838,7 +838,7 @@ async function routeImage(opts: ArkRouteOpts): Promise<ArkRouterResult> {
 
   if (isAuto && opts.stickyModelId && opts.stickyPinnedSource) {
     const sticky = await tryStickyImage(opts, attempted, mode);
-    // Only keep sticky when it actually produced a real image — otherwise free hosts never run
+    // Only keep sticky when it actually produced a real image. otherwise free hosts never run
     // and users see "busy / couldn't generate" from a failed local SD sticky.
     if (sticky?.media?.dataUrl && sticky.media.real) return sticky;
   }
@@ -941,8 +941,8 @@ async function routeImage(opts: ArkRouteOpts): Promise<ArkRouterResult> {
 
   if (local?.media?.dataUrl && local.media.real) return local;
 
-  // Last resort: labeled preview only — never treat SVG fallback as finished art.
-  // Never invent “use Canva / Photoshop” text — hosts failed; tell the user to retry or add a key.
+  // Last resort: labeled preview only. never treat SVG fallback as finished art.
+  // Never invent “use Canva / Photoshop” text. hosts failed; tell the user to retry or add a key.
   if (local?.media?.dataUrl && !local.media.real) {
     void import('@/lib/arkHuntBootstrap').then(m =>
       m.installNextWhenCurrentRanOut({
@@ -1090,7 +1090,7 @@ export async function arkRoute(opts: ArkRouteOpts): Promise<ArkRouterResult> {
   return routeChat(opts);
 }
 
-/** Short label for chat bubbles — keeps the provider quiet but honest. */
+/** Short label for chat bubbles. keeps the provider quiet but honest. */
 export function routerProviderLabel(result: ArkRouterResult, fallback: string) {
   if (result.source === 'none') return fallback;
   const hop = result.attempted.length > 1 ? ' · switched' : '';

@@ -1,6 +1,6 @@
 /**
  * Hunt GGUF brains from more than one file host.
- * ARK Engine remains the runtime — this only finds and downloads weights.
+ * ARK Engine remains the runtime. this only finds and downloads weights.
  */
 
 import { getHardwareClass, parseRamGb, type HardwareInfo } from '@/lib/api';

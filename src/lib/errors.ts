@@ -68,7 +68,7 @@ export function classifyErrorMessage(raw: string): ArkErrorInfo {
   return { code: 'UNKNOWN', message: msg };
 }
 
-/** UI guard — never paint long assistant answers as red error boxes. */
+/** UI guard. never paint long assistant answers as red error boxes. */
 export function isLikelyErrorMessage(raw: string): boolean {
   const msg = String(raw || '').trim();
   if (!msg || msg.startsWith('__generating__:') || msg.startsWith('__progress__:')) return false;

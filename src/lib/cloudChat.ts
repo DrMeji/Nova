@@ -13,7 +13,7 @@ export type CloudChatHit = {
   reply: string;
   provider: string;
   model: string;
-  /** free-key vs paid — helps the router label tiers */
+  /** free-key vs paid. helps the router label tiers */
   cost: 'free-key' | 'paid';
 };
 
@@ -400,7 +400,7 @@ async function chatXai(
   return openaiCompatible('https://api.x.ai/v1/chat/completions', key, model, history, undefined, onChunk, 'xai');
 }
 
-/** Progressive word reveal — fallback when a provider has no SSE path (Google/Anthropic). */
+/** Progressive word reveal. fallback when a provider has no SSE path (Google/Anthropic). */
 export async function revealCloudReply(
   reply: string,
   onChunk?: (text: string) => void,
@@ -415,7 +415,7 @@ export async function revealCloudReply(
   }
 }
 
-/** Free-key providers first, then paid — only entries with a stored key are attempted. */
+/** Free-key providers first, then paid. only entries with a stored key are attempted. */
 const FREE_KEY_PROVIDERS: ProviderAttempt[] = [
   {
     id: 'groq',

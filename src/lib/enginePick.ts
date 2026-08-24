@@ -1,13 +1,13 @@
 /**
  * Pick which ARK Engine GGUF Auto should run.
- * Never selects Ollama — Engine ids only.
+ * Never selects Ollama. Engine ids only.
  * Keep ranking in sync with electron/arkModelRank.cjs (Lindsay / Engine).
  */
 
 import type { ChatIntent } from '@/lib/chatIntent';
 import { isEngineDownloadable } from '@/lib/api';
 
-/** Instruct / general chat — skip coder weights for “hello / what can you do”. */
+/** Instruct / general chat. skip coder weights for “hello / what can you do”. */
 export const CHAT_ENGINE_RANK = [
   'qwen25-14b',
   'llama31-8b',

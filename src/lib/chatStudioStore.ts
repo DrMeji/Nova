@@ -69,7 +69,7 @@ export function clearChatStudio(chatId: string) {
   clearChatCodePill(chatId);
 }
 
-/** Sticky Code pill for this chat — set when build/files start; cleared only when chat is deleted. */
+/** Sticky Code pill for this chat. set when build/files start; cleared only when chat is deleted. */
 function chatCodePillKey(chatId: string) {
   return `ark:chat-code-pill:${chatId}`;
 }
@@ -265,11 +265,11 @@ export type LastPendingGreenfield = {
   summary: string;
   problemLine: string;
   at: number;
-  /** How many times Keep planning / expand was used — drives richer replies. */
+  /** How many times Keep planning / expand was used. drives richer replies. */
   planDepth?: number;
   /** Last expand focus (gallery, menu, hero, …). */
   planFocus?: string;
-  /** Accumulated plan sections — each Keep planning / expand appends; never drops prior ones. */
+  /** Accumulated plan sections. each Keep planning / expand appends; never drops prior ones. */
   planLog?: string[];
 };
 

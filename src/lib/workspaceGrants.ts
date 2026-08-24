@@ -87,7 +87,7 @@ async function findFolderInRoot(
         /* ignore */
       }
       const hit: DirHit = { name: dir.name, path: full, score: score + bonus, nested: depth > 0 };
-      // Shallower wins ties — avoid binding Desktop\\Projects\\X\\X.
+      // Shallower wins ties. avoid binding Desktop\\Projects\\X\\X.
       if (
         !best
         || hit.score > best.score
@@ -180,7 +180,7 @@ export async function resolveWorkFolderPath(
 
   await syncWorkspaceGrantsFromPrefs();
 
-  // Prefer Desktop\Projects\<Name> when it exists — avoids nested Name\Name clones.
+  // Prefer Desktop\Projects\<Name> when it exists. avoids nested Name\Name clones.
   const roots = await window.arkDesktop?.browseRoots?.();
   const desktopPath = roots?.roots?.find(r => r.id === 'desktop')?.path;
   if (desktopPath) {

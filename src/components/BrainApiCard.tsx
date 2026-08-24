@@ -27,11 +27,11 @@ export function BrainApiCard({ compact }: { compact?: boolean } = {}) {
       <div>
         <p className="text-sm font-medium text-content-primary">Brain API</p>
         <p className="text-[11px] text-content-tertiary mt-0.5 leading-relaxed">
-          Loopback only — for Lindsay and other apps on this PC. Packaged ARK requires a bearer token on chat routes.
+          Loopback only. for Lindsay and other apps on this PC. Packaged ARK requires a bearer token on chat routes.
         </p>
         {brainPackaged === false && !brainToken ? (
           <p className="text-[11px] font-medium text-amber-400 mt-1.5">
-            Auth: off (dev) — unpackaged builds accept chat without a token.
+            Auth: off (dev). unpackaged builds accept chat without a token.
           </p>
         ) : brainToken ? (
           <p className="text-[11px] text-emerald-400/90 mt-1.5">Auth: on · bearer token required for chat</p>
@@ -49,7 +49,7 @@ export function BrainApiCard({ compact }: { compact?: boolean } = {}) {
         <input
           readOnly
           type="password"
-          value={brainToken || '(none — dev mode)'}
+          value={brainToken || '(none. dev mode)'}
           className="ark-input font-mono text-xs"
         />
       </div>
@@ -87,7 +87,7 @@ export function BrainApiCard({ compact }: { compact?: boolean } = {}) {
             void window.arkDesktop?.brainTokenRotate?.().then(res => {
               if (res?.token) setBrainToken(res.token);
               if (res?.url) setBrainUrl(res.url);
-              setFlash('Token rotated — update Lindsay/clients');
+              setFlash('Token rotated. update Lindsay/clients');
               window.setTimeout(() => setFlash(''), 2200);
             });
           }}

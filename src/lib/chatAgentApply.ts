@@ -124,7 +124,7 @@ export async function applyChatReplyEdits(opts: {
     edits = extractChatStyleFileEdits(opts.reply, userMessage, baseFiles);
   }
 
-  // Prefer deterministic React/web patches for common UI asks — models often describe without writing.
+  // Prefer deterministic React/web patches for common UI asks. models often describe without writing.
   const finalized = finalizeWebEdits(baseFiles, userMessage, edits, { projectName: opts.projectName });
   if (finalized.length) {
     edits = finalized;
@@ -165,7 +165,7 @@ export async function applyChatReplyEdits(opts: {
   let wroteOk = false;
   let writeError: string | undefined;
 
-  // Prefer the live disk folder when bound — projectId sandbox alone can "succeed"
+  // Prefer the live disk folder when bound. projectId sandbox alone can "succeed"
   // while Desktop\Projects\… never changes (Localhost then looks unchanged).
   if (opts.diskRoot) {
     const disk = await writeViaDiskRoot(opts.diskRoot, payloadFiles);

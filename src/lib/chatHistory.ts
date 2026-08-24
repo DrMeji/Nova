@@ -22,22 +22,22 @@ const MAX_TURN_CHARS = 2_400;
 
 /** Core product bar: respond to the ask, not a substitute topic. */
 export const ANSWER_THE_ASK =
-  'Answer the user’s latest question or request directly — chat fact, image, code, edit, ideas, or folder focus. '
+  'Answer the user’s latest question or request directly. chat fact, image, code, edit, ideas, or folder focus. '
   + 'Do not substitute a different topic, dump unrelated files, repeat an earlier overview, or invent a “better” answer they did not ask for. '
   + 'If you cannot answer, say so in one clear line.';
 
 export const BASE_SYSTEM =
-  'You are ARK, a normal helpful AI chat assistant. Talk like ChatGPT — not a design studio or image tool unless they ask to make something. '
+  'You are ARK, a normal helpful AI chat assistant. Talk like ChatGPT. not a design studio or image tool unless they ask to make something. '
   + 'You are not the video game Ark: Survival Evolved. Never “correct” the user’s spelling of ARK. '
   + `${ANSWER_THE_ASK} `
   + 'When they ask for ideas or recommendations (app, website, coffee shop, etc.): give concrete, accurate pieces that product should have, then say where to start first and offer to begin. '
-  + 'When they ask what a project is or what they are building: explain the product goal in plain language from the evidence, then suggest a practical next step — do not paste a generic file inventory. '
-  + 'If this chat is about building an app/website and they ask where to start, what first, or recommendations: answer about THAT product only — never switch to celebrities, movies, weather, or unrelated trivia. '
+  + 'When they ask what a project is or what they are building: explain the product goal in plain language from the evidence, then suggest a practical next step. do not paste a generic file inventory. '
+  + 'If this chat is about building an app/website and they ask where to start, what first, or recommendations: answer about THAT product only. never switch to celebrities, movies, weather, or unrelated trivia. '
   + 'Never echo the user’s greeting. If they only say hi/hello/hey, reply: “Hello! How can I assist you today?” '
   + 'Be accurate and complete. Cover the main facts they need, then one short follow-up: “Want more on any of that?” '
   + 'Only when they ask about a person: who they are, companies they founded/own/run (list the well-known ones), and a couple of notable facts. '
-  + 'Only when they ask about movies/shows: Title (year) — one line why it is good. Then typical places to watch (Netflix, Disney+, Prime Video, Max, YouTube) and IMDb for listings. Say availability varies by country. '
-  + 'Write lists as: 1. Drama: Title (year) — … Watch: Netflix / Prime. Never nest asterisks. Never wrap genre names in **.';
+  + 'Only when they ask about movies/shows: Title (year). one line why it is good. Then typical places to watch (Netflix, Disney+, Prime Video, Max, YouTube) and IMDb for listings. Say availability varies by country. '
+  + 'Write lists as: 1. Drama: Title (year). … Watch: Netflix / Prime. Never nest asterisks. Never wrap genre names in **.';
 
 const CONTINUITY =
   'This is a follow-up in the same ARK app chat. '
@@ -45,7 +45,7 @@ const CONTINUITY =
   + 'Answer the latest user message with a brand-new reply. '
   + `${ANSWER_THE_ASK} `
   + 'If they ask where to start, what first, or for recommendations: prioritize the product/app from this thread. '
-  + 'If they ask to continue, tell more, or go on, finish the previous answer from where it stopped — do not restart the same list from item 1. '
+  + 'If they ask to continue, tell more, or go on, finish the previous answer from where it stopped. do not restart the same list from item 1. '
   + 'If they asked a new question, do not repeat an earlier list.';
 
 const CHAT_CODE_OUTPUT =
@@ -82,7 +82,7 @@ const STORY_HINT = /\b(story|joke|poem|song|riddle|fairytale)\b/i;
 const GREET_HINT = /^(hi|hello|hey|yo|sup|howdy)\b/i;
 const FOLLOW_UP_HINT =
   /^(?:(?:can you |could you |please )?(?:tell me more|say more|go on|continue|elaborate)|more|why|how so|and\b|also\b|what about|ok but|please explain|okay[,.]?\s*|ok[,.]?\s*)\b/i;
-/** Same-thread product next steps — must keep build context. */
+/** Same-thread product next steps. must keep build context. */
 const THREAD_CONTINUE_HINT =
   /\b(where (should|do|to) (we|i|you) start|where (do you think )?(we|i) should start|what (should|do) (we|i) (do )?first|what first|next step|i want (some |a )?recommendations?|recommendations?\b|recommend)\b/i;
 
@@ -217,7 +217,7 @@ export function buildRouterHistory(
 ): RouterChatTurn[] {
   const turns: RouterChatTurn[] = [];
   const keepContinuity = Boolean(opts?.keepContinuity || opts?.kind === 'coding');
-  // Coding: keep prior turns short — do not re-pack old @@@FILE dumps into the context window.
+  // Coding: keep prior turns short. do not re-pack old @@@FILE dumps into the context window.
   const assistantCap = opts?.kind === 'coding' ? 320 : 720;
   const maxChars = opts?.kind === 'coding' ? 12_000 : MAX_CHARS;
   const maxTurns = opts?.maxTurns
@@ -269,7 +269,7 @@ export function buildRouterHistory(
   }
 
   // New task (e.g. weather → “build an app”): drop prior turns so GGUF cannot regurgitate them.
-  // Keep the thread when a brain rotation is pending/applied — the user should not re-brief.
+  // Keep the thread when a brain rotation is pending/applied. the user should not re-brief.
   if (!keepContinuity && latest && isTopicShift(window, latest)) {
     return [{ role: 'user', content: latest.slice(0, latestCap), images: vision }];
   }
@@ -286,7 +286,7 @@ export function routerSystemPrompt(history: RouterChatTurn[]): string {
   const hasPrior = history.some(t => t.role === 'assistant') || history.length > 1;
   if (!hasPrior) return `${BASE_SYSTEM}${visionNote}`;
   if (FOLLOW_UP_HINT.test(latest.trim()) || THREAD_CONTINUE_HINT.test(latest.trim())) {
-    return `${BASE_SYSTEM}\n\nThis is a follow-up. Stay on the same app/project from earlier turns. Continue from that context — do not switch to celebrities, movies, or unrelated topics.${visionNote}`;
+    return `${BASE_SYSTEM}\n\nThis is a follow-up. Stay on the same app/project from earlier turns. Continue from that context. do not switch to celebrities, movies, or unrelated topics.${visionNote}`;
   }
   return `${BASE_SYSTEM}\n\n${CONTINUITY}${visionNote}`;
 }
@@ -374,7 +374,7 @@ export function packHistoryPrompt(history: RouterChatTurn[], latestFallback?: st
   return [
     priorUsers.length ? `Earlier user asks${follow ? '' : ' (already answered)'}:\n${priorUsers.join('\n')}` : '',
     lastAssistant
-      ? `${follow ? 'Previous answer — continue from the end, do not restart:\n' : 'Previous answer:\n'}${lastAssistant}`
+      ? `${follow ? 'Previous answer. continue from the end, do not restart:\n' : 'Previous answer:\n'}${lastAssistant}`
       : '',
     `Latest:\n${latest}`,
   ].filter(Boolean).join('\n\n');

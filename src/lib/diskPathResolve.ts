@@ -79,7 +79,7 @@ export function extractDiskParentHintFromText(text: string): string | undefined 
     /\b(?:in|inside|within|to|into|put\s+it\s+in|add\s+it\s+to|go\s+ahead\s+and\s+put\s+it\s+in|(?:should|needs to|needs)\s+go\s+(?:in|into|inside)|it\s+should\s+go\s+(?:in|into|inside))\s+(?:the\s+)?(?:my\s+)?(?:a\s+)?(pictures?|photos?|desktop|documents?|docs|downloads?|home)\b/i,
   );
   if (inRoot?.[1]) {
-    // "into a desktop app/layout/window" is UI work — not a Desktop folder destination.
+    // "into a desktop app/layout/window" is UI work. not a Desktop folder destination.
     if (
       /desktop/i.test(inRoot[1])
       && /\b(?:into|to)\s+(?:a\s+|the\s+)?desktop\s+(?:app|application|layout|window|ui)\b/i.test(t)

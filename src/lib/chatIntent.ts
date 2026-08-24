@@ -1,5 +1,5 @@
 /**
- * What the user is asking for — drives which ARK Engine model Auto loads.
+ * What the user is asking for. drives which ARK Engine model Auto loads.
  * Ollama is never part of this decision.
  */
 
@@ -41,7 +41,7 @@ export function looksLikeCodeAsk(text: string): boolean {
   return false;
 }
 
-/** Show the “Switch to Code” banner — disabled while Code tab is parked. */
+/** Show the “Switch to Code” banner. disabled while Code tab is parked. */
 export function shouldSuggestCodeSwitch(
   _text: string,
   _opts?: { hasStudioFiles?: boolean; composerAsk?: boolean },
@@ -58,7 +58,7 @@ const IMAGE_ASK = [
   /\b(higher\s+(?:res|resolution)|4k|8k|ultra\s+sharp)\b[\s\S]{0,80}\b(image|picture|photo|render|recreate)?\b/i,
 ];
 
-/** User wants a generated image — route to Image media pipeline (not chat text). */
+/** User wants a generated image. route to Image media pipeline (not chat text). */
 export function looksLikeImageAsk(text: string): boolean {
   const t = String(text || '').trim();
   if (!t) return false;

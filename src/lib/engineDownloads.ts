@@ -228,7 +228,7 @@ export async function cancelEngineDownload(id: string) {
   removeJob(id);
 }
 
-/** On app / Models / Local AI mount — pick up Engine downloads already in flight. */
+/** On app / Models / Local AI mount. pick up Engine downloads already in flight. */
 export async function reattachEngineDownloads(source: 'models' | 'local-ai' = 'models') {
   try {
     const status = await getEngineStatus();

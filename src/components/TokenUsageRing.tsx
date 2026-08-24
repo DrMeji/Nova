@@ -93,7 +93,7 @@ export function TokenUsageRing({
         aria-expanded={open}
       >
         <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="-rotate-90" aria-hidden>
-          {/* Outer — model freshness (color only when used; no white donut) */}
+          {/* Outer. model freshness (color only when used; no white donut) */}
           {mdl > 0.008 && (
             <circle
               cx={size / 2}
@@ -107,7 +107,7 @@ export function TokenUsageRing({
               className={mdl > 0.85 ? 'text-rose-500' : mdl > 0.55 ? 'text-amber-500' : 'text-violet-500'}
             />
           )}
-          {/* Inner — turn context */}
+          {/* Inner. turn context */}
           {ctx > 0.008 && (
             <circle
               cx={size / 2}

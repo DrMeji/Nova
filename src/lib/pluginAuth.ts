@@ -1,4 +1,4 @@
-/** Browser-assisted plugin auth — open provider login/token pages in the system browser. */
+/** Browser-assisted plugin auth. open provider login/token pages in the system browser. */
 
 export type PluginAuthLink = {
   label: string;

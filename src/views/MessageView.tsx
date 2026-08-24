@@ -377,7 +377,7 @@ export function MessageView() {
       await inviteByArkId(id);
       setAddId('');
       setAddOk(`Friend request was sent to ${id}`);
-      // Request pending — do not open a chat or show their profile.
+      // Request pending. do not open a chat or show their profile.
       await refreshContacts();
     } catch (err) {
       setAddError(err instanceof Error ? err.message : 'Could not send friend request');

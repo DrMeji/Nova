@@ -1,4 +1,4 @@
-/** Local PIN lock — hash only, never store the PIN itself. */
+/** Local PIN lock. hash only, never store the PIN itself. */
 
 const HASH_KEY = 'ark:pin-hash';
 const SALT_KEY = 'ark:pin-salt';

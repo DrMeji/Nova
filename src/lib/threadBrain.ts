@@ -1,5 +1,5 @@
 /**
- * Sticky brain per thread — Auto picks once, stays equipped until failover.
+ * Sticky brain per thread. Auto picks once, stays equipped until failover.
  * Scoped by chat/project id + kind (chat, coding, image, video).
  */
 
@@ -131,7 +131,7 @@ export function autoPillLabel(_brain?: ThreadBrain | null): string {
   return 'ARK';
 }
 
-/** Short line for the Auto menu row — Auto stays selected; this is the brain it picked. */
+/** Short line for the Auto menu row. Auto stays selected; this is the brain it picked. */
 export function autoEquippedCaption(brain: ThreadBrain | null): string {
   if (!brain?.modelName) return 'Picks the best brain for this chat';
   const short = brain.modelName

@@ -6,7 +6,7 @@ import { titleForRoute } from '@/lib/routeTitle';
 import { needsFirstRunSetup } from '@/lib/setup';
 import { getLocalPrefs } from '@/lib/localPrefs';
 
-/** Overlay window chrome — does not push layout down (even sidebar padding). */
+/** Overlay window chrome. does not push layout down (even sidebar padding). */
 export function TitleBar() {
   const desktop = typeof window !== 'undefined' ? window.arkDesktop : undefined;
   const [visible, setVisible] = useState(Boolean(desktop?.windowControls));

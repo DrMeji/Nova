@@ -101,7 +101,7 @@ export function ProjectsView() {
       setShowCreate(false);
       setNewName('');
       setCreating(false);
-      setNotice('Saved on this PC only — cloud sync unavailable');
+      setNotice('Saved on this PC only. cloud sync unavailable');
       window.setTimeout(() => setNotice(null), 4000);
       navigate({ name: 'project', id: local.id });
     }

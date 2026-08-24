@@ -21,7 +21,7 @@ const ORB_SETUP: Array<{ size: number; colorClass: string }> = [
   { size: 155, colorClass: 'auth-orb-tone-i' },
 ];
 
-/** Soft px/frame — slow roam, still readable */
+/** Soft px/frame. slow roam, still readable */
 const SPEED_MIN = 0.22;
 const SPEED_MAX = 0.42;
 
@@ -128,7 +128,7 @@ export function AuthAmbientOrbs() {
     const layer = layerRef.current;
     if (!layer) return;
 
-    // Soft ambient drift always runs — Windows "reduce motion" used to freeze
+    // Soft ambient drift always runs. Windows "reduce motion" used to freeze
     // orbs in place (or hide them). Login atmosphere should keep moving slowly.
     const ensureSeeded = () => {
       const w = layer.clientWidth;

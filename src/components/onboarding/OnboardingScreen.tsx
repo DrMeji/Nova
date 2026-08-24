@@ -73,7 +73,7 @@ const CONNECT_PROVIDERS: ConnectProvider[] = [
   {
     id: 'google',
     name: 'Google AI Studio',
-    blurb: 'Gemini free tier — one key.',
+    blurb: 'Gemini free tier. One key.',
     signupUrl: 'https://aistudio.google.com/apikey',
     free: true,
     tone: 'from-blue-500 to-sky-700',
@@ -383,35 +383,21 @@ export function OnboardingScreen() {
   const accessEnabledCount = [desktopAccess, documentsAccess, fullPcAccess].filter(Boolean).length;
 
   const enableRecommendedAccess = () => {
-    if (!window.confirm(
-      'Enable Desktop, Documents, and Full PC file access?\n\nARK can explore folders and list projects when you ask. Installs and deletes still ask for confirmation.',
-    )) return;
     setDesktopAccess(true);
     setDocumentsAccess(true);
     setFullPcAccess(true);
   };
 
   const toggleDesktopAccess = () => {
-    const next = !desktopAccess;
-    if (next && !window.confirm(
-      'Allow ARK to read folders under your Desktop?\n\nScope: Desktop only — not your whole drive.',
-    )) return;
-    setDesktopAccess(next);
+    setDesktopAccess(v => !v);
   };
 
   const toggleDocumentsAccess = () => {
-    const next = !documentsAccess;
-    if (next && !window.confirm(
-      'Allow ARK to read folders under your Documents?\n\nScope: Documents only — not your whole drive.',
-    )) return;
-    setDocumentsAccess(next);
+    setDocumentsAccess(v => !v);
   };
 
   const toggleFullPcAccess = () => {
     const next = !fullPcAccess;
-    if (next && !window.confirm(
-      'Give ARK broad file access on this PC?\n\nARK can list installed apps, scan beyond Desktop, and open folders you name. Windows system folders stay blocked.',
-    )) return;
     setFullPcAccess(next);
     if (next) {
       setDesktopAccess(true);
@@ -483,7 +469,7 @@ export function OnboardingScreen() {
                 </p>
                 <p className="flex items-start gap-2.5">
                   <KeyRound className="w-4 h-4 mt-0.5 shrink-0 text-content-tertiary" />
-                  Optionally connect free providers once — keys stay encrypted on this device.
+                  Optionally connect free providers once. Keys stay encrypted on this device.
                 </p>
                 <p className="flex items-start gap-2.5">
                   <FolderOpen className="w-4 h-4 mt-0.5 shrink-0 text-content-tertiary" />
@@ -573,7 +559,7 @@ export function OnboardingScreen() {
                   </p>
                   <p className="text-xs text-content-tertiary mt-0.5">
                     {speedTesting
-                      ? 'Hugging Face, HF Mirror, and ModelScope — plus any API keys already plugged in'
+                      ? 'Hugging Face, HF Mirror, and ModelScope, plus any API keys already plugged in'
                       : speedPlan
                         ? speedPlan.ratingLabel
                         : 'ARK uses this to start a backup brain earlier on slow Wi-Fi'}
@@ -725,8 +711,8 @@ export function OnboardingScreen() {
                   <p className="text-sm font-medium text-content-primary">PC permissions</p>
                   <p className="text-xs text-content-tertiary mt-0.5">
                     {accessEnabledCount > 0
-                      ? `${accessEnabledCount} permission${accessEnabledCount === 1 ? '' : 's'} enabled — ARK can answer folder and project asks`
-                      : 'Skip for now if you prefer — enable later in Settings → Security'}
+                      ? `${accessEnabledCount} permission${accessEnabledCount === 1 ? '' : 's'} enabled. ARK can answer folder and project asks`
+                      : 'Skip for now if you prefer. Enable later in Settings → Security'}
                   </p>
                 </div>
               </div>
@@ -772,7 +758,7 @@ export function OnboardingScreen() {
                 <p className="text-xs font-medium text-content-secondary mb-2">Execution &amp; approvals</p>
                 <div className="grid grid-cols-1 gap-1.5">
                   {([
-                    { id: 'allowlist' as const, label: 'Confirm each command', hint: 'Safest — npm, pip, git ask first' },
+                    { id: 'allowlist' as const, label: 'Confirm each command', hint: 'Safest. npm, pip, and git ask first' },
                     { id: 'auto_review' as const, label: 'Auto-review', hint: 'Known tools after one confirm' },
                     { id: 'run_all' as const, label: 'Run everything', hint: 'Allowlisted tools run when you ask' },
                   ]).map(opt => {
@@ -781,12 +767,7 @@ export function OnboardingScreen() {
                       <button
                         key={opt.id}
                         type="button"
-                        onClick={() => {
-                          if (opt.id === 'run_all' && !window.confirm(
-                            'Run everything?\n\nAllowlisted commands (npm, pip, git, winget) can run when you ask. Destructive commands stay blocked.',
-                          )) return;
-                          setExecutionMode(opt.id);
-                        }}
+                        onClick={() => setExecutionMode(opt.id)}
                         className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors ${
                           on
                             ? 'bg-surface-hover border border-sky-500/30'

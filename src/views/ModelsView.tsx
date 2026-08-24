@@ -72,7 +72,7 @@ type CloudProvider = {
   tiers: Tier[];
   tone: string;
   initial: string;
-  /** Catalog ping is not live — Key / Live / Retired badges are the honest status. */
+  /** Catalog ping is not live. Key / Live / Retired badges are the honest status. */
   health: 'available' | 'limited' | 'offline';
   /** Live in ARK Router / media today vs catalog only */
   availability: 'live' | 'coming_soon' | 'retired';
@@ -114,7 +114,7 @@ const LOCAL_MODELS: LocalModel[] = [
   { id: 'qwq-32b', name: 'QwQ 32B', description: 'Qwen reasoning model for complex steps.', size: '20 GB', category: 'reasoning', tiers: ['free'], tone: 'from-rose-500 to-pink-800', initial: 'Qw' },
   { id: 'phi4-reasoning', name: 'Phi-4 Reasoning', description: 'Compact reasoning model for local use.', size: '8.5 GB', category: 'reasoning', tiers: ['free'], tone: 'from-sky-500 to-indigo-800', initial: 'Φ4' },
 
-  // Vision (understand images — not generate)
+  // Vision (understand images, not generate)
   { id: 'qwen2-vl-7b', name: 'Qwen2-VL 7B', description: 'Understand images and screenshots locally.', size: '5.8 GB', category: 'vision', tiers: ['free'], recommended: true, tone: 'from-teal-500 to-emerald-800', initial: 'VL' },
   { id: 'llava-13b', name: 'LLaVA 13B', description: 'Image chat and visual Q&A.', size: '7.8 GB', category: 'vision', tiers: ['free'], tone: 'from-lime-500 to-green-800', initial: 'Lv' },
   { id: 'minicpm-v', name: 'MiniCPM-V', description: 'Efficient multimodal model for vision tasks.', size: '5.1 GB', category: 'vision', tiers: ['free'], tone: 'from-green-500 to-teal-800', initial: 'Mv' },
@@ -126,8 +126,8 @@ const LOCAL_MODELS: LocalModel[] = [
   { id: 'sd15-local', name: 'Stable Diffusion 1.5 (Local)', description: 'On-device images via ARK Engine (sd.cpp). Download from Local AI.', size: '4.0 GB', category: 'image', tiers: ['free'], recommended: true, tone: 'from-yellow-500 to-amber-700', initial: 'SD' },
   { id: 'sdxl-turbo-local', name: 'SDXL Turbo (Local)', description: 'Fast on-device drafts via ARK Engine. ~6.9 GB.', size: '6.9 GB', category: 'image', tiers: ['free'], recommended: true, tone: 'from-fuchsia-500 to-pink-700', initial: 'ST' },
   { id: 'flux-schnell-local', name: 'FLUX.1 Schnell (Local)', description: 'On-device FLUX via ARK Engine (~13 GB: model + VAE + CLIP + T5).', size: '13 GB', category: 'image', tiers: ['free'], recommended: true, tone: 'from-violet-500 to-purple-800', initial: 'Fx' },
-  { id: 'sdxl-turbo', name: 'SDXL Turbo', description: 'Alias — use SDXL Turbo (Local) in Local AI.', size: '6.9 GB', category: 'image', tiers: ['free'], tone: 'from-fuchsia-500 to-pink-700', initial: 'ST' },
-  { id: 'sd-15', name: 'Stable Diffusion 1.5', description: 'Alias — use Stable Diffusion 1.5 (Local) in Local AI.', size: '4.0 GB', category: 'image', tiers: ['free'], tone: 'from-yellow-500 to-amber-700', initial: 'SD' },
+  { id: 'sdxl-turbo', name: 'SDXL Turbo', description: 'Alias. Use SDXL Turbo (Local) in Local AI.', size: '6.9 GB', category: 'image', tiers: ['free'], tone: 'from-fuchsia-500 to-pink-700', initial: 'ST' },
+  { id: 'sd-15', name: 'Stable Diffusion 1.5', description: 'Alias. Use Stable Diffusion 1.5 (Local) in Local AI.', size: '4.0 GB', category: 'image', tiers: ['free'], tone: 'from-yellow-500 to-amber-700', initial: 'SD' },
   { id: 'playground-v25', name: 'Playground v2.5', description: 'Aesthetic local image generation.', size: '8.2 GB', category: 'image', tiers: ['free'], tone: 'from-rose-400 to-orange-700', initial: 'Pg' },
 
   // Video generation (Video tab)
@@ -162,23 +162,23 @@ const LOCAL_CATEGORIES: { id: LocalModel['category']; title: string; icon: typeo
   }));
 
 const CLOUD_PROVIDERS: CloudProvider[] = [
-  { id: 'ollama', name: 'Ollama', description: 'Optional plug-in. Connect any Ollama models the same way you connect other sources — ARK never requires it.', tiers: ['free'], tone: 'from-zinc-400 to-zinc-700', initial: 'Ol', health: 'available', availability: 'live' },
+  { id: 'ollama', name: 'Ollama', description: 'Optional plug-in. Connect any Ollama models the same way you connect other sources. ARK never requires it.', tiers: ['free'], tone: 'from-zinc-400 to-zinc-700', initial: 'Ol', health: 'available', availability: 'live' },
   { id: 'pollinations', name: 'Pollinations', description: 'Free no-key image generation used by ARK Image Core.', tiers: ['free'], tone: 'from-pink-500 to-rose-700', initial: 'Po', health: 'available', availability: 'live' },
   { id: 'openrouter', name: 'OpenRouter', description: 'Free + paid routes used by ARK Router.', tiers: ['free', 'pro'], tone: 'from-violet-500 to-purple-800', initial: 'OR', health: 'available', availability: 'live' },
-  { id: 'google', name: 'Google AI Studio', description: 'Gemini free tier — wired into ARK Router.', tiers: ['free', 'pro'], tone: 'from-blue-500 to-sky-700', initial: 'G', health: 'available', availability: 'live' },
-  { id: 'groq', name: 'Groq', description: 'Fast Llama free tier — wired into ARK Router.', tiers: ['free', 'pro'], tone: 'from-orange-500 to-red-700', initial: 'Gq', health: 'available', availability: 'live' },
+  { id: 'google', name: 'Google AI Studio', description: 'Gemini free tier. Wired into ARK Router.', tiers: ['free', 'pro'], tone: 'from-blue-500 to-sky-700', initial: 'G', health: 'available', availability: 'live' },
+  { id: 'groq', name: 'Groq', description: 'Fast Llama free tier. Wired into ARK Router.', tiers: ['free', 'pro'], tone: 'from-orange-500 to-red-700', initial: 'Gq', health: 'available', availability: 'live' },
   { id: 'openai', name: 'OpenAI', description: 'GPT models for chat, code, and DALL·E.', tiers: ['pro'], tone: 'from-emerald-400 to-green-800', initial: 'OA', health: 'available', availability: 'live' },
   { id: 'anthropic', name: 'Anthropic', description: 'Claude models for long context work.', tiers: ['pro'], tone: 'from-amber-500 to-orange-800', initial: 'An', health: 'available', availability: 'live' },
-  { id: 'huggingface', name: 'Hugging Face', description: 'Chat + FLUX images via Inference — wired into ARK Router.', tiers: ['free', 'pro'], tone: 'from-yellow-500 to-amber-700', initial: 'HF', health: 'available', availability: 'live' },
-  { id: 'nvidia', name: 'NVIDIA NIM', description: 'NVIDIA hosted inference — free-key hop in ARK Router.', tiers: ['free', 'pro'], tone: 'from-lime-500 to-green-800', initial: 'NV', health: 'available', availability: 'live' },
-  { id: 'together', name: 'Together AI', description: 'Open model hosting — wired into ARK Router.', tiers: ['free', 'pro'], tone: 'from-indigo-500 to-blue-800', initial: 'To', health: 'available', availability: 'live' },
-  { id: 'fireworks', name: 'Fireworks AI', description: 'Fast serverless inference — wired into ARK Router.', tiers: ['free', 'pro'], tone: 'from-rose-500 to-orange-700', initial: 'Fw', health: 'available', availability: 'live' },
-  { id: 'deepseek', name: 'DeepSeek', description: 'Coding and reasoning via API — wired into ARK Router.', tiers: ['free', 'pro'], tone: 'from-blue-400 to-indigo-700', initial: 'DS', health: 'available', availability: 'live' },
-  { id: 'mistral', name: 'Mistral', description: 'Mistral and Codestral — wired into ARK Router.', tiers: ['free', 'pro'], tone: 'from-orange-400 to-amber-700', initial: 'Mi', health: 'available', availability: 'live' },
-  { id: 'cerebras', name: 'Cerebras', description: 'Ultra-fast Llama free tier — wired into ARK Router.', tiers: ['free', 'pro'], tone: 'from-cyan-500 to-teal-800', initial: 'Ce', health: 'available', availability: 'live' },
-  { id: 'sambanova', name: 'SambaNova', description: 'SambaNova Cloud open models — wired into ARK Router.', tiers: ['free', 'pro'], tone: 'from-fuchsia-500 to-purple-800', initial: 'Sn', health: 'available', availability: 'live' },
-  { id: 'perplexity', name: 'Perplexity', description: 'Sonar chat with live search — add your API key.', tiers: ['pro'], tone: 'from-teal-400 to-cyan-800', initial: 'Px', health: 'available', availability: 'live' },
-  { id: 'xai', name: 'xAI', description: 'Grok models — add your xAI API key.', tiers: ['pro'], tone: 'from-zinc-400 to-black', initial: 'xA', health: 'available', availability: 'live' },
+  { id: 'huggingface', name: 'Hugging Face', description: 'Chat + FLUX images via Inference. Wired into ARK Router.', tiers: ['free', 'pro'], tone: 'from-yellow-500 to-amber-700', initial: 'HF', health: 'available', availability: 'live' },
+  { id: 'nvidia', name: 'NVIDIA NIM', description: 'NVIDIA hosted inference. free-key hop in ARK Router.', tiers: ['free', 'pro'], tone: 'from-lime-500 to-green-800', initial: 'NV', health: 'available', availability: 'live' },
+  { id: 'together', name: 'Together AI', description: 'Open model hosting. Wired into ARK Router.', tiers: ['free', 'pro'], tone: 'from-indigo-500 to-blue-800', initial: 'To', health: 'available', availability: 'live' },
+  { id: 'fireworks', name: 'Fireworks AI', description: 'Fast serverless inference. Wired into ARK Router.', tiers: ['free', 'pro'], tone: 'from-rose-500 to-orange-700', initial: 'Fw', health: 'available', availability: 'live' },
+  { id: 'deepseek', name: 'DeepSeek', description: 'Coding and reasoning via API. Wired into ARK Router.', tiers: ['free', 'pro'], tone: 'from-blue-400 to-indigo-700', initial: 'DS', health: 'available', availability: 'live' },
+  { id: 'mistral', name: 'Mistral', description: 'Mistral and Codestral. Wired into ARK Router.', tiers: ['free', 'pro'], tone: 'from-orange-400 to-amber-700', initial: 'Mi', health: 'available', availability: 'live' },
+  { id: 'cerebras', name: 'Cerebras', description: 'Ultra-fast Llama free tier. Wired into ARK Router.', tiers: ['free', 'pro'], tone: 'from-cyan-500 to-teal-800', initial: 'Ce', health: 'available', availability: 'live' },
+  { id: 'sambanova', name: 'SambaNova', description: 'SambaNova Cloud open models. Wired into ARK Router.', tiers: ['free', 'pro'], tone: 'from-fuchsia-500 to-purple-800', initial: 'Sn', health: 'available', availability: 'live' },
+  { id: 'perplexity', name: 'Perplexity', description: 'Sonar chat with live search. add your API key.', tiers: ['pro'], tone: 'from-teal-400 to-cyan-800', initial: 'Px', health: 'available', availability: 'live' },
+  { id: 'xai', name: 'xAI', description: 'Grok models. add your xAI API key.', tiers: ['pro'], tone: 'from-zinc-400 to-black', initial: 'xA', health: 'available', availability: 'live' },
   { id: 'github-models', name: 'GitHub Models', description: 'Retired by GitHub (July 2026).', tiers: ['free'], tone: 'from-zinc-500 to-zinc-900', initial: 'GH', health: 'offline', availability: 'retired' },
 ];
 
@@ -205,9 +205,9 @@ export const CLOUD_MODELS: CloudModel[] = [
   { id: 'deepseek-coder', name: 'DeepSeek Coder', description: 'Specialized coding via DeepSeek API.', provider: 'DeepSeek', category: 'coding', tiers: ['free', 'pro'], tone: 'from-cyan-500 to-blue-800', initial: 'DC' },
   { id: 'codestral', name: 'Codestral', description: 'Mistral coding model in the cloud.', provider: 'Mistral', category: 'coding', tiers: ['free', 'pro'], tone: 'from-orange-400 to-amber-700', initial: 'Cs' },
   { id: 'qwen-coder-plus', name: 'Qwen2.5-Coder Plus', description: 'Cloud coding model via OpenRouter hosts.', provider: 'OpenRouter', category: 'coding', tiers: ['free', 'pro'], tone: 'from-sky-500 to-blue-700', initial: 'QC' },
-  { id: 'groq-llama33', name: 'Llama 3.3 70B (Groq)', description: 'Fast free-tier coding/chat via Groq — ARK Router.', provider: 'Groq', category: 'coding', tiers: ['free'], tone: 'from-orange-500 to-red-700', initial: 'Gq' },
-  { id: 'openrouter-llama-free', name: 'Llama 3.3 Free (OpenRouter)', description: 'OpenRouter free route — ARK Router.', provider: 'OpenRouter', category: 'coding', tiers: ['free'], tone: 'from-violet-500 to-indigo-800', initial: 'OR' },
-  { id: 'github-gpt4o', name: 'GPT-4o (GitHub Models)', description: 'GitHub Models retired July 2026 — not available in ARK.', provider: 'GitHub Models', category: 'coding', tiers: ['free'], tone: 'from-zinc-500 to-zinc-900', initial: 'GH' },
+  { id: 'groq-llama33', name: 'Llama 3.3 70B (Groq)', description: 'Fast free-tier coding/chat via Groq. ARK Router.', provider: 'Groq', category: 'coding', tiers: ['free'], tone: 'from-orange-500 to-red-700', initial: 'Gq' },
+  { id: 'openrouter-llama-free', name: 'Llama 3.3 Free (OpenRouter)', description: 'OpenRouter free route. ARK Router.', provider: 'OpenRouter', category: 'coding', tiers: ['free'], tone: 'from-violet-500 to-indigo-800', initial: 'OR' },
+  { id: 'github-gpt4o', name: 'GPT-4o (GitHub Models)', description: 'GitHub Models retired July 2026. Not available in ARK.', provider: 'GitHub Models', category: 'coding', tiers: ['free'], tone: 'from-zinc-500 to-zinc-900', initial: 'GH' },
 
   // Reasoning
   { id: 'o3-mini', name: 'o3-mini', description: 'OpenAI reasoning model for harder tasks.', provider: 'OpenAI', category: 'reasoning', tiers: ['pro'], tone: 'from-emerald-500 to-teal-800', initial: 'o3' },
@@ -223,7 +223,7 @@ export const CLOUD_MODELS: CloudModel[] = [
   { id: 'llama-vision-cloud', name: 'Llama 3.2 Vision', description: 'Open vision model via cloud hosts.', provider: 'Together AI', category: 'vision', tiers: ['free', 'pro'], tone: 'from-indigo-400 to-violet-800', initial: 'LV' },
 
   // Image generation
-  { id: 'ark-pollinations', name: 'ARK Image (Pollinations)', description: 'Free no-key images — wired into Image tab by default.', provider: 'Pollinations', category: 'image', tiers: ['free'], tone: 'from-pink-500 to-rose-700', initial: 'Po' },
+  { id: 'ark-pollinations', name: 'ARK Image (Pollinations)', description: 'Free no-key images. Wired into Image tab by default.', provider: 'Pollinations', category: 'image', tiers: ['free'], tone: 'from-pink-500 to-rose-700', initial: 'Po' },
   { id: 'dall-e-3', name: 'DALL·E 3', description: 'Image generation from OpenAI.', provider: 'OpenAI', category: 'image', tiers: ['pro'], tone: 'from-pink-500 to-rose-800', initial: 'D3' },
   { id: 'imagen-3', name: 'Imagen 3', description: 'Google image generation.', provider: 'Google', category: 'image', tiers: ['pro'], tone: 'from-sky-400 to-blue-700', initial: 'Im' },
   { id: 'flux-pro', name: 'FLUX Pro', description: 'High quality image generation.', provider: 'Together AI', category: 'image', tiers: ['pro'], tone: 'from-violet-500 to-purple-800', initial: 'Fx' },
@@ -237,12 +237,12 @@ export const CLOUD_MODELS: CloudModel[] = [
   { id: 'gemini-flash-code', name: 'Gemini 2.0 Flash (Coding)', description: 'Free-tier Google coding assistant.', provider: 'Google', category: 'coding', tiers: ['free'], tone: 'from-blue-400 to-sky-700', initial: 'Gc' },
 
   // Video generation
-  { id: 'ark-pollinations-video', name: 'ARK Video (Pollinations)', description: 'Free short MP4 when the host answers. Otherwise a 4s motion clip from a still — labeled honestly.', provider: 'Pollinations', category: 'video', tiers: ['free'], tone: 'from-pink-500 to-violet-800', initial: 'Pv' },
+  { id: 'ark-pollinations-video', name: 'ARK Video (Pollinations)', description: 'Free short MP4 when the host answers. Otherwise a 4s motion clip from a still. labeled honestly.', provider: 'Pollinations', category: 'video', tiers: ['free'], tone: 'from-pink-500 to-violet-800', initial: 'Pv' },
   { id: 'runway-gen3', name: 'Runway Gen-3', description: 'Cloud video generation and editing.', provider: 'Runway', category: 'video', tiers: ['pro'], tone: 'from-emerald-400 to-teal-800', initial: 'Rw' },
   { id: 'luma-ray2', name: 'Luma Ray2', description: 'Text and image to video.', provider: 'Luma', category: 'video', tiers: ['pro'], tone: 'from-sky-400 to-indigo-800', initial: 'Lu' },
-  { id: 'kling-1', name: 'Kling', description: 'Short cinematic cloud clips — not wired in ARK yet.', provider: 'OpenRouter', category: 'video', tiers: ['free', 'pro'], tone: 'from-violet-500 to-purple-800', initial: 'Kl' },
-  { id: 'pika-2', name: 'Pika 2.0', description: 'Fast creative video drafts — not wired in ARK yet.', provider: 'OpenRouter', category: 'video', tiers: ['free', 'pro'], tone: 'from-pink-500 to-rose-800', initial: 'Pk' },
-  { id: 'sora', name: 'Sora', description: 'OpenAI video generation — not wired in ARK yet.', provider: 'OpenAI', category: 'video', tiers: ['pro'], tone: 'from-emerald-400 to-green-800', initial: 'So' },
+  { id: 'kling-1', name: 'Kling', description: 'Short cinematic cloud clips. Not wired in ARK yet.', provider: 'OpenRouter', category: 'video', tiers: ['free', 'pro'], tone: 'from-violet-500 to-purple-800', initial: 'Kl' },
+  { id: 'pika-2', name: 'Pika 2.0', description: 'Fast creative video drafts. Not wired in ARK yet.', provider: 'OpenRouter', category: 'video', tiers: ['free', 'pro'], tone: 'from-pink-500 to-rose-800', initial: 'Pk' },
+  { id: 'sora', name: 'Sora', description: 'OpenAI video generation. Not wired in ARK yet.', provider: 'OpenAI', category: 'video', tiers: ['pro'], tone: 'from-emerald-400 to-green-800', initial: 'So' },
 
   // Fast
   { id: 'groq-llama', name: 'Llama 3.3 70B (Groq)', description: 'Very fast Llama responses on Groq.', provider: 'Groq', category: 'fast', tiers: ['free', 'pro'], tone: 'from-orange-500 to-red-700', initial: 'Gq' },
@@ -434,7 +434,7 @@ function ModelInstallControl({
     return (
       <span
         className="inline-flex items-center rounded-full bg-surface-hover/80 px-2 py-1 text-[10px] font-medium text-content-tertiary shrink-0"
-        title="Listed for discovery — not downloadable in ARK Engine yet"
+        title="Listed for discovery. Not downloadable in ARK Engine yet"
       >
         Discover
       </span>
@@ -642,7 +642,7 @@ export function ModelsView() {
       setHuntNote(
         found.length
           ? `${found.length} online ${found.length === 1 ? 'model' : 'models'} from Hugging Face + ModelScope`
-          : 'No extra online models right now — catalog below still applies',
+          : 'No extra online models right now. catalog below still applies',
       );
     } catch {
       setHuntNote('Could not reach model hosts right now');
@@ -878,7 +878,7 @@ export function ModelsView() {
       const needGb = hunt.sizeGb * 1.15;
       void engineDiskSpace().then(disk => {
         if (disk?.freeGb != null && needGb > 0 && disk.freeGb < needGb) {
-          setOllamaNote(`⚠️ Not enough space — ${hunt.name} needs ~${needGb.toFixed(1)} GB but only ${disk.freeGb.toFixed(1)} GB is free. Free up space or change the models folder in Settings → Storage.`);
+          setOllamaNote(`⚠️ Not enough space. ${hunt.name} needs ~${needGb.toFixed(1)} GB but only ${disk.freeGb.toFixed(1)} GB is free. Free up space or change the models folder in Settings → Storage.`);
           return;
         }
         setOllamaNote(`Downloading ${hunt.name}…`);
@@ -897,7 +897,7 @@ export function ModelsView() {
       return;
     }
     if (!isEngineDownloadable(id)) {
-      setOllamaNote('Not downloadable in ARK Engine yet — search shows discovery only.');
+      setOllamaNote('Not downloadable in ARK Engine yet. search shows discovery only.');
       return;
     }
     if (installed.has(id) || isEngineDownloading(id)) return;
@@ -913,7 +913,7 @@ export function ModelsView() {
     const needGb = modelSizeGb(model || { size: '0' }) * 1.15;
     void engineDiskSpace().then(disk => {
       if (disk?.freeGb != null && needGb > 0 && disk.freeGb < needGb) {
-        setOllamaNote(`⚠️ Not enough space — ${model?.name || id} needs ~${needGb.toFixed(1)} GB but only ${disk.freeGb.toFixed(1)} GB is free. Free up space or change the models folder in Settings → Storage.`);
+        setOllamaNote(`⚠️ Not enough space. ${model?.name || id} needs ~${needGb.toFixed(1)} GB but only ${disk.freeGb.toFixed(1)} GB is free. Free up space or change the models folder in Settings → Storage.`);
         return;
       }
       setOllamaNote(`Downloading ${model?.name || id}…`);
@@ -976,7 +976,7 @@ export function ModelsView() {
           {liveCapacity && !liveCapacity.liveChat && (
             <div className="mb-4 rounded-xl border border-amber-500/25 bg-amber-500/10 px-4 py-3 text-sm text-amber-100/90 leading-relaxed">
               <span className="font-medium text-amber-200">No live brain yet</span>
-              {' — '}
+              {'. '}
               {liveCapacity.summary}
               {liveCapacity.suggestedFreeKeys.length > 0 && (
                 <>
@@ -1388,7 +1388,7 @@ export function ModelsView() {
                 <h2 className="text-base font-semibold text-content-primary mb-1">Providers</h2>
                 <p className="text-xs text-content-tertiary mb-4">
                   Turn a source on for Chat Auto. Plus asks for a key only if one is not saved yet.
-                  Pollinations and Ollama have no cloud key — plus just enables them.
+                  Pollinations and Ollama have no cloud key. plus just enables them.
                 </p>
                 {filteredProviders.length === 0 ? (
                   <EmptySearch />
@@ -1456,7 +1456,7 @@ export function ModelsView() {
                               provider.availability !== 'live' && provider.id !== 'ollama'
                                 ? 'Coming soon'
                                 : isOn
-                                  ? 'On for Chat — click to turn off (your key stays saved)'
+                                  ? 'On for Chat. click to turn off (your key stays saved)'
                                   : keyedProviders.has(provider.id)
                                     ? 'Turn on for Chat'
                                     : providerNeedsKey(provider.id)
@@ -1476,7 +1476,7 @@ export function ModelsView() {
 
               <div className="space-y-10">
                 <p className="text-xs text-content-tertiary -mt-4">
-                  Chat, Coding, Reasoning, Vision, and Fast are cloud models — not files you download.
+                  Chat, Coding, Reasoning, Vision, and Fast are cloud models. Not files you download.
                   Checkmark = this model is available in Chat. It stays selected when you leave this page.
                 </p>
                 {cloudCategories.map(cat => (
@@ -1532,7 +1532,7 @@ export function ModelsView() {
                                     ? 'bg-surface-hover text-ark-accent-green'
                                     : 'text-content-secondary hover:text-content-primary hover:bg-surface-hover'
                               }`}
-                              title={avail !== 'live' ? 'Not wired in ARK yet' : isOn ? 'On in Chat — click to turn off' : 'Enable in Chat'}
+                              title={avail !== 'live' ? 'Not wired in ARK yet' : isOn ? 'On in Chat. click to turn off' : 'Enable in Chat'}
                               aria-label={isOn ? `Disable ${model.name}` : `Enable ${model.name}`}
                             >
                               {isOn ? <Check className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
@@ -1567,7 +1567,7 @@ export function ModelsView() {
                 <h2 className="text-lg font-semibold text-content-primary">Connect {connectTarget.name}</h2>
                 <p className="text-xs text-content-tertiary mt-1">
                   Paste an API key. It stays on this device. After you save, this provider stays checked
-                  and Chat Auto can use it — same as adding it in Settings.
+                  and Chat Auto can use it. same as adding it in Settings.
                 </p>
               </div>
               <button

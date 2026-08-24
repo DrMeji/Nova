@@ -35,7 +35,7 @@ function hostSafeImagePrompt(raw: string): string {
 }
 
 export function rewriteImagePrompt(raw: string): string {
-  // Keep the user’s subject; only add fidelity hints — never swap in a different scene.
+  // Keep the user’s subject; only add fidelity hints. never swap in a different scene.
   const prompt = hostSafeImagePrompt(String(raw || '').trim());
   if (!prompt) return 'a clean, well-composed image';
 
@@ -70,7 +70,7 @@ export function rewriteImagePrompt(raw: string): string {
   if (/\b(tesla|model\s*s|plaid|cybertruck|model\s*[3xy])\b/.test(lower)) {
     subjectHints.push('accurate modern Tesla EV design, single coherent car body, correct proportions');
     if (/\bplaid\b|\bmodel\s*s\b/.test(lower)) {
-      subjectHints.push('2021+ Tesla Model S Plaid refreshed fascia, full-width headlight bar — not the early 2012-2016 Model S');
+      subjectHints.push('2021+ Tesla Model S Plaid refreshed fascia, full-width headlight bar. not the early 2012-2016 Model S');
     }
     if (/\bred\b|\bcrimson\b|\bscarlet\b/.test(lower)) {
       subjectHints.push('vivid red factory paint, studio automotive lighting, sharp reflections');
@@ -121,7 +121,7 @@ export function rewriteVideoPrompt(raw: string): string {
   return [prompt, ...hints].join(', ');
 }
 
-/** Target pixel size from prompt intent — default ~1080p-class square. */
+/** Target pixel size from prompt intent. default ~1080p-class square. */
 export function resolveImageDimensions(raw: string): { width: number; height: number } {
   const lower = String(raw || '').toLowerCase();
   if (/\b(portrait|vertical|9:16|phone wallpaper|lock screen)\b/.test(lower)) {

@@ -1,5 +1,5 @@
 /**
- * Greenfield product ideas — plan + optional create (not "Which project folder? DeBloat").
+ * Greenfield product ideas. plan + optional create (not "Which project folder? DeBloat").
  */
 
 import { slugifyProjectName } from './projectNames';
@@ -53,7 +53,7 @@ const FEATURE_DESC_RE =
 const BUILD_IDEA_RE =
   /\b(?:i\s+)?(?:want\s+to\s+)?(?:build|create|make|design|develop|start)\b/i;
 
-/** Hardware / real-world builds — never greenfield software projects. */
+/** Hardware / real-world builds. never greenfield software projects. */
 function isNonSoftwareBuildAsk(text: string): boolean {
   const t = String(text || '');
   if (/\b(app|application|website|site|web\s*app|software|saas|react|vite|landing\s+page|mobile\s+app|kanban|dashboard)\b/i.test(t)) {
@@ -63,7 +63,7 @@ function isNonSoftwareBuildAsk(text: string): boolean {
     || (/\b(?:pc|drone|car|bike|house|robot|engine)\b/i.test(t) && /\b(?:build|assemble|pick|recommend)\b/i.test(t));
 }
 
-/** User asked to talk / clarify / plan first — never scaffold or auto-create. */
+/** User asked to talk / clarify / plan first. never scaffold or auto-create. */
 export function wantsClarifyBeforeCreate(text: string): boolean {
   const t = String(text || '').trim();
   if (!t) return false;
@@ -75,7 +75,7 @@ export function wantsClarifyBeforeCreate(text: string): boolean {
   return false;
 }
 
-/** Planning-only turn — discuss sequence and features; no files, deps, or folders. */
+/** Planning-only turn. discuss sequence and features; no files, deps, or folders. */
 export function wantsPlanningOnly(text: string): boolean {
   const t = String(text || '').trim();
   if (!t) return false;
@@ -187,25 +187,25 @@ function summarizeProblem(text: string, name: string): string {
   const t = String(text || '').trim();
 
   if (/\b(?:coffee|copy)\s+shop\b/i.test(t) || /\bpick\s+what\s+coffee\b/i.test(t)) {
-    return 'Customers order coffee ahead, pick a pickup time, and get a text when it\'s ready — like a mobile-friendly coffee shop site.';
+    return 'Customers order coffee ahead, pick a pickup time, and get a text when it\'s ready. like a mobile-friendly coffee shop site.';
   }
   if (/\bdiscord\b/i.test(t) && !/\bnot\s+discord\b/i.test(t)) {
-    return 'A chat-style site with channels, messages, and voice-style layout — built from scratch in your project folder.';
+    return 'A chat-style site with channels, messages, and voice-style layout. built from scratch in your project folder.';
   }
   if (wantsChatAppScaffold(t) || (/\b(chat|channel|dm|voice|screen\s+share)\b/i.test(t) && /\b(react|vite|app)\b/i.test(t) && !/\b(restaurant|menu|hero|booking|unsplash|budget|transaction|finance|ledger|invoice)\b/i.test(t))) {
-    return 'A desktop-style chat app — servers, channels, DMs, settings, and voice/call UI built in React.';
+    return 'A desktop-style chat app. servers, channels, DMs, settings, and voice/call UI built in React.';
   }
   if (/\b(budget|transaction|finance|ledger|invoice|expense|accounts?\s+page)\b/i.test(t)) {
-    return 'A personal finance app — accounts, transactions, budgets, and a dashboard with local data only.';
+    return 'A personal finance app. accounts, transactions, budgets, and a dashboard with local data only.';
   }
   if (/\b(restaurant|dining|cafe)\b/i.test(t) || (/\bmenu\b/i.test(t) && /\b(hero|booking|reserve|unsplash)\b/i.test(t))) {
-    return 'A restaurant site — hero, menu, and a clear booking / reserve CTA with real photos.';
+    return 'A restaurant site. hero, menu, and a clear booking / reserve CTA with real photos.';
   }
   if (/\b(?:notes?|sticky)\b/i.test(t)) {
-    return 'A sticky-notes style app — create, edit, and keep notes in one place.';
+    return 'A sticky-notes style app. create, edit, and keep notes in one place.';
   }
   if (/\b(gallery|masonry|portfolio|photographer)\b/i.test(t)) {
-    return 'A photography portfolio — black canvas, big logo, real image gallery, and About/Contact.';
+    return 'A photography portfolio. black canvas, big logo, real image gallery, and About/Contact.';
   }
   if (/\b(door\s*bell|doorbell)\b/i.test(t) && /\b(notif|phone|alert|press)\b/i.test(t)) {
     return 'When someone presses the doorbell, the phone gets a notification.';
@@ -223,7 +223,7 @@ function summarizeProblem(text: string, name: string): string {
     return `People can ${snippet.charAt(0).toLowerCase()}${snippet.slice(1)}`;
   }
 
-  return `You want to build **${name}** — I'll help you plan it step by step.`;
+  return `You want to build **${name}**. I'll help you plan it step by step.`;
 }
 
 type MvpPlan = { steps: string[]; stackNote: string };
@@ -234,86 +234,86 @@ function mvpPlan(summary: string, kind: ProjectKind, name: string): MvpPlan {
   if (/\b(?:coffee|copy)\s+shop\b/i.test(t) || (/\bcoffee\b/i.test(t) && /\b(?:order|schedule|pickup|ready)\b/i.test(t))) {
     return {
       steps: [
-        '1. **Home page** — menu of drinks and a simple “order for pickup” button',
-        '2. **Order screen** — customer picks a drink, chooses a pickup time, enters phone or email',
-        '3. **“Ready” alert** — shop sees orders; customer gets a message when coffee is ready (start with email/SMS; phone app later)',
+        '1. **Home page**. menu of drinks and a simple “order for pickup” button',
+        '2. **Order screen**. customer picks a drink, chooses a pickup time, enters phone or email',
+        '3. **“Ready” alert**. shop sees orders; customer gets a message when coffee is ready (start with email/SMS; phone app later)',
       ],
-      stackNote: 'A modern website (React) you can open in a browser — works on phones too.',
+      stackNote: 'A modern website (React) you can open in a browser. works on phones too.',
     };
   }
 
   if (wantsChatAppScaffold(t) || (/\b(chat|channel|dm|voice|settings)\b/i.test(t) && /\b(react|vite|app)\b/i.test(t) && !/\b(restaurant|menu|hero|booking|unsplash|budget|transaction|finance|ledger|invoice)\b/i.test(t))) {
     return {
       steps: [
-        '1. **App shell** — left rail, server/channel sidebar, main chat pane, member list',
-        '2. **Messaging** — channel feed, send box, DMs with local state (real React components)',
-        '3. **Settings + voice** — settings tabs (account, appearance), call bar (mute, screen share)',
+        '1. **App shell**. left rail, server/channel sidebar, main chat pane, member list',
+        '2. **Messaging**. channel feed, send box, DMs with local state (real React components)',
+        '3. **Settings + voice**. settings tabs (account, appearance), call bar (mute, screen share)',
       ],
-      stackNote: 'React + Vite — we can scaffold files when you say **Create project**.',
+      stackNote: 'React + Vite. we can scaffold files when you say **Create project**.',
     };
   }
 
   if (/\b(budget|transaction|finance|ledger|invoice|expense)\b/i.test(t)) {
     return {
       steps: [
-        '1. **App shell** — rail + pages for Dashboard, Accounts, Budgets, Settings',
-        '2. **Ledger** — add/edit/delete transactions with localStorage persistence',
-        '3. **Budgets + polish** — category progress bars, empty states, working modals (not placeholders)',
+        '1. **App shell**. rail + pages for Dashboard, Accounts, Budgets, Settings',
+        '2. **Ledger**. add/edit/delete transactions with localStorage persistence',
+        '3. **Budgets + polish**. category progress bars, empty states, working modals (not placeholders)',
       ],
-      stackNote: 'React + Vite finance UI — scaffold when you are ready to **Create project**.',
+      stackNote: 'React + Vite finance UI. scaffold when you are ready to **Create project**.',
     };
   }
 
   if (/\b(kanban|drag[\s-]?and[\s-]?drop)\b/i.test(t) || (/\b(column|board)\b/i.test(t) && /\b(card|backlog|doing|review)\b/i.test(t))) {
     return {
       steps: [
-        '1. **Board shell** — columns (Backlog → Doing → Review → Done) with dark original UI',
-        '2. **Cards** — HTML5 drag-and-drop between columns; Add Card opens a real title/notes modal',
-        '3. **Persist** — board state in localStorage; empty states and polish',
+        '1. **Board shell**. columns (Backlog → Doing → Review → Done) with dark original UI',
+        '2. **Cards**. HTML5 drag-and-drop between columns; Add Card opens a real title/notes modal',
+        '3. **Persist**. board state in localStorage; empty states and polish',
       ],
-      stackNote: 'React + Vite kanban — scaffold when you are ready to **Create project**.',
+      stackNote: 'React + Vite kanban. scaffold when you are ready to **Create project**.',
     };
   }
 
   if (/\bdiscord\b/i.test(t) && !/\bnot\s+discord\b/i.test(t)) {
     return {
       steps: [
-        '1. **Layout** — sidebar for servers/channels, main area for messages',
-        '2. **Chat** — send and show messages in a channel (real UI, built in your files)',
-        '3. **Polish** — dark theme, user list, then voice/video later if you want',
+        '1. **Layout**. sidebar for servers/channels, main area for messages',
+        '2. **Chat**. send and show messages in a channel (real UI, built in your files)',
+        '3. **Polish**. dark theme, user list, then voice/video later if you want',
       ],
-      stackNote: 'React web app — we build each screen in your project, no pre-made template pack.',
+      stackNote: 'React web app. we build each screen in your project, no pre-made template pack.',
     };
   }
 
   if (/\b(restaurant|dining|cafe)\b/i.test(t) || (/\bmenu\b/i.test(t) && /\b(hero|booking|reserve|unsplash)\b/i.test(t))) {
     return {
       steps: [
-        '1. **Hero** — full-bleed restaurant photo, brand name, Reserve / View menu CTAs',
-        '2. **Menu** — dish cards with real Unsplash images, names, and short descriptions',
-        '3. **Booking CTA** — hours / reserve strip so the page feels finished',
+        '1. **Hero**. full-bleed restaurant photo, brand name, Reserve / View menu CTAs',
+        '2. **Menu**. dish cards with real Unsplash images, names, and short descriptions',
+        '3. **Booking CTA**. hours / reserve strip so the page feels finished',
       ],
-      stackNote: 'Landing page with your Unsplash images baked in — open **Preview** under chat when ready.',
+      stackNote: 'Landing page with your Unsplash images baked in. open **Preview** under chat when ready.',
     };
   }
 
   if (/\b(gallery|masonry|portfolio|photographer|photo\s+grid)\b/i.test(t)) {
     return {
       steps: [
-        '1. **Black canvas + logo** — FrameLab-style header and Work / About / Contact nav',
-        '2. **Photo gallery** — responsive grid with your Unsplash images loading for real',
-        '3. **About blurb** — short story under the gallery, then polish spacing and mobile',
+        '1. **Black canvas + logo**. FrameLab-style header and Work / About / Contact nav',
+        '2. **Photo gallery**. responsive grid with your Unsplash images loading for real',
+        '3. **About blurb**. short story under the gallery, then polish spacing and mobile',
       ],
-      stackNote: 'Static HTML/CSS/JS site — open index.html or localhost preview; images are real URLs.',
+      stackNote: 'Static HTML/CSS/JS site. open index.html or localhost preview; images are real URLs.',
     };
   }
 
   if (/\b(cabin|rental|nest\s*stay|check\s+availability)\b/i.test(t)) {
     return {
       steps: [
-        '1. **Hero** — full-bleed cabin photo, title, subtitle, CTA buttons',
-        '2. **Cabin cards** — photo, name, nightly price, Book button for each listing',
-        '3. **Polish** — footer and mobile layout',
+        '1. **Hero**. full-bleed cabin photo, title, subtitle, CTA buttons',
+        '2. **Cabin cards**. photo, name, nightly price, Book button for each listing',
+        '3. **Polish**. footer and mobile layout',
       ],
       stackNote: 'Static HTML/CSS/JS landing page with your image URLs baked in.',
     };
@@ -322,9 +322,9 @@ function mvpPlan(summary: string, kind: ProjectKind, name: string): MvpPlan {
   if (/\b(gym|fitness|pulse\s*fit|hiit|yoga)\b/i.test(t)) {
     return {
       steps: [
-        '1. **Hero** — dark gym photo, bold headline, Join a class CTA',
-        '2. **Classes row** — three class cards with photos, names, and times',
-        '3. **Schedule table** — fake weekly schedule under the cards',
+        '1. **Hero**. dark gym photo, bold headline, Join a class CTA',
+        '2. **Classes row**. three class cards with photos, names, and times',
+        '3. **Schedule table**. fake weekly schedule under the cards',
       ],
       stackNote: 'Static HTML/CSS/JS fitness landing page.',
     };
@@ -333,9 +333,9 @@ function mvpPlan(summary: string, kind: ProjectKind, name: string): MvpPlan {
   if (/\b(door\s*bell|doorbell)\b/i.test(t) && /\b(notif|phone|alert|press)\b/i.test(t)) {
     return {
       steps: [
-        '1. **Dashboard** — log when someone presses the doorbell',
-        '2. **Phone alert** — text or push notification when it rings',
-        '3. **Later** — mobile app, multiple users, camera feed',
+        '1. **Dashboard**. log when someone presses the doorbell',
+        '2. **Phone alert**. text or push notification when it rings',
+        '3. **Later**. mobile app, multiple users, camera feed',
       ],
       stackNote: 'Web app first; phone notifications added once the basics work.',
     };
@@ -344,19 +344,19 @@ function mvpPlan(summary: string, kind: ProjectKind, name: string): MvpPlan {
   if (/\bwebsite\b/i.test(t) && !prefersReactAppScaffold(summary) && kind === 'static-web') {
     return {
       steps: [
-        '1. **Hero / first screen** — match the look and copy from your brief',
-        '2. **Main sections** — cards, gallery, or menu you described (with real images if you gave URLs)',
-        '3. **Polish** — nav, footer, and mobile layout',
+        '1. **Hero / first screen**. match the look and copy from your brief',
+        '2. **Main sections**. cards, gallery, or menu you described (with real images if you gave URLs)',
+        '3. **Polish**. nav, footer, and mobile layout',
       ],
-      stackNote: 'Simple website pages — easy to open in a browser and update.',
+      stackNote: 'Simple website pages. easy to open in a browser and update.',
     };
   }
 
   if (kind === 'python') {
     return {
       steps: [
-        '1. **Small backend** — handles the main job (orders, data, etc.)',
-        '2. **One API or script** — prove the core flow works',
+        '1. **Small backend**. handles the main job (orders, data, etc.)',
+        '2. **One API or script**. prove the core flow works',
         '3. **Connect a front-end** when the logic is solid',
       ],
       stackNote: 'Python on the server; website or app can plug in later.',
@@ -365,11 +365,11 @@ function mvpPlan(summary: string, kind: ProjectKind, name: string): MvpPlan {
 
   return {
     steps: [
-      `1. **First screen** — show what ${name} does in one glance`,
-      '2. **Main flow** — let users do the core task (order, book, browse, etc.)',
-      '3. **Notifications or accounts** — only after the happy path works',
+      `1. **First screen**. show what ${name} does in one glance`,
+      '2. **Main flow**. let users do the core task (order, book, browse, etc.)',
+      '3. **Notifications or accounts**. only after the happy path works',
     ],
-    stackNote: 'Modern web app (React) — runs in the browser on desktop and phone.',
+    stackNote: 'Modern web app (React). runs in the browser on desktop and phone.',
   };
 }
 
@@ -377,7 +377,7 @@ export function looksLikeGreenfieldIdea(text: string): boolean {
   const t = String(text || '').trim();
   if (!t) return false;
   if (/\b(delete|remove|trash|wipe|get rid of)\b/i.test(t)) return false;
-  // Vague "help me plan" openers — chat first, not instant My App template.
+  // Vague "help me plan" openers. chat first, not instant My App template.
   if (
     wantsPlanningOnly(t)
     && t.length < 220
@@ -426,7 +426,7 @@ export function looksLikeGreenfieldIdea(text: string): boolean {
   if (WANT_APP_RE.test(t) && name) return true;
   if (name && WORK_ON_NEW_PROJECT_RE.test(t)) return true;
   if (name && /\bi\s+want\s+to\s+work\s+on\b/i.test(t) && !/\blet'?s\s+work\s+on\b/i.test(t)) return true;
-  // Named product briefs asking for MVP / sequencing — plan, don't scaffold.
+  // Named product briefs asking for MVP / sequencing. plan, don't scaffold.
   if (name && /\b(?:mvp\s+order|what\s+should\s+i\s+build\s+first|week\s+one\s+look\s+like)\b/i.test(t)) return true;
   if (name && (/\b(dashboard|finance|kanban|restaurant|website|site|messaging|tracker|landing\s+page|festival|planner|grocery|meal[\s-]?prep)\b/i.test(t) || FEATURE_DESC_RE.test(t))) {
     return true;
@@ -465,12 +465,12 @@ export function looksLikeGreenfieldCreateGo(text: string): boolean {
   );
 }
 
-/** Explicit “create/build files now” — continue pending idea. Bare “start” does NOT count. */
+/** Explicit “create/build files now”. continue pending idea. Bare “start” does NOT count. */
 export function looksLikeGreenfieldStartWorkGo(text: string): boolean {
   const t = String(text || '').trim();
   if (!t) return false;
   if (/\blet'?s\s+work\s+on\s+[A-Za-z]/i.test(t)) return false;
-  // Folder bind: "start working on Lyndsey" — not create.
+  // Folder bind: "start working on Lyndsey". not create.
   if (/\bstart\s+work(?:ing)?\s+on\s+[A-Za-z][A-Za-z0-9_-]{1,40}\b/i.test(t)
     && !/\bstart\s+work(?:ing)?\s+on\s+(?:this|the|a|my|our)\s+project\b/i.test(t)) {
     return false;
@@ -562,10 +562,10 @@ export function extractBriefBullets(text: string): string[] {
   return bullets.slice(0, 14);
 }
 
-/** Vague planning opener — questions only, no scaffold, no action chips. */
+/** Vague planning opener. questions only, no scaffold, no action chips. */
 export function buildPlanningStarterReply(): string {
   return [
-    'Happy to help you plan — no files or folders until you clearly ask to **build** or **create** the project.',
+    'Happy to help you plan. no files or folders until you clearly ask to **build** or **create** the project.',
     '',
     '**Quick questions:**',
     '1. Who is this for, and what should they accomplish in one session?',
@@ -576,7 +576,7 @@ export function buildPlanningStarterReply(): string {
   ].join('\n');
 }
 
-/** Conversational “how do I build / what stack” — chat freely, do not dump create chips. */
+/** Conversational “how do I build / what stack”. chat freely, do not dump create chips. */
 export function looksLikeConversationalPlanningAsk(text: string): boolean {
   const t = String(text || '').trim();
   if (!t) return false;
@@ -616,7 +616,7 @@ export function buildGreenfieldPlanReply(idea: GreenfieldIdeaIntent): string {
   const fromBrief = extractBriefBullets(idea.summary);
 
   return [
-    `**${idea.name}** — here’s a simple way to think about it.`,
+    `**${idea.name}**. here’s a simple way to think about it.`,
     '',
     idea.problemLine,
     '',
@@ -632,12 +632,12 @@ export function buildGreenfieldPlanReply(idea: GreenfieldIdeaIntent): string {
     '',
     `**Likely stack:** ${plan.stackNote}`,
     '',
-    'We can keep talking — ask about features, stack, or MVP order.',
+    'We can keep talking. ask about features, stack, or MVP order.',
     'When you want files on disk, say **lets build this**.',
   ].filter(Boolean).join('\n');
 }
 
-/** Chip: Keep planning — deepen the plan each time (never repeat the same blob). */
+/** Chip: Keep planning. deepen the plan each time (never repeat the same blob). */
 function isFinanceBrief(text: string): boolean {
   return /\b(budget|transaction|finance|ledger|invoice|expense|accounts?\s+page|vaultbean|spend\s+chart|bill\s+reminder)\b/i.test(String(text || ''));
 }
@@ -697,7 +697,7 @@ export function detectPlanFocus(ask: string, brief?: string): string {
   return 'general';
 }
 
-/** One new section to append — never re-lists the base plan. */
+/** One new section to append. never re-lists the base plan. */
 export function buildPlanExpansionSection(
   idea: GreenfieldIdeaIntent,
   focus: string,
@@ -778,7 +778,7 @@ export function buildPlanExpansionSection(
         '- Left rail with app logo + Friends / Servers / DMs / Settings icons',
         '- Server sidebar: #general, #random, voice channels, member list with status dots',
         '- Main pane: message feed, avatars, timestamps, send box',
-        '- Dark theme surfaces — not a photo gallery layout',
+        '- Dark theme surfaces. not a photo gallery layout',
       );
     } else if (depth === 2) {
       lines.push(
@@ -873,7 +873,7 @@ export function buildPlanExpansionSection(
     lines.push(
       '- React + Vite file layout (`src/App.jsx`, components folder)',
       '- lucide-react icons on every rail + control',
-      '- Local demo users/messages — no backend required for v1',
+      '- Local demo users/messages. no backend required for v1',
       '- npm run dev → **Localhost** button under chat',
     );
   } else if (isApp && depth >= 2) {
@@ -882,13 +882,13 @@ export function buildPlanExpansionSection(
       '- Split into components: Rail, ServerSidebar, ChatPane, MemberList, SettingsPanel',
       '- State: active server, channel, DM thread, settings tab',
       '- Polish spacing, typography, and hover/focus states',
-      '- Ready to create — real files, not a static portfolio page',
+      '- Ready to create. real files, not a static portfolio page',
     );
   } else if (depth === 1) {
     lines.push(`**+ Deeper plan** (pass ${depth})`);
     lines.push(
       '- Match colors and mood from your brief (dark / neon / warm)',
-      hasImages ? '- Use every image URL you pasted — no blank cards' : '- Gather 3–6 images for the main sections',
+      hasImages ? '- Use every image URL you pasted. no blank cards' : '- Gather 3–6 images for the main sections',
       '- One clear CTA above the fold',
       '- Polish spacing so the first screen feels intentional',
     );
@@ -906,7 +906,7 @@ export function buildPlanExpansionSection(
       '- Accessibility and SEO basics (title, alt text, headings)',
       '- Performance: compress hero, lazy images',
       '- Stretch: simple booking form or newsletter field (can stay UI-only)',
-      '- You’re ready — Create project when you want files on disk',
+      '- You’re ready. Create project when you want files on disk',
     );
   }
 
@@ -937,7 +937,7 @@ export function buildKeepPlanningReply(
     : [...prior, newest];
 
   const body = [
-    `Still planning **${idea.name}** — pass **${depth}** (keeping everything so far, then adding more).`,
+    `Still planning **${idea.name}**. pass **${depth}** (keeping everything so far, then adding more).`,
     '',
     idea.problemLine,
     '',
@@ -948,7 +948,7 @@ export function buildKeepPlanningReply(
     ...accumulated.flatMap((block, i) => (i === 0 ? [block] : ['', block])),
     '',
     depth < 4
-      ? 'Ask another question anytime — we can keep refining in chat. When you want real files, say **lets build this**.'
+      ? 'Ask another question anytime. we can keep refining in chat. When you want real files, say **lets build this**.'
       : 'Plan is deep. Say **lets build this** when you want files on disk, or keep asking questions.',
   ].join('\n');
 

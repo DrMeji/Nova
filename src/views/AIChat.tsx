@@ -214,8 +214,8 @@ import { ensureViteDevServer, isViteProject, openInAppPreview, ensureInAppPrevie
 const COMPOSER_MODE_PREFIX: Record<'plan' | 'ask' | 'agent' | 'debug' | 'multitask', string> = {
   plan: 'Plan this out step by step, then we can build:\n\n',
   ask: '',
-  agent: 'Agent mode — edit files and run approved tools in this workspace:\n\n',
-  debug: 'Debug this — find the issue and propose a fix:\n\n',
+  agent: 'Agent mode. edit files and run approved tools in this workspace:\n\n',
+  debug: 'Debug this. find the issue and propose a fix:\n\n',
   multitask: '[Multi-agent] ',
 };
 
@@ -262,7 +262,7 @@ function ChatModeTabs() {
       navigate({ name: 'chat' });
       return;
     }
-    // Already on this Image/Video thread — keep it (don't wipe an in-progress generate).
+    // Already on this Image/Video thread. keep it (don't wipe an in-progress generate).
     if (route.name === 'chat' && route.mode === next) return;
     // If a generate is still running for this mode, return to that chat instead of a blank canvas.
     try {
@@ -323,21 +323,21 @@ type ChatModelOption = {
 };
 
 const CHAT_MODELS: ChatModelOption[] = [
-  // Chat — only Auto by default; keyed clouds + Ollama added at runtime
+  // Chat. only Auto by default; keyed clouds + Ollama added at runtime
   { id: 'ark-auto', name: 'ARK', source: 'auto', detail: 'Best brain · stays on for this chat', kind: 'chat' },
-  // Image — paths that generate today
+  // Image. paths that generate today
   { id: 'ark-auto', name: 'ARK', source: 'auto', detail: 'Best path · stays on for this chat', kind: 'image' },
   { id: 'ark-image-core', name: 'ARK Image Core', source: 'local', detail: 'Free · Pollinations · local SD when installed', kind: 'image' },
   { id: 'sd15-local', name: 'SD 1.5 Local', source: 'local', detail: 'On-device · install from Local AI', kind: 'image' },
   { id: 'sdxl-turbo-local', name: 'SDXL Turbo Local', source: 'local', detail: 'Fast on-device · install from Local AI', kind: 'image' },
   { id: 'flux-schnell-local', name: 'FLUX Schnell Local', source: 'local', detail: 'On-device FLUX · ~13 GB · Local AI', kind: 'image' },
   { id: 'dall-e-3', name: 'DALL·E 3', source: 'cloud', detail: 'Cloud image · OpenAI key', kind: 'image' },
-  // Video — ARK Engine only (Pollinations / HF / motion-still). Not Kling or Sora.
+  // Video. ARK Engine only (Pollinations / HF / motion-still). Not Kling or Sora.
   { id: 'ark-auto', name: 'ARK', source: 'auto', detail: 'Best path · stays on for this chat', kind: 'video' },
   { id: 'ark-video-core', name: 'ARK Video Core', source: 'local', detail: 'Free MP4 when the host answers · motion still otherwise', kind: 'video' },
 ];
 
-/** Cloud chat options — only shown in the picker when that provider key exists. */
+/** Cloud chat options. only shown in the picker when that provider key exists. */
 const CLOUD_CHAT_WHEN_KEYED: (ChatModelOption & { keyId: string })[] = [
   { id: 'groq-llama', name: 'Llama 3.3 (Groq)', source: 'cloud', detail: 'Free-key · fast', kind: 'chat', keyId: 'groq' },
   { id: 'gemini-flash', name: 'Gemini 2.0 Flash', source: 'cloud', detail: 'Free-key · Google', kind: 'chat', keyId: 'google' },
@@ -416,7 +416,7 @@ const PLACEHOLDERS: Record<ChatMode, string[]> = {
     'Ask a question...',
   ],
   image: [
-    'Describe the image — ARK may ask a quick brief first…',
+    'Describe the image. ARK may ask a quick brief first…',
     'Upload a photo (+) to recreate or improve it…',
     'Describe style, subject, and mood for best accuracy…',
   ],
@@ -631,7 +631,7 @@ function deletePrepareErrorReply(err: unknown): string {
   const msg = err instanceof Error ? err.message : String(err || '');
   console.error('[delete] failed:', err);
   if (/before initialization/i.test(msg)) {
-    return 'Delete failed due to an internal app bug (module load). Please restart ARK after update — not a permissions issue.';
+    return 'Delete failed due to an internal app bug (module load). Please restart ARK after update. not a permissions issue.';
   }
   return msg || 'Could not prepare delete. Try again.';
 }
@@ -642,7 +642,7 @@ export function AIChat() {
   const { addCreation, addChat, addRecent, touchRecentProject, creations, chats, renameChat } = useRecentProjects();
 
   // Requirement: each app launch starts on a fresh chat (no resume of last thread).
-  // Only strip a chatId that was ALREADY present on first paint — never wipe a chat
+  // Only strip a chatId that was ALREADY present on first paint. never wipe a chat
   // the user just created in this session (that race left them stuck on New Chat).
   const forceNewChatOnLaunch = useMemo(() => {
     try {
@@ -772,7 +772,7 @@ export function AIChat() {
   const activeGenChatIdRef = useRef<string | null>(null);
   const pendingQueueRef = useRef<string[]>([]);
   const persistChatIdRef = useRef<string | null>(null);
-  /** Always-current route chat id — avoid stale closures when flushing the queue. */
+  /** Always-current route chat id. avoid stale closures when flushing the queue. */
   const routeChatIdRef = useRef<string | undefined>(undefined);
   const ignoreEnterUntilRef = useRef(0);
   const sendMessageRef = useRef<(content: string) => Promise<void>>(async () => {});
@@ -1126,7 +1126,7 @@ export function AIChat() {
 
   useEffect(() => {
     if (!shouldForceNewChat) {
-      // No launch-time thread to clear — never steal later navigations.
+      // No launch-time thread to clear. never steal later navigations.
       if (forceNewChatOnLaunch) didForceNewChatRef.current = true;
       return;
     }
@@ -1151,7 +1151,7 @@ export function AIChat() {
     if (generatingRef.current && activeGenChatIdRef.current) {
       return;
     }
-    // Explicit blank starter (New Chat / Image / Video with no id) — never keep a stale thread id.
+    // Explicit blank starter (New Chat / Image / Video with no id). never keep a stale thread id.
     // Otherwise the next send attaches to the previous Recent chat and looks like a “duplicate mix”.
     routeChatIdRef.current = undefined;
     persistChatIdRef.current = null;
@@ -1342,7 +1342,7 @@ export function AIChat() {
         setGenerating(true);
         return;
       }
-      // We just created this chat and already have messages in state — don't wipe them.
+      // We just created this chat and already have messages in state. don't wipe them.
       if (skipChatLoadIdsRef.current.has(route.chatId)) {
         if (messagesRef.current.length > 0) {
           skipChatLoadIdsRef.current.delete(route.chatId);
@@ -1364,7 +1364,7 @@ export function AIChat() {
         messagesRef.current = [];
         setThreadBrain(null);
       }
-      // Don't carry a folder from another chat into this thread — but restore this chat's files.
+      // Don't carry a folder from another chat into this thread. but restore this chat's files.
       if (activeGenChatIdRef.current !== route.chatId) {
         const restored = loadChatStudio(route.chatId);
         if (restored) {
@@ -1395,7 +1395,7 @@ export function AIChat() {
           setMessages(prev => {
             const next = prev.map(m => (
               m.role === 'assistant' && String(m.content || '').startsWith('__generating__:')
-                ? { ...m, content: '(interrupted — send again)' }
+                ? { ...m, content: '(interrupted. send again)' }
                 : m
             ));
             messagesRef.current = next;
@@ -1417,7 +1417,7 @@ export function AIChat() {
       return;
     }
 
-    // Fresh New Chat / Image / Video — empty canvas (never inherit a stuck Stop state)
+    // Fresh New Chat / Image / Video. empty canvas (never inherit a stuck Stop state)
     // Guard: a send is mid-flight (including the await before generatingRef flips).
     if (activeGenChatIdRef.current && (generatingRef.current || messagesRef.current.length > 0)) {
       setLoading(false);
@@ -1580,7 +1580,7 @@ export function AIChat() {
   }, [route]);
 
   useEffect(() => {
-    // Only pin to bottom when the user is already near the end — never yank scroll while reading history.
+    // Only pin to bottom when the user is already near the end. never yank scroll while reading history.
     if (!stickToBottomRef.current) return;
     const el = messagesScrollRef.current;
     if (el) {
@@ -1875,7 +1875,7 @@ export function AIChat() {
   };
 
   const applyDropResult = (result: Awaited<ReturnType<typeof resolveChatDrop>>) => {
-    // Only explicit image drops go in the preview strip — never folder contents.
+    // Only explicit image drops go in the preview strip. never folder contents.
     if (result.images.length && !result.attaches.some(a => a.kind === 'folder')) {
       for (const img of result.images) rememberThumb(img.id, img.dataUrl);
       setPendingImages(prev => {
@@ -1921,7 +1921,7 @@ export function AIChat() {
     } else if (result.note) {
       setDropHint(result.note);
     } else if (!fileCount && !result.images.length) {
-      setDropHint('Nothing readable in that drop — try another folder or file.');
+      setDropHint('Nothing readable in that drop. try another folder or file.');
     }
     ignoreEnterUntilRef.current = Date.now() + 600;
   };
@@ -1966,7 +1966,7 @@ export function AIChat() {
     setDragOverChat(on);
   };
 
-  // Capture-phase only — avoid React+window double handlers that flicker the overlay.
+  // Capture-phase only. avoid React+window double handlers that flicker the overlay.
   useEffect(() => {
     const onEnter = (e: DragEvent) => {
       allowWindowFileDrop(e);
@@ -2249,7 +2249,7 @@ export function AIChat() {
     ignoreEnterUntilRef.current = Date.now() + 600;
   };
 
-  /** Native OS file picker — shows files inside folders. */
+  /** Native OS file picker. shows files inside folders. */
   const pickFilesIntoChat = async () => {
     if (!window.arkDesktop?.pickFiles) {
       attachInputRef.current?.click();
@@ -2293,7 +2293,7 @@ export function AIChat() {
     if (userTyped) {
       parts.push(content);
     } else if (attaches.length || hasStudio) {
-      // Enter with only a folder/file — read it. Marker is hidden in the bubble.
+      // Enter with only a folder/file. read it. Marker is hidden in the bubble.
       parts.push('<!--ark-auto-read-->');
     } else if (images.length) {
       const hasStudio = Object.keys(chatStudioFilesRef.current).length > 0
@@ -2301,7 +2301,7 @@ export function AIChat() {
       content = mode === 'image'
         ? 'Recreate and improve this image'
         : hasStudio
-          ? 'I attached a screenshot of the project UI. Look at it carefully and wait for my fix ask — or tell me what stands out.'
+          ? 'I attached a screenshot of the project UI. Look at it carefully and wait for my fix ask. or tell me what stands out.'
           : 'What is in this image?';
       parts.push(content);
     }
@@ -2347,7 +2347,7 @@ export function AIChat() {
     setIpcFallbackDev(false);
     const mySeq = ++genSeqRef.current;
 
-    // Prefer live route id. Blank starters (no chatId) always mint a new id — never reuse persist.
+    // Prefer live route id. Blank starters (no chatId) always mint a new id. never reuse persist.
     const blankStarter = route.name === 'chat' && !route.chatId;
     let activeChatId = blankStarter
       ? undefined
@@ -2380,7 +2380,7 @@ export function AIChat() {
     persistChatIdRef.current = activeChatId;
     routeChatIdRef.current = activeChatId;
     activeGenChatIdRef.current = activeChatId;
-    // Bind any pending folder attach to this chat id for follow-ups — never on a brand-new chat.
+    // Bind any pending folder attach to this chat id for follow-ups. never on a brand-new chat.
     if (!isNewChat && Object.keys(chatStudioFilesRef.current).length) {
       const meta = parseChatAttach(content) || parseChatAttaches(content)[0];
       persistStudioSnapshot(activeChatId, {
@@ -2417,7 +2417,7 @@ export function AIChat() {
 
     const assistantId = crypto.randomUUID();
     const isMediaMode = mode === 'image' || mode === 'video';
-    // Reading… only when THIS message includes an upload — not leftover studio files.
+    // Reading… only when THIS message includes an upload. not leftover studio files.
     const readingAttach = /<!--ark-attach:/.test(content)
       || /<!--ark-auto-read-->/.test(content)
       || /!\[[^\]]*\]\(ark-media:/.test(content)
@@ -2581,7 +2581,7 @@ export function AIChat() {
       }
       if (mySeq !== genSeqRef.current) return;
 
-      pushAssistantStatus(`Found ${opts.displayName} — ${opts.targetPath}`);
+      pushAssistantStatus(`Found ${opts.displayName}. ${opts.targetPath}`);
       await new Promise<void>(r => { window.setTimeout(r, 100); });
       if (mySeq !== genSeqRef.current) return;
 
@@ -2680,7 +2680,7 @@ export function AIChat() {
       return filePath.slice(normRoot.length).replace(/^[/\\]/, '') || null;
     };
 
-    // Disk intents — delete_file → delete_project → add_file.
+    // Disk intents. delete_file → delete_project → add_file.
     // Create/build briefs are excluded in classifyDiskIntent (see chatMessageRouter.ts).
     if (mode === 'general' || mode === 'code') {
       if (diskIntent.type === 'delete_file' || shouldRouteDeleteToStickyFile(content, stickyDiskTarget)) {
@@ -2746,7 +2746,7 @@ export function AIChat() {
               filePath: outcome.filePath,
             });
             await finishPlainReply(
-              `Ready to delete **${outcome.fileName}**.\n\nConfirm in the dialog — this removes only that file:\n\`${outcome.filePath}\``,
+              `Ready to delete **${outcome.fileName}**.\n\nConfirm in the dialog. this removes only that file:\n\`${outcome.filePath}\``,
             );
             return;
           }
@@ -2797,7 +2797,7 @@ export function AIChat() {
               kind: 'folder',
             });
             await finishPlainReply(
-              `Ready to delete **${outcome.projectName}**.\n\nConfirm in the dialog — this removes the folder from your PC:\n\`${outcome.folderPath}\``,
+              `Ready to delete **${outcome.projectName}**.\n\nConfirm in the dialog. this removes the folder from your PC:\n\`${outcome.folderPath}\``,
             );
             return;
           }
@@ -2865,7 +2865,7 @@ export function AIChat() {
       }
     }
 
-    // PC system tasks — restore point, read file (no workspace required; Full PC / Desktop grant).
+    // PC system tasks. restore point, read file (no workspace required; Full PC / Desktop grant).
     if ((mode === 'general' || mode === 'code') && hasFolderAccessGrant()) {
       await syncWorkspaceGrantsFromPrefs();
       const homeCwd = (await window.arkDesktop?.browseRoots?.())?.roots?.find(r => r.id === 'home')?.path
@@ -2903,7 +2903,7 @@ export function AIChat() {
       }
     }
 
-    // Chip handlers for pending greenfield — MUST run even when message is just "Keep planning"
+    // Chip handlers for pending greenfield. MUST run even when message is just "Keep planning"
     // (that phrase alone is not a greenfield idea, so it used to fall through to the local model).
     const pendingPlanExpand = getLastPendingGreenfield(activeChatId);
     const looksLikePlanFeatureAdd = Boolean(
@@ -2964,7 +2964,7 @@ export function AIChat() {
           planLog: pending.planLog,
         });
         renameChat(activeChatId, pending.name);
-        // Fall through to the model — unique deepening, not a canned chip plan.
+        // Fall through to the model. unique deepening, not a canned chip plan.
       } else {
         await finishPlainReply(
           'I lost the project brief for this chat.\n\nPaste your idea again (or start a new chat with it), and I’ll keep planning from that.',
@@ -2973,12 +2973,12 @@ export function AIChat() {
       }
     }
 
-    // Greenfield / product idea — remember the brief, rename the chat, then talk via the model.
+    // Greenfield / product idea. remember the brief, rename the chat, then talk via the model.
     // Never dump Create/Keep-planning chips or the generic template plan.
     if ((mode === 'general' || mode === 'code') && looksLikeGreenfieldIdea(intentText)) {
       if (looksLikeGreenfieldHaveFolder(intentText)) {
         await finishPlainReply(
-          'Got it — you already have a folder.\n\nSay **Let’s work on YourFolderName** or *On my desktop I have a folder called …* and I’ll bind that workspace.',
+          'Got it. you already have a folder.\n\nSay **Let’s work on YourFolderName** or *On my desktop I have a folder called …* and I’ll bind that workspace.',
         );
         return;
       }
@@ -3005,7 +3005,7 @@ export function AIChat() {
         setLastPendingGreenfield(activeChatId, idea);
         renameChat(activeChatId, idea.name);
       }
-      // Fall through — no instant template starter.
+      // Fall through. no instant template starter.
     }
 
     // Explicit “lets build this” with a pending idea → ensure pending is set for create below.
@@ -3024,7 +3024,7 @@ export function AIChat() {
       }
     }
 
-    // In-place scrap/rebuild of the bound workspace — never catalog Desktop or create sibling folders.
+    // In-place scrap/rebuild of the bound workspace. never catalog Desktop or create sibling folders.
     if (
       (mode === 'general' || mode === 'code')
       && looksLikeInPlaceRebuildAsk(intentText)
@@ -3034,7 +3034,7 @@ export function AIChat() {
         diskRoot: resolvedStudio.diskRoot || chatStudioDiskRootRef.current,
       })
     ) {
-      // Fall through to code-edit / inspect with sticky files — skip catalog & create.
+      // Fall through to code-edit / inspect with sticky files. skip catalog & create.
     } else if ((mode === 'general' || mode === 'code') && looksLikeStartWorkOnFolderAsk(intentText)) {
       if (!hasFolderAccessGrant()) {
         await finishPlainReply(GRANT_OFF_FOLDER_MSG);
@@ -3105,7 +3105,7 @@ export function AIChat() {
       resolvedStudio.name = projectName;
       resolvedStudio.diskRoot = opened.root || located.path;
 
-      // "Open DeBloat and summarize…" — bind, then keep going into inspect/edit.
+      // "Open DeBloat and summarize…". bind, then keep going into inspect/edit.
       const wantsFollowUp = isInspectAsk(intentText)
         || isExplainAsk(intentText)
         || /\b(summarize|how it works|flag any|issues you notice|tell me what)\b/i.test(intentText);
@@ -3121,7 +3121,7 @@ export function AIChat() {
       }
     }
 
-    // Projects / folder catalog — ONLY when the user is asking to list folders (never for create/build).
+    // Projects / folder catalog. ONLY when the user is asking to list folders (never for create/build).
     if (
       (mode === 'general' || mode === 'code')
       && !isProjectCreateBrief(content)
@@ -3183,7 +3183,7 @@ export function AIChat() {
       return;
     }
 
-    // PC explore — games, desktop top-level, installed apps (never for create/build apps).
+    // PC explore. games, desktop top-level, installed apps (never for create/build apps).
     if (
       (mode === 'general' || mode === 'code')
       && !isProjectCreateBrief(content)
@@ -3201,7 +3201,7 @@ export function AIChat() {
       return;
     }
 
-    // New project create — scaffold on disk, bind workspace (BEFORE explore/catalog false positives).
+    // New project create. scaffold on disk, bind workspace (BEFORE explore/catalog false positives).
     const workspaceActiveForCreate = hasActiveWorkspace({
       files: resolvedStudio.files,
       projectId: resolvedStudio.projectId || chatStudioProjectIdRef.current,
@@ -3294,11 +3294,11 @@ export function AIChat() {
           problemLine: `Build ${createIntent.name} from your brief.`,
         });
         renameChat(activeChatId, createIntent.name);
-        // Prefer talking it through in the model — do not dump a canned plan + create chips.
+        // Prefer talking it through in the model. do not dump a canned plan + create chips.
       } else {
 
-      // Always prefer the original user brief for this chat — never assistant plan text.
-      // (Must resolve brief BEFORE any status/delay — using userBrief early caused a TDZ hang on "Reading your brief…".)
+      // Always prefer the original user brief for this chat. never assistant plan text.
+      // (Must resolve brief BEFORE any status/delay. using userBrief early caused a TDZ hang on "Reading your brief…".)
       const pending = getLastPendingGreenfield(activeChatId);
       const userLines = messagesRef.current.filter(m => m.role === 'user').map(m => String(m.content || ''));
       const userBrief = recoverOriginalUserBrief(messagesRef.current);
@@ -3320,7 +3320,7 @@ export function AIChat() {
       };
 
       // "lets build this" with no recoverable product brief → refuse empty mountain scaffolds.
-      // Do NOT treat "Create project Name" chips as thin — those carry a name and may use pending brief.
+      // Do NOT treat "Create project Name" chips as thin. those carry a name and may use pending brief.
       const summaryText = String(buildIntent.summary || '').trim();
       const goOnlyAsk = /^(?:lets?\s+build(?:\s+(?:this|that|it))?|build\s+this|build\s+that|go\s+implement|go\s+build|implement\s+it|ship\s+it)\s*[.!]?\s*$/i.test(content.trim());
       const thinBrief = goOnlyAsk && (
@@ -3460,7 +3460,7 @@ export function AIChat() {
       } // end create (non-preferPlan)
     }
 
-    // PC read file — AFTER create/greenfield so build briefs never become "open SignalDesk.txt".
+    // PC read file. AFTER create/greenfield so build briefs never become "open SignalDesk.txt".
     if ((mode === 'general' || mode === 'code') && hasFolderAccessGrant() && looksLikeReadFileAsk(content)) {
       await syncWorkspaceGrantsFromPrefs();
       const parsed = parseReadFileTarget(content);
@@ -3475,7 +3475,7 @@ export function AIChat() {
       return;
     }
 
-    // STEP 1: Natural-language folder open — full import for fix/build/scan asks only.
+    // STEP 1: Natural-language folder open. full import for fix/build/scan asks only.
     if (
       (mode === 'general' || mode === 'code')
       && Object.keys(resolvedStudio.files).length === 0
@@ -3507,7 +3507,7 @@ export function AIChat() {
           user_id: user?.id ?? 'guest',
       project_id: null,
           role: 'assistant',
-          content: 'Which folder on your Desktop? Say the name — for example: *“What is AutoTrade on my desktop?”* or *“On my desktop I have a folder called my-app.”*',
+          content: 'Which folder on your Desktop? Say the name. for example: *“What is AutoTrade on my desktop?”* or *“On my desktop I have a folder called my-app.”*',
           provider_used: 'ARK',
           created_at: new Date().toISOString(),
         };
@@ -3583,7 +3583,7 @@ export function AIChat() {
       }
     }
 
-    // STEP 1b: Folder by name — default to catalog when we parsed a folder name.
+    // STEP 1b: Folder by name. default to catalog when we parsed a folder name.
     if (
       (mode === 'general' || mode === 'code')
       && Object.keys(resolvedStudio.files).length === 0
@@ -3646,7 +3646,7 @@ export function AIChat() {
       clearGeneratingIfMineEarly();
     };
 
-    // Open / refresh the in-app Preview window (closable BrowserWindow — not system browser).
+    // Open / refresh the in-app Preview window (closable BrowserWindow. not system browser).
     if (
       (mode === 'general' || mode === 'code')
       && /\b(open|show|launch|start)\b[\s\S]{0,40}\b(preview|localhost|live\s+preview)\b/i.test(content)
@@ -3654,7 +3654,7 @@ export function AIChat() {
       const url = await openProjectPreview();
       finishAgentReply(
         url
-          ? `Opened **Preview** in an ARK window (\`${url}\`).\n\nIt stays open while you edit — file changes reload the window automatically.`
+          ? `Opened **Preview** in an ARK window (\`${url}\`).\n\nIt stays open while you edit. file changes reload the window automatically.`
           : 'Bind a project first (create one or say **Lets work on …**), then open Preview.',
         'ARK · preview',
       );
@@ -3679,7 +3679,7 @@ export function AIChat() {
     ) {
       const ref = parseGithubRepoRef(content);
       if (!ref) {
-        finishAgentReply('Say: **clone owner/repo** — example: *clone vercel/next.js*', 'ARK');
+        finishAgentReply('Say: **clone owner/repo**. example: *clone vercel/next.js*', 'ARK');
         return;
       }
       const token = githubToken() || getPluginRuntime('github', loadPluginState()).token?.trim();
@@ -3724,7 +3724,7 @@ export function AIChat() {
       || chatTurnAllowsFileEdits(content, turnComposerMode)
       || Boolean(classifyGitAsk(content))
     ) && !looksLikeFolderPathAsk(content)
-      // Greenfield "lets go and start build" must create — never the open-folder wall.
+      // Greenfield "lets go and start build" must create. never the open-folder wall.
       && !looksLikeImplementGo(content)
       && !looksLikeBuildStart(content);
 
@@ -3948,7 +3948,7 @@ export function AIChat() {
         // If multi-agent produced nothing useful, fall through to normal edit path.
       }
 
-      // Fast path: deterministic UI patches — surgical tweaks + layout rebuilds.
+      // Fast path: deterministic UI patches. surgical tweaks + layout rebuilds.
       if (allowEdits && (workspaceProjectId || chatStudioDiskRootRef.current)) {
         const { finalizeWebEdits } = await import('@/lib/webProjectCanon');
         const micro = finalizeWebEdits(stickyFiles, content, [], { projectName: projectLabel });
@@ -4226,7 +4226,7 @@ export function AIChat() {
       const routeChat = routeChatIdRef.current;
       const elapsedMs = Date.now() - replyStartedAt;
       if (threadChatId) {
-        // Media replies embed huge base64 data URLs — don't count those as "tokens"
+        // Media replies embed huge base64 data URLs. don't count those as "tokens"
         // or two image gens will slam Model freshness to ~50%.
         const isMediaReply = /data:image\/|data:video\/|!\[[^\]]*\]\(data:/i.test(finalText || '')
           || mode === 'image'
@@ -4275,7 +4275,7 @@ export function AIChat() {
         assistantId,
       });
 
-      // Safe if unmounted — React ignores; persistence above already landed.
+      // Safe if unmounted. React ignores; persistence above already landed.
       setMessages(prev => {
         if (routeChat && threadChatId && routeChat !== threadChatId) return prev;
         return next;
@@ -4335,7 +4335,7 @@ export function AIChat() {
       };
 
       try {
-      // Prefer sticky map from resolveStudioFiles — never trust an empty ref after attach.
+      // Prefer sticky map from resolveStudioFiles. never trust an empty ref after attach.
       const studioFiles = Object.keys(resolvedStudio.files).length
         ? resolvedStudio.files
         : chatStudioFilesRef.current;
@@ -4351,7 +4351,7 @@ export function AIChat() {
           response = [
             'Connect GitHub under Plugins so ARK can see your repos.',
             '',
-            'Then say “what repos do I have?” or **open owner/repo in Code**. Empty repos are fine — we start from a blank page.',
+            'Then say “what repos do I have?” or **open owner/repo in Code**. Empty repos are fine. we start from a blank page.',
           ].join('\n');
           usedPlugin = true;
         } else {
@@ -4398,7 +4398,7 @@ export function AIChat() {
                   `Pulled **${picked.full_name}** into Code.`,
                   cloned.branch ? `Branch: ${cloned.branch}` : '',
                   (picked.size ?? 1) === 0
-                    ? 'It looks empty — say what to add and I will start building.'
+                    ? 'It looks empty. say what to add and I will start building.'
                     : 'Explorer has the files. Keep chatting in Code to add, remove, upgrade, or fix.',
                 ].filter(Boolean).join('\n');
                 usedPlugin = true;
@@ -4417,14 +4417,14 @@ export function AIChat() {
         response = [
           'That sounds like an image request.',
           '',
-          'Switch to **Image** to generate it — your prompt carries over and the result saves to Creations.',
+          'Switch to **Image** to generate it. your prompt carries over and the result saves to Creations.',
         ].join('\n');
         setImageOfferId(assistantId);
         usedPlugin = true;
       }
 
       if (!usedPlugin && (mode === 'general' || mode === 'code') && shouldInspectInChat(content, hasStudioFiles, content.startsWith(COMPOSER_MODE_PREFIX.debug))) {
-        // Planning follow-ups (“more details”) must stay in normal chat — never the empty-attach wall.
+        // Planning follow-ups (“more details”) must stay in normal chat. never the empty-attach wall.
         const pendingPlan = getLastPendingGreenfield(activeChatId);
         const planningFollowUp = Boolean(
           looksLikeConversationalPlanningAsk(content)
@@ -4478,7 +4478,7 @@ export function AIChat() {
             || 'Attached project';
           const fileCount = Object.keys(filesForInspect).length;
           if (!fileCount) {
-            // No real files — do not wall the user; continue as normal chat.
+            // No real files. do not wall the user; continue as normal chat.
             skipReplySanitize = false;
           } else {
             persistStudioSnapshot(activeChatId, {
@@ -4787,7 +4787,7 @@ export function AIChat() {
             } else {
               const failText = String(routed.reply || '').replace(/!\[[^\]]*\]\([^)]+\)/g, '').trim();
               response = failText || [
-                'Couldn\'t generate image — try again.',
+                'Couldn\'t generate image. try again.',
                 '',
                 'Try again in a minute, or connect a Hugging Face / OpenAI key in Models → Cloud.',
               ].join('\n');
@@ -4927,7 +4927,7 @@ export function AIChat() {
             } else {
               const failText = String(routed.reply || '').replace(/!\[[^\]]*\]\([^)]+\)/g, '').trim();
               response = failText || [
-                'Couldn\'t generate video — try again.',
+                'Couldn\'t generate video. try again.',
                 '',
                 'Free video hosts did not return a playable MP4.',
               ].join('\n');
@@ -4969,7 +4969,7 @@ export function AIChat() {
             if (mySeq !== genSeqRef.current || stopRequestedRef.current) return;
             history = [
               { role: 'user' as const, content: planningConversationHint(pendingIdea?.summary || content) },
-              { role: 'assistant' as const, content: 'Understood. I will answer with a unique, thorough plan and questions — no files, no create-project chips.' },
+              { role: 'assistant' as const, content: 'Understood. I will answer with a unique, thorough plan and questions. no files, no create-project chips.' },
               ...history,
             ];
             routeMessage = content;
@@ -5038,7 +5038,7 @@ export function AIChat() {
           }
           const routed = await Promise.race(races);
           if (idleTimer) window.clearTimeout(idleTimer);
-          // Release Stop as soon as we have a usable reply — don't wait on trailing work.
+          // Release Stop as soon as we have a usable reply. don't wait on trailing work.
           clearGeneratingIfMine();
           const rawReply = stopRequestedRef.current && streamedPartial
             ? streamedPartial
@@ -5058,7 +5058,7 @@ export function AIChat() {
               '',
               '**In chat:** try again with a stronger model from the ARK menu, or open **Code** (sidebar or **Yes** above) so ARK writes files you can edit and preview.',
               '',
-              'Your prompt works — Code workspace is the best path for a full calculator app with Explorer + Preview.',
+              'Your prompt works. Code workspace is the best path for a full calculator app with Explorer + Preview.',
             ].join('\n');
           }
           if (routed.full) {
@@ -5196,7 +5196,7 @@ export function AIChat() {
   };
 
   const viewingChatId = route.name === 'chat' ? route.chatId : undefined;
-  // Explore / idea grid only for brand-new chats — never when a Recent thread is open.
+  // Explore / idea grid only for brand-new chats. never when a Recent thread is open.
   const showEmpty = !loading && messages.length === 0 && !viewingChatId;
   const showOpenThread = !loading && Boolean(viewingChatId);
   const ModelSourceIcon = activeModel.source === 'cloud' ? Cloud : Cpu;
@@ -5482,8 +5482,8 @@ export function AIChat() {
             <div className="mb-2 flex items-center justify-between gap-2 rounded-full border border-amber-500/25 bg-amber-500/10 px-3.5 py-2 text-[11px] text-amber-100/90">
               <span className="min-w-0 truncate">
                 {queueLen === 1
-                  ? '1 message queued — sends as soon as this reply finishes'
-                  : `${queueLen} messages queued — send next when this reply finishes`}
+                  ? '1 message queued. sends as soon as this reply finishes'
+                  : `${queueLen} messages queued. send next when this reply finishes`}
               </span>
               <button
                 type="button"
@@ -5876,7 +5876,7 @@ export function AIChat() {
               type="button"
               onClick={() => openCodeWorkspace()}
               className="inline-flex items-center gap-1.5 rounded-full border border-violet-500/45 bg-violet-500/20 px-2.5 py-1 text-[11px] font-medium text-violet-100 hover:bg-violet-500/30 transition-colors"
-              title="Open Code — files on the left, editor on the right"
+              title="Open Code. files on the left, editor on the right"
             >
               <Code2 className="w-3.5 h-3.5 text-violet-300" />
               Code
@@ -5953,7 +5953,7 @@ export function AIChat() {
 
   return (
     <div className="h-full min-w-0 flex flex-col overflow-hidden relative">
-      {/* Always mounted — toggling mount caused flicker; only opacity changes. */}
+      {/* Always mounted. toggling mount caused flicker; only opacity changes. */}
       <div
         className={`absolute inset-0 z-50 flex items-center justify-center bg-black/50 pointer-events-none transition-opacity duration-150 ${
           dragOverChat ? 'opacity-100' : 'opacity-0'
@@ -5962,7 +5962,7 @@ export function AIChat() {
       >
         <div className="rounded-2xl border border-sky-400/40 bg-ark-navy-900/95 px-6 py-4 text-center shadow-xl">
           <p className="text-sm font-medium text-content-primary">Drop folder or files</p>
-          <p className="text-[11px] text-content-tertiary mt-1">Add as many as you need — press Enter to read</p>
+          <p className="text-[11px] text-content-tertiary mt-1">Add as many as you need. press Enter to read</p>
         </div>
       </div>
       <ChatModeTabs />
@@ -6041,7 +6041,7 @@ export function AIChat() {
             {mode === 'video' && (
               <>
                 <p className="text-[11px] text-content-tertiary text-center mt-4 max-w-md mx-auto">
-                  Pick clip length (10 / 20 / 30s) above the composer before you send. ARK renders quality frames — expect ~15–30s.
+                  Pick clip length (10 / 20 / 30s) above the composer before you send. ARK renders quality frames. expect ~15–30s.
                 </p>
                 {ideaGrid(VIDEO_IDEAS)}
               </>

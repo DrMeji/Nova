@@ -1,5 +1,5 @@
 /**
- * Chat-facing code edit replies — hide source, show short status + optional trace.
+ * Chat-facing code edit replies. hide source, show short status + optional trace.
  */
 
 import {
@@ -84,7 +84,7 @@ export function finalizeCodingChatBubble(opts: {
     );
   }
   if (opts.applyError === 'no_edits' || opts.applyError === 'no_changes') {
-    return 'I understood the ask, but nothing was saved to your project files yet. Try again — I will patch the files on disk this time.';
+    return 'I understood the ask, but nothing was saved to your project files yet. Try again. I will patch the files on disk this time.';
   }
   if (opts.applyError === 'no_project') {
     return 'No project folder is bound to this chat. Say **Create project …** or open the folder with +, then ask again.';

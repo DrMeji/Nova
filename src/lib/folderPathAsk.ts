@@ -1,5 +1,5 @@
 /**
- * Natural-language folder references — "on my desktop I have a folder called ark-demo".
+ * Natural-language folder references. "on my desktop I have a folder called ark-demo".
  */
 
 import { isProjectCreateBrief } from '@/lib/chatCreateBrief';

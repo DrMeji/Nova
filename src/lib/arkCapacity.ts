@@ -21,7 +21,7 @@ export type LiveCapacity = {
   videoFree: boolean;
   openaiImage: boolean;
   summary: string;
-  /** Free-key providers still missing — for in-chat CTA */
+  /** Free-key providers still missing. for in-chat CTA */
   suggestedFreeKeys: { id: string; name: string }[];
 };
 
@@ -82,7 +82,7 @@ export async function probeLiveCapacity(): Promise<LiveCapacity> {
     if (ollama) bits.push('Ollama');
     summary = `Ready · ${bits.join(' · ')}`;
   } else {
-    summary = 'No live chat path yet — connect a free key or install a local brain';
+    summary = 'No live chat path yet. connect a free key or install a local brain';
   }
 
   return {
@@ -105,9 +105,9 @@ export function honestNoLiveChatReply(): string {
     'ARK doesn’t have a live model connected for this chat yet.',
     '',
     'To start getting real answers:',
-    '1. Open Local AI and install the default local brain (Qwen2.5 1.5B) — ARK downloads llama-cli + weights for you.',
-    '2. Or connect free capacity — Groq, Google AI Studio, OpenRouter, Hugging Face, or Together (Settings → Providers / Models → Cloud).',
+    '1. Open Local AI and install the default local brain (Qwen2.5 1.5B). ARK downloads llama-cli + weights for you.',
+    '2. Or connect free capacity. Groq, Google AI Studio, OpenRouter, Hugging Face, or Together (Settings → Providers / Models → Cloud).',
     '',
-    'Once something is connected, leave the picker on ARK Auto — it will fail over for you and keep this thread’s context.',
+    'Once something is connected, leave the picker on ARK Auto. it will fail over for you and keep this thread’s context.',
   ].join('\n');
 }

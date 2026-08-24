@@ -187,7 +187,7 @@ export async function runNotionLive(
   const lower = userText.toLowerCase();
   const perms = opts?.permissions || [];
 
-  // Update / rename — only when title search + new title are clear.
+  // Update / rename. only when title search + new title are clear.
   if (/\b(update|rename|edit)\b/.test(lower) && /page|note|doc/.test(lower)) {
     if (perms.length > 0 && !perms.includes('write')) {
       return [
@@ -224,7 +224,7 @@ export async function runNotionLive(
         ].join('\n');
       }
     }
-    // Unclear update phrasing — fall through to search rather than guess.
+    // Unclear update phrasing. fall through to search rather than guess.
   }
 
   if (/\b(create|write|add)\b/.test(lower) && /page|note|doc/.test(lower)) {
@@ -294,7 +294,7 @@ export async function runNotionLive(
         `Page: ${titleFromResult(top)}`,
         top.url ? top.url : '',
         '',
-        body || '(Page has no readable text blocks yet — check sharing permissions.)',
+        body || '(Page has no readable text blocks yet. check sharing permissions.)',
         '',
         'Related:',
         ...lines,

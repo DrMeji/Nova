@@ -93,7 +93,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setProfile({
         ...p,
         display_name: display,
-        // Machine install flag wins — never skip first-run because of a cloud profile.
+        // Machine install flag wins. never skip first-run because of a cloud profile.
         onboarding_completed: setupDone,
       });
       const arkId = await ensureArkId(userId);
@@ -132,7 +132,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
 
     (async () => {
-      // Must finish before any auth profile load — otherwise signup can skip setup.
+      // Must finish before any auth profile load. otherwise signup can skip setup.
       await ensureFirstRunGate();
       if (cancelled) return;
 

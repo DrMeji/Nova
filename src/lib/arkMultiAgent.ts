@@ -1,6 +1,6 @@
 /**
  * Lightweight multi-agent pass on one bound project: Design → Code → Verify.
- * Sequential coordinator (not parallel LLM swarm) — safe merge via chatAgentApply.
+ * Sequential coordinator (not parallel LLM swarm). safe merge via chatAgentApply.
  */
 
 import { applyChatReplyEdits } from '@/lib/chatAgentApply';
@@ -62,7 +62,7 @@ export async function runProjectMultiAgent(opts: {
     ok: skills.length > 0,
     note: skills.length
       ? `Equipped ${skills.map(s => s.name).join(', ')}`
-      : 'No skills enabled — using brief only',
+      : 'No skills enabled. using brief only',
   });
 
   // --- Code worker: apply via existing edit path ---
@@ -113,13 +113,13 @@ export async function runProjectMultiAgent(opts: {
   if (kind === 'static-web' && !hasIndex) issues.push('missing index.html');
   if (kind === 'vite-react' && !hasPkg) issues.push('missing package.json');
   if (hasIndex && !hasCss && !paths.some(p => /\.css|style=/i.test(files[paths.find(x => /index\.html$/i.test(x)) || ''] || ''))) {
-    /* soft — many pages use inline style */
+    /* soft. many pages use inline style */
   }
   workers.push({
     id: 'verify',
     label: 'Verify',
     ok: issues.length === 0,
-    note: issues.length ? issues.join('; ') : 'Structure looks usable — open Preview',
+    note: issues.length ? issues.join('; ') : 'Structure looks usable. open Preview',
   });
 
   const ok = workers.every(w => w.id === 'verify' ? w.ok : w.id !== 'code' || w.ok);
@@ -130,7 +130,7 @@ export async function runProjectMultiAgent(opts: {
     '',
     updated.length
       ? `Files touched: ${updated.map(p => `\`${p}\``).join(', ')}. Open **Preview** to review.`
-      : 'No file changes this pass — try a more specific edit ask.',
+      : 'No file changes this pass. try a more specific edit ask.',
   ].join('\n');
 
   return { ok, reply, files, updated, workers };
