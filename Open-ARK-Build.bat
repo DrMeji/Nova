@@ -1,21 +1,19 @@
 @echo off
-title ARK Desktop
+title ARK Desktop (source build)
 cd /d "%~dp0"
 
 echo.
 echo  ========================================
-echo   ARK - building your latest changes
+echo   ARK - source build (Open-ARK-Build)
 echo  ========================================
 echo.
-echo  Day-to-day testing: this bat builds THIS folder
-echo  and opens Electron. Do not use the installed
-echo  Start Menu ARK — that is the old GitHub build.
+echo  This is your day-to-day test path:
+echo    - Builds THIS folder and opens Electron
+echo    - Uses its own profile: %%AppData%%\ARK-Dev
+echo    - Models/keys do NOT mix with Start Menu ARK
 echo.
-echo  Signing: set CSC_LINK and CSC_KEY_PASSWORD
-echo  before Open-ARK-Packaged.bat for SmartScreen.
-echo.
-echo  For Check-Update testing, run Open-ARK-Packaged.bat
-echo  then install release\ARK-Setup.exe.
+echo  Do NOT run Start Menu ARK at the same time.
+echo  For installer/update testing use Open-ARK-Packaged.bat
 echo.
 
 where node >nul 2>&1
@@ -57,8 +55,6 @@ if errorlevel 1 (
   exit /b 1
 )
 
-REM Launch Electron binary directly — never "npx electron" on Windows.
-REM npx resolves to npx.ps1 which can open in Notepad instead of running ARK.
 if not exist "%ELECTRON_EXE%" (
   echo ERROR: Electron not found at:
   echo   %ELECTRON_EXE%
@@ -68,7 +64,8 @@ if not exist "%ELECTRON_EXE%" (
 )
 
 echo.
-echo  Build OK - launching ARK with your current code.
+echo  Build OK - launching ARK (dev profile ARK-Dev).
+echo  Settings - Testers is unlocked on source builds.
 echo  Close the app window when you are done testing.
 echo.
 start "" "%ELECTRON_EXE%" "%~dp0."

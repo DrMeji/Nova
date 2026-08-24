@@ -40,8 +40,10 @@ const MARKS: Record<string, Mark> = {
     bg: 'bg-white',
     node: (
       <Svg viewBox="0 0 24 24">
-        <path fill="#000" d="M4.4 4.5 16.5 2.7c.55-.09 1.02.25 1.1.7l2.4 15.2c.09.55-.28 1.05-.83 1.14L7.1 21.7c-.55.09-1.05-.25-1.14-.8L3.6 5.5c-.1-.55.25-1 .8-1z" />
-        <path fill="#fff" d="M8.5 8.2h1.85l3.7 7.6h.1V8.2H15.9v9.8h-1.9l-3.7-7.6h-.1v7.6H8.5V8.2z" />
+        <path
+          fill="#000"
+          d="M4.46 4.28c.2-.18.48-.24.92-.24h13.5c.2 0 .36.04.48.14.12.1.2.24.2.44v14.76c0 .22-.08.4-.24.52-.16.12-.36.18-.62.18H6.1c-.36 0-.62-.08-.8-.26-.16-.16-.26-.4-.26-.72V5.02c0-.3.1-.52.28-.74l-.1.01zm2.7 2.2v10.9h9.68V6.48H7.16zm1.7 1.5h1.46l2.9 5.4h.06V7.98h1.36v8.02h-1.5l-2.86-5.36h-.06v5.36H8.86V7.98z"
+        />
       </Svg>
     ),
   },
@@ -49,11 +51,11 @@ const MARKS: Record<string, Mark> = {
     bg: 'bg-white',
     node: (
       <Svg viewBox="0 0 24 24">
-        <path fill="#EA4335" d="M20.5 18.2V8.6L12 14.7 3.5 8.6v9.6c0 .9.7 1.6 1.6 1.6h13.8c.9 0 1.6-.7 1.6-1.6z" />
-        <path fill="#C5221F" d="M20.5 5.8c0-.9-.7-1.6-1.6-1.6H5.1c-.9 0-1.6.7-1.6 1.6v.4L12 12.8l8.5-6.6v-.4z" />
-        <path fill="#4285F4" d="M3.5 6.2v11.2c0 .3.1.6.2.9l5.5-4.4V9.8L3.5 6.2z" />
-        <path fill="#34A853" d="M20.5 6.2 15.3 9.8v4.1l5 4.4c.1-.3.2-.6.2-.9V6.2z" />
-        <path fill="#FBBC04" d="M12 12.8 3.5 6.2V5.8L12 12.1 20.5 5.8v.4L12 12.8z" />
+        <path fill="#4285F4" d="M2 6.75v10.5A1.75 1.75 0 0 0 3.75 19H6.5v-8.2L2 7.4V6.75z" />
+        <path fill="#34A853" d="M22 6.75v.65L17.5 10.8V19h2.75A1.75 1.75 0 0 0 22 17.25V6.75z" />
+        <path fill="#EA4335" d="M22 6.75H3.75A1.75 1.75 0 0 0 2 8.5v.4L12 16.1 22 8.9V8.5a1.75 1.75 0 0 0-1.75-1.75H22z" />
+        <path fill="#C5221F" d="M2 8.9 6.5 12.3V19H3.75A1.75 1.75 0 0 1 2 17.25V8.9z" />
+        <path fill="#FBBC05" d="M17.5 12.3 22 8.9v8.35A1.75 1.75 0 0 1 20.25 19H17.5v-6.7z" />
       </Svg>
     ),
   },
@@ -61,10 +63,10 @@ const MARKS: Record<string, Mark> = {
     bg: 'bg-white',
     node: (
       <Svg viewBox="0 0 24 24">
-        <path fill="#E01E5A" d="M8.1 13.8a1.7 1.7 0 1 1-1.7-1.7h1.7v1.7zm.9 0a1.7 1.7 0 1 1 3.4 0v4.3a1.7 1.7 0 1 1-3.4 0v-4.3z" />
-        <path fill="#36C5F0" d="M10.2 8.1a1.7 1.7 0 1 1 1.7-1.7v1.7h-1.7zm0 .9a1.7 1.7 0 1 1 0 3.4H5.9a1.7 1.7 0 1 1 0-3.4h4.3z" />
-        <path fill="#2EB67D" d="M15.9 10.2a1.7 1.7 0 1 1 1.7 1.7h-1.7v-1.7zm-.9 0a1.7 1.7 0 1 1-3.4 0V5.9a1.7 1.7 0 1 1 3.4 0v4.3z" />
-        <path fill="#ECB22E" d="M13.8 15.9a1.7 1.7 0 1 1-1.7 1.7v-1.7h1.7zm0-.9a1.7 1.7 0 1 1 0-3.4h4.3a1.7 1.7 0 1 1 0 3.4h-4.3z" />
+        <path fill="#E01E5A" d="M5.9 14.7a1.85 1.85 0 1 1-1.85-1.85h1.85v1.85zm.93 0a1.85 1.85 0 1 1 3.7 0v4.64a1.85 1.85 0 1 1-3.7 0v-4.64z" />
+        <path fill="#36C5F0" d="M9.3 5.9a1.85 1.85 0 1 1 1.85-1.85v1.85H9.3zm0 .93a1.85 1.85 0 1 1 0 3.7H4.66a1.85 1.85 0 1 1 0-3.7H9.3z" />
+        <path fill="#2EB67D" d="M18.1 9.3a1.85 1.85 0 1 1 1.85 1.85H18.1V9.3zm-.93 0a1.85 1.85 0 1 1-3.7 0V4.66a1.85 1.85 0 1 1 3.7 0V9.3z" />
+        <path fill="#ECB22E" d="M14.7 18.1a1.85 1.85 0 1 1-1.85 1.85V18.1h1.85zm0-.93a1.85 1.85 0 1 1 0-3.7h4.64a1.85 1.85 0 1 1 0 3.7H14.7z" />
       </Svg>
     ),
   },
@@ -92,9 +94,9 @@ const MARKS: Record<string, Mark> = {
     bg: 'bg-white',
     node: (
       <Svg viewBox="0 0 24 24">
-        <path fill="#0066DA" d="M8.4 4.5h7.2L12 11.1 8.4 4.5z" />
-        <path fill="#00AC47" d="M4.2 16.5 8.4 9l3.6 6.3H4.2z" />
-        <path fill="#FFBA00" d="M19.8 16.5H12l3.6-6.3 4.2 7.5z" />
+        <path fill="#4285F4" d="M8.09 3.5h7.82L22 14.05h-7.82L8.09 3.5z" />
+        <path fill="#34A853" d="M2 14.05 8.09 3.5l3.91 6.78L5.91 20.6 2 14.05z" />
+        <path fill="#FBBC04" d="M8.09 20.6h7.82L22 14.05H14.18L8.09 20.6z" />
       </Svg>
     ),
   },
@@ -102,9 +104,10 @@ const MARKS: Record<string, Mark> = {
     bg: 'bg-white',
     node: (
       <Svg viewBox="0 0 24 24">
-        <path fill="#1A73E8" d="M19.5 4.5h-2.2V3h-1.8v1.5H8.5V3H6.7v1.5H4.5A1.5 1.5 0 0 0 3 6v13.5A1.5 1.5 0 0 0 4.5 21h15a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5zm0 15H4.5V9h15v10.5z" />
-        <path fill="#EA4335" d="M6.7 3h1.8v1.5H6.7zm9 0h1.8v1.5h-1.8z" />
-        <text x="12" y="17.2" textAnchor="middle" fill="#1A73E8" fontSize="7" fontWeight="700" fontFamily="system-ui,Segoe UI,Arial">31</text>
+        <path fill="#1A73E8" d="M18.5 4h-1.75V2.5h-1.5V4h-6.5V2.5h-1.5V4H5.5A1.5 1.5 0 0 0 4 5.5v13A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5v-13A1.5 1.5 0 0 0 18.5 4zm0 14.5h-13V9h13v9.5z" />
+        <path fill="#EA4335" d="M7.25 2.5h1.5V4h-1.5zm8 0h1.5V4h-1.5z" />
+        <path fill="#34A853" d="M8.2 12.2h2.1v2.1H8.2zm3.25 0h2.1v2.1h-2.1zm3.25 0H16.8v2.1h-2.1zM8.2 15.4h2.1v2.1H8.2zm3.25 0h2.1v2.1h-2.1z" />
+        <path fill="#FBBC04" d="M14.7 15.4H16.8v2.1h-2.1z" />
       </Svg>
     ),
   },
@@ -359,6 +362,14 @@ const MARKS: Record<string, Mark> = {
       </Svg>
     ),
   },
+  perplexity: {
+    bg: 'bg-[#1FB8A8]',
+    node: (
+      <Svg>
+        <path fill="#fff" d="M11.2 3.5h1.6v6.2l4.4-4.2 1.1 1.2-4.6 4.3H18.5v1.6h-4.7l4.6 4.3-1.1 1.2-4.5-4.2v6.1h-1.6v-6.1l-4.5 4.2-1.1-1.2 4.6-4.3H5.5v-1.6h4.8L5.7 6.7l1.1-1.2 4.4 4.2V3.5z" />
+      </Svg>
+    ),
+  },
   flux: {
     bg: 'bg-[#7C3AED]',
     node: (
@@ -564,6 +575,8 @@ function resolveBrand(id: string, name?: string): string | null {
     ['together', 'together'],
     ['fireworks', 'fireworks'],
     ['xai', 'xai'],
+    ['perplexity', 'perplexity'],
+    ['sonar', 'perplexity'],
     ['flux', 'flux'],
     ['stable diffusion', 'stablediffusion'],
     ['sdxl', 'stablediffusion'],
@@ -598,6 +611,7 @@ export function BrandMark({
   tone,
   size = 'md',
   className = '',
+  glyph,
 }: {
   id: string;
   name?: string;
@@ -605,16 +619,34 @@ export function BrandMark({
   tone?: string;
   size?: Size;
   className?: string;
+  /** Local/catalog models: brain silhouette on brand gradient (keeps tone colors). */
+  glyph?: 'brain' | 'initial';
 }) {
   const key = resolveBrand(id, name);
   const mark = key ? MARKS[key] : null;
-  if (mark) {
+  if (mark && glyph !== 'brain') {
     return (
       <span
         className={`${SIZE_CLASS[size]} ${mark.bg} flex items-center justify-center shrink-0 overflow-hidden ${className}`}
         title={name || id}
       >
         {mark.node}
+      </span>
+    );
+  }
+  if (glyph === 'brain') {
+    return (
+      <span
+        className={`${SIZE_CLASS[size]} bg-gradient-to-br ${tone || 'from-zinc-600 to-zinc-900'} flex items-center justify-center text-white shrink-0 ${className}`}
+        title={name || id}
+      >
+        <svg viewBox="0 0 24 24" className="w-[58%] h-[58%]" fill="none" aria-hidden>
+          <path
+            fill="currentColor"
+            fillOpacity="0.95"
+            d="M9.5 3.5a3 3 0 0 0-2.9 2.25A3.5 3.5 0 0 0 3 9v1.2a3 3 0 0 0 1.2 5.7V17a3 3 0 0 0 3 3h.5a2.5 2.5 0 0 0 2.45-2H12v-1H9.5A1.5 1.5 0 0 1 8 15.5V15H6.5A1.5 1.5 0 0 1 5 13.5V10a2 2 0 0 1 2-2h.3A2.5 2.5 0 0 1 9.5 5.5 2 2 0 0 1 11.5 7v1H13V7a2 2 0 0 1 2-1.5 2.5 2.5 0 0 1 2.2 2.5H17.5A2 2 0 0 1 19.5 10v3.5A1.5 1.5 0 0 1 18 15h-1.5v.5A1.5 1.5 0 0 1 15 17H12.5v1h2.05A2.5 2.5 0 0 0 17 20h.5a3 3 0 0 0 3-3v-1.1a3 3 0 0 0 1.2-5.7V9a3.5 3.5 0 0 0-3.6-3.25A3 3 0 0 0 14.5 3.5a3.2 3.2 0 0 0-2.5 1.15A3.2 3.2 0 0 0 9.5 3.5z"
+          />
+        </svg>
       </span>
     );
   }

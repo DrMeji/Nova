@@ -1,19 +1,19 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Mic, MicOff, PanelLeft, Phone, PhoneOff } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useRouter } from '@/context/RouterContext';
 import { useSocial } from '@/context/SocialContext';
-import { ArkVoiceCall, sendCallSignal } from '@/lib/arkCall';
+import { useCall, formatCallElapsed } from '@/context/CallContext';
 import {
   isBlockedArkId,
   loadHiddenDemoContacts,
-  threadPreview,
   type ArkContact,
 } from '@/lib/arkSocial';
 import { formatArkId, isArkUserId, normalizeArkId } from '@/lib/arkUserId';
 import { GuestSocialBanner } from '@/components/GuestSocialBanner';
 import { ConnectShell } from '@/components/ConnectShell';
 import { buildDemoContacts, buildDemoThread } from '@/lib/socialDemo';
+import { threadPreview } from '@/lib/arkSocial';
 
 function initials(name: string) {
   const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
@@ -23,19 +23,14 @@ function initials(name: string) {
 }
 
 export function CallView() {
-  const { user, profile } = useAuth();
+  const { profile } = useAuth();
   const { route, navigate } = useRouter();
   const { contacts, inviteByArkId } = useSocial();
+  const { session, startCall, hangUp, toggleMute, elapsedSec, demoSimulateAnswer } = useCall();
   const myArkId = profile?.ark_id || '';
   const peer = route.name === 'call' ? route.peer : undefined;
-  const asCallee = route.name === 'call' ? Boolean(route.incoming) : false;
   const [addId, setAddId] = useState('');
-  const [status, setStatus] = useState<'idle' | 'ringing' | 'connecting' | 'live' | 'ended'>('idle');
-  const [muted, setMuted] = useState(false);
-  const [error, setError] = useState('');
-  const [round, setRound] = useState(0);
   const [railCompact, setRailCompact] = useState(false);
-  const callRef = useRef<ArkVoiceCall | null>(null);
 
   const people = useMemo(() => {
     const hidden = new Set(loadHiddenDemoContacts());
@@ -62,93 +57,13 @@ export function CallView() {
     return () => window.removeEventListener('ark:compact-connect-rail', compact);
   }, []);
 
-  const hangUp = () => {
-    if (myArkId && peer) {
-      void sendCallSignal({ kind: 'hangup', from: myArkId, to: peer }, user?.id);
-    }
-    callRef.current?.stop();
-    callRef.current = null;
-    setStatus('ended');
-  };
-
   useEffect(() => {
-    return () => {
-      callRef.current?.stop();
-      callRef.current = null;
-    };
-  }, []);
+    if (peer && !session) startCall(peer, people.find(c => c.arkId === peer)?.displayName);
+  }, [peer]); // eslint-disable-line react-hooks/exhaustive-deps -- dial when opening /call/:peer
 
-  useEffect(() => {
-    if (!myArkId || !peer) return;
-
-    const startMedia = async (isCaller: boolean) => {
-      try {
-        const voice = new ArkVoiceCall(myArkId, peer, user?.id || null, state => {
-          if (state === 'live') setStatus('live');
-          if (state === 'ended') setStatus('ended');
-          if (state === 'connecting') setStatus('connecting');
-        });
-        callRef.current = voice;
-        await voice.start(isCaller);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Microphone permission is needed for calls.');
-        setStatus('ended');
-      }
-    };
-
-    if (asCallee) {
-      setStatus('connecting');
-      void sendCallSignal({ kind: 'accept', from: myArkId, to: peer }, user?.id);
-      void startMedia(false);
-      return () => {
-        callRef.current?.stop();
-        callRef.current = null;
-      };
-    }
-
-    setStatus('ringing');
-    setError('');
-    void sendCallSignal({
-      kind: 'ring',
-      from: myArkId,
-      to: peer,
-      payload: { name: profile?.display_name || myArkId },
-    }, user?.id);
-
-    const ringTimer = window.setTimeout(() => {
-      setStatus('ended');
-      setError('No answer. They need ARK open with Call revealed. Try again, or Message them.');
-      void sendCallSignal({ kind: 'hangup', from: myArkId, to: peer }, user?.id);
-    }, 30000);
-
-    const onSig = (ev: Event) => {
-      const signal = (ev as CustomEvent).detail as { kind?: string; from?: string };
-      if (signal.from !== peer) return;
-      if (signal.kind === 'accept') {
-        window.clearTimeout(ringTimer);
-        setStatus('connecting');
-        void startMedia(true);
-      }
-      if (signal.kind === 'decline' || signal.kind === 'hangup') {
-        window.clearTimeout(ringTimer);
-        callRef.current?.stop();
-        setStatus('ended');
-      }
-    };
-    window.addEventListener('ark:call-signal', onSig);
-    return () => {
-      window.clearTimeout(ringTimer);
-      window.removeEventListener('ark:call-signal', onSig);
-      callRef.current?.stop();
-      callRef.current = null;
-    };
-  }, [myArkId, peer, asCallee, user?.id, profile?.display_name, round]);
-
-  useEffect(() => {
-    callRef.current?.setMuted(muted);
-  }, [muted]);
-
-  const person = people.find(c => c.arkId === peer);
+  const activePeer = session?.peerArkId || peer;
+  const person = people.find(c => c.arkId === activePeer);
+  const phase = session?.phase || 'idle';
 
   return (
     <ConnectShell
@@ -175,7 +90,7 @@ export function CallView() {
                       if (!isArkUserId(id)) return;
                       await inviteByArkId(id);
                       setAddId('');
-                      navigate({ name: 'call', peer: id });
+                      startCall(id);
                     }}
                   >
                     Call
@@ -199,10 +114,13 @@ export function CallView() {
                 key={c.arkId}
                 type="button"
                 title={c.displayName}
-                onClick={() => navigate({ name: 'call', peer: c.arkId })}
+                onClick={() => {
+                  navigate({ name: 'call', peer: c.arkId });
+                  startCall(c.arkId, c.displayName);
+                }}
                 className={`w-full flex items-center gap-2.5 text-left rounded-xl ${
                   railCompact ? 'justify-center py-2' : 'px-2.5 py-3'
-                } ${peer === c.arkId ? 'bg-surface-hover' : 'hover:bg-surface-hover/60'}`}
+                } ${activePeer === c.arkId ? 'bg-surface-hover' : 'hover:bg-surface-hover/60'}`}
               >
                 <span className="h-9 w-9 shrink-0 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-[11px] font-semibold text-content-primary">
                   {initials(c.displayName)}
@@ -220,51 +138,60 @@ export function CallView() {
       )}
     >
       <div className="flex-1 min-w-0 flex flex-col items-center justify-center px-6 text-center">
-        {!peer ? (
+        {!activePeer ? (
           <p className="text-sm text-content-tertiary max-w-sm">
-            Call another ARK user by their 7-digit ID. No Discord or Teams — it stays in ARK.
+            Call another ARK user by their 7-digit ID. The call bar stays visible while you browse other tabs.
           </p>
         ) : (
           <>
-            <div className="w-20 h-20 rounded-2xl bg-surface-hover border border-surface-border flex items-center justify-center text-2xl font-semibold text-content-primary mb-4">
-              {initials(person?.displayName || peer)}
+            <div className={`w-20 h-20 rounded-2xl border flex items-center justify-center text-2xl font-semibold text-content-primary mb-4 ${
+              phase === 'live' ? 'border-rose-400/40 bg-rose-500/10' : phase === 'outgoing' ? 'border-amber-400/40 bg-amber-500/10 animate-pulse' : 'bg-surface-hover border-surface-border'
+            }`}>
+              {initials(person?.displayName || activePeer)}
             </div>
-            <p className="text-lg font-medium text-content-primary">{person?.displayName || formatArkId(peer)}</p>
-            <p className="text-xs font-mono tracking-wider text-content-tertiary mt-1">{formatArkId(peer)}</p>
+            <p className="text-lg font-medium text-content-primary">{person?.displayName || formatArkId(activePeer)}</p>
+            <p className="text-xs font-mono tracking-wider text-content-tertiary mt-1">{formatArkId(activePeer)}</p>
             <p className="text-sm text-content-secondary mt-3">
-              {status === 'ringing' && 'Ringing… they need ARK open.'}
-              {status === 'connecting' && 'Connecting voice…'}
-              {status === 'live' && 'On a call'}
-              {status === 'ended' && 'Call ended'}
-              {status === 'idle' && 'Ready'}
+              {phase === 'outgoing' && 'Ringing…'}
+              {phase === 'connecting' && 'Connecting voice…'}
+              {phase === 'live' && `On a call · ${formatCallElapsed(elapsedSec)}`}
+              {phase === 'ended' && 'Call ended'}
+              {phase === 'idle' && 'Ready'}
             </p>
-            {error && <p className="text-xs text-amber-200/90 mt-2 max-w-sm">{error}</p>}
+            {session?.error && <p className="text-xs text-amber-200/90 mt-2 max-w-sm">{session.error}</p>}
             <div className="flex items-center gap-3 mt-8">
-              {status === 'live' && (
+              {phase === 'live' && session && (
                 <button
                   type="button"
-                  onClick={() => setMuted(v => !v)}
+                  onClick={toggleMute}
                   className="w-12 h-12 rounded-full border border-surface-border flex items-center justify-center text-content-secondary hover:text-content-primary"
                 >
-                  {muted ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+                  {session.muted ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+                </button>
+              )}
+              {phase === 'outgoing' && (
+                <button
+                  type="button"
+                  onClick={demoSimulateAnswer}
+                  className="rounded-full border border-violet-400/30 bg-violet-500/15 px-4 py-2 text-xs text-violet-200"
+                >
+                  Demo answer
                 </button>
               )}
               <button
                 type="button"
                 onClick={() => {
-                  if (status === 'ended' || status === 'idle') {
-                    setError('');
-                    setStatus('ringing');
-                    setRound(n => n + 1);
+                  if (phase === 'ended' || phase === 'idle') {
+                    startCall(activePeer, person?.displayName);
                     return;
                   }
                   hangUp();
                 }}
                 className={`w-14 h-14 rounded-full flex items-center justify-center text-white ${
-                  status === 'ended' ? 'bg-emerald-600' : 'bg-rose-600'
+                  phase === 'ended' || phase === 'idle' ? 'bg-emerald-600' : 'bg-rose-600'
                 }`}
               >
-                {status === 'ended' ? <Phone className="w-5 h-5" /> : <PhoneOff className="w-5 h-5" />}
+                {phase === 'ended' || phase === 'idle' ? <Phone className="w-5 h-5" /> : <PhoneOff className="w-5 h-5" />}
               </button>
             </div>
           </>

@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Ban, Download, File, Folder, Image as ImageIcon, Loader2, PanelLeft,
-  Phone, Plus, Send, Trash2, UserMinus, UserPlus, UsersRound,
+  Download, File, Folder, Image as ImageIcon, Loader2, PanelLeft,
+  Plus, Send, Trash2, UserMinus, UserPlus, UsersRound,
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useRouter } from '@/context/RouterContext';
 import { useSocial } from '@/context/SocialContext';
+import { useCall } from '@/context/CallContext';
+import { MessageDmCallPill, MessageGroupCallPill } from '@/components/CallRingUI';
 import {
   isBlockedArkId,
   listThread,
@@ -18,7 +20,7 @@ import {
   type MessageAttachment,
 } from '@/lib/arkSocial';
 import { formatArkId, isArkUserId, normalizeArkId } from '@/lib/arkUserId';
-import { isSocialParked } from '@/lib/featurePark';
+import { SOCIAL_DEMO_ENABLED } from '@/lib/socialDemo';
 import { GuestSocialBanner } from '@/components/GuestSocialBanner';
 import { ConnectShell } from '@/components/ConnectShell';
 import { Modal } from '@/components/Modal';
@@ -111,6 +113,7 @@ export function MessageView() {
   const { user, profile } = useAuth();
   const { route, navigate } = useRouter();
   const { contacts, inviteByArkId, refreshContacts, removeFriend, blockFriend, unreadFrom } = useSocial();
+  const { demoSimulateIncoming } = useCall();
   const myArkId = profile?.ark_id || '';
   const peer = route.name === 'message' ? route.peer : undefined;
   const groupId = route.name === 'message' ? route.groupId : undefined;
@@ -120,7 +123,7 @@ export function MessageView() {
   const [loading, setLoading] = useState(false);
   const [adding, setAdding] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
-  const [callActive, setCallActive] = useState(false);
+  const [addOk, setAddOk] = useState<string | null>(null);
   const [attachMenu, setAttachMenu] = useState(false);
   const [railCompact, setRailCompact] = useState(false);
   const [hiddenTick, setHiddenTick] = useState(0);
@@ -187,7 +190,6 @@ export function MessageView() {
   }, []);
 
   useEffect(() => {
-    setCallActive(false);
     setAttachMenu(false);
     setGroupPanelOpen(false);
     setAddToGroupOpen(false);
@@ -363,6 +365,7 @@ export function MessageView() {
   const add = async () => {
     const id = normalizeArkId(addId);
     setAddError(null);
+    setAddOk(null);
     if (!isArkUserId(id)) {
       setAddError('Enter a 7-digit ARK ID');
       return;
@@ -377,21 +380,15 @@ export function MessageView() {
     }
     setAdding(true);
     try {
-      const contact = await inviteByArkId(id);
+      await inviteByArkId(id);
       setAddId('');
-      if (contact) navigate({ name: 'message', peer: contact.arkId });
+      setAddOk(`Friend request was sent to ${id}`);
+      // Request pending — do not open a chat or show their profile.
       await refreshContacts();
     } catch (err) {
-      setAddError(err instanceof Error ? err.message : 'Could not add that ID');
+      setAddError(err instanceof Error ? err.message : 'Could not send friend request');
     }
     setAdding(false);
-  };
-
-  const toggleCall = () => {
-    setCallActive(v => !v);
-    if (!callActive && active && !isSocialParked('call')) {
-      navigate({ name: 'call', peer: active.arkId });
-    }
   };
 
   const unaddActive = () => {
@@ -517,6 +514,7 @@ export function MessageView() {
                 </button>
               </div>
               {addError && <p className="text-xs text-rose-300">{addError}</p>}
+              {addOk && <p className="text-xs text-emerald-300">{addOk}</p>}
             </div>
           </div>
         </div>
@@ -586,6 +584,7 @@ export function MessageView() {
               </button>
             </div>
             {addError && !railCompact && <p className="px-1 text-[10px] text-rose-300">{addError}</p>}
+            {addOk && !railCompact && <p className="px-1 text-[10px] text-emerald-300">{addOk}</p>}
           </div>
           <div className={`flex-1 overflow-y-auto pb-3 ${railCompact ? 'px-1.5 pt-4 space-y-1' : 'px-2 pt-5 space-y-1'}`}>
             {sortedGroups.map(g => {
@@ -714,19 +713,18 @@ export function MessageView() {
       ) : activeGroup ? (
         <>
           <div className="shrink-0 px-5 pt-3 pb-3 flex items-center justify-center">
-            <button
-              type="button"
-              onClick={() => {
+            <MessageGroupCallPill
+              groupId={activeGroup.id}
+              groupName={activeGroup.name}
+              memberArkIds={activeGroup.memberArkIds}
+              memberNames={activeGroup.memberArkIds.map(id =>
+                people.find(p => p.arkId === id)?.displayName || id,
+              )}
+              onOpenDetails={() => {
                 setEditGroupName(activeGroup.name);
                 setGroupPanelOpen(true);
               }}
-              className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-ark-navy-950/80 pl-3 pr-3 py-1.5 shadow-sm hover:bg-ark-navy-950 hover:border-white/20 transition-colors"
-              title="Group details"
-            >
-              <UsersRound className="w-3.5 h-3.5 text-sky-300" />
-              <p className="text-sm font-medium text-content-primary truncate max-w-[14rem]">{activeGroup.name}</p>
-              <span className="text-[10px] text-content-tertiary">{activeGroup.memberArkIds.length}</span>
-            </button>
+            />
           </div>
           <div className="flex-1 overflow-y-auto px-5 pt-6 pb-4 space-y-2.5">
             {thread.map(m => {
@@ -839,40 +837,17 @@ export function MessageView() {
       ) : (
         <>
           <div className="shrink-0 px-5 pt-3 pb-3 flex items-center justify-center">
-            <div className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-ark-navy-950/80 pl-4 pr-1.5 py-1 shadow-sm">
-              <p className="text-sm font-medium text-content-primary truncate max-w-[12rem] pr-2">{active!.displayName}</p>
-              <button
-                type="button"
-                onClick={unaddActive}
-                title="Unadd"
-                aria-label="Unadd"
-                className="h-7 w-7 shrink-0 rounded-full flex items-center justify-center text-content-tertiary hover:text-content-primary hover:bg-white/5"
-              >
-                <UserMinus className="w-3.5 h-3.5" />
-              </button>
-              <button
-                type="button"
-                onClick={blockActive}
-                title="Block"
-                aria-label="Block"
-                className="h-7 w-7 shrink-0 rounded-full flex items-center justify-center text-rose-300/90 hover:text-rose-200 hover:bg-rose-500/15"
-              >
-                <Ban className="w-3.5 h-3.5" />
-              </button>
-              <button
-                type="button"
-                onClick={toggleCall}
-                title={callActive ? 'End call' : 'Call'}
-                aria-label={callActive ? 'End call' : 'Call'}
-                className={`h-7 w-7 shrink-0 rounded-full flex items-center justify-center transition-colors ${
-                  callActive
-                    ? 'bg-rose-500 text-white hover:bg-rose-400'
-                    : 'bg-emerald-500 text-white hover:bg-emerald-400'
-                }`}
-              >
-                <Phone className="w-3.5 h-3.5" />
-              </button>
-            </div>
+            <MessageDmCallPill
+              displayName={active!.displayName}
+              peerArkId={active!.arkId}
+              onUnadd={unaddActive}
+              onBlock={blockActive}
+              onDemoRing={
+                SOCIAL_DEMO_ENABLED
+                  ? () => demoSimulateIncoming(active!.arkId, active!.displayName)
+                  : undefined
+              }
+            />
           </div>
 
           <div className="flex-1 overflow-y-auto px-5 pt-6 pb-4 space-y-2.5">

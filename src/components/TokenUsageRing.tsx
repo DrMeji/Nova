@@ -104,7 +104,7 @@ export function TokenUsageRing({
               strokeWidth={stroke}
               strokeLinecap="round"
               strokeDasharray={`${outerC * mdl} ${outerC}`}
-              className={mdl > 0.85 ? 'text-rose-400' : mdl > 0.55 ? 'text-amber-300' : 'text-violet-300'}
+              className={mdl > 0.85 ? 'text-rose-500' : mdl > 0.55 ? 'text-amber-500' : 'text-violet-500'}
             />
           )}
           {/* Inner — turn context */}
@@ -118,7 +118,7 @@ export function TokenUsageRing({
               strokeWidth={stroke}
               strokeLinecap="round"
               strokeDasharray={`${innerC * ctx} ${innerC}`}
-              className={ctx > 0.85 ? 'text-amber-300' : 'text-sky-300'}
+              className={ctx > 0.85 ? 'text-amber-500' : 'text-sky-500'}
             />
           )}
         </svg>
@@ -127,7 +127,7 @@ export function TokenUsageRing({
       {open && pos && createPortal(
         <div
           ref={popRef}
-          className="fixed z-[80] w-[220px] rounded-xl border border-surface-border bg-ark-navy-900/95 shadow-xl backdrop-blur-md p-3"
+          className="fixed z-[80] w-[220px] rounded-xl border border-surface-border bg-surface-panel shadow-xl backdrop-blur-md p-3"
           style={{ left: pos.left, bottom: pos.bottom }}
           role="dialog"
           aria-label="Usage rings"
@@ -140,14 +140,14 @@ export function TokenUsageRing({
             <div>
               <div className="flex items-center justify-between text-[11px] mb-1.5">
                 <span className="inline-flex items-center gap-1.5 text-content-secondary">
-                  <span className="w-2 h-2 rounded-full bg-sky-300 shrink-0" aria-hidden />
+                  <span className="w-2 h-2 rounded-full bg-sky-500 dark:bg-sky-300 shrink-0" aria-hidden />
                   {isLocal ? 'Context budget' : 'Turn context'}
                 </span>
-                <span className={`font-medium ${ctx > 0.85 ? 'text-amber-300' : 'text-content-primary'}`}>{ctxPct}%</span>
+                <span className={`font-medium ${ctx > 0.85 ? 'text-amber-600 dark:text-amber-300' : 'text-content-primary'}`}>{ctxPct}%</span>
               </div>
-              <div className="h-1.5 rounded-full bg-black/60 border border-white/[0.06] overflow-hidden">
+              <div className="h-1.5 rounded-full bg-surface-active border border-surface-border overflow-hidden">
                 <div
-                  className={`h-full rounded-full transition-[width] ${ctx > 0.85 ? 'bg-amber-400' : 'bg-sky-400'}`}
+                  className={`h-full rounded-full transition-[width] ${ctx > 0.85 ? 'bg-amber-500' : 'bg-sky-500'}`}
                   style={{ width: `${ctxPct}%` }}
                 />
               </div>
@@ -157,15 +157,15 @@ export function TokenUsageRing({
             <div>
               <div className="flex items-center justify-between text-[11px] mb-1.5">
                 <span className="inline-flex items-center gap-1.5 text-content-secondary">
-                  <span className={`w-2 h-2 rounded-full shrink-0 ${mdl > 0.85 ? 'bg-rose-400' : 'bg-violet-300'}`} aria-hidden />
+                  <span className={`w-2 h-2 rounded-full shrink-0 ${mdl > 0.85 ? 'bg-rose-500' : 'bg-violet-500 dark:bg-violet-300'}`} aria-hidden />
                   Model freshness
                 </span>
-                <span className={`font-medium ${mdl > 0.85 ? 'text-rose-300' : mdl > 0.55 ? 'text-amber-300' : 'text-content-primary'}`}>{mdlPct}%</span>
+                <span className={`font-medium ${mdl > 0.85 ? 'text-rose-600 dark:text-rose-300' : mdl > 0.55 ? 'text-amber-600 dark:text-amber-300' : 'text-content-primary'}`}>{mdlPct}%</span>
               </div>
-              <div className="h-1.5 rounded-full bg-black/60 border border-white/[0.06] overflow-hidden">
+              <div className="h-1.5 rounded-full bg-surface-active border border-surface-border overflow-hidden">
                 <div
                   className={`h-full rounded-full transition-[width] ${
-                    mdl > 0.85 ? 'bg-rose-400' : mdl > 0.55 ? 'bg-amber-400' : 'bg-violet-400'
+                    mdl > 0.85 ? 'bg-rose-500' : mdl > 0.55 ? 'bg-amber-500' : 'bg-violet-500'
                   }`}
                   style={{ width: `${mdlPct}%` }}
                 />

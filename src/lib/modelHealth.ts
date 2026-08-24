@@ -2,12 +2,12 @@
 
 const KEY = 'ark:model-health';
 
-/** ~20 minutes of continuous heavy use → ring near full. */
-const WEAR_MS_FULL = 20 * 60_000;
-/** ~30 coding/chat turns on the same brain → ring near full. */
-const WEAR_TURNS_FULL = 28;
+/** ~45 minutes of continuous heavy use → ring near full (image waits are long). */
+const WEAR_MS_FULL = 45 * 60_000;
+/** ~40 coding/chat turns on the same brain → ring near full. */
+const WEAR_TURNS_FULL = 40;
 /** Token volume that fills wear when combined with turns/time. */
-const WEAR_TOKENS_FULL = 48_000;
+const WEAR_TOKENS_FULL = 96_000;
 
 type HealthEntry = {
   turns: number;

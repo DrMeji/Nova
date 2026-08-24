@@ -3,7 +3,7 @@ import { useRouter, type Route } from '@/context/RouterContext';
 import {
   SquarePen, Briefcase, Blocks, Database,
   Settings, Search, PanelLeft, ChevronDown, History, Clock3,
-  ImageIcon, Video, MessageSquare, Archive, Trash2, Code2, Pencil,
+  ImageIcon, Video, MessageSquare, Trash2, Code2, Pencil,
   Globe, Bell, Copy, Star, Download, Brain,
 } from 'lucide-react';
 import { Modal } from './Modal';
@@ -13,6 +13,7 @@ import { useRecentProjects } from '@/context/RecentProjectsContext';
 import { useAuth } from '@/context/AuthContext';
 import { isSocialParked, isRevealed, isCodeTabEnabled } from '@/lib/featurePark';
 import { useSocial } from '@/context/SocialContext';
+import { SidebarCallDock } from '@/components/CallRingUI';
 import { getLocalPrefs, setLocalPrefs } from '@/lib/localPrefs';
 import {
   PRESENCE_OPTIONS,
@@ -126,7 +127,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [activity, setActivity] = useState(() => ({ ...getActivityFlags() }));
   const [doneChats, setDoneChats] = useState(() => new Set(getDoneChatIds()));
   const [navTick, setNavTick] = useState(0);
-  const { incoming, acceptCall, declineCall, unreadFrom } = useSocial();
+  const { unreadFrom } = useSocial();
 
   useEffect(() => {
     const onFeat = () => setNavTick(t => t + 1);
@@ -513,24 +514,6 @@ export function AppShell({ children }: { children: ReactNode }) {
             </button>
             <button
               type="button"
-              title={item.kind === 'chat' ? 'Archive to History' : 'Remove from Recent'}
-              aria-label={`Archive ${item.title}`}
-              onClick={(e) => {
-                e.stopPropagation();
-                if (item.kind === 'chat') {
-                  archiveChat(item.id);
-                  if (activeChatId === item.id) navigate({ name: 'chat' });
-                } else {
-                  removeRecent(item.id);
-                  if (activeRecentId === item.id) navigate({ name: 'chat' });
-                }
-              }}
-              className="opacity-0 group-hover:opacity-100 focus:opacity-100 w-7 h-7 rounded-md flex items-center justify-center text-content-tertiary hover:text-sky-300 hover:bg-surface-hover shrink-0 transition-opacity"
-            >
-              <Archive className="w-3.5 h-3.5" />
-            </button>
-            <button
-              type="button"
               title="Delete forever"
               aria-label={`Delete ${item.title}`}
               onClick={(e) => {
@@ -864,6 +847,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             )}
             {collapsed ? (
               <div className="flex flex-col items-center gap-1.5">
+                <SidebarCallDock />
                 <button
                   type="button"
                   onClick={() => setStatusMenuOpen(v => !v)}
@@ -890,6 +874,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               </div>
             ) : (
               <div className="space-y-2">
+                <SidebarCallDock />
                 <div className="flex items-center gap-2 rounded-xl border border-surface-border bg-ark-navy-950/80 px-2.5 py-2">
                   <button
                     type="button"
@@ -964,18 +949,6 @@ export function AppShell({ children }: { children: ReactNode }) {
 
         <main className="flex-1 min-h-0 min-w-0 overflow-hidden m-2 ml-2 relative flex flex-col">
           <div className="flex-1 min-h-0 overflow-hidden relative">
-          {incoming && isRevealed('call') ? (
-            <div className="absolute top-3 left-3 right-3 z-30 rounded-xl border border-sky-400/30 bg-ark-navy-900/95 backdrop-blur px-4 py-3 flex items-center justify-between gap-3 shadow-lg">
-              <div className="min-w-0">
-                <p className="text-sm font-medium text-content-primary truncate">Incoming call</p>
-                <p className="text-xs text-content-tertiary truncate">{incoming.fromName || incoming.from}</p>
-              </div>
-              <div className="flex items-center gap-2 shrink-0">
-                <button type="button" className="ark-btn-secondary text-xs" onClick={declineCall}>Decline</button>
-                <button type="button" className="ark-btn-primary text-xs" onClick={acceptCall}>Accept</button>
-              </div>
-            </div>
-          ) : null}
           {children}
           </div>
         </main>

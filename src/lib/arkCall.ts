@@ -1,6 +1,6 @@
 /**
- * Voice calls between ARK IDs. Signaling over Supabase channels;
- * media is peer-to-peer WebRTC (STUN only — no extra calling app).
+ * Voice calls between ARK IDs. Signaling over Supabase Realtime + Postgres;
+ * media is peer-to-peer WebRTC (STUN + optional TURN from env).
  */
 
 import { supabase } from '@/lib/supabase';
@@ -18,9 +18,22 @@ export type IncomingCall = {
   fromName?: string;
 };
 
-const ICE: RTCConfiguration = {
-  iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
-};
+const PERSIST_KINDS = new Set<CallSignal['kind']>(['ring', 'accept', 'decline', 'hangup', 'offer', 'answer', 'ice']);
+
+function buildIceConfig(): RTCConfiguration {
+  const servers: RTCIceServer[] = [{ urls: 'stun:stun.l.google.com:19302' }];
+  const turnUrl = (import.meta.env.VITE_TURN_URL as string | undefined)?.trim();
+  if (turnUrl) {
+    servers.push({
+      urls: turnUrl,
+      username: (import.meta.env.VITE_TURN_USERNAME as string | undefined)?.trim() || undefined,
+      credential: (import.meta.env.VITE_TURN_CREDENTIAL as string | undefined)?.trim() || undefined,
+    });
+  }
+  return { iceServers: servers };
+}
+
+const ICE = buildIceConfig();
 
 function pairChannel(a: string, b: string) {
   return `ark-call-${[a, b].sort().join('-')}`;
@@ -28,6 +41,29 @@ function pairChannel(a: string, b: string) {
 
 function userChannel(arkId: string) {
   return `ark-user-${arkId}`;
+}
+
+function rowToSignal(row: Record<string, unknown>): CallSignal {
+  return {
+    kind: String(row.kind) as CallSignal['kind'],
+    from: String(row.from_ark_id),
+    to: String(row.to_ark_id),
+    payload: (row.payload as Record<string, unknown>) || {},
+  };
+}
+
+async function persistSignal(signal: CallSignal, userId?: string | null) {
+  if (!canUseCloud(userId) || !PERSIST_KINDS.has(signal.kind)) return;
+  try {
+    await supabase.from('ark_call_signals').insert({
+      from_ark_id: signal.from,
+      to_ark_id: signal.to,
+      kind: signal.kind,
+      payload: signal.payload || {},
+    });
+  } catch {
+    /* ignore */
+  }
 }
 
 export async function sendCallSignal(signal: CallSignal, userId?: string | null) {
@@ -46,27 +82,50 @@ export async function sendCallSignal(signal: CallSignal, userId?: string | null)
     sendOn(userChannel(signal.to)),
     sendOn(pairChannel(signal.from, signal.to)),
   ]);
+  await persistSignal(signal, userId);
+}
 
-  if (canUseCloud(userId) && (signal.kind === 'ring' || signal.kind === 'hangup' || signal.kind === 'decline')) {
-    try {
-      await supabase.from('ark_call_signals').insert({
-        from_ark_id: signal.from,
-        to_ark_id: signal.to,
-        kind: signal.kind,
-        payload: signal.payload || {},
-      });
-    } catch {
-      /* ignore */
+/** Catch signals delivered while the app was offline or Realtime was reconnecting. */
+export async function fetchRecentCallSignals(myArkId: string, peerArkId?: string, sinceMs = 90_000): Promise<CallSignal[]> {
+  if (!myArkId) return [];
+  const since = new Date(Date.now() - sinceMs).toISOString();
+  try {
+    let q = supabase
+      .from('ark_call_signals')
+      .select('*')
+      .eq('to_ark_id', myArkId)
+      .gte('created_at', since)
+      .order('created_at', { ascending: true })
+      .limit(120);
+    if (peerArkId) {
+      q = q.eq('from_ark_id', peerArkId);
     }
+    const { data, error } = await q;
+    if (error || !data) return [];
+    return data.map(r => rowToSignal(r as Record<string, unknown>));
+  } catch {
+    return [];
   }
 }
 
 export function subscribeUserSignals(myArkId: string, onSignal: (signal: CallSignal) => void) {
+  const seen = new Set<string>();
+  const deliver = (signal: CallSignal, id?: string) => {
+    if (signal?.to !== myArkId || !signal.from) return;
+    const key = id || `${signal.kind}-${signal.from}-${JSON.stringify(signal.payload || {}).slice(0, 80)}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    onSignal(signal);
+  };
+
+  void fetchRecentCallSignals(myArkId).then(rows => {
+    rows.forEach(r => deliver(r, `${r.kind}-${r.from}-${Date.now()}`));
+  });
+
   const ch = supabase
     .channel(userChannel(myArkId))
     .on('broadcast', { event: 'ark-call' }, ({ payload }) => {
-      const signal = payload as CallSignal;
-      if (signal?.to === myArkId && signal.from) onSignal(signal);
+      deliver(payload as CallSignal);
     })
     .subscribe();
 
@@ -78,12 +137,7 @@ export function subscribeUserSignals(myArkId: string, onSignal: (signal: CallSig
       payload => {
         const row = payload.new as Record<string, unknown>;
         if (String(row.to_ark_id) !== myArkId) return;
-        onSignal({
-          kind: String(row.kind) as CallSignal['kind'],
-          from: String(row.from_ark_id),
-          to: String(row.to_ark_id),
-          payload: (row.payload as Record<string, unknown>) || {},
-        });
+        deliver(rowToSignal(row), String(row.id));
       },
     )
     .subscribe();
@@ -95,12 +149,23 @@ export function subscribeUserSignals(myArkId: string, onSignal: (signal: CallSig
 }
 
 export function subscribeCallPair(myArkId: string, peerArkId: string, onSignal: (signal: CallSignal) => void) {
+  const seen = new Set<string>();
+  const deliver = (signal: CallSignal) => {
+    if (!signal?.kind || signal.from === myArkId) return;
+    const key = `${signal.kind}-${signal.from}-${JSON.stringify(signal.payload || {}).slice(0, 120)}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    onSignal(signal);
+  };
+
+  void fetchRecentCallSignals(myArkId, peerArkId).then(rows => {
+    rows.forEach(deliver);
+  });
+
   const ch = supabase
     .channel(pairChannel(myArkId, peerArkId))
     .on('broadcast', { event: 'ark-call' }, ({ payload }) => {
-      const signal = payload as CallSignal;
-      if (!signal?.kind || signal.from === myArkId) return;
-      onSignal(signal);
+      deliver(payload as CallSignal);
     })
     .subscribe();
   return () => {

@@ -80,6 +80,14 @@ const PROBES: Record<string, ProbeSpec> = {
     name: 'SambaNova',
     run: openaiModels('https://api.sambanova.ai/v1/models'),
   },
+  perplexity: {
+    name: 'Perplexity',
+    run: openaiModels('https://api.perplexity.ai/models'),
+  },
+  xai: {
+    name: 'xAI',
+    run: openaiModels('https://api.x.ai/v1/models'),
+  },
   google: {
     name: 'Google AI Studio',
     run: async (key) => {

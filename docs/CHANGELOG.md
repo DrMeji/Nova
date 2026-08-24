@@ -1,5 +1,24 @@
 # ARK changelog
 
+## 0.1.141 — 2026-08-24
+
+Live social: cloud friend requests, real-time DMs, and internet voice calls.
+
+**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.141/ARK-Setup.exe) · [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.141)
+
+### Social (production)
+
+- **Friend requests** sync through Supabase (`ark_friend_requests`) — add by ARK ID, accept in Notifications on the other device.
+- **Direct messages** already use Supabase Realtime; friend flow is now wired for cross-user use when signed in.
+- **Voice calls** use Supabase signaling + WebRTC audio; offer/answer/ICE persist for reconnect catch-up.
+- **Call tab** enabled by default (no Testers toggle required).
+- **Call UI** on message pill + sidebar dock (colored ring, mute, timer).
+- Docs: [social-connectivity.md](./social-connectivity.md) — how messaging and calls work over the internet.
+
+### Backend migration
+
+Apply `supabase/migrations/20260824100000_ark_friend_requests.sql` on the hosted Supabase project and enable Realtime on `ark_friend_requests`.
+
 ## 0.1.140 — 2026-08-24
 
 Image quality, chat keep-alive, NSFW gate, and static-project fixes.

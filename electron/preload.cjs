@@ -1,8 +1,12 @@
 const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
+const packagedFlag = process.argv.find(a => typeof a === 'string' && a.startsWith('--ark-packaged='));
+const isPackagedApp = packagedFlag ? packagedFlag.endsWith('=1') : false;
+
 contextBridge.exposeInMainWorld('arkDesktop', {
   isElectron: true,
-  isPackaged: process.argv.includes('--ark-packaged=1'),
+  isPackaged: isPackagedApp,
+  isDevBuild: !isPackagedApp,
   platform: process.platform,
   versions: {
     electron: process.versions.electron,

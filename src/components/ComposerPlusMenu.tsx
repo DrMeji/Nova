@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  Plus, FilePlus2, ListTree, MessageCircleQuestion, Bug, Layers2, FolderOpen, ImagePlus, Zap, Users,
+  Plus, ListTree, MessageCircleQuestion, Bug, FolderOpen, ImagePlus, Zap, Users,
 } from 'lucide-react';
 
 export type ComposerPlusAction =
@@ -39,9 +39,7 @@ const ITEMS: {
   { id: 'agent', label: 'Agent', hint: 'Edit files and run approved tools in workspace', icon: Zap },
   { id: 'debug', label: 'Debug', hint: 'Find bugs and propose fixes', icon: Bug },
   { id: 'multitask', label: 'Multi-agent', hint: 'Design → Code → Verify on this project together', icon: Users },
-  { id: 'file', label: 'Add file', hint: 'Windows File Explorer — pick one or more files', icon: FilePlus2 },
-  { id: 'image', label: 'Add photo', hint: 'Screenshot or photo — show ARK exactly what to fix', icon: ImagePlus },
-  { id: 'folder', label: 'Open folder', hint: 'Edit files in place on your PC (recommended)', icon: FolderOpen },
+  { id: 'folder', label: 'Open folder', hint: 'Attach a project folder to edit in this chat', icon: FolderOpen },
   { id: 'import-folder', label: 'Import copy', hint: 'Copy folder into ARK storage (sandbox)', icon: FolderOpen },
   { id: 'enter-path', label: 'Enter path…', hint: 'Type a folder path and approve access', icon: FolderOpen },
 ];
@@ -50,16 +48,18 @@ const MODE_IDS = new Set<ComposerPlusAction>(['plan', 'ask', 'agent', 'debug', '
 
 function itemsForScope(scope: 'chat' | 'image' | 'code') {
   if (scope === 'image') {
-    return ITEMS.filter(m => m.id === 'image');
+    return [
+      { id: 'image' as const, label: 'Add photo', hint: 'Upload a photo to recreate or improve', icon: ImagePlus },
+    ];
   }
   if (scope === 'code') {
     return ITEMS.filter(m =>
-      m.id === 'file' || m.id === 'image' || m.id === 'folder'
+      m.id === 'folder'
       || m.id === 'import-folder' || m.id === 'enter-path' || MODE_IDS.has(m.id));
   }
-  // Chat: modes + attach (photo for UI screenshots while building)
+  // Chat: modes + open folder only
   return ITEMS.filter(m =>
-    m.id === 'file' || m.id === 'image' || m.id === 'folder'
+    m.id === 'folder'
     || m.id === 'plan' || m.id === 'ask' || m.id === 'agent' || m.id === 'multitask' || m.id === 'debug');
 }
 

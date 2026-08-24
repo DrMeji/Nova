@@ -1,11 +1,11 @@
-/** Parked product surfaces. Networking + Message are live; Call stays opt-in via Testers. */
+/** Parked product surfaces. Networking, Message, and Call are live. */
 
 export type ParkId = 'networking' | 'message' | 'call' | 'testers';
 
 const KEY = 'ark:revealed-features';
 
-/** Always available in the sidebar — not behind Testers. */
-const ALWAYS_LIVE: ParkId[] = ['networking', 'message'];
+/** Networking, Message, and Call are live for signed-in users. */
+const ALWAYS_LIVE: ParkId[] = ['networking', 'message', 'call'];
 
 function readList(): ParkId[] {
   try {

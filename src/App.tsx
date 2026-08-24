@@ -20,10 +20,13 @@ import { MessageView } from '@/views/MessageView';
 import { CallView } from '@/views/CallView';
 import { NotificationsView } from '@/views/NotificationsView';
 import { SocialProvider } from '@/context/SocialContext';
+import { CallProvider } from '@/context/CallContext';
 import { ParkedNotice } from '@/components/ParkedNotice';
 import { PinLockGate } from '@/components/PinLockGate';
-import { isSocialParked, isCodeTabEnabled } from '@/lib/featurePark';
+import { isSocialParked, isRevealed, setRevealed, isCodeTabEnabled } from '@/lib/featurePark';
 import { runCleanBootIfNeeded } from '@/lib/clearSession';
+import { runSocialReleaseCleanIfNeeded } from '@/lib/socialCleanBoot';
+import { isArkDevSession } from '@/lib/arkRuntime';
 import { getLocalPrefs } from '@/lib/localPrefs';
 import { startModelHuntCycle } from '@/lib/arkHuntBootstrap';
 import { needsFirstRunSetup } from '@/lib/setup';
@@ -33,6 +36,13 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Loader2 } from 'lucide-react';
 
 runCleanBootIfNeeded();
+runSocialReleaseCleanIfNeeded();
+
+function ensureDevFeatureAccess() {
+  if (!isArkDevSession()) return;
+  if (!isRevealed('call')) setRevealed('call', true);
+}
+ensureDevFeatureAccess();
 
 function AppRoutes() {
   const { route } = useRouter();
@@ -139,6 +149,7 @@ function AppContent() {
   return (
     <RecentProjectsProvider>
       <SocialProvider>
+        <CallProvider>
         <PinLockGate>
         <AppShell>
           <HuntOnLaunch />
@@ -146,6 +157,7 @@ function AppContent() {
           <AppRoutes />
         </AppShell>
         </PinLockGate>
+        </CallProvider>
       </SocialProvider>
     </RecentProjectsProvider>
   );

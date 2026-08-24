@@ -177,6 +177,8 @@ const CLOUD_PROVIDERS: CloudProvider[] = [
   { id: 'mistral', name: 'Mistral', description: 'Mistral and Codestral — wired into ARK Router.', tiers: ['free', 'pro'], tone: 'from-orange-400 to-amber-700', initial: 'Mi', health: 'available', availability: 'live' },
   { id: 'cerebras', name: 'Cerebras', description: 'Ultra-fast Llama free tier — wired into ARK Router.', tiers: ['free', 'pro'], tone: 'from-cyan-500 to-teal-800', initial: 'Ce', health: 'available', availability: 'live' },
   { id: 'sambanova', name: 'SambaNova', description: 'SambaNova Cloud open models — wired into ARK Router.', tiers: ['free', 'pro'], tone: 'from-fuchsia-500 to-purple-800', initial: 'Sn', health: 'available', availability: 'live' },
+  { id: 'perplexity', name: 'Perplexity', description: 'Sonar chat with live search — add your API key.', tiers: ['pro'], tone: 'from-teal-400 to-cyan-800', initial: 'Px', health: 'available', availability: 'live' },
+  { id: 'xai', name: 'xAI', description: 'Grok models — add your xAI API key.', tiers: ['pro'], tone: 'from-zinc-400 to-black', initial: 'xA', health: 'available', availability: 'live' },
   { id: 'github-models', name: 'GitHub Models', description: 'Retired by GitHub (July 2026).', tiers: ['free'], tone: 'from-zinc-500 to-zinc-900', initial: 'GH', health: 'offline', availability: 'retired' },
 ];
 
@@ -1060,6 +1062,7 @@ export function ModelsView() {
                             name={model.name}
                             initial={huntSourceBadge(model.source)}
                             tone={model.source === 'modelscope' ? 'from-sky-500 to-indigo-700' : 'from-emerald-400 to-sky-700'}
+                            glyph="brain"
                           />
                           <span className="min-w-0 flex-1">
                             <span className="flex items-center gap-2 min-w-0 flex-wrap">
@@ -1110,7 +1113,7 @@ export function ModelsView() {
                                 key={`${section.id}-${model.id}`}
                                 className="flex items-center gap-3 py-3 rounded-xl px-1 hover:bg-surface-hover/50 transition-colors"
                               >
-                                <BrandMark id={model.id} name={model.name} initial={model.initial} tone={model.tone} />
+                                <BrandMark id={model.id} name={model.name} initial={model.initial} tone={model.tone} glyph="brain" />
                                 <span className="min-w-0 flex-1">
                                   <span className="flex items-center gap-2 min-w-0 flex-wrap">
                                     <span className="text-sm font-medium text-content-primary truncate">{model.name}</span>
@@ -1158,7 +1161,7 @@ export function ModelsView() {
                           key={model.id}
                           className="w-full flex items-center gap-3 py-3 px-1 rounded-xl hover:bg-surface-hover/50 transition-colors min-w-0"
                         >
-                          <BrandMark id={model.id} name={model.name} initial={model.initial} tone={model.tone} />
+                          <BrandMark id={model.id} name={model.name} initial={model.initial} tone={model.tone} glyph="brain" />
                           <span className="min-w-0 flex-1">
                             <span className="flex items-center gap-2 min-w-0 flex-wrap">
                               <span className="text-sm font-medium text-content-primary truncate">{model.name}</span>
@@ -1199,7 +1202,7 @@ export function ModelsView() {
                             key={model.id}
                             className="flex items-center gap-3 py-3 rounded-xl px-1 hover:bg-surface-hover/50 transition-colors"
                           >
-                            <BrandMark id={model.id} name={model.name} initial={model.initial} tone={model.tone} />
+                            <BrandMark id={model.id} name={model.name} initial={model.initial} tone={model.tone} glyph="brain" />
                             <span className="min-w-0 flex-1">
                               <span className="flex items-center gap-2 min-w-0 flex-wrap">
                                 <span className="text-sm font-medium text-content-primary truncate">{model.name}</span>
@@ -1495,7 +1498,7 @@ export function ModelsView() {
                               avail !== 'live' ? 'opacity-80' : ''
                             }`}
                           >
-                            <BrandMark id={model.id} name={model.name} initial={model.initial} tone={model.tone} />
+                            <BrandMark id={model.id} name={model.name} initial={model.initial} tone={model.tone} glyph="brain" />
                             <span className="min-w-0 flex-1">
                               <span className="flex items-center gap-2 min-w-0 flex-wrap">
                                 <span className="text-sm font-medium text-content-primary truncate">{model.name}</span>

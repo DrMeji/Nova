@@ -470,10 +470,10 @@ export async function mergeGuestSocialToCloud(userId: string): Promise<void> {
   for (const c of contacts) {
     try {
       await supabase.from('ark_contacts').upsert({
-        user_id: userId,
-        contact_ark_id: c.arkId,
+        owner_id: userId,
+        peer_ark_id: c.arkId,
         display_name: c.displayName,
-      }, { onConflict: 'user_id,contact_ark_id' });
+      }, { onConflict: 'owner_id,peer_ark_id' });
     } catch {
       /* keep going */
     }

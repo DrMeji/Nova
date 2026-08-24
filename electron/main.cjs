@@ -21,10 +21,16 @@ const arkConfig = require('./arkConfig.cjs');
 const arkPcInventory = require('./arkPcInventory.cjs');
 
 const DEV_URL = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173';
+/** True only when Vite dev server is running (`npm run electron:dev`). Bat builds use dist/ instead. */
 const isDev = process.env.ARK_DEV === '1';
 const isUpdaterMode = process.argv.includes('--ark-updater');
 const BRAIN_PORT = arkConfig.BRAIN_PORT_BASE;
 let brainPort = BRAIN_PORT;
+
+// Source builds (Open-ARK-Build.bat) keep their own profile so models/keys never clash with Setup.exe.
+if (!app.isPackaged) {
+  app.setPath('userData', path.join(app.getPath('appData'), 'ARK-Dev'));
+}
 
 const ALLOWED_HOSTS = new Set([
   'api.github.com',
@@ -344,9 +350,32 @@ function createWindow() {
   });
 
   win.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    try {
+      const { shell } = require('electron');
+      if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
+    } catch { /* ignore */ }
     return { action: 'deny' };
   });
+
+  // Packaged app: block DevTools / element inspector so end users cannot view source.
+  // Dev / unpackaged builds still allow F12 and Ctrl+Shift+I for debugging.
+  if (packaged && !isDev) {
+    win.webContents.on('before-input-event', (event, input) => {
+      const key = String(input.key || '').toLowerCase();
+      const ctrl = Boolean(input.control || input.meta);
+      const shift = Boolean(input.shift);
+      const isDevtoolsChord =
+        key === 'f12'
+        || (ctrl && shift && (key === 'i' || key === 'j' || key === 'c'))
+        || (ctrl && key === 'u');
+      if (isDevtoolsChord) {
+        event.preventDefault();
+      }
+    });
+    try {
+      win.webContents.closeDevTools();
+    } catch { /* ignore */ }
+  }
 
   if (!app.isPackaged) {
     win.webContents.on('console-message', (_event, level, message, line, sourceId) => {
@@ -593,7 +622,9 @@ ipcMain.handle('ark:login-item-set', async (_event, payload) => {
 ipcMain.handle('ark:app-meta', async () => ({
   ok: true,
   isPackaged: app.isPackaged,
+  isDevBuild: !app.isPackaged,
   isDev: Boolean(isDev),
+  userDataProfile: app.isPackaged ? 'ARK' : 'ARK-Dev',
   version: app.getVersion(),
   name: app.getName(),
   updateFeed: arkUpdater.UPDATE_REPO,

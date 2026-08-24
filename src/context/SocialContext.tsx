@@ -2,40 +2,37 @@ import { createContext, useContext, useEffect, useMemo, useState, type ReactNode
 import { useAuth } from '@/context/AuthContext';
 import { useRouter } from '@/context/RouterContext';
 import {
-  addContact,
   blockArkId,
   hideDemoContact,
   listContacts,
-  persistContact,
   removeContact,
   subscribeMessages,
   type ArkContact,
   type DirectMessage,
 } from '@/lib/arkSocial';
-import { sendCallSignal, subscribeUserSignals, type IncomingCall } from '@/lib/arkCall';
-import { isRevealed, isSocialParked } from '@/lib/featurePark';
+import { sendFriendRequest, respondFriendRequest, subscribeFriendRequests, syncFriendRequests } from '@/lib/friendRequests';
+import { getLocalPrefs } from '@/lib/localPrefs';
+import { isRevealed } from '@/lib/featurePark';
 import { notifyWorkDone } from '@/lib/activityIndicators';
 import { pushSidebarToast } from '@/lib/sidebarToast';
 
 type SocialContextValue = {
   contacts: ArkContact[];
-  incoming: IncomingCall | null;
   unreadFrom: string[];
   refreshContacts: () => Promise<void>;
   inviteByArkId: (arkId: string, displayName?: string) => Promise<ArkContact | null>;
+  acceptFriendRequest: (requestId: string) => Promise<ArkContact | null>;
+  declineFriendRequest: (requestId: string) => void;
   removeFriend: (arkId: string) => void;
   blockFriend: (arkId: string) => void;
-  acceptCall: () => void;
-  declineCall: () => void;
 };
 
 const SocialContext = createContext<SocialContextValue | undefined>(undefined);
 
 export function SocialProvider({ children }: { children: ReactNode }) {
   const { user, profile } = useAuth();
-  const { navigate, route } = useRouter();
+  const { route } = useRouter();
   const [contacts, setContacts] = useState<ArkContact[]>([]);
-  const [incoming, setIncoming] = useState<IncomingCall | null>(null);
   const [unreadFrom, setUnreadFrom] = useState<string[]>([]);
   const myArkId = profile?.ark_id || '';
 
@@ -47,6 +44,18 @@ export function SocialProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     void refreshContacts();
   }, [user?.id]);
+
+  useEffect(() => {
+    if (!myArkId) return;
+    void syncFriendRequests(myArkId, user?.id);
+    const unsub = subscribeFriendRequests(myArkId, user?.id, {
+      onAccepted: () => {
+        void refreshContacts();
+        pushSidebarToast('Friend request accepted — you’re connected', { ttlMs: 8_000, id: 'fr-accepted' });
+      },
+    });
+    return unsub;
+  }, [myArkId, user?.id]);
 
   useEffect(() => {
     if (!myArkId) return;
@@ -74,30 +83,30 @@ export function SocialProvider({ children }: { children: ReactNode }) {
     }
   }, [route]);
 
-  useEffect(() => {
-    if (!myArkId) return;
-    const unsub = subscribeUserSignals(myArkId, signal => {
-      if (signal.kind === 'ring' && signal.to === myArkId) {
-        setIncoming({
-          from: signal.from,
-          fromName: typeof signal.payload?.name === 'string' ? signal.payload.name : signal.from,
-        });
-        if (isRevealed('call')) notifyWorkDone('call');
-      }
-      if (signal.kind === 'hangup' || signal.kind === 'decline') {
-        setIncoming(prev => (prev && (signal.from === prev.from || signal.to === myArkId) ? null : prev));
-      }
-      window.dispatchEvent(new CustomEvent('ark:call-signal', { detail: signal }));
+  const inviteByArkId = async (arkId: string, _displayName?: string) => {
+    const prefs = getLocalPrefs();
+    const fromName = prefs.displayName || profile?.display_name || 'ARK user';
+    const result = await sendFriendRequest({
+      fromArkId: myArkId,
+      fromName,
+      fromAvatarUrl: prefs.avatarDataUrl,
+      toArkIdRaw: arkId,
+      userId: user?.id,
     });
-    return unsub;
-  }, [myArkId]);
+    if (!result.ok) throw new Error(result.error);
+    return null;
+  };
 
-  const inviteByArkId = async (arkId: string, displayName?: string) => {
-    const contact = await addContact(arkId, displayName);
-    if (!contact) return null;
-    await persistContact(user?.id, contact);
-    await refreshContacts();
-    return contact;
+  const acceptFriendRequest = async (requestId: string) => {
+    const req = await respondFriendRequest(requestId, 'accepted', { userId: user?.id, myArkId });
+    if (!req) return null;
+    const list = await listContacts(user?.id);
+    setContacts(list);
+    return list.find(c => c.arkId === req.fromArkId) || null;
+  };
+
+  const declineFriendRequest = (requestId: string) => {
+    void respondFriendRequest(requestId, 'declined', { userId: user?.id, myArkId });
   };
 
   const removeFriend = (arkId: string) => {
@@ -112,33 +121,18 @@ export function SocialProvider({ children }: { children: ReactNode }) {
     void refreshContacts();
   };
 
-  const acceptCall = () => {
-    if (!incoming) return;
-    const peer = incoming.from;
-    setIncoming(null);
-    if (isSocialParked('call')) return;
-    navigate({ name: 'call', peer, incoming: true });
-  };
-
-  const declineCall = () => {
-    if (!incoming || !myArkId) return;
-    void sendCallSignal({ kind: 'decline', from: myArkId, to: incoming.from }, user?.id);
-    setIncoming(null);
-  };
-
   const value = useMemo(
     () => ({
       contacts,
-      incoming,
       unreadFrom,
       refreshContacts,
       inviteByArkId,
+      acceptFriendRequest,
+      declineFriendRequest,
       removeFriend,
       blockFriend,
-      acceptCall,
-      declineCall,
     }),
-    [contacts, incoming, unreadFrom],
+    [contacts, unreadFrom, myArkId, profile?.display_name, user?.id],
   );
 
   return <SocialContext.Provider value={value}>{children}</SocialContext.Provider>;

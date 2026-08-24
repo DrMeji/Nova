@@ -3,9 +3,10 @@
  */
 
 import type { ArkContact, DirectMessage, MessageAttachment, NetworkPost } from '@/lib/arkSocial';
+import { isSocialDemoEnabled } from '@/lib/arkRuntime';
 
-/** True only in `npm run electron:dev` / Vite DEV. Packaged releases are always clean. */
-export const SOCIAL_DEMO_ENABLED = import.meta.env.DEV;
+/** True for bat/source builds and Vite dev — false for installed Setup.exe. */
+export const SOCIAL_DEMO_ENABLED = isSocialDemoEnabled();
 
 export function buildDemoNetworkPosts(myArkId: string): NetworkPost[] {
   if (!SOCIAL_DEMO_ENABLED) return [];

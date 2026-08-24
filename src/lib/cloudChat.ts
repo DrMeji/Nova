@@ -382,6 +382,24 @@ async function chatSambaNova(
   return openaiCompatible('https://api.sambanova.ai/v1/chat/completions', key, model, history, undefined, onChunk, 'sambanova');
 }
 
+async function chatPerplexity(
+  key: string,
+  history: RouterChatTurn[],
+  model: string,
+  onChunk?: (text: string) => void,
+) {
+  return openaiCompatible('https://api.perplexity.ai/chat/completions', key, model, history, undefined, onChunk, 'perplexity');
+}
+
+async function chatXai(
+  key: string,
+  history: RouterChatTurn[],
+  model: string,
+  onChunk?: (text: string) => void,
+) {
+  return openaiCompatible('https://api.x.ai/v1/chat/completions', key, model, history, undefined, onChunk, 'xai');
+}
+
 /** Progressive word reveal — fallback when a provider has no SSE path (Google/Anthropic). */
 export async function revealCloudReply(
   reply: string,
@@ -499,6 +517,20 @@ const PAID_PROVIDERS: ProviderAttempt[] = [
     cost: 'paid',
     model: 'openai/gpt-4o-mini',
     run: chatOpenRouter,
+  },
+  {
+    id: 'perplexity',
+    label: 'Perplexity',
+    cost: 'paid',
+    model: 'sonar',
+    run: chatPerplexity,
+  },
+  {
+    id: 'xai',
+    label: 'xAI',
+    cost: 'paid',
+    model: 'grok-2-latest',
+    run: chatXai,
   },
 ];
 
@@ -621,6 +653,24 @@ function mapPreferred(modelId: string, modelName: string): ProviderAttempt | nul
       cost: 'free-key',
       model: 'Meta-Llama-3.1-8B-Instruct',
       run: chatSambaNova,
+    };
+  }
+  if (id.includes('perplexity') || name.includes('perplexity') || id.includes('sonar') || name.includes('sonar')) {
+    return {
+      id: 'perplexity',
+      label: 'Perplexity',
+      cost: 'paid',
+      model: 'sonar',
+      run: chatPerplexity,
+    };
+  }
+  if (id.includes('xai') || name.includes('xai') || id.includes('grok') || name.includes('grok')) {
+    return {
+      id: 'xai',
+      label: 'xAI',
+      cost: 'paid',
+      model: 'grok-2-latest',
+      run: chatXai,
     };
   }
   return null;
@@ -795,6 +845,7 @@ export function hasAnyCloudChatKey() {
   const ids = [
     'groq', 'google', 'openrouter', 'huggingface', 'nvidia', 'together',
     'fireworks', 'deepseek', 'mistral', 'cerebras', 'sambanova', 'openai', 'anthropic',
+    'perplexity', 'xai',
   ];
   const keys = getProviderApiKeys();
   return ids.some(id => Boolean(keys[id]) && isCloudProviderEnabled(id));

@@ -227,6 +227,14 @@ const COMPOSER_MODE_LABEL: Record<'plan' | 'ask' | 'agent' | 'debug' | 'multitas
   multitask: 'Multi-agent',
 };
 
+const COMPOSER_MODE_PILL: Record<'plan' | 'ask' | 'agent' | 'debug' | 'multitask', string> = {
+  plan: 'border-sky-500/40 bg-sky-500/15 text-sky-700 dark:text-sky-200',
+  ask: 'border-emerald-500/40 bg-emerald-500/15 text-emerald-700 dark:text-emerald-200',
+  agent: 'border-violet-500/40 bg-violet-500/15 text-violet-700 dark:text-violet-200',
+  debug: 'border-amber-500/40 bg-amber-500/15 text-amber-800 dark:text-amber-200',
+  multitask: 'border-fuchsia-500/40 bg-fuchsia-500/15 text-fuchsia-700 dark:text-fuchsia-200',
+};
+
 function composerModeFromContent(content: string): 'plan' | 'ask' | 'agent' | 'debug' | 'multitask' | null {
   if (content.startsWith(COMPOSER_MODE_PREFIX.plan)) return 'plan';
   if (content.startsWith(COMPOSER_MODE_PREFIX.agent)) return 'agent';
@@ -2260,6 +2268,22 @@ export function AIChat() {
     if ((!content && !images.length && !attaches.length && !hasStudio) || !user) return;
     if (composerMode && COMPOSER_MODE_PREFIX[composerMode]) {
       content = `${COMPOSER_MODE_PREFIX[composerMode]}${content}`;
+    } else if (
+      !composerMode
+      && (mode === 'general' || mode === 'code')
+      && /\b(debug|find\s+(?:the\s+)?bugs?|fix\s+(?:this|the)\s+(?:bug|error|crash)|why\s+(?:is\s+)?(?:this|it)\s+broken)\b/i.test(content)
+    ) {
+      setComposerMode('debug');
+      content = `${COMPOSER_MODE_PREFIX.debug}${content}`;
+    } else if (
+      !composerMode
+      && (mode === 'general' || mode === 'code')
+      && Object.keys(chatStudioFilesRef.current || {}).length > 0
+      && /\b(faster|quicker|speed\s+this\s+up|multi[\s-]?agent|parallel\s+agents)\b/i.test(content)
+    ) {
+      // Soft nudge: equip multi-agent when user asks for speed on a bound project.
+      setComposerMode('multitask');
+      content = `${COMPOSER_MODE_PREFIX.multitask}${content}`;
     }
     const userTyped = Boolean(content.trim());
     const parts: string[] = [];
@@ -4202,9 +4226,19 @@ export function AIChat() {
       const routeChat = routeChatIdRef.current;
       const elapsedMs = Date.now() - replyStartedAt;
       if (threadChatId) {
+        // Media replies embed huge base64 data URLs — don't count those as "tokens"
+        // or two image gens will slam Model freshness to ~50%.
+        const isMediaReply = /data:image\/|data:video\/|!\[[^\]]*\]\(data:/i.test(finalText || '')
+          || mode === 'image'
+          || mode === 'video';
+        const tokenEstimate = isMediaReply
+          ? Math.min(2_400, Math.ceil(String(finalText || '').replace(/!\[[^\]]*\]\(data:[^)]+\)/g, '').length / 4) + 800)
+          : Math.ceil((finalText?.length || 0) / 4);
+        // Cap activeMs wear for media so a slow free-host wait doesn't look like "brain worn out".
+        const wearMs = isMediaReply ? Math.min(elapsedMs, 45_000) : elapsedMs;
         setModelRatio(recordModelTurn(threadChatId, {
-          tokens: Math.ceil((finalText?.length || 0) / 4),
-          activeMs: elapsedMs,
+          tokens: tokenEstimate,
+          activeMs: wearMs,
         }));
       }
       const patchThread = (list: ChatMessage[]) => list.map(m => (
@@ -4680,7 +4714,8 @@ export function AIChat() {
           await runMediaGenStages('image', label => {
             setAssistantContent(`__generating__:image:${label}`);
           }, async () => {
-            const IMAGE_TIMEOUT_MS = 150_000;
+            // Free hosts (Flux + Horde cascade) often need 2–3 minutes; keep UI timeout above media budget.
+            const IMAGE_TIMEOUT_MS = 210_000;
             routed = await Promise.race([
               arkRoute({
                 message: rewritten,
@@ -5428,12 +5463,12 @@ export function AIChat() {
       {failoverChip}
       {composerMode && (
         <div className="mb-2 flex items-center gap-2 px-1">
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-surface-border bg-surface-hover/60 px-2.5 py-0.5 text-[11px] text-content-secondary">
+          <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-medium ${COMPOSER_MODE_PILL[composerMode]}`}>
             {COMPOSER_MODE_LABEL[composerMode]}
             <button
               type="button"
               onClick={() => setComposerMode(null)}
-              className="text-content-tertiary hover:text-content-primary"
+              className="opacity-70 hover:opacity-100"
               aria-label="Clear mode"
             >
               <X className="w-3 h-3" />

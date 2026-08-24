@@ -27,7 +27,7 @@ import {
   User, Palette, Zap, Boxes, Cloud, Shield, HardDrive,
   FolderKanban, Lock, RefreshCw, Check, Cpu, KeyRound,
   Smartphone, Sparkles, FlaskConical,
-  Mail, BadgeCheck, Trash2, Download, Info, Monitor, Copy,
+  Mail, BadgeCheck, Trash2, Download, Info, Monitor, Copy, X, FolderOpen,
 } from 'lucide-react';
 import { formatArkId } from '@/lib/arkUserId';
 import { clearLocalAppCaches, clearLocalChatCache } from '@/lib/clearSession';
@@ -39,6 +39,7 @@ import { probeProviderKey } from '@/lib/providerSpeed';
 import { setCloudProviderEnabled } from '@/lib/cloudSources';
 import { getBrainUrl } from '@/lib/brainUrl';
 import { SettingsSystemHealth } from '@/components/SettingsSystemHealth';
+import { isArkDevSession } from '@/lib/arkRuntime';
 import { BrandMark, StatusCheck } from '@/components/BrandMark';
 
 const REVEAL_FEATURES: { id: ParkId; label: string; description: string }[] = [
@@ -103,6 +104,8 @@ const PROVIDER_ROWS = [
   { id: 'mistral', name: 'Mistral', hint: 'Mistral + Codestral' },
   { id: 'cerebras', name: 'Cerebras', hint: 'Ultra-fast Llama free tier' },
   { id: 'sambanova', name: 'SambaNova', hint: 'SambaNova Cloud open models' },
+  { id: 'perplexity', name: 'Perplexity', hint: 'Sonar chat + search' },
+  { id: 'xai', name: 'xAI', hint: 'Grok models' },
   { id: 'github-models', name: 'GitHub Models', hint: 'Retired — use Groq / Google / OpenRouter' },
 ];
 
@@ -449,11 +452,21 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
     return entry.version === appVersion;
   }).slice(0, 1);
 
+  const navSections = useMemo(() => {
+    const dev = isArkDevSession();
+    return SECTIONS.map(section => {
+      if (dev && (section.id === 'testers' || section.id === 'beta')) {
+        return { ...section, comingSoon: false };
+      }
+      return section;
+    });
+  }, []);
+
   return (
     <div ref={settingsRootRef} className="flex h-full min-h-0 min-w-0 animate-fade-in">
       <div className={`${navCompact ? 'w-14' : 'w-56'} shrink-0 border-r border-surface-border flex flex-col min-h-0 min-w-0`}>
         <nav className={`flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-2 sm:p-3 flex flex-col gap-0.5 ${navCompact ? 'items-center' : ''}`}>
-          {SECTIONS.map(section => (
+          {navSections.map(section => (
             <button
               key={section.id}
               type="button"
@@ -501,32 +514,67 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
           {activeSection === 'account' && (
             <SettingsSection title="Account" description="Profile, sign in, and session controls">
               <div className="space-y-5">
-                <div className="flex items-center gap-4">
-                  <label className="relative w-16 h-16 rounded-full overflow-hidden bg-ark-blue-500/20 border border-ark-blue-500/30 flex items-center justify-center text-xl font-bold text-ark-blue-300 cursor-pointer shrink-0">
-                    {prefs.avatarDataUrl
-                      ? <img src={prefs.avatarDataUrl} alt="" className="w-full h-full object-cover" />
-                      : (displayName || profile?.display_name || user?.email || '?')[0].toUpperCase()}
-                    <input
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      onChange={e => {
-                        const file = e.target.files?.[0];
-                        if (!file) return;
-                        const reader = new FileReader();
-                        reader.onload = () => {
-                          const url = typeof reader.result === 'string' ? reader.result : '';
-                          if (url) patchPrefs({ avatarDataUrl: url });
-                        };
-                        reader.readAsDataURL(file);
-                      }}
-                    />
-                  </label>
-                  <div className="min-w-0">
+                <div className="flex items-start gap-4">
+                  <div className="relative shrink-0">
+                    <label className="relative w-16 h-16 rounded-full overflow-hidden bg-ark-blue-500/20 border border-ark-blue-500/30 flex items-center justify-center text-xl font-bold text-ark-blue-300 cursor-pointer block">
+                      {prefs.avatarDataUrl
+                        ? <img src={prefs.avatarDataUrl} alt="" className="w-full h-full object-cover" />
+                        : (displayName || profile?.display_name || user?.email || '?')[0].toUpperCase()}
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={e => {
+                          const file = e.target.files?.[0];
+                          if (!file) return;
+                          const reader = new FileReader();
+                          reader.onload = () => {
+                            const url = typeof reader.result === 'string' ? reader.result : '';
+                            if (!url) return;
+                            // Center-crop to square and resize to 256px for a clean profile photo.
+                            const img = new Image();
+                            img.onload = () => {
+                              const side = Math.min(img.width, img.height);
+                              const sx = (img.width - side) / 2;
+                              const sy = (img.height - side) / 2;
+                              const canvas = document.createElement('canvas');
+                              canvas.width = 256;
+                              canvas.height = 256;
+                              const ctx = canvas.getContext('2d');
+                              if (!ctx) {
+                                patchPrefs({ avatarDataUrl: url });
+                                return;
+                              }
+                              ctx.drawImage(img, sx, sy, side, side, 0, 0, 256, 256);
+                              patchPrefs({ avatarDataUrl: canvas.toDataURL('image/jpeg', 0.9) });
+                            };
+                            img.onerror = () => patchPrefs({ avatarDataUrl: url });
+                            img.src = url;
+                          };
+                          reader.readAsDataURL(file);
+                          e.target.value = '';
+                        }}
+                      />
+                    </label>
+                    {prefs.avatarDataUrl && (
+                      <button
+                        type="button"
+                        title="Remove photo"
+                        onClick={() => patchPrefs({ avatarDataUrl: undefined })}
+                        className="absolute -bottom-1 -right-1 w-7 h-7 rounded-full bg-surface-panel border border-surface-border text-content-secondary hover:text-rose-400 flex items-center justify-center shadow"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1">
                     <p className="text-sm font-medium text-content-primary truncate">{displayName || 'Guest'}</p>
                     <p className="text-xs text-content-tertiary truncate flex items-center gap-1.5 mt-0.5">
                       <Mail className="w-3 h-3" />
                       {user?.email ?? 'guest@ark.local'}
+                    </p>
+                    <p className="text-[11px] text-content-tertiary mt-1.5 leading-relaxed">
+                      Click the circle to upload. Photos are cropped to a square and resized. Use × to remove.
                     </p>
                     <p className="text-[11px] text-content-tertiary mt-1 inline-flex items-center gap-1">
                       <BadgeCheck className="w-3 h-3 text-sky-400" />
@@ -708,8 +756,9 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
           )}
 
           {activeSection === 'ai' && (
-            <SettingsSection title="AI" description="How ARK routes and answers requests">
-              <div className="space-y-5">
+            <SettingsSection title="AI" description="Routing, safety, failover, and local brain tuning">
+              <div className="space-y-6 max-w-3xl">
+                {/* Status */}
                 <div className="ark-card p-4 flex items-center gap-3">
                   <div className="w-10 h-10 rounded-lg bg-ark-accent-green/10 flex items-center justify-center shrink-0">
                     <Cpu className="w-5 h-5 text-ark-accent-green" />
@@ -723,19 +772,19 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                       Last answer: {prefs.lastAnsweredLabel || 'None yet this session'}
                     </p>
                   </div>
-                  <Sparkles className="w-4 h-4 text-sky-400" />
+                  <Sparkles className="w-4 h-4 text-sky-400 shrink-0" />
                 </div>
 
-                <div className="rounded-xl border border-surface-border p-4 flex items-center justify-between gap-4">
+                <div className="rounded-xl border border-surface-border p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <div className="min-w-0">
                     <p className="text-sm font-medium text-content-primary">ARK Brain details</p>
-                    <p className="text-[11px] text-content-tertiary mt-0.5 leading-relaxed">
-                      Engine status, active local brain, localhost API URL, and access token now live together in Models.
+                    <p className="text-xs text-content-tertiary mt-1 leading-relaxed">
+                      Engine status, active local brain, localhost API URL, and access token live in Models.
                     </p>
                   </div>
                   <button
                     type="button"
-                    className="ark-btn-secondary text-xs shrink-0"
+                    className="ark-btn-secondary text-xs shrink-0 self-start sm:self-center"
                     onClick={() => {
                       onClose?.();
                       navigate({ name: 'models', tab: 'engine' });
@@ -751,108 +800,164 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                   diskFreeGb={diskSpace?.freeGb}
                 />
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {AI_MODES.map(mode => (
-                    <button
-                      key={mode.value}
-                      type="button"
-                      onClick={() => {
-                        patchPrefs({ aiMode: mode.value as AiModePref });
-                        if (settings) updateSettings({ ai_mode: mode.value as typeof settings.ai_mode });
-                      }}
-                      className={`w-full text-left p-3 rounded-lg border transition-all ${
-                        aiMode === mode.value
-                          ? 'border-ark-blue-400 bg-ark-blue-500/10'
-                          : 'border-surface-border hover:border-surface-border-light'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <div>
-                          <p className={`text-sm font-medium ${aiMode === mode.value ? 'text-ark-blue-300' : 'text-content-primary'}`}>
-                            {mode.label}
-                          </p>
-                          <p className="text-[11px] text-content-tertiary mt-0.5">{mode.description}</p>
+                {/* Routing mode */}
+                <SettingsGroup
+                  title="Routing mode"
+                  description="How ARK chooses local vs cloud models for chat and media."
+                >
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {AI_MODES.map(mode => (
+                      <button
+                        key={mode.value}
+                        type="button"
+                        onClick={() => {
+                          patchPrefs({ aiMode: mode.value as AiModePref });
+                          if (settings) updateSettings({ ai_mode: mode.value as typeof settings.ai_mode });
+                        }}
+                        className={`w-full text-left p-3 rounded-lg border transition-all ${
+                          aiMode === mode.value
+                            ? 'border-ark-blue-400 bg-ark-blue-500/10'
+                            : 'border-surface-border hover:border-surface-border-light'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <div>
+                            <p className={`text-sm font-medium ${aiMode === mode.value ? 'text-ark-blue-300' : 'text-content-primary'}`}>
+                              {mode.label}
+                            </p>
+                            <p className="text-[11px] text-content-tertiary mt-0.5 leading-snug">{mode.description}</p>
+                          </div>
+                          {aiMode === mode.value && <Check className="w-4 h-4 text-ark-blue-400 shrink-0" />}
                         </div>
-                        {aiMode === mode.value && <Check className="w-4 h-4 text-ark-blue-400 shrink-0" />}
-                      </div>
-                    </button>
-                  ))}
-                </div>
+                      </button>
+                    ))}
+                  </div>
+                </SettingsGroup>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <ToggleRow
-                  label="Allow NSFW content"
-                  description="Off (default): block nude / pornographic image requests. On: allow adult image generation."
-                  value={Boolean(prefs.allowNsfw)}
-                  onChange={v => patchPrefs({ allowNsfw: v })}
-                />
-                <p className="sm:col-span-2 text-[11px] text-content-tertiary leading-relaxed px-0.5">
-                  NSFW off also appends SFW constraints to free image hosts. Chat “what is MCP” lists local tools; external MCP servers are next.
-                </p>
-                <ToggleRow
-                  label="Auto failover"
-                  description="If a provider is limited or offline, switch to the next healthy option"
-                  value={prefs.autoFailover}
-                  onChange={v => patchPrefs({ autoFailover: v })}
-                />
-                <ToggleRow
-                  label="Ask before cloud failover"
-                  description="Confirm before a local request is sent to a cloud provider"
-                  value={prefs.askBeforeCloudFailover}
-                  onChange={v => patchPrefs({ askBeforeCloudFailover: v })}
-                />
-                <ToggleRow
-                  label="Stream responses"
-                  description="Show tokens as they arrive instead of waiting for the full answer"
-                  value={prefs.streamResponses}
-                  onChange={v => patchPrefs({ streamResponses: v })}
-                />
-                <ToggleRow
-                  label="Remember project context"
-                  description="Carry recent files and chat into the next request in a project"
-                  value={prefs.rememberContext}
-                  onChange={v => patchPrefs({ rememberContext: v })}
-                />
-                <ToggleRow
-                  label="Hunt new models online"
-                  description="Use this PC’s specs to search Hugging Face for GGUF brains that fit"
-                  value={prefs.huntInternetModels}
-                  onChange={v => patchPrefs({ huntInternetModels: v })}
-                />
-                <ToggleRow
-                  label="Download next when a model runs out"
-                  description="If the current chat, image, or video path hits a limit, ARK starts the next local brain that fits this PC"
-                  value={prefs.autoInstallHuntModels}
-                  onChange={v => patchPrefs({ autoInstallHuntModels: v })}
-                />
-                </div>
-                <div className="rounded-xl border border-surface-border p-4 space-y-3">
-                  <p className="text-sm font-medium text-content-primary">Local GGUF (advanced)</p>
-                  <label className="block text-[11px] text-content-tertiary">
-                    Temperature {Number(prefs.ggufTemperature || 0.55).toFixed(2)}
-                    <input
-                      type="range"
+                {/* Content safety — NSFW in one self-contained card */}
+                <SettingsGroup
+                  title="Content safety (Image)"
+                  description="Controls adult image generation and how free image hosts are prompted."
+                >
+                  <div className="ark-card p-4 space-y-3">
+                    <ToggleRow
+                      label="Allow NSFW content"
+                      description={
+                        Boolean(prefs.allowNsfw)
+                          ? 'On — Image mode may generate nude or adult content. Chat still follows your routing mode.'
+                          : 'Off (default) — Image requests for nudity or porn are blocked in chat. Free image hosts also receive SFW constraints so they stay family-safe.'
+                      }
+                      value={Boolean(prefs.allowNsfw)}
+                      onChange={v => patchPrefs({ allowNsfw: v })}
+                      bare
+                    />
+                    <p className="text-[11px] text-content-tertiary leading-relaxed border-t border-surface-border pt-3">
+                      This toggle only affects <span className="text-content-secondary">Image</span> generation.
+                      When off, ARK checks your prompt before sending and adds safe-for-work hints to Pollinations / Horde.
+                      When on, those blocks are removed. It does not change how Chat text answers work.
+                    </p>
+                  </div>
+                </SettingsGroup>
+
+                {/* Failover */}
+                <SettingsGroup
+                  title="Failover & cloud"
+                  description="What happens when a local model is busy, offline, or out of capacity."
+                >
+                  <div className="grid grid-cols-1 gap-3">
+                    <ToggleRow
+                      label="Auto failover"
+                      description="If a provider is limited or offline, switch to the next healthy option automatically."
+                      value={prefs.autoFailover}
+                      onChange={v => patchPrefs({ autoFailover: v })}
+                    />
+                    <ToggleRow
+                      label="Ask before cloud failover"
+                      description="Show a confirmation before a local request is sent to a cloud provider."
+                      value={prefs.askBeforeCloudFailover}
+                      onChange={v => patchPrefs({ askBeforeCloudFailover: v })}
+                    />
+                  </div>
+                </SettingsGroup>
+
+                {/* Chat behavior */}
+                <SettingsGroup
+                  title="Chat behavior"
+                  description="How replies stream and how much context carries into the next message."
+                >
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <ToggleRow
+                      label="Stream responses"
+                      description="Show tokens as they arrive instead of waiting for the full answer."
+                      value={prefs.streamResponses}
+                      onChange={v => patchPrefs({ streamResponses: v })}
+                    />
+                    <ToggleRow
+                      label="Remember project context"
+                      description="Carry recent files and chat into the next request in a project."
+                      value={prefs.rememberContext}
+                      onChange={v => patchPrefs({ rememberContext: v })}
+                    />
+                  </div>
+                </SettingsGroup>
+
+                {/* Model discovery */}
+                <SettingsGroup
+                  title="Model discovery"
+                  description="Automatic search and install when ARK needs a new local brain."
+                >
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <ToggleRow
+                      label="Hunt new models online"
+                      description="Use this PC’s specs to search Hugging Face for GGUF brains that fit."
+                      value={prefs.huntInternetModels}
+                      onChange={v => patchPrefs({ huntInternetModels: v })}
+                    />
+                    <ToggleRow
+                      label="Download next when a model runs out"
+                      description="If chat, image, or video hits a limit, ARK starts installing the next fitting local brain."
+                      value={prefs.autoInstallHuntModels}
+                      onChange={v => patchPrefs({ autoInstallHuntModels: v })}
+                    />
+                  </div>
+                </SettingsGroup>
+
+                {/* Local GGUF */}
+                <SettingsGroup
+                  title="Local GGUF (advanced)"
+                  description="Fine-tune on-device text models only. Does not affect cloud chat or image/video hosts."
+                >
+                  <div className="rounded-xl border border-surface-border p-5 space-y-6 bg-surface/30">
+                    <p className="text-xs text-content-tertiary leading-relaxed">
+                      These settings apply when ARK runs a <span className="text-content-secondary">local GGUF brain</span>.
+                      They control creativity and how long each reply is allowed to grow before stopping.
+                    </p>
+                    <GgufSliderRow
+                      label="Temperature"
+                      valueLabel={Number(prefs.ggufTemperature ?? 0.55).toFixed(2)}
+                      hint="Lower = focused and predictable. Higher = more creative and varied. Default 0.55 is a good balance for everyday chat."
                       min={0.1}
                       max={1.2}
                       step={0.05}
                       value={prefs.ggufTemperature ?? 0.55}
-                      onChange={e => patchPrefs({ ggufTemperature: Number(e.target.value) })}
-                      className="w-full mt-1"
+                      onChange={v => patchPrefs({ ggufTemperature: v })}
+                      lowLabel="Focused"
+                      highLabel="Creative"
                     />
-                  </label>
-                  <label className="block text-[11px] text-content-tertiary">
-                    Max tokens {prefs.ggufNPredict ?? 4096}
-                    <input
-                      type="range"
+                    <GgufSliderRow
+                      label="Max output tokens"
+                      valueLabel={String(prefs.ggufNPredict ?? 4096)}
+                      hint="Cap on how many tokens the local model may write per reply — not your chat history size. 4096 is the recommended default (~3k words max). Higher values can mean slower replies and more RAM while generating, but nothing is “used up” over time."
                       min={4096}
                       max={8192}
-                      step={128}
+                      step={256}
                       value={prefs.ggufNPredict ?? 4096}
-                      onChange={e => patchPrefs({ ggufNPredict: Number(e.target.value) })}
-                      className="w-full mt-1"
+                      onChange={v => patchPrefs({ ggufNPredict: v })}
+                      lowLabel="4096 default"
+                      highLabel="8192 longer"
                     />
-                  </label>
-                </div>
+                  </div>
+                </SettingsGroup>
               </div>
             </SettingsSection>
           )}
@@ -1246,9 +1351,45 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                   <InfoCard
                     title="Models folder"
                     value={engineStatus?.modelsDirIsCustom ? 'Custom' : 'Default'}
-                    hint={engineStatus?.modelsDir ? 'Open Local AI → Storage to change' : 'Open ARK Desktop to manage files'}
+                    hint={engineStatus?.modelsDir ? 'Path shown below' : 'Open ARK Desktop to manage files'}
                   />
                 </div>
+
+                {engineStatus?.modelsDir && (
+                  <div className="rounded-xl border border-surface-border p-4 space-y-2">
+                    <p className="text-sm font-medium text-content-primary flex items-center gap-2">
+                      <FolderOpen className="w-4 h-4 text-sky-400 shrink-0" />
+                      Download location
+                    </p>
+                    <p className="text-[11px] text-content-tertiary leading-relaxed">
+                      GGUF brains and local image weights are saved here when you install from Models or Local AI.
+                    </p>
+                    <code className="block text-[11px] font-mono text-content-secondary break-all rounded-lg bg-surface-active/60 border border-surface-border px-3 py-2">
+                      {engineStatus.modelsDir}
+                    </code>
+                    <div className="flex flex-wrap gap-2 pt-1">
+                      <button
+                        type="button"
+                        className="ark-btn-secondary text-xs"
+                        onClick={() => {
+                          void window.arkDesktop?.openPath?.(engineStatus.modelsDir!);
+                        }}
+                      >
+                        Open folder
+                      </button>
+                      <button
+                        type="button"
+                        className="ark-btn-secondary text-xs"
+                        onClick={() => {
+                          onClose?.();
+                          navigate({ name: 'local-ai' });
+                        }}
+                      >
+                        Change in Local AI
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 <div>
                   <p className="text-xs font-medium text-content-secondary mb-2">Downloaded models</p>
@@ -1680,25 +1821,63 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
 
                 <div>
                   <label className="block text-xs font-medium text-content-secondary mb-2">Execution &amp; approvals</label>
-                  <p className="text-[11px] text-content-tertiary mb-2">
-                    How ARK runs tools like npm install, pip, and file cleanup when you ask in Chat or Code.
+                  <p className="text-[11px] text-content-tertiary mb-3 leading-relaxed">
+                    How ARK runs tools like npm install, pip, and file cleanup when you ask in Chat.
                   </p>
-                  <select
-                    value={prefs.agentExecutionMode}
-                    onChange={e => {
-                      const next = e.target.value as LocalPrefs['agentExecutionMode'];
-                      if (next === 'run_all' && !window.confirm(
-                        'Run everything?\n\nARK can run allowlisted commands without asking each time. Destructive commands stay blocked.',
-                      )) return;
-                      patchPrefs({ agentExecutionMode: next });
-                    }}
-                    className="w-full rounded-xl border border-surface-border bg-ark-navy-900 px-3 py-2.5 text-sm text-content-primary"
-                  >
-                    <option value="allowlist">Allowlist — npm, pip, git only (confirm each time)</option>
-                    <option value="auto_review">Auto-review — allowlisted runs automatically; others ask</option>
-                    <option value="run_all">Run everything — allowlisted tools run without extra prompts</option>
-                  </select>
-                  <p className="text-[11px] text-content-tertiary mt-2">
+                  <div className="rounded-xl border border-surface-border overflow-hidden divide-y divide-surface-border">
+                    {([
+                      {
+                        value: 'allowlist' as const,
+                        title: 'Allowlist',
+                        detail: 'npm, pip, git only — confirm each time',
+                      },
+                      {
+                        value: 'auto_review' as const,
+                        title: 'Auto-review',
+                        detail: 'Allowlisted runs automatically; others ask',
+                      },
+                      {
+                        value: 'run_all' as const,
+                        title: 'Run everything',
+                        detail: 'Allowlisted tools run without extra prompts',
+                      },
+                    ]).map(opt => {
+                      const active = prefs.agentExecutionMode === opt.value;
+                      return (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          onClick={() => {
+                            if (opt.value === 'run_all' && prefs.agentExecutionMode !== 'run_all' && !window.confirm(
+                              'Run everything?\n\nARK can run allowlisted commands without asking each time. Destructive commands stay blocked.',
+                            )) return;
+                            patchPrefs({ agentExecutionMode: opt.value });
+                          }}
+                          className={`w-full text-left px-4 py-3 flex items-start gap-3 transition-colors ${
+                            active
+                              ? 'bg-sky-500/10'
+                              : 'hover:bg-surface-hover/60'
+                          }`}
+                        >
+                          <span
+                            className={`mt-0.5 w-4 h-4 rounded-full border-2 shrink-0 flex items-center justify-center ${
+                              active ? 'border-sky-400' : 'border-surface-border'
+                            }`}
+                            aria-hidden
+                          >
+                            {active && <span className="w-2 h-2 rounded-full bg-sky-400" />}
+                          </span>
+                          <span className="min-w-0">
+                            <span className={`block text-sm font-medium ${active ? 'text-sky-300' : 'text-content-primary'}`}>
+                              {opt.title}
+                            </span>
+                            <span className="block text-[11px] text-content-tertiary mt-0.5 leading-snug">{opt.detail}</span>
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="text-[11px] text-content-tertiary mt-2 leading-relaxed">
                     {prefs.agentExecutionMode === 'run_all'
                       ? 'Allowlisted installs and git commands can run when you ask. System folders stay protected.'
                       : prefs.agentExecutionMode === 'auto_review'
@@ -1875,8 +2054,15 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
           {activeSection === 'testers' && (
             <SettingsSection
               title="For testers"
-              description="Quick path to a first real reply, reveal parked features, then tell us what to improve"
+              description={isArkDevSession()
+                ? 'Source build (Open-ARK-Build.bat) — reveal parked features and test before you ship an installer.'
+                : 'Quick path to a first real reply, reveal parked features, then tell us what to improve'}
             >
+              {isArkDevSession() && (
+                <div className="rounded-xl border border-sky-500/25 bg-sky-500/10 p-4 mb-3 text-xs text-sky-100/90 leading-relaxed">
+                  You are on a <strong className="font-medium">dev profile</strong> (AppData/ARK-Dev). Models, keys, and chats here stay separate from an installed Start Menu ARK so the bat and Setup.exe never fight over the same files.
+                </div>
+              )}
               <div className="space-y-3">
                 <div className="rounded-xl border border-surface-border p-4 space-y-3">
                   <p className="text-sm font-medium text-content-primary">Reveal parked features</p>
@@ -2088,24 +2274,94 @@ function Field({
   );
 }
 
+function SettingsGroup({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="space-y-3">
+      <div>
+        <h3 className="text-sm font-semibold text-content-primary">{title}</h3>
+        <p className="text-xs text-content-tertiary mt-1 leading-relaxed max-w-2xl">{description}</p>
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function GgufSliderRow({
+  label,
+  valueLabel,
+  hint,
+  min,
+  max,
+  step,
+  value,
+  onChange,
+  lowLabel,
+  highLabel,
+}: {
+  label: string;
+  valueLabel: string;
+  hint: string;
+  min: number;
+  max: number;
+  step: number;
+  value: number;
+  onChange: (v: number) => void;
+  lowLabel: string;
+  highLabel: string;
+}) {
+  return (
+    <div className="space-y-2">
+      <div className="flex items-baseline justify-between gap-3">
+        <p className="text-sm font-medium text-content-primary">{label}</p>
+        <span className="text-xs font-mono text-ark-blue-300 tabular-nums shrink-0">{valueLabel}</span>
+      </div>
+      <p className="text-[11px] text-content-tertiary leading-relaxed">{hint}</p>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={e => onChange(Number(e.target.value))}
+        className="w-full mt-1 accent-ark-blue-400"
+      />
+      <div className="flex justify-between text-[10px] text-content-tertiary uppercase tracking-wide">
+        <span>{lowLabel}</span>
+        <span>{highLabel}</span>
+      </div>
+    </div>
+  );
+}
+
 function ToggleRow({
   label,
   description,
   value,
   onChange,
   disabled,
+  bare,
 }: {
   label: string;
   description: string;
   value: boolean;
   onChange: (v: boolean) => void;
   disabled?: boolean;
+  /** When true, skip outer card chrome (for use inside a parent card). */
+  bare?: boolean;
 }) {
   return (
-    <div className={`flex items-center justify-between gap-3 p-4 ark-card min-w-0 ${disabled ? 'opacity-70' : ''}`}>
-      <div className="flex-1 min-w-0">
+    <div className={`flex items-center justify-between gap-4 min-w-0 ${bare ? '' : 'p-4 ark-card'} ${disabled ? 'opacity-70' : ''}`}>
+      <div className="flex-1 min-w-0 pr-2">
         <p className="text-sm font-medium text-content-primary">{label}</p>
-        <p className="text-xs text-content-tertiary mt-0.5 leading-snug">{description}</p>
+        <p className="text-xs text-content-tertiary mt-1 leading-relaxed">{description}</p>
       </div>
       <button
         type="button"
