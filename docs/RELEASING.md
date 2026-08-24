@@ -24,12 +24,14 @@ pwsh scripts/publish-public-release.ps1 -Tag v0.1.147
 gh api repos/DrMeji/Ark/contents --jq "[.[].name]"
 ```
 
-## What not to do
+## GitHub “Source code (zip)” on public Releases
 
-- Do not make **Ark-Source** public.
-- Do not push this working tree to `DrMeji/Ark`.
-- Do not attach source zips to public Releases.
-- Do not paste internal docs (`docs/ark-brain-api.md`, etc.) into public release notes.
+GitHub **always** attaches Source code (zip) and Source code (tar.gz) to every release. They cannot be removed.
+
+On **DrMeji/Ark** those archives only contain the public README (and guard workflow) — **not** the ARK app. Real source stays in **Ark-Source**.
+
+When writing public release notes, remind downloaders to use **ARK-Setup.exe** only.
+
 
 ## CI note
 
