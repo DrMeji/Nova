@@ -1,33 +1,50 @@
 # ARK changelog
 
-## 0.1.144 ‚Äî 2026-08-24
+## 0.1.145 ó 2026-08-24
+
+Chat continuity, setup Connect links, and image download / enlarge fixes.
+
+**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.145/ARK-Setup.exe) ∑ [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.145)
+
+### Chat
+- Soft follow-ups (ìmore detailsî, ìdive deeperî, ìrecommended areaî) keep history and a thread topic so local models stay on coding instead of inventing EcoBuddy or movies/TV.
+- Bare teach-me follow-ups no longer force product-planning framing.
+
+### Setup Connect
+- Connect / Add opens the system browser immediately (no ìOpen external link?î confirm) for OpenAI, NVIDIA NIM, and other hosts.
+
+### Images
+- Download saves a real **JPG/PNG** (was wrongly named `.svg` when ìsvgî appeared inside base64).
+- Click an image to open a larger clear preview; Esc or backdrop closes it.
+- Portrait prompts nudge better eye anatomy (Flux still has limits).
+## 0.1.144 G«ˆ 2026-08-24
 
 Setup access toggles apply instantly (no OK popups). Decorative em dashes cleaned from UI copy.
 
-**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.144/ARK-Setup.exe) ¬∑ [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.144)
+**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.144/ARK-Setup.exe) -+ [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.144)
 
 ### Setup / Security
 - Desktop, Documents, Full PC, and Run everything toggles no longer show a second confirm dialog.
-- Same for Settings ‚Üí Security access and execution mode.
+- Same for Settings GÂ∆ Security access and execution mode.
 
 ### Copy
-- Removed decorative em dashes in user-facing text (e.g. ‚ÄúGemini free tier. One key.‚Äù).
+- Removed decorative em dashes in user-facing text (e.g. G«£Gemini free tier. One key.G«•).
 
-## 0.1.143 ‚Äî 2026-08-24
+## 0.1.143 G«ˆ 2026-08-24
 
 Fresh installs always open on Sign in / Sign up before first-run setup.
 
-**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.143/ARK-Setup.exe) ¬∑ [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.143)
+**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.143/ARK-Setup.exe) -+ [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.143)
 
 ### Auth
 - New installs clear leftover saved sessions so setup cannot skip Sign in / Sign up.
 - Installer deletes `ark-auth-storage.dat` on a fresh install (not upgrades).
 
-## 0.1.142 ‚Äî 2026-08-24
+## 0.1.142 G«ˆ 2026-08-24
 
 Plugins Soon locks, profile photos across Connect, and presence-colored sidebar ring.
 
-**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.142/ARK-Setup.exe) ¬∑ [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.142)
+**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.142/ARK-Setup.exe) -+ [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.142)
 
 ### Plugins
 - Unwired catalog plugins (Neon, Shopify, HubSpot, QuickBooks, etc.) show **Soon**, are dimmed, and are not clickable.
@@ -36,37 +53,37 @@ Plugins Soon locks, profile photos across Connect, and presence-colored sidebar 
 - Uploaded profile photo syncs to your account and shows on Network, Message, and Notifications.
 - Sidebar profile avatar ring + ARK ID color follow Online / Idle / Do Not Disturb / Inactive.
 
-## 0.1.141 ‚Äî 2026-08-24
+## 0.1.141 G«ˆ 2026-08-24
 
 Live social: cloud friend requests, real-time DMs, and internet voice calls.
 
-**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.141/ARK-Setup.exe) ¬∑ [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.141)
+**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.141/ARK-Setup.exe) -+ [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.141)
 
 ### Social (production)
 
-- **Friend requests** sync through Supabase (`ark_friend_requests`) ‚Äî add by ARK ID, accept in Notifications on the other device.
+- **Friend requests** sync through Supabase (`ark_friend_requests`) G«ˆ add by ARK ID, accept in Notifications on the other device.
 - **Direct messages** already use Supabase Realtime; friend flow is now wired for cross-user use when signed in.
 - **Voice calls** use Supabase signaling + WebRTC audio; offer/answer/ICE persist for reconnect catch-up.
 - **Call tab** enabled by default (no Testers toggle required).
 - **Call UI** on message pill + sidebar dock (colored ring, mute, timer).
-- Docs: [social-connectivity.md](./social-connectivity.md) ‚Äî how messaging and calls work over the internet.
+- Docs: [social-connectivity.md](./social-connectivity.md) G«ˆ how messaging and calls work over the internet.
 
 ### Backend migration
 
 Apply `supabase/migrations/20260824100000_ark_friend_requests.sql` on the hosted Supabase project and enable Realtime on `ark_friend_requests`.
 
-## 0.1.140 ‚Äî 2026-08-24
+## 0.1.140 G«ˆ 2026-08-24
 
 Image quality, chat keep-alive, NSFW gate, and static-project fixes.
 
-**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.140/ARK-Setup.exe) ¬∑ [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.140)
+**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.140/ARK-Setup.exe) -+ [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.140)
 
 ### Image generation
 
-- Flux-first pipeline (no dual Pollinations race that caused 429 ‚Äúbusy‚Äù errors).
+- Flux-first pipeline (no dual Pollinations race that caused 429 G«£busyG«• errors).
 - Stronger sharp-focus prompts and blur negative prompts; rejects soft/fast cache stubs.
 - Optional ffmpeg upscale+unsharp when frames arrive below 1100px.
-- NSFW off adds SFW constraints on free hosts; Settings ‚Üí AI toggle controls adult content.
+- NSFW off adds SFW constraints on free hosts; Settings GÂ∆ AI toggle controls adult content.
 
 ### Chat / navigation
 
@@ -81,11 +98,11 @@ Image quality, chat keep-alive, NSFW gate, and static-project fixes.
 
 Download: [Releases](https://github.com/DrMeji/Ark/releases)
 
-## 0.1.138 ‚Äî 2026-08-22
+## 0.1.138 G«ˆ 2026-08-22
 
 Chat coding, new-product routing, and delete targeting.
 
-**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.138/ARK-Setup.exe) ¬∑ [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.138)
+**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.138/ARK-Setup.exe) -+ [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.138)
 
 Remaining product request: [issue #1](https://github.com/DrMeji/Ark/issues/1).
 
@@ -95,19 +112,19 @@ Default Chat is Agent, not Ask. Asks like **add a search button** or **change th
 
 ### New product ideas (Ring System)
 
-‚ÄúI want to work on a project called Ring System‚Ä¶‚Äù is a **new app**, not ‚Äúwhich existing folder? DeBloat.‚Äù Greenfield plan ‚Üí Create project. `Let‚Äôs work on DeBloat` still binds an existing folder.
+G«£I want to work on a project called Ring SystemG«™G«• is a **new app**, not G«£which existing folder? DeBloat.G«• Greenfield plan GÂ∆ Create project. `LetG«÷s work on DeBloat` still binds an existing folder.
 
 ### Delete / catalog safety
 
 - Delete only the **named** folder. Never wipe the bound workspace by mistake.
 - Listing a catalog no longer unbinds the open project.
-- Add-file intent requires a real file name (not ‚ÄúAgent edit files‚Äù).
+- Add-file intent requires a real file name (not G«£Agent edit filesG«•).
 
 ### Typecheck (follow-up on main)
 
 Chat/Code view types: `ChatMessage.project_id`, attach `kind as const`, optional `window.arkDesktop`, Code composer `'agent'` mode, `readTextFile` `text`/`binary`.
 
-### Also in this line (0.1.118‚Äì0.1.137)
+### Also in this line (0.1.118G«Ù0.1.137)
 
 - Chat-first PC agent: explore, folder catalog, Desktop / Documents / Full PC grants
 - Create / delete project from Chat (TDZ delete bug fixed)

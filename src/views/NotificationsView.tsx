@@ -44,7 +44,7 @@ export function NotificationsView() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const demos = useMemo(() => buildDemoNotifications(), []);
   const local = useMemo(
-    () => loadLocalNotifications(profile?.ark_id),
+    () => loadLocalNotifications(profile?.ark_id ?? undefined),
     [localTick, profile?.ark_id],
   );
   const inbound = useMemo(

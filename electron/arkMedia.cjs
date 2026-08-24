@@ -337,7 +337,7 @@ async function fetchRealImage(prompt, opts = {}) {
         const timeoutMs = Math.min(tier.ms, left);
         const modelQ = tier.model ? `&model=${encodeURIComponent(tier.model)}` : '';
         // Do NOT use enhance=true — it often injects cinematic soft/shallow-DOF looks.
-        const neg = encodeURIComponent('blurry, soft focus, shallow depth of field, bokeh on subject, out of focus, low resolution, mushy, smoothed skin, plastic, overprocessed');
+        const neg = encodeURIComponent('blurry, soft focus, shallow depth of field, bokeh on subject, out of focus, low resolution, mushy, smoothed skin, plastic, overprocessed, bad eyes, crossed eyes, asymmetrical eyes, melted eyes, deformed pupils');
         const url = `https://image.pollinations.ai/prompt/${encoded}?width=${w}&height=${h}&nologo=true&nofeed=true&negative_prompt=${neg}${modelQ}&seed=${seed}`;
         const t0 = Date.now();
         const hit = await fetchImageUrl(url, timeoutMs);
@@ -688,6 +688,12 @@ function rewriteImagePrompt(prompt) {
     'crisp clean detail, high resolution, 1080p or sharper',
     'avoid blurry soft mushy low-detail renders',
   ];
+  if (/\b(face|portrait|person|people|human|woman|man|girl|boy|character|elf|avatar|selfie|headshot)\b/.test(lower)) {
+    hints.push(
+      'symmetrical natural eyes with clear round pupils and matching catchlights',
+      'correct eye anatomy, no warped irises, no crossed or melted eyes',
+    );
+  }
   if (/\b(cat|kitten)\b/.test(lower) && !/\b(human|person|man|woman)\b/.test(lower)) {
     hints.push('subject is a real cat animal, full body and face crisp and clear, whiskers visible, not a human');
   }
@@ -1031,7 +1037,7 @@ async function generateImage(prompt, modelName, opts = {}) {
   try {
     const plain = hostSafeImagePrompt(String(enhanced || prompt).slice(0, 280));
     const seed = freshImageSeed(plain);
-    const neg = encodeURIComponent('blurry, soft focus, shallow depth of field, out of focus, low resolution');
+    const neg = encodeURIComponent('blurry, soft focus, shallow depth of field, out of focus, low resolution, bad eyes, crossed eyes, asymmetrical eyes');
     const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(plain)}?width=${dim.width}&height=${dim.height}&nologo=true&nofeed=true&model=flux&negative_prompt=${neg}&seed=${seed}`;
     const hit = await fetchImageUrl(url, 55_000);
     if (isUsableImageHit(hit)) best = pickBest(best, { ...hit, source: 'pollinations-flux', tookMs: 55_000 });

@@ -30,23 +30,24 @@ export const BASE_SYSTEM =
   'You are ARK, a normal helpful AI chat assistant. Talk like ChatGPT. not a design studio or image tool unless they ask to make something. '
   + 'You are not the video game Ark: Survival Evolved. Never “correct” the user’s spelling of ARK. '
   + `${ANSWER_THE_ASK} `
-  + 'When they ask for ideas or recommendations (app, website, coffee shop, etc.): give concrete, accurate pieces that product should have, then say where to start first and offer to begin. '
+  + 'When they ask for ideas for an app, website, coffee shop, etc.: give concrete pieces that product should have, then say where to start first and offer to begin. '
   + 'When they ask what a project is or what they are building: explain the product goal in plain language from the evidence, then suggest a practical next step. do not paste a generic file inventory. '
-  + 'If this chat is about building an app/website and they ask where to start, what first, or recommendations: answer about THAT product only. never switch to celebrities, movies, weather, or unrelated trivia. '
+  + 'Never invent a new subject (movies, TV, celebrities, weather, EcoBuddy-style fake products) when the thread is about something else. '
   + 'Never echo the user’s greeting. If they only say hi/hello/hey, reply: “Hello! How can I assist you today?” '
   + 'Be accurate and complete. Cover the main facts they need, then one short follow-up: “Want more on any of that?” '
-  + 'Only when they ask about a person: who they are, companies they founded/own/run (list the well-known ones), and a couple of notable facts. '
-  + 'Only when they ask about movies/shows: Title (year). one line why it is good. Then typical places to watch (Netflix, Disney+, Prime Video, Max, YouTube) and IMDb for listings. Say availability varies by country. '
-  + 'Write lists as: 1. Drama: Title (year). … Watch: Netflix / Prime. Never nest asterisks. Never wrap genre names in **.';
+  + 'Only when they clearly ask about a person: who they are, companies they founded/own/run (list the well-known ones), and a couple of notable facts. '
+  + 'Only when they clearly ask about movies or TV shows: Title (year). one line why it is good. Then typical places to watch (Netflix, Disney+, Prime Video, Max, YouTube) and IMDb for listings. Say availability varies by country. '
+  + 'Write movie/TV lists as: 1. Drama: Title (year). … Watch: Netflix / Prime. Never nest asterisks. Never wrap genre names in **.';
 
 const CONTINUITY =
-  'This is a follow-up in the same ARK app chat. '
-  + 'Stay on the same topic as the earlier turns (especially any app, website, or project they described). '
+  'This is a follow-up in the same ARK chat. '
+  + 'Stay on the same topic as the earlier turns (coding lesson, app idea, troubleshooting, etc.). '
+  + 'If they say “more details”, “dive deeper”, “recommended area”, or similar, deepen the PREVIOUS answer. do not switch subjects. '
   + 'Answer the latest user message with a brand-new reply. '
   + `${ANSWER_THE_ASK} `
-  + 'If they ask where to start, what first, or for recommendations: prioritize the product/app from this thread. '
+  + 'If they ask where to start, what first, or for next steps: prioritize the topic from this thread. '
   + 'If they ask to continue, tell more, or go on, finish the previous answer from where it stopped. do not restart the same list from item 1. '
-  + 'If they asked a new question, do not repeat an earlier list.';
+  + 'If they clearly switched topics (e.g. coding → ninja warriors), follow the new topic.';
 
 const CHAT_CODE_OUTPUT =
   'Give one short intro sentence, then one complete markdown code fence. No placeholders.';
@@ -74,17 +75,24 @@ const CODING_WORKSPACE_ECHO_RE =
 const BUILD_HINT =
   /\b(build|create|make|implement|develop)\b.{0,48}\b(app|apps|website|site|calculator|program|game|page|ui)\b|\b(write|give|paste|show)\b.{0,32}\b(code|html|css|javascript|python|script|source)\b|\bfull (file|source)\b|\bcopy and paste\b/i;
 const TEACH_HINT =
-  /\b(teach|learn|tutorial|explain how|how (do i|to|can i) (learn|code|program|start))\b/i;
+  /\b(teach|learn|tutorial|explain how|how (do i|to|can i) (learn|code|program|start)|teach me how to code|learning to code)\b/i;
+const CODING_TOPIC_HINT =
+  /\b(code|coding|program(?:ming)?|python|javascript|typescript|java|html|css|leetcode|variables?|functions?|loops?|syntax|debug(?:ging)?|software|developer|compiler)\b/i;
 
 const FACT_HINT =
   /\b(weather|temperature|forecast|rain|humid|capital of|who is|what is|when did|population|india|history of)\b/i;
 const STORY_HINT = /\b(story|joke|poem|song|riddle|fairytale)\b/i;
 const GREET_HINT = /^(hi|hello|hey|yo|sup|howdy)\b/i;
+const MEDIA_ASK_HINT =
+  /\b(movies?|tv\s*shows?|films?|netflix|what\s+should\s+i\s+watch|watch\s+next)\b/i;
+/** Soft deepen / continue — always keep prior turns. */
 const FOLLOW_UP_HINT =
   /^(?:(?:can you |could you |please )?(?:tell me more|say more|go on|continue|elaborate)|more|why|how so|and\b|also\b|what about|ok but|please explain|okay[,.]?\s*|ok[,.]?\s*)\b/i;
-/** Same-thread product next steps. must keep build context. */
+const SOFT_FOLLOW_UP_HINT =
+  /\b(?:dive\s+(?:deeper|in)|go\s+deeper|more\s+details?|tell\s+me\s+more|expand\s+on|recommended\s+area|that\s+area|this\s+area|those\s+steps?|any\s+of\s+(?:these|those|them)|focus\s+on\s+(?:a\s+)?specific|in\s+(?:that|this|the)\s+(?:area|step|topic|one)|give\s+me\s+more|i\s+would\s+like\s+more|yes[,.]?\s+(?:please|more|that))\b/i;
+/** Same-thread next steps. must keep prior context. */
 const THREAD_CONTINUE_HINT =
-  /\b(where (should|do|to) (we|i|you) start|where (do you think )?(we|i) should start|what (should|do) (we|i) (do )?first|what first|next step|i want (some |a )?recommendations?|recommendations?\b|recommend)\b/i;
+  /\b(where (should|do|to) (we|i|you) start|where (do you think )?(we|i) should start|what (should|do) (we|i) (do )?first|what first|next step|i want (some |a )?recommendations?|recommendations?\b|recommend(?:ed|ation)?s?)\b/i;
 
 function significantTokens(text: string): Set<string> {
   return new Set(
@@ -92,15 +100,69 @@ function significantTokens(text: string): Set<string> {
       .toLowerCase()
       .split(/[^a-z0-9]+/i)
       .filter(w => w.length > 3)
-      .filter(w => !/^(that|this|with|from|have|what|when|where|your|about|please|would|could|should|there|their)$/i.test(w)),
+      .filter(w => !/^(that|this|with|from|have|what|when|where|your|about|please|would|could|should|there|their|like|would|deeper|area|more|details?)$/i.test(w)),
   );
+}
+
+function isSoftContinuityAsk(text: string): boolean {
+  const t = String(text || '').trim();
+  if (!t) return false;
+  return FOLLOW_UP_HINT.test(t) || SOFT_FOLLOW_UP_HINT.test(t) || THREAD_CONTINUE_HINT.test(t);
+}
+
+export type ThreadTopicKind = 'coding' | 'product' | 'media' | 'general';
+
+/** Infer what this chat is currently about so follow-ups stay anchored. */
+export function inferThreadTopic(history: RouterChatTurn[]): { kind: ThreadTopicKind; label: string } {
+  const users = history.filter(t => t.role === 'user').map(t => t.content);
+  const assistants = history.filter(t => t.role === 'assistant').map(t => t.content);
+  const latestUser = [...users].reverse().find(u => u.trim() && !GREET_HINT.test(u.trim())) || '';
+  // Prefer the latest user ask when it clearly starts a new subject.
+  if (MEDIA_ASK_HINT.test(latestUser)) {
+    return { kind: 'media', label: 'movies / TV' };
+  }
+  if (TEACH_HINT.test(latestUser) || (CODING_TOPIC_HINT.test(latestUser) && !BUILD_HINT.test(latestUser))) {
+    return { kind: 'coding', label: 'learning to code / programming' };
+  }
+  if (BUILD_HINT.test(latestUser)) {
+    return { kind: 'product', label: 'building a software product' };
+  }
+  // Soft follow-ups: topic comes from earlier turns + last assistant.
+  const priorBlob = [
+    ...users.filter(u => u !== latestUser).slice(-4),
+    ...assistants.slice(-2),
+  ].join('\n');
+  if (isSoftContinuityAsk(latestUser) || !latestUser) {
+    if (TEACH_HINT.test(priorBlob) || CODING_TOPIC_HINT.test(priorBlob)) {
+      return { kind: 'coding', label: 'learning to code / programming' };
+    }
+    if (BUILD_HINT.test(priorBlob) || /\b(app|website|mvp|stack|scaffold|project)\b/i.test(priorBlob)) {
+      return { kind: 'product', label: 'building a software product' };
+    }
+    if (MEDIA_ASK_HINT.test(priorBlob)) {
+      return { kind: 'media', label: 'movies / TV' };
+    }
+  }
+  const blob = [...users, ...assistants.slice(-2)].join('\n');
+  if (TEACH_HINT.test(blob) || CODING_TOPIC_HINT.test(blob)) {
+    return { kind: 'coding', label: 'learning to code / programming' };
+  }
+  if (BUILD_HINT.test(blob) || /\b(app|website|mvp|stack|scaffold|project)\b/i.test(blob)) {
+    return { kind: 'product', label: 'building a software product' };
+  }
+  if (latestUser) {
+    const clip = latestUser.replace(/\s+/g, ' ').trim().slice(0, 80);
+    return { kind: 'general', label: clip };
+  }
+  return { kind: 'general', label: 'the ongoing conversation' };
 }
 
 /** True when the latest ask is a new task, not a follow-up to the prior one. */
 export function isTopicShift(history: RouterChatTurn[], latestUserMessage: string): boolean {
   const latest = String(latestUserMessage || '').trim();
   if (!latest) return false;
-  if (FOLLOW_UP_HINT.test(latest) || THREAD_CONTINUE_HINT.test(latest)) return false;
+  // Soft deepen / continue always keeps the thread (fixes “dive deeper in recommended area” → movies).
+  if (isSoftContinuityAsk(latest)) return false;
   const priorUsers = history.filter(t => t.role === 'user');
   const earlier = priorUsers.length > 1
     ? priorUsers[priorUsers.length - 2]
@@ -110,20 +172,22 @@ export function isTopicShift(history: RouterChatTurn[], latestUserMessage: strin
   if (!earlier?.content) return false;
   const a = earlier.content.trim();
   const b = latest;
-  // After a build/app ask, “where should we start” etc. stay on that product.
+  // After teach/learn or build, short / deepen asks stay on that topic.
+  if ((TEACH_HINT.test(a) || CODING_TOPIC_HINT.test(a) || BUILD_HINT.test(a)) && b.length < 160) return false;
   if (BUILD_HINT.test(a) && THREAD_CONTINUE_HINT.test(b)) return false;
   if (BUILD_HINT.test(a) && /\b(app|website|site|product|project|build)\b/i.test(b)) return false;
-  if (GREET_HINT.test(a) && !GREET_HINT.test(b) && !FOLLOW_UP_HINT.test(b) && !THREAD_CONTINUE_HINT.test(b)) return true;
+  // Explicit media ask after a non-media thread is a real switch.
+  if (MEDIA_ASK_HINT.test(b) && !MEDIA_ASK_HINT.test(a) && !isSoftContinuityAsk(b)) return true;
+  if (GREET_HINT.test(a) && !GREET_HINT.test(b) && !isSoftContinuityAsk(b)) return true;
   if (STORY_HINT.test(b) && !STORY_HINT.test(a)) return true;
-  if (STORY_HINT.test(a) && !STORY_HINT.test(b) && !FOLLOW_UP_HINT.test(b)) return true;
+  if (STORY_HINT.test(a) && !STORY_HINT.test(b) && !isSoftContinuityAsk(b)) return true;
   if (BUILD_HINT.test(b) && !BUILD_HINT.test(a) && (FACT_HINT.test(a) || a.length > 12)) return true;
   if (FACT_HINT.test(b) && BUILD_HINT.test(a)) return true;
   const ta = significantTokens(a);
   const tb = significantTokens(b);
   if (tb.size < 2 || ta.size < 2) {
-    // Short follow-ups after a build thread are continuity, not a new topic.
-    if (BUILD_HINT.test(a) && b.length < 120) return false;
-    return a.toLowerCase() !== b.toLowerCase() && !FOLLOW_UP_HINT.test(b) && !THREAD_CONTINUE_HINT.test(b);
+    if ((BUILD_HINT.test(a) || TEACH_HINT.test(a) || CODING_TOPIC_HINT.test(a)) && b.length < 140) return false;
+    return a.toLowerCase() !== b.toLowerCase() && !isSoftContinuityAsk(b);
   }
   let overlap = 0;
   for (const t of tb) if (ta.has(t)) overlap += 1;
@@ -285,10 +349,13 @@ export function routerSystemPrompt(history: RouterChatTurn[]): string {
     : '';
   const hasPrior = history.some(t => t.role === 'assistant') || history.length > 1;
   if (!hasPrior) return `${BASE_SYSTEM}${visionNote}`;
-  if (FOLLOW_UP_HINT.test(latest.trim()) || THREAD_CONTINUE_HINT.test(latest.trim())) {
-    return `${BASE_SYSTEM}\n\nThis is a follow-up. Stay on the same app/project from earlier turns. Continue from that context. do not switch to celebrities, movies, or unrelated topics.${visionNote}`;
+  const topic = inferThreadTopic(history);
+  const topicLine =
+    `Current thread topic: ${topic.label}. Stay on this unless the user clearly switches to something else.`;
+  if (isSoftContinuityAsk(latest.trim())) {
+    return `${BASE_SYSTEM}\n\n${topicLine}\nThis is a follow-up. Deepen the previous answer on that topic. Do not invent movies, TV, celebrities, or a new product.${visionNote}`;
   }
-  return `${BASE_SYSTEM}\n\n${CONTINUITY}${visionNote}`;
+  return `${BASE_SYSTEM}\n\n${topicLine}\n${CONTINUITY}${visionNote}`;
 }
 
 function wantsChatCode(latest: string) {
@@ -341,8 +408,10 @@ export function packHistoryPrompt(history: RouterChatTurn[], latestFallback?: st
 
   // Keep identity in the ChatML system turn (arkGguf wrapChatPrompt). Stuffing it into
   // the user text makes Qwen parrot “Never continue a previous sentence…” in the bubble.
-  const keepContinuity = history.some(t => /Earlier in this chat/i.test(t.content))
-    || history.filter(t => t.role === 'user').length >= 3;
+  const softFollow = isSoftContinuityAsk(latest);
+  const keepContinuity = softFollow
+    || history.some(t => /Earlier in this chat/i.test(t.content))
+    || history.filter(t => t.role === 'user').length >= 2;
   if (
     history.length <= 1
     || !history.some(t => t.role === 'assistant')
@@ -352,6 +421,7 @@ export function packHistoryPrompt(history: RouterChatTurn[], latestFallback?: st
   }
 
   const packedHistory = compressHistoryIfNeeded(history);
+  const topic = inferThreadTopic(packedHistory);
   const priorUsers = packedHistory
     .filter(t => t.role === 'user' && t.content.trim() && t.content.trim() !== latest)
     .slice(-8)
@@ -370,11 +440,11 @@ export function packHistoryPrompt(history: RouterChatTurn[], latestFallback?: st
     ].filter(Boolean).join('\n\n');
   }
 
-  const follow = FOLLOW_UP_HINT.test(latest.trim());
   return [
-    priorUsers.length ? `Earlier user asks${follow ? '' : ' (already answered)'}:\n${priorUsers.join('\n')}` : '',
+    `Thread topic: ${topic.label}. Stay on it unless Latest clearly switches.`,
+    priorUsers.length ? `Earlier user asks${softFollow ? '' : ' (already answered)'}:\n${priorUsers.join('\n')}` : '',
     lastAssistant
-      ? `${follow ? 'Previous answer. continue from the end, do not restart:\n' : 'Previous answer:\n'}${lastAssistant}`
+      ? `${softFollow ? 'Previous answer. continue / deepen from here, do not restart or change subject:\n' : 'Previous answer:\n'}${lastAssistant}`
       : '',
     `Latest:\n${latest}`,
   ].filter(Boolean).join('\n\n');

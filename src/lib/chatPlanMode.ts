@@ -37,14 +37,12 @@ export function planModeSystemHint(): string {
 export function planningConversationHint(topicHint?: string): string {
   const topic = topicHint ? ` Focus on: ${topicHint.slice(0, 280)}` : '';
   return [
-    'Planning conversation only. do not create files, folders, or projects.',
-    'Answer THIS specific product idea with concrete, unique detail (not a generic questionnaire).',
-    'Match their latest question: stack, PC requirements, timeline, open-source/GitHub refs, inspiration sites,',
-    'mockups/references, or tradeoffs. do not force a generic “give me more details” script.',
-    'When useful, offer: (1) product variants, (2) stack + why, (3) v1 scope, (4) build path,',
-    '(5) real reference repos/sites, (6) 2–4 clarifying questions phrased naturally.',
+    'Planning conversation only. Do not create files, folders, or projects.',
+    'Stay on the user’s actual topic. If they asked a general how-to (coding, learning, troubleshooting), deepen THAT answer.',
+    'Do not invent a random product name, EcoBuddy-style demo app, stack, or timeline unless they described a product to build.',
+    'If they already shared a product idea, answer that idea with concrete detail (stack, scope, tradeoffs).',
     'Never invent UI chips like Create project or Keep planning.',
-    'Do not greet empty. jump into useful content about their idea.',
+    'Do not greet empty. Jump into useful content.',
     topic,
   ].filter(Boolean).join(' ');
 }

@@ -158,6 +158,93 @@ export function GeneratingPlaceholder({
   );
 }
 
+/** Ext from MIME / path only — never scan base64 (random “svg” bytes caused .svg downloads). */
+function mediaDownloadExt(src: string, isVideo: boolean): string {
+  if (isVideo) return 'mp4';
+  const data = /^data:(image|video)\/([a-z0-9+.-]+)/i.exec(src);
+  if (data) {
+    const sub = data[2].toLowerCase();
+    if (sub.includes('png')) return 'png';
+    if (sub.includes('webp')) return 'webp';
+    if (sub.includes('gif')) return 'gif';
+    if (sub.includes('svg')) return 'png';
+    return 'jpg';
+  }
+  const pathOnly = src.split('?')[0].split('#')[0];
+  if (/\.png$/i.test(pathOnly)) return 'png';
+  if (/\.webp$/i.test(pathOnly)) return 'webp';
+  if (/\.gif$/i.test(pathOnly)) return 'gif';
+  if (/\.jpe?g$/i.test(pathOnly)) return 'jpg';
+  return 'jpg';
+}
+
+function sniffImageExt(buf: ArrayBuffer): 'png' | 'jpg' | 'webp' | 'gif' | null {
+  const u8 = new Uint8Array(buf);
+  if (u8.length >= 3 && u8[0] === 0xff && u8[1] === 0xd8 && u8[2] === 0xff) return 'jpg';
+  if (u8.length >= 8 && u8[0] === 0x89 && u8[1] === 0x50 && u8[2] === 0x4e && u8[3] === 0x47) return 'png';
+  if (u8.length >= 12 && u8[0] === 0x52 && u8[1] === 0x49 && u8[2] === 0x46 && u8[3] === 0x46
+    && u8[8] === 0x57 && u8[9] === 0x45 && u8[10] === 0x42 && u8[11] === 0x50) return 'webp';
+  if (u8.length >= 6 && u8[0] === 0x47 && u8[1] === 0x49 && u8[2] === 0x46) return 'gif';
+  return null;
+}
+
+function MediaLightbox({
+  src,
+  alt,
+  isVideo,
+  onClose,
+}: {
+  src: string;
+  alt: string;
+  isVideo: boolean;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={alt || 'Image preview'}
+      className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 p-4 sm:p-8"
+      onClick={onClose}
+    >
+      <button
+        type="button"
+        className="absolute top-4 right-4 rounded-lg px-3 py-1.5 text-sm text-white/90 bg-white/10 hover:bg-white/20"
+        onClick={onClose}
+      >
+        Close
+      </button>
+      <div
+        className="max-h-full max-w-full"
+        onClick={e => e.stopPropagation()}
+      >
+        {isVideo ? (
+          <video
+            src={src}
+            controls
+            autoPlay
+            className="max-h-[min(92vh,900px)] max-w-[min(96vw,1200px)] rounded-xl bg-black"
+          />
+        ) : (
+          <img
+            src={src}
+            alt={alt}
+            className="max-h-[min(92vh,900px)] max-w-[min(96vw,1200px)] rounded-xl object-contain bg-[#0d1117]"
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
 function MediaActions({ src, alt }: { src: string; alt: string }) {
   const [copied, setCopied] = useState(false);
   const isVideo = src.startsWith('data:video/') || /\.mp4(\?|$)/i.test(src);
@@ -167,7 +254,7 @@ function MediaActions({ src, alt }: { src: string; alt: string }) {
       const res = await fetch(src);
       const blob = await res.blob();
       if (typeof ClipboardItem !== 'undefined' && navigator.clipboard?.write) {
-        await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
+        await navigator.clipboard.write([new ClipboardItem({ [blob.type || 'image/png']: blob })]);
       } else {
         await navigator.clipboard.writeText(alt || src);
       }
@@ -185,17 +272,38 @@ function MediaActions({ src, alt }: { src: string; alt: string }) {
   };
 
   const onDownload = () => {
-    const a = document.createElement('a');
-    a.href = src;
-    const ext = isVideo
-      ? 'mp4'
-      : src.includes('svg')
-        ? 'svg'
-        : src.includes('png')
-          ? 'png'
-          : 'jpg';
-    a.download = `ark-${Date.now()}.${ext}`;
-    a.click();
+    void (async () => {
+      try {
+        const res = await fetch(src);
+        const blob = await res.blob();
+        const buf = await blob.arrayBuffer();
+        const sniffed = sniffImageExt(buf);
+        let ext = isVideo ? 'mp4' : (sniffed || mediaDownloadExt(src, false));
+        // Never offer a broken .svg wrapper for real raster bytes.
+        if (ext === 'svg') ext = sniffed || 'jpg';
+        const mime =
+          ext === 'png' ? 'image/png'
+            : ext === 'webp' ? 'image/webp'
+              : ext === 'gif' ? 'image/gif'
+                : ext === 'mp4' ? 'video/mp4'
+                  : 'image/jpeg';
+        const out = new Blob([buf], { type: mime });
+        const url = URL.createObjectURL(out);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `ark-${Date.now()}.${ext}`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.setTimeout(() => URL.revokeObjectURL(url), 2_000);
+      } catch {
+        // Fallback: still avoid .svg from base64 false-positives
+        const a = document.createElement('a');
+        a.href = src;
+        a.download = `ark-${Date.now()}.${mediaDownloadExt(src, isVideo)}`;
+        a.click();
+      }
+    })();
   };
 
   return (
@@ -223,6 +331,7 @@ function MediaActions({ src, alt }: { src: string; alt: string }) {
 }
 
 function ResolvedMedia({ src, alt, preview }: { src: string; alt: string; preview?: boolean }) {
+  const [lightbox, setLightbox] = useState(false);
   const isVideo = src.startsWith('data:video/') || /\.mp4(\?|$)/i.test(src);
   return (
     <div className={`${preview ? 'opacity-90' : ''}`}>
@@ -230,18 +339,35 @@ function ResolvedMedia({ src, alt, preview }: { src: string; alt: string; previe
         <video
           src={src}
           controls
-          className="rounded-2xl bg-black block"
+          className="rounded-2xl bg-black block cursor-pointer"
           style={{ width: 320, maxWidth: '100%' }}
+          onDoubleClick={() => setLightbox(true)}
         />
       ) : (
-        <img
-          src={src}
-          alt={alt}
-          className="rounded-2xl object-contain bg-[#0d1117] block"
-          style={{ maxWidth: 'min(100%, 420px)', maxHeight: 480, width: 'auto', height: 'auto' }}
-        />
+        <button
+          type="button"
+          className="block p-0 m-0 border-0 bg-transparent cursor-zoom-in rounded-2xl overflow-hidden text-left"
+          onClick={() => setLightbox(true)}
+          title="View larger"
+          aria-label={`View larger: ${alt || 'image'}`}
+        >
+          <img
+            src={src}
+            alt={alt}
+            className="rounded-2xl object-contain bg-[#0d1117] block pointer-events-none"
+            style={{ maxWidth: 'min(100%, 420px)', maxHeight: 480, width: 'auto', height: 'auto' }}
+          />
+        </button>
       )}
       <MediaActions src={src} alt={alt} />
+      {lightbox ? (
+        <MediaLightbox
+          src={src}
+          alt={alt}
+          isVideo={isVideo}
+          onClose={() => setLightbox(false)}
+        />
+      ) : null}
     </div>
   );
 }

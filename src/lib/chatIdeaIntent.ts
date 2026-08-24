@@ -6,6 +6,7 @@ import { slugifyProjectName } from './projectNames';
 import { looksLikeProjectBuildAsk } from './chatBuildIntent';
 import { looksLikeLandingBrief, prefersReactAppScaffold, wantsChatAppScaffold } from '@/lib/webLandingFromBrief';
 import { detectProjectKind, resolveProjectKindForCreate, type ProjectKind } from '@/lib/projectKind';
+import { looksLikeImplementGo } from '@/lib/chatPlanMode';
 
 export type { ProjectKind };
 
@@ -600,14 +601,37 @@ export function looksLikeConversationalPlanningAsk(text: string): boolean {
     && /\b(?:repo|site|sites|faster|help|peek|look|worth|use)\b/i.test(t)) return true;
   if (/\bnot\s+(?:building|creating|ready)\s+yet\b/i.test(t) || /\bjust\s+(?:figuring|talking|planning|wondering)\b/i.test(t)) return true;
   if (/\bstill\s+just\s+(?:planning|talking|discussing)\b/i.test(t)) return true;
-  if (/\bgive\s+me\s+more\s+(?:info|information|detail)/i.test(t)) return true;
-  if (/\b(?:yes[,.]?\s+)?(?:give\s+me\s+)?more\s+details?\b/i.test(t)) return true;
-  if (/\btell\s+me\s+more\b/i.test(t) || /\bexpand\s+on\s+(?:that|this|it)\b/i.test(t)) return true;
-  if (/\bmore\s+(?:info|detail|about)\b/i.test(t) && t.length < 80) return true;
+  // Bare “more details / tell me more” is a normal follow-up, not a product-planning turn.
+  // Those only stay in planning when a greenfield brief is already pending (see shouldInjectPlanningConversation).
   if (/\bi(?:'m| am)\s+(?:building|thinking\s+about|planning|working\s+on)\b/i.test(t)
     && !/\bcreate\s+(?:the\s+)?(?:files|project)\b/i.test(t)) return true;
   if (/\bbuilding\s+(?:a|an|my)\b/i.test(t) && /\b(?:app|website|site|tool|game)\b/i.test(t)
     && !/\b(?:create\s+project|scaffold|files\s+now)\b/i.test(t)) return true;
+  return false;
+}
+
+/** Short “more details / tell me more” with no product words. */
+export function isBarePlanningFollowUp(text: string): boolean {
+  const content = String(text || '').trim();
+  if (!content || content.length >= 100) return false;
+  if (!/\b(?:more\s+details?|tell\s+me\s+more|expand\s+on|give\s+me\s+more)\b/i.test(content)) return false;
+  return !/\b(?:app|application|website|site|product|project|mvp|stack)\b/i.test(content);
+}
+
+/**
+ * When true, Chat injects planningConversationHint (product-plan framing).
+ * Bare teach-me / more-details follow-ups must stay normal chat unless a greenfield brief is pending.
+ */
+export function shouldInjectPlanningConversation(
+  content: string,
+  opts?: { pendingIdea?: boolean },
+): boolean {
+  if (looksLikeImplementGo(content)) return false;
+  const pending = Boolean(opts?.pendingIdea);
+  const bare = isBarePlanningFollowUp(content);
+  if (looksLikeGreenfieldIdea(content) || wantsPlanningOnly(content)) return true;
+  if (pending && (looksLikeConversationalPlanningAsk(content) || bare)) return true;
+  if (looksLikeConversationalPlanningAsk(content) && !bare) return true;
   return false;
 }
 

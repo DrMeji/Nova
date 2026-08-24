@@ -681,9 +681,8 @@ ipcMain.handle('ark:open-path', async (_event, targetPath) => {
   return { ok: true };
 });
 
-ipcMain.handle('ark:open-external', async (event, url) => {
-  const win = BrowserWindow.fromWebContents(event.sender);
-  return arkOpenExternal.openExternal(url, win);
+ipcMain.handle('ark:open-external', async (_event, url) => {
+  return arkOpenExternal.openExternal(url);
 });
 
 ipcMain.handle('ark:secrets-status', async () => ({

@@ -143,7 +143,7 @@ import { projectUsesNpm } from '@/lib/projectScaffolds';
 import { looksLikeImplementGo, shouldBlockChatFileWrites, planningConversationHint } from '@/lib/chatPlanMode';
 import { looksLikeInPlaceRebuildAsk, looksLikeProjectBuildAsk } from '@/lib/chatBuildIntent';
 import { isProjectCreateBrief } from '@/lib/chatCreateBrief';
-import { briefReadDelayMs, detectPlanFocus, extractGreenfieldName, looksLikeConversationalPlanningAsk, looksLikeGreenfieldCreateGo, looksLikeGreenfieldHaveFolder, looksLikeGreenfieldIdea, looksLikeGreenfieldKeepPlanning, looksLikeGreenfieldStartWorkGo, parseGreenfieldIdea, buildMissingWorkFolderReply, wantsPlanningOnly } from '@/lib/chatIdeaIntent';
+import { briefReadDelayMs, detectPlanFocus, extractGreenfieldName, looksLikeConversationalPlanningAsk, looksLikeGreenfieldCreateGo, looksLikeGreenfieldHaveFolder, looksLikeGreenfieldIdea, looksLikeGreenfieldKeepPlanning, looksLikeGreenfieldStartWorkGo, parseGreenfieldIdea, buildMissingWorkFolderReply, shouldInjectPlanningConversation, wantsPlanningOnly } from '@/lib/chatIdeaIntent';
 import {
   chatTurnAllowsExec,
   chatTurnAllowsFileEdits,
@@ -4162,9 +4162,9 @@ export function AIChat() {
       earlyHasStudio,
       content.startsWith(COMPOSER_MODE_PREFIX.debug),
     );
-    const keepContinuity = mode === 'code' || Boolean(
-      threadBrainRef.current?.pendingModelId || threadBrainRef.current?.freshBudget,
-    );
+    const keepContinuity = mode === 'code'
+      || Boolean(threadBrainRef.current?.pendingModelId || threadBrainRef.current?.freshBudget)
+      || histPrefs.rememberContext;
     // Inspect follow-ups must not pack the prior huge dump into GGUF (that hung Thinking…).
     const seedHistory = willInspect
       ? buildRouterHistory([], content)
@@ -4945,12 +4945,7 @@ export function AIChat() {
           const prefs = getLocalPrefs();
           const vision = extractVisionImages(content);
           const pendingIdea = getLastPendingGreenfield(activeChatId);
-          const planningTalk = !looksLikeImplementGo(content) && (
-            looksLikeConversationalPlanningAsk(content)
-            || wantsPlanningOnly(content)
-            || looksLikeGreenfieldIdea(content)
-            || Boolean(pendingIdea)
-          );
+          const planningTalk = shouldInjectPlanningConversation(content, { pendingIdea: Boolean(pendingIdea) });
           let routeMessage = content;
           let history = prefs.rememberContext
             ? (rotatedHistory.length ? rotatedHistory : buildRouterHistory(priorForHistory, content, vision, {
@@ -4968,8 +4963,8 @@ export function AIChat() {
             });
             if (mySeq !== genSeqRef.current || stopRequestedRef.current) return;
             history = [
-              { role: 'user' as const, content: planningConversationHint(pendingIdea?.summary || content) },
-              { role: 'assistant' as const, content: 'Understood. I will answer with a unique, thorough plan and questions. no files, no create-project chips.' },
+              { role: 'user' as const, content: planningConversationHint(pendingIdea?.summary || undefined) },
+              { role: 'assistant' as const, content: 'Understood. I will stay on their topic, give a thorough answer, and not invent a random product.' },
               ...history,
             ];
             routeMessage = content;
