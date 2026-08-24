@@ -456,11 +456,12 @@ function ModelInstallControl({
     <button
       type="button"
       onClick={onInstall}
-      className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors"
+      className="inline-flex items-center gap-1.5 h-8 rounded-full px-2.5 shrink-0 text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors text-[11px] font-medium"
       title="Download into ARK Engine"
       aria-label={`Download ${name}`}
     >
       <Download className="w-4 h-4" />
+      <span>Download</span>
     </button>
   );
 }

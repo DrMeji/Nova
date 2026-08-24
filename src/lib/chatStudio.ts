@@ -11,6 +11,7 @@ import {
   type InspectFinding,
 } from '@/lib/projectInspect';
 import { looksLikeCodeAsk } from '@/lib/chatIntent';
+import { looksLikeConversationalPlanningAsk } from '@/lib/chatIdeaIntent';
 import { looksLikeFolderCatalogAsk } from '@/lib/folderCatalog';
 import { listGitHubRepos, type GitHubRepo } from '@/lib/github';
 import { parseGithubRepoRef } from '@/lib/arkGitClient';
@@ -20,11 +21,20 @@ export type ChatStudioFiles = Record<string, string>;
 export function looksLikeBuildStart(message: string): boolean {
   const t = String(message || '');
   if (wantsInspectOnly(t, false) && !/\b(build|create|make)\b/i.test(t)) return false;
+  // Advisory talk ("I'm building a 3D app", "how do I get started") is NOT scaffold.
+  if (/\b(?:how\s+(?:do|can|should|would)|get\s+started|help\s+me\s+plan|just\s+(?:talk|plan|discuss)|planning\s+only|no\s+files|do\s+not\s+create)\b/i.test(t)) {
+    return false;
+  }
+  if (/\bi(?:'m| am)\s+building\b/i.test(t) && !/\b(?:create\s+(?:the\s+)?(?:files|project)|scaffold|lets?\s+build\s+this)\b/i.test(t)) {
+    return false;
+  }
   return (
-    /\b(build|create|make|scaffold|start)\b[\s\S]{0,90}\b(app|website|site|page|tool|dashboard|ui|chat\s*gpt|blank page|iphone|ipad|ios|android|button|icon|search|settings)\b/i.test(t)
-    || (/\b(iphone|ipad|ios|android|app store|play store)\b/i.test(t)
-      && /\b(build|create|make|start|want|need|app)\b/i.test(t))
-    || /\b(let'?s|lets)\s+(build|make|create|start)\b/i.test(t)
+    /\b(create|scaffold)\b[\s\S]{0,90}\b(app|website|site|page|tool|dashboard|ui|project)\b/i.test(t)
+    || (
+      /\b(build|make)\b[\s\S]{0,40}\b(?:me\s+)?(?:a\s+)?(?:new\s+)?(app|website|site|project)\b/i.test(t)
+      && /\b(?:now|files|scaffold|on\s+desktop|create\s+the)\b/i.test(t)
+    )
+    || /\b(let'?s|lets)\s+(build|make|create)\s+(?:this|that|it|the\s+project|files)\b/i.test(t)
     || /\bstart with a blank\b/i.test(t)
     || /\banother chat\s*gpt\b/i.test(t)
     || /\b(add|put|place)\b[\s\S]{0,60}\b(button|icon|logo|search|settings)\b/i.test(t)
@@ -131,7 +141,9 @@ export function classifyStudioAsk(message: string, hasFiles = false): StudioAskK
     /^go into more detail about this project/i.test(ask)
     || /\bwhat the main files do and how they connect\b/i.test(ask)
     || (
-      /\b(more details?|go deeper|full details?)\b/i.test(ask)
+      // Only treat “more details” as file-detail when a folder is actually attached.
+      hasFiles
+      && /\b(more details?|go deeper|full details?)\b/i.test(ask)
       && !/\b(security|fix|problem|bug|issue|scan)\b/i.test(ask)
       && !STUDIO_FIX_ASK_RE.test(ask)
       && !STUDIO_WIDER_RE.test(ask)
@@ -209,9 +221,24 @@ export function shouldInspectInChat(
 ): boolean {
   const t = String(message || '');
   if (t.includes('<!--ark-attach:') || t.includes('<!--ark-auto-read-->')) return true;
+  // Soft planning / “give me more details” about an idea is normal chat — not folder inspect.
+  if (
+    /\b(?:more\s+details?|give\s+me\s+more|go\s+deeper|tell\s+me\s+more|expand\s+on\s+(?:that|this|it))\b/i.test(t)
+    && !hasFiles
+    && !/\b(?:this\s+project|this\s+folder|attached|files?\s+do)\b/i.test(t)
+  ) {
+    return false;
+  }
+  if (
+    /\b(?:help\s+me\s+plan|planning\s+only|just\s+(?:talk|discuss)|get\s+started|i(?:'m| am)\s+building)\b/i.test(t)
+    && !hasFiles
+  ) {
+    return false;
+  }
   const kind = classifyStudioAsk(t, hasFiles);
   if (kind === 'catalog') return false;
-  if (kind != null) return true;
+  // Studio intents (file-detail, overview, …) need real attached files — otherwise stay in chat.
+  if (kind != null) return hasFiles;
   if (!hasFiles) return false;
   const ask = cleanStudioAsk(t).replace(/!\[[^\]]*\]\([^)]+\)/g, '').trim();
   if (!ask || (SMALLTALK_RE.test(ask) && ask.length < 24)) return false;
@@ -235,13 +262,25 @@ export function shouldHandoffToCode(
 
 export function isGithubPullAsk(message: string): boolean {
   const t = message.toLowerCase();
+  // Planning: "is there an open GitHub repo / starter out there?" — not account/clone.
+  if (looksLikeConversationalPlanningAsk(message) || /\b(?:starter|template|out there|inspiration|faster than)\b/i.test(message)) {
+    if (!/\b(?:clone|pull in|bring in|my github|list (?:my )?repos|what repos)\b/i.test(t)) {
+      return false;
+    }
+  }
   if (/\b(pull request|\bprs?\b|issues?)\b/.test(t) && !/\b(clone|pull in|bring in|open .{0,20}repo)\b/.test(t)) {
     return wantsGithubCatalog(message);
   }
   if (/\b(clone|pull in|bring in)\b/.test(t) && (/github|repo/.test(t) || parseGithubRepoRef(message))) {
     return true;
   }
-  if (/\bopen\b/.test(t) && (parseGithubRepoRef(message) || /\b(github )?repos?\b/.test(t))) {
+  // "open owner/repo" / "open my github repos" — not "an open GitHub repo out there".
+  if (
+    /\bopen\b/.test(t)
+    && !/\ban\s+open\b/.test(t)
+    && !/\bopen[- ]source\b/.test(t)
+    && (parseGithubRepoRef(message) || /\b(my\s+)?(github )?repos?\b/.test(t))
+  ) {
     return true;
   }
   if (/\bwork on\b/.test(t) && parseGithubRepoRef(message)) return true;

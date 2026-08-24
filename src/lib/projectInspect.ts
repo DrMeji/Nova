@@ -90,19 +90,25 @@ export function isExplainAsk(message: string): boolean {
   if (isImproveAsk(t)) return false;
   if (/\b(debug|fix the|find the (bug|issue)|crash|better|improv)\b/i.test(t)
     && !/\bwhat is this (project|app|code|folder) about\b/i.test(t)
-    && !/\bsummarize\b/i.test(t)) {
+    && !/\bwhat this (project|app|code|folder) is about\b/i.test(t)
+    && !/\bsummarize\b/i.test(t)
+    && !/\bflag any\b/i.test(t)) {
     return false;
   }
   return /\bwhat is this(\s+(project|app|code|folder|repo))?\b/i.test(t)
     || /\bwhat (is|are) this (project|app|code|folder|repo) about\b/i.test(t)
+    || /\bwhat this (project|app|code|folder|repo) is(\s+about)?\b/i.test(t)
     || /\bwhat does this (project|app|code|folder) do\b/i.test(t)
     || /\bwhat (am i|i'?m|im) (trying to )?build\b/i.test(t)
     || /\b(can you |do you )?see (exactly )?what (i'?m|im|i am) (trying to )?build\b/i.test(t)
     || /\bwhat can you tell me about (this |the )?(project|app|code|folder|repo|files?)?\b/i.test(t)
     || /\btell me (exactly )?what this (project|app|code|folder|repo) is(\s+about)?\b/i.test(t)
+    || /\btell me what this (project|app|code|folder|repo) is about\b/i.test(t)
     || /\btell me about this (project|app|code|folder|repo)\b/i.test(t)
     || /\bexplain (this|the) (project|app|code|folder|repo)\b/i.test(t)
     || /\bsummarize\b/i.test(t)
+    || /\bhow (?:it|this|the project|the app) works\b/i.test(t)
+    || /\bflag any (?:bugs?|issues?|rough)\b/i.test(t)
     || /\bwhat (do|does) these files\b/i.test(t)
     || /\bhow (do|does) (they|these|the files) fit\b/i.test(t)
     || /\b(all about|overview of) (this|the|these)\b/i.test(t)

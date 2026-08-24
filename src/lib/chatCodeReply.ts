@@ -110,6 +110,12 @@ export function finalizeCodingChatBubble(opts: {
 
 export function liveCodingStatusText(partial: string): string {
   const clean = stripFileBlocks(partial);
+  if (/@@@FILE|```[\w]*\n|<!DOCTYPE|<html[\s>]|export\s+default\s+function/i.test(partial)) {
+    if (/\b(logo|icon|image)\b/i.test(partial)) return 'Updating visuals in your project…';
+    if (/\b(button|nav|header|footer|sidebar|tab)\b/i.test(partial)) return 'Updating layout and controls…';
+    if (/\b(page|route|screen)\b/i.test(partial)) return 'Updating pages…';
+    return 'Writing project files…';
+  }
   if (clean && clean.length > 8 && clean.length < 280 && !/```|@@@FILE/i.test(clean)) return clean;
   if (/\b(logo|icon|image)\b/i.test(partial)) return 'Creating logo and updating the project…';
   if (/\b(button|nav|header|footer|sidebar)\b/i.test(partial)) return 'Updating the layout…';

@@ -838,7 +838,9 @@ async function routeImage(opts: ArkRouteOpts): Promise<ArkRouterResult> {
 
   if (isAuto && opts.stickyModelId && opts.stickyPinnedSource) {
     const sticky = await tryStickyImage(opts, attempted, mode);
-    if (sticky && sticky.source !== 'none') return sticky;
+    // Only keep sticky when it actually produced a real image — otherwise free hosts never run
+    // and users see "busy / couldn't generate" from a failed local SD sticky.
+    if (sticky?.media?.dataUrl && sticky.media.real) return sticky;
   }
 
   const wantsCloud =
@@ -926,17 +928,21 @@ async function routeImage(opts: ArkRouteOpts): Promise<ArkRouterResult> {
   const local = await tryLocalMedia();
   if (local?.media?.dataUrl && local.media.real) return local;
 
-  // One engine pass only — generateImage already ranks local → HF → Pollinations.
-  // Do not loop IMAGE_ALTS; that re-ran Pollinations for minutes.
-
+  // Cascade: cloud (HF/OpenAI) after free hosts if failover is on.
   if ((!wantsCloud || !local?.media?.real) && failover && modeAllowsCloud(mode)) {
     const cloud = await tryCloud();
-    if (cloud) return cloud;
+    if (cloud) {
+      if (local && attempted.length > 1) {
+        return { ...cloud, attempted: [...attempted, ...(cloud.attempted || [])] };
+      }
+      return cloud;
+    }
   }
 
   if (local?.media?.dataUrl && local.media.real) return local;
 
   // Last resort: labeled preview only — never treat SVG fallback as finished art.
+  // Never invent “use Canva / Photoshop” text — hosts failed; tell the user to retry or add a key.
   if (local?.media?.dataUrl && !local.media.real) {
     void import('@/lib/arkHuntBootstrap').then(m =>
       m.installNextWhenCurrentRanOut({

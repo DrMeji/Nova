@@ -1,5 +1,31 @@
 # ARK changelog
 
+## 0.1.140 — 2026-08-24
+
+Image quality, chat keep-alive, NSFW gate, and static-project fixes.
+
+**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.140/ARK-Setup.exe) · [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.140)
+
+### Image generation
+
+- Flux-first pipeline (no dual Pollinations race that caused 429 “busy” errors).
+- Stronger sharp-focus prompts and blur negative prompts; rejects soft/fast cache stubs.
+- Optional ffmpeg upscale+unsharp when frames arrive below 1100px.
+- NSFW off adds SFW constraints on free hosts; Settings → AI toggle controls adult content.
+
+### Chat / navigation
+
+- Chat and Image generations keep running when you hop to Settings, Local AI, or other tabs.
+- Sticky local SD failure no longer blocks free image hosts.
+- Multi-agent via Chat **+**; skills auto-attach on create/edit; MCP tool catalog in chat.
+
+### Project create
+
+- Static HTML calculators skip npm install (no ENOENT on missing package.json).
+- Preview window tracks `windowOpen` for Vite HMR reload.
+
+Download: [Releases](https://github.com/DrMeji/Ark/releases)
+
 ## 0.1.138 — 2026-08-22
 
 Chat coding, new-product routing, and delete targeting.

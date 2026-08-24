@@ -106,7 +106,7 @@ export function honestNoLiveChatReply(): string {
     '',
     'To start getting real answers:',
     '1. Open Local AI and install the default local brain (Qwen2.5 1.5B) — ARK downloads llama-cli + weights for you.',
-    '2. Or connect free capacity — Groq, Google AI Studio, OpenRouter, Hugging Face, or Together (Settings → Providers / Models).',
+    '2. Or connect free capacity — Groq, Google AI Studio, OpenRouter, Hugging Face, or Together (Settings → Providers / Models → Cloud).',
     '',
     'Once something is connected, leave the picker on ARK Auto — it will fail over for you and keep this thread’s context.',
   ].join('\n');

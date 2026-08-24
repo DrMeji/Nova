@@ -440,8 +440,13 @@ function startDownloadJob(id, meta) {
         /* warmup is best-effort */
       }
     } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (/download canceled/i.test(msg)) {
+        delete downloads[id];
+        return;
+      }
       if (downloads[id]) {
-        downloads[id].error = err instanceof Error ? err.message : String(err);
+        downloads[id].error = msg;
         downloads[id].progress = 0;
         downloads[id].phase = 'error';
       }
@@ -657,6 +662,7 @@ async function generate(message, opts = {}) {
       : (model.name || 'ARK Image Core');
     const media = await arkMedia.generateImage(message, mediaLabel, {
       referenceImageDataUrl: opts.referenceImageDataUrl,
+      allowNsfw: Boolean(opts.allowNsfw),
     });
     return {
       ok: media.ok !== false,

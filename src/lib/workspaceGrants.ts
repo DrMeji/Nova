@@ -73,19 +73,47 @@ async function findFolderInRoot(
     const score = scoreFolderMatch(dir.name, wantName);
     if (score >= 70) {
       const full = joinPath(rootPath, dir.name);
-      const hit: DirHit = { name: dir.name, path: full, score, nested: depth > 0 };
-      if (!best || score > best.score) best = hit;
+      // Prefer real project roots (package.json / src) over nested name/name clones.
+      let bonus = 0;
+      try {
+        const probe = await window.arkDesktop?.listDir?.(full);
+        if (probe?.ok) {
+          const names = new Set((probe.items || []).map(i => String(i.name || '').toLowerCase()));
+          if (names.has('package.json') || names.has('src') || names.has('index.html')) bonus += 8;
+          // Penalize accidental Project\\Project nests.
+          if (names.has(dir.name.toLowerCase()) && !names.has('package.json')) bonus -= 15;
+        }
+      } catch {
+        /* ignore */
+      }
+      const hit: DirHit = { name: dir.name, path: full, score: score + bonus, nested: depth > 0 };
+      // Shallower wins ties — avoid binding Desktop\\Projects\\X\\X.
+      if (
+        !best
+        || hit.score > best.score
+        || (hit.score === best.score && depth < (best.nested ? 1 : 0))
+        || (hit.score === best.score && !hit.nested && best.nested)
+      ) {
+        best = hit;
+      }
     }
   }
 
-  if (best && best.score >= 95) return best;
+  if (best && best.score >= 95 && !best.nested) return best;
 
   if (depth >= maxDepth) return best;
 
   for (const dir of dirs) {
     const nestedRoot = joinPath(rootPath, dir.name);
     const nested = await findFolderInRoot(nestedRoot, wantName, depth + 1, maxDepth);
-    if (nested && (!best || nested.score > best.score)) {
+    if (
+      nested
+      && (
+        !best
+        || nested.score > best.score
+        || (nested.score === best.score && best.nested && !nested.nested)
+      )
+    ) {
       best = nested;
     }
   }
@@ -151,6 +179,33 @@ export async function resolveWorkFolderPath(
   }
 
   await syncWorkspaceGrantsFromPrefs();
+
+  // Prefer Desktop\Projects\<Name> when it exists — avoids nested Name\Name clones.
+  const roots = await window.arkDesktop?.browseRoots?.();
+  const desktopPath = roots?.roots?.find(r => r.id === 'desktop')?.path;
+  if (desktopPath) {
+    const projectsPath = joinPath(desktopPath, 'Projects');
+    const preferred = joinPath(projectsPath, wantName);
+    const stat = await window.arkDesktop?.workspaceStatPath?.(preferred);
+    if (stat?.ok && stat.isDirectory && stat.path) {
+      return { ok: true, path: stat.path, matchedName: stat.name || wantName, nested: false };
+    }
+    // Case-insensitive scan of Desktop\Projects
+    const listing = await window.arkDesktop?.listDir?.(projectsPath);
+    if (listing?.ok) {
+      for (const item of listing.items || []) {
+        if (item.kind !== 'dir') continue;
+        if (scoreFolderMatch(item.name, wantName) >= 95) {
+          return {
+            ok: true,
+            path: item.path || joinPath(projectsPath, item.name),
+            matchedName: item.name,
+            nested: false,
+          };
+        }
+      }
+    }
+  }
 
   const desktopHit = await resolveScopedFolderPath({ scope: 'desktop', name: wantName });
   if (desktopHit.ok && desktopHit.path) return desktopHit;

@@ -238,7 +238,7 @@ function ResolvedMedia({ src, alt, preview }: { src: string; alt: string; previe
           src={src}
           alt={alt}
           className="rounded-2xl object-contain bg-[#0d1117] block"
-          style={{ width: 320, maxWidth: '100%' }}
+          style={{ maxWidth: 'min(100%, 420px)', maxHeight: 480, width: 'auto', height: 'auto' }}
         />
       )}
       <MediaActions src={src} alt={alt} />

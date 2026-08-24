@@ -61,7 +61,7 @@ export function isVideoTabEnabled(): boolean {
   return false;
 }
 
-/** Code workspace tab parked — all project work happens in Chat until panels return. */
+/** Code workspace tab — Explorer + editor + preview for builds. */
 export function isCodeTabEnabled(): boolean {
-  return false;
+  return true;
 }

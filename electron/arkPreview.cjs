@@ -251,7 +251,8 @@ async function openPreviewWindow(payload) {
 
   const kind = payload?.kind === 'device' ? 'device' : 'web';
   const device = payload?.device || null;
-  const title = String(payload?.title || (device ? `${device.label} · ARK Preview` : 'ARK Preview'));
+  const rawTitle = String(payload?.title || (device ? `${device.label} · ARK Preview` : 'ARK Preview'));
+  const title = /ARK/i.test(rawTitle) ? rawTitle : `ARK Preview · ${rawTitle}`;
   const size = kind === 'device' && device ? deviceWindowSize(device) : { width: 1100, height: 780 };
 
   const existing = previewWindows.get(id);
@@ -265,15 +266,31 @@ async function openPreviewWindow(payload) {
         existing.setMinimumSize(480, 360);
         existing.setMaximumSize(4000, 3000);
         existing.setTitle(title);
-        await existing.loadURL(url);
+        let sameHost = false;
+        try {
+          const cur = new URL(existing.webContents.getURL());
+          const next = new URL(url);
+          sameHost = cur.host === next.host;
+        } catch {
+          sameHost = false;
+        }
+        if (sameHost && !payload?.forceNavigate) {
+          await existing.webContents.reloadIgnoringCache();
+        } else {
+          await existing.loadURL(url);
+        }
       } catch {
-        /* keep */
+        try {
+          await existing.loadURL(url);
+        } catch {
+          /* keep */
+        }
       }
     }
     if (existing.isMinimized()) existing.restore();
     existing.show();
     existing.focus();
-    return { ok: true };
+    return { ok: true, reused: true };
   }
 
   const win = new BrowserWindow({
@@ -314,16 +331,75 @@ async function openPreviewWindow(payload) {
   return { ok: true };
 }
 
+/** Push updated files into a running preview and reload the ARK preview window. */
+async function updatePreview(payload) {
+  const id = String(payload?.projectId || 'default');
+  const files = payload?.files || {};
+  const projectName = payload?.projectName || 'Preview';
+  let session = sessions.get(id);
+  if (!session) {
+    const started = await startPreview({ projectId: id, projectName, files });
+    if (!started.ok) return started;
+    session = sessions.get(id);
+  } else if (Object.keys(files).length) {
+    writeTree(session.root, files);
+    ensureIndex(session.root, projectName);
+  }
+  const url = `http://127.0.0.1:${session.port}/`;
+  const win = previewWindows.get(id);
+  if (win && !win.isDestroyed()) {
+    try {
+      await win.webContents.reloadIgnoringCache();
+      if (win.isMinimized()) win.restore();
+      win.show();
+    } catch {
+      /* ignore */
+    }
+    return { ok: true, url, reloaded: true };
+  }
+  return { ok: true, url, reloaded: false };
+}
+
+function reloadPreviewWindow(projectId) {
+  const id = String(projectId || 'default');
+  const win = previewWindows.get(id);
+  if (!win || win.isDestroyed()) return { ok: false, error: 'No preview window open' };
+  try {
+    win.webContents.reloadIgnoringCache();
+    if (win.isMinimized()) win.restore();
+    win.show();
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'reload failed' };
+  }
+}
+
 function previewStatus(projectId) {
-  const session = sessions.get(String(projectId || 'default'));
-  if (!session) return { ok: false, running: false };
+  const id = String(projectId || 'default');
+  const session = sessions.get(id);
+  const win = previewWindows.get(id);
+  if (!session) {
+    return {
+      ok: false,
+      running: false,
+      windowOpen: Boolean(win && !win.isDestroyed()),
+    };
+  }
   return {
     ok: true,
     running: true,
     url: `http://127.0.0.1:${session.port}/`,
     port: session.port,
     root: session.root,
+    windowOpen: Boolean(win && !win.isDestroyed()),
   };
 }
 
-module.exports = { startPreview, stopPreview, previewStatus, openPreviewWindow };
+module.exports = {
+  startPreview,
+  stopPreview,
+  previewStatus,
+  openPreviewWindow,
+  updatePreview,
+  reloadPreviewWindow,
+};

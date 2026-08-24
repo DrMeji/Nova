@@ -16,6 +16,8 @@ import {
 } from '@/lib/projectCodeEdit';
 import { finalizeWebEdits, reactUiMicroAskEdits } from '@/lib/webProjectCanon';
 import { safeProjectWrite } from '@/lib/projectWriteSafe';
+import { skillPromptAppendix } from '@/lib/arkSkills';
+import { detectProjectKind } from '@/lib/projectKind';
 
 export type ChatApplyResult = {
   ok: boolean;
@@ -29,8 +31,17 @@ export type ChatApplyResult = {
 function joinDisk(root: string, rel: string): string {
   const sep = root.includes('\\') ? '\\' : '/';
   const cleanRoot = root.replace(/[/\\]+$/, '');
-  const cleanRel = rel.replace(/^[/\\]+/, '').replace(/\//g, sep);
-  return `${cleanRoot}${sep}${cleanRel}`;
+  let cleanRel = rel.replace(/^[/\\]+/, '').replace(/\//g, sep);
+  // Guard against Folder\\Folder nesting when studio keys were prefixed with the folder name.
+  const base = cleanRoot.split(/[/\\]/).filter(Boolean).pop() || '';
+  if (base) {
+    const prefix = `${base}${sep}`;
+    const prefixAlt = `${base}/`;
+    if (cleanRel === base || cleanRel.startsWith(prefix) || cleanRel.startsWith(prefixAlt)) {
+      cleanRel = cleanRel.slice(base.length).replace(/^[/\\]+/, '');
+    }
+  }
+  return cleanRel ? `${cleanRoot}${sep}${cleanRel}` : cleanRoot;
 }
 
 async function writeViaDiskRoot(
@@ -53,6 +64,40 @@ async function writeViaDiskRoot(
   return { ok: true };
 }
 
+async function hydrateFilesFromDiskRoot(diskRoot: string): Promise<ProjectFileMap> {
+  if (!window.arkDesktop?.readTextFile) return {};
+  const rels = [
+    'src/App.jsx', 'src/App.tsx', 'src/App.css', 'src/index.css',
+    'index.html', 'css/styles.css', 'js/app.js', 'package.json',
+  ];
+  const out: ProjectFileMap = {};
+  for (const rel of rels) {
+    try {
+      const read = await window.arkDesktop.readTextFile({ path: joinDisk(diskRoot, rel) });
+      if (read?.ok && typeof read.text === 'string') out[rel] = read.text;
+    } catch {
+      /* missing */
+    }
+  }
+  return out;
+}
+
+/** Strip accidental Folder/Folder prefixes from in-memory studio keys. */
+function normalizeStudioFileKeys(files: ProjectFileMap, diskRoot?: string | null): ProjectFileMap {
+  if (!diskRoot || !Object.keys(files).length) return files;
+  const base = diskRoot.split(/[/\\]/).filter(Boolean).pop() || '';
+  if (!base) return files;
+  const out: ProjectFileMap = {};
+  for (const [rel, content] of Object.entries(files)) {
+    let key = String(rel).replace(/\\/g, '/').replace(/^\/+/, '');
+    if (key.startsWith(`${base}/`)) key = key.slice(base.length + 1);
+    // Collapse TaskRail/TaskRail/src → src when bound to outer root.
+    while (key.startsWith(`${base}/`)) key = key.slice(base.length + 1);
+    if (!out[key]) out[key] = content;
+  }
+  return out;
+}
+
 export async function applyChatReplyEdits(opts: {
   reply: string;
   projectId: string | null;
@@ -61,20 +106,32 @@ export async function applyChatReplyEdits(opts: {
   userMessage?: string;
   diskRoot?: string | null;
 }): Promise<ChatApplyResult> {
-  const userMessage = opts.userMessage || '';
+  const rawUser = opts.userMessage || '';
+  const kind = detectProjectKind(rawUser);
+  const appendix = skillPromptAppendix(rawUser, kind, {
+    isEdit: Object.keys(opts.files || {}).length > 0,
+    hasReferenceImage: /unsplash|https?:\/\/\S+\.(?:png|jpe?g|webp)|ark-media:/i.test(rawUser),
+  });
+  const userMessage = appendix && !rawUser.includes('ARK design skills')
+    ? `${rawUser}\n\n${appendix}`
+    : rawUser;
+  let baseFiles = normalizeStudioFileKeys(opts.files, opts.diskRoot);
+  if (Object.keys(baseFiles).length === 0 && opts.diskRoot) {
+    baseFiles = await hydrateFilesFromDiskRoot(opts.diskRoot);
+  }
   let edits = parseFileEdits(opts.reply);
   if (!edits.length) {
-    edits = extractChatStyleFileEdits(opts.reply, userMessage, opts.files);
+    edits = extractChatStyleFileEdits(opts.reply, userMessage, baseFiles);
   }
 
   // Prefer deterministic React/web patches for common UI asks — models often describe without writing.
-  const finalized = finalizeWebEdits(opts.files, userMessage, edits, { projectName: opts.projectName });
+  const finalized = finalizeWebEdits(baseFiles, userMessage, edits, { projectName: opts.projectName });
   if (finalized.length) {
     edits = finalized;
   } else if (!edits.length) {
-    const react = reactUiMicroAskEdits(opts.files, userMessage, { projectName: opts.projectName });
+    const react = reactUiMicroAskEdits(baseFiles, userMessage, { projectName: opts.projectName });
     if (react.length) edits = react;
-    else edits = scaffoldFallbackEdits(userMessage, opts.files, { projectName: opts.projectName });
+    else edits = scaffoldFallbackEdits(userMessage, baseFiles, { projectName: opts.projectName });
   }
 
   if (!edits.length) {
@@ -82,21 +139,21 @@ export async function applyChatReplyEdits(opts: {
       ok: false,
       updated: [],
       deleted: [],
-      files: opts.files,
+      files: baseFiles,
       reply: '',
       error: 'no_edits',
     };
   }
 
-  const tree = buildFileTreeFromPaths(opts.files);
-  const applied = applyFileEdits(opts.files, tree, edits);
+  const tree = buildFileTreeFromPaths(baseFiles);
+  const applied = applyFileEdits(baseFiles, tree, edits);
   const changed = applied.changedPaths;
   if (!changed.length) {
     return {
       ok: false,
       updated: [],
       deleted: [],
-      files: opts.files,
+      files: baseFiles,
       reply: 'No file changes could be applied from that reply.',
       error: 'no_changes',
     };
@@ -108,7 +165,29 @@ export async function applyChatReplyEdits(opts: {
   let wroteOk = false;
   let writeError: string | undefined;
 
-  if (opts.projectId) {
+  // Prefer the live disk folder when bound — projectId sandbox alone can "succeed"
+  // while Desktop\Projects\… never changes (Localhost then looks unchanged).
+  if (opts.diskRoot) {
+    const disk = await writeViaDiskRoot(opts.diskRoot, payloadFiles);
+    if (!disk.ok) {
+      return {
+        ok: false,
+        updated: [],
+        deleted: [],
+        files: baseFiles,
+        reply: disk.error || `Could not write into ${opts.diskRoot}`,
+        error: disk.error || 'disk_write_failed',
+      };
+    }
+    wroteOk = true;
+    if (opts.projectId) {
+      void safeProjectWrite({
+        projectId: opts.projectId,
+        projectName: opts.projectName,
+        files: payloadFiles,
+      });
+    }
+  } else if (opts.projectId) {
     const write = await safeProjectWrite({
       projectId: opts.projectId,
       projectName: opts.projectName,
@@ -118,18 +197,12 @@ export async function applyChatReplyEdits(opts: {
     writeError = write.error;
   }
 
-  if (!wroteOk && opts.diskRoot) {
-    const disk = await writeViaDiskRoot(opts.diskRoot, payloadFiles);
-    wroteOk = disk.ok;
-    writeError = disk.error;
-  }
-
   if (!wroteOk) {
     return {
       ok: false,
       updated: [],
       deleted: [],
-      files: opts.files,
+      files: baseFiles,
       reply: writeError || (!opts.projectId && !opts.diskRoot ? 'No project bound' : 'Write failed.'),
       error: writeError || (!opts.projectId ? 'no_project' : 'write_failed'),
     };

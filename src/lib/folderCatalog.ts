@@ -6,20 +6,31 @@
 import { parseFolderPathAsk, parseDesktopSubfolderAsk, type FolderPathRef } from '@/lib/folderPathAsk';
 import { looksLikeInstalledAppsAsk } from '@/lib/pcExplore';
 import { looksLikeAddFileDestinationClarify } from '@/lib/chatDiskIntent';
-import { looksLikeGreenfieldIdea } from '@/lib/chatIdeaIntent';
-import { looksLikeProjectBuildAsk } from '@/lib/chatBuildIntent';
+import { looksLikeConversationalPlanningAsk, looksLikeGreenfieldIdea } from '@/lib/chatIdeaIntent';
+import { isProjectCreateBrief } from '@/lib/chatCreateBrief';
 import { isBlockedDiskTargetName } from '@/lib/projectNames';
 
 /** "What projects do I have on my PC / desktop?" — not installed-apps asks. */
 export function looksLikeProjectsInventoryAsk(text: string): boolean {
   const t = String(text || '').trim();
   if (!/\bprojects?\b/i.test(t)) return false;
-  if (looksLikeProjectBuildAsk(t)) return false;
+  if (isProjectCreateBrief(t)) return false;
   if (looksLikeInstalledAppsAsk(t)) return false;
-  if (/\b(?:work\s+on|start\s+work|implement|build|fix|edit|create\s+project)\b/i.test(t)) return false;
-  // Must be a real inventory question — not just the words project + desktop in a build brief.
+  if (looksLikeGreenfieldIdea(t)) return false;
+  if (/\b(?:work\s+on|start\s+work|implement|build|fix|edit|create\s+project|open\s+(?:the\s+)?(?:folder|project)|summarize|how it works|flag any)\b/i.test(t)) return false;
+  // Soft product chat (“hobby project”, “auth for this project”) is not an inventory ask.
+  if (/\b(?:hobby|side|side\s+project|auth|authentication|mvp|week\s+one|tech\s+stack|three\.?js|babylon)\b/i.test(t)
+    && !/\b(?:on\s+(?:my\s+)?(?:pc|desktop|computer)|do\s+i\s+have|list\s+(?:my\s+)?projects)\b/i.test(t)) {
+    return false;
+  }
+  if (/\btell\s+me\s+more\b/i.test(t) || /\bmore\s+details?\b/i.test(t) || /\babout\s+auth\b/i.test(t)) {
+    return false;
+  }
+  // Must be a real inventory question — not just the words project + “tell me” in a planning reply.
   const asksInventory = (
-    /\b(what|which|tell me|show|list|type|kind|sort|do i have|have got)\b/i.test(t)
+    /\b(?:what|which)\s+projects?\b/i.test(t)
+    || /\bprojects?\s+(?:do\s+i\s+have|have\s+i|are\s+on|on\s+my)\b/i.test(t)
+    || /\b(?:list|show)\s+(?:my\s+)?projects?\b/i.test(t)
     || /\b(?:what(?:'s| is)|list|show).{0,40}\b(?:on|in)\s+(?:my\s+)?(?:pc|computer|desktop)\b/i.test(t)
   );
   if (!asksInventory) return false;
@@ -33,7 +44,7 @@ export function resolveCatalogFolderRef(message: string): FolderPathRef | null {
 
   const t = String(message || '').trim();
   if (!t) return null;
-  if (looksLikeProjectBuildAsk(t)) return null;
+  if (isProjectCreateBrief(t)) return null;
   if (looksLikeAddFileDestinationClarify(t)) return null;
 
   if (looksLikeProjectsInventoryAsk(t)) {
@@ -96,8 +107,10 @@ const KEY_FILE_NAMES = [
 export function looksLikeFolderCatalogAsk(text: string): boolean {
   const t = String(text || '').trim();
   if (!t) return false;
-  if (looksLikeProjectBuildAsk(t)) return false;
+  if (isProjectCreateBrief(t)) return false;
+  if (looksLikeConversationalPlanningAsk(t)) return false;
   if (looksLikeAddFileDestinationClarify(t)) return false;
+  if (/\b(?:scrap|rebuild|redo|replace)\b/i.test(t) && /\b(?:folder|project|ui|layout)\b/i.test(t)) return false;
   if (/\b(delete|remove|trash|wipe|get rid of)\b/i.test(t)) return false;
   if (looksLikeInstalledAppsAsk(t)) return false;
   if (looksLikeProjectsInventoryAsk(t)) return true;
@@ -111,6 +124,8 @@ export function looksLikeFolderCatalogAsk(text: string): boolean {
   if (/\b(?:inside|in)\s+(?:my\s+)?(?:desktop\s+)?folder\b/i.test(t)) return true;
   if (/\bunder\s+[A-Za-z0-9_.-]+\b/i.test(t) && /\bdesktop\b/i.test(t)) return true;
   if (/\bprojects?\b/i.test(t) && /\bdesktop\b/i.test(t) && /\b(?:inside|what|tell|show|in it)\b/i.test(t)) {
+    // "Open DeBloat on Desktop Projects. Tell me what it does" is analyze, not inventory.
+    if (/\b(?:open|work\s+on|summarize|flag|about|how it works)\b/i.test(t)) return false;
     return true;
   }
   if (

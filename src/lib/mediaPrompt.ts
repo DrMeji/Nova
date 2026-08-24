@@ -53,15 +53,15 @@ export function rewriteImagePrompt(raw: string): string {
     subjectHints.push('accurate consumer electronics product design, no garbled logos or fake brand text');
   }
   if (/\b(cat|kitten|cats)\b/.test(lower) && !/\b(human|person|man|woman|people)\b/.test(lower)) {
-    subjectHints.push('subject is a real cat (animal), symmetrical face and eyes, not a human');
+    subjectHints.push('subject is a real cat (animal), full face and body in focus, whiskers visible, not a human');
   }
   if (/\b(dog|puppy|dogs)\b/.test(lower) && !/\b(human|person|man|woman|people)\b/.test(lower)) {
-    subjectHints.push('subject is a real dog (animal), not a human');
+    subjectHints.push('subject is a real dog (animal), full body in focus, not a human');
   }
   if (/\b(wallpaper|desktop background|lock screen)\b/.test(lower)) {
     subjectHints.push('16:9 landscape desktop wallpaper, edge-to-edge composition, no desktop icons, no taskbar, no UI chrome, no text overlays');
   }
-  if (/\b4k\b|\b3840\b|\b2160\b|\b1920\s*x\s*1080\b/.test(lower)) {
+  if (/\b4k\b|\b3840\b|\b2160\b|\b1920\s*x\s*1080\b|\brecreate\b|\bimprove this\b|\bupscale\b/.test(lower)) {
     subjectHints.push('ultra sharp 4K detail, crisp edges, high resolution');
   }
   if (/\bdark and simple\b|\bsimple\b/.test(lower) && /\bdark\b/.test(lower)) {
@@ -85,7 +85,9 @@ export function rewriteImagePrompt(raw: string): string {
     'match the described subject, style, and composition',
     'do not invent unrelated subjects or swap species',
     'coherent anatomy and objects, correct proportions',
-    'sharp focus, high detail, professional quality',
+    'tack-sharp focus across the entire subject, deep depth of field',
+    'no soft bokeh blur on the main subject, no shallow DOF, no out-of-focus face',
+    'crisp 1080p-or-better detail, high resolution',
     'natural lighting and believable materials',
     'no watermarks, no UI, no captions burned into the image',
     'no misspelled brand text or nonsense lettering on products',
@@ -119,23 +121,24 @@ export function rewriteVideoPrompt(raw: string): string {
   return [prompt, ...hints].join(', ');
 }
 
-/** Target pixel size from prompt intent (hosts cap ~1344 on the long edge). */
+/** Target pixel size from prompt intent — default ~1080p-class square. */
 export function resolveImageDimensions(raw: string): { width: number; height: number } {
   const lower = String(raw || '').toLowerCase();
   if (/\b(portrait|vertical|9:16|phone wallpaper|lock screen)\b/.test(lower)) {
     return { width: 768, height: 1344 };
   }
-  if (/\b(wallpaper|desktop background|16:9|1920|1080|3840|2160|4k)\b/.test(lower)) {
+  if (/\b(wallpaper|desktop background|desktop image|16:9|1920|1080|landscape|banner)\b/.test(lower)
+    || (/\b(recreate|improve|upscale|4k|8k)\b/.test(lower) && /\b(wallpaper|desktop|landscape|16:9)\b/.test(lower))) {
     return { width: 1344, height: 768 };
   }
-  return { width: 1024, height: 1024 };
+  return { width: 1280, height: 1280 };
 }
 
 export const MEDIA_GEN_STAGES = {
   image: [
-    { key: 'create', label: 'Creating image', ms: 10000 },
-    { key: 'sketch', label: 'Refining details', ms: 14000 },
-    { key: 'almost', label: 'Polishing quality', ms: 16000 },
+    { key: 'create', label: 'Creating image', ms: 14000 },
+    { key: 'sketch', label: 'Refining details', ms: 22000 },
+    { key: 'almost', label: 'Polishing sharpness', ms: 28000 },
     { key: 'wrap', label: 'Wrapping it up', ms: 0 },
   ],
   video: [

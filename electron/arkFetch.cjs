@@ -66,16 +66,31 @@ async function downloadOnce(url, destPath, onProgress) {
 
   await new Promise((resolve, reject) => {
     const out = fs.createWriteStream(partial);
+    let settled = false;
+    const fail = (err) => {
+      if (settled) return;
+      settled = true;
+      try { res.destroy(); } catch { /* ignore */ }
+      try { out.destroy(); } catch { /* ignore */ }
+      reject(err instanceof Error ? err : new Error(String(err)));
+    };
     res.on('data', (chunk) => {
       received += chunk.length;
-      if (onProgress) {
+      if (!onProgress) return;
+      try {
         const pct = total > 0 ? Math.min(99, Math.round((received / total) * 100)) : 0;
         onProgress(pct, received, total);
+      } catch (err) {
+        fail(err);
       }
     });
-    res.on('error', reject);
-    out.on('error', reject);
-    out.on('finish', resolve);
+    res.on('error', fail);
+    out.on('error', fail);
+    out.on('finish', () => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    });
     res.pipe(out);
   });
 

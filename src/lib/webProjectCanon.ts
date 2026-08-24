@@ -255,9 +255,15 @@ export function webMicroAskEdits(files: WebFileMap, message: string): WebFileEdi
     || (/\bsearch\b/i.test(t) && /\b(top|corner|right|header|bar)\b/i.test(t));
   const wantsRemoveToggle = /\b(remove|delete|get rid of)\b.{0,40}\b(toggle|theme)\b/i.test(t)
     || /\b(toggle\s*theme)\b/i.test(t) && /\b(remove|delete)\b/i.test(t);
-  const renameTo = t.match(/(?:change|rename|set|into).{0,48}(?:to|into)\s+["']?([A-Za-z0-9][A-Za-z0-9 .+-]{1,40})/i)?.[1]?.trim()
-    || t.match(/(?:saying|say)\s+["']?([A-Za-z0-9][A-Za-z0-9 .+-]{1,40})/i)?.[1]?.trim()
-    || (/\bpizza\b/i.test(t) ? 'I like pizza' : null);
+  const wantsBadgeText = /\bbadge\b/i.test(t) && /\b(text|label|say|to|into)\b/i.test(t);
+  const wantsEqualsBigger = /\bequals?\s+button\b/i.test(t) && /\b(larger|bigger|bigger|bigger|bigger|increase|grow)\b/i.test(t);
+  const renameTo = (!wantsBadgeText && !/\bbutton\b/i.test(t))
+    ? (
+      t.match(/(?:change|rename|set|into).{0,48}(?:to|into)\s+["']?([A-Za-z0-9][A-Za-z0-9 .+-]{1,40})/i)?.[1]?.trim()
+      || t.match(/(?:saying|say)\s+["']?([A-Za-z0-9][A-Za-z0-9 .+-]{1,40})/i)?.[1]?.trim()
+      || (/\bpizza\b/i.test(t) ? 'I like pizza' : null)
+    )
+    : null;
 
   if (wantsBg && colorWord) {
     const bg = cssColor(colorWord) || '#000000';
@@ -323,6 +329,26 @@ h1 {
       html = html.replace(/<main[^>]*>/i, `$&\n    <h1>${safe}</h1>`);
     }
     html = html.replace(/<title>[^<]*<\/title>/i, `<title>${safe}</title>`);
+    touched = true;
+  }
+
+  if (wantsBadgeText) {
+    const badgeText = (
+      t.match(/\bbadge\b[\s\S]{0,48}(?:to|into|say|text)\s+["']?([A-Za-z0-9][A-Za-z0-9 .+-]{1,24})/i)?.[1]
+      || t.match(/(?:to|into)\s+["']?([A-Za-z0-9][A-Za-z0-9 .+-]{1,24})/i)?.[1]
+      || ''
+    ).trim().replace(/\s+and\b[\s\S]*$/i, '').slice(0, 24);
+    if (badgeText && /class=["'][^"']*badge/i.test(html)) {
+      const safe = escapeHtml(badgeText);
+      html = html.replace(/(<span[^>]*class=["'][^"']*badge[^"']*["'][^>]*>)([^<]*)(<\/span>)/i, `$1${safe}$3`);
+      touched = true;
+    }
+  }
+
+  if (wantsEqualsBigger) {
+    if (!/\.pad\s+\.eq\s*\{[^}]*min-height\s*:\s*6/i.test(css)) {
+      css += `\n.pad .eq { min-height: 6.75rem; font-size: 1.65rem; }\n`;
+    }
     touched = true;
   }
 
@@ -423,13 +449,168 @@ document.getElementById('ark-search')?.addEventListener('keydown', (e) => {
     touched = true;
   }
 
+  // Festival / landing layout edits (static HTML) — models often describe without @@@FILE.
+  const dropAbout = /\b(drop|remove|delete|fold)\b[\s\S]{0,80}\babout\b/i.test(t)
+    || /\b(?:no|without)\s+(?:a\s+)?(?:separate\s+)?about\b/i.test(t);
+  const stickyTicket = /\bsticky\b/i.test(t) && /\b(ticket|cta|bottom)\b/i.test(t);
+  const navSlim = /\bnav\b/i.test(t) && /\b(only|just)\b/i.test(t)
+    && /\b(lineup|contact)\b/i.test(t);
+  const addSchedule = /\b(add|create|new)\b[\s\S]{0,40}\bschedule\b/i.test(t)
+    || /\bschedule\s+page\b/i.test(t);
+  const waitlist = /\bwaitlist\b/i.test(t)
+    || (/\bcontact\b/i.test(t) && /\bemail\b/i.test(t) && /\b(only|just|keep)\b/i.test(t));
+  const nightFlow = /\bnight\s+flow\b/i.test(t);
+
+  if (dropAbout) {
+    html = html
+      .replace(/<a[^>]*href=["']#about["'][^>]*>[\s\S]*?<\/a>/gi, '')
+      .replace(/<section[^>]*id=["']about["'][^>]*>[\s\S]*?<\/section>/gi, '');
+    touched = true;
+  }
+
+  if (navSlim) {
+    html = html.replace(/<nav[\s\S]*?<\/nav>/i, `<nav>
+      <a href="#lineup">Lineup</a>
+      <a href="#contact">Contact</a>
+    </nav>`);
+    touched = true;
+  }
+
+  if (stickyTicket) {
+    if (!/class=["'][^"']*sticky-ticket/i.test(html)) {
+      html = html.replace(/<\/body>/i, `  <div class="sticky-ticket"><a class="btn" href="#tickets">Get Tickets</a></div>\n</body>`);
+    }
+    // Soften hero primary CTA if present
+    html = html.replace(/(<div class="actions">)[\s\S]*?(<\/div>)/i, `$1\n        <a class="btn ghost" href="#lineup">See the Lineup</a>\n      $2`);
+    if (!/\.sticky-ticket\s*\{/i.test(css)) {
+      css += `
+.sticky-ticket {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
+  display: flex; justify-content: center; padding: 0.75rem;
+  background: rgba(10, 6, 16, 0.92); border-top: 1px solid rgba(255,255,255,0.12);
+}
+.sticky-ticket .btn { min-width: 12rem; }
+body { padding-bottom: 4.5rem; }
+`;
+    }
+    touched = true;
+  }
+
+  if (addSchedule && !/id=["']schedule["']/i.test(html)) {
+    const scheduleTitle = nightFlow ? 'Night Flow' : 'Schedule';
+    const block = `
+    <section id="schedule" class="schedule">
+      <a class="back-home" href="#">Back to home</a>
+      <h2>${scheduleTitle}</h2>
+      <ul class="slots">
+        <li><strong>8:00 PM</strong> — Doors · warm-up set</li>
+        <li><strong>9:30 PM</strong> — Headliner one</li>
+        <li><strong>11:00 PM</strong> — Headliner two · late set</li>
+      </ul>
+    </section>`;
+    if (/<\/main>/i.test(html)) html = html.replace(/<\/main>/i, `${block}\n  </main>`);
+    else html = html.replace(/<\/body>/i, `${block}\n</body>`);
+    if (!/\.schedule\s*\{/i.test(css)) {
+      css += `
+.schedule { padding: 3rem 1.5rem; max-width: 720px; margin: 0 auto; }
+.schedule .slots { list-style: none; padding: 0; }
+.schedule .slots li { padding: 0.85rem 0; border-bottom: 1px solid rgba(255,255,255,0.12); }
+.back-home { display: inline-block; margin-bottom: 1rem; color: inherit; opacity: 0.8; }
+`;
+    }
+    if (/<nav[\s\S]*?<\/nav>/i.test(html) && !/href=["']#schedule["']/i.test(html)) {
+      html = html.replace(/<\/nav>/i, `      <a href="#schedule">${scheduleTitle}</a>\n    </nav>`);
+    }
+    touched = true;
+  } else if (nightFlow && /id=["']schedule["']/i.test(html)) {
+    html = html.replace(/(<section[^>]*id=["']schedule["'][^>]*>[\s\S]*?<h2>)([^<]*)(<\/h2>)/i, '$1Night Flow$3');
+    touched = true;
+  }
+
+  if (waitlist) {
+    const waitlistBlock = `<section id="contact" class="contact">
+      <h2>Contact</h2>
+      <form id="waitlist-form" class="waitlist">
+        <label>Email <input type="email" name="email" required placeholder="you@email.com" /></label>
+        <button type="submit" class="btn">Join waitlist</button>
+      </form>
+      <p id="waitlist-thanks" hidden>Thanks — you are on the list.</p>
+    </section>`;
+    if (/<section[^>]*id=["']contact["'][^>]*>[\s\S]*?<\/section>/i.test(html)) {
+      html = html.replace(/<section[^>]*id=["']contact["'][^>]*>[\s\S]*?<\/section>/i, waitlistBlock);
+    } else if (/<footer[^>]*id=["']contact["'][^>]*>[\s\S]*?<\/footer>/i.test(html)) {
+      html = html.replace(/<footer[^>]*id=["']contact["'][^>]*>[\s\S]*?<\/footer>/i, waitlistBlock);
+    } else if (/<\/main>/i.test(html)) {
+      html = html.replace(/<\/main>/i, `${waitlistBlock}\n  </main>`);
+    } else {
+      html = html.replace(/<\/body>/i, `${waitlistBlock}\n</body>`);
+    }
+    if (!/waitlist-form/i.test(js)) {
+      js += `
+document.getElementById('waitlist-form')?.addEventListener('submit', (e) => {
+  e.preventDefault();
+  const thanks = document.getElementById('waitlist-thanks');
+  if (thanks) thanks.hidden = false;
+});
+`;
+    }
+    touched = true;
+  }
+
+  // Trade cockpit follow-ups
+  const addHelpTab = /\bhelp\s+tab\b/i.test(t) || (/\badd\b/i.test(t) && /\bhelp\b/i.test(t) && /\btab\b/i.test(t));
+  const addSymbol = /\badd\s+symbol\b/i.test(t) || (/\bwatchlist\b/i.test(t) && /\b(field|input|append)\b/i.test(t));
+  const buySell = /\b(buy\s+and\s+sell|buy\s+and\s+sell\s+buttons)\b/i.test(t)
+    || (/\borders\b/i.test(t) && /\b(buy|sell)\b/i.test(t) && /\bbutton/i.test(t));
+
+  if (addHelpTab && /data-tab=["']settings["']/i.test(html) && !/data-tab=["']help["']/i.test(html)) {
+    html = html.replace(
+      /(<button[^>]*data-tab=["']settings["'][^>]*>[\s\S]*?<\/button>)/i,
+      `<button type="button" class="tab" data-tab="help">Help</button>\n        $1`,
+    );
+    if (!/id=["']panel-help["']/i.test(html)) {
+      html = html.replace(
+        /(<section[^>]*id=["']panel-settings["'][^>]*>)/i,
+        `<section id="panel-help" class="panel" role="tabpanel" hidden>
+        <h1>Help</h1>
+        <ul class="faq">
+          <li>Watchlist stores symbols locally in this session.</li>
+          <li>Orders are demo-only — nothing is routed to a broker.</li>
+          <li>Settings risk limit is a soft reminder, not a hard block.</li>
+        </ul>
+      </section>\n      $1`,
+      );
+    }
+    if (!/\.faq\s*\{/i.test(css)) {
+      css += `\n.faq { margin: 0; padding-left: 1.1rem; color: var(--muted, #8fa0b8); line-height: 1.6; }\n`;
+    }
+    touched = true;
+  }
+
+  if (addSymbol && /id=["']watch-form["']/i.test(html) === false && /Watchlist/i.test(html)) {
+    // already scaffolded with form in cockpit; if missing, inject
+    html = html.replace(
+      /(<section[^>]*id=["']panel-watchlist["'][^>]*>[\s\S]*?<h1>Watchlist<\/h1>)/i,
+      `$1\n        <form id="watch-form" class="row"><input id="symbol-input" type="text" placeholder="Symbol" /><button type="submit">Add symbol</button></form>\n        <ul id="watch-list" class="list"></ul>`,
+    );
+    touched = true;
+  }
+
+  if (buySell && /id=["']btn-buy["']/i.test(html) === false && /Orders/i.test(html)) {
+    html = html.replace(
+      /(<section[^>]*id=["']panel-orders["'][^>]*>[\s\S]*?<h1>Orders<\/h1>)/i,
+      `$1\n        <div class="row"><button type="button" id="btn-buy">Buy</button><button type="button" id="btn-sell">Sell</button></div>\n        <ul id="order-list" class="list"></ul>`,
+    );
+    touched = true;
+  }
+
   if (!touched) return [];
 
   out.push({ path: htmlPath, content: html });
-  if (css !== css0 || wantsBg || wantsRgb || wantsTextColor || wantsSearchBar) {
+  if (css !== css0 || wantsBg || wantsRgb || wantsTextColor || wantsSearchBar || stickyTicket || addSchedule) {
     out.push({ path: cssPath, content: css || '/* styles */\n' });
   }
-  if (js !== js0 || wantsRemoveToggle || wantsSearchBar) {
+  if (js !== js0 || wantsRemoveToggle || wantsSearchBar || waitlist) {
     out.push({ path: jsPath, content: js || 'document.documentElement.dataset.arkReady = \'1\';\n' });
   }
   return out;
@@ -441,18 +622,107 @@ export function isWebMicroAsk(message: string): boolean {
   if (/\b(build|create|make|scaffold)\b.{0,40}\b(app|website|site|page)\b/i.test(t) && /\bhello\s*world\b/i.test(t) === false) {
     // brand-new big builds are not micro — except hello world follow-ups with change verbs
   }
-  if (/\bbackground\b/i.test(t) && /\b(black|white|blue|dark|red|green)\b/i.test(t)) return true;
-  if (/\b(rgb|multi[- ]?colou?r|multiple\s+colou?rs?|rainbow|gradient)\b/i.test(t)) return true;
+  if (/\bbackground\b/i.test(t) && /\b(black|white|blue|dark|red|green|teal)\b/i.test(t)) return true;
+  if (/\b(rgb|multi[- ]?colou?r|multiple\s+colou?rs?|rainbow|gradient|teal)\b/i.test(t)) return true;
   if (/\bsearch\s*bar\b/i.test(t) || (/\bsearch\b/i.test(t) && /\b(top|corner|right|header|bar)\b/i.test(t))) return true;
   if (/\b(remove|delete)\b.{0,40}\b(toggle|theme)\b/i.test(t)) return true;
   if (/(?:change|rename|set|into).{0,48}(?:to|into)\s+["']?[A-Za-z0-9]/i.test(t)) return true;
   if (/\bpizza\b/i.test(t) && /\b(change|saying|say|text|title|hello)\b/i.test(t)) return true;
   if (/\b(text|hello\s*world)\b.{0,40}\b(white|black|color)\b/i.test(t)) return true;
   if (/\b(logo|icon)\b/i.test(t) && /\b(add|put|place|center|middle|screen)\b/i.test(t)) return true;
-  if (/\b(title\s*bar|sidebar|note\s*list|localStorage|new\s+note)\b/i.test(t)) return true;
+  if (/\b(title\s*bar|sidebar|note\s*list|localStorage|new\s+note|new\s+page|ink\s+notes|column)\b/i.test(t)) return true;
   if (/\b(server\s+rail|channel\s+list|chat\s+pane|member\s+list|welcome\s+screen)\b/i.test(t)) return true;
   if (/\bcreate\s+project\b/i.test(t)) return true;
+  if (/\bbadge\b/i.test(t) && /\b(text|label|to|into)\b/i.test(t)) return true;
+  if (/\bequals?\s+button\b/i.test(t) && /\b(larger|bigger)\b/i.test(t)) return true;
+  if (/\b(drop|remove|delete|fold)\b[\s\S]{0,80}\babout\b/i.test(t)) return true;
+  if (/\bsticky\b/i.test(t) && /\b(ticket|cta|bottom)\b/i.test(t)) return true;
+  if (/\bnav\b/i.test(t) && /\b(only|just)\b/i.test(t) && /\b(lineup|contact)\b/i.test(t)) return true;
+  if (/\bschedule\s+page\b/i.test(t) || (/\b(add|create|new)\b[\s\S]{0,40}\bschedule\b/i.test(t))) return true;
+  if (/\bwaitlist\b/i.test(t)) return true;
+  if (/\bnight\s+flow\b/i.test(t)) return true;
+  if (/\b(watchlist|orders?\s+tab|help\s+tab|add\s+symbol|buy\s+and\s+sell)\b/i.test(t)) return true;
   return false;
+}
+
+/** Surgical React SPA tweaks — must win over full kanban/finance rebuilds from project name. */
+export function reactSurgicalMicroAskEdits(
+  files: WebFileMap,
+  message: string,
+): WebFileEdit[] {
+  const t = String(message || '');
+  if (!t.trim()) return [];
+  if (/\b(scrap|rebuild|from\s+scratch|scaffold\s+(?:a\s+)?new|replace\s+(?:the\s+)?(?:entire\s+)?(?:app|layout|ui)|start\s+over)\b/i.test(t)) {
+    return [];
+  }
+  if (!isWebMicroAsk(t) && !/\b(rename|change|tint|make|update)\b/i.test(t)) return [];
+
+  const flat = flatten(files);
+  const appPath = findReactAppPath(flat);
+  if (!appPath || !flat[appPath]) return [];
+  const cssPath = findReactCssPath(flat, appPath);
+  let app = flat[appPath];
+  let css = flat[cssPath] || '';
+  let touchedApp = false;
+  let touchedCss = false;
+
+  const col = t.match(/rename\s+(?:the\s+)?([A-Za-z][A-Za-z0-9_-]*)\s+column\s+to\s+([A-Za-z][A-Za-z0-9_-]*)/i)
+    || t.match(/rename\s+(?:the\s+)?([A-Za-z][A-Za-z0-9_-]*)\s+to\s+([A-Za-z][A-Za-z0-9_-]*)/i);
+  if (col) {
+    const from = col[1];
+    const to = col[2];
+    const labelRe = new RegExp(`(label:\\s*['"])${from}(['"])`, 'gi');
+    if (labelRe.test(app)) {
+      app = app.replace(new RegExp(`(label:\\s*['"])${from}(['"])`, 'gi'), `$1${to}$2`);
+      touchedApp = true;
+    }
+    if (app.includes(`>${from}<`)) {
+      app = app.replace(new RegExp(`(>)${from}(<)`, 'g'), `$1${to}$2`);
+      touchedApp = true;
+    }
+  }
+
+  if (/\bink\s+notes\b/i.test(t)) {
+    if (/titlebar-hint['"][^>]*>[^<]+/i.test(app)) {
+      app = app.replace(/(titlebar-hint['"][^>]*>)[^<]+/i, '$1Ink notes');
+      touchedApp = true;
+    } else if (/>Notes</.test(app)) {
+      app = app.replace(/>Notes</, '>Ink notes<');
+      touchedApp = true;
+    }
+  }
+
+  if (/\bnew\s+page\b/i.test(t)) {
+    if (/>New [Nn]ote</.test(app)) {
+      app = app.replace(/>New [Nn]ote</, '>New page<');
+      touchedApp = true;
+    }
+  }
+
+  if (/\bteal\b/i.test(t) || (/\bbackground\b/i.test(t) && /\b(gradient|tint|deep)\b/i.test(t))) {
+    if (/--bg\s*:/.test(css)) {
+      css = css.replace(/--bg\s*:\s*[^;]+;/, '--bg: #0a2f2a;');
+      touchedCss = true;
+    }
+    if (/body\s*\{[^}]*background\s*:/i.test(css)) {
+      css = css.replace(
+        /(body\s*\{[^}]*?)background\s*:\s*[^;]+/i,
+        '$1background: radial-gradient(1200px 600px at 12% -8%, #145c54, #0a2f2a)',
+      );
+      touchedCss = true;
+    } else if (/body\s*\{/i.test(css)) {
+      css = css.replace(/body\s*\{/i, 'body {\n  background: radial-gradient(1200px 600px at 12% -8%, #145c54, #0a2f2a);');
+      touchedCss = true;
+    } else {
+      css = `body { background: radial-gradient(1200px 600px at 12% -8%, #145c54, #0a2f2a); color: #e8f2ec; }\n${css}`;
+      touchedCss = true;
+    }
+  }
+
+  const out: WebFileEdit[] = [];
+  if (touchedApp) out.push({ path: appPath, content: app });
+  if (touchedCss) out.push({ path: cssPath, content: css });
+  return out;
 }
 
 function findReactAppPath(flat: WebFileMap): string | null {
@@ -470,10 +740,948 @@ function findReactCssPath(flat: WebFileMap, appPath: string): string {
   return 'src/App.css';
 }
 
-/** Discord-ish mark as inline SVG (works offline; no external image dependency). */
-const DISCORD_STYLE_LOGO_SVG = `<svg className="ark-logo" viewBox="0 0 127.14 96.36" aria-hidden="true" role="img">
-  <path fill="#5865F2" d="M107.7 8.07A105.15 105.15 0 0 0 81.07 0a72.06 72.06 0 0 0-3.36 6.83 97.68 97.68 0 0 0-29.11 0A72.37 72.37 0 0 0 45.23 0 105.89 105.89 0 0 0 18.39 8.09C2.79 32.65-1.71 56.6.54 80.21a105.73 105.73 0 0 0 32.17 16.15 77.7 77.7 0 0 0 6.89-11.11 68.42 68.42 0 0 1-10.85-5.16c.91-.66 1.8-1.34 2.66-2a75.57 75.57 0 0 0 64.32 0c.87.71 1.76 1.39 2.66 2a68.68 68.68 0 0 1-10.87 5.18 77 77 0 0 0 6.89 11.1 105.25 105.25 0 0 0 32.19-16.14c2.64-27.38-4.51-51.11-18.9-72.15ZM42.45 65.69C36.18 65.69 31 60 31 53s5-12.74 11.43-12.74S54 46 53.89 53s-5.05 12.69-11.44 12.69Zm42.24 0C78.41 65.69 73.25 60 73.25 53s5-12.74 11.44-12.74S96.23 46 96.12 53s-5.04 12.69-11.43 12.69Z"/>
+/** Original geometric mark — not Discord's logo. */
+function brandLogoSvg(initial: string): string {
+  const letter = escapeHtml(initial.slice(0, 1).toUpperCase() || 'N');
+  return `<svg className="brand-mark" viewBox="0 0 48 48" aria-hidden="true" role="img">
+  <polygon points="24,4 44,14 44,34 24,44 4,34 4,14" fill="none" stroke="currentColor" stroke-width="2.5"/>
+  <text x="24" y="30" text-anchor="middle" font-size="16" font-weight="700" fill="currentColor" font-family="system-ui,sans-serif">${letter}</text>
 </svg>`;
+}
+
+function patchPackageJsonForLucide(flat: WebFileMap): WebFileEdit | null {
+  const pkgPath = flat['package.json'] != null ? 'package.json' : null;
+  if (!pkgPath) return null;
+  try {
+    const pkg = JSON.parse(String(flat[pkgPath]));
+    pkg.dependencies = { ...(pkg.dependencies || {}), 'lucide-react': '^0.474.0' };
+    return { path: pkgPath, content: `${JSON.stringify(pkg, null, 2)}\n` };
+  } catch {
+    return null;
+  }
+}
+
+function buildFinanceAppJsx(title: string): string {
+  const safeTitle = escapeHtml(title);
+  return `import { useEffect, useMemo, useState } from 'react';
+import {
+  LayoutDashboard, Wallet, ArrowLeftRight, Target, Settings, Plus, X, Moon, Sun,
+} from 'lucide-react';
+import './App.css';
+
+const STORAGE_KEY = 'ark-finance-v1';
+const WALLETS = [
+  { id: 'checking', name: 'Checking', balance: 2450 },
+  { id: 'savings', name: 'Savings', balance: 8200 },
+  { id: 'credit', name: 'Credit', balance: -420 },
+];
+const SEED = [
+  { id: '1', wallet: 'checking', category: 'Salary', note: 'Payroll', amount: 3200, date: '2026-08-01' },
+  { id: '2', wallet: 'checking', category: 'Food', note: 'Groceries', amount: -86.4, date: '2026-08-03' },
+  { id: '3', wallet: 'credit', category: 'Rent', note: 'August rent', amount: -1400, date: '2026-08-01' },
+];
+
+function loadState() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    if (parsed?.transactions?.length) return parsed;
+  } catch { /* ignore */ }
+  return { transactions: SEED, theme: 'dark', displayName: 'You' };
+}
+
+export default function App() {
+  const [page, setPage] = useState('overview');
+  const [walletId, setWalletId] = useState('checking');
+  const [state, setState] = useState(loadState);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [draft, setDraft] = useState({ amount: '', category: 'Food', note: '', date: new Date().toISOString().slice(0, 10) });
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    document.documentElement.dataset.theme = state.theme;
+  }, [state]);
+
+  const txs = useMemo(
+    () => state.transactions.filter(t => t.wallet === walletId).sort((a, b) => b.date.localeCompare(a.date)),
+    [state.transactions, walletId],
+  );
+  const net = useMemo(() => state.transactions.reduce((s, t) => s + Number(t.amount), 0), [state.transactions]);
+  const weekly = useMemo(() => {
+    const days = [0, 0, 0, 0, 0, 0, 0];
+    state.transactions.forEach(t => {
+      if (Number(t.amount) >= 0) return;
+      const d = new Date(t.date).getDay();
+      days[d] += Math.abs(Number(t.amount));
+    });
+    return days;
+  }, [state.transactions]);
+  const maxBar = Math.max(1, ...weekly);
+
+  const addTx = () => {
+    const amount = Number(draft.amount);
+    if (!Number.isFinite(amount) || !draft.amount) return;
+    setState(s => ({
+      ...s,
+      transactions: [
+        { id: String(Date.now()), wallet: walletId, category: draft.category, note: draft.note || draft.category, amount, date: draft.date },
+        ...s.transactions,
+      ],
+    }));
+    setModalOpen(false);
+    setDraft({ amount: '', category: 'Food', note: '', date: new Date().toISOString().slice(0, 10) });
+  };
+
+  const nav = [
+    { id: 'overview', label: 'Overview', icon: LayoutDashboard },
+    { id: 'wallets', label: 'Wallets', icon: Wallet },
+    { id: 'cashflow', label: 'Cashflow', icon: ArrowLeftRight },
+    { id: 'goals', label: 'Goals', icon: Target },
+    { id: 'prefs', label: 'Preferences', icon: Settings },
+  ];
+
+  return (
+    <div className="finance-shell">
+      <aside className="side">
+        <div className="brand">${safeTitle}</div>
+        {nav.map(n => {
+          const Icon = n.icon;
+          return (
+            <button key={n.id} type="button" className={page === n.id ? 'nav active' : 'nav'} onClick={() => setPage(n.id)}>
+              <Icon size={18} /> {n.label}
+            </button>
+          );
+        })}
+      </aside>
+      <main className="main">
+        <header className="top">
+          <h1>{nav.find(n => n.id === page)?.label}</h1>
+          <button type="button" className="btn" onClick={() => setModalOpen(true)}><Plus size={16} /> Add Transaction</button>
+        </header>
+
+        {page === 'overview' && (
+          <section className="stack">
+            <div className="tiles">
+              <div className="tile"><span>Net worth</span><strong>{net.toLocaleString(undefined, { style: 'currency', currency: 'USD' })}</strong></div>
+              <div className="tile"><span>Wallets</span><strong>{WALLETS.length}</strong></div>
+              <div className="tile"><span>Transactions</span><strong>{state.transactions.length}</strong></div>
+            </div>
+            <div className="card">
+              <h2>Weekly spend</h2>
+              <svg viewBox="0 0 280 100" className="chart" role="img" aria-label="Weekly spend">
+                {weekly.map((v, i) => (
+                  <rect key={i} x={20 + i * 36} y={90 - (v / maxBar) * 70} width="22" height={(v / maxBar) * 70 || 2} rx="4" />
+                ))}
+              </svg>
+            </div>
+            <div className="card">
+              <h2>Recent</h2>
+              {state.transactions.length === 0 ? <p className="empty">No transactions yet.</p> : (
+                <ul className="ledger">{state.transactions.slice(0, 8).map(t => (
+                  <li key={t.id}><span>{t.note}</span><em className={t.amount < 0 ? 'neg' : 'pos'}>{t.amount.toFixed(2)}</em></li>
+                ))}</ul>
+              )}
+            </div>
+          </section>
+        )}
+
+        {(page === 'wallets' || page === 'cashflow') && (
+          <section className="stack">
+            <div className="tiles">
+              {WALLETS.map(w => (
+                <button key={w.id} type="button" className={walletId === w.id ? 'tile active' : 'tile'} onClick={() => setWalletId(w.id)}>
+                  <span>{w.name}</span><strong>{w.balance.toLocaleString(undefined, { style: 'currency', currency: 'USD' })}</strong>
+                </button>
+              ))}
+            </div>
+            <div className="card">
+              <h2>{WALLETS.find(w => w.id === walletId)?.name} ledger</h2>
+              {txs.length === 0 ? <p className="empty">No rows for this wallet.</p> : (
+                <ul className="ledger">{txs.map(t => (
+                  <li key={t.id}><span>{t.date} · {t.category} · {t.note}</span><em className={t.amount < 0 ? 'neg' : 'pos'}>{t.amount.toFixed(2)}</em></li>
+                ))}</ul>
+              )}
+            </div>
+          </section>
+        )}
+
+        {page === 'goals' && (
+          <section className="tiles">
+            {[{ name: 'Savings', pct: 62 }, { name: 'Travel', pct: 28 }].map(g => (
+              <div key={g.name} className="tile goal">
+                <svg viewBox="0 0 36 36" className="ring"><circle cx="18" cy="18" r="15.5" /><circle cx="18" cy="18" r="15.5" style={{ strokeDasharray: \`\${g.pct} 100\` }} /></svg>
+                <div><span>{g.name}</span><strong>{g.pct}%</strong></div>
+              </div>
+            ))}
+          </section>
+        )}
+
+        {page === 'prefs' && (
+          <section className="card prefs">
+            <label>Display name<input value={state.displayName} onChange={e => setState(s => ({ ...s, displayName: e.target.value }))} /></label>
+            <button type="button" className="btn" onClick={() => setState(s => ({ ...s, theme: s.theme === 'dark' ? 'light' : 'dark' }))}>
+              {state.theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />} Switch to {state.theme === 'dark' ? 'light' : 'dark'}
+            </button>
+          </section>
+        )}
+      </main>
+
+      {modalOpen && (
+        <div className="modal-backdrop" onClick={() => setModalOpen(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <header><h2>Add transaction</h2><button type="button" onClick={() => setModalOpen(false)}><X size={16} /></button></header>
+            <label>Amount<input value={draft.amount} onChange={e => setDraft(d => ({ ...d, amount: e.target.value }))} placeholder="-42.50" /></label>
+            <label>Category
+              <select value={draft.category} onChange={e => setDraft(d => ({ ...d, category: e.target.value }))}>
+                {['Food', 'Rent', 'Salary', 'Transfer', 'Travel'].map(c => <option key={c}>{c}</option>)}
+              </select>
+            </label>
+            <label>Note<input value={draft.note} onChange={e => setDraft(d => ({ ...d, note: e.target.value }))} /></label>
+            <label>Date<input type="date" value={draft.date} onChange={e => setDraft(d => ({ ...d, date: e.target.value }))} /></label>
+            <button type="button" className="btn primary" onClick={addTx}>Save</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+`;
+}
+
+function buildFinanceAppCss(): string {
+  return `:root, [data-theme="dark"] {
+  --bg: #0c1210; --panel: #141c18; --text: #e8f2ec; --muted: #8aa396; --accent: #3dd68c; --line: #24302a; --neg: #f07178; --pos: #3dd68c;
+}
+[data-theme="light"] {
+  --bg: #f3f7f4; --panel: #ffffff; --text: #14201a; --muted: #5b6f64; --accent: #0f9f6e; --line: #d7e3db; --neg: #c0392b; --pos: #0f9f6e;
+}
+* { box-sizing: border-box; }
+body { margin: 0; font-family: "Segoe UI", system-ui, sans-serif; background: var(--bg); color: var(--text); }
+.finance-shell { display: grid; grid-template-columns: 220px 1fr; min-height: 100vh; }
+.side { border-right: 1px solid var(--line); padding: 1rem 0.75rem; background: var(--panel); }
+.brand { font-weight: 700; letter-spacing: 0.04em; margin: 0 0.5rem 1rem; }
+.nav { width: 100%; display: flex; gap: 0.55rem; align-items: center; border: 0; background: transparent; color: var(--muted); padding: 0.65rem 0.75rem; border-radius: 10px; cursor: pointer; }
+.nav.active, .nav:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--text); }
+.main { padding: 1.25rem 1.5rem 2rem; }
+.top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
+.top h1 { margin: 0; font-size: 1.35rem; }
+.btn { display: inline-flex; gap: 0.4rem; align-items: center; border: 1px solid var(--line); background: var(--panel); color: var(--text); border-radius: 999px; padding: 0.45rem 0.85rem; cursor: pointer; }
+.btn.primary { background: var(--accent); color: #062216; border-color: transparent; font-weight: 600; }
+.stack { display: grid; gap: 1rem; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 0.75rem; }
+.tile { text-align: left; border: 1px solid var(--line); background: var(--panel); border-radius: 14px; padding: 0.9rem 1rem; color: inherit; cursor: pointer; }
+.tile.active { outline: 2px solid var(--accent); }
+.tile span, .card h2 { color: var(--muted); font-size: 0.8rem; }
+.tile strong { display: block; margin-top: 0.35rem; font-size: 1.25rem; }
+.card { border: 1px solid var(--line); background: var(--panel); border-radius: 16px; padding: 1rem; }
+.chart { width: 100%; height: 120px; fill: var(--accent); }
+.ledger { list-style: none; margin: 0; padding: 0; }
+.ledger li { display: flex; justify-content: space-between; gap: 1rem; padding: 0.55rem 0; border-bottom: 1px solid var(--line); }
+.neg { color: var(--neg); } .pos { color: var(--pos); }
+.empty { color: var(--muted); }
+.goal { display: flex; gap: 0.75rem; align-items: center; }
+.ring { width: 52px; height: 52px; transform: rotate(-90deg); }
+.ring circle { fill: none; stroke: var(--line); stroke-width: 3; }
+.ring circle:last-child { stroke: var(--accent); }
+.prefs { display: grid; gap: 0.85rem; max-width: 360px; }
+.prefs label, .modal label { display: grid; gap: 0.3rem; font-size: 0.85rem; color: var(--muted); }
+.prefs input, .modal input, .modal select { border: 1px solid var(--line); background: var(--bg); color: var(--text); border-radius: 10px; padding: 0.55rem 0.7rem; }
+.modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.45); display: grid; place-items: center; padding: 1rem; }
+.modal { width: min(420px, 100%); background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 1rem; display: grid; gap: 0.75rem; }
+.modal header { display: flex; justify-content: space-between; align-items: center; }
+.modal header h2 { margin: 0; font-size: 1rem; color: var(--text); }
+.modal header button { border: 0; background: transparent; color: var(--muted); cursor: pointer; }
+@media (max-width: 800px) { .finance-shell { grid-template-columns: 1fr; } .side { display: flex; gap: 0.35rem; overflow-x: auto; } }
+`;
+}
+
+function buildPulseAppJsx(title: string, brief = ''): string {
+  const safeTitle = escapeHtml(title);
+  const wantStopwatch = /\b(stopwatch|lap)\b/i.test(brief);
+  if (wantStopwatch) {
+    return `import { useEffect, useRef, useState } from 'react';
+import './App.css';
+
+const LAPS_KEY = 'ark-pulse-laps-v1';
+function loadLaps() {
+  try { const p = JSON.parse(localStorage.getItem(LAPS_KEY) || '[]'); return Array.isArray(p) ? p : []; } catch { return []; }
+}
+function fmt(ms) {
+  const total = Math.floor(ms / 1000);
+  const mm = String(Math.floor(total / 60)).padStart(2, '0');
+  const ss = String(total % 60).padStart(2, '0');
+  const cs = String(Math.floor((ms % 1000) / 10)).padStart(2, '0');
+  return mm + ':' + ss + '.' + cs;
+}
+
+export default function App() {
+  const [ms, setMs] = useState(0);
+  const [running, setRunning] = useState(false);
+  const [laps, setLaps] = useState(loadLaps);
+  const tick = useRef(null);
+  const started = useRef(0);
+  const base = useRef(0);
+  useEffect(() => { try { localStorage.setItem(LAPS_KEY, JSON.stringify(laps)); } catch {} }, [laps]);
+  useEffect(() => {
+    if (!running) { if (tick.current) clearInterval(tick.current); return undefined; }
+    started.current = Date.now();
+    tick.current = setInterval(() => setMs(base.current + (Date.now() - started.current)), 40);
+    return () => clearInterval(tick.current);
+  }, [running]);
+  return (
+    <div className="pulse-shell stopwatch">
+      <header className="pulse-bar"><strong>${safeTitle}</strong><span>Emerald stopwatch</span></header>
+      <div className="pulse-grid">
+        <section className="timer-card glow-ring">
+          <p className="label">Stopwatch</p>
+          <div className="clock">{fmt(ms)}</div>
+          <div className="row">
+            <button type="button" className="btn primary" onClick={() => { if (!running) setRunning(true); }} disabled={running}>Start</button>
+            <button type="button" className="btn" onClick={() => { if (running) { base.current = ms; setRunning(false); } }} disabled={!running}>Pause</button>
+            <button type="button" className="btn" onClick={() => { setRunning(false); base.current = 0; setMs(0); setLaps([]); }}>Reset</button>
+            <button type="button" className="btn primary" onClick={() => setLaps((p) => [{ id: Date.now(), at: ms }, ...p].slice(0, 40))} disabled={ms === 0}>Lap</button>
+          </div>
+        </section>
+        <section className="note-card">
+          <p className="label">Lap times</p>
+          <ul className="laps">
+            {laps.length === 0 && <li className="empty">No laps yet</li>}
+            {laps.map((item, i) => (
+              <li key={item.id}><span>Lap {laps.length - i}</span><strong>{fmt(item.at)}</strong></li>
+            ))}
+          </ul>
+        </section>
+      </div>
+    </div>
+  );
+}
+`;
+  }
+  return `import { useEffect, useRef, useState } from 'react';
+import './App.css';
+
+const NOTE_KEY = 'ark-pulse-note-v1';
+const FOCUS_SECS = 25 * 60;
+
+function loadNote() {
+  try { return localStorage.getItem(NOTE_KEY) || ''; } catch { return ''; }
+}
+
+export default function App() {
+  const [seconds, setSeconds] = useState(FOCUS_SECS);
+  const [running, setRunning] = useState(false);
+  const [note, setNote] = useState(loadNote);
+  const tick = useRef(null);
+
+  useEffect(() => {
+    localStorage.setItem(NOTE_KEY, note);
+  }, [note]);
+
+  useEffect(() => {
+    if (!running) {
+      if (tick.current) clearInterval(tick.current);
+      return undefined;
+    }
+    tick.current = setInterval(() => {
+      setSeconds((s) => {
+        if (s <= 1) {
+          setRunning(false);
+          return 0;
+        }
+        return s - 1;
+      });
+    }, 1000);
+    return () => clearInterval(tick.current);
+  }, [running]);
+
+  const mm = String(Math.floor(seconds / 60)).padStart(2, '0');
+  const ss = String(seconds % 60).padStart(2, '0');
+
+  return (
+    <div className="pulse-shell">
+      <header className="pulse-bar"><strong>${safeTitle}</strong><span>Focus utility</span></header>
+      <div className="pulse-grid">
+        <section className="timer-card">
+          <p className="label">Pomodoro</p>
+          <div className="clock">{mm}:{ss}</div>
+          <div className="row">
+            <button type="button" className="btn primary" onClick={() => setRunning(true)} disabled={running || seconds === 0}>Start</button>
+            <button type="button" className="btn" onClick={() => setRunning(false)} disabled={!running}>Pause</button>
+            <button type="button" className="btn" onClick={() => { setRunning(false); setSeconds(FOCUS_SECS); }}>Reset</button>
+          </div>
+        </section>
+        <section className="note-card">
+          <p className="label">Scratch pad</p>
+          <textarea
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="Quick notes — saved locally…"
+          />
+        </section>
+      </div>
+    </div>
+  );
+}
+`;
+}
+
+function buildPulseAppCss(brief = ''): string {
+  const emerald = /\b(emerald|stopwatch|lap|green)\b/i.test(brief);
+  const root = emerald
+    ? ':root { --bg:#07140f; --panel:#0f2a1f; --text:#e8f7ef; --muted:#8aafa0; --accent:#3dd68c; --line:#1d3d30; --glow:rgba(61,214,140,0.35); }'
+    : ':root { --bg:#10141a; --panel:#1a222d; --text:#e8eef7; --muted:#8b97a8; --accent:#f0b429; --line:#2a3442; --glow:rgba(240,180,41,0.2); }';
+  return `${root}
+* { box-sizing: border-box; }
+body { margin: 0; font-family: "Segoe UI", system-ui, sans-serif; background: radial-gradient(900px 480px at 15% -5%, var(--glow), transparent), linear-gradient(160deg, var(--bg), #0a1210 55%, var(--bg)); color: var(--text); }
+.pulse-shell { min-height: 100vh; }
+.pulse-bar { display:flex; justify-content:space-between; align-items:center; padding:0.85rem 1.1rem; border-bottom:1px solid var(--line); background: rgba(0,0,0,0.25); }
+.pulse-bar span { color: var(--muted); font-size: 0.8rem; }
+.pulse-grid { display:grid; grid-template-columns: 1fr 1fr; gap:1rem; padding:1.25rem; max-width:960px; margin:0 auto; }
+.timer-card, .note-card { background: var(--panel); border:1px solid var(--line); border-radius:16px; padding:1.1rem; min-height:280px; }
+.glow-ring { box-shadow: 0 0 0 1px var(--line), 0 0 36px var(--glow); }
+.label { margin:0 0 0.75rem; color:var(--muted); letter-spacing:0.08em; text-transform:uppercase; font-size:0.72rem; }
+.clock { font-size:4rem; font-variant-numeric: tabular-nums; font-weight:600; margin:1rem 0 1.25rem; }
+.row { display:flex; gap:0.5rem; flex-wrap:wrap; }
+.btn { border:1px solid var(--line); background:#0c1612; color:var(--text); border-radius:10px; padding:0.55rem 0.9rem; cursor:pointer; }
+.btn.primary { background: var(--accent); color:#062015; border-color:transparent; font-weight:600; }
+.btn:disabled { opacity:0.45; cursor:not-allowed; }
+.note-card textarea { width:100%; height:210px; resize:vertical; border:1px solid var(--line); border-radius:12px; background:#07110d; color:var(--text); padding:0.75rem; font:inherit; }
+.laps { list-style:none; margin:0; padding:0; display:grid; gap:0.45rem; max-height:260px; overflow:auto; }
+.laps li { display:flex; justify-content:space-between; padding:0.55rem 0.7rem; border-radius:10px; background:rgba(0,0,0,0.22); border:1px solid var(--line); }
+.laps .empty { color:var(--muted); border-style:dashed; }
+@media (max-width:720px) { .pulse-grid { grid-template-columns: 1fr; } }
+`;
+}
+
+function buildKanbanAppJsx(title: string): string {
+  const safeTitle = escapeHtml(title);
+  return `import { useEffect, useMemo, useState } from 'react';
+import { Plus, X } from 'lucide-react';
+import './App.css';
+
+const STORAGE_KEY = 'ark-kanban-v1';
+const COLUMNS = [
+  { id: 'backlog', label: 'Backlog' },
+  { id: 'doing', label: 'Doing' },
+  { id: 'review', label: 'Review' },
+  { id: 'done', label: 'Done' },
+];
+
+function loadCards() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    if (Array.isArray(parsed) && parsed.length) return parsed;
+  } catch { /* ignore */ }
+  return [
+    { id: '1', column: 'backlog', title: 'Sketch board chrome', notes: 'Dark original UI, not a Trello clone.' },
+    { id: '2', column: 'doing', title: 'Wire drag-and-drop', notes: 'HTML5 DnD between columns.' },
+    { id: '3', column: 'review', title: 'Persist to localStorage', notes: 'Survive reloads.' },
+  ];
+}
+
+export default function App() {
+  const [cards, setCards] = useState(loadCards);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [draftTitle, setDraftTitle] = useState('');
+  const [draftNotes, setDraftNotes] = useState('');
+  const [draftColumn, setDraftColumn] = useState('backlog');
+  const [draggingId, setDraggingId] = useState(null);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(cards));
+  }, [cards]);
+
+  const byColumn = useMemo(() => {
+    const map = Object.fromEntries(COLUMNS.map((c) => [c.id, []]));
+    for (const card of cards) {
+      if (map[card.column]) map[card.column].push(card);
+      else map.backlog.push(card);
+    }
+    return map;
+  }, [cards]);
+
+  const openAdd = (columnId) => {
+    setDraftColumn(columnId);
+    setDraftTitle('');
+    setDraftNotes('');
+    setModalOpen(true);
+  };
+
+  const saveCard = () => {
+    const title = draftTitle.trim();
+    if (!title) return;
+    setCards((prev) => [
+      { id: String(Date.now()), column: draftColumn, title, notes: draftNotes.trim() },
+      ...prev,
+    ]);
+    setModalOpen(false);
+  };
+
+  const onDropColumn = (columnId) => {
+    if (!draggingId) return;
+    setCards((prev) => prev.map((c) => (c.id === draggingId ? { ...c, column: columnId } : c)));
+    setDraggingId(null);
+  };
+
+  return (
+    <div className="kanban-shell">
+      <header className="kanban-top">
+        <div>
+          <p className="eyebrow">Board</p>
+          <h1>${safeTitle}</h1>
+        </div>
+        <button type="button" className="btn primary" onClick={() => openAdd('backlog')}>
+          <Plus size={16} /> Add Card
+        </button>
+      </header>
+      <div className="board">
+        {COLUMNS.map((col) => (
+          <section
+            key={col.id}
+            className="column"
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={() => onDropColumn(col.id)}
+          >
+            <div className="column-head">
+              <h2>{col.label}</h2>
+              <span>{byColumn[col.id].length}</span>
+              <button type="button" className="ghost" onClick={() => openAdd(col.id)} aria-label={\`Add to \${col.label}\`}>
+                <Plus size={14} />
+              </button>
+            </div>
+            <ul className="card-list">
+              {byColumn[col.id].map((card) => (
+                <li
+                  key={card.id}
+                  className="kcard"
+                  draggable
+                  onDragStart={() => setDraggingId(card.id)}
+                  onDragEnd={() => setDraggingId(null)}
+                >
+                  <strong>{card.title}</strong>
+                  {card.notes ? <p>{card.notes}</p> : null}
+                </li>
+              ))}
+              {!byColumn[col.id].length ? <li className="empty">Drop cards here</li> : null}
+            </ul>
+          </section>
+        ))}
+      </div>
+      {modalOpen ? (
+        <div className="modal-backdrop" role="presentation" onClick={() => setModalOpen(false)}>
+          <div className="modal" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+            <header>
+              <h2>New card</h2>
+              <button type="button" onClick={() => setModalOpen(false)} aria-label="Close"><X size={16} /></button>
+            </header>
+            <label>
+              Title
+              <input value={draftTitle} onChange={(e) => setDraftTitle(e.target.value)} placeholder="Card title" autoFocus />
+            </label>
+            <label>
+              Notes
+              <textarea value={draftNotes} onChange={(e) => setDraftNotes(e.target.value)} placeholder="Optional notes" rows={4} />
+            </label>
+            <label>
+              Column
+              <select value={draftColumn} onChange={(e) => setDraftColumn(e.target.value)}>
+                {COLUMNS.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+              </select>
+            </label>
+            <button type="button" className="btn primary" onClick={saveCard}>Save card</button>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+`;
+}
+
+function buildKanbanAppCss(): string {
+  return `:root {
+  --bg: #0e1116; --panel: #161b22; --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff; --line: #30363d; --lift: #1c2128;
+}
+* { box-sizing: border-box; }
+body { margin: 0; font-family: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif; background: radial-gradient(1200px 600px at 10% -10%, #1a2740, var(--bg)); color: var(--text); }
+.kanban-shell { min-height: 100vh; padding: 1.25rem 1.5rem 2rem; }
+.kanban-top { display: flex; justify-content: space-between; align-items: end; gap: 1rem; margin-bottom: 1.25rem; }
+.eyebrow { margin: 0; color: var(--muted); font-size: 0.75rem; letter-spacing: 0.12em; text-transform: uppercase; }
+.kanban-top h1 { margin: 0.15rem 0 0; font-size: 1.6rem; }
+.btn { display: inline-flex; gap: 0.4rem; align-items: center; border: 1px solid var(--line); background: var(--panel); color: var(--text); border-radius: 10px; padding: 0.5rem 0.9rem; cursor: pointer; }
+.btn.primary { background: var(--accent); color: #041018; border-color: transparent; font-weight: 600; }
+.board { display: grid; grid-template-columns: repeat(4, minmax(200px, 1fr)); gap: 0.85rem; align-items: start; }
+.column { background: color-mix(in srgb, var(--panel) 88%, transparent); border: 1px solid var(--line); border-radius: 14px; min-height: 420px; padding: 0.65rem; }
+.column-head { display: flex; align-items: center; gap: 0.45rem; margin-bottom: 0.55rem; }
+.column-head h2 { margin: 0; font-size: 0.92rem; flex: 1; }
+.column-head span { color: var(--muted); font-size: 0.75rem; }
+.ghost { border: 0; background: transparent; color: var(--muted); cursor: pointer; display: grid; place-items: center; padding: 0.2rem; }
+.card-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.55rem; min-height: 320px; }
+.kcard { background: var(--lift); border: 1px solid var(--line); border-radius: 12px; padding: 0.75rem 0.8rem; cursor: grab; }
+.kcard:active { cursor: grabbing; }
+.kcard strong { display: block; font-size: 0.92rem; }
+.kcard p { margin: 0.35rem 0 0; color: var(--muted); font-size: 0.82rem; line-height: 1.35; }
+.empty { color: var(--muted); font-size: 0.8rem; padding: 0.75rem; border: 1px dashed var(--line); border-radius: 10px; text-align: center; }
+.modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: grid; place-items: center; padding: 1rem; }
+.modal { width: min(420px, 100%); background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 1rem; display: grid; gap: 0.75rem; }
+.modal header { display: flex; justify-content: space-between; align-items: center; }
+.modal header h2 { margin: 0; font-size: 1rem; }
+.modal header button { border: 0; background: transparent; color: var(--muted); cursor: pointer; }
+.modal label { display: grid; gap: 0.3rem; font-size: 0.85rem; color: var(--muted); }
+.modal input, .modal textarea, .modal select { border: 1px solid var(--line); background: var(--bg); color: var(--text); border-radius: 10px; padding: 0.55rem 0.7rem; font: inherit; }
+@media (max-width: 960px) { .board { grid-template-columns: repeat(2, minmax(180px, 1fr)); } }
+@media (max-width: 560px) { .board { grid-template-columns: 1fr; } .kanban-top { flex-direction: column; align-items: start; } }
+`;
+}
+
+function buildChatAppJsx(title: string): string {
+  const logo = brandLogoSvg(title);
+  const safeTitle = escapeHtml(title);
+  return `import { useMemo, useState } from 'react';
+import {
+  Users, MessageCircle, Settings, Hash, Volume2, Phone,
+  Mic, MicOff, MonitorUp, X, UserPlus, Smile,
+} from 'lucide-react';
+import './App.css';
+
+const FRIENDS = ['Alex', 'Jordan', 'Sam'];
+const CHANNELS = [
+  { id: 'general', name: 'general', type: 'text' },
+  { id: 'random', name: 'random', type: 'text' },
+  { id: 'voice', name: 'Lounge', type: 'voice' },
+];
+const MEMBERS = [
+  { name: 'You', status: 'online' },
+  { name: 'Ark Bot', status: 'online' },
+  { name: 'Guest', status: 'idle' },
+];
+const SEED = [
+  { id: '1', channel: 'general', author: 'Ark Bot', text: 'Welcome to ${safeTitle} — pick a channel or open DMs.' },
+];
+
+export default function App() {
+  const [rail, setRail] = useState('servers');
+  const [channelId, setChannelId] = useState('general');
+  const [dmUser, setDmUser] = useState(null);
+  const [draft, setDraft] = useState('');
+  const [messages, setMessages] = useState(SEED);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState('appearance');
+  const [theme, setTheme] = useState('dark');
+  const [accent, setAccent] = useState('#38bdf8');
+  const [displayName, setDisplayName] = useState('You');
+  const [inCall, setInCall] = useState(false);
+  const [muted, setMuted] = useState(false);
+  const [deafened, setDeafened] = useState(false);
+  const [screenShare, setScreenShare] = useState(false);
+  const [inviteOpen, setInviteOpen] = useState(false);
+
+  const channel = CHANNELS.find(c => c.id === channelId) || CHANNELS[0];
+  const threadKey = dmUser ? \`dm:\${dmUser}\` : channel.id;
+  const thread = useMemo(
+    () => messages.filter(m => (dmUser ? m.dm === dmUser : m.channel === channel.id && !m.dm)),
+    [messages, channel.id, dmUser],
+  );
+
+  const send = () => {
+    const text = draft.trim();
+    if (!text) return;
+    setMessages(prev => [...prev, {
+      id: String(Date.now()),
+      channel: dmUser ? null : channel.id,
+      dm: dmUser,
+      author: displayName,
+      text,
+    }]);
+    setDraft('');
+    if (dmUser) {
+      window.setTimeout(() => {
+        setMessages(prev => [...prev, {
+          id: String(Date.now() + 1),
+          dm: dmUser,
+          author: dmUser,
+          text: \`Got it — "\${text.slice(0, 80)}"\`,
+        }]);
+      }, 600);
+    }
+  };
+
+  return (
+    <div className={\`app-shell theme-\${theme}\`} style={{ '--accent': accent }}>
+      <nav className="rail" aria-label="Main">
+        <div className="rail-logo" title="${safeTitle}">
+          ${logo}
+        </div>
+        <button type="button" className={rail === 'friends' ? 'rail-btn active' : 'rail-btn'} onClick={() => { setRail('friends'); setDmUser(null); }} title="Friends"><Users size={20} /></button>
+        <button type="button" className={rail === 'servers' ? 'rail-btn active' : 'rail-btn'} onClick={() => { setRail('servers'); setDmUser(null); }} title="Servers"><Hash size={20} /></button>
+        <button type="button" className={rail === 'dms' ? 'rail-btn active' : 'rail-btn'} onClick={() => setRail('dms')} title="Direct messages"><MessageCircle size={20} /></button>
+        <button type="button" className="rail-btn rail-settings" onClick={() => setSettingsOpen(true)} title="Settings"><Settings size={20} /></button>
+      </nav>
+
+      <aside className="sidebar">
+        {rail === 'friends' && (
+          <>
+            <p className="sidebar-title">Friends</p>
+            <ul className="list">{FRIENDS.map(f => <li key={f}><span className="dot online" />{f}</li>)}</ul>
+          </>
+        )}
+        {rail === 'dms' && (
+          <>
+            <p className="sidebar-title">Direct Messages</p>
+            <ul className="list">
+              {FRIENDS.map(f => (
+                <li key={f}>
+                  <button type="button" className={dmUser === f ? 'row active' : 'row'} onClick={() => { setDmUser(f); setRail('dms'); }}>
+                    <span className="dot online" />{f}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+        {(rail === 'servers' || (!dmUser && rail !== 'dms' && rail !== 'friends')) && (
+          <>
+            <p className="sidebar-title">${safeTitle}</p>
+            <p className="sidebar-sub">Text channels</p>
+            <ul className="list">
+              {CHANNELS.filter(c => c.type === 'text').map(c => (
+                <li key={c.id}>
+                  <button type="button" className={channelId === c.id && !dmUser ? 'row active' : 'row'} onClick={() => { setChannelId(c.id); setDmUser(null); setRail('servers'); }}>
+                    <Hash size={14} /> {c.name}
+                  </button>
+                </li>
+              ))}
+            </ul>
+            <p className="sidebar-sub">Voice</p>
+            <ul className="list">
+              {CHANNELS.filter(c => c.type === 'voice').map(c => (
+                <li key={c.id}><button type="button" className="row" onClick={() => setInCall(true)}><Volume2 size={14} /> {c.name}</button></li>
+              ))}
+            </ul>
+          </>
+        )}
+      </aside>
+
+      <main className="main">
+        <header className="main-header">
+          <h1>{dmUser ? \`@\${dmUser}\` : \`# \${channel.name}\`}</h1>
+          <div className="header-actions">
+            <button type="button" className="ghost" onClick={() => setInviteOpen(true)}><UserPlus size={16} /> Add people</button>
+            <button type="button" className="ghost" onClick={() => setInCall(v => !v)}><Phone size={16} /> {inCall ? 'End call' : 'Start call'}</button>
+          </div>
+        </header>
+        <div className="messages">
+          {thread.map(m => (
+            <article key={m.id} className="msg">
+              <span className="avatar" style={{ background: accent }}>{(m.author || '?')[0]}</span>
+              <div>
+                <header><strong>{m.author}</strong> <time>{new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time></header>
+                <p>{m.text}</p>
+              </div>
+            </article>
+          ))}
+        </div>
+        <div className="composer">
+          <button type="button" className="icon-btn" aria-label="Emoji"><Smile size={18} /></button>
+          <input
+            value={draft}
+            onChange={e => setDraft(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') send(); }}
+            placeholder={dmUser ? \`Message @\${dmUser}\` : \`Message #\${channel.name}\`}
+          />
+          <button type="button" className="send" onClick={send}>Send</button>
+        </div>
+        {inCall && (
+          <div className="call-bar">
+            <span><Phone size={14} /> Connected (demo)</span>
+            <div className="call-actions">
+              <button type="button" className={muted ? 'on' : ''} onClick={() => setMuted(v => !v)}>{muted ? <MicOff size={16} /> : <Mic size={16} />}</button>
+              <button type="button" className={deafened ? 'on' : ''} onClick={() => setDeafened(v => !v)} title="Deafen">🔇</button>
+              <button type="button" className={screenShare ? 'on' : ''} onClick={() => setScreenShare(v => !v)}><MonitorUp size={16} /></button>
+              <button type="button" onClick={() => { setInCall(false); setScreenShare(false); }}><X size={16} /></button>
+            </div>
+          </div>
+        )}
+      </main>
+
+      <aside className="members">
+        <p className="sidebar-sub">Members</p>
+        <ul className="list">
+          {MEMBERS.map(m => (
+            <li key={m.name}><span className={\`dot \${m.status}\`} />{m.name}</li>
+          ))}
+        </ul>
+      </aside>
+
+      {inviteOpen && (
+        <div className="modal-backdrop" onClick={() => setInviteOpen(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <h2>Invite to ${safeTitle}</h2>
+            <p>Share link: <code>${safeTitle.toLowerCase()}.invite/demo</code></p>
+            <button type="button" onClick={() => setInviteOpen(false)}>Close</button>
+          </div>
+        </div>
+      )}
+
+      {settingsOpen && (
+        <div className="modal-backdrop" onClick={() => setSettingsOpen(false)}>
+          <div className="modal settings" onClick={e => e.stopPropagation()}>
+            <header><h2>Settings</h2><button type="button" onClick={() => setSettingsOpen(false)}><X size={18} /></button></header>
+            <div className="settings-body">
+              <nav>
+                {['account', 'appearance', 'notifications', 'privacy', 'keybinds', 'voice'].map(tab => (
+                  <button key={tab} type="button" className={settingsTab === tab ? 'active' : ''} onClick={() => setSettingsTab(tab)}>{tab}</button>
+                ))}
+              </nav>
+              <div className="settings-panel">
+                {settingsTab === 'account' && (
+                  <label>Display name<input value={displayName} onChange={e => setDisplayName(e.target.value)} /></label>
+                )}
+                {settingsTab === 'appearance' && (
+                  <>
+                    <label>Theme
+                      <select value={theme} onChange={e => setTheme(e.target.value)}>
+                        <option value="dark">Dark</option>
+                        <option value="light">Light</option>
+                      </select>
+                    </label>
+                    <label>Accent color<input type="color" value={accent} onChange={e => setAccent(e.target.value)} /></label>
+                  </>
+                )}
+                {settingsTab === 'notifications' && <p>Notification toggles (demo) — all on.</p>}
+                {settingsTab === 'privacy' && <p>Privacy toggles (demo) — DMs from friends only.</p>}
+                {settingsTab === 'keybinds' && <p>Ctrl+Enter — send message (read-only list for v1).</p>}
+                {settingsTab === 'voice' && <p>Input / output device dropdowns (demo).</p>}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+`;
+}
+
+function buildChatAppCss(): string {
+  return `html, body, #root { margin: 0; height: 100%; }
+* { box-sizing: border-box; }
+.app-shell {
+  --bg: #0c1017;
+  --panel: #151b26;
+  --panel-2: #1c2433;
+  --text: #e8edf5;
+  --muted: #8b95a8;
+  --accent: #38bdf8;
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 72px 240px 1fr 200px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, Segoe UI, sans-serif;
+}
+.app-shell.theme-light {
+  --bg: #f4f6fa;
+  --panel: #ffffff;
+  --panel-2: #eef1f6;
+  --text: #111827;
+  --muted: #6b7280;
+}
+.rail {
+  background: var(--panel);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 0;
+  border-right: 1px solid #0003;
+}
+.rail-logo { color: var(--accent); width: 44px; height: 44px; margin-bottom: 0.5rem; }
+.brand-mark { width: 100%; height: 100%; }
+.rail-btn {
+  width: 44px; height: 44px; border: 0; border-radius: 14px;
+  background: var(--panel-2); color: var(--muted); cursor: pointer;
+  display: grid; place-items: center;
+}
+.rail-btn:hover, .rail-btn.active { background: var(--accent); color: #0c1017; }
+.rail-settings { margin-top: auto; }
+.sidebar, .members { background: var(--panel); padding: 0.85rem; border-right: 1px solid #0002; }
+.members { border-right: 0; border-left: 1px solid #0002; }
+.sidebar-title { margin: 0 0 0.75rem; font-weight: 700; }
+.sidebar-sub { margin: 0.75rem 0 0.35rem; font-size: 0.7rem; text-transform: uppercase; color: var(--muted); letter-spacing: 0.04em; }
+.list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.25rem; }
+.row {
+  width: 100%; text-align: left; border: 0; border-radius: 8px; padding: 0.45rem 0.5rem;
+  background: transparent; color: inherit; cursor: pointer; display: flex; align-items: center; gap: 0.35rem;
+}
+.row:hover, .row.active { background: var(--panel-2); }
+.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 0.35rem; }
+.dot.online { background: #34d399; }
+.dot.idle { background: #fbbf24; }
+.main { display: flex; flex-direction: column; min-width: 0; background: var(--bg); }
+.main-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0.85rem 1rem; border-bottom: 1px solid #0003;
+}
+.main-header h1 { margin: 0; font-size: 1rem; }
+.header-actions { display: flex; gap: 0.5rem; }
+.ghost {
+  border: 1px solid #ffffff18; background: transparent; color: inherit;
+  border-radius: 8px; padding: 0.35rem 0.6rem; cursor: pointer; display: inline-flex; align-items: center; gap: 0.35rem;
+}
+.messages { flex: 1; overflow: auto; padding: 1rem; display: grid; gap: 0.85rem; align-content: start; }
+.msg { display: grid; grid-template-columns: 40px 1fr; gap: 0.65rem; }
+.avatar {
+  width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center;
+  font-weight: 700; color: #0c1017;
+}
+.msg header { display: flex; gap: 0.5rem; align-items: baseline; }
+.msg time { color: var(--muted); font-size: 0.75rem; }
+.msg p { margin: 0.2rem 0 0; }
+.composer {
+  display: flex; gap: 0.5rem; padding: 0.75rem 1rem 1rem; align-items: center;
+}
+.composer input {
+  flex: 1; border: 0; border-radius: 10px; padding: 0.7rem 0.85rem;
+  background: var(--panel); color: inherit; outline: none;
+}
+.icon-btn, .send {
+  border: 0; border-radius: 10px; padding: 0.55rem 0.85rem; cursor: pointer;
+}
+.send { background: var(--accent); color: #0c1017; font-weight: 700; }
+.call-bar {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 0.5rem 1rem; background: var(--panel); border-top: 1px solid #0003;
+}
+.call-actions { display: flex; gap: 0.35rem; }
+.call-actions button {
+  border: 0; border-radius: 8px; padding: 0.4rem; background: var(--panel-2); color: inherit; cursor: pointer;
+}
+.call-actions button.on { background: var(--accent); color: #0c1017; }
+.modal-backdrop {
+  position: fixed; inset: 0; background: #0008; backdrop-filter: blur(4px);
+  display: grid; place-items: center; z-index: 50;
+}
+.modal {
+  background: var(--panel); border-radius: 16px; padding: 1.25rem; width: min(92vw, 420px);
+  box-shadow: 0 20px 60px #0006;
+}
+.modal.settings { width: min(94vw, 640px); }
+.modal header { display: flex; justify-content: space-between; align-items: center; }
+.settings-body { display: grid; grid-template-columns: 140px 1fr; gap: 1rem; margin-top: 1rem; }
+.settings-body nav { display: grid; gap: 0.35rem; }
+.settings-body nav button {
+  text-align: left; border: 0; border-radius: 8px; padding: 0.45rem 0.6rem;
+  background: transparent; color: inherit; cursor: pointer; text-transform: capitalize;
+}
+.settings-body nav button.active { background: var(--panel-2); }
+.settings-panel label { display: grid; gap: 0.35rem; margin-bottom: 0.75rem; }
+.settings-panel input, .settings-panel select {
+  border: 1px solid #ffffff18; border-radius: 8px; padding: 0.45rem 0.6rem; background: var(--panel-2); color: inherit;
+}
+`;
+}
 
 /**
  * When the user pastes several project prompts, only use the segment that
@@ -652,6 +1860,20 @@ export function reactUiMicroAskEdits(
   message: string,
   opts?: { projectName?: string },
 ): WebFileEdit[] {
+  const surgical = reactSurgicalMicroAskEdits(files, message);
+  if (surgical.length) return surgical;
+
+  // Small UI tweaks must not trigger a full layout rebuild just because the
+  // project name maps to kanban/finance/notes. Full create/scaffold briefs still rebuild.
+  const looksLikeTweakOnly = (
+    /\b(rename|tint|change|update|make)\b/i.test(message)
+    && !/\b(create|scaffold|build\s+(?:a|me|the)|named|called)\b/i.test(message)
+    && String(message || '').length < 500
+  );
+  if (looksLikeTweakOnly) {
+    return [];
+  }
+
   const projectName = String(opts?.projectName || '').trim();
   const t = segmentForProject(String(message || ''), projectName);
   const flat = flatten(files);
@@ -659,9 +1881,13 @@ export function reactUiMicroAskEdits(
 
   const nameKey = projectName.toLowerCase().replace(/[^a-z0-9]+/g, '');
   // Project name wins over other prompts in the same paste.
-  const kindForced = ((): 'todo' | 'notes' | 'discord' | 'weather' | 'coffee' | null => {
+  const kindForced = ((): 'todo' | 'notes' | 'discord' | 'weather' | 'coffee' | 'finance' | 'kanban' | 'pulse' | null => {
     if (/taskbox|todobox/.test(nameKey) || (/^todo/.test(nameKey) && !/discord|night/.test(nameKey))) return 'todo';
     if (/pixelpad|noteark|stickynotes?/.test(nameKey)) return 'notes';
+    if (/coinnest|ledgerfox|vaultbean|moneypit|shelfledger/.test(nameKey)) return 'finance';
+    if (/flowdeck|taskrail|columnforge|boardly|kanban/.test(nameKey)) return 'kanban';
+    if (/deskpulse|chronopad|pomodoro|focuspulse/.test(nameKey)) return 'pulse';
+    if (/signaldesk|nexuslink|teamchat|messaging|chatdesk/.test(nameKey)) return 'discord';
     if (/discord|nightchat|discorddesk/.test(nameKey)) return 'discord';
     if (/weather/.test(nameKey)) return 'weather';
     if (/brewdesk|coffee/.test(nameKey)) return 'coffee';
@@ -678,28 +1904,62 @@ export function reactUiMicroAskEdits(
   );
   const wantsTodoLayout = (
     /\b(todo|task\s*list|add\s+task)\b/i.test(t)
-    || (/\btask\b/i.test(t) && /\b(list|editor|localStorage|button)\b/i.test(t))
+    || (/\btask\b/i.test(t) && /\b(list|editor|localStorage|button)\b/i.test(t)
+      && !/\b(kanban|column|board|drag)\b/i.test(t))
+  );
+  const wantsKanbanLayout = (
+    /\b(kanban|drag[\s-]?and[\s-]?drop)\b/i.test(t)
+    || (/\b(column|board)\b/i.test(t) && /\b(backlog|doing|review|card|draggable)\b/i.test(t))
+    || /flowdeck|taskrail|columnforge|boardly/.test(nameKey)
   );
   const wantsDiscordLayout = (
     /\b(server\s+rail|channel\s+list|chat\s+pane|member\s+list|welcome\s+screen)\b/i.test(t)
     || (/\bdiscord\b/i.test(t) && /\b(layout|channels?|sidebar|chat)\b/i.test(t))
   );
+  // Strong chat signals only — do NOT treat lucide / settings modal / left rail alone as Discord.
+  const wantsChatAppLayout = (
+    wantsDiscordLayout
+    || /\b(direct\s+messages?|voice\s+channel|screen\s+share|server\s+sidebar|threads?\s+panel|command\s+palette|call\s+bar|team\s+messaging|chat\s+app)\b/i.test(t)
+    || (/\b(channel|dm|mute|deafen|friends?)\b/i.test(t) && /\b(react|vite|sidebar|rail|layout)\b/i.test(t)
+      && !/\b(budget|transaction|finance|ledger|wallet|invoice|kanban|note|todo|task)\b/i.test(t))
+  );
+  const wantsFinanceLayout = (
+    /\b(budget|transaction|finance|ledger|wallet|expense|net\s*worth|cashflow)\b/i.test(t)
+    || /coinnest|ledgerfox|vaultbean|moneypit|shelfledger/.test(nameKey)
+  );
+  const wantsPulseLayout = (
+    /\b(pomodoro|focus\s+timer|scratch\s*pad)\b/i.test(t)
+    || (/\btimer\b/i.test(t) && /\b(notepad|scratch|pause|reset)\b/i.test(t))
+    || /deskpulse|chronopad|focuspulse/.test(nameKey)
+  );
   const wantsWeatherLayout = /\bweather\b/i.test(t) && /\b(dashboard|search|temperature|city)\b/i.test(t);
-  const wantsCoffeeLayout = /\b(coffee|brew|menu|order\s+now|hero)\b/i.test(t);
+  const wantsCoffeeLayout = /\b(coffee|brew|menu|order\s+now|hero)\b/i.test(t)
+    && !/\b(budget|transaction|finance)\b/i.test(t);
 
-  let kind: 'todo' | 'notes' | 'discord' | 'weather' | 'coffee' | 'logo' | null = kindForced;
+  let kind: 'todo' | 'notes' | 'discord' | 'weather' | 'coffee' | 'finance' | 'kanban' | 'pulse' | 'logo' | null = kindForced;
   if (!kind) {
-    if (wantsTodoLayout) kind = 'todo';
-    else if (wantsDiscordLayout) kind = 'discord';
+    if (wantsKanbanLayout) kind = 'kanban';
+    else if (wantsPulseLayout) kind = 'pulse';
+    else if (wantsFinanceLayout) kind = 'finance';
+    else if (wantsTodoLayout) kind = 'todo';
+    else if (wantsChatAppLayout) kind = 'discord';
     else if (wantsNotesLayout) kind = 'notes';
     else if (wantsWeatherLayout) kind = 'weather';
     else if (wantsCoffeeLayout) kind = 'coffee';
     else if (wantsLogo || wantsCenter) kind = 'logo';
   }
 
-  // Hard block: never apply Discord UI to a non-Discord project name.
-  if (kind === 'discord' && projectName && !/discord|nightchat/i.test(projectName)) {
-    kind = wantsTodoLayout ? 'todo' : wantsNotesLayout ? 'notes' : null;
+  // Never keep Discord layout when the project name + brief are clearly non-chat.
+  if (kind === 'discord' && projectName && !/discord|nightchat|nexus|link|chat|voice|message|signal|desk|team|messaging/i.test(projectName)) {
+    const briefLooksChat = /\b(channel|dm|voice\s+channel|screen\s+share|member\s+list|team\s+messaging|chat\s+app)\b/i.test(t);
+    if (!briefLooksChat) {
+      kind = wantsKanbanLayout ? 'kanban'
+        : wantsPulseLayout ? 'pulse'
+        : wantsFinanceLayout ? 'finance'
+        : wantsTodoLayout ? 'todo'
+        : wantsNotesLayout ? 'notes'
+        : null;
+    }
   }
 
   if (!kind) return [];
@@ -839,144 +2099,33 @@ export default function App() {
     return out;
   }
 
+  if (kind === 'finance') {
+    const pkgEdit = patchPackageJsonForLucide(flat);
+    if (pkgEdit) out.push(pkgEdit);
+    out.push({ path: appPath, content: buildFinanceAppJsx(title) });
+    out.push({ path: cssPath, content: buildFinanceAppCss() });
+    return out;
+  }
+
+  if (kind === 'kanban') {
+    const pkgEdit = patchPackageJsonForLucide(flat);
+    if (pkgEdit) out.push(pkgEdit);
+    out.push({ path: appPath, content: buildKanbanAppJsx(title) });
+    out.push({ path: cssPath, content: buildKanbanAppCss() });
+    return out;
+  }
+
+  if (kind === 'pulse') {
+    out.push({ path: appPath, content: buildPulseAppJsx(title, t) });
+    out.push({ path: cssPath, content: buildPulseAppCss(t) });
+    return out;
+  }
+
   if (kind === 'discord') {
-    const jsx = `import { useState } from 'react';
-import './App.css';
-
-const SERVERS = [{ id: 's1', label: 'D' }];
-const CHANNELS = [
-  { id: 'c1', name: 'general' },
-  { id: 'c2', name: 'random' },
-];
-const MEMBERS = ['You', 'Ark Bot', 'Guest'];
-
-export default function App() {
-  const [channelId, setChannelId] = useState(null);
-  const [draft, setDraft] = useState('');
-  const [messages, setMessages] = useState([]);
-
-  const channel = CHANNELS.find(c => c.id === channelId) || null;
-
-  const send = () => {
-    const text = draft.trim();
-    if (!text || !channel) return;
-    setMessages(prev => [...prev, { id: String(Date.now()), channelId: channel.id, author: 'You', text }]);
-    setDraft('');
-  };
-
-  return (
-    <div className="desk">
-      <aside className="servers" aria-label="Servers">
-        {SERVERS.map(s => (
-          <button key={s.id} type="button" className="server-btn" title="${title}">{s.label}</button>
-        ))}
-      </aside>
-      <aside className="channels" aria-label="Channels">
-        <p className="channels-title">${title}</p>
-        <ul>
-          {CHANNELS.map(c => (
-            <li key={c.id}>
-              <button
-                type="button"
-                className={c.id === channelId ? 'channel active' : 'channel'}
-                onClick={() => setChannelId(c.id)}
-              >
-                # {c.name}
-              </button>
-            </li>
-          ))}
-        </ul>
-      </aside>
-      <main className="chat">
-        {!channel ? (
-          <div className="welcome">
-            ${DISCORD_STYLE_LOGO_SVG}
-            <h1>Welcome</h1>
-            <p>Pick a channel to start chatting.</p>
-          </div>
-        ) : (
-          <>
-            <header className="chat-header"># {channel.name}</header>
-            <div className="messages">
-              {messages.filter(m => m.channelId === channel.id).map(m => (
-                <div key={m.id} className="msg">
-                  <strong>{m.author}</strong>
-                  <span>{m.text}</span>
-                </div>
-              ))}
-            </div>
-            <div className="composer">
-              <input
-                value={draft}
-                onChange={e => setDraft(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') send(); }}
-                placeholder={\`Message #\${channel.name}\`}
-              />
-              <button type="button" onClick={send}>Send</button>
-            </div>
-          </>
-        )}
-      </main>
-      <aside className="members" aria-label="Members">
-        <p className="members-title">Members</p>
-        <ul>
-          {MEMBERS.map(name => <li key={name}>{name}</li>)}
-        </ul>
-      </aside>
-    </div>
-  );
-}
-`;
-
-    const css = `html, body, #root { margin: 0; height: 100%; }
-* { box-sizing: border-box; }
-.desk {
-  min-height: 100vh;
-  display: grid;
-  grid-template-columns: 72px 220px 1fr 200px;
-  background: #313338;
-  color: #f2f3f5;
-  font-family: system-ui, Segoe UI, sans-serif;
-}
-.servers { background: #1e1f22; padding: 0.75rem 0; display: flex; flex-direction: column; align-items: center; gap: 0.5rem; }
-.server-btn {
-  width: 48px; height: 48px; border: 0; border-radius: 16px;
-  background: #5865f2; color: #fff; font-weight: 700; cursor: pointer;
-}
-.channels { background: #2b2d31; padding: 0.75rem; }
-.channels-title { margin: 0 0 0.75rem; font-weight: 700; }
-.channels ul, .members ul { list-style: none; margin: 0; padding: 0; }
-.channel {
-  width: 100%; text-align: left; border: 0; border-radius: 6px;
-  padding: 0.45rem 0.55rem; background: transparent; color: #dbdee1; cursor: pointer;
-}
-.channel:hover, .channel.active { background: #404249; color: #fff; }
-.chat { display: flex; flex-direction: column; min-width: 0; background: #313338; }
-.chat-header { padding: 0.85rem 1rem; border-bottom: 1px solid #1e1f22; font-weight: 700; }
-.messages { flex: 1; overflow: auto; padding: 1rem; display: grid; gap: 0.75rem; align-content: start; }
-.msg { display: grid; gap: 0.15rem; }
-.msg strong { font-size: 0.9rem; }
-.composer { display: flex; gap: 0.5rem; padding: 0.75rem 1rem 1rem; }
-.composer input {
-  flex: 1; border: 0; border-radius: 8px; padding: 0.7rem 0.85rem;
-  background: #383a40; color: inherit; outline: none;
-}
-.composer button {
-  border: 0; border-radius: 8px; padding: 0 1rem; background: #5865f2; color: #fff; font-weight: 600; cursor: pointer;
-}
-.welcome {
-  flex: 1; display: grid; place-content: center; justify-items: center; gap: 0.75rem; text-align: center;
-}
-.welcome h1 { margin: 0; }
-.welcome p { margin: 0; color: #b5bac1; }
-.ark-logo { width: min(160px, 40vw); height: auto; }
-.members { background: #2b2d31; padding: 0.75rem; }
-.members-title { margin: 0 0 0.75rem; font-weight: 700; color: #949ba4; font-size: 0.75rem; text-transform: uppercase; }
-.members li { padding: 0.35rem 0.25rem; color: #dbdee1; }
-`;
-
-    out.push({ path: appPath, content: jsx });
-    out.push({ path: cssPath, content: css });
+    const pkgEdit = patchPackageJsonForLucide(flat);
+    if (pkgEdit) out.push(pkgEdit);
+    out.push({ path: appPath, content: buildChatAppJsx(title) });
+    out.push({ path: cssPath, content: buildChatAppCss() });
     return out;
   }
 
@@ -1105,14 +2254,14 @@ export default function App() {
 
   if (kind !== 'logo') return [];
 
-  const disco = /\b(discord|disco)\b/i.test(t);
+  const logoMark = brandLogoSvg(projectName || 'App');
   const jsx = `import './App.css';
 
 export default function App() {
   return (
     <div className="app">
-      <div className="logo-stage" aria-label="${disco ? 'Discord logo' : 'Logo'}">
-        ${disco ? DISCORD_STYLE_LOGO_SVG : `<div className="ark-logo-fallback">${escapeHtml(t.match(/\b([A-Z][A-Za-z0-9-]{1,20})\s+logo\b/i)?.[1] || 'Logo')}</div>`}
+      <div className="logo-stage" aria-label="App logo">
+        ${logoMark}
       </div>
     </div>
   );
@@ -1172,6 +2321,11 @@ export function finalizeWebEdits(
   opts?: { projectName?: string },
 ): WebFileEdit[] {
   const remapped = canonicalizeWebEdits(modelEdits, files);
+
+  // Surgical tweaks first — never let project-name full rebuilds clobber them.
+  const surgical = reactSurgicalMicroAskEdits(files, message);
+  if (surgical.length) return surgical;
+
   const reactMicro = reactUiMicroAskEdits(files, message, opts);
   if (reactMicro.length) return reactMicro;
 

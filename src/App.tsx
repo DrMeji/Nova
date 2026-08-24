@@ -28,33 +28,62 @@ import { getLocalPrefs } from '@/lib/localPrefs';
 import { startModelHuntCycle } from '@/lib/arkHuntBootstrap';
 import { needsFirstRunSetup } from '@/lib/setup';
 import { supabaseConfigError } from '@/lib/supabase';
-import { useEffect, useRef, useState } from 'react';
+import { hasChatInflight, subscribeChatInflight } from '@/lib/chatInflight';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Loader2 } from 'lucide-react';
 
 runCleanBootIfNeeded();
 
 function AppRoutes() {
   const { route } = useRouter();
+  const [keepChatAlive, setKeepChatAlive] = useState(() => hasChatInflight());
 
-  switch (route.name) {
-    case 'dashboard': return <Dashboard />;
-    case 'projects': return <ProjectsView />;
-    case 'code':
-      return isCodeTabEnabled() ? <ProjectWorkspace /> : <ParkedNotice feature="code" />;
-    case 'project':
-      return isCodeTabEnabled() ? <ProjectWorkspace /> : <ParkedNotice feature="project" />;
-    case 'creation': return <CreationViewer />;
-    case 'chat': return <AIChat key={route.mode ?? 'general'} />;
-    case 'models': return <ModelsView />;
-    case 'build': return <BuildRun />;
-    case 'local-ai': return <LocalAI />;
-    case 'networking': return isSocialParked('networking') ? <ParkedNotice feature="networking" /> : <NetworkingView />;
-    case 'message': return isSocialParked('message') ? <ParkedNotice feature="message" /> : <MessageView />;
-    case 'notifications': return <NotificationsView />;
-    case 'call': return isSocialParked('call') ? <ParkedNotice feature="call" /> : <CallView />;
-    case 'settings': return <Settings />;
-    default: return <Dashboard />;
+  useEffect(() => subscribeChatInflight(() => setKeepChatAlive(hasChatInflight())), []);
+
+  const showChat = route.name === 'chat' || keepChatAlive;
+  const chatVisible = route.name === 'chat';
+
+  let other: ReactNode = null;
+  if (route.name !== 'chat') {
+    switch (route.name) {
+      case 'dashboard': other = <Dashboard />; break;
+      case 'projects': other = <ProjectsView />; break;
+      case 'code':
+        other = isCodeTabEnabled() ? <ProjectWorkspace /> : <ParkedNotice feature="code" />;
+        break;
+      case 'project':
+        other = isCodeTabEnabled() ? <ProjectWorkspace /> : <ParkedNotice feature="project" />;
+        break;
+      case 'creation': other = <CreationViewer />; break;
+      case 'models': other = <ModelsView />; break;
+      case 'build': other = <BuildRun />; break;
+      case 'local-ai': other = <LocalAI />; break;
+      case 'networking':
+        other = isSocialParked('networking') ? <ParkedNotice feature="networking" /> : <NetworkingView />;
+        break;
+      case 'message':
+        other = isSocialParked('message') ? <ParkedNotice feature="message" /> : <MessageView />;
+        break;
+      case 'notifications': other = <NotificationsView />; break;
+      case 'call':
+        other = isSocialParked('call') ? <ParkedNotice feature="call" /> : <CallView />;
+        break;
+      case 'settings': other = <Settings />; break;
+      default: other = <Dashboard />; break;
+    }
   }
+
+  return (
+    <>
+      {showChat && (
+        <div className={chatVisible ? 'h-full min-h-0' : 'hidden'} aria-hidden={!chatVisible}>
+          {/* Stable mount: Chat ↔ Image and Settings hops must not kill in-flight gens */}
+          <AIChat />
+        </div>
+      )}
+      {!chatVisible && other}
+    </>
+  );
 }
 
 function AppContent() {

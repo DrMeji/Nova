@@ -13,6 +13,7 @@ import {
   DESKTOP_PROJECTS_PARENT,
   extractDiskParentHintFromText,
 } from './diskPathResolve';
+import { isProjectCreateBrief } from './chatCreateBrief';
 
 export { DESKTOP_PROJECTS_PARENT } from './diskPathResolve';
 
@@ -41,6 +42,9 @@ function detectProjectKind(text: string): ProjectKind {
 
 function looksLikeAddFileAsk(text: string): boolean {
   const t = String(text || '').trim();
+  if (isProjectCreateBrief(t)) return false;
+  if (/\b(?:real|full|actual|component)\s+files\b/i.test(t)) return false;
+  if (/\bwith\s+real\s+files\b/i.test(t)) return false;
   if (/\bedit files\b/i.test(t) && !/\b(?:add|create|make|write|put)\s+(?:a\s+|the\s+|new\s+)?files?\b/i.test(t)) {
     return false;
   }
@@ -311,6 +315,7 @@ export function classifyDiskIntent(
   },
 ): DiskIntent {
   const t = String(message || '').trim();
+  if (isProjectCreateBrief(t)) return { type: 'none' };
   const recent = opts?.recentUserMessages || [];
   const pendingAddFile = opts?.pendingAddFile || null;
   const stickyDiskTarget = opts?.stickyDiskTarget || null;

@@ -15,6 +15,15 @@ const CODE_FILE =
 export function looksLikeCodeAsk(text: string): boolean {
   const t = String(text || '').trim();
   if (!t) return false;
+  // Planning / “how do I get started” is chat, not a coding/scaffold turn.
+  if (/planning conversation only/i.test(t)) return false;
+  if (/\b(?:help\s+me\s+plan|planning\s+only|just\s+(?:talk|discuss)|get\s+started)\b/i.test(t)
+    && !/\b(?:create\s+the\s+files|scaffold|lets?\s+build\s+this)\b/i.test(t)) {
+    return false;
+  }
+  if (/\bi(?:'m| am)\s+building\b/i.test(t) && !/\b(?:create\s+project|files\s+now|scaffold)\b/i.test(t)) {
+    return false;
+  }
   if (looksLikeFolderPathAsk(t) && !/\b(build|create|make|scaffold|implement|fix|add|debug|code)\b/i.test(t)) {
     return false;
   }
@@ -44,12 +53,20 @@ const IMAGE_ASK = [
   /\b(draw me|paint me|picture of|photo of|image of|wallpaper of|logo for|icon for)\b/i,
   /\b(generate|create|make|draw|render|design|paint|produce)\b[\s\S]{0,48}\b(an?\s+)?(image|picture|photo|illustration|wallpaper|logo|icon|artwork|portrait|avatar|banner|poster)\b/i,
   /\b(image|picture|photo|illustration|wallpaper|logo|icon|artwork|portrait)\b[\s\S]{0,32}\b(of|for|showing|with)\b/i,
+  /\b(recreate|upscale|img2img|image[\s-]?to[\s-]?image)\b/i,
+  /\b(improve|enhance|fix)\b[\s\S]{0,40}\b(this\s+)?(image|picture|photo|artwork)\b/i,
+  /\b(higher\s+(?:res|resolution)|4k|8k|ultra\s+sharp)\b[\s\S]{0,80}\b(image|picture|photo|render|recreate)?\b/i,
 ];
 
-/** User wants a generated image — route to Image tab (not chat text). */
+/** User wants a generated image — route to Image media pipeline (not chat text). */
 export function looksLikeImageAsk(text: string): boolean {
   const t = String(text || '').trim();
-  if (!t || looksLikeCodeAsk(t)) return false;
+  if (!t) return false;
+  // Attached chat media with recreate / improve intent.
+  if (/ark-media:/i.test(t) && /\b(recreate|improve|enhance|upscale|4k|higher\s+res)\b/i.test(t)) {
+    return true;
+  }
+  if (looksLikeCodeAsk(t)) return false;
   // Never treat product recommendations / “where to start” as image gen.
   if (/\brecommend/i.test(t) && !/\b(image|picture|photo|illustration|logo|icon|wallpaper)\b/i.test(t)) {
     return false;
@@ -63,6 +80,7 @@ export function looksLikeImageAsk(text: string): boolean {
 export function classifyChatIntent(message: string, kind?: string): ChatIntent {
   if (kind === 'image' || kind === 'video') return 'media';
   if (kind === 'coding') return 'coding';
+  if (looksLikeImageAsk(message)) return 'media';
   if (looksLikeCodeAsk(message)) return 'coding';
   return 'chat';
 }

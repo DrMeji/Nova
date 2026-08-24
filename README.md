@@ -2,7 +2,7 @@
 
 **ARK** is a Windows desktop AI creation studio.
 
-Current source: **v0.1.138** · [Changelog](docs/CHANGELOG.md) · [Releases](https://github.com/DrMeji/Ark/releases)
+Current source: **v0.1.140** · [Changelog](docs/CHANGELOG.md) · [Releases](https://github.com/DrMeji/Ark/releases)
 
 It combines local and cloud AI so you can chat, generate images and video, manage models, and connect tools — without depending on a third-party local runtime like Ollama.
 

@@ -145,6 +145,7 @@ export async function engineGenerate(
     nPredict: ggufNPredictForKind(kind),
     mediaDurationSec: opts?.mediaDurationSec,
     referenceImageDataUrl: opts?.referenceImageDataUrl,
+    allowNsfw: Boolean(prefs.allowNsfw),
   };
   if (window.arkDesktop?.engineGenerate) {
     return window.arkDesktop.engineGenerate(message, modelId, kind, sampling);

@@ -633,16 +633,21 @@ ipcMain.handle('ark:window-close', async () => {
 
 ipcMain.handle('ark:open-path', async (_event, targetPath) => {
   if (typeof targetPath !== 'string' || !targetPath.trim()) {
-    throw new Error('Invalid path');
+    return { ok: false, error: 'Invalid path' };
   }
   const resolved = path.resolve(targetPath);
-  const root = path.resolve(app.getPath('userData'));
-  if (!resolved.toLowerCase().startsWith(root.toLowerCase())) {
-    throw new Error('Path is outside ARK data folder');
+  const userData = path.resolve(app.getPath('userData'));
+  const allowed = arkProjects.isPathUnderRoot(resolved, userData)
+    || arkProjects.isAllowedExternalPath(resolved);
+  if (!allowed) {
+    return { ok: false, error: 'Path is not in an allowed folder' };
+  }
+  if (!require('fs').existsSync(resolved)) {
+    return { ok: false, error: 'Path does not exist' };
   }
   const err = await shell.openPath(resolved);
-  if (err) throw new Error(err);
-  return true;
+  if (err) return { ok: false, error: err };
+  return { ok: true };
 });
 
 ipcMain.handle('ark:open-external', async (event, url) => {
@@ -825,6 +830,12 @@ ipcMain.handle('ark:preview-stop', async (_e, projectId) =>
 );
 ipcMain.handle('ark:preview-open-window', async (_e, payload) =>
   arkPreview.openPreviewWindow(payload || {}),
+);
+ipcMain.handle('ark:preview-update', async (_e, payload) =>
+  arkPreview.updatePreview(payload || {}),
+);
+ipcMain.handle('ark:preview-reload', async (_e, projectId) =>
+  arkPreview.reloadPreviewWindow(projectId),
 );
 ipcMain.handle('ark:preview-status', async (_e, projectId) =>
   arkPreview.previewStatus(projectId),

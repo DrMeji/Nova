@@ -41,6 +41,11 @@ export type LocalPrefs = {
   autoFailover: boolean;
   /** Ask before a local request is sent to a cloud provider during failover. */
   askBeforeCloudFailover: boolean;
+  /**
+   * When false (default), block nude / pornographic image asks and bias hosts to SFW.
+   * When true, allow NSFW image generation.
+   */
+  allowNsfw: boolean;
   streamResponses: boolean;
   rememberContext: boolean;
   /** Local GGUF sampling temperature (0.1–1.2). */
@@ -102,6 +107,7 @@ const DEFAULT_PREFS: LocalPrefs = {
   showStatusBar: true,
   autoFailover: true,
   askBeforeCloudFailover: false,
+  allowNsfw: false,
   streamResponses: true,
   rememberContext: true,
   ggufTemperature: 0.55,

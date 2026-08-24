@@ -36,6 +36,7 @@ const ALLOWED_HOSTS = new Set([
 function hostAllowed(hostname) {
   const host = String(hostname || '').toLowerCase();
   if (!host) return false;
+  if (host === 'localhost' || host === '127.0.0.1' || host === '[::1]') return true;
   if (ALLOWED_HOSTS.has(host)) return true;
   if (host.endsWith('.github.com') || host.endsWith('.githubusercontent.com')) return true;
   if (host.endsWith('.google.com') || host.endsWith('.googleapis.com')) return true;

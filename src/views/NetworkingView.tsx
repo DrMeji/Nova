@@ -963,9 +963,22 @@ export function NetworkingView() {
             </div>
             <button
               type="button"
-              disabled={busy || !title.trim() || !myArkId}
-              onClick={() => void postWork()}
-              className="ml-auto rounded-full bg-sky-500 hover:bg-sky-400 text-white text-sm font-medium px-5 py-1.5 disabled:opacity-40 transition-colors"
+              aria-disabled={busy || !title.trim() || !myArkId}
+              onClick={() => {
+                if (busy) return;
+                if (!myArkId) {
+                  setNote('Sign in (or finish profile) so this post has an ARK ID.');
+                  return;
+                }
+                if (!title.trim()) {
+                  setNote('Add a title before posting.');
+                  return;
+                }
+                void postWork();
+              }}
+              className={`ml-auto rounded-full bg-sky-500 hover:bg-sky-400 text-white text-sm font-medium px-5 py-1.5 transition-colors ${
+                busy || !title.trim() || !myArkId ? 'opacity-40' : ''
+              }`}
             >
               {busy ? 'Posting…' : 'Post'}
             </button>

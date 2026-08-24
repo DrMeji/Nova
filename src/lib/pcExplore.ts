@@ -5,7 +5,8 @@
 
 import type { CatalogItem } from '@/lib/folderCatalog';
 import { parseDesktopSubfolderAsk } from '@/lib/folderPathAsk';
-import { looksLikeProjectBuildAsk } from '@/lib/chatBuildIntent';
+import { isProjectCreateBrief } from '@/lib/chatCreateBrief';
+import { looksLikeConversationalPlanningAsk } from '@/lib/chatIdeaIntent';
 import { grantsFromPrefs, type WorkspaceGrants } from '@/lib/workspaceGrants';
 
 const FOLDER_NAMED_RE = /\b(?:folder|project)\s+(?:called|named)\b/i;
@@ -15,7 +16,7 @@ export type PcExploreMode = 'desktop_top' | 'desktop_subfolder' | 'games' | 'ins
 export function looksLikeInstalledAppsAsk(text: string): boolean {
   const t = String(text || '').trim();
   if (!/\b(?:apps?|applications?|programs?|software)\b/i.test(t)) return false;
-  if (looksLikeProjectBuildAsk(t)) return false;
+  if (isProjectCreateBrief(t)) return false;
   if (/\b(?:installed|install(?:ed|ation)?s?|do\s+i\s+have|have\s+(?:on|in)\s+(?:my\s+)?(?:pc|computer)|other\s+(?:apps?|applications?|programs?))\b/i.test(t)) {
     if (/\b(?:on|in)\s+(?:my\s+)?desktop\b/i.test(t) && !/\binstalled\b/i.test(t)) return false;
     return true;
@@ -26,23 +27,31 @@ export function looksLikeInstalledAppsAsk(text: string): boolean {
 export function classifyPcExploreMode(text: string): PcExploreMode | null {
   const t = String(text || '').trim();
   if (!t) return null;
-  if (looksLikeProjectBuildAsk(t)) return null;
+  if (isProjectCreateBrief(t)) return null;
+  if (looksLikeConversationalPlanningAsk(t)) return null;
   if (FOLDER_NAMED_RE.test(t)) return null;
 
   if (looksLikeInstalledAppsAsk(t)) return 'installed_apps';
 
-  // Inventory only — "Create project … Desktop window" must NOT match.
+  // Inventory only — soft “hobby project / tell me more” must NOT match.
   if (
-    /\bprojects?\b/i.test(t)
-    && /\b(?:what|which|list|show|tell|inside|have)\b/i.test(t)
-    && /\b(?:pc|computer|desktop|projects?)\b/i.test(t)
-    && !/\b(?:create|build|scaffold|want\s+a|called|named)\b/i.test(t)
+    /\b(?:what|which)\s+projects?\b/i.test(t)
+    || /\b(?:list|show)\s+(?:my\s+)?projects?\b/i.test(t)
+    || (
+      /\bprojects?\b/i.test(t)
+      && /\b(?:on\s+(?:my\s+)?(?:pc|computer|desktop)|do\s+i\s+have)\b/i.test(t)
+      && !/\b(?:create|build|scaffold|want\s+a|called|named|hobby|auth|mvp)\b/i.test(t)
+    )
   ) {
     return 'desktop_subfolder';
   }
 
-  if (/\b(games?|gaming|steam)\b/i.test(t)
-    && /\b(desktop|pc|computer|downloaded|installed|have|found|find|any|whole|my)\b/i.test(t)) {
+  // "gaming PC build / CPU GPU recommend" is advice — not inventory of Desktop\Games.
+  if (
+    /\b(games?|gaming|steam)\b/i.test(t)
+    && /\b(desktop|pc|computer|downloaded|installed|have|found|find|any|whole|my)\b/i.test(t)
+    && !/\b(?:build|cpu|gpu|recommend|pair|budget|dollars?|mid-?range|what\s+(?:cpu|gpu))\b/i.test(t)
+  ) {
     return 'games';
   }
 

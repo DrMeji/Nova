@@ -2,6 +2,8 @@
  * Natural-language folder references — "on my desktop I have a folder called ark-demo".
  */
 
+import { isProjectCreateBrief } from '@/lib/chatCreateBrief';
+
 export type FolderPathRef = {
   scope: 'desktop' | 'documents' | 'downloads' | 'absolute';
   name: string;
@@ -139,6 +141,7 @@ export function parseFolderPathAsk(message: string): FolderPathRef | null {
 
 /** User is asking about a folder on Desktop/Documents (even before we can parse the exact name). */
 export function looksLikeFolderPathAsk(text: string): boolean {
+  if (isProjectCreateBrief(text)) return false;
   if (INSTALLED_APPS_ASK_RE.test(text)) return false;
   if (parseFolderPathAsk(text) != null) return true;
   if (parseDesktopSubfolderAsk(text) != null) return true;
@@ -156,8 +159,8 @@ export function looksLikeInstallDepsAsk(text: string): boolean {
   const t = String(text || '').trim();
   if (!t) return false;
   return (
-    /\b(install|add|get|fetch|download)\b[\s\S]{0,40}\b(npm|node_modules|dependencies|packages|pip|python|requirements)\b/i.test(t)
-    || /\bnpm\s+i(nstall)?\b/i.test(t)
+    /\b(install|add|get|fetch|download|upgrade|update)\b[\s\S]{0,40}\b(npm|node_modules|dependencies|packages|pip|python|requirements)\b/i.test(t)
+    || /\bnpm\s+(?:i(nstall)?|update|upgrade)\b/i.test(t)
     || /\bpip\s+install\b/i.test(t)
   );
 }
@@ -185,7 +188,9 @@ export function inferInstallCommand(text: string, hasPackageJson: boolean): stri
     return m?.[0]?.trim() || 'pip install -r requirements.txt';
   }
   if (/\bnpm\s+i(nstall)?\b/i.test(t)) return 'npm install';
+  if (/\bnpm\s+(?:update|upgrade)\b/i.test(t)) return 'npm update';
   if (looksLikeInstallDepsAsk(t)) {
+    if (/\b(?:update|upgrade)\b/i.test(t) && hasPackageJson) return 'npm update';
     if (hasPackageJson) return 'npm install';
     if (/\bpython\b/i.test(t)) return 'pip install -r requirements.txt';
     return 'npm install';

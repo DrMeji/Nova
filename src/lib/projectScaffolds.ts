@@ -1,9 +1,11 @@
 /**
- * Minimal project files — empty starting point, no placeholder pages or demo copy.
+ * Minimal project files — empty starting point unless the brief describes a real landing page.
  */
 
 import type { ProjectKind } from '@/lib/createProjectIntent';
 import { slugifyProjectName } from '@/lib/projectNames';
+import { buildLandingPageFiles, looksLikeLandingBrief, prefersReactAppScaffold } from '@/lib/webLandingFromBrief';
+import { reactUiMicroAskEdits } from '@/lib/webProjectCanon';
 
 export type ScaffoldFile = { path: string; content: string };
 
@@ -17,11 +19,37 @@ export function buildScaffoldFiles(
 ): ScaffoldFile[] {
   const title = opts.name.trim() || 'New Project';
   const pkg = pkgName(title);
+  const summary = String(opts.summary || '');
+
+  // Marketing landings win unless the brief clearly wants an interactive SPA / cockpit.
+  if (/\b(watchlist|trading\s+cockpit|trade\s*rail|orders?\s+tab)\b/i.test(summary)) {
+    return buildLandingPageFiles(title, summary);
+  }
+  if (/\bcalculator\b/i.test(summary)) {
+    return buildLandingPageFiles(title, summary);
+  }
+  if (looksLikeLandingBrief(summary) && !prefersReactAppScaffold(summary)) {
+    return buildLandingPageFiles(title, summary);
+  }
+  // Festival / event briefs even when marketing heuristic is weak.
+  if (/\b(festival|lineup|ticket\s+cta|jazz|concert|velvet)\b/i.test(summary) && !prefersReactAppScaffold(summary)) {
+    return buildLandingPageFiles(title, summary);
+  }
+
+  // Interactive SPA / React briefs → Vite scaffold.
+  if (kind === 'vite-react' || prefersReactAppScaffold(summary)) {
+    return viteReactScaffold(title, pkg, summary);
+  }
+
+  // Static-web with a long brief but weak marketing signals.
+  if (kind === 'static-web' && summary.length > 120) {
+    return buildLandingPageFiles(title, summary);
+  }
 
   if (kind === 'python') return pythonScaffold(title);
   if (kind === 'static-web') return staticWebScaffold(title);
   if (kind === 'node-cli') return nodeCliScaffold(title, pkg);
-  return viteReactScaffold(title, pkg);
+  return viteReactScaffold(title, pkg, summary);
 }
 
 function gitignore(kind: 'node' | 'python' | 'web'): string {
@@ -68,8 +96,8 @@ body { font-family: system-ui, sans-serif; min-height: 100vh; }
   ];
 }
 
-function viteReactScaffold(title: string, pkg: string): ScaffoldFile[] {
-  return [
+function viteReactScaffold(title: string, pkg: string, summary = ''): ScaffoldFile[] {
+  const files: ScaffoldFile[] = [
     {
       path: 'package.json',
       content: JSON.stringify({
@@ -78,7 +106,7 @@ function viteReactScaffold(title: string, pkg: string): ScaffoldFile[] {
         version: '0.1.0',
         type: 'module',
         scripts: { dev: 'vite', build: 'vite build', preview: 'vite preview' },
-        dependencies: { react: '^18.3.1', 'react-dom': '^18.3.1' },
+        dependencies: { react: '^18.3.1', 'react-dom': '^18.3.1', 'lucide-react': '^0.474.0' },
         devDependencies: { '@vitejs/plugin-react': '^4.3.4', vite: '^6.0.3' },
       }, null, 2) + '\n',
     },
@@ -143,6 +171,19 @@ export default function App() {
     },
     { path: '.gitignore', content: gitignore('node') },
   ];
+
+  // Chat / app briefs → replace empty App.jsx via reactUiMicroAskEdits (no-op if no match).
+  if (summary.trim()) {
+    const map = Object.fromEntries(files.map(f => [f.path, f.content]));
+    const edits = reactUiMicroAskEdits(map, summary, { projectName: title });
+    for (const e of edits) {
+      const i = files.findIndex(f => f.path === e.path);
+      if (i >= 0) files[i] = { path: e.path, content: e.content };
+      else files.push({ path: e.path, content: e.content });
+    }
+  }
+
+  return files;
 }
 
 function pythonScaffold(title: string): ScaffoldFile[] {

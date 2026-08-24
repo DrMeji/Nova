@@ -781,6 +781,15 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <ToggleRow
+                  label="Allow NSFW content"
+                  description="Off (default): block nude / pornographic image requests. On: allow adult image generation."
+                  value={Boolean(prefs.allowNsfw)}
+                  onChange={v => patchPrefs({ allowNsfw: v })}
+                />
+                <p className="sm:col-span-2 text-[11px] text-content-tertiary leading-relaxed px-0.5">
+                  NSFW off also appends SFW constraints to free image hosts. Chat “what is MCP” lists local tools; external MCP servers are next.
+                </p>
+                <ToggleRow
                   label="Auto failover"
                   description="If a provider is limited or offline, switch to the next healthy option"
                   value={prefs.autoFailover}

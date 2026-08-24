@@ -66,6 +66,40 @@ export function clearChatStudio(chatId: string) {
   } catch {
     /* ignore */
   }
+  clearChatCodePill(chatId);
+}
+
+/** Sticky Code pill for this chat — set when build/files start; cleared only when chat is deleted. */
+function chatCodePillKey(chatId: string) {
+  return `ark:chat-code-pill:${chatId}`;
+}
+
+export function setChatCodePill(chatId: string, on = true) {
+  if (!chatId) return;
+  try {
+    if (on) localStorage.setItem(chatCodePillKey(chatId), '1');
+    else localStorage.removeItem(chatCodePillKey(chatId));
+  } catch {
+    /* ignore */
+  }
+}
+
+export function hasChatCodePill(chatId: string | null | undefined): boolean {
+  if (!chatId) return false;
+  try {
+    return localStorage.getItem(chatCodePillKey(chatId)) === '1';
+  } catch {
+    return false;
+  }
+}
+
+export function clearChatCodePill(chatId: string) {
+  if (!chatId) return;
+  try {
+    localStorage.removeItem(chatCodePillKey(chatId));
+  } catch {
+    /* ignore */
+  }
 }
 
 export type LastListedFolder = {
@@ -231,6 +265,12 @@ export type LastPendingGreenfield = {
   summary: string;
   problemLine: string;
   at: number;
+  /** How many times Keep planning / expand was used — drives richer replies. */
+  planDepth?: number;
+  /** Last expand focus (gallery, menu, hero, …). */
+  planFocus?: string;
+  /** Accumulated plan sections — each Keep planning / expand appends; never drops prior ones. */
+  planLog?: string[];
 };
 
 export const LAST_PENDING_GREENFIELD_TTL_MS = 60 * 60 * 1000;
@@ -247,12 +287,18 @@ export function setLastPendingGreenfield(
     kind: string;
     summary: string;
     problemLine: string;
+    planDepth?: number;
+    planFocus?: string;
+    planLog?: string[];
   },
 ) {
   if (!chatId || !idea.name) return;
   try {
     localStorage.setItem(lastPendingGreenfieldKey(chatId), JSON.stringify({
       ...idea,
+      planDepth: idea.planDepth ?? 0,
+      planFocus: idea.planFocus,
+      planLog: Array.isArray(idea.planLog) ? idea.planLog : [],
       at: Date.now(),
     } satisfies LastPendingGreenfield));
   } catch {

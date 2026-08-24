@@ -92,55 +92,98 @@ function fileToDataUrl(filePath) {
   return `data:${mime};base64,${buf.toString('base64')}`;
 }
 
-/** Poll one free image URL; returns buffer, error status, or null. */
+/** Poll one free image URL via Node https (more reliable than undici in Electron). */
 async function fetchImageUrl(url, timeoutMs = 45_000) {
-  try {
-    const ac = new AbortController();
-    const timer = setTimeout(() => ac.abort(), timeoutMs);
-    const res = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'User-Agent': 'ARK-Desktop',
-        Referer: 'https://pollinations.ai/',
-        Accept: 'image/jpeg,image/png,image/*,*/*',
-      },
-      redirect: 'follow',
-      signal: ac.signal,
-    });
-    clearTimeout(timer);
-    if (!res.ok) {
-      try {
-        const peek = (await res.text()).slice(0, 160).replace(/\s+/g, ' ');
-        console.log(`[ark-media] image HTTP ${res.status}: ${peek}`);
-      } catch { /* ignore */ }
-      return { error: res.status };
-    }
-    const ctype = res.headers.get('content-type') || '';
-    if (!ctype.includes('image') && !ctype.includes('octet-stream')) return { error: res.status || 415 };
-    const buf = Buffer.from(await res.arrayBuffer());
-    if (buf.length < 2500) return null;
-    const ext = ctype.includes('png') ? 'png' : ctype.includes('webp') ? 'webp' : 'jpg';
-    return { buf, ext };
-  } catch (err) {
+  const https = require('https');
+  const http = require('http');
+  const { URL } = require('url');
+  const fetchOnce = (target, redirectsLeft = 6) => new Promise((resolve) => {
+    let settled = false;
+    const done = (v) => {
+      if (settled) return;
+      settled = true;
+      resolve(v);
+    };
     try {
-      console.log(`[ark-media] image fetch fail: ${err && err.name ? err.name : 'error'}`);
-    } catch { /* ignore */ }
-    return null;
-  }
+      const parsed = new URL(target);
+      const lib = parsed.protocol === 'http:' ? http : https;
+      const req = lib.get(
+        target,
+        {
+          headers: {
+            'User-Agent': 'ARK-Desktop/0.3',
+            Referer: 'https://pollinations.ai/',
+            Accept: 'image/jpeg,image/png,image/*,*/*',
+          },
+          timeout: timeoutMs,
+        },
+        (res) => {
+          const status = res.statusCode || 0;
+          if ([301, 302, 303, 307, 308].includes(status) && res.headers.location && redirectsLeft > 0) {
+            res.resume();
+            const next = new URL(res.headers.location, target).toString();
+            fetchOnce(next, redirectsLeft - 1).then(done);
+            return;
+          }
+          if (status === 429) {
+            res.resume();
+            done({ error: 429 });
+            return;
+          }
+          if (status < 200 || status >= 300) {
+            res.resume();
+            done({ error: status });
+            return;
+          }
+          const ctype = String(res.headers['content-type'] || '');
+          const chunks = [];
+          res.on('data', (c) => chunks.push(c));
+          res.on('end', () => {
+            const buf = Buffer.concat(chunks);
+            if (buf.length < 2500) {
+              done(null);
+              return;
+            }
+            // Accept image/* or opaque octet-stream bodies that sniff as images.
+            const sniff = sniffImageExt(buf);
+            if (!ctype.includes('image') && !ctype.includes('octet-stream') && sniff === 'jpg' && buf[0] !== 0xff) {
+              done({ error: 415 });
+              return;
+            }
+            const ext = ctype.includes('png') || sniff === 'png'
+              ? 'png'
+              : ctype.includes('webp') || sniff === 'webp'
+                ? 'webp'
+                : 'jpg';
+            done({ buf, ext });
+          });
+          res.on('error', () => done(null));
+        },
+      );
+      req.on('timeout', () => {
+        try { req.destroy(); } catch { /* ignore */ }
+        done(null);
+      });
+      req.on('error', () => done(null));
+    } catch {
+      done(null);
+    }
+  });
+  return fetchOnce(url);
 }
 
-/** Tiny stubs / error JPEGs are usually under ~8KB; real gens are larger. */
+/** Tiny stubs / error JPEGs are usually under ~12KB; real Flux gens are larger. */
 const IMAGE_MIN_BYTES = 12_000;
-/** Prefer a real quality pass (~15–55s) before falling through. */
-const IMAGE_TOTAL_BUDGET_MS = 55_000;
+/** Prefer waiting for a real Flux frame (~20–90s) before falling through. */
+const IMAGE_TOTAL_BUDGET_MS = 120_000;
 /**
- * Reject “instant” low-detail CDN frames. Real Flux work is usually slower
- * and larger; 2–3s medium JPEGs look soft / wrong model year on cars.
+ * Only reject near-instant tiny bodies (true CDN cache stubs) AND soft fast frames.
+ * Real Flux at 1536² is rarely under ~8s / ~45KB on free hosts.
  */
-const IMAGE_QUALITY_FAST_MS = 7_500;
-const IMAGE_QUALITY_MIN_BYTES = 85_000;
-const IMAGE_CACHE_HARD_MS = 900;
-const IMAGE_CACHE_MAX_BYTES = 28_000;
+const IMAGE_QUALITY_FAST_MS = 8_000;
+const IMAGE_QUALITY_MIN_BYTES = 45_000;
+const IMAGE_CACHE_HARD_MS = 1_200;
+const IMAGE_CACHE_MAX_BYTES = 18_000;
 
 function freshImageSeed(prompt) {
   const a = hashPrompt(`${prompt}|${Date.now()}|${Math.random()}`);
@@ -185,12 +228,52 @@ function sourceDisplayName(source, fallback) {
   return fallback || 'ARK Image Core';
 }
 
-function isLowQualityHit(tookMs, bytes) {
+function sniffJpegSize(buf) {
+  if (!buf || buf.length < 24 || buf[0] !== 0xff || buf[1] !== 0xd8) return null;
+  let i = 2;
+  while (i < buf.length - 8) {
+    if (buf[i] !== 0xff) { i += 1; continue; }
+    const marker = buf[i + 1];
+    if (marker === 0xd9 || marker === 0xda) break;
+    const len = (buf[i + 2] << 8) | buf[i + 3];
+    if (len < 2) break;
+    // SOF0 / SOF2
+    if (marker === 0xc0 || marker === 0xc2) {
+      const height = (buf[i + 5] << 8) | buf[i + 6];
+      const width = (buf[i + 7] << 8) | buf[i + 8];
+      return { width, height };
+    }
+    i += 2 + len;
+  }
+  return null;
+}
+
+function sniffPngSize(buf) {
+  if (!buf || buf.length < 24) return null;
+  if (buf[0] !== 0x89 || buf[1] !== 0x50) return null;
+  const width = buf.readUInt32BE(16);
+  const height = buf.readUInt32BE(20);
+  return { width, height };
+}
+
+function imagePixelSize(buf) {
+  return sniffJpegSize(buf) || sniffPngSize(buf);
+}
+
+/** Prefer quality, but never discard the only usable frame when hosts are flaky. */
+function isLowQualityHit(tookMs, bytes, buf) {
   if (!bytes || bytes < IMAGE_MIN_BYTES) return true;
-  // Instant + modest size → soft / cached look (user saw 2.7s “ARK Core” frames).
-  if (tookMs < IMAGE_QUALITY_FAST_MS && bytes < IMAGE_QUALITY_MIN_BYTES) return true;
   if (tookMs < IMAGE_CACHE_HARD_MS && bytes < IMAGE_CACHE_MAX_BYTES) return true;
+  if (tookMs < IMAGE_QUALITY_FAST_MS && bytes < IMAGE_QUALITY_MIN_BYTES) return true;
+  const dim = buf ? imagePixelSize(buf) : null;
+  // Prefer ≥1024; treat tiny ≤640 frames as soft (keep 768 as usable last resort).
+  if (dim && Math.min(dim.width, dim.height) < 640) return true;
+  if (dim && Math.min(dim.width, dim.height) < 960 && bytes < 55_000) return true;
   return false;
+}
+
+function isUsableImageHit(hit) {
+  return Boolean(hit && hit.buf && hit.buf.length >= IMAGE_MIN_BYTES);
 }
 
 function sleep(ms) {
@@ -199,10 +282,11 @@ function sleep(ms) {
 
 function resolveImageDimensions(prompt) {
   const lower = String(prompt || '').toLowerCase();
-  if (/\b(portrait|vertical|9:16|phone wallpaper|lock screen)\b/.test(lower)) {
+  // Stick to sizes free Flux hosts honor (multiples of 64; 1024+ class).
+  if (/\b(iphone|phone wallpaper|lock screen|portrait|vertical|9:16)\b/.test(lower)) {
     return { width: 768, height: 1344 };
   }
-  if (/\b(wallpaper|desktop background|16:9|1920|1080|3840|2160|4k)\b/.test(lower)) {
+  if (/\b(wallpaper|desktop background|desktop image|16:9|1920|1080|landscape|banner)\b/.test(lower)) {
     return { width: 1344, height: 768 };
   }
   return { width: 1024, height: 1024 };
@@ -229,10 +313,9 @@ async function fetchRealImage(prompt, opts = {}) {
   const w = opts.width || 1024;
   const h = opts.height || 1024;
   const started = Date.now();
-  // Flux first (quality). Skip turbo — it wins on speed and loses on detail.
+  // Flux only for quality — zimage is softer / faster and looked blurry to users.
   const tiers = [
-    { model: 'flux', source: 'pollinations-flux', ms: 58_000 },
-    { model: 'zimage', source: 'pollinations-zimage', ms: 45_000 },
+    { model: 'flux', source: 'pollinations-flux', ms: 90_000 },
   ];
 
   const seen = new Set();
@@ -253,7 +336,9 @@ async function fetchRealImage(prompt, opts = {}) {
 
         const timeoutMs = Math.min(tier.ms, left);
         const modelQ = tier.model ? `&model=${encodeURIComponent(tier.model)}` : '';
-        const url = `https://image.pollinations.ai/prompt/${encoded}?width=${w}&height=${h}&nologo=true&enhance=true${modelQ}&seed=${seed}`;
+        // Do NOT use enhance=true — it often injects cinematic soft/shallow-DOF looks.
+        const neg = encodeURIComponent('blurry, soft focus, shallow depth of field, bokeh on subject, out of focus, low resolution, mushy, smoothed skin, plastic, overprocessed');
+        const url = `https://image.pollinations.ai/prompt/${encoded}?width=${w}&height=${h}&nologo=true&nofeed=true&negative_prompt=${neg}${modelQ}&seed=${seed}`;
         const t0 = Date.now();
         const hit = await fetchImageUrl(url, timeoutMs);
         const took = Date.now() - t0;
@@ -290,27 +375,29 @@ async function fetchRealImage(prompt, opts = {}) {
         seen.add(fp);
 
         const candidate = { ...hit, source: tier.source, model: tier.model, seed, tookMs: took };
-        if (isLowQualityHit(took, hit.buf.length)) {
+        if (isLowQualityHit(took, hit.buf.length, hit.buf)) {
           softRejects += 1;
           if (!best || hit.buf.length > (best.buf?.length || 0)) best = candidate;
+          const dim = imagePixelSize(hit.buf);
           try {
-            console.log(`[ark-media] soft/fast reject model=${tier.model} tookMs=${took} bytes=${hit.buf.length} (want quality)`);
+            console.log(`[ark-media] soft/fast reject model=${tier.model} tookMs=${took} bytes=${hit.buf.length} dims=${dim ? `${dim.width}x${dim.height}` : '?'} (want quality)`);
           } catch { /* ignore */ }
-          // One more flux attempt with a new seed, then accept best if budget is low.
-          if (softRejects >= 3 || left < 12_000) {
-            if (best) return best;
+          // Never accept a soft frame early — keep trying until the budget is nearly gone.
+          if (left < 18_000 && softRejects >= 3 && best) {
+            return best;
           }
           continue;
         }
 
         try {
-          console.log(`[ark-media] image model=${tier.model} seed=${seed} tookMs=${took} bytes=${hit.buf.length}`);
+          const dim = imagePixelSize(hit.buf);
+          console.log(`[ark-media] image model=${tier.model} seed=${seed} tookMs=${took} bytes=${hit.buf.length} dims=${dim ? `${dim.width}x${dim.height}` : '?'}`);
         } catch { /* ignore */ }
         return candidate;
       }
     }
 
-    if (best && !isLowQualityHit(best.tookMs || 0, best.buf?.length || 0)) {
+    if (best && !isLowQualityHit(best.tookMs || 0, best.buf?.length || 0, best.buf)) {
       return best;
     }
   }
@@ -374,12 +461,15 @@ function sniffImageExt(buf) {
 
 /** Free community SD when Pollinations Gen Sana is down (no user key required). */
 async function fetchHordeImage(prompt, opts = {}) {
-  const text = hostSafeImagePrompt(String(prompt || 'studio product photograph')).slice(0, 450);
-  const dim = resolveImageDimensions(text);
-  const width = opts.width || dim.width;
-  const height = opts.height || dim.height;
+  const positive = hostSafeImagePrompt(String(prompt || 'studio product photograph')).slice(0, 380);
+  const negative = 'blurry, soft focus, shallow depth of field, bokeh, out of focus, creamy bokeh, low detail, mushy, smoothed, plastic skin';
+  const text = `${positive} ### ${negative}`.slice(0, 480);
+  const dim = resolveImageDimensions(positive);
+  const width = Math.min(opts.width || dim.width, 512);
+  const height = Math.min(opts.height || dim.height, 512);
   const ref = String(opts.referenceImageDataUrl || '').trim();
   const refB64 = ref.replace(/^data:image\/\w+;base64,/, '');
+  const allowNsfw = Boolean(opts.allowNsfw);
   const headers = {
     'Content-Type': 'application/json',
     apikey: '0000000000',
@@ -397,8 +487,8 @@ async function fetchHordeImage(prompt, opts = {}) {
         n: 1,
         denoising_strength: refB64 ? 0.52 : undefined,
       },
-      nsfw: false,
-      censor_nsfw: true,
+      nsfw: allowNsfw,
+      censor_nsfw: !allowNsfw,
       r2: true,
       shared: false,
       slow_workers: true,
@@ -584,17 +674,25 @@ function isProductPrompt(prompt) {
 }
 
 function rewriteImagePrompt(prompt) {
-  const raw = hostSafeImagePrompt(String(prompt || '').trim());
+  let raw = hostSafeImagePrompt(String(prompt || '').trim());
+  raw = raw.replace(/^(Studio headshot|Create a caricature|Anime style|Underwater)\s*/i, '').trim() || raw;
+  raw = raw.replace(/^(Studio headshot|Create a caricature|Anime style|Underwater)/i, '').trim() || raw;
   if (/studio photograph of |isolated product on a seamless/i.test(raw)) {
     return raw;
   }
   const lower = raw.toLowerCase();
-  const hints = [];
+  const hints = [
+    'tack-sharp focus across the entire subject including face body and paws',
+    'deep depth of field f/8 style — entire subject in focus',
+    'no soft bokeh blur on the main subject, no shallow DOF, no out-of-focus face',
+    'crisp clean detail, high resolution, 1080p or sharper',
+    'avoid blurry soft mushy low-detail renders',
+  ];
   if (/\b(cat|kitten)\b/.test(lower) && !/\b(human|person|man|woman)\b/.test(lower)) {
-    hints.push('subject is a real cat animal, not a human');
+    hints.push('subject is a real cat animal, full body and face crisp and clear, whiskers visible, not a human');
   }
   if (/\b(dog|puppy)\b/.test(lower) && !/\b(human|person|man|woman)\b/.test(lower)) {
-    hints.push('subject is a real dog animal, not a human');
+    hints.push('subject is a real dog animal, full body crisp and clear, not a human');
   }
   if (/\b(wireless|bluetooth)\b/.test(lower) && /\b(mouse|keyboard|headset|earbuds|headphones)\b/.test(lower)) {
     hints.push('wireless device with no cable, no cord, no wire visible');
@@ -619,7 +717,7 @@ function rewriteImagePrompt(prompt) {
     return [
       `studio photograph of ${concept}`,
       'isolated product on a seamless gray backdrop',
-      'centered, no hands, no people, no lifestyle scene',
+      'centered, no hands, no people, tack sharp, high resolution',
     ].join(', ');
   }
   return [
@@ -627,7 +725,7 @@ function rewriteImagePrompt(prompt) {
     ...hints,
     'follow the request exactly',
     'do not invent unrelated subjects',
-    'highly detailed, sharp focus, professional quality, high resolution',
+    'professional quality photography',
   ].join(', ');
 }
 
@@ -771,184 +869,178 @@ function shortVideoReply(prompt, dataUrl, ok, opts = {}) {
 
 async function generateImage(prompt, modelName, opts = {}) {
   const id = `img-${Date.now()}-${hashPrompt(prompt).toString(16)}`;
+  const allowNsfw = Boolean(opts.allowNsfw);
   let enhanced = rewriteImagePrompt(prompt);
+  if (!allowNsfw) {
+    enhanced = `${enhanced}, sfw, safe for work, fully clothed, no nudity, no sexual content, no pornography`;
+  }
   const ref = String(opts.referenceImageDataUrl || '').trim();
   if (ref) {
     enhanced = [
       'Recreate and improve this reference image',
       enhanced,
-      'preserve composition and subject, higher detail, fix anatomy and artifacts, cleaner render',
+      'preserve composition and subject, higher detail, natural proportions, fix anatomy and artifacts, cleaner render',
     ].join(', ');
   }
-  const dim = resolveImageDimensions(enhanced);
+  const dim = resolveImageDimensions(ref ? `${enhanced}, square composition` : enhanced);
 
-  // Reference upload → img2img first for accuracy.
-  if (ref) {
-    const hordeRef = await fetchHordeImage(enhanced, {
-      width: dim.width,
-      height: dim.height,
-      referenceImageDataUrl: ref,
-    });
-    if (hordeRef) {
-      const file = path.join(mediaDir(), `${id}.${hordeRef.ext}`);
-      fs.writeFileSync(file, hordeRef.buf);
-      const dataUrl = `data:image/${hordeRef.ext === 'jpg' ? 'jpeg' : hordeRef.ext};base64,${hordeRef.buf.toString('base64')}`;
-      const entry = {
-        id,
-        kind: 'image',
-        title: String(prompt).slice(0, 80),
-        prompt: String(prompt),
-        modelName: modelName || 'AI Horde img2img',
-        path: file,
-        createdAt: new Date().toISOString(),
-        source: hordeRef.source,
-        real: true,
-      };
-      writeLibraryEntry(entry);
-      return {
-        ok: true,
-        kind: 'image',
-        modelName: entry.modelName,
-        path: file,
-        dataUrl,
-        libraryId: id,
-        real: true,
-        source: hordeRef.source,
-        reply: shortImageReply(prompt, dataUrl, true),
-      };
+  const saveWinner = async (winner, label) => {
+    let buf = winner.buf;
+    let ext = winner.ext || sniffImageExt(buf) || 'jpg';
+    const dim = imagePixelSize(buf);
+    // Free hosts often return soft ~768 frames — upscale+unsharp to ~1280 for readability.
+    if (dim && Math.min(dim.width, dim.height) < 1100) {
+      try {
+        const tmpIn = path.join(mediaDir(), `${id}-src.${ext}`);
+        fs.writeFileSync(tmpIn, buf);
+        const refined = await arkFfmpeg.sharpenUpscaleStill(tmpIn, { size: 1280 });
+        try { fs.unlinkSync(tmpIn); } catch { /* ignore */ }
+        if (refined && refined.length > buf.length * 0.8) {
+          buf = refined;
+          ext = 'jpg';
+          try {
+            const outDim = imagePixelSize(buf);
+            console.log(`[ark-media] refined ${dim.width}x${dim.height} → ${outDim ? `${outDim.width}x${outDim.height}` : '?'} bytes=${buf.length}`);
+          } catch { /* ignore */ }
+        }
+      } catch {
+        /* keep original */
+      }
     }
-  }
+    const file = path.join(mediaDir(), `${id}.${ext}`);
+    fs.writeFileSync(file, buf);
+    const mime = ext === 'png' ? 'png' : ext === 'webp' ? 'webp' : 'jpeg';
+    const dataUrl = `data:image/${mime};base64,${buf.toString('base64')}`;
+    const niceName = sourceDisplayName(winner.source, label || modelName || 'ARK Image Core');
+    const entry = {
+      id,
+      kind: 'image',
+      title: String(prompt).slice(0, 80),
+      prompt: String(prompt),
+      modelName: niceName,
+      path: file,
+      createdAt: new Date().toISOString(),
+      source: winner.source,
+      real: true,
+    };
+    writeLibraryEntry(entry);
+    return {
+      ok: true,
+      kind: 'image',
+      modelName: niceName,
+      path: file,
+      dataUrl,
+      libraryId: id,
+      real: true,
+      source: winner.source,
+      reply: shortImageReply(prompt, dataUrl, true),
+    };
+  };
 
-  // Prefer on-device SD when the user installed local image weights.
-  // Cap wait so a broken local install cannot burn the free-host window.
-  if (arkSd.isLocalImageReady()) {
+  // Quality-first cascade — do NOT race two Pollinations URLs (causes 429 "busy"
+  // and lets a soft plain JPEG beat a sharper Flux frame).
+  const pickBest = (a, b) => {
+    if (!a) return b;
+    if (!b) return a;
+    const aSoft = isLowQualityHit(a.tookMs || 0, a.buf?.length || 0, a.buf);
+    const bSoft = isLowQualityHit(b.tookMs || 0, b.buf?.length || 0, b.buf);
+    if (aSoft !== bSoft) return aSoft ? b : a;
+    const aDim = imagePixelSize(a.buf);
+    const bDim = imagePixelSize(b.buf);
+    const aPx = aDim ? aDim.width * aDim.height : 0;
+    const bPx = bDim ? bDim.width * bDim.height : 0;
+    if (aPx !== bPx) return bPx > aPx ? b : a;
+    const aFlux = /flux|huggingface/i.test(String(a.source || ''));
+    const bFlux = /flux|huggingface/i.test(String(b.source || ''));
+    if (aFlux !== bFlux) return aFlux ? a : b;
+    return (b.buf?.length || 0) > (a.buf?.length || 0) ? b : a;
+  };
+
+  let best = null;
+
+  // Recreate / img2img: try Horde with the reference first.
+  if (ref) {
     try {
-      const local = await arkSd.generateLocalImage(enhanced, {
-        width: 768,
-        height: 768,
-        steps: 28,
-        timeoutMs: 45_000,
+      const img2img = await fetchHordeImage(enhanced, {
+        width: 512,
+        height: 512,
+        referenceImageDataUrl: ref,
+        allowNsfw,
       });
-      if (local) {
-        const file = path.join(mediaDir(), `${id}.${local.ext}`);
-        fs.writeFileSync(file, local.buf);
-        const dataUrl = `data:image/${local.ext};base64,${local.buf.toString('base64')}`;
-        const entry = {
-          id,
-          kind: 'image',
-          title: String(prompt).slice(0, 80),
-          prompt: String(prompt),
-          modelName: modelName || 'Stable Diffusion (Local)',
-          path: file,
-          createdAt: new Date().toISOString(),
-          source: local.source,
-          real: true,
-        };
-        writeLibraryEntry(entry);
-        return {
-          ok: true,
-          kind: 'image',
-          modelName: entry.modelName,
-          path: file,
-          dataUrl,
-          libraryId: id,
-          real: true,
-          source: local.source,
-          reply: shortImageReply(prompt, dataUrl, true),
-        };
+      if (isUsableImageHit(img2img)) {
+        best = pickBest(best, { ...img2img, source: img2img.source || 'ai-horde-img2img' });
+        if (best && !isLowQualityHit(best.tookMs || 0, best.buf.length, best.buf)) {
+          return await saveWinner(best, modelName);
+        }
       }
     } catch {
-      /* fall through to cloud */
+      /* continue */
     }
   }
 
-  const hf = await fetchHfImage(enhanced);
-  if (hf) {
-    const file = path.join(mediaDir(), `${id}.${hf.ext}`);
-    fs.writeFileSync(file, hf.buf);
-    const dataUrl = `data:image/${hf.ext === 'jpg' ? 'jpeg' : hf.ext};base64,${hf.buf.toString('base64')}`;
-    const entry = {
-      id,
-      kind: 'image',
-      title: String(prompt).slice(0, 80),
-      prompt: String(prompt),
-      modelName: modelName || 'Hugging Face FLUX',
-      path: file,
-      createdAt: new Date().toISOString(),
-      source: hf.source,
-      real: true,
-    };
-    writeLibraryEntry(entry);
-    return {
-      ok: true,
-      kind: 'image',
-      modelName: entry.modelName,
-      path: file,
-      dataUrl,
-      libraryId: id,
-      real: true,
-      source: hf.source,
-      reply: shortImageReply(prompt, dataUrl, true),
-    };
-  }
-
-  // Pollinations first; kick AI Horde after 22s so quality Flux can finish.
-  const pollPromise = fetchRealImage(enhanced, {
-    width: dim.width,
-    height: dim.height,
-    fallbackPrompt: String(prompt || '').trim(),
-  });
-  let hordePromise = null;
-  const kickHorde = () => {
-    if (!hordePromise) {
-      hordePromise = fetchHordeImage(enhanced, {
-        width: Math.min(dim.width, 1024),
-        height: Math.min(dim.height, 1024),
-        referenceImageDataUrl: ref,
-      });
-    }
-    return hordePromise;
-  };
-  const hordeTimer = setTimeout(() => { void kickHorde(); }, 22_000);
-  let winner = null;
+  // Primary: Pollinations Flux (enhanced) — wait for quality, not the first soft stub.
   try {
-    winner = await pollPromise;
-  } finally {
-    clearTimeout(hordeTimer);
-  }
-  if (!winner) winner = await kickHorde();
-
-  if (winner) {
-    const file = path.join(mediaDir(), `${id}.${winner.ext}`);
-    fs.writeFileSync(file, winner.buf);
-    const dataUrl = `data:image/${winner.ext === 'jpg' ? 'jpeg' : winner.ext};base64,${winner.buf.toString('base64')}`;
-    const niceName = sourceDisplayName(winner.source, modelName || 'ARK Image Core');
-    const entry = {
-      id,
-      kind: 'image',
-      title: String(prompt).slice(0, 80),
-      prompt: String(prompt),
-      modelName: niceName,
-      path: file,
-      createdAt: new Date().toISOString(),
-      source: winner.source,
-      real: true,
-    };
-    writeLibraryEntry(entry);
-    return {
-      ok: true,
-      kind: 'image',
-      modelName: niceName,
-      path: file,
-      dataUrl,
-      libraryId: id,
-      real: true,
-      source: winner.source,
-      reply: shortImageReply(prompt, dataUrl, true),
-    };
+    const flux = await fetchRealImage(enhanced, {
+      width: dim.width,
+      height: dim.height,
+      fallbackPrompt: String(prompt || '').trim(),
+    });
+    if (isUsableImageHit(flux)) {
+      best = pickBest(best, flux);
+      if (best && !isLowQualityHit(best.tookMs || 0, best.buf.length, best.buf) && /flux/i.test(String(best.source || ''))) {
+        return await saveWinner(best, modelName);
+      }
+    }
+  } catch {
+    /* continue */
   }
 
-  // Honest failure — no SVG/gradient presented as an image.
+  // Parallel secondary hosts (different networks — safe to race with each other).
+  const secondary = await Promise.all([
+    fetchHfImage(enhanced).then((hit) => (isUsableImageHit(hit) ? hit : null)).catch(() => null),
+    fetchHordeImage(enhanced, {
+      width: 512,
+      height: 512,
+      referenceImageDataUrl: ref || undefined,
+      allowNsfw,
+    }).then((hit) => (isUsableImageHit(hit) ? { ...hit, source: hit.source || 'ai-horde' } : null)).catch(() => null),
+    (async () => {
+      if (!arkSd.isLocalImageReady()) return null;
+      try {
+        const local = await arkSd.generateLocalImage(enhanced, {
+          width: Math.min(dim.width, 1024),
+          height: Math.min(dim.height, 1024),
+          steps: 22,
+          timeoutMs: 28_000,
+        });
+        if (local && isUsableImageHit(local)) return { ...local, source: local.source || 'local-sd' };
+      } catch {
+        /* ignore */
+      }
+      return null;
+    })(),
+  ]);
+  for (const hit of secondary) {
+    if (hit) best = pickBest(best, hit);
+  }
+  if (best && !isLowQualityHit(best.tookMs || 0, best.buf.length, best.buf)) {
+    return await saveWinner(best, modelName);
+  }
+
+  // Last resort: single plain Pollinations call (never raced with Flux).
+  try {
+    const plain = hostSafeImagePrompt(String(enhanced || prompt).slice(0, 280));
+    const seed = freshImageSeed(plain);
+    const neg = encodeURIComponent('blurry, soft focus, shallow depth of field, out of focus, low resolution');
+    const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(plain)}?width=${dim.width}&height=${dim.height}&nologo=true&nofeed=true&model=flux&negative_prompt=${neg}&seed=${seed}`;
+    const hit = await fetchImageUrl(url, 55_000);
+    if (isUsableImageHit(hit)) best = pickBest(best, { ...hit, source: 'pollinations-flux', tookMs: 55_000 });
+  } catch {
+    /* ignore */
+  }
+
+  if (best) return await saveWinner(best, modelName);
+
   return {
     ok: false,
     kind: 'image',
@@ -956,12 +1048,11 @@ async function generateImage(prompt, modelName, opts = {}) {
     libraryId: id,
     real: false,
     source: 'none',
-    mediaFailure: 'Free image hosts were unavailable — no real image was generated',
+    mediaFailure: 'All image hosts failed',
     reply: [
       'Couldn\'t generate image — try again.',
       '',
-      'Free image hosts did not return a real render (or only returned a cached frame).',
-      'Try again in a minute, connect a Hugging Face key in Models → Cloud, or install local SD weights in Local AI.',
+      'Free image hosts were rate-limited or empty. Wait about a minute and retry, or add a Hugging Face / OpenAI key in Models → Cloud (same vault as Settings / setup).',
     ].join('\n'),
   };
 }

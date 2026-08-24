@@ -3,7 +3,9 @@
  */
 
 import type { NewProjectIntent } from '@/lib/createProjectIntent';
+import { resolveProjectKindForCreate } from '@/lib/projectKind';
 import { buildScaffoldFiles, projectUsesNpm } from '@/lib/projectScaffolds';
+import { skillPromptAppendix } from '@/lib/arkSkills';
 import { grantsFromPrefs, hasFolderAccessGrant, syncWorkspaceGrantsFromPrefs } from '@/lib/workspaceGrants';
 import { safeProjectWrite } from '@/lib/projectWriteSafe';
 import { runAgentCommand } from '@/lib/chatAgentExec';
@@ -127,7 +129,12 @@ export async function runCreateProjectFlow(
     };
   }
 
-  const scaffold = buildScaffoldFiles(intent.kind, { name: intent.name, summary: intent.summary });
+  const scaffoldKind = resolveProjectKindForCreate(intent.summary, intent.kind, intent.kind);
+  const skillAppendix = skillPromptAppendix(intent.summary, scaffoldKind);
+  const scaffoldSummary = skillAppendix
+    ? `${intent.summary}\n\n${skillAppendix}`
+    : intent.summary;
+  const scaffold = buildScaffoldFiles(scaffoldKind, { name: intent.name, summary: scaffoldSummary });
   const fileMap = Object.fromEntries(scaffold.map(f => [f.path.replace(/\\/g, '/'), f.content]));
 
   const write = await safeProjectWrite({
@@ -161,12 +168,57 @@ export async function runCreateProjectFlow(
   };
 }
 
-/** npm install + dev server — runs automatically after create (no extra user step). */
+/** True when cwd has a package.json (async disk check). */
+async function folderHasPackageJson(projectPath: string): Promise<boolean> {
+  const sep = projectPath.includes('\\') ? '\\' : '/';
+  const pkg = `${projectPath.replace(/[/\\]+$/, '')}${sep}package.json`;
+  try {
+    const st = await window.arkDesktop?.workspaceStatPath?.(pkg);
+    if (st?.ok && st.isFile) return true;
+  } catch {
+    /* fall through */
+  }
+  try {
+    const listed = await window.arkDesktop?.agentRun?.({
+      command: 'node -e "require(\'fs\').accessSync(\'package.json\'); console.log(\'ok\')"',
+      cwd: projectPath,
+      mode: 'run_all',
+    });
+    if (listed?.ok && /ok/i.test(String(listed.output || ''))) return true;
+  } catch {
+    /* ignore */
+  }
+  return false;
+}
+
+function sanitizeBootstrapNote(raw: string | undefined): string | undefined {
+  const t = String(raw || '').trim();
+  if (!t) return undefined;
+  // Never surface raw npm ENOENT / stack dumps to end users.
+  if (/ENOENT|package\.json|npm error|could not run\s*`?npm install/i.test(t)) {
+    return undefined;
+  }
+  return t.slice(0, 280);
+}
+
+/** npm install + dev server — only when the project actually uses npm. */
 export async function bootstrapProjectWorkspace(
   projectPath: string,
   kind: NewProjectIntent['kind'],
+  opts?: { files?: Record<string, string> },
 ): Promise<ProjectBootstrapResult> {
-  if (!projectPath || !projectUsesNpm(kind)) {
+  if (!projectPath) {
+    return { npmInstalled: true };
+  }
+
+  const filesHavePkg = Boolean(
+    opts?.files
+    && Object.keys(opts.files).some(p => /(^|\/)package\.json$/i.test(p.replace(/\\/g, '/'))),
+  );
+  const diskHasPkg = filesHavePkg || (await folderHasPackageJson(projectPath));
+
+  // Static HTML/CSS/JS scaffolds (calculator, landings, etc.) must never run npm.
+  if (!diskHasPkg || !projectUsesNpm(kind)) {
     return { npmInstalled: true };
   }
 
@@ -176,10 +228,11 @@ export async function bootstrapProjectWorkspace(
     skipConfirm: true,
   });
 
-  if (!install.handled || (install.reply && /could not run/i.test(install.reply))) {
+  if (!install.handled || (install.reply && /could not run|ENOENT|npm error/i.test(install.reply))) {
     return {
       npmInstalled: false,
-      bootstrapNote: install.reply || 'npm install did not complete — say **install npm dependencies** to retry.',
+      bootstrapNote: sanitizeBootstrapNote(install.reply)
+        || 'Could not install npm dependencies automatically. Say **install npm dependencies** to retry, or open the folder and run `npm install` once.',
     };
   }
 
@@ -190,9 +243,11 @@ export async function bootstrapProjectWorkspace(
 
   return {
     npmInstalled: true,
-    bootstrapNote: dev?.error
-      ? `Dependencies installed. Dev server did not start (${dev.error}) — say **run dev server** or open \`index.html\`.`
-      : undefined,
+    bootstrapNote: sanitizeBootstrapNote(
+      dev?.error
+        ? `Dependencies installed. Dev server did not start (${dev.error}) — say **run dev server** or use **Preview**.`
+        : undefined,
+    ),
   };
 }
 
@@ -205,6 +260,9 @@ export function formatCreateProjectReply(
     return result.error || 'Could not create the project.';
   }
 
+  const isStatic = intent.kind === 'static-web'
+    || (!bootstrap?.devServerUrl && result.files && !Object.keys(result.files).some(p => /package\.json$/i.test(p)));
+
   const lines = [
     `**Created ${intent.name}**`,
     '',
@@ -216,13 +274,13 @@ export function formatCreateProjectReply(
     result.written.length > 12 ? `- …and ${result.written.length - 12} more` : '',
     '',
     bootstrap?.npmInstalled === false
-      ? `**Setup:** ${bootstrap.bootstrapNote || 'Run npm install manually.'}`
+      ? `**Setup:** ${bootstrap.bootstrapNote || 'Dependencies need a one-time install.'}`
       : intent.kind === 'python'
         ? '**Ready** — edit `app/main.py` and say what to build next.'
-        : intent.kind === 'static-web'
-          ? '**Ready** — open `index.html` in your browser and tell me what to add.'
+        : isStatic || intent.kind === 'static-web'
+          ? '**Ready** — use **Preview** under the chat box to open the site, or **Code** to edit files. Tell me what to add.'
           : bootstrap?.devServerUrl
-            ? `**Ready** — dependencies installed, dev server running at **${bootstrap.devServerUrl}**.\n\nOpen that URL in your browser. Tell me what to build (layout, pages, features) and I will edit the files here.`
+            ? `**Ready** — dependencies installed. Dev server is at **${bootstrap.devServerUrl}** — click **Localhost** under the chat box to open it.\n\nTell me what to build (layout, pages, features) and I will edit the files here.`
             : '**Ready** — dependencies installed. Tell me what to build and I will edit the files here.',
     bootstrap?.bootstrapNote && bootstrap.npmInstalled ? `\n${bootstrap.bootstrapNote}` : '',
     '',

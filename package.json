@@ -1,7 +1,7 @@
 {
   "name": "ark",
   "private": true,
-  "version": "0.1.139",
+  "version": "0.1.140",
   "type": "module",
   "main": "electron/main.cjs",
   "description": "ARK — AI Creation Studio desktop app",
@@ -24,7 +24,8 @@
     "electron:publish": "npm run build && electron-builder --publish always",
     "smoke:ui": "node scripts/smoke-ui.cjs",
     "smoke:brain": "node scripts/smoke-brain-check.cjs",
-    "smoke:delete": "npx tsx scripts/smoke-delete-flow.mjs"
+    "smoke:delete": "npx tsx --tsconfig tsconfig.app.json scripts/smoke-delete-flow.mjs",
+    "smoke:routes": "npx tsx --tsconfig tsconfig.app.json scripts/smoke-chat-routes.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.4",

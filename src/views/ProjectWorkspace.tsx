@@ -176,7 +176,7 @@ const COMPOSER_MODE_PREFIX: Record<'plan' | 'ask' | 'agent' | 'debug' | 'multita
   ask: '',
   agent: 'Agent mode — edit files and run approved tools in this workspace:\n\n',
   debug: 'Debug this — find the issue and propose a fix:\n\n',
-  multitask: 'Break this into parallel tasks and tackle them clearly:\n\n',
+  multitask: '[Multi-agent] ',
 };
 
 type ProjectRow = Project & { id: string };
@@ -400,10 +400,12 @@ export function ProjectWorkspace() {
   const [expandedFolders, setExpandedFolders] = useState(new Set<string>());
   const [buildRunning, setBuildRunning] = useState(false);
   const [buildProgress, setBuildProgress] = useState(0);
-  const [explorerOpen, setExplorerOpen] = useState(() => typeof window === 'undefined' || window.innerWidth >= 900);
-  const [codeOpen, setCodeOpen] = useState(() => typeof window === 'undefined' || window.innerWidth >= 900);
-  const [explorerWidth, setExplorerWidth] = useState(220);
-  const [codeWidth, setCodeWidth] = useState(380);
+  const [explorerOpen, setExplorerOpen] = useState(true);
+  const [codeOpen, setCodeOpen] = useState(true);
+  const [explorerWidth, setExplorerWidth] = useState(260);
+  const [codeWidth, setCodeWidth] = useState(520);
+  /** Code from Chat is files+editor only — planning stays in Chat. */
+  const showWorkspaceChat = false;
   const [buildLive, setBuildLive] = useState<{
     assistantId: string;
     label: string;
@@ -3536,7 +3538,8 @@ export function ProjectWorkspace() {
           </>
         )}
 
-        {/* Chat center */}
+        {/* Chat center — hidden when opened from Chat Code pill (planning stays in Chat) */}
+        {showWorkspaceChat && (
         <div className="flex-1 min-w-0 flex flex-col bg-ark-navy-950">
           {/* Compact toolbar — no permanent ARK Agent header */}
           <div className="shrink-0 h-10 px-3 flex items-center justify-between gap-2">
@@ -4293,15 +4296,18 @@ export function ProjectWorkspace() {
             </div>
           </div>
         </div>
+        )}
 
         {codeOpen && (
           <>
-            <ResizeHandle onDrag={dragCode} />
+            {showWorkspaceChat && <ResizeHandle onDrag={dragCode} />}
             <div
-              className={`shrink-0 flex flex-col min-h-0 min-w-0 max-w-[48vw] bg-ark-navy-900/15 overflow-hidden transition-shadow ${
+              className={`flex flex-col min-h-0 min-w-0 bg-ark-navy-900/15 overflow-hidden transition-shadow ${
+                showWorkspaceChat ? 'shrink-0 max-w-[48vw]' : 'flex-1'
+              } ${
                 fileFlash ? 'ring-2 ring-sky-400/50 ring-inset' : ''
               }`}
-              style={{ width: codeWidth }}
+              style={showWorkspaceChat ? { width: codeWidth } : undefined}
             >
               <div className="shrink-0 flex items-center justify-between px-2 h-9 bg-ark-navy-900/30">
                 <div className="flex items-center gap-1 min-w-0">

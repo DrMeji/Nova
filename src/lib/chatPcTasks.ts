@@ -5,6 +5,7 @@
 import { extractDiskParentHintFromText } from './diskPathResolve';
 import { extractNamedDiskTarget, normalizeDiskFileName } from './projectNames';
 import { parseDeleteFileTarget } from './chatDiskIntent';
+import { shouldRouteReadFile } from './chatRouteGuards';
 
 export function looksLikeRestorePointAsk(text: string): boolean {
   const t = String(text || '').trim();
@@ -21,10 +22,7 @@ export function buildRestorePointCommand(label?: string): string {
 }
 
 export function looksLikeReadFileAsk(text: string): boolean {
-  const t = String(text || '').trim();
-  if (/\b(delete|remove|trash)\b/i.test(t)) return false;
-  if (!/\b(?:read|open|show\s+me|display|what(?:'s| is)\s+in)\b/i.test(t)) return false;
-  return /\bfiles?\b/i.test(t) || /\.[A-Za-z0-9]{1,12}\b/.test(t);
+  return shouldRouteReadFile(text);
 }
 
 export function parseReadFileTarget(text: string): { fileName: string | null; parentHint?: string } {

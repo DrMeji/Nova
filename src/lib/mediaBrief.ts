@@ -9,6 +9,8 @@ export function wantsSkipImageBrief(raw: string): boolean {
 export function needsImageBrief(raw: string): boolean {
   const t = String(raw || '').trim();
   if (!t || t.length > 220 || wantsSkipImageBrief(t)) return false;
+  // Upload / recreate flows should render immediately — no quiz.
+  if (/\b(recreate|improve this|upscale|from this (?:photo|image|picture))\b/i.test(t)) return false;
 
   const lower = t.toLowerCase();
   const words = lower.split(/\s+/).filter(Boolean);

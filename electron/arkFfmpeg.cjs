@@ -221,10 +221,71 @@ async function stillToMp4(stillPath, opts = {}) {
   }
 }
 
+/**
+ * Upscale + mild unsharp for free-host frames that arrive soft at ~768.
+ * Does not invent detail, but makes the subject read cleaner at 1080p-class size.
+ */
+async function sharpenUpscaleStill(inputPath, opts = {}) {
+  let bin;
+  try {
+    bin = await ensureFfmpeg();
+  } catch {
+    return null;
+  }
+  if (!bin || !inputPath || !fs.existsSync(inputPath)) return null;
+
+  const target = Math.max(1024, Number(opts.size) || 1280);
+  const outPath = path.join(
+    path.dirname(inputPath),
+    `sharp-${Date.now()}.jpg`,
+  );
+
+  const vf =
+    `scale=${target}:${target}:force_original_aspect_ratio=increase:flags=lanczos,` +
+    `crop=${target}:${target},` +
+    `unsharp=5:5:0.9:5:5:0.0`;
+
+  try {
+    await new Promise((resolve, reject) => {
+      const args = [
+        '-y',
+        '-i', inputPath,
+        '-vf', vf,
+        '-q:v', '2',
+        outPath,
+      ];
+      const child = spawn(bin, args, { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
+      let stderr = '';
+      const timer = setTimeout(() => {
+        try { child.kill(); } catch { /* ignore */ }
+        reject(new Error('ffmpeg sharpen timed out'));
+      }, 45_000);
+      child.stderr?.on('data', (d) => { stderr += d.toString(); });
+      child.on('error', (err) => { clearTimeout(timer); reject(err); });
+      child.on('close', (code) => {
+        clearTimeout(timer);
+        if (code !== 0 || !fs.existsSync(outPath)) {
+          reject(new Error(stderr.trim().slice(-300) || `ffmpeg exited ${code}`));
+          return;
+        }
+        resolve();
+      });
+    });
+    const buf = fs.readFileSync(outPath);
+    try { fs.unlinkSync(outPath); } catch { /* ignore */ }
+    if (!buf || buf.length < 8_000) return null;
+    return buf;
+  } catch {
+    try { if (fs.existsSync(outPath)) fs.unlinkSync(outPath); } catch { /* ignore */ }
+    return null;
+  }
+}
+
 module.exports = {
   findFfmpeg,
   ensureFfmpeg,
   stillToMp4,
+  sharpenUpscaleStill,
   ffmpegInstallHint() {
     if (process.platform === 'win32') return null;
     if (findFfmpeg()) return null;

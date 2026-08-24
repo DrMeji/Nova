@@ -16,7 +16,7 @@ declare global {
       /** Absolute path for a dropped/selected File (Electron 32+). */
       getPathForFile?: (file: File) => string;
       openExternal?: (url: string) => Promise<boolean>;
-      openPath?: (targetPath: string) => Promise<boolean>;
+      openPath?: (targetPath: string) => Promise<boolean | { ok: boolean; error?: string }>;
       windowControls?: boolean;
       windowMinimize?: () => Promise<boolean>;
       windowMaximizeToggle?: () => Promise<boolean>;
@@ -266,6 +266,7 @@ declare global {
       previewStatus?: (projectId: string) => Promise<{
         ok: boolean;
         running?: boolean;
+        windowOpen?: boolean;
         url?: string;
         port?: number;
       }>;
@@ -275,7 +276,14 @@ declare global {
         title?: string;
         kind?: 'web' | 'device';
         device?: { label: string; width: number; height: number; family?: string };
-      }) => Promise<{ ok: boolean; error?: string }>;
+        forceNavigate?: boolean;
+      }) => Promise<{ ok: boolean; error?: string; reused?: boolean }>;
+      previewUpdate?: (payload: {
+        projectId: string;
+        files?: Record<string, string>;
+        projectName?: string;
+      }) => Promise<{ ok: boolean; url?: string; reloaded?: boolean; error?: string }>;
+      previewReload?: (projectId: string) => Promise<{ ok: boolean; error?: string }>;
       mediaLibrary?: () => Promise<{
         ok: boolean;
         items: Array<{

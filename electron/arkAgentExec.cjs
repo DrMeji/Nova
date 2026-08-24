@@ -6,7 +6,11 @@
 const { execFile } = require('child_process');
 const path = require('path');
 const fs = require('fs');
+const http = require('http');
 const arkProjects = require('./arkProjects.cjs');
+
+/** @type {Map<string, { url: string, pid?: number, child?: import('child_process').ChildProcess }>} */
+const devServersByCwd = new Map();
 
 const ALLOWLIST = [
   /^npm(\s|$)/i,
@@ -118,27 +122,114 @@ async function agentRun(payload) {
   };
 }
 
-/** Start npm run dev in the background (Vite default port 5173). */
-async function agentStartDevServer(payload) {
+function httpProbePort(port, host = '127.0.0.1', timeoutMs = 800) {
+  return new Promise((resolve) => {
+    const req = http.get({ host, port, path: '/', timeout: timeoutMs, family: host === '::1' ? 6 : 4 }, (res) => {
+      res.resume();
+      resolve(true);
+    });
+    req.on('error', () => resolve(false));
+    req.on('timeout', () => {
+      req.destroy();
+      resolve(false);
+    });
+  });
+}
+
+/** Vite on Windows often binds ::1 first; probe both stacks. */
+async function httpProbePortAny(port, timeoutMs = 800) {
+  if (await httpProbePort(port, '127.0.0.1', timeoutMs)) return '127.0.0.1';
+  if (await httpProbePort(port, '::1', timeoutMs)) return '::1';
+  return null;
+}
+
+function portFromUrl(url) {
+  try {
+    const p = Number(new URL(url).port);
+    return p || 5173;
+  } catch {
+    return 5173;
+  }
+}
+
+const DEV_PORT_CANDIDATES = [5173, 5174, 5175, 5176, 5177, 5178, 5179, 5180];
+
+async function findFreeDevPort() {
+  for (const port of DEV_PORT_CANDIDATES) {
+    if (!(await httpProbePortAny(port, 400))) return port;
+  }
+  return null;
+}
+
+async function waitForDevServerUrl(port, timeoutMs = 25_000) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    const host = await httpProbePortAny(port);
+    if (host) {
+      const authority = host === '::1' ? `[::1]:${port}` : `127.0.0.1:${port}`;
+      return `http://${authority}/`;
+    }
+    await new Promise(r => setTimeout(r, 350));
+  }
+  throw new Error(`Dev server did not respond on port ${port}`);
+}
+
+function spawnHiddenDevServer(cwd, port) {
   const { spawn } = require('child_process');
+  // Force IPv4 + an explicit free port so we never steal ARK's own Vite or miss ::1-only binds.
+  const run = `npm run dev -- --host 127.0.0.1 --port ${port} --strictPort`;
+  const env = { ...process.env, BROWSER: 'none' };
+  if (process.platform === 'win32') {
+    // npm.cmd + shell:false causes EINVAL on Windows — use cmd /c with hidden window.
+    // Do not use detached:true — it forces a visible CMD on Windows despite windowsHide.
+    return spawn('cmd.exe', ['/d', '/s', '/c', run], {
+      cwd,
+      stdio: 'ignore',
+      windowsHide: true,
+      windowsVerbatimArguments: false,
+      env,
+    });
+  }
+  return spawn('npm', ['run', 'dev', '--', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
+    cwd,
+    stdio: 'ignore',
+    windowsHide: true,
+    env,
+  });
+}
+
+/** Start npm run dev in the background on a free port. No visible terminal. */
+async function agentStartDevServer(payload) {
   const cwdRes = resolveCwd(payload?.cwd);
   if (!cwdRes.ok) return cwdRes;
+
+  const cwdKey = cwdRes.path.toLowerCase();
+  const existing = devServersByCwd.get(cwdKey);
+  if (existing?.url) {
+    const port = portFromUrl(existing.url);
+    if (await httpProbePortAny(port)) {
+      return { ok: true, cwd: cwdRes.path, url: existing.url };
+    }
+    try { existing.child?.kill?.(); } catch { /* ignore */ }
+    devServersByCwd.delete(cwdKey);
+  }
 
   const pkgPath = path.join(cwdRes.path, 'package.json');
   if (!fs.existsSync(pkgPath)) {
     return { ok: false, error: 'No package.json in this folder.' };
   }
 
-  const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+  const port = await findFreeDevPort();
+  if (!port) {
+    return { ok: false, error: 'No free port in 5173–5180 for the project dev server.' };
+  }
+
   try {
-    const child = spawn(npm, ['run', 'dev'], {
-      cwd: cwdRes.path,
-      detached: true,
-      stdio: 'ignore',
-      shell: process.platform === 'win32',
-    });
-    child.unref();
-    return { ok: true, cwd: cwdRes.path, url: 'http://localhost:5173' };
+    const child = spawnHiddenDevServer(cwdRes.path, port);
+    // Keep child referenced in the Map (no unref) so the console stays hidden and we can kill later.
+    const url = await waitForDevServerUrl(port, 25_000);
+    devServersByCwd.set(cwdKey, { url, pid: child.pid, child });
+    return { ok: true, cwd: cwdRes.path, url };
   } catch (err) {
     return { ok: false, error: err?.message || 'Could not start dev server.' };
   }
