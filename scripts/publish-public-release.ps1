@@ -46,8 +46,12 @@ Source code is not included in this repository.
 "@
 
 $exists = $false
-gh release view $Tag --repo $PublicRepo 2>$null | Out-Null
-if ($LASTEXITCODE -eq 0) { $exists = $true }
+try {
+  gh release view $Tag --repo $PublicRepo 2>$null | Out-Null
+  if ($LASTEXITCODE -eq 0) { $exists = $true }
+} catch {
+  $exists = $false
+}
 
 if ($exists) {
   gh release upload $Tag @files --repo $PublicRepo --clobber
