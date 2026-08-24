@@ -32,19 +32,13 @@ import {
   type DemoGroup,
 } from '@/lib/socialDemo';
 import { getLocalPrefs } from '@/lib/localPrefs';
+import { ArkAvatar } from '@/components/ArkAvatar';
 import {
   demoPresenceFor,
   formatActivityAge,
   presenceDotClass,
   type PresenceStatus,
 } from '@/lib/presenceStatus';
-
-function initials(name: string) {
-  const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
-  if (!parts.length) return '?';
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return `${parts[0][0] || ''}${parts[1][0] || ''}`.toUpperCase();
-}
 
 function formatBytes(n: number) {
   if (n < 1024) return `${n} B`;
@@ -652,9 +646,7 @@ export function MessageView() {
                     }`}
                   >
                     <span className="relative">
-                      <span className="h-9 w-9 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-[11px] font-semibold text-content-primary">
-                        {initials(c.displayName)}
-                      </span>
+                      <ArkAvatar name={c.displayName} src={c.avatarUrl} size="md" />
                       <span
                         className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-ark-navy-950 ${presenceDotClass(status)}`}
                         aria-hidden
@@ -676,9 +668,7 @@ export function MessageView() {
                   }`}
                 >
                   <span className="relative shrink-0">
-                    <span className="h-9 w-9 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-[11px] font-semibold text-content-primary">
-                      {initials(c.displayName)}
-                    </span>
+                    <ArkAvatar name={c.displayName} src={c.avatarUrl} size="md" />
                     <span
                       className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-ark-navy-950 ${presenceDotClass(status)}`}
                       title={status}
@@ -992,9 +982,7 @@ export function MessageView() {
                   on ? 'bg-sky-500/15 text-sky-100' : 'hover:bg-surface-hover text-content-secondary'
                 }`}
               >
-                <span className="h-7 w-7 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-[10px] font-semibold">
-                  {initials(c.displayName)}
-                </span>
+                <ArkAvatar name={c.displayName} src={c.avatarUrl} size="sm" />
                 {c.displayName}
               </button>
             );
@@ -1065,9 +1053,15 @@ export function MessageView() {
                     className="group flex items-center gap-2.5 rounded-xl px-2 py-2 hover:bg-white/[0.04]"
                   >
                     <span className="relative shrink-0">
-                      <span className="h-9 w-9 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-[11px] font-semibold text-content-primary">
-                        {initials(memberName(id))}
-                      </span>
+                      <ArkAvatar
+                        name={memberName(id)}
+                        src={
+                          isMe
+                            ? getLocalPrefs().avatarDataUrl
+                            : contacts.find(c => c.arkId === id)?.avatarUrl
+                        }
+                        size="md"
+                      />
                       <span
                         className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-ark-navy-900 ${presenceDotClass(status)}`}
                         aria-hidden
@@ -1133,9 +1127,7 @@ export function MessageView() {
                     }`}
                   >
                     <span className="relative shrink-0">
-                      <span className="h-7 w-7 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-[10px] font-semibold">
-                        {initials(c.displayName)}
-                      </span>
+                      <ArkAvatar name={c.displayName} src={c.avatarUrl} size="sm" />
                       <span
                         className={`absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full border border-ark-navy-900 ${presenceDotClass(demoPresenceFor(c.arkId))}`}
                         aria-hidden

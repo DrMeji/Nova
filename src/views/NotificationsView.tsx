@@ -11,6 +11,8 @@ import { useSocial } from '@/context/SocialContext';
 import { useAuth } from '@/context/AuthContext';
 import { listPendingInbound, syncFriendRequests } from '@/lib/friendRequests';
 import { formatArkId } from '@/lib/arkUserId';
+import { ArkAvatar } from '@/components/ArkAvatar';
+import { getLocalPrefs } from '@/lib/localPrefs';
 
 type Notice = DemoNotification | LocalNotification;
 
@@ -134,11 +136,11 @@ export function NotificationsView() {
                         : 'border-surface-border bg-ark-navy-900/40'
                     }`}
                   >
-                    {friend?.fromAvatarUrl ? (
-                      <img
-                        src={friend.fromAvatarUrl}
-                        alt=""
-                        className="h-10 w-10 shrink-0 rounded-full object-cover border border-white/10"
+                    {friend ? (
+                      <ArkAvatar
+                        name={friend.fromName || 'ARK user'}
+                        src={friend.fromAvatarUrl || (friend.fromArkId === profile?.ark_id ? getLocalPrefs().avatarDataUrl : undefined)}
+                        size="lg"
                       />
                     ) : (
                       <span className="h-10 w-10 shrink-0 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-content-secondary">

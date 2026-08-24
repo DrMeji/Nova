@@ -97,13 +97,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
       const arkId = await ensureArkId(userId);
       setProfile(prev => prev ? { ...prev, ark_id: arkId } : prev);
-      if (display) {
+      if (display || p.avatar_url) {
         try {
           const { getLocalPrefs, setLocalPrefs } = await import('@/lib/localPrefs');
           const prefs = getLocalPrefs();
-          if (!prefs.displayName || prefs.displayName === 'Guest') {
-            setLocalPrefs({ displayName: display });
+          const patch: { displayName?: string; avatarDataUrl?: string } = {};
+          if (display && (!prefs.displayName || prefs.displayName === 'Guest')) {
+            patch.displayName = display;
           }
+          if (p.avatar_url && !prefs.avatarDataUrl) {
+            patch.avatarDataUrl = p.avatar_url;
+          }
+          if (Object.keys(patch).length) setLocalPrefs(patch);
         } catch {
           /* ignore */
         }

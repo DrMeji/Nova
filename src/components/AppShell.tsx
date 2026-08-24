@@ -18,6 +18,8 @@ import { getLocalPrefs, setLocalPrefs } from '@/lib/localPrefs';
 import {
   PRESENCE_OPTIONS,
   presenceDotClass,
+  presenceIdClass,
+  presenceRingClass,
   presenceTextClass,
   type PresenceStatus,
 } from '@/lib/presenceStatus';
@@ -852,7 +854,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                   type="button"
                   onClick={() => setStatusMenuOpen(v => !v)}
                   title="Change status"
-                  className="w-9 h-9 rounded-xl border border-surface-border bg-ark-navy-900/80 flex items-center justify-center text-sm font-semibold overflow-hidden hover:bg-surface-hover transition-colors"
+                  className={`w-9 h-9 rounded-xl border bg-ark-navy-900/80 flex items-center justify-center text-sm font-semibold overflow-hidden hover:bg-surface-hover transition-colors ${presenceRingClass(presence)}`}
                   aria-label="Change status"
                   aria-expanded={statusMenuOpen}
                 >
@@ -879,7 +881,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                   <button
                     type="button"
                     onClick={() => setStatusMenuOpen(v => !v)}
-                    className="w-8 h-8 shrink-0 rounded-lg bg-surface-hover border border-surface-border flex items-center justify-center text-sm font-semibold overflow-hidden"
+                    className={`w-8 h-8 shrink-0 rounded-lg bg-surface-hover border flex items-center justify-center text-sm font-semibold overflow-hidden ${presenceRingClass(presence)}`}
                     title="Change status"
                     aria-label="Change status"
                     aria-expanded={statusMenuOpen}
@@ -900,7 +902,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                       {displayName}
                     </span>
                     {(profile?.ark_id || (user?.email && ['thomaskrishnan0107@gmail.com'].includes(user.email))) ? (
-                      <span className="block text-[10px] font-mono tracking-[0.22em] text-content-tertiary truncate mt-0.5">
+                      <span className={`block text-[10px] font-mono tracking-[0.22em] truncate mt-0.5 ${presenceIdClass(presence)}`}>
                         {user?.email && ['thomaskrishnan0107@gmail.com'].includes(user.email)
                           ? 'DEV'
                           : formatArkId(profile!.ark_id!)}

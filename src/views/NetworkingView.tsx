@@ -10,17 +10,12 @@ import { useSocial } from '@/context/SocialContext';
 import { listNetworkPosts, publishNetworkPost, deleteNetworkPost, type NetworkPost } from '@/lib/arkSocial';
 import { formatArkId, isArkUserId, normalizeArkId } from '@/lib/arkUserId';
 import { GuestSocialBanner } from '@/components/GuestSocialBanner';
+import { ArkAvatar } from '@/components/ArkAvatar';
 import { buildDemoNetworkPosts } from '@/lib/socialDemo';
 import { Modal } from '@/components/Modal';
 import { pushSidebarToast } from '@/lib/sidebarToast';
 import { pushLocalNotification } from '@/lib/localNotifications';
-
-function initials(name: string) {
-  const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
-  if (!parts.length) return '?';
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return `${parts[0][0] || ''}${parts[1][0] || ''}`.toUpperCase();
-}
+import { getLocalPrefs } from '@/lib/localPrefs';
 
 type FeedTab = 'public' | 'paid' | 'mine' | 'saved';
 
@@ -40,18 +35,13 @@ function persistSavedIds(ids: string[]) {
   localStorage.setItem(SAVED_KEY, JSON.stringify(ids));
 }
 
-function avatarTone(name: string) {
-  const tones = [
-    'bg-violet-500/25 text-violet-200',
-    'bg-emerald-500/25 text-emerald-200',
-    'bg-orange-500/25 text-orange-200',
-    'bg-sky-500/25 text-sky-200',
-    'bg-rose-500/25 text-rose-200',
-    'bg-amber-500/25 text-amber-200',
-  ];
-  let h = 0;
-  for (let i = 0; i < name.length; i++) h = (h + name.charCodeAt(i) * (i + 1)) % tones.length;
-  return tones[h];
+function ownerAvatarSrc(
+  ownerArkId: string,
+  myArkId: string,
+  contacts: { arkId: string; avatarUrl?: string }[],
+): string | undefined {
+  if (ownerArkId && ownerArkId === myArkId) return getLocalPrefs().avatarDataUrl;
+  return contacts.find(c => c.arkId === ownerArkId)?.avatarUrl;
 }
 
 function formatCount(n: number) {
@@ -464,9 +454,11 @@ export function NetworkingView() {
                           className="w-full text-left"
                         >
                           <div className="flex items-start gap-2.5">
-                            <span className={`h-9 w-9 shrink-0 rounded-full flex items-center justify-center text-[10px] font-semibold ${avatarTone(post.ownerName || post.ownerArkId)}`}>
-                              {initials(post.ownerName || post.ownerArkId)}
-                            </span>
+                            <ArkAvatar
+                              name={post.ownerName || post.ownerArkId}
+                              src={ownerAvatarSrc(post.ownerArkId, myArkId, contacts)}
+                              size="md"
+                            />
                             <div className="min-w-0 flex-1">
                               <div className="flex items-start gap-2">
                                 <div className="min-w-0 flex-1">
@@ -588,9 +580,12 @@ export function NetworkingView() {
             <div className={`overflow-y-auto px-5 py-4 space-y-4 ${discussionOpen ? 'flex-1 min-w-0' : 'h-full'}`}>
               <div className="flex items-start gap-3">
                 <div className="relative shrink-0">
-                  <div className="h-12 w-12 rounded-full bg-surface-hover border border-surface-border flex items-center justify-center text-xs font-semibold text-content-primary">
-                    {initials(selected.ownerName || selected.ownerArkId)}
-                  </div>
+                  <ArkAvatar
+                    name={selected.ownerName || selected.ownerArkId}
+                    src={ownerAvatarSrc(selected.ownerArkId, myArkId, contacts)}
+                    size="lg"
+                    className="!h-12 !w-12 !text-xs"
+                  />
                   {selected.paying && (
                     <span className="absolute -top-1 -right-1 inline-flex h-5 w-5 items-center justify-center rounded-full border border-emerald-400/50 bg-emerald-500 text-white shadow">
                       <DollarSign className="w-3 h-3" strokeWidth={2.5} />

@@ -29,6 +29,22 @@ export function presenceTextClass(status: PresenceStatus): string {
   return 'text-zinc-400';
 }
 
+/** Border around the sidebar profile avatar (first box). */
+export function presenceRingClass(status: PresenceStatus): string {
+  if (status === 'online') return 'border-emerald-400/80 ring-1 ring-emerald-400/35';
+  if (status === 'idle') return 'border-amber-400/80 ring-1 ring-amber-400/35';
+  if (status === 'dnd') return 'border-rose-500/90 ring-1 ring-rose-500/40';
+  return 'border-zinc-500/70 ring-1 ring-zinc-500/25';
+}
+
+/** ARK ID / DEV label under the name — matches presence. */
+export function presenceIdClass(status: PresenceStatus): string {
+  if (status === 'online') return 'text-emerald-400/90';
+  if (status === 'idle') return 'text-amber-400/90';
+  if (status === 'dnd') return 'text-rose-400';
+  return 'text-zinc-500';
+}
+
 export function presenceLabel(status: PresenceStatus): string {
   return PRESENCE_OPTIONS.find(o => o.id === status)?.label || 'Online';
 }

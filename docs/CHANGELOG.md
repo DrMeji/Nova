@@ -1,5 +1,18 @@
 # ARK changelog
 
+## 0.1.142 — 2026-08-24
+
+Plugins Soon locks, profile photos across Connect, and presence-colored sidebar ring.
+
+**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.142/ARK-Setup.exe) · [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.142)
+
+### Plugins
+- Unwired catalog plugins (Neon, Shopify, HubSpot, QuickBooks, etc.) show **Soon**, are dimmed, and are not clickable.
+
+### Profile & presence
+- Uploaded profile photo syncs to your account and shows on Network, Message, and Notifications.
+- Sidebar profile avatar ring + ARK ID color follow Online / Idle / Do Not Disturb / Inactive.
+
 ## 0.1.141 — 2026-08-24
 
 Live social: cloud friend requests, real-time DMs, and internet voice calls.

@@ -301,11 +301,26 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
         await supabase.from('profiles').upsert({
           id: user.id,
           display_name: name,
+          avatar_url: prefs.avatarDataUrl || null,
         });
         await refreshProfile();
       } catch {
         /* local prefs still saved */
       }
+    }
+  };
+
+  const syncAvatarToCloud = async (dataUrl: string | undefined) => {
+    if (!user || user.id === 'guest-local') return;
+    try {
+      const { supabase } = await import('@/lib/supabase');
+      await supabase.from('profiles').upsert({
+        id: user.id,
+        avatar_url: dataUrl || null,
+      });
+      await refreshProfile();
+    } catch {
+      /* keep local */
     }
   };
 
@@ -543,12 +558,18 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                               const ctx = canvas.getContext('2d');
                               if (!ctx) {
                                 patchPrefs({ avatarDataUrl: url });
+                                void syncAvatarToCloud(url);
                                 return;
                               }
                               ctx.drawImage(img, sx, sy, side, side, 0, 0, 256, 256);
-                              patchPrefs({ avatarDataUrl: canvas.toDataURL('image/jpeg', 0.9) });
+                              const cropped = canvas.toDataURL('image/jpeg', 0.85);
+                              patchPrefs({ avatarDataUrl: cropped });
+                              void syncAvatarToCloud(cropped);
                             };
-                            img.onerror = () => patchPrefs({ avatarDataUrl: url });
+                            img.onerror = () => {
+                              patchPrefs({ avatarDataUrl: url });
+                              void syncAvatarToCloud(url);
+                            };
                             img.src = url;
                           };
                           reader.readAsDataURL(file);
@@ -560,7 +581,10 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                       <button
                         type="button"
                         title="Remove photo"
-                        onClick={() => patchPrefs({ avatarDataUrl: undefined })}
+                        onClick={() => {
+                          patchPrefs({ avatarDataUrl: undefined });
+                          void syncAvatarToCloud(undefined);
+                        }}
                         className="absolute -bottom-1 -right-1 w-7 h-7 rounded-full bg-surface-panel border border-surface-border text-content-secondary hover:text-rose-400 flex items-center justify-center shadow"
                       >
                         <X className="w-3.5 h-3.5" />

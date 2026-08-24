@@ -10,6 +10,7 @@ export type ArkContact = {
   arkId: string;
   displayName: string;
   addedAt: string;
+  avatarUrl?: string;
 };
 
 export type NetworkPost = {
@@ -109,7 +110,7 @@ function saveLocalMessages(list: DirectMessage[]) {
   writeJson(DMS_KEY, list);
 }
 
-export async function addContact(arkIdRaw: string, displayName?: string): Promise<ArkContact | null> {
+export async function addContact(arkIdRaw: string, displayName?: string, avatarUrl?: string): Promise<ArkContact | null> {
   const arkId = normalizeArkId(arkIdRaw);
   if (!isArkUserId(arkId)) return null;
   if (loadLocalContacts().some(c => c.arkId === arkId)) {
@@ -120,6 +121,7 @@ export async function addContact(arkIdRaw: string, displayName?: string): Promis
     arkId,
     displayName: displayName?.trim() || looked?.displayName || arkId,
     addedAt: new Date().toISOString(),
+    avatarUrl: avatarUrl || looked?.avatarUrl || undefined,
   };
   const next = [contact, ...loadLocalContacts().filter(c => c.arkId !== arkId)];
   saveLocalContacts(next);
@@ -171,17 +173,20 @@ export async function listContacts(userId?: string | null): Promise<ArkContact[]
   try {
     const { data, error } = await supabase
       .from('ark_contacts')
-      .select('peer_ark_id, display_name, created_at')
+      .select('peer_ark_id, display_name, peer_avatar_url, created_at')
       .order('created_at', { ascending: false });
     if (error || !data) return local;
     const cloud: ArkContact[] = data.map(row => ({
       arkId: String(row.peer_ark_id),
       displayName: String(row.display_name || row.peer_ark_id),
       addedAt: String(row.created_at),
+      avatarUrl: row.peer_avatar_url ? String(row.peer_avatar_url) : undefined,
     })).filter(c => isArkUserId(c.arkId));
     const byId = new Map<string, ArkContact>();
     [...cloud, ...local].forEach(c => {
-      if (!byId.has(c.arkId)) byId.set(c.arkId, c);
+      const prev = byId.get(c.arkId);
+      if (!prev) byId.set(c.arkId, c);
+      else byId.set(c.arkId, { ...prev, ...c, avatarUrl: c.avatarUrl || prev.avatarUrl });
     });
     const merged = [...byId.values()];
     saveLocalContacts(merged);
@@ -198,6 +203,7 @@ export async function persistContact(userId: string | null | undefined, contact:
       owner_id: userId,
       peer_ark_id: contact.arkId,
       display_name: contact.displayName,
+      peer_avatar_url: contact.avatarUrl || null,
     }, { onConflict: 'owner_id,peer_ark_id' });
   } catch {
     /* ignore */
@@ -473,6 +479,7 @@ export async function mergeGuestSocialToCloud(userId: string): Promise<void> {
         owner_id: userId,
         peer_ark_id: c.arkId,
         display_name: c.displayName,
+        peer_avatar_url: c.avatarUrl || null,
       }, { onConflict: 'owner_id,peer_ark_id' });
     } catch {
       /* keep going */

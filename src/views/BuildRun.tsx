@@ -316,7 +316,7 @@ export function BuildRun() {
               <section className="mb-8">
                 <h2 className="text-base font-semibold text-content-primary mb-1">Suggested</h2>
                 <p className="text-xs text-content-tertiary mb-3">
-                  Live connections. Search the catalog for the rest — those stay labeled Coming soon until they have an API.
+                  Live connections you can add today. Catalog entries marked Soon are not wired yet and cannot be opened.
                 </p>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   {PLUGIN_CATALOG.filter(p => isPluginLive(p.id)).map(plugin => {
@@ -400,12 +400,22 @@ export function BuildRun() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1">
                   {category.plugins.map(plugin => {
                     const runtime = getPluginRuntime(plugin.id, state);
+                    const wired = isPluginWired(plugin.id);
                     return (
                       <button
                         key={`${category.id}-${plugin.id}`}
                         type="button"
-                        onClick={() => openPlugin(plugin)}
-                        className="flex items-center gap-3 py-3 rounded-xl px-1 text-left hover:bg-surface-hover/50 transition-colors"
+                        disabled={!wired}
+                        onClick={() => {
+                          if (!wired) return;
+                          openPlugin(plugin);
+                        }}
+                        title={wired ? plugin.name : `${plugin.name} · Soon`}
+                        className={`flex items-center gap-3 py-3 rounded-xl px-1 text-left transition-colors ${
+                          wired
+                            ? 'hover:bg-surface-hover/50'
+                            : 'opacity-45 cursor-not-allowed pointer-events-none grayscale-[0.35]'
+                        }`}
                       >
                         <BrandMark id={plugin.id} name={plugin.name} initial={plugin.initial} tone={plugin.tone} />
                         <span className="min-w-0 flex-1">
@@ -415,25 +425,29 @@ export function BuildRun() {
                               <span className="text-[10px] rounded-full bg-emerald-500/15 text-emerald-400 px-1.5 py-0.5 shrink-0">
                                 Live
                               </span>
-                            ) : isPluginWired(plugin.id) ? (
+                            ) : wired ? (
                               <span className="text-[10px] rounded-full bg-sky-500/15 text-sky-400 px-1.5 py-0.5 shrink-0">
                                 Ready
                               </span>
                             ) : (
-                              <span className="text-[10px] rounded-full bg-amber-500/15 text-amber-400/90 px-1.5 py-0.5 shrink-0">
-                                Catalog only
+                              <span className="text-[10px] rounded-full bg-white/10 text-content-tertiary px-1.5 py-0.5 shrink-0">
+                                Soon
                               </span>
                             )}
                           </span>
                           <span className="block text-xs text-content-tertiary truncate">{plugin.description}</span>
                         </span>
-                        <span className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${
-                          runtime.installed
-                            ? 'bg-surface-hover text-ark-accent-green'
-                            : 'text-content-secondary'
-                        }`}>
-                          {runtime.installed ? <Check className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-                        </span>
+                        {wired ? (
+                          <span className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${
+                            runtime.installed
+                              ? 'bg-surface-hover text-ark-accent-green'
+                              : 'text-content-secondary'
+                          }`}>
+                            {runtime.installed ? <Check className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+                          </span>
+                        ) : (
+                          <span className="text-[10px] text-content-tertiary shrink-0 pr-1">Soon</span>
+                        )}
                       </button>
                     );
                   })}

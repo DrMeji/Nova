@@ -110,7 +110,7 @@ async function saveCloudArkId(userId: string, arkId: string): Promise<'ok' | 'ta
 const lookupAt = new Map<string, number>();
 const LOOKUP_MIN_MS = 2500;
 
-export async function lookupArkUser(arkId: string): Promise<{ arkId: string; displayName: string | null } | null> {
+export async function lookupArkUser(arkId: string): Promise<{ arkId: string; displayName: string | null; avatarUrl?: string | null } | null> {
   const id = normalizeArkId(arkId);
   if (!isArkUserId(id)) return null;
   const last = lookupAt.get(id) || 0;
@@ -124,6 +124,7 @@ export async function lookupArkUser(arkId: string): Promise<{ arkId: string; dis
     return {
       arkId: String(row.ark_id),
       displayName: row.display_name ? String(row.display_name) : null,
+      avatarUrl: row.avatar_url ? String(row.avatar_url) : null,
     };
   } catch {
     return null;
