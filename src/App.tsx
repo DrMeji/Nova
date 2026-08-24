@@ -97,7 +97,7 @@ function AppRoutes() {
 }
 
 function AppContent() {
-  const { user, profile, loading } = useAuth();
+  const { user, profile, loading, bypass } = useAuth();
   const [setupTick, setSetupTick] = useState(0);
 
   useEffect(() => {
@@ -135,7 +135,8 @@ function AppContent() {
     );
   }
 
-  if (!user) {
+  // Always Auth first on real installs. Guest is allowed only via explicit bypass (dev/bat).
+  if (!user || (user.id === 'guest-local' && !bypass)) {
     return <AuthScreen />;
   }
 

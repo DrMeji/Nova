@@ -71,7 +71,7 @@ function TypewriterHero() {
 export function AuthScreen() {
   const { signIn, signUp, resetPassword, bypassLogin } = useAuth();
   const [mode, setMode] = useState<AuthMode>('signin');
-  const [showBypass, setShowBypass] = useState(true);
+  const [showBypass, setShowBypass] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -83,9 +83,10 @@ export function AuthScreen() {
   useEffect(() => {
     void window.arkDesktop?.appMeta?.()
       .then(meta => {
-        if (meta?.isPackaged) setShowBypass(false);
+        // Guest continue is unpackaged/dev only — never on Setup.exe installs.
+        setShowBypass(!meta?.isPackaged);
       })
-      .catch(() => {});
+      .catch(() => setShowBypass(false));
   }, []);
 
   const switchMode = (next: AuthMode) => {

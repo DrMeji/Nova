@@ -1,5 +1,15 @@
 # ARK changelog
 
+## 0.1.143 — 2026-08-24
+
+Fresh installs always open on Sign in / Sign up before first-run setup.
+
+**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.143/ARK-Setup.exe) · [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.143)
+
+### Auth
+- New installs clear leftover saved sessions so setup cannot skip Sign in / Sign up.
+- Installer deletes `ark-auth-storage.dat` on a fresh install (not upgrades).
+
 ## 0.1.142 — 2026-08-24
 
 Plugins Soon locks, profile photos across Connect, and presence-colored sidebar ring.

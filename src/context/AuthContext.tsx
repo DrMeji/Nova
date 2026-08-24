@@ -5,6 +5,7 @@ import type { Profile, UserSettings } from '@/types';
 import {
   clearSetupCompleted,
   ensureFirstRunGate,
+  isFreshInstallGate,
   isSetupCompleted,
   markSetupCompleted,
   prepareLaunchForTesting,
@@ -168,6 +169,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Packaged releases never auto-enter as guest.
       if (isPackaged) {
         localStorage.removeItem(BYPASS_KEY);
+      }
+
+      // Fresh / reinstalled desktop: wipe leftover sessions so AuthScreen is first.
+      if (isPackaged && isFreshInstallGate()) {
+        localStorage.removeItem(BYPASS_KEY);
+        try {
+          await supabase.auth.signOut();
+        } catch {
+          /* ignore */
+        }
+        try {
+          await window.arkDesktop?.authStorageRemove?.('ark-auth-token');
+        } catch {
+          /* ignore */
+        }
+        if (!cancelled) {
+          setBypass(false);
+          setSession(null);
+          setUser(null);
+          setProfile(null);
+          setSettings(null);
+          setLoading(false);
+        }
+        return;
       }
 
       if (!isPackaged && isBypassEnabled()) {

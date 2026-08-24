@@ -39,25 +39,27 @@ function ensureInstallId() {
 }
 
 function readSetup() {
-  const { id: installId } = ensureInstallId();
+  const { id: installId, created } = ensureInstallId();
   try {
     const raw = fs.readFileSync(setupFile(), 'utf8');
     const data = JSON.parse(raw);
     let completed = Boolean(data?.completed);
     const stamped = typeof data?.installId === 'string' ? data.installId.trim() : '';
+    let freshInstall = Boolean(created);
 
     if (completed && stamped && stamped !== installId) {
       // Reinstall left an old setup flag under a new install id — force onboarding.
       completed = false;
+      freshInstall = true;
       writeSetup(false, installId);
     } else if (completed && !stamped) {
       // Legacy builds had no install id — keep setup through upgrades, stamp this install.
       writeSetup(true, installId);
     }
 
-    return { ok: true, completed, installId };
+    return { ok: true, completed, installId, freshInstall };
   } catch {
-    return { ok: true, completed: false, installId };
+    return { ok: true, completed: false, installId, freshInstall: true };
   }
 }
 

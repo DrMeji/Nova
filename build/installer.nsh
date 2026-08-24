@@ -3,13 +3,14 @@
 ; (${isUpdated} is set by electron-builder when the installer replaces an existing build.)
 
 !macro customInstall
-  ; Fresh install (not an in-place upgrade): drop setup completion so sign-in
-  ; always runs Hardware → Models → Connect again. Keeps models/keys unless
-  ; uninstall already removed AppData.
+  ; Fresh install (not an in-place upgrade): drop setup completion + saved
+  ; sign-in so the user always sees Auth → then Hardware → Models → Connect.
+  ; Keeps models/keys unless uninstall already removed AppData.
   ${ifNot} ${isUpdated}
     CreateDirectory "$APPDATA\ARK"
     Delete "$APPDATA\ARK\ark-setup.json"
     Delete "$APPDATA\ARK\ark-install-id"
+    Delete "$APPDATA\ARK\ark-auth-storage.dat"
   ${endIf}
 !macroend
 

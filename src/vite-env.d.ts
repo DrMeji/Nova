@@ -90,8 +90,8 @@ declare global {
         openAtLogin?: boolean;
         devBlocked?: boolean;
       }>;
-      setupGet?: () => Promise<{ ok: boolean; completed?: boolean }>;
-      setupSet?: (completed: boolean) => Promise<{ ok: boolean; completed?: boolean }>;
+      setupGet?: () => Promise<{ ok: boolean; completed?: boolean; installId?: string; freshInstall?: boolean }>;
+      setupSet?: (completed: boolean) => Promise<{ ok: boolean; completed?: boolean; installId?: string }>;
       systemInfo?: () => Promise<{
         ok: boolean;
         os?: string;
