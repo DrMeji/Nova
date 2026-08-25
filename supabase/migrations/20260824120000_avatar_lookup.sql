@@ -1,4 +1,6 @@
--- Expose avatar_url via ARK ID lookup (name + photo only — never email).
+﻿-- Expose avatar_url via ARK ID lookup (name + photo only â€” never email).
+
+DROP FUNCTION IF EXISTS public.lookup_ark_user(text);
 
 CREATE OR REPLACE FUNCTION public.lookup_ark_user(p_ark_id text)
 RETURNS TABLE (ark_id text, display_name text, avatar_url text)
@@ -69,3 +71,4 @@ BEGIN
   END IF;
 END;
 $$;
+

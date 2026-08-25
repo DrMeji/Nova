@@ -1,5 +1,5 @@
 -- ARK social friend-requests schema (apply in Supabase SQL Editor if missing).
--- Project: cdwfngrdtlrymofkzaof
+-- Project: mjheezjqwqbhkcmwredq
 -- Fixes: "Could not find the table 'public.ark_friend_requests' in the schema cache"
 
 CREATE TABLE IF NOT EXISTS public.ark_friend_requests (
@@ -42,6 +42,8 @@ CREATE POLICY "ark_fr_update" ON public.ark_friend_requests FOR UPDATE
   ) WITH CHECK (
     to_ark_id = public.my_ark_id() OR from_ark_id = public.my_ark_id()
   );
+
+DROP FUNCTION IF EXISTS public.lookup_ark_user(text);
 
 CREATE OR REPLACE FUNCTION public.lookup_ark_user(p_ark_id text)
 RETURNS TABLE (ark_id text, display_name text, avatar_url text)

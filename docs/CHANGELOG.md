@@ -1,5 +1,15 @@
 ﻿# ARK changelog
 
+## 0.1.150 — 2026-08-24
+
+Point ARK at the new Supabase project and ship friend-request schema for public testers.
+
+**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.150/ARK-Setup.exe) · [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.150)
+
+### Social / backend
+- Desktop app now uses Supabase project `mjheezjqwqbhkcmwredq`.
+- Friend requests, profiles, contacts, DMs, and networking tables are live on that project.
+- Sign in again on each PC (accounts from the old project do not carry over).
 ## 0.1.149 — 2026-08-24
 
 Friend requests / Networking add-by-ARK-ID. Requires applying supabase/apply-friend-requests.sql once on the hosted project.
