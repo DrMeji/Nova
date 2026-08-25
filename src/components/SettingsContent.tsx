@@ -118,7 +118,7 @@ const ACCENTS: { id: AccentPref; label: string; swatch: string }[] = [
 ];
 
 export function SettingsContent({ onClose, initialSection }: { onClose?: () => void; initialSection?: string } = {}) {
-  const { user, profile, settings, updateSettings, signOut, refreshProfile } = useAuth();
+  const { user, profile, settings, updateSettings, signOut, deleteAccountPermanently, refreshProfile } = useAuth();
   const { theme, setTheme } = useTheme();
   const { navigate } = useRouter();
   const [activeSection, setActiveSection] = useState(initialSection || 'account');
@@ -144,6 +144,8 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
   const [hwScanning, setHwScanning] = useState(false);
   const [hwFlash, setHwFlash] = useState('');
   const [arkCopied, setArkCopied] = useState(false);
+  const [deleteAccountBusy, setDeleteAccountBusy] = useState(false);
+  const [deleteAccountMsg, setDeleteAccountMsg] = useState<string | null>(null);
   const [navCompact, setNavCompact] = useState(false);
   const [cacheBusy, setCacheBusy] = useState(false);
   const [engineStatus, setEngineStatus] = useState<ArkEngineStatus | null>(null);
@@ -681,6 +683,46 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                     Reset profile labels
                   </button>
                 </div>
+
+                {user?.id && user.id !== 'guest-local' ? (
+                  <div className="rounded-xl border border-rose-500/30 bg-rose-500/5 p-4 space-y-2">
+                    <p className="text-sm font-medium text-rose-200">Delete account</p>
+                    <p className="text-[11px] text-content-tertiary leading-relaxed">
+                      Permanently deletes this account right away (no waiting period). Your email can be used again to
+                      create a new account with a new ARK ID. This cannot be undone.
+                    </p>
+                    {deleteAccountMsg ? (
+                      <p className="text-[11px] text-amber-200/90">{deleteAccountMsg}</p>
+                    ) : null}
+                    <button
+                      type="button"
+                      disabled={deleteAccountBusy}
+                      className="ark-btn-secondary !text-rose-300 border-rose-500/40 disabled:opacity-50"
+                      onClick={() => {
+                        const email = user.email || 'this account';
+                        const ok = window.confirm(
+                          `Permanently delete ${email} right now?\n\nThis removes the account immediately. You can sign up again with the same email afterward.`,
+                        );
+                        if (!ok) return;
+                        const again = window.confirm('Last chance: delete permanently? There is no recovery.');
+                        if (!again) return;
+                        setDeleteAccountBusy(true);
+                        setDeleteAccountMsg(null);
+                        void deleteAccountPermanently().then((res) => {
+                          setDeleteAccountBusy(false);
+                          if (!res.ok) {
+                            setDeleteAccountMsg(res.error);
+                            return;
+                          }
+                          flashSaved('Account deleted');
+                          onClose?.();
+                        });
+                      }}
+                    >
+                      {deleteAccountBusy ? 'Deleting…' : 'Permanently delete account'}
+                    </button>
+                  </div>
+                ) : null}
               </div>
             </SettingsSection>
           )}

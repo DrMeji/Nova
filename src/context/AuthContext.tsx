@@ -13,6 +13,7 @@ import {
 import { hydrateProviderApiKeys } from '@/lib/localPrefs';
 import { ensureArkId, formatArkId, readLocalArkId } from '@/lib/arkUserId';
 import { mergeGuestSocialToCloud } from '@/lib/arkSocial';
+import { deleteOwnAccountPermanently } from '@/lib/deleteAccount';
 
 // Guest identity used when login is bypassed (dev / testing only).
 const BYPASS_KEY = 'ark:bypass-enabled';
@@ -60,6 +61,8 @@ interface AuthContextValue {
   signUp: (email: string, password: string, displayName?: string) => Promise<{ error: string | null }>;
   resetPassword: (email: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
+  /** Permanently delete this account on the server (immediate). */
+  deleteAccountPermanently: () => Promise<{ ok: true } | { ok: false; error: string }>;
   /** Guest login. skipSetup: true jumps straight into the app; false runs first-run optimize. */
   bypassLogin: (options?: { skipSetup?: boolean }) => void;
   refreshProfile: () => Promise<void>;
@@ -355,6 +358,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const deleteAccountPermanently = async () => {
+    const result = await deleteOwnAccountPermanently();
+    if (!result.ok) return result;
+    localStorage.removeItem(BYPASS_KEY);
+    setBypass(false);
+    setSession(null);
+    setUser(null);
+    setProfile(null);
+    setSettings(null);
+    try {
+      // Clear encrypted Electron session too (key-by-key via remove, then signOut).
+      await supabase.auth.signOut({ scope: 'local' });
+    } catch {
+      /* ignore */
+    }
+    return { ok: true as const };
+  };
+
   const refreshProfile = async () => {
     if (user?.id === 'guest-local' || bypass) {
       const id = await ensureArkId('guest-local');
@@ -376,7 +397,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ session, user, profile, settings, loading, bypass, signIn, signUp, resetPassword, signOut, bypassLogin, refreshProfile, updateSettings }}>
+    <AuthContext.Provider value={{ session, user, profile, settings, loading, bypass, signIn, signUp, resetPassword, signOut, deleteAccountPermanently, bypassLogin, refreshProfile, updateSettings }}>
       {children}
     </AuthContext.Provider>
   );

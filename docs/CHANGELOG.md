@@ -1,5 +1,13 @@
 ﻿# ARK changelog
 
+## 0.1.152 — 2026-08-24
+
+Permanent Delete account in Settings (immediate, no waiting period).
+
+**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.152/ARK-Setup.exe) · [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.152)
+
+### Account
+- Settings → Account → Permanently delete account removes the user on Supabase right away so the same email can sign up again with a new ARK ID.
 ## 0.1.151 — 2026-08-24
 
 Clean auth restart on the new Supabase project. Developer email shows as DEV; everyone else keeps a 7-digit ARK ID.
