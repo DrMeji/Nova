@@ -5,9 +5,13 @@ import {
   blockArkId,
   hideDemoContact,
   listContacts,
-  removeContact,
   subscribeMessages,
+  syncBlockedFromCloud,
+  unfriendPeer,
+  unblockArkId,
+  loadBlockedUsers,
   type ArkContact,
+  type BlockedUser,
   type DirectMessage,
 } from '@/lib/arkSocial';
 import { sendFriendRequest, respondFriendRequest, subscribeFriendRequests, syncFriendRequests } from '@/lib/friendRequests';
@@ -22,12 +26,16 @@ import { formatArkId } from '@/lib/arkUserId';
 type SocialContextValue = {
   contacts: ArkContact[];
   unreadFrom: string[];
+  blockedUsers: BlockedUser[];
   refreshContacts: () => Promise<void>;
+  refreshBlocked: () => Promise<void>;
   inviteByArkId: (arkId: string, displayName?: string) => Promise<ArkContact | null>;
   acceptFriendRequest: (requestId: string) => Promise<ArkContact | null>;
   declineFriendRequest: (requestId: string) => void;
-  removeFriend: (arkId: string) => void;
-  blockFriend: (arkId: string) => void;
+  removeFriend: (arkId: string) => Promise<void>;
+  deleteContact: (arkId: string) => Promise<void>;
+  blockFriend: (arkId: string, displayName?: string) => Promise<void>;
+  unblockFriend: (arkId: string) => Promise<void>;
 };
 
 const SocialContext = createContext<SocialContextValue | undefined>(undefined);
@@ -37,6 +45,7 @@ export function SocialProvider({ children }: { children: ReactNode }) {
   const { route } = useRouter();
   const [contacts, setContacts] = useState<ArkContact[]>([]);
   const [unreadFrom, setUnreadFrom] = useState<string[]>([]);
+  const [blockedUsers, setBlockedUsers] = useState<BlockedUser[]>(() => loadBlockedUsers());
   const myArkId = isArkDevEmail(user?.email) ? 'DEV' : (profile?.ark_id || '');
   const contactsRef = useRef(contacts);
   contactsRef.current = contacts;
@@ -46,9 +55,21 @@ export function SocialProvider({ children }: { children: ReactNode }) {
     setContacts(list);
   };
 
+  const refreshBlocked = async () => {
+    const list = await syncBlockedFromCloud(user?.id);
+    setBlockedUsers(list);
+  };
+
   useEffect(() => {
     void refreshContacts();
+    void refreshBlocked();
   }, [user?.id]);
+
+  useEffect(() => {
+    const bump = () => setBlockedUsers(loadBlockedUsers());
+    window.addEventListener('ark:blocks-changed', bump);
+    return () => window.removeEventListener('ark:blocks-changed', bump);
+  }, []);
 
   // Re-pull live names/avatars when opening Message (friends may have updated Settings).
   useEffect(() => {
@@ -131,30 +152,45 @@ export function SocialProvider({ children }: { children: ReactNode }) {
     void respondFriendRequest(requestId, 'declined', { userId: user?.id, myArkId });
   };
 
-  const removeFriend = (arkId: string) => {
-    removeContact(arkId);
+  const removeFriend = async (arkId: string) => {
+    await unfriendPeer(user?.id, arkId);
     hideDemoContact(arkId);
-    void refreshContacts();
+    await refreshContacts();
   };
 
-  const blockFriend = (arkId: string) => {
-    blockArkId(arkId);
+  const deleteContact = async (arkId: string) => {
+    await unfriendPeer(user?.id, arkId);
     hideDemoContact(arkId);
-    void refreshContacts();
+    await refreshContacts();
+  };
+
+  const blockFriend = async (arkId: string, displayName?: string) => {
+    await blockArkId(arkId, { userId: user?.id, displayName });
+    await refreshContacts();
+    await refreshBlocked();
+  };
+
+  const unblockFriend = async (arkId: string) => {
+    await unblockArkId(arkId, user?.id);
+    await refreshBlocked();
   };
 
   const value = useMemo(
     () => ({
       contacts,
       unreadFrom,
+      blockedUsers,
       refreshContacts,
+      refreshBlocked,
       inviteByArkId,
       acceptFriendRequest,
       declineFriendRequest,
       removeFriend,
+      deleteContact,
       blockFriend,
+      unblockFriend,
     }),
-    [contacts, unreadFrom, myArkId, profile?.display_name, user?.id],
+    [contacts, unreadFrom, blockedUsers, myArkId, profile?.display_name, user?.id],
   );
 
   return <SocialContext.Provider value={value}>{children}</SocialContext.Provider>;

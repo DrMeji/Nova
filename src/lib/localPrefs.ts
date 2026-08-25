@@ -316,6 +316,18 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.156',
+    channel: 'stable' as const,
+    date: 'Aug 25, 2026',
+    title: 'Friends unadd/block + icon + Update screen',
+    notes: [
+      'Unadd removes both sides; messaging requires mutual friendship',
+      'Trash deletes contacts; Settings → Privacy lists blocked users',
+      'App icon: black rounded square only (no gray inset)',
+      'Update screen: GitHub button beside Check for update; rounded progress splash',
+    ],
+  },
+  {
     version: '0.1.155',
     channel: 'stable' as const,
     date: 'Aug 25, 2026',

@@ -525,19 +525,20 @@ function splashIconDataUri() {
 function splashIconMarkup() {
   const data = splashIconDataUri();
   if (data) {
-    return `<img src="${data}" alt="" width="64" height="64" draggable="false" style="object-fit:contain;display:block;margin:0 auto;user-select:none;" />`;
+    return `<img src="${data}" alt="" width="96" height="96" draggable="false" style="object-fit:contain;display:block;margin:0 auto;user-select:none;border-radius:22px;" />`;
   }
-  return `<div style="width:64px;height:64px;margin:0 auto;border-radius:14px;background:#1a1a1e;display:flex;align-items:center;justify-content:center;color:#f2f2f3;font:700 15px Segoe UI,system-ui,sans-serif;">ARK</div>`;
+  return `<div style="width:96px;height:96px;margin:0 auto;border-radius:22px;background:#0c0c0e;display:flex;align-items:center;justify-content:center;color:#f2f2f3;font:700 18px Segoe UI,system-ui,sans-serif;">ARK</div>`;
 }
 
 function splashShellCss() {
   return `
   html,body{margin:0;height:100%;background:#0a0a0c;color:#f2f2f3;font-family:"Segoe UI",system-ui,sans-serif;overflow:hidden;user-select:none;}
-  .wrap{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:36px 32px 40px;box-sizing:border-box;}
-  .logo-wrap{margin:0 0 20px;}
+  .wrap{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px 36px 44px;box-sizing:border-box;}
+  .logo-wrap{margin:0 0 24px;width:112px;height:112px;border-radius:26px;background:#0c0c0e;display:flex;align-items:center;justify-content:center;box-shadow:0 10px 28px rgba(0,0,0,0.45);}
+  .logo-wrap img{width:96px;height:96px;border-radius:22px;}
   #label{font-size:16px;font-weight:600;letter-spacing:0.01em;margin:0 0 8px;text-align:center;color:#f2f2f3;}
-  #pct{font-size:13px;font-weight:500;color:#a8a8b3;margin:0 0 18px;text-align:center;font-variant-numeric:tabular-nums;}
-  .track{width:320px;max-width:100%;height:10px;margin:0 auto;border-radius:999px;background:#3a3a44;overflow:hidden;}
+  #pct{font-size:13px;font-weight:500;color:#a8a8b3;margin:0 0 20px;text-align:center;font-variant-numeric:tabular-nums;}
+  .track{width:340px;max-width:100%;height:12px;margin:0 auto;border-radius:999px;background:#3a3a44;overflow:hidden;}
   #fill{height:100%;width:0%;min-width:0;border-radius:999px;background:#f2f2f4;}
 `;
 }
@@ -931,8 +932,8 @@ async function runStandaloneSplash(argv) {
   writeUpdateStatus(statusPath, 'waiting', 8, 'Installing update', 'Installing update');
 
   const win = new BrowserWindow({
-    width: 420,
-    height: 280,
+    width: 460,
+    height: 320,
     frame: false,
     resizable: false,
     maximizable: false,
@@ -1336,7 +1337,7 @@ function launchInstallHandoffSplash({ statusPath, expectedVersion, arkExe, shown
     'function Write-ArkAlive { try { Set-Content -LiteralPath $alivePath -Value "ok" -Encoding ASCII } catch {} }',
     '$form = New-Object System.Windows.Forms.Form',
     `$form.Text = "ARK"`,
-    '$form.Size = New-Object System.Drawing.Size(420, 280)',
+    '$form.Size = New-Object System.Drawing.Size(460, 320)',
     '$form.StartPosition = "CenterScreen"',
     '$form.FormBorderStyle = "None"',
     '$form.BackColor = [System.Drawing.Color]::FromArgb(10, 10, 12)',
@@ -1350,38 +1351,57 @@ function launchInstallHandoffSplash({ statusPath, expectedVersion, arkExe, shown
     '    $form.Icon = [System.Drawing.Icon]::ExtractAssociatedIcon($exeForIcon)',
     '  } catch {}',
     '}',
+    'function New-ArkRoundRegion([int]$w, [int]$h, [int]$r) {',
+    '  $gp = New-Object System.Drawing.Drawing2D.GraphicsPath',
+    '  $d = [Math]::Max(1, $r * 2)',
+    '  $gp.AddArc(0, 0, $d, $d, 180, 90)',
+    '  $gp.AddArc($w - $d, 0, $d, $d, 270, 90)',
+    '  $gp.AddArc($w - $d, $h - $d, $d, $d, 0, 90)',
+    '  $gp.AddArc(0, $h - $d, $d, $d, 90, 90)',
+    '  $gp.CloseFigure()',
+    '  return New-Object System.Drawing.Region($gp)',
+    '}',
+    '$picHost = New-Object System.Windows.Forms.Panel',
+    '$picHost.Size = New-Object System.Drawing.Size(112, 112)',
+    '$picHost.Location = New-Object System.Drawing.Point(174, 36)',
+    '$picHost.BackColor = [System.Drawing.Color]::FromArgb(12, 12, 14)',
+    'try { $picHost.Region = New-ArkRoundRegion 112 112 26 } catch {}',
     '$pic = New-Object System.Windows.Forms.PictureBox',
     '$pic.SizeMode = "Zoom"',
-    '$pic.Size = New-Object System.Drawing.Size(64, 64)',
-    '$pic.Location = New-Object System.Drawing.Point(178, 40)',
+    '$pic.Size = New-Object System.Drawing.Size(96, 96)',
+    '$pic.Location = New-Object System.Drawing.Point(8, 8)',
+    '$pic.BackColor = [System.Drawing.Color]::FromArgb(12, 12, 14)',
     'if ($pngPath -and (Test-Path -LiteralPath $pngPath)) { try { $pic.Image = [System.Drawing.Image]::FromFile($pngPath) } catch {} }',
     'if (-not $pic.Image -and $form.Icon) { try { $pic.Image = $form.Icon.ToBitmap() } catch {} }',
+    '$picHost.Controls.Add($pic)',
     '$label = New-Object System.Windows.Forms.Label',
     '$label.Text = "Installing update"',
     '$label.ForeColor = [System.Drawing.Color]::FromArgb(242, 242, 243)',
     '$label.Font = New-Object System.Drawing.Font("Segoe UI", 12, [System.Drawing.FontStyle]::Bold)',
     '$label.AutoSize = $false',
     '$label.TextAlign = "MiddleCenter"',
-    '$label.Size = New-Object System.Drawing.Size(380, 28)',
-    '$label.Location = New-Object System.Drawing.Point(20, 118)',
+    '$label.Size = New-Object System.Drawing.Size(420, 28)',
+    '$label.Location = New-Object System.Drawing.Point(20, 164)',
     '$pct = New-Object System.Windows.Forms.Label',
     '$pct.Text = "8%"',
     '$pct.ForeColor = [System.Drawing.Color]::FromArgb(168, 168, 179)',
     '$pct.Font = New-Object System.Drawing.Font("Segoe UI", 11)',
     '$pct.AutoSize = $false',
     '$pct.TextAlign = "MiddleCenter"',
-    '$pct.Size = New-Object System.Drawing.Size(380, 22)',
-    '$pct.Location = New-Object System.Drawing.Point(20, 148)',
+    '$pct.Size = New-Object System.Drawing.Size(420, 22)',
+    '$pct.Location = New-Object System.Drawing.Point(20, 194)',
     '$track = New-Object System.Windows.Forms.Panel',
     '$track.BackColor = [System.Drawing.Color]::FromArgb(58, 58, 68)',
-    '$track.Size = New-Object System.Drawing.Size(320, 10)',
-    '$track.Location = New-Object System.Drawing.Point(50, 186)',
+    '$track.Size = New-Object System.Drawing.Size(340, 12)',
+    '$track.Location = New-Object System.Drawing.Point(60, 232)',
+    'try { $track.Region = New-ArkRoundRegion 340 12 6 } catch {}',
     '$fill = New-Object System.Windows.Forms.Panel',
     '$fill.BackColor = [System.Drawing.Color]::FromArgb(242, 242, 244)',
-    '$fill.Size = New-Object System.Drawing.Size(0, 10)',
+    '$fill.Size = New-Object System.Drawing.Size(0, 12)',
     '$fill.Location = New-Object System.Drawing.Point(0, 0)',
+    'try { $fill.Region = New-ArkRoundRegion 12 12 6 } catch {}',
     '$track.Controls.Add($fill)',
-    '$form.Controls.Add($pic)',
+    '$form.Controls.Add($picHost)',
     '$form.Controls.Add($label)',
     '$form.Controls.Add($pct)',
     '$form.Controls.Add($track)',
@@ -1408,8 +1428,9 @@ function launchInstallHandoffSplash({ statusPath, expectedVersion, arkExe, shown
     '        if ($n -lt 0) { $n = 0 }',
     '        if ($n -gt 100) { $n = 100 }',
     '        $pct.Text = "$n%"',
-    '        $w = [Math]::Max(12, [int](320 * $n / 100))',
+    '        $w = [Math]::Max(16, [int](340 * $n / 100))',
     '        $fill.Width = $w',
+    '        try { $fill.Region = New-ArkRoundRegion $w 12 6 } catch {}',
     '      }',
     '      $stage = [string]$map.stage',
     '      if ($stage -eq "opening" -or $stage -eq "done" -or $stage -eq "waiting_reopen") {',
@@ -1428,7 +1449,8 @@ function launchInstallHandoffSplash({ statusPath, expectedVersion, arkExe, shown
     '    $script:closeAt = [Environment]::TickCount + 400',
     '    $label.Text = "Opening ARK"',
     '    $pct.Text = "100%"',
-    '    $fill.Width = 320',
+    '    $fill.Width = 340',
+    '    try { $fill.Region = New-ArkRoundRegion 340 12 6 } catch {}',
     '  }',
     '  if (([Environment]::TickCount - $script:startedAt) -gt 600000) { $timer.Stop(); $form.Close() }',
     '  if ($script:closeArmed -and [Environment]::TickCount -ge $script:closeAt) {',

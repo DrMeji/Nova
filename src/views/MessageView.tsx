@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import {
   Download, File, Folder, Image as ImageIcon, Loader2, PanelLeft,
   Plus, Send, Trash2, UserMinus, UserPlus, UsersRound,
@@ -9,9 +9,11 @@ import { useSocial } from '@/context/SocialContext';
 import { useCall } from '@/context/CallContext';
 import { MessageDmCallPill, MessageGroupCallPill } from '@/components/CallRingUI';
 import {
+  areMutualFriends,
   isBlockedArkId,
   listThread,
   loadHiddenDemoContacts,
+  MSG_NEED_FRIEND,
   sendDirectMessage,
   subscribeMessages,
   threadPreview,
@@ -109,7 +111,7 @@ function FileBubble({
 export function MessageView() {
   const { user, profile } = useAuth();
   const { route, navigate } = useRouter();
-  const { contacts, inviteByArkId, refreshContacts, removeFriend, blockFriend, unreadFrom } = useSocial();
+  const { contacts, inviteByArkId, refreshContacts, removeFriend, deleteContact, blockFriend, unreadFrom } = useSocial();
   const { demoSimulateIncoming } = useCall();
   const myArkId = isArkDevEmail(user?.email) ? 'DEV' : (profile?.ark_id || '');
   const peer = route.name === 'message' ? route.peer : undefined;
@@ -121,6 +123,8 @@ export function MessageView() {
   const [adding, setAdding] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
   const [addOk, setAddOk] = useState<string | null>(null);
+  const [sendError, setSendError] = useState<string | null>(null);
+  const [canChat, setCanChat] = useState(true);
   const [attachMenu, setAttachMenu] = useState(false);
   const [railCompact, setRailCompact] = useState(false);
   const [hiddenTick, setHiddenTick] = useState(0);
@@ -175,10 +179,34 @@ export function MessageView() {
   }, [groups]);
 
   const activeGroup = groups.find(g => g.id === groupId) || null;
+  const isDemoPeer = Boolean(peer && buildDemoContacts().some(c => c.arkId === peer));
+  const isFriend = Boolean(peer && contacts.some(c => formatArkId(c.arkId) === formatArkId(peer)));
   const active = !groupId
     ? (people.find(c => c.arkId === peer)
       || (peer && !isBlockedArkId(peer) ? { arkId: peer, displayName: peer, addedAt: '' } : null))
     : null;
+
+  useEffect(() => {
+    setSendError(null);
+    if (groupId || !peer) {
+      setCanChat(true);
+      return;
+    }
+    if (isDemoPeer) {
+      setCanChat(true);
+      return;
+    }
+    let cancelled = false;
+    void areMutualFriends(user?.id, peer, contacts).then(ok => {
+      if (!cancelled) {
+        setCanChat(ok);
+        if (!ok) setSendError(MSG_NEED_FRIEND);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [peer, groupId, contacts, user?.id, isDemoPeer]);
 
   useEffect(() => {
     const compact = () => setRailCompact(true);
@@ -273,21 +301,26 @@ export function MessageView() {
     }
 
     if (!peer) return;
+    if (!isDemoPeer && !canChat) {
+      setSendError(MSG_NEED_FRIEND);
+      return;
+    }
+    setSendError(null);
     setDraft('');
-    const msg = await sendDirectMessage({
-      userId: user?.id,
-      senderArkId: sender,
-      recipientArkId: peer,
-      body,
-    });
-    setThread(prev => [...prev, msg]);
-    setListTick(t => t + 1);
-    if (myArkId && !contacts.some(c => c.arkId === peer)) {
-      try {
-        await inviteByArkId(peer);
-      } catch {
-        /* ignore */
-      }
+    try {
+      const msg = await sendDirectMessage({
+        userId: user?.id,
+        senderArkId: sender,
+        recipientArkId: peer,
+        body,
+        allowWithoutFriendship: isDemoPeer,
+      });
+      setThread(prev => [...prev, msg]);
+      setListTick(t => t + 1);
+    } catch (err) {
+      setDraft(body);
+      setSendError(err instanceof Error ? err.message : MSG_NEED_FRIEND);
+      setCanChat(false);
     }
   };
 
@@ -295,6 +328,11 @@ export function MessageView() {
     if (!files?.length) return;
     const sender = myArkId || '3218815';
     setAttachMenu(false);
+
+    if (!groupId && peer && !isDemoPeer && !canChat) {
+      setSendError(MSG_NEED_FRIEND);
+      return;
+    }
 
     const pushGroupAttachment = (attachment: MessageAttachment) => {
       if (!groupId) return;
@@ -323,15 +361,21 @@ export function MessageView() {
         return;
       }
       if (!peer) return;
-      const msg = await sendDirectMessage({
-        userId: user?.id,
-        senderArkId: sender,
-        recipientArkId: peer,
-        body: '',
-        attachment,
-      });
-      setThread(prev => [...prev, msg]);
-      setListTick(t => t + 1);
+      try {
+        const msg = await sendDirectMessage({
+          userId: user?.id,
+          senderArkId: sender,
+          recipientArkId: peer,
+          body: '',
+          attachment,
+          allowWithoutFriendship: isDemoPeer,
+        });
+        setThread(prev => [...prev, msg]);
+        setListTick(t => t + 1);
+      } catch (err) {
+        setSendError(err instanceof Error ? err.message : MSG_NEED_FRIEND);
+        setCanChat(false);
+      }
       return;
     }
 
@@ -347,15 +391,22 @@ export function MessageView() {
         continue;
       }
       if (!peer) return;
-      const msg = await sendDirectMessage({
-        userId: user?.id,
-        senderArkId: sender,
-        recipientArkId: peer,
-        body: '',
-        attachment,
-      });
-      setThread(prev => [...prev, msg]);
-      setListTick(t => t + 1);
+      try {
+        const msg = await sendDirectMessage({
+          userId: user?.id,
+          senderArkId: sender,
+          recipientArkId: peer,
+          body: '',
+          attachment,
+          allowWithoutFriendship: isDemoPeer,
+        });
+        setThread(prev => [...prev, msg]);
+        setListTick(t => t + 1);
+      } catch (err) {
+        setSendError(err instanceof Error ? err.message : MSG_NEED_FRIEND);
+        setCanChat(false);
+        break;
+      }
     }
   };
 
@@ -391,9 +442,21 @@ export function MessageView() {
 
   const unaddActive = () => {
     if (!active) return;
-    removeFriend(active.arkId);
-    setHiddenTick(t => t + 1);
-    navigate({ name: 'message' });
+    void removeFriend(active.arkId).then(() => {
+      setHiddenTick(t => t + 1);
+      setCanChat(false);
+      setSendError(MSG_NEED_FRIEND);
+      navigate({ name: 'message' });
+    });
+  };
+
+  const deleteFromList = (arkId: string, e?: MouseEvent) => {
+    e?.stopPropagation();
+    e?.preventDefault();
+    void deleteContact(arkId).then(() => {
+      setHiddenTick(t => t + 1);
+      if (peer === arkId) navigate({ name: 'message' });
+    });
   };
 
   const createGroup = () => {
@@ -471,9 +534,10 @@ export function MessageView() {
 
   const blockActive = () => {
     if (!active) return;
-    blockFriend(active.arkId);
-    setHiddenTick(t => t + 1);
-    navigate({ name: 'message' });
+    void blockFriend(active.arkId, active.displayName).then(() => {
+      setHiddenTick(t => t + 1);
+      navigate({ name: 'message' });
+    });
   };
 
   if (people.length === 0) {
@@ -640,60 +704,83 @@ export function MessageView() {
               const status = demoPresenceFor(c.arkId);
               if (railCompact) {
                 return (
-                  <button
-                    key={c.arkId}
-                    type="button"
-                    title={c.displayName}
-                    onClick={() => navigate({ name: 'message', peer: c.arkId })}
-                    className={`w-full flex items-center justify-center rounded-xl py-2 ${
-                      !groupId && peer === c.arkId ? 'bg-surface-hover' : 'hover:bg-surface-hover/60'
-                    }`}
-                  >
-                    <span className="relative">
-                      <ArkAvatar name={c.displayName} src={c.avatarUrl} size="md" />
-                      <span
-                        className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-ark-navy-950 ${presenceDotClass(status)}`}
-                        aria-hidden
-                      />
-                      {hasUnread && (
-                        <span className="absolute -top-0.5 -left-0.5 h-2 w-2 rounded-full bg-sky-400 border border-ark-navy-950" aria-label="Unread" />
-                      )}
-                    </span>
-                  </button>
+                  <div key={c.arkId} className="group relative w-full flex items-center justify-center">
+                    <button
+                      type="button"
+                      title={c.displayName}
+                      onClick={() => navigate({ name: 'message', peer: c.arkId })}
+                      className={`w-full flex items-center justify-center rounded-xl py-2 ${
+                        !groupId && peer === c.arkId ? 'bg-surface-hover' : 'hover:bg-surface-hover/60'
+                      }`}
+                    >
+                      <span className="relative">
+                        <ArkAvatar name={c.displayName} src={c.avatarUrl} size="md" />
+                        <span
+                          className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-ark-navy-950 ${presenceDotClass(status)}`}
+                          aria-hidden
+                        />
+                        {hasUnread && (
+                          <span className="absolute -top-0.5 -left-0.5 h-2 w-2 rounded-full bg-sky-400 border border-ark-navy-950" aria-label="Unread" />
+                        )}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      title="Delete contact"
+                      aria-label={`Delete ${c.displayName}`}
+                      onClick={e => deleteFromList(c.arkId, e)}
+                      className="absolute -top-0.5 -right-0.5 h-5 w-5 rounded-full bg-ark-navy-900 border border-white/15 text-content-tertiary hover:text-rose-300 hover:border-rose-400/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      <Trash2 className="w-2.5 h-2.5" />
+                    </button>
+                  </div>
                 );
               }
               return (
-                <button
+                <div
                   key={c.arkId}
-                  type="button"
-                  onClick={() => navigate({ name: 'message', peer: c.arkId })}
-                  className={`w-full flex items-center gap-2.5 text-left rounded-xl px-2.5 py-2.5 ${
+                  className={`group relative w-full flex items-center gap-1 rounded-xl ${
                     !groupId && peer === c.arkId ? 'bg-surface-hover' : 'hover:bg-surface-hover/60'
                   }`}
                 >
-                  <span className="relative shrink-0">
-                    <ArkAvatar name={c.displayName} src={c.avatarUrl} size="md" />
-                    <span
-                      className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-ark-navy-950 ${presenceDotClass(status)}`}
-                      title={status}
-                      aria-hidden
-                    />
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block text-sm text-content-primary truncate">{c.displayName}</span>
-                    <span className="block text-[10px] font-mono text-content-tertiary tracking-wider mt-0.5">
-                      {formatArkId(c.arkId)}
+                  <button
+                    type="button"
+                    onClick={() => navigate({ name: 'message', peer: c.arkId })}
+                    className="flex-1 min-w-0 flex items-center gap-2.5 text-left rounded-xl px-2.5 py-2.5"
+                  >
+                    <span className="relative shrink-0">
+                      <ArkAvatar name={c.displayName} src={c.avatarUrl} size="md" />
+                      <span
+                        className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-ark-navy-950 ${presenceDotClass(status)}`}
+                        title={status}
+                        aria-hidden
+                      />
                     </span>
-                  </span>
-                  <span className="shrink-0 flex flex-row items-center gap-1.5 self-center">
-                    {age && (
-                      <span className="text-[10px] text-content-tertiary tabular-nums">{age}</span>
-                    )}
-                    {hasUnread && (
-                      <span className="h-2 w-2 rounded-full bg-sky-400 shrink-0" aria-label="Unread message" />
-                    )}
-                  </span>
-                </button>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm text-content-primary truncate">{c.displayName}</span>
+                      <span className="block text-[10px] font-mono text-content-tertiary tracking-wider mt-0.5">
+                        {formatArkId(c.arkId)}
+                      </span>
+                    </span>
+                    <span className="shrink-0 flex flex-row items-center gap-1.5 self-center">
+                      {age && (
+                        <span className="text-[10px] text-content-tertiary tabular-nums">{age}</span>
+                      )}
+                      {hasUnread && (
+                        <span className="h-2 w-2 rounded-full bg-sky-400 shrink-0" aria-label="Unread message" />
+                      )}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    title="Delete contact"
+                    aria-label={`Delete ${c.displayName}`}
+                    onClick={e => deleteFromList(c.arkId, e)}
+                    className="shrink-0 mr-1.5 h-8 w-8 rounded-full flex items-center justify-center text-content-tertiary hover:text-rose-300 hover:bg-rose-500/15 opacity-0 group-hover:opacity-100 transition-opacity"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               );
             })}
           </div>
@@ -876,6 +963,38 @@ export function MessageView() {
           </div>
 
           <div className="shrink-0 px-4 pb-4 pt-2">
+            {sendError && !groupId ? (
+              <p className="mx-auto w-full max-w-md mb-2 text-[11px] text-amber-200/95 leading-relaxed text-center px-1">
+                {sendError}
+              </p>
+            ) : null}
+            {!canChat && !groupId && !isFriend && peer ? (
+              <div className="mx-auto w-full max-w-md mb-2 flex justify-center">
+                <button
+                  type="button"
+                  disabled={adding}
+                  onClick={() => {
+                    setAddId(peer);
+                    void (async () => {
+                      setAdding(true);
+                      setAddError(null);
+                      try {
+                        await inviteByArkId(peer);
+                        setAddOk(`Friend request was sent to ${formatArkId(peer)}`);
+                        setSendError('Friend request sent. They need to accept before you can message.');
+                      } catch (err) {
+                        setSendError(err instanceof Error ? err.message : 'Could not send friend request');
+                      }
+                      setAdding(false);
+                    })();
+                  }}
+                  className="inline-flex items-center gap-1.5 rounded-full bg-sky-500/20 border border-sky-500/35 px-3 py-1.5 text-[11px] font-medium text-sky-200 hover:bg-sky-500/30 disabled:opacity-50"
+                >
+                  <UserPlus className="w-3 h-3" />
+                  {adding ? 'Sending…' : 'Send friend request'}
+                </button>
+              </div>
+            ) : null}
             <div className="relative mx-auto w-full max-w-md">
               {attachMenu && (
                 <div className="absolute bottom-full left-0 mb-2 w-44 rounded-xl border border-white/10 bg-ark-navy-900 shadow-xl overflow-hidden z-10">
@@ -899,11 +1018,12 @@ export function MessageView() {
                   </button>
                 </div>
               )}
-              <div className="flex items-center gap-1 rounded-full bg-ark-navy-950/80 border border-white/10 pl-1.5 pr-1.5 py-1">
+              <div className={`flex items-center gap-1 rounded-full bg-ark-navy-950/80 border border-white/10 pl-1.5 pr-1.5 py-1 ${!canChat && !groupId ? 'opacity-60' : ''}`}>
                 <button
                   type="button"
                   onClick={() => setAttachMenu(v => !v)}
-                  className="h-8 w-8 shrink-0 rounded-full flex items-center justify-center text-content-tertiary hover:text-content-primary hover:bg-white/5"
+                  disabled={!canChat && !groupId}
+                  className="h-8 w-8 shrink-0 rounded-full flex items-center justify-center text-content-tertiary hover:text-content-primary hover:bg-white/5 disabled:opacity-40"
                   aria-label="Attach"
                   title="Upload image, file, or folder"
                 >
@@ -914,19 +1034,20 @@ export function MessageView() {
                   onChange={e => setDraft(e.target.value)}
                   spellCheck
                   lang="en"
+                  disabled={!canChat && !groupId}
                   onKeyDown={e => {
                     if (e.key === 'Enter' && !e.shiftKey) {
                       e.preventDefault();
                       void send();
                     }
                   }}
-                  placeholder="Message…"
-                  className="flex-1 min-w-0 bg-transparent text-sm text-content-primary placeholder:text-content-tertiary outline-none py-1.5"
+                  placeholder={!canChat && !groupId ? 'Add friend to message…' : 'Message…'}
+                  className="flex-1 min-w-0 bg-transparent text-sm text-content-primary placeholder:text-content-tertiary outline-none py-1.5 disabled:cursor-not-allowed"
                 />
                 <button
                   type="button"
                   onClick={() => void send()}
-                  disabled={!draft.trim()}
+                  disabled={!draft.trim() || (!canChat && !groupId)}
                   className="h-8 w-8 shrink-0 rounded-full bg-sky-600 text-white flex items-center justify-center disabled:opacity-35"
                   aria-label="Send"
                 >

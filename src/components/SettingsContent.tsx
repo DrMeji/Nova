@@ -30,7 +30,7 @@ import {
   User, Palette, Zap, Boxes, Cloud, Shield, HardDrive,
   FolderKanban, Lock, RefreshCw, Check, Cpu, KeyRound,
   Smartphone, Sparkles, FlaskConical, Cable,
-  Mail, BadgeCheck, Trash2, Download, Info, Monitor, Copy, X, FolderOpen, HelpCircle,
+  Mail, BadgeCheck, Trash2, Download, Info, Monitor, Copy, X, FolderOpen, HelpCircle, Ban, Github,
 } from 'lucide-react';
 import { clearLocalAppCaches, clearLocalChatCache } from '@/lib/clearSession';
 import { deleteEngineModel, engineDiskSpace, getEngineStatus, type ArkEngineModel, type ArkEngineStatus } from '@/lib/arkEngine';
@@ -43,8 +43,7 @@ import { getBrainUrl } from '@/lib/brainUrl';
 import { SettingsSystemHealth } from '@/components/SettingsSystemHealth';
 import { isArkDevSession } from '@/lib/arkRuntime';
 import { BrandMark, StatusCheck } from '@/components/BrandMark';
-import {
-  listMcpServers,
+import { listMcpServers,
   upsertMcpServer,
   removeMcpServer,
   setMcpServerEnabled,
@@ -53,6 +52,7 @@ import {
   type McpTransport,
 } from '@/lib/mcpServers';
 import { probeMcpServer } from '@/lib/arkMcp';
+import { useSocial } from '@/context/SocialContext';
 
 const REVEAL_FEATURES: { id: ParkId; label: string; description: string }[] = [
   { id: 'networking', label: 'Networking', description: 'Live. help feed, add/message builders (always on).' },
@@ -131,6 +131,7 @@ const ACCENTS: { id: AccentPref; label: string; swatch: string }[] = [
 
 export function SettingsContent({ onClose, initialSection }: { onClose?: () => void; initialSection?: string } = {}) {
   const { user, profile, settings, updateSettings, signOut, deleteAccountPermanently, refreshProfile } = useAuth();
+  const { blockedUsers, unblockFriend, refreshBlocked } = useSocial();
   const { theme, setTheme } = useTheme();
   const { navigate } = useRouter();
   const [activeSection, setActiveSection] = useState(initialSection || 'account');
@@ -1684,6 +1685,50 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                   value={prefs.clearClipboardAfterPaste}
                   onChange={v => patchPrefs({ clearClipboardAfterPaste: v })}
                 />
+                <div className="rounded-xl border border-surface-border p-4 space-y-3 mt-2">
+                  <div className="flex items-start gap-2.5">
+                    <Ban className="w-4 h-4 text-rose-300/90 shrink-0 mt-0.5" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-content-primary">Blocked users</p>
+                      <p className="text-xs text-content-tertiary mt-0.5 leading-relaxed">
+                        Blocked people cannot add you or message you. Unblock to allow friend requests again.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      className="ark-btn-secondary text-xs shrink-0"
+                      onClick={() => void refreshBlocked()}
+                    >
+                      Refresh
+                    </button>
+                  </div>
+                  {blockedUsers.length === 0 ? (
+                    <p className="text-xs text-content-tertiary">No blocked users.</p>
+                  ) : (
+                    <ul className="space-y-2">
+                      {blockedUsers.map(b => (
+                        <li
+                          key={b.arkId}
+                          className="flex items-center gap-2 rounded-xl border border-white/10 bg-ark-navy-950/40 px-3 py-2"
+                        >
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-sm text-content-primary truncate">{b.displayName}</span>
+                            <span className="block text-[10px] font-mono text-content-tertiary tracking-wider mt-0.5">
+                              {formatArkId(b.arkId)}
+                            </span>
+                          </span>
+                          <button
+                            type="button"
+                            className="shrink-0 rounded-full bg-white/5 border border-white/10 px-3 py-1 text-[11px] text-content-secondary hover:text-content-primary"
+                            onClick={() => void unblockFriend(b.arkId)}
+                          >
+                            Unblock
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
                 <button
                   type="button"
                   className="ark-btn-secondary w-full !text-ark-accent-red mt-2"
@@ -2350,15 +2395,15 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
           {activeSection === 'updates' && (
             <SettingsSection title="Update" description="Check for a new ARK build and install it here">
               <div className="space-y-5">
-                <div className="ark-card p-4 flex flex-col gap-3">
+                <div className="rounded-3xl border border-surface-border bg-ark-navy-900/55 p-5 sm:p-6 flex flex-col gap-4 shadow-[0_8px_28px_rgba(0,0,0,0.28)]">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <div className="min-w-0">
                       <p className="text-sm font-medium text-content-primary">ARK v{appVersion}</p>
                       <p className="text-xs text-content-tertiary mt-0.5">{updateMsg}</p>
                       {downloadingUpdate && (
-                        <div className="mt-2 h-1.5 rounded-full bg-surface-hover overflow-hidden max-w-xs">
+                        <div className="mt-3 h-2 rounded-full bg-surface-hover overflow-hidden max-w-xs">
                           <div
-                            className="h-full bg-sky-500 transition-all"
+                            className="h-full rounded-full bg-sky-500 transition-all"
                             style={{ width: `${Math.min(100, Math.max(updatePercent, 4))}%` }}
                           />
                         </div>
@@ -2367,9 +2412,20 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                     <div className="flex flex-wrap items-center gap-2 shrink-0">
                       <button
                         type="button"
+                        title="Open ARK on GitHub"
+                        aria-label="Open ARK on GitHub"
+                        onClick={() =>
+                          void window.arkDesktop?.openExternal?.('https://github.com/DrMeji/Ark/releases')
+                        }
+                        className="h-10 w-10 rounded-xl border border-white/15 bg-white/[0.04] text-content-secondary hover:text-content-primary hover:bg-white/[0.08] flex items-center justify-center transition-colors"
+                      >
+                        <Github className="w-5 h-5" />
+                      </button>
+                      <button
+                        type="button"
                         onClick={checkForUpdates}
                         disabled={checkingUpdates || downloadingUpdate}
-                        className="ark-btn-secondary"
+                        className="ark-btn-secondary !rounded-full"
                       >
                         {checkingUpdates ? <RefreshCw className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
                         {checkingUpdates ? 'Checking…' : 'Check for update'}
@@ -2380,7 +2436,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                           onClick={downloadUpdate}
                           disabled={downloadingUpdate || !updateInfo.setupAssetUrl}
                           title={!updateInfo.setupAssetUrl ? 'Update is disabled until GitHub publishes an installer file for this build' : 'Download and install'}
-                          className="ark-btn-primary"
+                          className="ark-btn-primary !rounded-full"
                         >
                           {downloadingUpdate ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
                           {downloadingUpdate ? 'Updating…' : 'Update'}
@@ -2391,21 +2447,8 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                   <p className="text-[11px] text-content-tertiary leading-relaxed">
                     Use <strong className="font-medium text-content-secondary">Check for update</strong>, then press{' '}
                     <strong className="font-medium text-content-secondary">Update</strong> when a newer build is offered.
-                    That downloads ARK-Setup.exe from GitHub Releases and installs it.
-                  </p>
-                  <button
-                    type="button"
-                    className="ark-btn-secondary w-full sm:w-auto"
-                    onClick={() =>
-                      void window.arkDesktop?.openExternal?.('https://github.com/DrMeji/Ark/releases/latest')
-                    }
-                  >
-                    <Download className="w-4 h-4" />
-                    Click here to download
-                  </button>
-                  <p className="text-[11px] text-content-tertiary leading-relaxed -mt-1">
-                    Prefer a manual install? Opens the public releases page in your browser. After install, firewall or
-                    SmartScreen prompts are normal — minimize them and keep using ARK.
+                    That downloads ARK-Setup.exe from GitHub Releases and installs it. The GitHub button opens the public
+                    releases page if you prefer a manual install.
                   </p>
                   {signingStatus ? (
                     <p className="text-[11px] text-content-tertiary leading-relaxed">

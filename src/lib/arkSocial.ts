@@ -4,7 +4,7 @@
  */
 
 import { supabase } from '@/lib/supabase';
-import { isArkUserId, lookupArkUser, normalizeArkId } from '@/lib/arkUserId';
+import { formatArkId, isArkUserId, lookupArkUser, normalizeArkId } from '@/lib/arkUserId';
 
 export type ArkContact = {
   arkId: string;
@@ -129,32 +129,199 @@ export async function addContact(arkIdRaw: string, displayName?: string, avatarU
 }
 
 export function removeContact(arkId: string) {
-  saveLocalContacts(loadLocalContacts().filter(c => c.arkId !== arkId));
+  const id = normalizeArkId(arkId);
+  saveLocalContacts(loadLocalContacts().filter(c => normalizeArkId(c.arkId) !== id && formatArkId(c.arkId) !== formatArkId(id)));
+}
+
+/** Friendship required before DMs. Shown in Message when send is blocked. */
+export const MSG_NEED_FRIEND =
+  'You need to add this person, and they need to accept your friend request before you can send messages.';
+
+export async function unfriendPeer(userId: string | null | undefined, peerArkIdRaw: string): Promise<void> {
+  const peer = normalizeArkId(peerArkIdRaw);
+  if (!isArkUserId(peer)) return;
+  removeContact(peer);
+  hideDemoContact(peer);
+  if (!canUseCloud(userId)) return;
+  try {
+    const { error } = await supabase.rpc('unfriend_ark_peer', { p_peer_ark_id: formatArkId(peer) });
+    if (error) {
+      // Fallback: delete my cloud row only (peer may still see me until they refresh / RPC is applied).
+      await supabase.from('ark_contacts').delete().eq('peer_ark_id', formatArkId(peer));
+      await supabase.from('ark_contacts').delete().eq('peer_ark_id', peer);
+    }
+  } catch {
+    try {
+      await supabase.from('ark_contacts').delete().eq('peer_ark_id', formatArkId(peer));
+    } catch {
+      /* keep local removed */
+    }
+  }
+}
+
+export async function areMutualFriends(
+  userId: string | null | undefined,
+  peerArkIdRaw: string,
+  localContacts: ArkContact[],
+): Promise<boolean> {
+  const peer = formatArkId(normalizeArkId(peerArkIdRaw));
+  if (!isArkUserId(peer)) return false;
+  const locally = localContacts.some(c => formatArkId(c.arkId) === peer);
+  if (!locally) return false;
+  if (!canUseCloud(userId)) return true;
+  try {
+    const { data, error } = await supabase.rpc('are_mutual_ark_friends', { p_peer_ark_id: peer });
+    if (error) return locally;
+    return Boolean(data);
+  } catch {
+    return locally;
+  }
 }
 
 const BLOCKED_KEY = 'ark:blocked-ark-ids';
 const HIDDEN_DEMOS_KEY = 'ark:hidden-demo-contacts';
 
+export type BlockedUser = {
+  arkId: string;
+  displayName: string;
+  blockedAt: string;
+};
+
+const BLOCKED_META_KEY = 'ark:blocked-meta';
+
+function loadBlockedMeta(): Record<string, { displayName?: string; blockedAt?: string }> {
+  const raw = readJson<Record<string, { displayName?: string; blockedAt?: string }>>(BLOCKED_META_KEY, {});
+  return raw && typeof raw === 'object' ? raw : {};
+}
+
+function saveBlockedMeta(meta: Record<string, { displayName?: string; blockedAt?: string }>) {
+  writeJson(BLOCKED_META_KEY, meta);
+}
+
 export function loadBlockedArkIds(): string[] {
   const list = readJson<string[]>(BLOCKED_KEY, []);
-  return Array.isArray(list) ? list.filter(isArkUserId) : [];
+  return Array.isArray(list) ? list.filter(isArkUserId).map(formatArkId) : [];
+}
+
+export function loadBlockedUsers(): BlockedUser[] {
+  const ids = loadBlockedArkIds();
+  const meta = loadBlockedMeta();
+  return ids.map(arkId => ({
+    arkId,
+    displayName: meta[arkId]?.displayName || arkId,
+    blockedAt: meta[arkId]?.blockedAt || new Date(0).toISOString(),
+  })).sort((a, b) => b.blockedAt.localeCompare(a.blockedAt));
 }
 
 export function isBlockedArkId(arkId: string): boolean {
-  return loadBlockedArkIds().includes(normalizeArkId(arkId));
+  const id = formatArkId(normalizeArkId(arkId));
+  return loadBlockedArkIds().some(x => formatArkId(x) === id);
 }
 
-export function blockArkId(arkIdRaw: string) {
-  const arkId = normalizeArkId(arkIdRaw);
+export async function blockArkId(
+  arkIdRaw: string,
+  opts?: { userId?: string | null; displayName?: string },
+): Promise<void> {
+  const arkId = formatArkId(normalizeArkId(arkIdRaw));
   if (!isArkUserId(arkId)) return;
   const next = [...new Set([...loadBlockedArkIds(), arkId])];
   writeJson(BLOCKED_KEY, next);
-  saveLocalContacts(loadLocalContacts().filter(c => c.arkId !== arkId));
+  const meta = loadBlockedMeta();
+  meta[arkId] = {
+    displayName: opts?.displayName || meta[arkId]?.displayName || arkId,
+    blockedAt: new Date().toISOString(),
+  };
+  saveBlockedMeta(meta);
+  removeContact(arkId);
+  hideDemoContact(arkId);
+  if (!canUseCloud(opts?.userId)) return;
+  try {
+    const { error } = await supabase.rpc('block_ark_peer', { p_peer_ark_id: arkId });
+    if (error) {
+      await supabase.from('ark_blocks').upsert({
+        owner_id: opts!.userId,
+        blocked_ark_id: arkId,
+      }, { onConflict: 'owner_id,blocked_ark_id' });
+      await unfriendPeer(opts?.userId, arkId);
+    }
+  } catch {
+    try {
+      await unfriendPeer(opts?.userId, arkId);
+    } catch {
+      /* local block still set */
+    }
+  }
+  try {
+    window.dispatchEvent(new CustomEvent('ark:blocks-changed'));
+  } catch {
+    /* ignore */
+  }
 }
 
-export function unblockArkId(arkIdRaw: string) {
-  const arkId = normalizeArkId(arkIdRaw);
-  writeJson(BLOCKED_KEY, loadBlockedArkIds().filter(id => id !== arkId));
+export async function unblockArkId(arkIdRaw: string, userId?: string | null): Promise<void> {
+  const arkId = formatArkId(normalizeArkId(arkIdRaw));
+  writeJson(BLOCKED_KEY, loadBlockedArkIds().filter(id => formatArkId(id) !== arkId));
+  const meta = loadBlockedMeta();
+  delete meta[arkId];
+  saveBlockedMeta(meta);
+  if (canUseCloud(userId)) {
+    try {
+      const { error } = await supabase.rpc('unblock_ark_peer', { p_peer_ark_id: arkId });
+      if (error) {
+        await supabase.from('ark_blocks').delete().eq('blocked_ark_id', arkId);
+      }
+    } catch {
+      try {
+        await supabase.from('ark_blocks').delete().eq('blocked_ark_id', arkId);
+      } catch {
+        /* keep local */
+      }
+    }
+  }
+  try {
+    window.dispatchEvent(new CustomEvent('ark:blocks-changed'));
+  } catch {
+    /* ignore */
+  }
+}
+
+export async function syncBlockedFromCloud(userId?: string | null): Promise<BlockedUser[]> {
+  if (!canUseCloud(userId)) return loadBlockedUsers();
+  try {
+    const { data, error } = await supabase
+      .from('ark_blocks')
+      .select('blocked_ark_id, created_at')
+      .order('created_at', { ascending: false });
+    if (error || !data) return loadBlockedUsers();
+    const ids = data.map(r => formatArkId(String(r.blocked_ark_id))).filter(isArkUserId);
+    writeJson(BLOCKED_KEY, [...new Set(ids)]);
+    const meta = loadBlockedMeta();
+    for (const row of data) {
+      const id = formatArkId(String(row.blocked_ark_id));
+      if (!isArkUserId(id)) continue;
+      meta[id] = {
+        displayName: meta[id]?.displayName || id,
+        blockedAt: String(row.created_at || new Date().toISOString()),
+      };
+    }
+    saveBlockedMeta(meta);
+    return loadBlockedUsers();
+  } catch {
+    return loadBlockedUsers();
+  }
+}
+
+export async function isBlockedFromAdding(targetArkId: string, userId?: string | null): Promise<boolean> {
+  if (!canUseCloud(userId)) return false;
+  try {
+    const { data, error } = await supabase.rpc('is_blocked_from_adding', {
+      p_target_ark_id: formatArkId(normalizeArkId(targetArkId)),
+    });
+    if (error) return false;
+    return Boolean(data);
+  } catch {
+    return false;
+  }
 }
 
 export function loadHiddenDemoContacts(): string[] {
@@ -238,11 +405,13 @@ export async function listContacts(userId?: string | null): Promise<ArkContact[]
       }
     }
 
+    const blocked = new Set(loadBlockedArkIds().map(formatArkId));
+    // Cloud is source of truth when signed in — local-only rows must not resurrect after unfriend.
     const byId = new Map<string, ArkContact>();
-    [...enriched, ...local].forEach(c => {
-      const prev = byId.get(c.arkId);
-      if (!prev) byId.set(c.arkId, c);
-      else byId.set(c.arkId, { ...prev, ...c, avatarUrl: c.avatarUrl || prev.avatarUrl });
+    enriched.forEach(c => {
+      const id = formatArkId(c.arkId);
+      if (blocked.has(id)) return;
+      byId.set(id, { ...c, arkId: id });
     });
     const merged = [...byId.values()];
     saveLocalContacts(merged);
@@ -454,11 +623,23 @@ export async function sendDirectMessage(opts: {
   recipientArkId: string;
   body: string;
   attachment?: MessageAttachment;
+  /** When false, skip friendship check (internal / already verified). */
+  allowWithoutFriendship?: boolean;
 }): Promise<DirectMessage> {
+  const peer = formatArkId(normalizeArkId(opts.recipientArkId));
+  if (!opts.allowWithoutFriendship) {
+    const friends = await areMutualFriends(opts.userId, peer, loadLocalContacts());
+    if (!friends) {
+      throw new Error(MSG_NEED_FRIEND);
+    }
+    if (isBlockedArkId(peer)) {
+      throw new Error('You blocked this user. Unblock them in Settings → Privacy to message again.');
+    }
+  }
   const msg: DirectMessage = {
     id: crypto.randomUUID(),
     senderArkId: opts.senderArkId,
-    recipientArkId: opts.recipientArkId,
+    recipientArkId: peer,
     body: opts.body.trim(),
     createdAt: new Date().toISOString(),
     attachment: opts.attachment,

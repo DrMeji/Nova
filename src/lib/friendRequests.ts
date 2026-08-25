@@ -8,6 +8,7 @@ import { isArkUserId, lookupArkUser, normalizeArkId } from '@/lib/arkUserId';
 import { isDevArkAlias } from '@/lib/arkDevAccount';
 import { pushLocalNotification, dismissFriendRequestNotification } from '@/lib/localNotifications';
 import { pushSidebarToast } from '@/lib/sidebarToast';
+import { isBlockedArkId, isBlockedFromAdding } from '@/lib/arkSocial';
 
 export type FriendRequest = {
   id: string;
@@ -156,6 +157,10 @@ export async function sendFriendRequest(opts: {
     return { ok: false, error: 'Sign in to send friend requests to other ARK users.' };
   }
 
+  if (isBlockedArkId(toAlias ? 'DEV' : to)) {
+    return { ok: false, error: 'You blocked this user. Unblock them in Settings → Privacy first.' };
+  }
+
   const found = await lookupArkUser(toAlias ? 'DEV' : to);
   if (!found) {
     return {
@@ -166,6 +171,10 @@ export async function sendFriendRequest(opts: {
     };
   }
   if (found.arkId === from) return { ok: false, error: 'That’s your own ARK ID' };
+
+  if (await isBlockedFromAdding(found.arkId, opts.userId)) {
+    return { ok: false, error: 'This user is not accepting friend requests from you.' };
+  }
 
   const all = await syncFriendRequests(from, opts.userId);
   if (all.some(r => r.fromArkId === from && r.toArkId === found.arkId && r.status === 'pending')) {

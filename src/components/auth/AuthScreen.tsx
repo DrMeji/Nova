@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { useAuth } from '@/context/AuthContext';
-import { Loader2, Mail, Lock, AlertCircle, Zap, Eye, EyeOff, User, Download, FolderOpen, RefreshCw } from 'lucide-react';
+import { Loader2, Mail, Lock, AlertCircle, Zap, Eye, EyeOff, User, FolderOpen, RefreshCw, Github } from 'lucide-react';
 import { AuthAmbientOrbs } from '@/components/auth/AuthAmbientOrbs';
 import {
   formatForgotPasswordHelp,
@@ -384,32 +384,35 @@ export function AuthScreen() {
             )}
 
             <div className="mt-4 space-y-2">
-              <button
-                type="button"
-                className="ark-btn-secondary w-full h-11 rounded-xl"
-                onClick={() =>
-                  void window.arkDesktop?.openExternal?.('https://github.com/DrMeji/Ark/releases/latest')
-                }
-              >
-                <Download className="w-4 h-4 shrink-0" />
-                Click here to download
-              </button>
-              <button
-                type="button"
-                className="ark-btn-ghost w-full h-10 rounded-xl text-xs"
-                disabled={updateBusy}
-                onClick={() => void handleSignedOutUpdateCheck()}
-              >
-                {updateBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
-                Check for update (no sign-in)
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  title="Open ARK on GitHub"
+                  aria-label="Open ARK on GitHub"
+                  className="h-11 w-11 shrink-0 rounded-xl border border-white/15 bg-white/[0.04] text-content-secondary hover:text-content-primary hover:bg-white/[0.08] flex items-center justify-center"
+                  onClick={() =>
+                    void window.arkDesktop?.openExternal?.('https://github.com/DrMeji/Ark/releases')
+                  }
+                >
+                  <Github className="w-5 h-5" />
+                </button>
+                <button
+                  type="button"
+                  className="ark-btn-ghost flex-1 h-11 rounded-full text-xs"
+                  disabled={updateBusy}
+                  onClick={() => void handleSignedOutUpdateCheck()}
+                >
+                  {updateBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                  Check for update (no sign-in)
+                </button>
+              </div>
               {updateHint ? (
                 <p className="text-center text-[11px] text-content-tertiary leading-relaxed whitespace-pre-wrap">
                   {updateHint}
                 </p>
               ) : (
                 <p className="text-center text-[11px] text-content-tertiary leading-relaxed">
-                  Opens the latest ARK installer on GitHub, or checks for an in-app update without signing in.
+                  Check for an in-app update without signing in, or open public GitHub releases with the icon.
                 </p>
               )}
               <button
