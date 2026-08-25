@@ -1,59 +1,72 @@
-"""Rebuild ARK app icon: black rounded square + white robot, no gray inset."""
-from PIL import Image, ImageDraw, ImageFilter
+"""Generate ARK mark icon: robot only, no squircle / gray box."""
+from PIL import Image, ImageDraw
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SRC = ROOT / 'build' / 'icon.png'
-BACKUP = ROOT / 'build' / 'icon.source-backup.png'
+DESKTOP = Path.home() / 'Desktop'
 
 
-def rebuild(src_img: Image.Image, size: int) -> Image.Image:
-    src = src_img.convert('RGBA').resize((size, size), Image.Resampling.LANCZOS)
-    w, h = src.size
-    logo = Image.new('RGBA', (w, h), (0, 0, 0, 0))
-    spx = src.load()
-    lpx = logo.load()
-    for y in range(h):
-        for x in range(w):
-            r, g, b, a = spx[x, y]
-            if a < 20:
-                continue
-            luma = (r + g + b) / 3.0
-            if luma >= 160:
-                lpx[x, y] = (255, 255, 255, 255)
+def draw_mark(size: int, fg=(255, 255, 255, 255)) -> Image.Image:
+    """Transparent background + robot mark only."""
+    img = Image.new('RGBA', (size, size), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    s = size / 64.0
+    stroke = max(2, int(round(3.2 * s)))
 
-    bg = Image.new('RGBA', (w, h), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(bg)
-    radius = int(size * 0.22)
-    draw.rounded_rectangle([0, 0, w - 1, h - 1], radius=radius, fill=(12, 12, 14, 255))
-    composed = Image.alpha_composite(bg, logo)
+    def L(x, y):
+        return (x * s, y * s)
 
-    mask = Image.new('L', (w, h), 0)
-    md = ImageDraw.Draw(mask)
-    md.rounded_rectangle([0, 0, w - 1, h - 1], radius=radius, fill=255)
-    mask = mask.filter(ImageFilter.GaussianBlur(0.8))
-    r, g, b, _ = composed.split()
-    return Image.merge('RGBA', (r, g, b, mask))
+    # Antenna
+    draw.line([L(32, 8), L(32, 15)], fill=fg, width=stroke)
+    draw.line([L(26, 8), L(38, 8)], fill=fg, width=stroke)
+
+    # Head
+    hx0, hy0 = L(14, 16)
+    hx1, hy1 = L(50, 52)
+    head_r = max(2, int(round(11 * s)))
+    draw.rounded_rectangle([hx0, hy0, hx1, hy1], radius=head_r, outline=fg, width=stroke)
+
+    # Ears
+    ear_w = max(2, int(round(3.2 * s)))
+    draw.arc([L(6, 30), L(18, 46)], start=90, end=270, fill=fg, width=ear_w)
+    draw.arc([L(46, 30), L(58, 46)], start=270, end=90, fill=fg, width=ear_w)
+
+    # Eyes
+    eye_w = max(2, int(round(3.6 * s)))
+    draw.line([L(25, 28), L(25, 40)], fill=fg, width=eye_w)
+    draw.line([L(39, 28), L(39, 40)], fill=fg, width=eye_w)
+    return img
 
 
 def main():
-    if not BACKUP.exists():
-        BACKUP.write_bytes(SRC.read_bytes())
-    src = Image.open(BACKUP if BACKUP.exists() else SRC)
-    icon = rebuild(src, 1024)
+    icon = draw_mark(1024)
     icon.save(ROOT / 'build' / 'icon.png', 'PNG')
-    rebuild(src, 512).save(ROOT / 'public' / 'ark-icon.png', 'PNG')
+    draw_mark(512).save(ROOT / 'public' / 'ark-icon.png', 'PNG')
+    draw_mark(512).save(ROOT / 'website' / 'public' / 'ark-icon.png', 'PNG')
+
+    DESKTOP.mkdir(parents=True, exist_ok=True)
+    icon.save(DESKTOP / 'ARK-icon.png', 'PNG')
+    draw_mark(1024, fg=(10, 10, 12, 255)).save(DESKTOP / 'ARK-mark-light.png', 'PNG')
+    draw_mark(1024, fg=(242, 244, 247, 255)).save(DESKTOP / 'ARK-mark-dark.png', 'PNG')
+    svg = '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <path d="M32 8v7M26 8h12" stroke="currentColor" stroke-width="3.2" stroke-linecap="round"/>
+  <rect x="14" y="16" width="36" height="36" rx="11" stroke="currentColor" stroke-width="3.2"/>
+  <path d="M14 34c-3.2 0-5 2-5 4.5S10.8 43 14 43M50 34c3.2 0 5 2 5 4.5S53.2 43 50 43" stroke="currentColor" stroke-width="3.2" stroke-linecap="round"/>
+  <path d="M25 28v12M39 28v12" stroke="currentColor" stroke-width="3.6" stroke-linecap="round"/>
+</svg>
+'''
+    (DESKTOP / 'ARK-mark.svg').write_text(svg, encoding='utf-8')
 
     sizes = [256, 128, 64, 48, 32, 24, 16]
     variants = [icon.resize((s, s), Image.Resampling.LANCZOS) for s in sizes]
-    # Largest first — electron-builder requires at least 256x256 in the ICO.
     variants[0].save(
         ROOT / 'build' / 'icon.ico',
         format='ICO',
         sizes=[(im.width, im.height) for im in variants],
         append_images=variants[1:],
     )
-    print('Updated build/icon.png, public/ark-icon.png, build/icon.ico')
+    print('Updated build/icon.png, public/ark-icon.png, website/public/ark-icon.png, build/icon.ico (no box)')
+    print('Also saved to Desktop: ARK-icon.png, ARK-mark-light.png, ARK-mark-dark.png, ARK-mark.svg')
 
 
 if __name__ == '__main__':

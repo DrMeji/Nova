@@ -525,17 +525,17 @@ function splashIconDataUri() {
 function splashIconMarkup() {
   const data = splashIconDataUri();
   if (data) {
-    return `<img src="${data}" alt="" width="96" height="96" draggable="false" style="object-fit:contain;display:block;margin:0 auto;user-select:none;border-radius:22px;" />`;
+    return `<img src="${data}" alt="" width="96" height="96" draggable="false" style="object-fit:contain;display:block;margin:0 auto;user-select:none;" />`;
   }
-  return `<div style="width:96px;height:96px;margin:0 auto;border-radius:22px;background:#0c0c0e;display:flex;align-items:center;justify-content:center;color:#f2f2f3;font:700 18px Segoe UI,system-ui,sans-serif;">ARK</div>`;
+  return `<div style="width:96px;height:96px;margin:0 auto;display:flex;align-items:center;justify-content:center;color:#f2f2f3;font:700 18px Segoe UI,system-ui,sans-serif;">ARK</div>`;
 }
 
 function splashShellCss() {
   return `
   html,body{margin:0;height:100%;background:#0a0a0c;color:#f2f2f3;font-family:"Segoe UI",system-ui,sans-serif;overflow:hidden;user-select:none;}
   .wrap{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px 36px 44px;box-sizing:border-box;}
-  .logo-wrap{margin:0 0 24px;width:112px;height:112px;border-radius:26px;background:#0c0c0e;display:flex;align-items:center;justify-content:center;box-shadow:0 10px 28px rgba(0,0,0,0.45);}
-  .logo-wrap img{width:96px;height:96px;border-radius:22px;}
+  .logo-wrap{margin:0 0 24px;width:112px;height:112px;display:flex;align-items:center;justify-content:center;background:transparent;box-shadow:none;}
+  .logo-wrap img{width:96px;height:96px;object-fit:contain;}
   #label{font-size:16px;font-weight:600;letter-spacing:0.01em;margin:0 0 8px;text-align:center;color:#f2f2f3;}
   #pct{font-size:13px;font-weight:500;color:#a8a8b3;margin:0 0 20px;text-align:center;font-variant-numeric:tabular-nums;}
   .track{width:340px;max-width:100%;height:12px;margin:0 auto;border-radius:999px;background:#3a3a44;overflow:hidden;}

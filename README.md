@@ -22,3 +22,13 @@ Current source: **v0.1.147** · Private changelog: [docs/CHANGELOG.md](docs/CHAN
 Helper: `pwsh scripts/publish-public-release.ps1 -Tag v0.1.xxx`
 
 See [docs/RELEASING.md](docs/RELEASING.md).
+
+## Website (preview)
+
+Marketing + account-help site lives in [`website/`](website/). It is **not** packaged into the desktop installer.
+
+```bash
+npm run website:dev
+```
+
+Open http://localhost:5180 — details in [website/README.md](website/README.md).

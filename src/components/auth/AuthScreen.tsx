@@ -202,7 +202,7 @@ export function AuthScreen() {
             <img
               src={`${import.meta.env.BASE_URL}ark-icon.png`}
               alt="ARK"
-              className="w-10 h-10 rounded-xl object-cover mx-auto"
+              className="w-10 h-10 object-contain mx-auto"
             />
           </div>
 

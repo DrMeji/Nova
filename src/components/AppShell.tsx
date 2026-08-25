@@ -650,7 +650,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                   <img
                     src={`${import.meta.env.BASE_URL}ark-icon.png`}
                     alt=""
-                    className="w-7 h-7 rounded-lg object-cover shrink-0"
+                    className="w-7 h-7 object-contain shrink-0"
                     onError={e => {
                       (e.currentTarget as HTMLImageElement).style.display = 'none';
                     }}
