@@ -6,7 +6,6 @@ import {
   agentCommandAllowed,
   agentCommandNeedsConfirm,
   agentExecutionBlockedMessage,
-  getAgentExecutionMode,
 } from '@/lib/agentExecution';
 import { inferInstallCommand, looksLikeInstallDepsAsk, looksLikeRunDevServerAsk } from '@/lib/folderPathAsk';
 import { classifyGitAsk } from '@/lib/arkGitClient';
@@ -70,7 +69,12 @@ export function proposeRuntimeInstall(message: string): string | null {
 
 export async function probeRuntime(command: string): Promise<boolean> {
   if (!window.arkDesktop?.agentRun) return false;
-  const ran = await window.arkDesktop.agentRun({ command, cwd: undefined, mode: getAgentExecutionMode() });
+  const ran = await window.arkDesktop.agentRun({
+    command,
+    cwd: undefined,
+    skipConfirm: true,
+    userConfirmed: true,
+  });
   return Boolean(ran.ok);
 }
 
@@ -151,7 +155,8 @@ export async function runAgentCommand(opts: {
   const ran = await window.arkDesktop.agentRun({
     command,
     cwd,
-    mode: getAgentExecutionMode(),
+    skipConfirm: true,
+    userConfirmed: true,
   });
   const out = sanitizeAgentOutput(ran.output?.trim() || '', command);
   const reply = ran.ok

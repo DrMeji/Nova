@@ -235,10 +235,22 @@ for (const c of CASES) {
   }
   if (c.name === '3D app conversational planning') {
     const { shouldInspectInChat } = await import('../src/lib/chatStudio.ts');
-    const { looksLikeConversationalPlanningAsk } = await import('../src/lib/chatIdeaIntent.ts');
+    const {
+      isBarePlanningFollowUp,
+      shouldInjectPlanningConversation,
+    } = await import('../src/lib/chatIdeaIntent.ts');
     const follow = 'yes give me more details';
-    if (!looksLikeConversationalPlanningAsk(follow)) {
-      console.error('FAIL [3D follow-up]: more details must stay conversational planning');
+    // Bare “more details” is a normal follow-up, not a standalone planning ask.
+    if (!isBarePlanningFollowUp(follow)) {
+      console.error('FAIL [3D follow-up]: more details should classify as bare planning follow-up');
+      failed += 1;
+    }
+    if (shouldInjectPlanningConversation(follow, { pendingIdea: false })) {
+      console.error('FAIL [3D follow-up]: bare more details must not inject planning without a pending idea');
+      failed += 1;
+    }
+    if (!shouldInjectPlanningConversation(follow, { pendingIdea: true })) {
+      console.error('FAIL [3D follow-up]: bare more details must stay in planning when a brief is pending');
       failed += 1;
     }
     if (shouldInspectInChat(follow, false)) {

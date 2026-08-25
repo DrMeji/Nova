@@ -425,13 +425,17 @@ declare global {
       agentRun?: (payload: {
         command: string;
         cwd?: string;
+        /** Ignored by main — mode comes from stored grants only. */
         mode?: 'allowlist' | 'auto_review' | 'run_all';
+        skipConfirm?: boolean;
+        userConfirmed?: boolean;
       }) => Promise<{
         ok: boolean;
         command?: string;
         cwd?: string;
         output?: string;
         error?: string;
+        needsConfirm?: boolean;
       }>;
       agentStartDevServer?: (payload: { cwd?: string }) => Promise<{
         ok: boolean;

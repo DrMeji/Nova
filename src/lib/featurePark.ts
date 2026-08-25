@@ -1,11 +1,11 @@
-/** Parked product surfaces. Networking, Message, and Call are live. */
+/** Parked product surfaces. Networking + Message are live; Call stays parked on retail until signaling is hardened. */
 
 export type ParkId = 'networking' | 'message' | 'call' | 'testers';
 
 const KEY = 'ark:revealed-features';
 
-/** Networking, Message, and Call are live for signed-in users. */
-const ALWAYS_LIVE: ParkId[] = ['networking', 'message', 'call'];
+/** Always on for signed-in users (Message / Networking). Call is opt-in via Testers on bat/dev. */
+const ALWAYS_LIVE: ParkId[] = ['networking', 'message'];
 
 function readList(): ParkId[] {
   try {
@@ -16,7 +16,6 @@ function readList(): ParkId[] {
     const list = parsed.filter((id): id is ParkId =>
       id === 'networking' || id === 'message' || id === 'call' || id === 'testers',
     );
-    // Migrate older installs that never revealed social tabs.
     for (const id of ALWAYS_LIVE) {
       if (!list.includes(id)) list.push(id);
     }
@@ -41,10 +40,7 @@ export function isRevealed(id: ParkId): boolean {
 }
 
 export function setRevealed(id: ParkId, on: boolean) {
-  if (ALWAYS_LIVE.includes(id) && !on) {
-    // Networking + Message stay live; Call can still be toggled.
-    return;
-  }
+  if (ALWAYS_LIVE.includes(id) && !on) return;
   const cur = new Set(readList());
   if (on) cur.add(id);
   else cur.delete(id);
@@ -54,6 +50,11 @@ export function setRevealed(id: ParkId, on: boolean) {
 export function isSocialParked(name: 'networking' | 'message' | 'call'): boolean {
   if (name === 'networking' || name === 'message') return false;
   return !isRevealed(name);
+}
+
+/** True when Call UI (Message pills / Call tab) should be shown. */
+export function isCallUiEnabled(): boolean {
+  return !isSocialParked('call');
 }
 
 /** Video tab parked until generative video is reliable (motion-still fallback is not product-ready). */

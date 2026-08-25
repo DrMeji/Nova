@@ -83,6 +83,8 @@ function FileBubble({
             {attachment.kind === 'folder' ? 'Folder' : attachment.kind === 'image' ? 'Image' : 'File'}
             {' · '}
             {attachment.sizeLabel}
+            {' · '}
+            this PC only
           </p>
           {!mine && (
             <button

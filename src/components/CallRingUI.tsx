@@ -1,7 +1,7 @@
 import { Ban, Mic, MicOff, Phone, PhoneOff, Sparkles, UserMinus, UsersRound } from 'lucide-react';
 import { useCall, formatCallElapsed, type CallSession } from '@/context/CallContext';
 import { SOCIAL_DEMO_ENABLED } from '@/lib/socialDemo';
-import { isRevealed } from '@/lib/featurePark';
+import { isCallUiEnabled, isRevealed } from '@/lib/featurePark';
 import { useRouter } from '@/context/RouterContext';
 
 export type CallRingMode = 'idle' | 'outgoing' | 'incoming' | 'live';
@@ -196,17 +196,19 @@ export function MessageDmCallPill({
             </button>
           </>
         )}
-        <CallControls
-          mode={mode}
-          muted={Boolean(session?.muted)}
-          onCall={onCall}
-          onHangUp={hangUp}
-          onToggleMute={toggleMute}
-          onAccept={acceptIncoming}
-          onDecline={declineIncoming}
-          onDemoAnswer={demoSimulateAnswer}
-        />
-        {SOCIAL_DEMO_ENABLED && mode === 'idle' && onDemoRing && (
+        {isCallUiEnabled() ? (
+          <CallControls
+            mode={mode}
+            muted={Boolean(session?.muted)}
+            onCall={onCall}
+            onHangUp={hangUp}
+            onToggleMute={toggleMute}
+            onAccept={acceptIncoming}
+            onDecline={declineIncoming}
+            onDemoAnswer={demoSimulateAnswer}
+          />
+        ) : null}
+        {isCallUiEnabled() && SOCIAL_DEMO_ENABLED && mode === 'idle' && onDemoRing && (
           <button type="button" onClick={onDemoRing} className="text-[9px] text-violet-300/80 hover:text-violet-200 underline underline-offset-2 pr-1">
             Demo ring
           </button>
@@ -274,14 +276,16 @@ export function MessageGroupCallPill({
           </div>
           <span className="text-[10px] text-content-tertiary shrink-0">{memberArkIds.length}</span>
         </button>
-        <CallControls
-          mode={mode}
-          muted={Boolean(session?.muted)}
-          onCall={onCall}
-          onHangUp={hangUp}
-          onToggleMute={toggleMute}
-          onDemoAnswer={demoSimulateAnswer}
-        />
+        {isCallUiEnabled() ? (
+          <CallControls
+            mode={mode}
+            muted={Boolean(session?.muted)}
+            onCall={onCall}
+            onHangUp={hangUp}
+            onToggleMute={toggleMute}
+            onDemoAnswer={demoSimulateAnswer}
+          />
+        ) : null}
       </div>
     </div>
   );
@@ -294,7 +298,7 @@ export function SidebarCallDock() {
     session, incoming, elapsedSec, hangUp, toggleMute, acceptIncoming, declineIncoming, demoSimulateAnswer,
   } = useCall();
 
-  if (!isRevealed('call')) return null;
+  if (!isCallUiEnabled()) return null;
 
   const onMessagePeer = route.name === 'message' && route.peer;
   const onMessageGroup = route.name === 'message' && route.groupId;

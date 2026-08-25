@@ -4285,12 +4285,12 @@ export function AIChat() {
     };
 
     // First-run guarantee: no live chat path → honest CTA reply (no fake ARK Core answer).
+    // engineGenerate IPC exists on desktop even when no GGUF is installed — do not treat IPC as capacity.
     if (
       !pluginId
       && (mode === 'general' || mode === 'code')
       && capacity
       && !capacity.liveChat
-      && !window.arkDesktop?.engineGenerate
     ) {
       const honest = honestNoLiveChatReply();
       finalizeAssistant(honest, 'ARK · setup needed');

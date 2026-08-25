@@ -285,8 +285,7 @@ const LIVE_MODEL_PROVIDERS = new Set([
 function cloudModelAvailability(model: CloudModel): 'live' | 'coming_soon' | 'retired' {
   if (model.provider === 'GitHub Models') return 'retired';
   if (model.category === 'video') {
-    // Router only calls ARK Engine video (Pollinations / HF / motion still).
-    if (model.provider === 'Pollinations' || model.provider === 'Hugging Face') return 'live';
+    // Video tab is parked — never show video models as live in the catalog.
     return 'coming_soon';
   }
   if (model.category === 'image') {

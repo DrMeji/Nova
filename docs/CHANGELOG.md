@@ -1,5 +1,25 @@
-# ARK changelog
+﻿# ARK changelog
 
+## 0.1.148 — 2026-08-24
+
+Security / public-beta hardening for testers. Video stays Soon. Forgot password goes to contact developer.
+
+**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.148/ARK-Setup.exe) · [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.148)
+
+### Security / public beta
+- Updates re-resolve the installer from DrMeji/Ark Releases and reject non-trusted URLs before download/silent install.
+- After download, Setup.exe is checked against `latest.yml` sha512 when that asset is published (Authenticode signing still needs a publisher cert).
+- Agent command mode is enforced in Electron main (renderer cannot force run_all); node -e / python -c blocked; node/python/npx always need confirm.
+- Call UI parked on retail Setup.exe builds (bat/dev can still reveal); Message phone controls hidden when parked.
+- Full PC grant limited to the Windows user profile (not whole-disk).
+- pathStat / browse honor the same workspace grants as file read.
+- Forgot password → contact developer (@DrMeji) instead of broken email reset.
+- Public docs link goes to Releases (no oauth-setup.md on public Ark).
+- Skip-setup chat honesty no longer treats engine IPC as a live brain.
+- Video models always "coming soon" in catalog; video capacity never advertised as free/live.
+- openExternal allowlists known Connect/docs hosts (HTTPS only).
+- Localhost HTTP proxy limited to brain / Ollama / Vite ports.
+- Image offline/SVG fallbacks show an honesty label; DM attachments labeled "this PC only".
 ## 0.1.147 — 2026-08-24
 
 Public downloads without public source.
@@ -14,10 +34,10 @@ Public downloads without public source.
 
 In-app updates work while source stays private.
 
-**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark-Releases/releases/download/v0.1.146/ARK-Setup.exe) · [Release notes](https://github.com/DrMeji/Ark-Releases/releases/tag/v0.1.146)
+**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.146/ARK-Setup.exe) · [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.146)
 
 ### Updates
-- Check/Download now reads the public **DrMeji/Ark-Releases** feed (installers only).
+- Check/Download now reads the public **DrMeji/Ark** feed (installers only).
 - Private `DrMeji/Ark` source no longer blocks anonymous update checks (GitHub 404).
 ## 0.1.145 � 2026-08-24
 

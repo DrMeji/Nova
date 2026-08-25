@@ -1,6 +1,8 @@
 # ARK social: messaging & voice calls over the internet
 
-ARK’s **Message** and **Call** tabs work over the internet when both people use the desktop app, are **signed in** with an ARK account, and have a normal internet connection. No separate calling app is required.
+ARK’s **Message** tab works over the internet when both people use the desktop app, are **signed in** with an ARK account, and have a normal internet connection.
+
+**Call UI is parked on retail Setup.exe builds** (hidden / non-functional for public testers). Dev/`Open-ARK-Build.bat` can still reveal call demo controls. Do not treat Call as a shipped feature on installers until it is un-parked.
 
 ## What runs where
 
@@ -10,8 +12,8 @@ ARK’s **Message** and **Call** tabs work over the internet when both people us
 | **Friend requests** | Supabase (`ark_friend_requests`) | Add someone by ID; they accept in Notifications |
 | **Contacts** | Supabase (`ark_contacts`) | Your friend list after accept |
 | **Direct messages** | Supabase (`ark_direct_messages`) | Text chat between two ARK IDs |
-| **Call signaling** | Supabase Realtime + `ark_call_signals` | Ring, accept, WebRTC offer/answer/ICE |
-| **Voice audio** | **Peer-to-peer WebRTC** | Audio goes directly between PCs when possible |
+| **Call signaling** | Supabase Realtime + `ark_call_signals` | Ring, accept, WebRTC offer/answer/ICE (**parked on Setup.exe**) |
+| **Voice audio** | **Peer-to-peer WebRTC** | Audio goes directly between PCs when possible (**parked on Setup.exe**) |
 | **Local cache** | `localStorage` on each PC | Offline read + faster UI; syncs when online |
 
 The desktop app ships with the **public Supabase URL + anon key** (`.env.production`). That is normal for Supabase client apps; **Row Level Security (RLS)** on the database ensures users only read/write their own threads and signals.
@@ -26,7 +28,7 @@ The desktop app ships with the **public Supabase URL + anon key** (`.env.product
 
 **Requirements:** both users signed in, migrations applied on the hosted Supabase project, Realtime enabled on `ark_direct_messages`.
 
-## How calling works (step by step)
+## How calling works (when un-parked)
 
 1. Both users must be **friends** (or know each other’s ARK ID) and **signed in**.
 2. **Caller** taps the green call button → ARK sends a **`ring`** signal (broadcast + DB row).
@@ -65,13 +67,13 @@ CLI (if linked): `npx supabase db push`
 3. Account A sends friend request to B’s ID.
 4. Account B accepts in Notifications.
 5. Open Message thread → send text both ways.
-6. Tap call → other side accepts → talk.
+6. Call is parked on Setup.exe — skip call testing on public installers; use bat/dev only if testing Call UI.
 
-Dev builds (`Open-ARK-Build.bat`) also show **demo contacts** for UI testing; **production installers** start with an empty social graph until real friends are added.
+Dev builds (`Open-ARK-Build.bat`) also show **demo contacts** for UI testing; **production installers** start with an empty social graph until real friends are added. Demo friends / demo ring buttons never appear on Setup.exe.
 
 ## What is not cloud-synced yet
 
-- Group chat (local/demo UI only)
-- File/image attachments in DMs (local only)
+- Group chat (local/demo UI only — attachments stay on this PC)
+- File/image attachments in DMs (local only — not uploaded to Supabase; other devices will not see the file bytes)
 - Push when the app is fully quit (needs OS push service)
 - True multi-party group calls (UI stacks avatars; signaling is 1:1)

@@ -410,7 +410,19 @@ function assertAllowedUrl(url) {
     throw new Error(`Host not allowed: ${parsed.hostname}`);
   }
   const isLocal = parsed.hostname === '127.0.0.1' || parsed.hostname === 'localhost';
-  if (!isLocal && parsed.protocol !== 'https:') {
+  if (isLocal) {
+    // Localhost proxy is only for ARK brain, Ollama, and common Vite preview ports —
+    // not an open SSRF tunnel to arbitrary local services.
+    const port = parsed.port
+      ? Number(parsed.port)
+      : (parsed.protocol === 'https:' ? 443 : 80);
+    const allowed = new Set([8787, 11434, 5173, 5174, 5175, 5176, Number(brainPort) || 8787]);
+    if (!allowed.has(port)) {
+      throw new Error(`Local port not allowed: ${port}`);
+    }
+    return parsed;
+  }
+  if (parsed.protocol !== 'https:') {
     throw new Error('Remote hosts must use https');
   }
   return parsed;

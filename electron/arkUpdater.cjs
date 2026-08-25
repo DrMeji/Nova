@@ -10,14 +10,46 @@
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
-const http = require('http');
+const crypto = require('crypto');
 const { spawn, execFileSync } = require('child_process');
 const { app, BrowserWindow } = require('electron');
 
 /** Public installer feed (no source). */
 const UPDATE_REPO = 'DrMeji/Ark';
-/** Private source repo — fallback only; anonymous GitHub API returns 404 here. */
-const UPDATE_REPO_FALLBACK = 'DrMeji/Ark-Source';
+/** Private source — never use as anonymous download target in production. */
+const UPDATE_REPO_FALLBACK = '';
+
+const TRUSTED_SETUP_HOSTS = new Set([
+  'github.com',
+  'objects.githubusercontent.com',
+  'release-assets.githubusercontent.com',
+]);
+
+/** Only ARK installers from the public DrMeji/Ark Releases feed (canonical GitHub download URL). */
+function isTrustedSetupUrl(url) {
+  try {
+    const u = new URL(String(url || ''));
+    if (u.protocol !== 'https:') return false;
+    const host = u.hostname.toLowerCase();
+    if (host !== 'github.com') return false;
+    return /^\/DrMeji\/Ark\/releases\/download\/v[\w.-]+\/ARK-Setup[^/]*\.exe$/i.test(u.pathname);
+  } catch {
+    return false;
+  }
+}
+
+function isTrustedDownloadHost(url) {
+  try {
+    const u = new URL(String(url || ''));
+    if (u.protocol !== 'https:') return false;
+    const host = u.hostname.toLowerCase();
+    return host === 'github.com'
+      || TRUSTED_SETUP_HOSTS.has(host)
+      || host.endsWith('.githubusercontent.com');
+  } catch {
+    return false;
+  }
+}
 const POST_UPDATE_FLAG = 'ark-post-update.json';
 const UI_SHOWN_FLAG = 'ark-ui-shown.flag';
 const SPLASH_ALIVE_FLAG = 'ark-update-splash-alive.flag';
@@ -235,9 +267,16 @@ function isNewer(latest, current) {
 
 function downloadFile(url, dest, onProgress) {
   return new Promise((resolve, reject) => {
+    if (!isTrustedSetupUrl(url) && !isTrustedDownloadHost(url)) {
+      reject(new Error('Installer URL is not from the trusted ARK releases feed.'));
+      return;
+    }
     const follow = (currentUrl, redirectsLeft) => {
-      const mod = currentUrl.startsWith('http://') ? http : https;
-      const req = mod.get(
+      if (!/^https:\/\//i.test(currentUrl) || !isTrustedDownloadHost(currentUrl)) {
+        reject(new Error('Blocked untrusted download redirect.'));
+        return;
+      }
+      const req = https.get(
         currentUrl,
         { headers: { 'User-Agent': 'ARK-Desktop', Accept: '*/*' } },
         (res) => {
@@ -248,7 +287,14 @@ function downloadFile(url, dest, onProgress) {
               return;
             }
             res.resume();
-            follow(res.headers.location, redirectsLeft - 1);
+            let next = res.headers.location;
+            try {
+              next = new URL(next, currentUrl).href;
+            } catch {
+              reject(new Error('Invalid redirect'));
+              return;
+            }
+            follow(next, redirectsLeft - 1);
             return;
           }
           if (code !== 200) {
@@ -278,6 +324,92 @@ function downloadFile(url, dest, onProgress) {
     };
     follow(url, 8);
   });
+}
+
+function fileSha512Base64(filePath) {
+  const hash = crypto.createHash('sha512');
+  hash.update(fs.readFileSync(filePath));
+  return hash.digest('base64');
+}
+
+function parseLatestYmlSha512(ymlText) {
+  const text = String(ymlText || '');
+  // Prefer top-level sha512 (electron-builder), then first files[].sha512.
+  const top = text.match(/^\s*sha512:\s*([A-Za-z0-9+/=]+)\s*$/m);
+  if (top?.[1]) return top[1].trim();
+  const nested = text.match(/^\s*-\s*url:.*\n(?:.*\n)*?\s*sha512:\s*([A-Za-z0-9+/=]+)/m);
+  return nested?.[1]?.trim() || '';
+}
+
+function fetchTrustedText(url) {
+  return new Promise((resolve, reject) => {
+    if (!/^https:\/\/github\.com\/DrMeji\/Ark\/releases\/download\//i.test(url)
+      && !isTrustedDownloadHost(url)) {
+      reject(new Error('Untrusted metadata URL'));
+      return;
+    }
+    const follow = (currentUrl, redirectsLeft) => {
+      if (!/^https:\/\//i.test(currentUrl) || !isTrustedDownloadHost(currentUrl)) {
+        reject(new Error('Blocked untrusted metadata redirect'));
+        return;
+      }
+      const req = https.get(
+        currentUrl,
+        { headers: { 'User-Agent': 'ARK-Desktop', Accept: '*/*' } },
+        (res) => {
+          const code = res.statusCode || 0;
+          if ([301, 302, 303, 307, 308].includes(code) && res.headers.location) {
+            if (redirectsLeft <= 0) {
+              reject(new Error('Too many redirects'));
+              return;
+            }
+            res.resume();
+            let next = res.headers.location;
+            try {
+              next = new URL(next, currentUrl).href;
+            } catch {
+              reject(new Error('Invalid redirect'));
+              return;
+            }
+            follow(next, redirectsLeft - 1);
+            return;
+          }
+          if (code !== 200) {
+            res.resume();
+            reject(new Error(`Metadata fetch failed (${code})`));
+            return;
+          }
+          const chunks = [];
+          res.on('data', (c) => chunks.push(c));
+          res.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+        },
+      );
+      req.on('error', reject);
+      req.setTimeout(60_000, () => req.destroy(new Error('Metadata timeout')));
+    };
+    follow(url, 8);
+  });
+}
+
+/** Verify downloaded Setup.exe against latest.yml sha512 when the asset exists. */
+async function verifyDownloadedSetup(dest, versionTag) {
+  const ver = normalizeVersion(versionTag);
+  if (!ver) return { ok: true, skipped: true };
+  const ymlUrl = `https://github.com/${UPDATE_REPO}/releases/download/v${ver}/latest.yml`;
+  let yml;
+  try {
+    yml = await fetchTrustedText(ymlUrl);
+  } catch {
+    // Older releases may lack latest.yml — size gate still applies.
+    return { ok: true, skipped: true };
+  }
+  const expected = parseLatestYmlSha512(yml);
+  if (!expected) return { ok: true, skipped: true };
+  const actual = fileSha512Base64(dest);
+  if (actual !== expected) {
+    return { ok: false, error: 'Installer hash mismatch. Update aborted.' };
+  }
+  return { ok: true, skipped: false };
 }
 
 function resolveUpdateIcon() {
@@ -954,7 +1086,7 @@ async function checkForUpdate() {
     // Prefer the public installer feed. Private DrMeji/Ark returns 404 without a GitHub login.
     let res = await fetchReleases(UPDATE_REPO);
     let usedRepo = UPDATE_REPO;
-    if (res.status !== 200 || !Array.isArray(res.data)) {
+    if ((res.status !== 200 || !Array.isArray(res.data)) && UPDATE_REPO_FALLBACK) {
       const fallback = await fetchReleases(UPDATE_REPO_FALLBACK);
       if (fallback.status === 200 && Array.isArray(fallback.data)) {
         res = fallback;
@@ -1601,7 +1733,27 @@ async function downloadAndInstall(setupUrl, latestTag) {
     };
   }
 
-  const expectedVersion = normalizeVersion(latestTag || '');
+  // Re-resolve the installer from GitHub ourselves. Never trust a renderer-supplied URL alone.
+  const check = await checkForUpdate();
+  if (!check?.newerAvailable || !check.setupAssetUrl) {
+    return {
+      ok: false,
+      message: check?.message || 'No update available to download.',
+    };
+  }
+  const resolvedUrl = String(check.setupAssetUrl);
+  if (!isTrustedSetupUrl(resolvedUrl)) {
+    return { ok: false, message: 'Installer URL is not from the trusted ARK releases feed.' };
+  }
+  if (typeof setupUrl === 'string' && setupUrl && setupUrl !== resolvedUrl) {
+    return { ok: false, message: 'Installer URL mismatch. Check for updates again.' };
+  }
+  if (latestTag && check.latestTag && normalizeVersion(latestTag) !== normalizeVersion(check.latestTag)) {
+    return { ok: false, message: 'Update tag mismatch. Check for updates again.' };
+  }
+
+  const expectedVersion = normalizeVersion(check.latestTag || latestTag || '');
+  setupUrl = resolvedUrl;
 
   const handoffAndExit = async (installerPath) => {
     // Copy out of electron-updater's pending/ folder before the parent exits —
@@ -1694,8 +1846,8 @@ async function downloadAndInstall(setupUrl, latestTag) {
     return handoffAndExit(deltaPath);
   }
 
-  if (typeof setupUrl !== 'string' || !/^https:\/\//i.test(setupUrl)) {
-    return { ok: false, message: 'Missing installer download URL.' };
+  if (!setupUrl || !isTrustedSetupUrl(setupUrl)) {
+    return { ok: false, message: 'Missing trusted installer download URL.' };
   }
 
   const dest = path.join(app.getPath('temp'), `ARK-Setup-${expectedVersion || 'update'}.exe`);
@@ -1735,6 +1887,20 @@ async function downloadAndInstall(setupUrl, latestTag) {
       message: 'Download looked incomplete. Try again.',
     });
     return { ok: false, message: 'Download incomplete' };
+  }
+
+  sendProgress({
+    status: 'downloading',
+    percent: 99,
+    message: 'Verifying installer…',
+    version: expectedVersion,
+  });
+  const verified = await verifyDownloadedSetup(dest, expectedVersion);
+  if (!verified.ok) {
+    try { fs.unlinkSync(dest); } catch { /* ignore */ }
+    const msg = verified.error || 'Installer verification failed.';
+    sendProgress({ status: 'error', percent: 0, message: msg, error: msg });
+    return { ok: false, message: msg };
   }
 
   return handoffAndExit(dest);

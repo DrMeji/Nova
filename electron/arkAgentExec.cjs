@@ -1,6 +1,6 @@
 /**
  * Run approved shell commands for ARK agent (npm, pip, git, …).
- * Respects execution mode stored with workspace grants.
+ * Execution mode always comes from stored workspace grants — never from the renderer.
  */
 
 const { execFile } = require('child_process');
@@ -39,6 +39,11 @@ const BLOCKED = [
   /Remove-Item\s+-Recurse\s+-Force\s+[A-Z]:\\/i,
   /\bshutdown\b/i,
   /\brestart-computer\b/i,
+  // Inline code eval — treat as always-dangerous regardless of mode.
+  /\bnode(?:\.exe)?\s+(-e|--eval)\b/i,
+  /\bpython(?:\d+(?:\.\d+)?)?(?:\.exe)?\s+(-c|--command)\b/i,
+  /\bpy(?:\.exe)?\s+(-3\s+)?-c\b/i,
+  /\bnpx(?:\.cmd)?\s+(-[yc]\s+)?(-e|--eval)\b/i,
 ];
 
 function loadExecutionMode() {
@@ -53,19 +58,56 @@ function loadExecutionMode() {
   return 'allowlist';
 }
 
-function commandAllowed(command, mode) {
+function onAllowlist(command) {
+  return ALLOWLIST.some(re => re.test(command));
+}
+
+/** node / python / npx can run arbitrary code — never silent-auto. */
+function isPowerfulInterpreter(command) {
+  return /^(node|python(?:\d+(?:\.\d+)?)?|py|npx)(\.exe|\.cmd)?(\s|$)/i.test(String(command || '').trim());
+}
+
+/**
+ * @param {string} command
+ * @param {'allowlist'|'auto_review'|'run_all'} mode
+ * @param {boolean} userConfirmed  Renderer already showed a confirm dialog for this command.
+ */
+function commandAllowed(command, mode, userConfirmed) {
   const cmd = String(command || '').trim();
   if (!cmd) return { ok: false, error: 'Empty command.' };
   if (BLOCKED.some(re => re.test(cmd))) {
     return { ok: false, error: 'That command is blocked for safety.' };
   }
-  if (mode === 'run_all') return { ok: true };
-  if (mode === 'auto_review') return { ok: true };
-  if (ALLOWLIST.some(re => re.test(cmd))) return { ok: true };
-  return {
-    ok: false,
-    error: 'Command not on the allowlist. Switch to Auto-review or Run everything in Settings → Security.',
-  };
+
+  if (mode === 'allowlist') {
+    if (!onAllowlist(cmd)) {
+      return {
+        ok: false,
+        error: 'Command not on the allowlist. Switch to Auto-review or Run everything in Settings → Security.',
+      };
+    }
+    // Allowlisted still needs an explicit confirm from the UI (skipConfirm after dialog).
+    if (!userConfirmed) {
+      return { ok: false, needsConfirm: true, error: 'Confirm this command in ARK before it can run.' };
+    }
+    return { ok: true };
+  }
+
+  if (mode === 'auto_review') {
+    // Known package managers / git may run quietly; interpreters always need confirm.
+    if (onAllowlist(cmd) && !isPowerfulInterpreter(cmd)) return { ok: true };
+    if (!userConfirmed) {
+      return { ok: false, needsConfirm: true, error: 'Confirm this command in ARK before it can run.' };
+    }
+    return { ok: true };
+  }
+
+  // run_all — allowlisted non-interpreters may run; everything else needs UI confirm.
+  if (onAllowlist(cmd) && !isPowerfulInterpreter(cmd)) return { ok: true };
+  if (!userConfirmed) {
+    return { ok: false, needsConfirm: true, error: 'Confirm this command in ARK before it can run.' };
+  }
+  return { ok: true };
 }
 
 function resolveCwd(cwd) {
@@ -104,8 +146,10 @@ function runCommand(command, cwd, timeoutMs = 120_000) {
 
 async function agentRun(payload) {
   const command = String(payload?.command || '').trim();
-  const mode = payload?.mode || loadExecutionMode();
-  const allowed = commandAllowed(command, mode);
+  // Never trust renderer-supplied mode.
+  const mode = loadExecutionMode();
+  const userConfirmed = payload?.userConfirmed === true || payload?.skipConfirm === true;
+  const allowed = commandAllowed(command, mode, userConfirmed);
   if (!allowed.ok) return allowed;
 
   const cwdRes = resolveCwd(payload?.cwd);
@@ -239,4 +283,5 @@ module.exports = {
   agentRun,
   agentStartDevServer,
   commandAllowed,
+  loadExecutionMode,
 };

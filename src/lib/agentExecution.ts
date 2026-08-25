@@ -43,6 +43,9 @@ const BLOCKED_PATTERNS: RegExp[] = [
   /Remove-Item\s+-Recurse\s+-Force\s+[A-Z]:\\/i,
   /\bshutdown\b/i,
   /\brestart-computer\b/i,
+  /\bnode(?:\.exe)?\s+(-e|--eval)\b/i,
+  /\bpython(?:\d+(?:\.\d+)?)?(?:\.exe)?\s+(-c|--command)\b/i,
+  /\bpy(?:\.exe)?\s+(-3\s+)?-c\b/i,
 ];
 
 export function isBlockedAgentCommand(command: string): boolean {
@@ -60,7 +63,13 @@ export function isAllowlistedAgentCommand(command: string): boolean {
 /** Whether this command may run without an extra confirm dialog. */
 export function agentCommandNeedsConfirm(command: string): boolean {
   const mode = getAgentExecutionMode();
-  if (mode === 'run_all') return false;
+  if (isBlockedAgentCommand(command)) return true;
+  const powerful = /^(node|python(?:\d+(?:\.\d+)?)?|py|npx)(\.exe|\.cmd)?(\s|$)/i.test(command.trim())
+    || /\bnode(?:\.exe)?\s+(-e|--eval)\b/i.test(command)
+    || /\bpython(?:\d+(?:\.\d+)?)?(?:\.exe)?\s+(-c|--command)\b/i.test(command)
+    || /\bpy(?:\.exe)?\s+(-3\s+)?-c\b/i.test(command);
+  if (powerful) return true;
+  if (mode === 'run_all') return !isAllowlistedAgentCommand(command);
   if (mode === 'auto_review') return !isAllowlistedAgentCommand(command);
   return true;
 }
@@ -68,6 +77,11 @@ export function agentCommandNeedsConfirm(command: string): boolean {
 export function agentCommandAllowed(command: string): boolean {
   const mode = getAgentExecutionMode();
   if (isBlockedAgentCommand(command)) return false;
+  if (/\bnode(?:\.exe)?\s+(-e|--eval)\b/i.test(command)
+    || /\bpython(?:\d+(?:\.\d+)?)?(?:\.exe)?\s+(-c|--command)\b/i.test(command)
+    || /\bpy(?:\.exe)?\s+(-3\s+)?-c\b/i.test(command)) {
+    return false;
+  }
   if (mode === 'run_all') return true;
   if (mode === 'auto_review') return true;
   return isAllowlistedAgentCommand(command);

@@ -69,7 +69,7 @@ function TypewriterHero() {
 }
 
 export function AuthScreen() {
-  const { signIn, signUp, resetPassword, bypassLogin } = useAuth();
+  const { signIn, signUp, bypassLogin } = useAuth();
   const [mode, setMode] = useState<AuthMode>('signin');
   const [showBypass, setShowBypass] = useState(false);
   const [email, setEmail] = useState('');
@@ -97,20 +97,25 @@ export function AuthScreen() {
   };
 
   const handleForgotPassword = async () => {
-    if (!email.trim() || !email.includes('@')) {
-      setError('Enter your email above, then click Forgot password.');
-      return;
-    }
     setError(null);
-    setInfo(null);
-    setLoading(true);
-    const result = await resetPassword(email.trim());
-    setLoading(false);
-    if (result.error) {
-      setError(result.error);
-      return;
+    setInfo(
+      [
+        'Password resets are handled by the ARK developer.',
+        '',
+        'Contact @DrMeji on GitHub and include the email on your ARK account:',
+        'https://github.com/DrMeji',
+        '',
+        'They will verify it is you and help reset the password.',
+      ].join('\n'),
+    );
+    if (email.trim() && email.includes('@')) {
+      try {
+        await navigator.clipboard.writeText(email.trim());
+        setInfo(prev => `${prev}\n\nYour email (${email.trim()}) was copied to the clipboard so you can paste it in the message.`);
+      } catch {
+        /* ignore */
+      }
     }
-    setInfo('Password reset email sent. Check your inbox for the link.');
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -249,7 +254,7 @@ export function AuthScreen() {
                     disabled={loading}
                     className="text-xs text-content-tertiary hover:text-content-secondary"
                   >
-                    Forgot password?
+                    Forgot password? Contact developer
                   </button>
                 </div>
               )}

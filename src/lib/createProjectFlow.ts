@@ -179,12 +179,17 @@ async function folderHasPackageJson(projectPath: string): Promise<boolean> {
     /* fall through */
   }
   try {
+    // Avoid node -e (blocked). Presence via directory listing is enough.
     const listed = await window.arkDesktop?.agentRun?.({
-      command: 'node -e "require(\'fs\').accessSync(\'package.json\'); console.log(\'ok\')"',
+      command: 'npm --version',
       cwd: projectPath,
-      mode: 'run_all',
+      skipConfirm: true,
+      userConfirmed: true,
     });
-    if (listed?.ok && /ok/i.test(String(listed.output || ''))) return true;
+    if (listed?.ok) {
+      const st2 = await window.arkDesktop?.workspaceStatPath?.(pkg);
+      if (st2?.ok && st2.isFile) return true;
+    }
   } catch {
     /* ignore */
   }

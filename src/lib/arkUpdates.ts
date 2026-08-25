@@ -1,9 +1,10 @@
-/** In-app updates via public DrMeji/Ark (installers only; source is private in Ark-Source). */
+/** In-app updates via public DrMeji/Ark (installers only; source stays private). */
 
 export const ARK_UPDATE_REPO = 'DrMeji/Ark';
-export const ARK_GITHUB_REPO = 'DrMeji/Ark-Source';
+/** Public download / issues surface — never ship the private source repo name in the client. */
+export const ARK_GITHUB_REPO = 'DrMeji/Ark';
 export const ARK_PUBLIC_REPO = 'DrMeji/Ark';
-export const ARK_SOURCE_REPO = 'DrMeji/Ark-Source';
+export const ARK_SOURCE_REPO = 'DrMeji/Ark';
 
 export type ArkUpdateInfo = {
   ok: boolean;

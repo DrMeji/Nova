@@ -45,7 +45,7 @@ import { BrandMark, StatusCheck } from '@/components/BrandMark';
 const REVEAL_FEATURES: { id: ParkId; label: string; description: string }[] = [
   { id: 'networking', label: 'Networking', description: 'Live. help feed, add/message builders (always on).' },
   { id: 'message', label: 'Message', description: 'Live. direct messages between ARK users (always on).' },
-  { id: 'call', label: 'Call', description: 'Voice calls (microphone + WebRTC). Still parked until you reveal it.' },
+  { id: 'call', label: 'Call', description: 'Voice calls (microphone + WebRTC). Parked on retail builds until signaling is hardened — enable here on bat/dev only.' },
 ];
 
 const AUTO_LOCK_OPTIONS = [
@@ -1205,9 +1205,10 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                     <button
                       type="button"
                       className="text-[11px] text-sky-400 hover:text-sky-300 shrink-0"
-                      onClick={() => void window.arkDesktop?.openExternal?.('https://github.com/DrMeji/Ark/blob/main/docs/oauth-setup.md')}
+                      onClick={() => void window.arkDesktop?.openExternal?.('https://github.com/DrMeji/Ark/releases')}
+                      title="Public download page (setup guide docs are not on the public repo)"
                     >
-                      Setup guide
+                      Releases
                     </button>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -1318,9 +1319,10 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                   </div>
                 </div>
                 <p className="text-[11px] text-amber-300/80 mt-2">
-                  Uninstalling ARK removes downloaded models, API keys, and local projects from this PC
-                  (<code>deleteAppDataOnUninstall</code>). Export settings first if you need a copy. Quit from the tray
-                  menu stops the brain; closing the window only hides to tray.
+                  Full uninstall via Setup.exe removes downloaded models, API keys, and local app data on this PC
+                  (<code>deleteAppDataOnUninstall</code>). In-app updates keep your keys. Clearing chat cache does not
+                  remove API keys — remove them under Connect. Export settings first if you need a copy. Quit from the
+                  tray menu stops the brain; closing the window only hides to tray.
                 </p>
                 <button
                   type="button"
@@ -1599,11 +1601,11 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
               <div className="space-y-4">
                 <div className="rounded-xl border border-surface-border p-4 space-y-3">
                   <div>
-                    <p className="text-sm font-medium text-content-primary">Local PIN</p>
+                    <p className="text-sm font-medium text-content-primary">Local PIN (UI lock only)</p>
                     <p className="text-xs text-content-tertiary mt-0.5">
                       {hasPinSet()
-                        ? 'PIN is set on this device and locks the app UI. It does not encrypt API keys.'
-                        : 'Set a 4–8 digit PIN to lock the app UI on this PC. It does not encrypt API keys.'}
+                        ? 'PIN is set on this device and locks the app window. It is not encryption, login security, or cloud recovery — API keys stay in OS storage separately.'
+                        : 'Set a 4–8 digit PIN to lock the app window on this PC. Privacy screen only — not encryption, not account recovery. API keys stay in OS storage separately.'}
                     </p>
                   </div>
                   <div className="grid gap-2 sm:grid-cols-2">

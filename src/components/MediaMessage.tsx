@@ -333,8 +333,15 @@ function MediaActions({ src, alt }: { src: string; alt: string }) {
 function ResolvedMedia({ src, alt, preview }: { src: string; alt: string; preview?: boolean }) {
   const [lightbox, setLightbox] = useState(false);
   const isVideo = src.startsWith('data:video/') || /\.mp4(\?|$)/i.test(src);
+  const looksSvg = /^data:image\/svg\+xml/i.test(src) || /\.svg(\?|$)/i.test(src);
+  const showHonesty = Boolean(preview) || looksSvg;
   return (
-    <div className={`${preview ? 'opacity-90' : ''}`}>
+    <div className={`relative ${showHonesty ? 'opacity-90' : ''}`}>
+      {showHonesty ? (
+        <p className="mb-1 text-[11px] text-amber-400/90">
+          {looksSvg ? 'Offline / SVG placeholder — not a finished image' : 'Preview / offline fallback — not a finished image'}
+        </p>
+      ) : null}
       {isVideo ? (
         <video
           src={src}

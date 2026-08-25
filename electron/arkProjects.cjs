@@ -225,20 +225,17 @@ function isUnderFullPcGrant(absPath) {
   if (!grants.fullPc) return false;
   const p = path.resolve(String(absPath || ''));
   const home = path.resolve(os.homedir());
-  if (isPathUnderRoot(p, home)) return true;
-  const blockedRoots = [
+  // Full PC = the signed-in Windows user profile only (not the whole disk).
+  if (!isPathUnderRoot(p, home)) return false;
+  const blockedInsideHome = [
     path.resolve('C:\\Windows'),
     path.resolve('C:\\Program Files'),
     path.resolve('C:\\Program Files (x86)'),
   ];
-  for (const br of blockedRoots) {
+  for (const br of blockedInsideHome) {
     if (isPathUnderRoot(p, br)) return false;
   }
-  try {
-    return fs.existsSync(p);
-  } catch {
-    return false;
-  }
+  return true;
 }
 
 function isUnderGrantedScope(absPath) {
@@ -934,6 +931,9 @@ function deleteWorkspaceRelPath(projectId, relPath) {
 function pathStat(targetPath) {
   let p = path.resolve(String(targetPath || ''));
   if (!p || !fs.existsSync(p)) return { ok: false, error: 'Path not found' };
+  if (!isAllowedExternalPath(p)) {
+    return { ok: false, error: 'Path is outside ARK access. Enable Desktop, Documents, or Full PC in Settings → Security.' };
+  }
   if (/\.lnk$/i.test(p)) {
     const target = resolveWindowsShortcut(p);
     if (target) p = path.resolve(target);
@@ -942,6 +942,9 @@ function pathStat(targetPath) {
     p = fs.realpathSync(p);
   } catch {
     /* keep */
+  }
+  if (!isAllowedExternalPath(p)) {
+    return { ok: false, error: 'Path is outside ARK access. Enable Desktop, Documents, or Full PC in Settings → Security.' };
   }
   const st = safeStatFollow(p);
   if (!st) return { ok: false, error: 'stat failed' };
