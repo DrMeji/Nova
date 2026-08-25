@@ -44,8 +44,9 @@ def main():
     icon.save(ROOT / 'build' / 'icon.png', 'PNG')
     rebuild(src, 512).save(ROOT / 'public' / 'ark-icon.png', 'PNG')
 
-    sizes = [(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)]
-    variants = [icon.resize(s, Image.Resampling.LANCZOS) for s in sizes]
+    sizes = [256, 128, 64, 48, 32, 24, 16]
+    variants = [icon.resize((s, s), Image.Resampling.LANCZOS) for s in sizes]
+    # Largest first — electron-builder requires at least 256x256 in the ICO.
     variants[0].save(
         ROOT / 'build' / 'icon.ico',
         format='ICO',
