@@ -1,5 +1,16 @@
 ﻿# ARK changelog
 
+## 0.1.149 — 2026-08-24
+
+Friend requests / Networking add-by-ARK-ID. Requires applying supabase/apply-friend-requests.sql once on the hosted project.
+
+**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.149/ARK-Setup.exe) · [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.149)
+
+### Social
+- Clearer errors when friend-request table is missing on Supabase.
+- Lookup ARK IDs reliably before sending requests (both accounts must have signed in once).
+- Networking search accepts a 7-digit ARK ID and shows Add friend.
+- Message / Networking add paths send a friend request (not a fake instant contact).
 ## 0.1.148 — 2026-08-24
 
 Security / public-beta hardening for testers. Video stays Soon. Forgot password goes to contact developer.

@@ -8,7 +8,7 @@ import { useRecentProjects } from '@/context/RecentProjectsContext';
 import { useRouter } from '@/context/RouterContext';
 import { useSocial } from '@/context/SocialContext';
 import { listNetworkPosts, publishNetworkPost, deleteNetworkPost, type NetworkPost } from '@/lib/arkSocial';
-import { formatArkId, isArkUserId, normalizeArkId } from '@/lib/arkUserId';
+import { formatArkId, isArkUserId, lookupArkUser, normalizeArkId } from '@/lib/arkUserId';
 import { GuestSocialBanner } from '@/components/GuestSocialBanner';
 import { ArkAvatar } from '@/components/ArkAvatar';
 import { buildDemoNetworkPosts } from '@/lib/socialDemo';
@@ -103,6 +103,9 @@ export function NetworkingView() {
   const [note, setNote] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [addBusy, setAddBusy] = useState(false);
+  const [idSearchBusy, setIdSearchBusy] = useState(false);
+  const [idSearchHit, setIdSearchHit] = useState<{ arkId: string; displayName: string | null } | null>(null);
+  const [idSearchNote, setIdSearchNote] = useState('');
   const [projectType, setProjectType] = useState<ProjectTypeId>('all');
   const [platform, setPlatform] = useState<ProjectPlatformId>('all');
   const [platformOpen, setPlatformOpen] = useState(false);
@@ -147,6 +150,7 @@ export function NetworkingView() {
 
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
+    const qId = normalizeArkId(query);
     const saved = new Set(savedIds);
     return posts.filter(p => {
       if (tab === 'mine' && p.ownerArkId !== myArkId) return false;
@@ -158,10 +162,38 @@ export function NetworkingView() {
       if (tab === 'public' && p.visibility !== 'public' && p.ownerArkId !== myArkId) return false;
       if (projectType !== 'all' && p.projectType && p.projectType !== projectType) return false;
       if (platform !== 'all' && p.platform && p.platform !== platform) return false;
-      if (q && !`${p.title} ${p.summary} ${p.details || ''} ${p.ownerName} ${p.categoryLabel || ''}`.toLowerCase().includes(q)) return false;
+      if (q) {
+        const hay = `${p.title} ${p.summary} ${p.details || ''} ${p.ownerName} ${p.categoryLabel || ''} ${p.ownerArkId}`.toLowerCase();
+        if (!hay.includes(q) && !(isArkUserId(qId) && p.ownerArkId === qId)) return false;
+      }
       return true;
     });
   }, [posts, query, tab, myArkId, savedIds, projectType, platform]);
+
+  useEffect(() => {
+    const id = normalizeArkId(query);
+    if (!isArkUserId(id) || id === myArkId) {
+      setIdSearchHit(null);
+      setIdSearchNote('');
+      return;
+    }
+    let cancelled = false;
+    setIdSearchBusy(true);
+    setIdSearchNote('');
+    void lookupArkUser(id).then((hit) => {
+      if (cancelled) return;
+      setIdSearchBusy(false);
+      if (hit) {
+        setIdSearchHit({ arkId: hit.arkId, displayName: hit.displayName });
+      } else {
+        setIdSearchHit(null);
+        setIdSearchNote(`No ARK account found for ${id}`);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [query, myArkId]);
 
   const toggleSave = (postId: string, e?: { stopPropagation: () => void }) => {
     e?.stopPropagation();
@@ -277,9 +309,23 @@ export function NetworkingView() {
     try {
       await inviteByArkId(post.ownerArkId, post.ownerName);
       await refreshContacts();
-      setNote(`Added ${post.ownerName || formatArkId(post.ownerArkId)} to contacts.`);
+      setNote(`Friend request sent to ${formatArkId(post.ownerArkId)}. They’ll appear after they accept.`);
     } catch (err) {
       setNote(err instanceof Error ? err.message : 'Could not add that user.');
+    }
+    setAddBusy(false);
+  };
+
+  const addFromSearchId = async () => {
+    if (!idSearchHit) return;
+    setAddBusy(true);
+    setIdSearchNote('');
+    try {
+      await inviteByArkId(idSearchHit.arkId, idSearchHit.displayName || undefined);
+      await refreshContacts();
+      setIdSearchNote(`Friend request sent to ${formatArkId(idSearchHit.arkId)}. They’ll appear after they accept.`);
+    } catch (err) {
+      setIdSearchNote(err instanceof Error ? err.message : 'Could not send friend request.');
     }
     setAddBusy(false);
   };
@@ -297,7 +343,7 @@ export function NetworkingView() {
                 <input
                   value={query}
                   onChange={e => setQuery(e.target.value)}
-                  placeholder="Search"
+                  placeholder="Search posts or 7-digit ARK ID"
                   className="flex-1 min-w-0 bg-transparent text-sm text-content-primary outline-none placeholder:text-content-tertiary"
                 />
               </div>
@@ -422,6 +468,37 @@ export function NetworkingView() {
           <div className="flex-1 min-h-0 overflow-y-auto px-5 sm:px-8 pb-6">
             <div className="w-full">
               {note && <p className="text-xs text-amber-200/90 mb-3">{note}</p>}
+              {(idSearchHit || idSearchBusy || idSearchNote) && isArkUserId(normalizeArkId(query)) && (
+                <div className="mb-3 rounded-2xl border border-sky-500/25 bg-sky-500/5 px-4 py-3 flex items-center gap-3 flex-wrap">
+                  {idSearchBusy ? (
+                    <p className="text-sm text-content-tertiary flex items-center gap-2">
+                      <Loader2 className="w-4 h-4 animate-spin" /> Looking up ARK ID…
+                    </p>
+                  ) : idSearchHit ? (
+                    <>
+                      <ArkAvatar name={idSearchHit.displayName || idSearchHit.arkId} size="md" />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium text-content-primary">
+                          {idSearchHit.displayName || 'ARK user'}
+                        </p>
+                        <p className="text-[11px] text-content-tertiary">ARK ID {formatArkId(idSearchHit.arkId)}</p>
+                        {idSearchNote ? <p className="text-[11px] text-amber-200/90 mt-1">{idSearchNote}</p> : null}
+                      </div>
+                      <button
+                        type="button"
+                        disabled={addBusy}
+                        onClick={() => void addFromSearchId()}
+                        className="inline-flex items-center gap-1.5 rounded-full bg-sky-600 px-3 py-1.5 text-xs text-white disabled:opacity-40"
+                      >
+                        <UserPlus className="w-3.5 h-3.5" />
+                        Add friend
+                      </button>
+                    </>
+                  ) : (
+                    <p className="text-sm text-amber-200/90">{idSearchNote || 'No match for that ARK ID.'}</p>
+                  )}
+                </div>
+              )}
               {loading ? (
                 <p className="flex items-center gap-2 text-sm text-content-tertiary py-10">
                   <Loader2 className="w-4 h-4 animate-spin" /> Loading posts…
@@ -430,11 +507,13 @@ export function NetworkingView() {
                 <div className="text-center py-16 text-content-tertiary">
                   <Globe className="w-6 h-6 mx-auto mb-2 opacity-70" />
                   <p className="text-sm">
-                    {tab === 'saved'
-                      ? 'No saved projects yet. Bookmark a post to find it here.'
-                      : tab === 'paid'
-                        ? 'No paid posts yet.'
-                        : 'Nothing here yet. Post what you’re building. or that you need help.'}
+                    {isArkUserId(normalizeArkId(query))
+                      ? 'No posts from that ARK ID yet. Use Add friend above if they were found.'
+                      : tab === 'saved'
+                        ? 'No saved projects yet. Bookmark a post to find it here.'
+                        : tab === 'paid'
+                          ? 'No paid posts yet.'
+                          : 'Nothing here yet. Post what you’re building. or that you need help.'}
                   </p>
                 </div>
               ) : (

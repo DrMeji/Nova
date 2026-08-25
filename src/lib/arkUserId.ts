@@ -107,25 +107,32 @@ async function saveCloudArkId(userId: string, arkId: string): Promise<'ok' | 'ta
 }
 
 /** Look up a public ARK ID (no email). Returns null if unknown or offline. */
-const lookupAt = new Map<string, number>();
-const LOOKUP_MIN_MS = 2500;
+const lookupCache = new Map<string, { at: number; value: { arkId: string; displayName: string | null; avatarUrl?: string | null } | null }>();
+const LOOKUP_CACHE_MS = 15_000;
 
 export async function lookupArkUser(arkId: string): Promise<{ arkId: string; displayName: string | null; avatarUrl?: string | null } | null> {
   const id = normalizeArkId(arkId);
   if (!isArkUserId(id)) return null;
-  const last = lookupAt.get(id) || 0;
-  if (Date.now() - last < LOOKUP_MIN_MS) return null;
-  lookupAt.set(id, Date.now());
+  const cached = lookupCache.get(id);
+  if (cached && Date.now() - cached.at < LOOKUP_CACHE_MS) return cached.value;
   try {
     const { data, error } = await supabase.rpc('lookup_ark_user', { p_ark_id: id });
-    if (error || !data) return null;
+    if (error || !data) {
+      lookupCache.set(id, { at: Date.now(), value: null });
+      return null;
+    }
     const row = Array.isArray(data) ? data[0] : data;
-    if (!row || !isArkUserId(String(row.ark_id || ''))) return null;
-    return {
+    if (!row || !isArkUserId(String(row.ark_id || ''))) {
+      lookupCache.set(id, { at: Date.now(), value: null });
+      return null;
+    }
+    const value = {
       arkId: String(row.ark_id),
       displayName: row.display_name ? String(row.display_name) : null,
       avatarUrl: row.avatar_url ? String(row.avatar_url) : null,
     };
+    lookupCache.set(id, { at: Date.now(), value });
+    return value;
   } catch {
     return null;
   }

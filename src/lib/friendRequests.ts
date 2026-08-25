@@ -115,6 +115,25 @@ function notifyInbound(req: FriendRequest) {
  * Sender: do NOT reveal the other person's name/avatar.
  * Receiver: gets a notification with full sender profile (via Realtime + local).
  */
+function friendlyFriendError(raw: string | undefined): string {
+  const msg = String(raw || '').trim();
+  const lower = msg.toLowerCase();
+  if (
+    lower.includes('ark_friend_requests')
+    || lower.includes('schema cache')
+    || lower.includes('could not find the table')
+  ) {
+    return 'Friend requests are not set up on the server yet. Ask the ARK developer to apply the friend-requests SQL migration, then try again.';
+  }
+  if (lower.includes('row-level security') || lower.includes('rls') || lower.includes('permission denied')) {
+    return 'Could not send that request (permission). Sign out, sign back in, and try again.';
+  }
+  if (lower.includes('duplicate') || lower.includes('unique')) {
+    return 'Friend request already sent';
+  }
+  return msg || 'Could not send friend request';
+}
+
 export async function sendFriendRequest(opts: {
   fromArkId: string;
   fromName: string;
@@ -137,10 +156,9 @@ export async function sendFriendRequest(opts: {
     return { ok: false, error: 'Friend request already sent' };
   }
 
-  try {
-    await lookupArkUser(to);
-  } catch {
-    /* still allow send */
+  const found = await lookupArkUser(to);
+  if (!found) {
+    return { ok: false, error: `No ARK account found for ID ${to}. They must sign in once so their ID is registered.` };
   }
 
   try {
@@ -152,7 +170,7 @@ export async function sendFriendRequest(opts: {
       status: 'pending',
     }).select('*').maybeSingle();
     if (error || !data) {
-      return { ok: false, error: error?.message || 'Could not send friend request' };
+      return { ok: false, error: friendlyFriendError(error?.message) };
     }
     const req = mapRow(data as Record<string, unknown>);
     writeLocal([req, ...readLocal().filter(r => r.id !== req.id)]);
@@ -167,7 +185,7 @@ export async function sendFriendRequest(opts: {
 
     return { ok: true, request: req };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : 'Could not send friend request' };
+    return { ok: false, error: friendlyFriendError(err instanceof Error ? err.message : undefined) };
   }
 }
 

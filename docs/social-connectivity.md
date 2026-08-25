@@ -71,6 +71,16 @@ CLI (if linked): `npx supabase db push`
 
 Dev builds (`Open-ARK-Build.bat`) also show **demo contacts** for UI testing; **production installers** start with an empty social graph until real friends are added. Demo friends / demo ring buttons never appear on Setup.exe.
 
+## Database one-time fix (friend requests)
+
+If Add friend shows `Could not find the table 'public.ark_friend_requests'`, run this SQL once in the Supabase SQL Editor:
+
+- File: `supabase/apply-friend-requests.sql`
+- Dashboard: Project → SQL → New → paste → Run
+- Or: `powershell -File scripts/apply-friend-requests.ps1` with `SUPABASE_ACCESS_TOKEN` set
+
+Then try Add friend again (both people must have signed in at least once so their ARK IDs exist in `profiles`).
+
 ## What is not cloud-synced yet
 
 - Group chat (local/demo UI only — attachments stay on this PC)
