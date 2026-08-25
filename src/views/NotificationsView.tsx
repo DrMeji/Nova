@@ -5,6 +5,7 @@ import {
 import { buildDemoNotifications, type DemoNotification } from '@/lib/socialDemo';
 import {
   loadLocalNotifications,
+  markLocalNotificationsRead,
   type LocalNotification,
 } from '@/lib/localNotifications';
 import { useSocial } from '@/context/SocialContext';
@@ -13,6 +14,9 @@ import { listPendingInbound, syncFriendRequests } from '@/lib/friendRequests';
 import { formatArkId } from '@/lib/arkUserId';
 import { ArkAvatar } from '@/components/ArkAvatar';
 import { getLocalPrefs } from '@/lib/localPrefs';
+import { clearActivity } from '@/lib/activityIndicators';
+import { isArkDevEmail } from '@/lib/arkDevAccount';
+import { useRouter } from '@/context/RouterContext';
 
 type Notice = DemoNotification | LocalNotification;
 
@@ -38,24 +42,33 @@ function isLocalFriend(n: Notice): n is LocalNotification {
 
 export function NotificationsView() {
   const { profile, user } = useAuth();
+  const { route } = useRouter();
   const { acceptFriendRequest, declineFriendRequest } = useSocial();
   const [query, setQuery] = useState('');
   const [localTick, setLocalTick] = useState(0);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const myArkId = isArkDevEmail(user?.email) ? 'DEV' : (profile?.ark_id || undefined);
   const demos = useMemo(() => buildDemoNotifications(), []);
   const local = useMemo(
-    () => loadLocalNotifications(profile?.ark_id ?? undefined),
-    [localTick, profile?.ark_id],
+    () => loadLocalNotifications(myArkId),
+    [localTick, myArkId],
   );
   const inbound = useMemo(
-    () => (profile?.ark_id ? listPendingInbound(profile.ark_id) : []),
-    [profile?.ark_id, localTick],
+    () => (myArkId ? listPendingInbound(myArkId) : []),
+    [myArkId, localTick],
   );
 
   useEffect(() => {
-    if (!profile?.ark_id) return;
-    void syncFriendRequests(profile.ark_id, user?.id);
-  }, [profile?.ark_id, user?.id]);
+    if (!myArkId) return;
+    void syncFriendRequests(myArkId, user?.id);
+  }, [myArkId, user?.id]);
+
+  useEffect(() => {
+    if (route.name !== 'notifications') return;
+    markLocalNotificationsRead(myArkId);
+    clearActivity('notifications');
+    setLocalTick(t => t + 1);
+  }, [route.name, myArkId]);
 
   useEffect(() => {
     const bump = () => setLocalTick(t => t + 1);

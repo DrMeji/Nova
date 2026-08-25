@@ -40,6 +40,7 @@ import {
   type ActivityKey,
 } from '@/lib/activityIndicators';
 import { reattachEngineDownloads } from '@/lib/engineDownloads';
+import { countUnreadLocalNotifications } from '@/lib/localNotifications';
 import { ARK_UPDATE_INDICATOR_CACHE_KEY, checkArkGitHubUpdate, clearUpdateIndicatorCache, downloadAndInstallArkUpdate, type ArkUpdateInfo } from '@/lib/arkUpdates';
 
 function getNavGroups(): {
@@ -127,7 +128,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [activity, setActivity] = useState(() => ({ ...getActivityFlags() }));
   const [doneChats, setDoneChats] = useState(() => new Set(getDoneChatIds()));
   const [navTick, setNavTick] = useState(0);
+  const [notifUnread, setNotifUnread] = useState(0);
   const { unreadFrom } = useSocial();
+  const myArkIdForNotifs = isArkDevEmail(user?.email) ? 'DEV' : (profile?.ark_id || undefined);
 
   useEffect(() => {
     const onFeat = () => setNavTick(t => t + 1);
@@ -146,6 +149,13 @@ export function AppShell({ children }: { children: ReactNode }) {
       unsub();
     };
   }, []);
+
+  useEffect(() => {
+    const bump = () => setNotifUnread(countUnreadLocalNotifications(myArkIdForNotifs));
+    bump();
+    window.addEventListener('ark:local-notifications', bump);
+    return () => window.removeEventListener('ark:local-notifications', bump);
+  }, [myArkIdForNotifs]);
 
   useEffect(() => {
     const onPrefs = () => {
@@ -566,7 +576,9 @@ export function AppShell({ children }: { children: ReactNode }) {
     comingSoon?: boolean;
   }) => {
     const active = isActive(item);
-    const busy = Boolean(item.activity && activity[item.activity]);
+    const isNotifications = item.label === 'Notifications';
+    const notifAttention = isNotifications && (notifUnread > 0 || Boolean(activity.notifications));
+    const busy = Boolean(item.activity && activity[item.activity]) && !notifAttention;
     const unreadCount = item.label === 'Message' && !item.comingSoon ? unreadFrom.length : 0;
     if (item.comingSoon) {
       return (
@@ -592,10 +604,14 @@ export function AppShell({ children }: { children: ReactNode }) {
       <button
         key={item.label}
         type="button"
-        aria-label={item.label}
+        aria-label={
+          isNotifications && notifUnread > 0
+            ? `Notifications (${notifUnread} unread)`
+            : item.label
+        }
         onClick={() => handleNavClick(item)}
         title={collapsed ? item.label : undefined}
-        className={`ark-nav-item w-full relative ${collapsed ? '!justify-center' : ''} ${active ? 'active' : ''} ${busy ? 'ark-nav-activity' : ''}`}
+        className={`ark-nav-item w-full relative ${collapsed ? '!justify-center' : ''} ${active ? 'active' : ''} ${busy || notifAttention ? 'ark-nav-activity' : ''}`}
       >
         <item.icon className="w-4 h-4 shrink-0" />
         {!collapsed && <span>{item.label}</span>}
@@ -604,6 +620,12 @@ export function AppShell({ children }: { children: ReactNode }) {
             {unreadCount > 9 ? '9+' : unreadCount}
           </span>
         ) : null}
+        {notifAttention && (
+          <span
+            className={`absolute w-2 h-2 rounded-full bg-sky-400 ring-2 ring-ark-navy-900 ${collapsed ? 'top-1.5 right-1.5' : 'top-2 right-2'}`}
+            aria-hidden
+          />
+        )}
         {busy && (
           <span
             className={`absolute w-1.5 h-1.5 rounded-full bg-emerald-400 ${collapsed ? 'top-1.5 right-1.5' : 'top-2 right-2'}`}

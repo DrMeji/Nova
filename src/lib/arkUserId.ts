@@ -129,6 +129,10 @@ export type ArkLookupHit = {
 const lookupCache = new Map<string, { at: number; value: ArkLookupHit | null }>();
 const LOOKUP_CACHE_MS = 15_000;
 
+export function clearArkLookupCache() {
+  lookupCache.clear();
+}
+
 export async function lookupArkUser(arkId: string): Promise<ArkLookupHit | null> {
   const raw = String(arkId || '').trim();
   const id = normalizeArkId(raw);
@@ -156,11 +160,13 @@ export async function lookupArkUser(arkId: string): Promise<ArkLookupHit | null>
       lookupCache.set(cacheKey, { at: Date.now(), value: null });
       return null;
     }
+    // Public ARK ID stays DEV for the developer account; display name is separate
+    // (e.g. AutoFoot) so friends see the name, not only "DEV".
+    const rawName = row.display_name ? String(row.display_name).trim() : '';
+    const displayName = rawName && rawName.toUpperCase() !== ARK_DEV_ID ? rawName : null;
     const value: ArkLookupHit = {
       arkId: isDevHit ? ARK_DEV_ID : formatArkId(rowId),
-      displayName: isDevHit
-        ? ARK_DEV_ID
-        : (row.display_name ? String(row.display_name) : null),
+      displayName,
       avatarUrl: row.avatar_url ? String(row.avatar_url) : null,
       legacyArkId: isDevHit && ARK_ID_RE.test(rowId) ? rowId : undefined,
     };

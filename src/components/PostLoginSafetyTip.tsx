@@ -1,48 +1,57 @@
-import { useState } from 'react';
+import { useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
-import { X } from 'lucide-react';
+import { pushLocalNotification, loadLocalNotifications } from '@/lib/localNotifications';
+import { formatArkId } from '@/lib/arkUserId';
+import { isArkDevEmail } from '@/lib/arkDevAccount';
 
 const DISMISS_KEY = 'ark:post-login-safety-tip';
+const NOTICE_ID = 'post-login-safety';
 
-/** One-time tip after sign-in: Windows may show firewall / SmartScreen — safe to minimize. */
+/**
+ * One-time after sign-in: put the firewall / SmartScreen tip in Notifications
+ * (with unread blue-dot) instead of a banner over Chat.
+ */
 export function PostLoginSafetyTip() {
-  const { user, bypass, loading } = useAuth();
-  const [dismissed, setDismissed] = useState(() => {
+  const { user, profile, bypass, loading } = useAuth();
+
+  useEffect(() => {
+    if (loading || bypass || !user || user.id === 'guest-local') return;
     try {
-      return localStorage.getItem(DISMISS_KEY) === '1';
+      if (localStorage.getItem(DISMISS_KEY) === '1') return;
     } catch {
-      return false;
+      return;
     }
-  });
 
-  if (loading || dismissed || bypass || !user || user.id === 'guest-local') return null;
+    const forArkId = isArkDevEmail(user.email)
+      ? 'DEV'
+      : (profile?.ark_id ? formatArkId(profile.ark_id) : undefined);
 
-  return (
-    <div className="shrink-0 mx-2 mt-2 mb-0 rounded-xl border border-sky-500/30 bg-sky-500/10 px-4 py-3 flex items-start gap-3">
-      <div className="min-w-0 flex-1 text-xs text-sky-100/90 leading-relaxed">
-        <p className="font-medium text-sky-200 text-sm">You&apos;re signed in</p>
-        <p className="mt-1">
-          If Windows shows a firewall, SmartScreen, or similar warning for ARK or the local brain, you can{' '}
-          <strong className="font-medium text-sky-100">minimize that window</strong> and keep using the app.
-          Those prompts are normal on first run — they are not a failed login.
-        </p>
-      </div>
-      <button
-        type="button"
-        className="shrink-0 p-1 rounded-lg text-sky-200/70 hover:text-sky-100 hover:bg-sky-500/20"
-        aria-label="Dismiss"
-        title="Dismiss"
-        onClick={() => {
-          setDismissed(true);
-          try {
-            localStorage.setItem(DISMISS_KEY, '1');
-          } catch {
-            /* ignore */
-          }
-        }}
-      >
-        <X className="w-4 h-4" />
-      </button>
-    </div>
-  );
+    const existing = loadLocalNotifications(forArkId).some(n => n.id === NOTICE_ID);
+    if (existing) {
+      try {
+        localStorage.setItem(DISMISS_KEY, '1');
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
+
+    pushLocalNotification({
+      id: NOTICE_ID,
+      kind: 'system',
+      title: "You're signed in",
+      body:
+        'If Windows shows a firewall, SmartScreen, or similar warning for ARK or the local brain, you can minimize that window and keep using the app. Those prompts are normal on first run — they are not a failed login.',
+      forArkId,
+      unread: true,
+    });
+
+    try {
+      localStorage.setItem(DISMISS_KEY, '1');
+    } catch {
+      /* ignore */
+    }
+  }, [loading, bypass, user, profile?.ark_id]);
+
+  return null;
 }

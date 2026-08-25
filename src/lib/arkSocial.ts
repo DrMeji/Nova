@@ -184,7 +184,8 @@ export async function listContacts(userId?: string | null): Promise<ArkContact[]
     })).filter(c => isArkUserId(c.arkId));
 
     // Live profile overlay — Settings name/avatar changes must show for friends.
-    const { lookupArkUser, ARK_DEV_ID, formatArkId } = await import('@/lib/arkUserId');
+    const { lookupArkUser, ARK_DEV_ID, formatArkId, clearArkLookupCache } = await import('@/lib/arkUserId');
+    clearArkLookupCache();
     const [devHit, ...lives] = await Promise.all([
       lookupArkUser('DEV'),
       ...cloud.map(c => lookupArkUser(c.arkId)),
@@ -201,10 +202,18 @@ export async function listContacts(userId?: string | null): Promise<ArkContact[]
         ),
       );
       if (isDevPeer) {
+        const liveName = (live?.displayName || '').trim();
+        const cached = (c.displayName || '').trim();
+        const displayName =
+          (liveName && liveName.toUpperCase() !== ARK_DEV_ID)
+            ? liveName
+            : (cached && cached.toUpperCase() !== ARK_DEV_ID && cached !== c.arkId)
+              ? cached
+              : 'ARK user';
         return {
           ...c,
           arkId: ARK_DEV_ID,
-          displayName: ARK_DEV_ID,
+          displayName,
           avatarUrl: live?.avatarUrl || devHit?.avatarUrl || c.avatarUrl,
         };
       }

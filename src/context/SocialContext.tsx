@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { useRouter } from '@/context/RouterContext';
 import {
@@ -16,6 +16,8 @@ import { isArkDevEmail } from '@/lib/arkDevAccount';
 import { isRevealed } from '@/lib/featurePark';
 import { notifyWorkDone } from '@/lib/activityIndicators';
 import { pushSidebarToast } from '@/lib/sidebarToast';
+import { pushLocalNotification } from '@/lib/localNotifications';
+import { formatArkId } from '@/lib/arkUserId';
 
 type SocialContextValue = {
   contacts: ArkContact[];
@@ -36,6 +38,8 @@ export function SocialProvider({ children }: { children: ReactNode }) {
   const [contacts, setContacts] = useState<ArkContact[]>([]);
   const [unreadFrom, setUnreadFrom] = useState<string[]>([]);
   const myArkId = isArkDevEmail(user?.email) ? 'DEV' : (profile?.ark_id || '');
+  const contactsRef = useRef(contacts);
+  contactsRef.current = contacts;
 
   const refreshContacts = async () => {
     const list = await listContacts(user?.id);
@@ -72,12 +76,22 @@ export function SocialProvider({ children }: { children: ReactNode }) {
       if (!viewingThisPeer) {
         setUnreadFrom(prev => (prev.includes(msg.senderArkId) ? prev : [...prev, msg.senderArkId]));
       }
+      const who =
+        contactsRef.current.find(c => c.arkId === msg.senderArkId || formatArkId(c.arkId) === formatArkId(msg.senderArkId))?.displayName
+        || formatArkId(msg.senderArkId);
       if (!viewingMessage && isRevealed('message')) {
-        const who = msg.senderArkId;
-        pushSidebarToast(`New message from ${who}`, { ttlMs: 10_000, id: `dm-${who}` });
+        pushSidebarToast(`New message from ${who}`, { ttlMs: 10_000, id: `dm-${msg.senderArkId}` });
         notifyWorkDone('message');
+        pushLocalNotification({
+          id: `dm-${msg.id}`,
+          kind: 'system',
+          title: `Message from ${who}`,
+          body: (msg.body || '').trim().slice(0, 160) || 'New direct message',
+          forArkId: myArkId,
+        });
       } else if (isRevealed('message') && !viewingThisPeer) {
         notifyWorkDone('message');
+        notifyWorkDone('notifications');
       }
     }, user?.id);
     return unsub;
@@ -91,9 +105,9 @@ export function SocialProvider({ children }: { children: ReactNode }) {
 
   const inviteByArkId = async (arkId: string, _displayName?: string) => {
     const prefs = getLocalPrefs();
-    const fromName = isArkDevEmail(user?.email)
-      ? 'DEV'
-      : (prefs.displayName || profile?.display_name || 'ARK user');
+    const fromName = prefs.displayName?.trim() && prefs.displayName.trim() !== 'Guest'
+      ? prefs.displayName.trim()
+      : (profile?.display_name?.trim() || (isArkDevEmail(user?.email) ? 'DEV' : 'ARK user'));
     const result = await sendFriendRequest({
       fromArkId: myArkId,
       fromName,

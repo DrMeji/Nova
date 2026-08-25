@@ -11,6 +11,7 @@ import {
   getEngineStatus,
 } from '@/lib/arkEngine';
 import { notifyWorkDone, type ActivityKey } from '@/lib/activityIndicators';
+import { pushLocalNotification } from '@/lib/localNotifications';
 
 export type EngineDownloadJob = {
   id: string;
@@ -78,6 +79,12 @@ async function tick(id: string) {
     if (p >= 100) {
       stopTimer(id);
       notifyWorkDone(activityFor(job.source));
+      pushLocalNotification({
+        id: `model-ready-${id}`,
+        kind: 'model',
+        title: `${job.name} is ready`,
+        body: 'Your local model finished downloading and is ready to use.',
+      });
       try {
         void window.arkDesktop?.engineSetModel?.(id);
       } catch {

@@ -316,6 +316,17 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.155',
+    channel: 'stable' as const,
+    date: 'Aug 25, 2026',
+    title: 'Notifications hub + display names',
+    notes: [
+      'Signed-in / SmartScreen tip moved into Notifications with a blue unread dot',
+      'Friend requests, messages, and finished model downloads light Notifications',
+      'DEV public ID stays DEV while friends see the real display name (e.g. AutoFoot)',
+    ],
+  },
+  {
     version: '0.1.154',
     channel: 'stable' as const,
     date: 'Aug 25, 2026',
