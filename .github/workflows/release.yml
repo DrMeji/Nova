@@ -1,11 +1,16 @@
 name: Release
 
-# Build on private Ark-Source; publish installer assets only to public DrMeji/Ark.
+# Build on private Ark-Source; publish installer to Ark-Source + public DrMeji/Ark.
 on:
   push:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to publish (e.g. v0.1.154). Required for workflow_dispatch."
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -15,6 +20,8 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
 
       - uses: actions/setup-node@v4
         with:
@@ -36,11 +43,45 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npx electron-builder --win --publish never
 
-      - name: Publish installers to public DrMeji/Ark only
+      - name: Upload installer artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ark-windows-installer
+          path: |
+            release/ARK-Setup.exe
+            release/ARK-Setup.exe.blockmap
+            release/latest.yml
+            release/ARK-Portable.exe
+          if-no-files-found: error
+
+      - name: Resolve release tag
+        id: tag
+        shell: pwsh
+        run: |
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $tag = "${{ inputs.tag }}"
+          } elseif ("${{ github.ref_type }}" -eq "tag") {
+            $tag = "${{ github.ref_name }}"
+          } else {
+            throw "Tag required"
+          }
+          if ($tag -notmatch '^v\d+\.\d+\.\d+$') { throw "Bad tag: $tag" }
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+
+      - name: Publish to Ark-Source (private)
         shell: pwsh
         env:
-          # Prefer a PAT that can write Releases on DrMeji/Ark (cross-repo).
-          GH_TOKEN: ${{ secrets.ARK_PUBLIC_RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          $tag = if ("${{ github.ref_type }}" -eq "tag") { "${{ github.ref_name }}" } else { throw "Tag required" }
-          pwsh scripts/publish-public-release.ps1 -Tag $tag
+          pwsh scripts/publish-public-release.ps1 -Tag "${{ steps.tag.outputs.tag }}" -Repos @('DrMeji/Ark-Source')
+
+      - name: Publish to public DrMeji/Ark
+        shell: pwsh
+        env:
+          # Cross-repo publish requires a PAT with repo scope on DrMeji/Ark.
+          GH_TOKEN: ${{ secrets.ARK_PUBLIC_RELEASE_TOKEN }}
+        run: |
+          if (-not $env:GH_TOKEN) {
+            throw "Missing secret ARK_PUBLIC_RELEASE_TOKEN (PAT that can create releases on DrMeji/Ark)."
+          }
+          pwsh scripts/publish-public-release.ps1 -Tag "${{ steps.tag.outputs.tag }}" -Repos @('DrMeji/Ark')
