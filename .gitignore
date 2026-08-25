@@ -33,3 +33,6 @@ Modelfile.cline
 # Local Grok handoff notes (not for GitHub)
 GROK-HANDOFF*.md
 ARK-Grok-*.txt
+
+supabase/.temp/
+
