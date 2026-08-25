@@ -9,6 +9,7 @@ import { useRouter } from '@/context/RouterContext';
 import { useSocial } from '@/context/SocialContext';
 import { listNetworkPosts, publishNetworkPost, deleteNetworkPost, type NetworkPost } from '@/lib/arkSocial';
 import { formatArkId, isArkUserId, lookupArkUser, normalizeArkId } from '@/lib/arkUserId';
+import { isDevArkAlias } from '@/lib/arkDevAccount';
 import { GuestSocialBanner } from '@/components/GuestSocialBanner';
 import { ArkAvatar } from '@/components/ArkAvatar';
 import { buildDemoNetworkPosts } from '@/lib/socialDemo';
@@ -171,8 +172,10 @@ export function NetworkingView() {
   }, [posts, query, tab, myArkId, savedIds, projectType, platform]);
 
   useEffect(() => {
-    const id = normalizeArkId(query);
-    if (!isArkUserId(id) || id === myArkId) {
+    const raw = query.trim();
+    const id = normalizeArkId(raw);
+    const wantDev = isDevArkAlias(raw);
+    if ((!wantDev && !isArkUserId(id)) || (!wantDev && id === myArkId)) {
       setIdSearchHit(null);
       setIdSearchNote('');
       return;
@@ -180,14 +183,22 @@ export function NetworkingView() {
     let cancelled = false;
     setIdSearchBusy(true);
     setIdSearchNote('');
-    void lookupArkUser(id).then((hit) => {
+    void lookupArkUser(wantDev ? 'DEV' : id).then((hit) => {
       if (cancelled) return;
       setIdSearchBusy(false);
       if (hit) {
-        setIdSearchHit({ arkId: hit.arkId, displayName: hit.displayName });
+        if (hit.arkId === myArkId) {
+          setIdSearchHit(null);
+          setIdSearchNote('That’s your own account');
+          return;
+        }
+        setIdSearchHit({
+          arkId: hit.arkId,
+          displayName: wantDev ? 'DEV' : hit.displayName,
+        });
       } else {
         setIdSearchHit(null);
-        setIdSearchNote(`No ARK account found for ${id}`);
+        setIdSearchNote(wantDev ? 'DEV is not registered yet' : `No ARK account found for ${id}`);
       }
     });
     return () => {
@@ -468,7 +479,7 @@ export function NetworkingView() {
           <div className="flex-1 min-h-0 overflow-y-auto px-5 sm:px-8 pb-6">
             <div className="w-full">
               {note && <p className="text-xs text-amber-200/90 mb-3">{note}</p>}
-              {(idSearchHit || idSearchBusy || idSearchNote) && isArkUserId(normalizeArkId(query)) && (
+              {(idSearchHit || idSearchBusy || idSearchNote) && (isArkUserId(normalizeArkId(query)) || isDevArkAlias(query)) && (
                 <div className="mb-3 rounded-2xl border border-sky-500/25 bg-sky-500/5 px-4 py-3 flex items-center gap-3 flex-wrap">
                   {idSearchBusy ? (
                     <p className="text-sm text-content-tertiary flex items-center gap-2">
@@ -507,7 +518,7 @@ export function NetworkingView() {
                 <div className="text-center py-16 text-content-tertiary">
                   <Globe className="w-6 h-6 mx-auto mb-2 opacity-70" />
                   <p className="text-sm">
-                    {isArkUserId(normalizeArkId(query))
+                    {isArkUserId(normalizeArkId(query)) || isDevArkAlias(query)
                       ? 'No posts from that ARK ID yet. Use Add friend above if they were found.'
                       : tab === 'saved'
                         ? 'No saved projects yet. Bookmark a post to find it here.'

@@ -16,6 +16,8 @@ import {
 } from '@/lib/localPrefs';
 import { clearSetupCompleted } from '@/lib/setup';
 import { syncWorkspaceGrantsFromPrefs } from '@/lib/workspaceGrants';
+import { formatArkId } from '@/lib/arkUserId';
+import { isArkDevEmail } from '@/lib/arkDevAccount';
 import {
   detectHardware,
   getAccurateHardware,
@@ -29,7 +31,6 @@ import {
   Smartphone, Sparkles, FlaskConical,
   Mail, BadgeCheck, Trash2, Download, Info, Monitor, Copy, X, FolderOpen,
 } from 'lucide-react';
-import { formatArkId } from '@/lib/arkUserId';
 import { clearLocalAppCaches, clearLocalChatCache } from '@/lib/clearSession';
 import { deleteEngineModel, engineDiskSpace, getEngineStatus, type ArkEngineModel, type ArkEngineStatus } from '@/lib/arkEngine';
 import { isRevealed, setRevealed, type ParkId } from '@/lib/featurePark';
@@ -619,18 +620,18 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                   </div>
                   <div className="flex items-center gap-2 min-w-0">
                     <p className="flex-1 min-w-0 rounded-lg border border-surface-border bg-ark-navy-900/80 px-3 py-2 text-sm font-mono tracking-[0.18em] sm:tracking-[0.28em] text-content-primary overflow-x-auto">
-                      {user?.email && ['thomaskrishnan0107@gmail.com'].includes(user.email)
+                      {isArkDevEmail(user?.email)
                         ? 'DEV'
                         : (profile?.ark_id ? formatArkId(profile.ark_id) : '•••••••')}
                     </p>
                     <button
                       type="button"
-                      disabled={!profile?.ark_id}
+                      disabled={!profile?.ark_id && !isArkDevEmail(user?.email)}
                       onClick={() => {
-                        if (!profile?.ark_id) return;
-                        const arkIdText = user?.email && ['thomaskrishnan0107@gmail.com'].includes(user.email)
+                        if (!profile?.ark_id && !isArkDevEmail(user?.email)) return;
+                        const arkIdText = isArkDevEmail(user?.email)
                           ? 'DEV'
-                          : formatArkId(profile.ark_id);
+                          : formatArkId(profile!.ark_id);
                         void navigator.clipboard.writeText(arkIdText).then(() => {
                           setArkCopied(true);
                           window.setTimeout(() => setArkCopied(false), 1600);

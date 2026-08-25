@@ -1,5 +1,15 @@
 ﻿# ARK changelog
 
+## 0.1.151 — 2026-08-24
+
+Clean auth restart on the new Supabase project. Developer email shows as DEV; everyone else keeps a 7-digit ARK ID.
+
+**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.151/ARK-Setup.exe) · [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.151)
+
+### Social
+- Fresh backend has no leftover accounts — sign up again with your email.
+- `thomaskrishnan0107@gmail.com` displays as **DEV**; friends can add `DEV` or the underlying 7-digit ID.
+- Other accounts always use their own 7-digit ARK ID.
 ## 0.1.150 — 2026-08-24
 
 Point ARK at the new Supabase project and ship friend-request schema for public testers.

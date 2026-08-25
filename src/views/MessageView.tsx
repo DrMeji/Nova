@@ -20,6 +20,7 @@ import {
   type MessageAttachment,
 } from '@/lib/arkSocial';
 import { formatArkId, isArkUserId, normalizeArkId } from '@/lib/arkUserId';
+import { isDevArkAlias } from '@/lib/arkDevAccount';
 import { SOCIAL_DEMO_ENABLED } from '@/lib/socialDemo';
 import { GuestSocialBanner } from '@/components/GuestSocialBanner';
 import { ConnectShell } from '@/components/ConnectShell';
@@ -359,26 +360,27 @@ export function MessageView() {
   };
 
   const add = async () => {
-    const id = normalizeArkId(addId);
+    const raw = addId.trim();
+    const id = normalizeArkId(raw);
     setAddError(null);
     setAddOk(null);
-    if (!isArkUserId(id)) {
-      setAddError('Enter a 7-digit ARK ID');
+    if (!isDevArkAlias(raw) && !isArkUserId(id)) {
+      setAddError('Enter a 7-digit ARK ID (or DEV)');
       return;
     }
-    if (id === myArkId) {
+    if (!isDevArkAlias(raw) && id === myArkId) {
       setAddError('That’s your own ARK ID');
       return;
     }
-    if (isBlockedArkId(id)) {
+    if (!isDevArkAlias(raw) && isBlockedArkId(id)) {
       setAddError('That user is blocked');
       return;
     }
     setAdding(true);
     try {
-      await inviteByArkId(id);
+      await inviteByArkId(isDevArkAlias(raw) ? 'DEV' : id);
       setAddId('');
-      setAddOk(`Friend request was sent to ${id}`);
+      setAddOk(`Friend request was sent to ${isDevArkAlias(raw) ? 'DEV' : id}`);
       // Request pending. do not open a chat or show their profile.
       await refreshContacts();
     } catch (err) {

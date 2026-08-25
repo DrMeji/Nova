@@ -4,6 +4,7 @@
  */
 
 import { supabase } from '@/lib/supabase';
+import { isDevArkAlias } from '@/lib/arkDevAccount';
 
 export const ARK_ID_RE = /^[1-9]\d{6}$/;
 
@@ -111,19 +112,23 @@ const lookupCache = new Map<string, { at: number; value: { arkId: string; displa
 const LOOKUP_CACHE_MS = 15_000;
 
 export async function lookupArkUser(arkId: string): Promise<{ arkId: string; displayName: string | null; avatarUrl?: string | null } | null> {
-  const id = normalizeArkId(arkId);
-  if (!isArkUserId(id)) return null;
-  const cached = lookupCache.get(id);
+  const raw = String(arkId || '').trim();
+  const id = isDevArkAlias(raw) ? 'DEV' : normalizeArkId(raw);
+  if (!isDevArkAlias(raw) && !isArkUserId(id)) return null;
+  const cacheKey = isDevArkAlias(raw) ? 'DEV' : id;
+  const cached = lookupCache.get(cacheKey);
   if (cached && Date.now() - cached.at < LOOKUP_CACHE_MS) return cached.value;
   try {
-    const { data, error } = await supabase.rpc('lookup_ark_user', { p_ark_id: id });
+    const { data, error } = await supabase.rpc('lookup_ark_user', {
+      p_ark_id: isDevArkAlias(raw) ? 'DEV' : id,
+    });
     if (error || !data) {
-      lookupCache.set(id, { at: Date.now(), value: null });
+      lookupCache.set(cacheKey, { at: Date.now(), value: null });
       return null;
     }
     const row = Array.isArray(data) ? data[0] : data;
     if (!row || !isArkUserId(String(row.ark_id || ''))) {
-      lookupCache.set(id, { at: Date.now(), value: null });
+      lookupCache.set(cacheKey, { at: Date.now(), value: null });
       return null;
     }
     const value = {
@@ -131,7 +136,7 @@ export async function lookupArkUser(arkId: string): Promise<{ arkId: string; dis
       displayName: row.display_name ? String(row.display_name) : null,
       avatarUrl: row.avatar_url ? String(row.avatar_url) : null,
     };
-    lookupCache.set(id, { at: Date.now(), value });
+    lookupCache.set(cacheKey, { at: Date.now(), value });
     return value;
   } catch {
     return null;

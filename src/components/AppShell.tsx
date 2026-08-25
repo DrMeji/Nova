@@ -28,6 +28,7 @@ import { probeAiModeLabel, type AiModeLabel } from '@/lib/aiModeStatus';
 import { JobsStrip } from '@/components/JobsStrip';
 import { comparePinnedThenRecent } from '@/lib/recentStore';
 import { formatArkId } from '@/lib/arkUserId';
+import { isArkDevEmail } from '@/lib/arkDevAccount';
 import {
   clearActivity,
   clearChatDone,
@@ -901,24 +902,24 @@ export function AppShell({ children }: { children: ReactNode }) {
                     <span className="block text-xs font-medium text-content-primary truncate">
                       {displayName}
                     </span>
-                    {(profile?.ark_id || (user?.email && ['thomaskrishnan0107@gmail.com'].includes(user.email))) ? (
+                    {(profile?.ark_id || isArkDevEmail(user?.email)) ? (
                       <span className={`block text-[10px] font-mono tracking-[0.22em] truncate mt-0.5 ${presenceIdClass(presence)}`}>
-                        {user?.email && ['thomaskrishnan0107@gmail.com'].includes(user.email)
+                        {isArkDevEmail(user?.email)
                           ? 'DEV'
                           : formatArkId(profile!.ark_id!)}
                       </span>
                     ) : null}
                   </button>
-                  {profile?.ark_id ? (
+                  {(profile?.ark_id || isArkDevEmail(user?.email)) ? (
                     <button
                       type="button"
                       className="p-1.5 rounded-lg shrink-0 text-content-tertiary hover:text-content-primary hover:bg-surface-hover"
                       title="Copy your ARK ID"
                       aria-label="Copy your ARK ID"
                       onClick={() => {
-                        const arkIdText = user?.email && ['thomaskrishnan0107@gmail.com'].includes(user.email)
+                        const arkIdText = isArkDevEmail(user?.email)
                           ? 'DEV'
-                          : formatArkId(profile.ark_id || '');
+                          : formatArkId(profile?.ark_id || '');
                         void navigator.clipboard.writeText(arkIdText).catch(() => undefined);
                       }}
                     >

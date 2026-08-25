@@ -5,6 +5,7 @@
 import { supabase } from '@/lib/supabase';
 import { canUseCloud } from '@/lib/arkSocial';
 import { isArkUserId, lookupArkUser, normalizeArkId } from '@/lib/arkUserId';
+import { isDevArkAlias } from '@/lib/arkDevAccount';
 import { pushLocalNotification, dismissFriendRequestNotification } from '@/lib/localNotifications';
 import { pushSidebarToast } from '@/lib/sidebarToast';
 
@@ -142,29 +143,39 @@ export async function sendFriendRequest(opts: {
   userId?: string | null;
 }): Promise<{ ok: true; request: FriendRequest } | { ok: false; error: string }> {
   const from = normalizeArkId(opts.fromArkId);
-  const to = normalizeArkId(opts.toArkIdRaw);
-  if (!isArkUserId(from) || !isArkUserId(to)) {
-    return { ok: false, error: 'Enter a valid 7-digit ARK ID' };
+  const rawTo = String(opts.toArkIdRaw || '').trim();
+  const toAlias = isDevArkAlias(rawTo);
+  const to = toAlias ? '' : normalizeArkId(rawTo);
+  if (!isArkUserId(from)) {
+    return { ok: false, error: 'Your ARK ID is missing. Sign out and sign back in.' };
   }
-  if (from === to) return { ok: false, error: 'That’s your own ARK ID' };
+  if (!toAlias && !isArkUserId(to)) {
+    return { ok: false, error: 'Enter a valid 7-digit ARK ID (or DEV for the developer account)' };
+  }
   if (!canUseCloud(opts.userId)) {
     return { ok: false, error: 'Sign in to send friend requests to other ARK users.' };
   }
 
-  const all = await syncFriendRequests(from, opts.userId);
-  if (all.some(r => r.fromArkId === from && r.toArkId === to && r.status === 'pending')) {
-    return { ok: false, error: 'Friend request already sent' };
-  }
-
-  const found = await lookupArkUser(to);
+  const found = await lookupArkUser(toAlias ? 'DEV' : to);
   if (!found) {
-    return { ok: false, error: `No ARK account found for ID ${to}. They must sign in once so their ID is registered.` };
+    return {
+      ok: false,
+      error: toAlias
+        ? 'DEV account is not registered yet. Sign in once with the developer email first.'
+        : `No ARK account found for ID ${to}. They must sign in once so their ID is registered.`,
+    };
+  }
+  if (found.arkId === from) return { ok: false, error: 'That’s your own ARK ID' };
+
+  const all = await syncFriendRequests(from, opts.userId);
+  if (all.some(r => r.fromArkId === from && r.toArkId === found.arkId && r.status === 'pending')) {
+    return { ok: false, error: 'Friend request already sent' };
   }
 
   try {
     const { data, error } = await supabase.from('ark_friend_requests').insert({
       from_ark_id: from,
-      to_ark_id: to,
+      to_ark_id: found.arkId,
       from_name: opts.fromName || 'ARK user',
       from_avatar_url: opts.fromAvatarUrl || null,
       status: 'pending',
@@ -175,11 +186,12 @@ export async function sendFriendRequest(opts: {
     const req = mapRow(data as Record<string, unknown>);
     writeLocal([req, ...readLocal().filter(r => r.id !== req.id)]);
 
-    pushSidebarToast(`Friend request was sent to ${to}`, { ttlMs: 8_000, id: `fr-sent-${to}` });
+    const label = toAlias ? 'DEV' : found.arkId;
+    pushSidebarToast(`Friend request was sent to ${label}`, { ttlMs: 8_000, id: `fr-sent-${found.arkId}` });
     pushLocalNotification({
       kind: 'system',
       title: 'Friend request sent',
-      body: `Your request was sent to ARK ID ${to}. You’ll connect after they accept.`,
+      body: `Your request was sent to ${label}. You’ll connect after they accept.`,
       forArkId: from,
     });
 
