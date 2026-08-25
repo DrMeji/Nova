@@ -1,10 +1,10 @@
 {
   "name": "ark",
   "private": true,
-  "version": "0.1.157",
+  "version": "0.1.158",
   "type": "module",
   "main": "electron/main.cjs",
-  "description": "ARK â€” AI Creation Studio desktop app",
+  "description": "ARK \u00e2\u20ac\u201d AI Creation Studio desktop app",
   "author": "DrMeji",
   "repository": {
     "type": "git",
