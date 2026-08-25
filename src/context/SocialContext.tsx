@@ -12,6 +12,7 @@ import {
 } from '@/lib/arkSocial';
 import { sendFriendRequest, respondFriendRequest, subscribeFriendRequests, syncFriendRequests } from '@/lib/friendRequests';
 import { getLocalPrefs } from '@/lib/localPrefs';
+import { isArkDevEmail } from '@/lib/arkDevAccount';
 import { isRevealed } from '@/lib/featurePark';
 import { notifyWorkDone } from '@/lib/activityIndicators';
 import { pushSidebarToast } from '@/lib/sidebarToast';
@@ -44,6 +45,11 @@ export function SocialProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     void refreshContacts();
   }, [user?.id]);
+
+  // Re-pull live names/avatars when opening Message (friends may have updated Settings).
+  useEffect(() => {
+    if (route.name === 'message') void refreshContacts();
+  }, [route.name, user?.id]);
 
   useEffect(() => {
     if (!myArkId) return;
@@ -85,11 +91,13 @@ export function SocialProvider({ children }: { children: ReactNode }) {
 
   const inviteByArkId = async (arkId: string, _displayName?: string) => {
     const prefs = getLocalPrefs();
-    const fromName = prefs.displayName || profile?.display_name || 'ARK user';
+    const fromName = isArkDevEmail(user?.email)
+      ? 'DEV'
+      : (prefs.displayName || profile?.display_name || 'ARK user');
     const result = await sendFriendRequest({
       fromArkId: myArkId,
       fromName,
-      fromAvatarUrl: prefs.avatarDataUrl,
+      fromAvatarUrl: prefs.avatarDataUrl || profile?.avatar_url || undefined,
       toArkIdRaw: arkId,
       userId: user?.id,
     });

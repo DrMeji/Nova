@@ -182,8 +182,37 @@ export async function listContacts(userId?: string | null): Promise<ArkContact[]
       addedAt: String(row.created_at),
       avatarUrl: row.peer_avatar_url ? String(row.peer_avatar_url) : undefined,
     })).filter(c => isArkUserId(c.arkId));
+
+    // Live profile overlay — Settings name/avatar changes must show for friends.
+    const { lookupArkUser } = await import('@/lib/arkUserId');
+    const [devHit, ...lives] = await Promise.all([
+      lookupArkUser('DEV'),
+      ...cloud.map(c => lookupArkUser(c.arkId)),
+    ]);
+    const enriched = cloud.map((c, i) => {
+      const live = lives[i];
+      let displayName = (live?.displayName || c.displayName || c.arkId).trim();
+      let avatarUrl = live?.avatarUrl || c.avatarUrl;
+      if (devHit && c.arkId === devHit.arkId) {
+        displayName = 'DEV';
+        avatarUrl = live?.avatarUrl || devHit.avatarUrl || avatarUrl;
+      }
+      return { ...c, displayName, avatarUrl: avatarUrl || undefined };
+    });
+
+    // Persist fresher labels so the next open is instant.
+    for (const c of enriched) {
+      const prev = cloud.find(x => x.arkId === c.arkId);
+      if (
+        prev
+        && (prev.displayName !== c.displayName || (prev.avatarUrl || '') !== (c.avatarUrl || ''))
+      ) {
+        void persistContact(userId, c);
+      }
+    }
+
     const byId = new Map<string, ArkContact>();
-    [...cloud, ...local].forEach(c => {
+    [...enriched, ...local].forEach(c => {
       const prev = byId.get(c.arkId);
       if (!prev) byId.set(c.arkId, c);
       else byId.set(c.arkId, { ...prev, ...c, avatarUrl: c.avatarUrl || prev.avatarUrl });

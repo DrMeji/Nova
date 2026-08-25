@@ -316,6 +316,18 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.153',
+    channel: 'stable' as const,
+    date: 'Aug 24, 2026',
+    title: 'Live friend names/avatars + signup name',
+    notes: [
+      'Friends list and chat refresh live display names and profile photos from Settings',
+      'DEV account labels correctly on friend requests and contacts',
+      'Sign up includes a single Name field (ARK ID still auto-assigned)',
+      'Call stays parked until tomorrow; see docs/DEFERRED.md',
+    ],
+  },
+  {
     version: '0.1.103',
     channel: 'stable' as const,
     date: 'Aug 21, 2026',

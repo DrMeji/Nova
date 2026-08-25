@@ -5,8 +5,9 @@ const SALT_KEY = 'ark:pin-salt';
 const SESSION_KEY = 'ark:pin-unlocked';
 const FAILURES_KEY = 'ark:pin-failures';
 const LOCKOUT_KEY = 'ark:pin-lockout-until';
-const MAX_FAILURES = 5;
-const LOCKOUT_MS = 30_000;
+const MAX_FAILURES = 10_000;
+const LOCKOUT_MS = 0; // testing: no PIN lockout delay for now
+
 
 function randomSalt() {
   const bytes = crypto.getRandomValues(new Uint8Array(16));

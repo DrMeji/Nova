@@ -295,6 +295,15 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
 
   const keyedCount = useMemo(() => Object.keys(providerKeys).length, [providerKeys]);
 
+  const pushProfileToFriends = async () => {
+    try {
+      const { supabase } = await import('@/lib/supabase');
+      await supabase.rpc('broadcast_my_profile');
+    } catch {
+      /* RPC may not be applied yet; friends still refresh via live lookup */
+    }
+  };
+
   const saveDisplayName = async () => {
     const name = displayName.trim() || 'Guest';
     patchPrefs({ displayName: name });
@@ -306,6 +315,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
           display_name: name,
           avatar_url: prefs.avatarDataUrl || null,
         });
+        await pushProfileToFriends();
         await refreshProfile();
       } catch {
         /* local prefs still saved */
@@ -321,6 +331,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
         id: user.id,
         avatar_url: dataUrl || null,
       });
+      await pushProfileToFriends();
       await refreshProfile();
     } catch {
       /* keep local */

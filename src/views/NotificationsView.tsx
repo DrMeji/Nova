@@ -157,7 +157,9 @@ export function NotificationsView() {
                       <p className="text-xs text-content-secondary mt-1 leading-relaxed">{n.body}</p>
                       {friend?.fromArkId && (
                         <p className="text-[10px] font-mono text-content-tertiary mt-1 tracking-wider">
-                          {formatArkId(friend.fromArkId)}
+                          {friend.fromName === 'DEV' || /^dev$/i.test(friend.fromName || '')
+                            ? 'DEV'
+                            : formatArkId(friend.fromArkId)}
                         </p>
                       )}
                       {friend?.friendRequestId && (

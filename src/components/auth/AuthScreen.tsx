@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { useAuth } from '@/context/AuthContext';
-import { Loader2, Mail, Lock, AlertCircle, Zap, Eye, EyeOff } from 'lucide-react';
+import { Loader2, Mail, Lock, AlertCircle, Zap, Eye, EyeOff, User } from 'lucide-react';
 import { AuthAmbientOrbs } from '@/components/auth/AuthAmbientOrbs';
 
 const TYPE_PHRASES = [
@@ -73,6 +73,7 @@ export function AuthScreen() {
   const [mode, setMode] = useState<AuthMode>('signin');
   const [showBypass, setShowBypass] = useState(false);
   const [email, setEmail] = useState('');
+  const [fullName, setFullName] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -94,6 +95,7 @@ export function AuthScreen() {
     setError(null);
     setInfo(null);
     setPassword('');
+    if (next === 'signin') setFullName('');
   };
 
   const handleForgotPassword = async () => {
@@ -124,6 +126,10 @@ export function AuthScreen() {
       setError('Enter a valid email to continue.');
       return;
     }
+    if (mode === 'signup' && fullName.trim().length < 2) {
+      setError('Enter your name (first and last is fine in one field).');
+      return;
+    }
     if (password.length < 6) {
       setError('Password must be at least 6 characters.');
       return;
@@ -141,7 +147,8 @@ export function AuthScreen() {
     }
 
     // Users do not pick their own handle/username. We assign a 7-digit ARK ID automatically.
-    const created = await signUp(email.trim(), password);
+    // Display name is their real name from this form (not a unique username).
+    const created = await signUp(email.trim(), password, fullName.trim());
     if (created.error) {
       setLoading(false);
       setError(created.error);
@@ -218,8 +225,25 @@ export function AuthScreen() {
               </div>
 
               {mode === 'signup' && (
+                <div className="relative animate-fade-in">
+                  <User className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-content-tertiary" />
+                  <input
+                    type="text"
+                    required
+                    minLength={2}
+                    maxLength={80}
+                    value={fullName}
+                    onChange={e => setFullName(e.target.value)}
+                    placeholder="Your name"
+                    className="ark-input pl-10 h-12 rounded-xl"
+                    autoComplete="name"
+                  />
+                </div>
+              )}
+
+              {mode === 'signup' && (
                 <div className="text-[11px] text-content-tertiary px-1 animate-fade-in">
-                  Your 7-digit ARK ID is assigned automatically.
+                  Your 7-digit ARK ID is assigned automatically. Profile photo can be added later in Settings.
                 </div>
               )}
 
@@ -311,7 +335,20 @@ export function AuthScreen() {
               </>
             )}
 
-            <p className="text-center text-[11px] text-content-tertiary mt-5 leading-relaxed">
+            <p className="text-center text-[11px] text-content-tertiary mt-4 leading-relaxed">
+              <button
+                type="button"
+                className="underline hover:text-content-secondary"
+                onClick={() =>
+                  void window.arkDesktop?.openExternal?.('https://github.com/DrMeji/Ark/releases/latest')
+                }
+              >
+                Can&apos;t sign in? Download the latest installer
+              </button>
+              {' '}(no sign-in required)
+            </p>
+
+            <p className="text-center text-[11px] text-content-tertiary mt-3 leading-relaxed">
               By continuing, you agree to our{' '}
               <button
                 type="button"

@@ -261,6 +261,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         void mergeGuestSocialToCloud(data.user.id);
       }
     }
+    if (error) {
+      const msg = String(error.message || '');
+      if (/rate limit|too many requests|email rate limit/i.test(msg)) {
+        return {
+          error:
+            'Auth is rate-limited by Supabase right now. Wait a minute, or Sign in if the account already exists.',
+        };
+      }
+    }
     return { error: error?.message ?? null };
   };
 
@@ -274,6 +283,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // We'll assign the ARK ID display name after we generate/claim their 7-digit ARK ID.
       options: { data: { display_name: displayName?.trim() || undefined } },
     });
+    if (error) {
+      const msg = String(error.message || '');
+      if (/rate limit|too many requests|email rate limit/i.test(msg)) {
+        return {
+          error:
+            'Email rate limit hit (Supabase built-in mail is ~2/hour). Disable Confirm email in the dashboard, wait, or Sign in if the account already exists.',
+        };
+      }
+      return { error: msg };
+    }
     if (!error && data.user) {
       try {
         const trimmed = displayName?.trim() || null;
