@@ -4,7 +4,10 @@ export function titleForRoute(route: Route, extras?: { projectName?: string; cha
   switch (route.name) {
     case 'chat': {
       // Don't show "ARK · Chat" in the title bar. just "ARK" is cleaner.
-      const mode = route.mode === 'image' ? 'Image' : route.mode === 'video' ? 'Video' : '';
+      const mode = route.mode === 'image' ? 'Image'
+        : route.mode === 'video' ? 'Video'
+        : route.mode === 'voice' ? 'Voice'
+        : '';
       const thread = extras?.chatTitle?.trim();
       if (!mode && !thread) return '';
       return thread ? (mode ? `${mode} · ${thread}` : thread) : mode;

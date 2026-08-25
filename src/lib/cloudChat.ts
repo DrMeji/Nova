@@ -676,6 +676,16 @@ function mapPreferred(modelId: string, modelName: string): ProviderAttempt | nul
   return null;
 }
 
+/** Public: resolve picker / catalog model ids to a cloud provider key id. */
+export function resolvePreferredCloudProvider(
+  modelId: string,
+  modelName = '',
+): { providerId: string; label: string } | null {
+  const hit = mapPreferred(modelId, modelName);
+  if (!hit) return null;
+  return { providerId: hit.id, label: hit.label };
+}
+
 async function runAttempt(
   attempt: ProviderAttempt,
   history: RouterChatTurn[],

@@ -35,7 +35,7 @@ export function SocialProvider({ children }: { children: ReactNode }) {
   const { route } = useRouter();
   const [contacts, setContacts] = useState<ArkContact[]>([]);
   const [unreadFrom, setUnreadFrom] = useState<string[]>([]);
-  const myArkId = profile?.ark_id || '';
+  const myArkId = isArkDevEmail(user?.email) ? 'DEV' : (profile?.ark_id || '');
 
   const refreshContacts = async () => {
     const list = await listContacts(user?.id);

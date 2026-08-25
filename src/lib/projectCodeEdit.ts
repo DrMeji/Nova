@@ -70,6 +70,7 @@ const LAYOUT_RULES = `Layout rules for simple pages:
 const CODING_INSTRUCTIONS = `You are ARK inside a developer project workspace. not a generic chatbot and not a local-engine toy.
 Your job is to help the user build and change real software in this project.
 Answer the user’s latest request directly (build / edit / fix / explain). Do not substitute a different feature, dump unrelated files, or “improve” something they did not ask for. If they only asked a question, answer it. do not invent file edits.
+Interpret typos and misspellings generously (infer the intended words) and do not lecture about spelling unless they ask.
 
 When the user asks you to build, add, remove, upgrade, fix, or change code, you MUST emit @@@FILE blocks with FULL file contents. Do not only explain how to create files. The left tree and Start preview only update when you write files.
 
@@ -102,6 +103,7 @@ Rules:
 ${LAYOUT_RULES}`;
 
 const CODING_INSTRUCTIONS_LITE = `You are ARK Code. Edit ONLY what the user asked.
+Interpret typos generously; do not lecture about spelling unless asked.
 
 Output @@@FILE path + COMPLETE file content for each changed file. Do not rewrite unrelated files.
 Do not echo the user message. Do not dump tutorials.
@@ -561,6 +563,18 @@ function inferLangPath(lang: string, userMessage: string, existing?: ProjectFile
   }
   if (lower === 'json') {
     return pickWorkspacePath(paths, [p => /package\.json$/i.test(p)], 'package.json');
+  }
+  if (lower === 'md' || lower === 'markdown') {
+    const fromAsk = String(userMessage || '').match(/\b([A-Za-z0-9_-]+\.md)\b/i)?.[1]
+      || (/\breadme\b/i.test(userMessage) ? 'README.md' : null);
+    return pickWorkspacePath(
+      paths,
+      [
+        p => /readme\.md$/i.test(p),
+        p => /\.md$/i.test(p),
+      ],
+      fromAsk || 'notes.md',
+    );
   }
   return '';
 }

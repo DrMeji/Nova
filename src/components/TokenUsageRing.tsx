@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { ggufCtxCapacityLabel } from '@/lib/ggufContext';
 
 type Props = {
   /** 0–1 how full this turn’s packed prompt is */
@@ -151,7 +152,11 @@ export function TokenUsageRing({
                   style={{ width: `${ctxPct}%` }}
                 />
               </div>
-              <p className="text-[10px] text-content-tertiary mt-1">How full this turn’s prompt is.</p>
+              <p className="text-[10px] text-content-tertiary mt-1">
+                {isLocal
+                  ? `How full this turn’s prompt is · ${ggufCtxCapacityLabel()}`
+                  : 'How full this turn’s prompt is.'}
+              </p>
             </div>
 
             <div>

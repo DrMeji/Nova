@@ -24,7 +24,7 @@ import {
   getTokenUsageRatio,
   resetTokenUsage,
   syncTokenUsage,
-  USABLE_TOKENS,
+  getUsableTokens,
 } from '@/lib/tokenUsage';
 import { resetModelHealth } from '@/lib/modelHealth';
 
@@ -48,7 +48,7 @@ function engineRowSize(models: { id?: string; sizeGb?: number }[], id: string) {
 
 export function measureThreadPressure(history: RouterChatTurn[]): number {
   const tokens = estimateTokens(flattenHistoryText(history));
-  return Math.max(0, Math.min(1, tokens / USABLE_TOKENS));
+  return Math.max(0, Math.min(1, tokens / getUsableTokens()));
 }
 
 let lastRotationNote = '';

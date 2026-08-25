@@ -8,6 +8,7 @@ import { isTraceMessage, parseTraceMessage, stripAgentTrace } from '@/lib/agentT
 import { isCatalogMessage, parseCatalogMessage, catalogToPlainText } from '@/lib/folderCatalog';
 import { isPcExploreMessage, parsePcExploreMessage, pcExploreToPlainText } from '@/lib/pcExplore';
 import { isPromptChipsMessage, parsePromptChipsMessage, promptChipsToPlainText } from '@/lib/chatPromptChips';
+import { getUsableTokens } from '@/lib/ggufContext';
 
 export type RouterChatTurn = {
   role: 'user' | 'assistant';
@@ -16,9 +17,9 @@ export type RouterChatTurn = {
   images?: { mime: string; data: string }[];
 };
 
-const MAX_TURNS = 48;
-const MAX_CHARS = 24_000;
-const MAX_TURN_CHARS = 2_400;
+const MAX_TURNS = 72;
+const MAX_CHARS = 48_000;
+const MAX_TURN_CHARS = 6_000;
 
 /** Core product bar: respond to the ask, not a substitute topic. */
 export const ANSWER_THE_ASK =
@@ -29,6 +30,8 @@ export const ANSWER_THE_ASK =
 export const BASE_SYSTEM =
   'You are ARK, a normal helpful AI chat assistant. Talk like ChatGPT. not a design studio or image tool unless they ask to make something. '
   + 'You are not the video game Ark: Survival Evolved. Never “correct” the user’s spelling of ARK. '
+  + 'Read past typos and misspellings: infer the intended word (e.g. “recomendation” → recommendation, “misplaned” → misspelled) and answer that intent. '
+  + 'Do not lecture about spelling or grammar unless they ask you to proofread. '
   + `${ANSWER_THE_ASK} `
   + 'When they ask for ideas for an app, website, coffee shop, etc.: give concrete pieces that product should have, then say where to start first and offer to begin. '
   + 'When they ask what a project is or what they are building: explain the product goal in plain language from the evidence, then suggest a practical next step. do not paste a generic file inventory. '
@@ -42,6 +45,7 @@ export const BASE_SYSTEM =
 const CONTINUITY =
   'This is a follow-up in the same ARK chat. '
   + 'Stay on the same topic as the earlier turns (coding lesson, app idea, troubleshooting, etc.). '
+  + 'Interpret typos the same way: guess the intended words and stay helpful. '
   + 'If they say “more details”, “dive deeper”, “recommended area”, or similar, deepen the PREVIOUS answer. do not switch subjects. '
   + 'Answer the latest user message with a brand-new reply. '
   + `${ANSWER_THE_ASK} `
@@ -172,26 +176,38 @@ export function isTopicShift(history: RouterChatTurn[], latestUserMessage: strin
   if (!earlier?.content) return false;
   const a = earlier.content.trim();
   const b = latest;
+  const priorIsBuildThread =
+    TEACH_HINT.test(a) || CODING_TOPIC_HINT.test(a) || BUILD_HINT.test(a)
+    || /\b(app|website|site|product|project|landing|page|ui|layout)\b/i.test(a);
+  const latestIsBuildish =
+    BUILD_HINT.test(b) || CODING_TOPIC_HINT.test(b) || THREAD_CONTINUE_HINT.test(b)
+    || /\b(app|website|site|product|project|landing|page|color|font|layout|edit|change|add|fix)\b/i.test(b);
+
+  // Long planning / build threads must stay intact — weak word-overlap must not wipe memory.
+  if (priorIsBuildThread && (latestIsBuildish || b.length < 220)) return false;
   // After teach/learn or build, short / deepen asks stay on that topic.
-  if ((TEACH_HINT.test(a) || CODING_TOPIC_HINT.test(a) || BUILD_HINT.test(a)) && b.length < 160) return false;
+  if ((TEACH_HINT.test(a) || CODING_TOPIC_HINT.test(a) || BUILD_HINT.test(a)) && b.length < 220) return false;
   if (BUILD_HINT.test(a) && THREAD_CONTINUE_HINT.test(b)) return false;
   if (BUILD_HINT.test(a) && /\b(app|website|site|product|project|build)\b/i.test(b)) return false;
   // Explicit media ask after a non-media thread is a real switch.
   if (MEDIA_ASK_HINT.test(b) && !MEDIA_ASK_HINT.test(a) && !isSoftContinuityAsk(b)) return true;
-  if (GREET_HINT.test(a) && !GREET_HINT.test(b) && !isSoftContinuityAsk(b)) return true;
+  if (GREET_HINT.test(a) && !GREET_HINT.test(b) && !isSoftContinuityAsk(b) && b.length > 24) return true;
   if (STORY_HINT.test(b) && !STORY_HINT.test(a)) return true;
-  if (STORY_HINT.test(a) && !STORY_HINT.test(b) && !isSoftContinuityAsk(b)) return true;
-  if (BUILD_HINT.test(b) && !BUILD_HINT.test(a) && (FACT_HINT.test(a) || a.length > 12)) return true;
-  if (FACT_HINT.test(b) && BUILD_HINT.test(a)) return true;
+  if (STORY_HINT.test(a) && !STORY_HINT.test(b) && !isSoftContinuityAsk(b) && !latestIsBuildish) return true;
+  if (BUILD_HINT.test(b) && !BUILD_HINT.test(a) && (FACT_HINT.test(a) || a.length > 12) && !priorIsBuildThread) return true;
+  if (FACT_HINT.test(b) && BUILD_HINT.test(a) && !isSoftContinuityAsk(b)) return true;
   const ta = significantTokens(a);
   const tb = significantTokens(b);
   if (tb.size < 2 || ta.size < 2) {
-    if ((BUILD_HINT.test(a) || TEACH_HINT.test(a) || CODING_TOPIC_HINT.test(a)) && b.length < 140) return false;
+    if ((BUILD_HINT.test(a) || TEACH_HINT.test(a) || CODING_TOPIC_HINT.test(a)) && b.length < 180) return false;
+    // Short follow-ups in an ongoing thread are almost never a real topic change.
+    if (priorUsers.length >= 2 && b.length < 160) return false;
     return a.toLowerCase() !== b.toLowerCase() && !isSoftContinuityAsk(b);
   }
   let overlap = 0;
   for (const t of tb) if (ta.has(t)) overlap += 1;
-  return overlap / tb.size < 0.28;
+  // Only treat as a shift when almost no shared words (was 0.28 — too eager mid-build).
+  return overlap / tb.size < 0.12;
 }
 
 /** Strip UI / media noise so providers get usable text. */
@@ -282,11 +298,11 @@ export function buildRouterHistory(
   const turns: RouterChatTurn[] = [];
   const keepContinuity = Boolean(opts?.keepContinuity || opts?.kind === 'coding');
   // Coding: keep prior turns short. do not re-pack old @@@FILE dumps into the context window.
-  const assistantCap = opts?.kind === 'coding' ? 320 : 720;
-  const maxChars = opts?.kind === 'coding' ? 12_000 : MAX_CHARS;
+  const assistantCap = opts?.kind === 'coding' ? 480 : 1_200;
+  const maxChars = opts?.kind === 'coding' ? 28_000 : MAX_CHARS;
   const maxTurns = opts?.maxTurns
-    ?? (opts?.kind === 'coding' ? 8 : MAX_TURNS);
-  const latestCap = opts?.kind === 'coding' ? 36_000 : MAX_TURN_CHARS;
+    ?? (opts?.kind === 'coding' ? 24 : MAX_TURNS);
+  const latestCap = opts?.kind === 'coding' ? 48_000 : MAX_TURN_CHARS;
   for (const m of prior) {
     const role = m.role === 'assistant' ? 'assistant' : m.role === 'user' ? 'user' : null;
     if (!role) continue;
@@ -375,27 +391,29 @@ export function flattenHistoryText(history: RouterChatTurn[]): string {
  */
 export function compressHistoryIfNeeded(
   history: RouterChatTurn[],
-  maxChars = 16_000,
+  maxChars?: number,
 ): RouterChatTurn[] {
+  // Scale soft cap with this PC’s usable token budget (~4 chars/token).
+  const budgetChars = maxChars ?? Math.min(64_000, Math.max(24_000, getUsableTokens() * 4));
   const text = flattenHistoryText(history);
-  if (!history.length || text.length <= maxChars) return history;
-  const keep = Math.min(8, history.length);
+  if (!history.length || text.length <= budgetChars) return history;
+  const keep = Math.min(16, history.length);
   if (history.length <= keep) {
     return history.map(t => ({
       ...t,
-      content: t.content.length > 1800 ? `${t.content.slice(0, 400)}\n…\n${t.content.slice(-1200)}` : t.content,
+      content: t.content.length > 2400 ? `${t.content.slice(0, 500)}\n…\n${t.content.slice(-1600)}` : t.content,
     }));
   }
   const old = history.slice(0, -keep);
   const recent = history.slice(-keep);
   const blob = old
-    .map(t => `${t.role === 'user' ? 'User' : 'ARK'}: ${t.content.replace(/\s+/g, ' ').slice(0, 280)}`)
+    .map(t => `${t.role === 'user' ? 'User' : 'ARK'}: ${t.content.replace(/\s+/g, ' ').slice(0, 360)}`)
     .join('\n')
-    .slice(0, 3500);
+    .slice(0, 6_000);
   return [
     {
       role: 'user',
-      content: `Earlier in this chat (keep using this memory):\n${blob}`,
+      content: `Earlier in this chat (keep using this memory — do not restart the project or greet like a new chat):\n${blob}`,
     },
     ...recent,
   ];
@@ -409,9 +427,11 @@ export function packHistoryPrompt(history: RouterChatTurn[], latestFallback?: st
   // Keep identity in the ChatML system turn (arkGguf wrapChatPrompt). Stuffing it into
   // the user text makes Qwen parrot “Never continue a previous sentence…” in the bubble.
   const softFollow = isSoftContinuityAsk(latest);
+  const userCount = history.filter(t => t.role === 'user').length;
   const keepContinuity = softFollow
     || history.some(t => /Earlier in this chat/i.test(t.content))
-    || history.filter(t => t.role === 'user').length >= 2;
+    || userCount >= 2
+    || history.some(t => t.role === 'assistant');
   if (
     history.length <= 1
     || !history.some(t => t.role === 'assistant')
@@ -424,12 +444,12 @@ export function packHistoryPrompt(history: RouterChatTurn[], latestFallback?: st
   const topic = inferThreadTopic(packedHistory);
   const priorUsers = packedHistory
     .filter(t => t.role === 'user' && t.content.trim() && t.content.trim() !== latest)
-    .slice(-8)
-    .map(t => `- ${t.content.replace(/\s+/g, ' ').slice(0, 400)}`);
+    .slice(-12)
+    .map(t => `- ${t.content.replace(/\s+/g, ' ').slice(0, 520)}`);
   const lastAssistant = [...packedHistory].reverse().find(t => t.role === 'assistant')?.content
     ?.replace(/\s+/g, ' ')
     .trim()
-    .slice(-2000);
+    .slice(-3200);
 
   if (wantsChatCode(latest)) {
     return [

@@ -54,6 +54,17 @@ export async function checkArkGitHubUpdate(): Promise<ArkUpdateInfo> {
   };
 }
 
+/** Sidebar “update available” cache — clear on failed Update so green CTA can’t outlive a 504. */
+export const ARK_UPDATE_INDICATOR_CACHE_KEY = 'ark:update-indicator-cache-v1';
+
+export function clearUpdateIndicatorCache() {
+  try {
+    localStorage.removeItem(ARK_UPDATE_INDICATOR_CACHE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
 export async function downloadAndInstallArkUpdate(info: Pick<ArkUpdateInfo, 'setupAssetUrl' | 'latestTag'>) {
   if (!window.arkDesktop?.updateDownload) {
     return { ok: false, message: 'Installer download is only available in the desktop app.' };

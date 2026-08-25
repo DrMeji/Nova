@@ -1,32 +1,69 @@
-# Deferred / not fully implemented
+# ARK backlog (open work)
 
-Parked on purpose or blocked by external requirements. Revisit after core social + auth is stable.
+Master list of things not done yet, half-done, or parked.  
+**Core product first** — Call / Voice / Video are side add-ons for later.
 
-## Product / UX
+---
 
-1. **Call (WebRTC)** — UI parked behind Testers until signaling spoof hardening ships. Message DMs work; call button stays hidden on retail until Call is revealed.
-2. **WebRTC call signaling spoof hardening** — full fix when Call officially ships.
-3. **Video generation** — intentionally blocked until generation is reliable (not motion-still fallback).
-4. **Plugins “half-finished” UX** — no redesign yet; keep current UI.
-5. **Real email password reset** — still contact-developer flow (`@DrMeji`); no automated reset email.
-6. **Sign-up email rate limits** — Supabase built-in SMTP (~2/hour). Needs custom SMTP to raise; Confirm email off helps testing.
+## Start here (recommended order)
 
-## Security / platform
+| # | Item | Why first |
+|---|------|-----------|
+| **A–M** | Prior UX / chat reliability batch | ✅ Done |
+| **1** | Settings **Update 504** | ✅ Done |
+| **2** | MCP **tools/call** in Chat | ✅ Done |
+| **3** | Plugins UX polish | ✅ Done (clarity pass, not full redesign) |
+| **4** | Auth (local recovery note + PIN lockout) | ✅ Temp local recovery; real email reset still later |
+| **5** | Ship slice (CSP packaged, signed-out update, SQL migrations) | ✅ Partial — signing cert + avatar Storage + RLS audit still open |
+| — | Call / Video / Voice | Parked side add-ons — later |
 
-7. **Authenticode / publisher code-signing** — need a real Windows code-signing cert. Today: GitHub URL trust + sha512 on releases.
-8. **CSP (Content Security Policy)** — skipped for now (easy to break Electron / `data:` images).
-9. **Supabase RLS re-audit** — manual dashboard pass before large invite.
-10. **PIN lockout** — temporarily disabled for testing (`pinLock.ts`); re-enable before public launch.
-11. **Avatar storage** — profile photos are currently data URLs in `profiles` / contacts; move to Storage bucket before scale.
+---
 
-## Ops
+## Open list (full)
 
-12. **In-app update while signed out** — Auth screen has “Download latest installer” link; Settings → Updates still needs sign-in.
-13. **`delete_own_account` / `broadcast_my_profile` SQL** — must be applied once per Supabase project (SQL editor). Client degrades gracefully if missing.
+### Networking / social
+1. ~~Delete own post~~ ✅  
+2–3. Call / Voice / signaling — later  
+4. Live name/avatar sync — re-test  
 
-## Done recently (do not re-park)
+### Chat / AI
+5–13. ~~Prior chat items~~ ✅ (incl. MCP register + call, Update 504)  
+14. ~~Update 504~~ ✅  
 
-- Friend requests + DM messaging
-- Live contact name/avatar refresh from profiles
-- Sign-up display name field
-- DEV alias for developer account
+### Onboarding / Settings UX
+15–19. ~~Prior onboarding~~ ✅  
+20. ~~Plugins “half-finished” UX~~ ✅ (copy / empty state / how-to clarity)  
+
+### Auth / backend
+21. Real email password reset (hosted redirect site) — **still needed**; temp = local recovery note on PC  
+22. Sign-up email rate limits — needs custom SMTP in Supabase  
+23. ~~PIN lockout re-enable~~ ✅ (5 fails → 1 min)  
+24. ~~SQL migrations for `delete_own_account` / `broadcast_my_profile`~~ ✅ (copied into `supabase/migrations/`) — **apply in Supabase dashboard if not already**  
+
+### Security / platform
+25. Authenticode / Windows code-signing certificate — **needs purchased cert** (can’t fake in code)  
+26. ~~CSP~~ ✅ (packaged Electron builds)  
+27. Supabase RLS re-audit before large invite — still open  
+28. Avatar Storage bucket (not data URLs) — still open  
+29. Video generation — later  
+30. ~~In-app update while signed out~~ ✅ (Auth screen Check for update)  
+
+---
+
+## Done recently
+
+- MCP registration + tools/call  
+- Update GitHub 504 retry + honest UI  
+- Boot/setup tips  
+- **Temp local login recovery note** (email+password on this PC only)  
+- Plugins clarity pass  
+- PIN lockout restored  
+- Packaged CSP  
+- Signed-out update check on Auth  
+
+---
+
+## Rule of thumb
+
+1. **Remaining hard items:** Windows signing cert, RLS audit, avatar Storage, custom SMTP / real email reset site  
+2. **Later (side add-ons):** Call, Voice, Video  

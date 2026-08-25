@@ -748,7 +748,13 @@ async function generate(message, opts = {}) {
       const requested = typeof opts.nPredict === 'number' && Number.isFinite(opts.nPredict)
         ? opts.nPredict
         : nPredictMin;
-      const nPredict = Math.max(requested, nPredictMin);
+      // Keep enough of the RAM-scaled context for chat history so long builds don't get prompt-truncated.
+      const ctx = typeof arkGguf.getGgufCtx === 'function'
+        ? arkGguf.getGgufCtx()
+        : (Number(arkGguf.GGUF_CTX) || 16384);
+      const promptReserve = Math.max(6144, Math.floor(ctx * 0.45));
+      const nPredictCap = Math.max(nPredictMin, ctx - promptReserve);
+      const nPredict = Math.min(Math.max(requested, nPredictMin), nPredictCap);
       const temperature = typeof opts.temperature === 'number' ? opts.temperature : 0.55;
       const gguf = await arkGguf.runGgufStream(ggufId, message, onChunk, timeoutMs, nPredict, temperature);
       let reply = gguf.reply;

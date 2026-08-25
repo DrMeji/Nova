@@ -1,12 +1,16 @@
 /** Approximate token budget for the UI ring. driven by real thread pressure. */
 
-/** Matches electron/arkGguf.cjs GGUF_CTX. */
-export const GGUF_CTX = 8192;
-/** Leave room for the next reply (chat nPredict is 4096). */
-export const REPLY_RESERVE = 4096;
-export const USABLE_TOKENS = Math.max(2048, GGUF_CTX - REPLY_RESERVE - 256);
+import { getGgufCtx, getUsableTokens, REPLY_RESERVE } from '@/lib/ggufContext';
+
+/** @deprecated Prefer getGgufCtx() — value can change with detected RAM. */
+export const GGUF_CTX = getGgufCtx();
+export { REPLY_RESERVE };
+/** @deprecated Prefer getUsableTokens() — scales with RAM / context. */
+export const USABLE_TOKENS = getUsableTokens();
 /** Fast-link band only. Rotation threshold is `preloadStartRatio(nextModel)` from saved MBps. */
 export const ROTATION_PRESSURE = 0.9;
+
+export { getGgufCtx, getUsableTokens };
 
 const KEY = 'ark:token-usage';
 
@@ -41,7 +45,8 @@ export function estimateTokens(text: string) {
 export function getTokenUsageRatio(scopeId: string): number {
   if (!scopeId) return 0;
   const used = readMap()[scopeId] || 0;
-  return Math.max(0, Math.min(1, used / USABLE_TOKENS));
+  const budget = getUsableTokens();
+  return Math.max(0, Math.min(1, used / budget));
 }
 
 export function recordTokenUsage(scopeId: string, text: string) {

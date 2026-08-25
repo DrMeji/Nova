@@ -88,6 +88,7 @@ export function defaultFileExtension(fileName: string): string {
   if (!base) return '.txt';
   if (/\.[A-Za-z0-9]{1,12}$/.test(base)) return '';
   if (/\breadme\b/i.test(base)) return '.md';
+  if (/\bmarkdown\b|\bnotes?\b/i.test(base)) return '.md';
   return '.txt';
 }
 

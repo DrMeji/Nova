@@ -277,6 +277,10 @@ export function BuildRun() {
           <div className="flex items-center justify-between gap-3 mb-6 min-w-0">
             <div className="min-w-0">
               <h1 className="text-2xl sm:text-3xl font-semibold text-content-primary tracking-tight">Plugins</h1>
+              <p className="text-xs text-content-tertiary mt-1.5 max-w-xl leading-relaxed">
+                Connect GitHub, Drive, and other tools for Chat. Add → connect account → optional “in chat”.
+                Green dot = connected. Catalog “Soon” cards are listed but not wired yet.
+              </p>
             </div>
             <div className="flex items-center gap-2">
               <div className="flex rounded-full bg-surface-hover p-0.5">
@@ -316,7 +320,7 @@ export function BuildRun() {
               <section className="mb-8">
                 <h2 className="text-base font-semibold text-content-primary mb-1">Suggested</h2>
                 <p className="text-xs text-content-tertiary mb-3">
-                  Live connections you can add today. Catalog entries marked Soon are not wired yet and cannot be opened.
+                  Ready to connect now. Click one → Add → paste token or sign in → turn on for Chat if you want it there.
                 </p>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   {PLUGIN_CATALOG.filter(p => isPluginLive(p.id)).map(plugin => {
@@ -367,7 +371,12 @@ export function BuildRun() {
                   </p>
                 )}
                 {installedPlugins.length === 0 ? (
-                  <p className="text-sm text-content-tertiary">Nothing added yet. pick a plugin above to start.</p>
+                  <div className="rounded-xl border border-dashed border-surface-border px-4 py-6 text-center space-y-1">
+                    <p className="text-sm text-content-secondary">Nothing installed yet</p>
+                    <p className="text-xs text-content-tertiary">
+                      Use Browse → Suggested, pick a live plugin, then connect. Tokens stay on this PC.
+                    </p>
+                  </div>
                 ) : (
                   <div className="flex flex-wrap gap-2">
                     {installedPlugins.map(plugin => {

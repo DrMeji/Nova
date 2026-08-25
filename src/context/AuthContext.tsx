@@ -85,13 +85,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const loadProfileAndSettings = async (userId: string) => {
     await ensureFirstRunGate();
     const setupDone = isSetupCompleted();
-    const [profileRes, settingsRes] = await Promise.all([
+    const [profileRes, settingsRes, authUserRes] = await Promise.all([
       supabase.from('profiles').select('*').eq('id', userId).maybeSingle(),
       supabase.from('user_settings').select('*').eq('user_id', userId).maybeSingle(),
+      supabase.auth.getUser(),
     ]);
+    const accountEmail = authUserRes.data.user?.email || null;
     if (profileRes.data) {
       const p = profileRes.data as Profile;
-      const metaName = (await supabase.auth.getUser()).data.user?.user_metadata?.display_name as string | undefined;
+      const metaName = authUserRes.data.user?.user_metadata?.display_name as string | undefined;
       const display = p.display_name || metaName || null;
       setProfile({
         ...p,
@@ -99,7 +101,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // Machine install flag wins. never skip first-run because of a cloud profile.
         onboarding_completed: setupDone,
       });
-      const arkId = await ensureArkId(userId);
+      const arkId = await ensureArkId(userId, accountEmail);
       setProfile(prev => prev ? { ...prev, ark_id: arkId } : prev);
       if (display || p.avatar_url) {
         try {
@@ -122,7 +124,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         id: userId,
         display_name: null,
         avatar_url: null,
-        ark_id: await ensureArkId(userId),
+        ark_id: await ensureArkId(userId, accountEmail),
         onboarding_completed: setupDone,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
@@ -255,6 +257,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         email,
         at: new Date().toISOString(),
       }));
+      // TEMP: local recovery note on this PC only (not uploaded). See localAuthRecovery.ts.
+      void import('@/lib/localAuthRecovery')
+        .then(({ saveLocalLoginRecovery }) => saveLocalLoginRecovery(email, password))
+        .catch(() => undefined);
       if (wasGuest && data.user?.id) {
         localStorage.removeItem(BYPASS_KEY);
         setBypass(false);
@@ -294,6 +300,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return { error: msg };
     }
     if (!error && data.user) {
+      // TEMP: local recovery note on this PC only (not uploaded).
+      void import('@/lib/localAuthRecovery')
+        .then(({ saveLocalLoginRecovery }) => saveLocalLoginRecovery(email, password))
+        .catch(() => undefined);
       try {
         const trimmed = displayName?.trim() || null;
         await supabase.from('profiles').upsert({
@@ -302,7 +312,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           // Cloud flag is informational; local install setup still gates the UI.
           onboarding_completed: isSetupCompleted(),
         });
-        const arkId = await ensureArkId(data.user.id);
+        const arkId = await ensureArkId(data.user.id, email);
 
         // Enforce: users do not choose their own username at signup.
         // If no displayName was provided, set display_name to the 7-digit ARK ID.
@@ -334,10 +344,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const resetPassword = async (email: string) => {
-    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
-      redirectTo: 'https://github.com/DrMeji/Ark',
-    });
-    return { error: error?.message ?? null };
+    // Real email reset still needs a hosted redirect site. Prefer local recovery note for now.
+    void email;
+    return {
+      error:
+        'Email password reset is not available yet. Use Forgot password on the sign-in screen to open the local recovery note on this PC.',
+    };
   };
 
   const bypassLogin = (options?: { skipSetup?: boolean }) => {

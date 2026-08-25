@@ -66,6 +66,30 @@ declare global {
         error?: string;
       }>;
       postUpdateConsume?: () => Promise<{ ok: boolean; land?: string | null }>;
+      authRecoverySave?: (payload: {
+        email?: string;
+        password?: string;
+        pin?: string;
+      }) => Promise<{
+        ok: boolean;
+        path?: string;
+        folder?: string;
+        error?: string;
+      }>;
+      authRecoveryInfo?: () => Promise<{
+        ok: boolean;
+        path?: string;
+        folder?: string;
+        exists?: boolean;
+        error?: string;
+      }>;
+      authRecoveryReveal?: () => Promise<{
+        ok: boolean;
+        path?: string;
+        folder?: string;
+        exists?: boolean;
+        error?: string;
+      }>;
       onUpdateProgress?: (
         handler: (payload: {
           status: string;
@@ -443,6 +467,36 @@ declare global {
         url?: string;
         error?: string;
       }>;
+      mcpListTools?: (payload: {
+        id: string;
+        transport: 'stdio' | 'sse';
+        command?: string;
+        args?: string;
+        cwd?: string;
+        url?: string;
+      }) => Promise<{
+        ok: boolean;
+        tools?: { name: string; description?: string }[];
+        error?: string | null;
+      }>;
+      mcpCallTool?: (payload: {
+        server: {
+          id: string;
+          transport: 'stdio' | 'sse';
+          command?: string;
+          args?: string;
+          cwd?: string;
+          url?: string;
+        };
+        name: string;
+        arguments?: Record<string, unknown>;
+      }) => Promise<{
+        ok: boolean;
+        content?: string;
+        error?: string | null;
+        isError?: boolean;
+      }>;
+      mcpStop?: (payload: { id?: string }) => Promise<{ ok: boolean; error?: string }>;
       workspaceDeletePath?: (payload: {
         projectId: string;
         relPath: string;

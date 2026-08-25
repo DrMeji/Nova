@@ -25,11 +25,12 @@ import {
   loadHardwareSnapshot,
   type HardwareInfo,
 } from '@/lib/api';
+import { getGgufCtx, ggufCtxCapacityLabel } from '@/lib/ggufContext';
 import {
   User, Palette, Zap, Boxes, Cloud, Shield, HardDrive,
   FolderKanban, Lock, RefreshCw, Check, Cpu, KeyRound,
-  Smartphone, Sparkles, FlaskConical,
-  Mail, BadgeCheck, Trash2, Download, Info, Monitor, Copy, X, FolderOpen,
+  Smartphone, Sparkles, FlaskConical, Cable,
+  Mail, BadgeCheck, Trash2, Download, Info, Monitor, Copy, X, FolderOpen, HelpCircle,
 } from 'lucide-react';
 import { clearLocalAppCaches, clearLocalChatCache } from '@/lib/clearSession';
 import { deleteEngineModel, engineDiskSpace, getEngineStatus, type ArkEngineModel, type ArkEngineStatus } from '@/lib/arkEngine';
@@ -42,6 +43,16 @@ import { getBrainUrl } from '@/lib/brainUrl';
 import { SettingsSystemHealth } from '@/components/SettingsSystemHealth';
 import { isArkDevSession } from '@/lib/arkRuntime';
 import { BrandMark, StatusCheck } from '@/components/BrandMark';
+import {
+  listMcpServers,
+  upsertMcpServer,
+  removeMcpServer,
+  setMcpServerEnabled,
+  MCP_CHANGED_EVENT,
+  type McpServerConfig,
+  type McpTransport,
+} from '@/lib/mcpServers';
+import { probeMcpServer } from '@/lib/arkMcp';
 
 const REVEAL_FEATURES: { id: ParkId; label: string; description: string }[] = [
   { id: 'networking', label: 'Networking', description: 'Live. help feed, add/message builders (always on).' },
@@ -63,12 +74,13 @@ const SECTIONS: { id: string; label: string; icon: typeof User; disabled?: boole
   { id: 'ai', label: 'AI', icon: Zap },
   { id: 'models', label: 'Models', icon: Boxes },
   { id: 'providers', label: 'Providers', icon: Cloud },
+  { id: 'mcp', label: 'MCP', icon: Cable },
   { id: 'privacy', label: 'Privacy', icon: Shield },
   { id: 'storage', label: 'Storage', icon: HardDrive },
   { id: 'hardware', label: 'Hardware', icon: Monitor },
   { id: 'projects', label: 'Projects', icon: FolderKanban },
   { id: 'security', label: 'Security', icon: Lock },
-  { id: 'updates', label: 'Updates', icon: RefreshCw },
+  { id: 'updates', label: 'Update', icon: RefreshCw },
   { id: 'testers', label: 'Testers', icon: FlaskConical, comingSoon: true },
   { id: 'beta', label: 'Beta', icon: Sparkles, comingSoon: true },
 ];
@@ -92,21 +104,21 @@ const DEFAULT_MODELS = [
 ];
 
 const PROVIDER_ROWS = [
-  { id: 'openai', name: 'OpenAI', hint: 'GPT models' },
-  { id: 'anthropic', name: 'Anthropic', hint: 'Claude models' },
-  { id: 'google', name: 'Google AI Studio', hint: 'Gemini models' },
-  { id: 'groq', name: 'Groq', hint: 'Fast inference' },
-  { id: 'openrouter', name: 'OpenRouter', hint: 'Many models, one key' },
-  { id: 'huggingface', name: 'Hugging Face', hint: 'Chat + FLUX images' },
-  { id: 'nvidia', name: 'NVIDIA NIM', hint: 'Free NIM endpoints' },
-  { id: 'together', name: 'Together AI', hint: 'Open model hosting' },
-  { id: 'fireworks', name: 'Fireworks', hint: 'Fast serverless open models' },
-  { id: 'deepseek', name: 'DeepSeek', hint: 'Coding + chat API' },
-  { id: 'mistral', name: 'Mistral', hint: 'Mistral + Codestral' },
-  { id: 'cerebras', name: 'Cerebras', hint: 'Ultra-fast Llama free tier' },
-  { id: 'sambanova', name: 'SambaNova', hint: 'SambaNova Cloud open models' },
-  { id: 'perplexity', name: 'Perplexity', hint: 'Sonar chat + search' },
-  { id: 'xai', name: 'xAI', hint: 'Grok models' },
+  { id: 'openai', name: 'OpenAI', hint: 'GPT models', keyUrl: 'https://platform.openai.com/api-keys' },
+  { id: 'anthropic', name: 'Anthropic', hint: 'Claude models', keyUrl: 'https://console.anthropic.com/settings/keys' },
+  { id: 'google', name: 'Google AI Studio', hint: 'Gemini models', keyUrl: 'https://aistudio.google.com/apikey' },
+  { id: 'groq', name: 'Groq', hint: 'Fast inference', keyUrl: 'https://console.groq.com/keys' },
+  { id: 'openrouter', name: 'OpenRouter', hint: 'Many models, one key', keyUrl: 'https://openrouter.ai/keys' },
+  { id: 'huggingface', name: 'Hugging Face', hint: 'Chat + FLUX images', keyUrl: 'https://huggingface.co/settings/tokens' },
+  { id: 'nvidia', name: 'NVIDIA NIM', hint: 'Free NIM endpoints', keyUrl: 'https://build.nvidia.com/settings/api-keys' },
+  { id: 'together', name: 'Together AI', hint: 'Open model hosting', keyUrl: 'https://api.together.xyz/settings/api-keys' },
+  { id: 'fireworks', name: 'Fireworks', hint: 'Fast serverless open models', keyUrl: 'https://fireworks.ai/account/api-keys' },
+  { id: 'deepseek', name: 'DeepSeek', hint: 'Coding + chat API', keyUrl: 'https://platform.deepseek.com/api_keys' },
+  { id: 'mistral', name: 'Mistral', hint: 'Mistral + Codestral', keyUrl: 'https://console.mistral.ai/api-keys' },
+  { id: 'cerebras', name: 'Cerebras', hint: 'Ultra-fast Llama free tier', keyUrl: 'https://cloud.cerebras.ai' },
+  { id: 'sambanova', name: 'SambaNova', hint: 'SambaNova Cloud open models', keyUrl: 'https://cloud.sambanova.ai' },
+  { id: 'perplexity', name: 'Perplexity', hint: 'Sonar chat + search', keyUrl: 'https://www.perplexity.ai/settings/api' },
+  { id: 'xai', name: 'xAI', hint: 'Grok models', keyUrl: 'https://console.x.ai' },
   { id: 'github-models', name: 'GitHub Models', hint: 'Retired. use Groq / Google / OpenRouter' },
 ];
 
@@ -129,9 +141,20 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
   const [providerKeys, setProviderKeys] = useState(() => getProviderApiKeys());
   const [editingProvider, setEditingProvider] = useState<string | null>(null);
   const [keyDraft, setKeyDraft] = useState('');
+  const [mcpServers, setMcpServers] = useState<McpServerConfig[]>(() => listMcpServers());
+  const [mcpEditingId, setMcpEditingId] = useState<string | null>(null);
+  const [mcpFormOpen, setMcpFormOpen] = useState(false);
+  const [mcpName, setMcpName] = useState('');
+  const [mcpTransport, setMcpTransport] = useState<McpTransport>('stdio');
+  const [mcpCommand, setMcpCommand] = useState('');
+  const [mcpArgs, setMcpArgs] = useState('');
+  const [mcpCwd, setMcpCwd] = useState('');
+  const [mcpUrl, setMcpUrl] = useState('');
+  const [mcpBusyId, setMcpBusyId] = useState<string | null>(null);
+  const [mcpFlash, setMcpFlash] = useState('');
   const [checkingUpdates, setCheckingUpdates] = useState(false);
   const [downloadingUpdate, setDownloadingUpdate] = useState(false);
-  const [updateMsg, setUpdateMsg] = useState('Check for a new build, then download it inside ARK.');
+  const [updateMsg, setUpdateMsg] = useState('Press Check for update to look for a newer ARK build.');
   const [updateInfo, setUpdateInfo] = useState<{
     newerAvailable: boolean;
     setupAssetUrl?: string;
@@ -179,6 +202,12 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
     const onFeat = () => setFeatureTick(t => t + 1);
     window.addEventListener('ark:features-changed', onFeat);
     return () => window.removeEventListener('ark:features-changed', onFeat);
+  }, []);
+
+  useEffect(() => {
+    const refresh = () => setMcpServers(listMcpServers());
+    window.addEventListener(MCP_CHANGED_EVENT, refresh);
+    return () => window.removeEventListener(MCP_CHANGED_EVENT, refresh);
   }, []);
 
   useEffect(() => {
@@ -382,7 +411,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
     setUpdatePercent(0);
     setUpdateMsg('Updating…');
     void (async () => {
-      const { downloadAndInstallArkUpdate } = await import('@/lib/arkUpdates');
+      const { clearUpdateIndicatorCache, downloadAndInstallArkUpdate } = await import('@/lib/arkUpdates');
       const result = await downloadAndInstallArkUpdate({
         setupAssetUrl: updateInfo.setupAssetUrl,
         latestTag: updateInfo.latestTag,
@@ -390,6 +419,9 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
       if (!result?.ok) {
         setUpdateMsg(result?.message || 'Update failed.');
         setDownloadingUpdate(false);
+        // Don't keep a green “available” CTA after GitHub 504 / download failure.
+        setUpdateInfo(null);
+        clearUpdateIndicatorCache();
       }
     })();
   };
@@ -424,6 +456,77 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
   const flashSaved = (msg: string) => {
     setSavedFlash(msg);
     window.setTimeout(() => setSavedFlash(''), 2200);
+  };
+
+  const resetMcpForm = () => {
+    setMcpEditingId(null);
+    setMcpFormOpen(false);
+    setMcpName('');
+    setMcpTransport('stdio');
+    setMcpCommand('');
+    setMcpArgs('');
+    setMcpCwd('');
+    setMcpUrl('');
+  };
+
+  const openMcpCreate = () => {
+    resetMcpForm();
+    setMcpFormOpen(true);
+  };
+
+  const openMcpEdit = (server: McpServerConfig) => {
+    setMcpEditingId(server.id);
+    setMcpFormOpen(true);
+    setMcpName(server.name);
+    setMcpTransport(server.transport);
+    setMcpCommand(server.command || '');
+    setMcpArgs(server.args || '');
+    setMcpCwd(server.cwd || '');
+    setMcpUrl(server.url || '');
+  };
+
+  const saveMcpForm = () => {
+    const name = mcpName.trim() || 'MCP server';
+    if (mcpTransport === 'stdio' && !mcpCommand.trim()) {
+      setMcpFlash('stdio needs a command (e.g. npx, node, python)');
+      window.setTimeout(() => setMcpFlash(''), 2800);
+      return;
+    }
+    if (mcpTransport === 'sse' && !mcpUrl.trim()) {
+      setMcpFlash('SSE needs a URL');
+      window.setTimeout(() => setMcpFlash(''), 2800);
+      return;
+    }
+    upsertMcpServer({
+      id: mcpEditingId || undefined,
+      name,
+      transport: mcpTransport,
+      command: mcpCommand,
+      args: mcpArgs,
+      cwd: mcpCwd,
+      url: mcpUrl,
+    });
+    setMcpServers(listMcpServers());
+    resetMcpForm();
+    flashSaved(mcpEditingId ? 'MCP server updated' : 'MCP server added');
+  };
+
+  const runMcpProbe = async (server: McpServerConfig) => {
+    if (mcpBusyId) return;
+    setMcpBusyId(server.id);
+    setMcpFlash(`Testing ${server.name}…`);
+    try {
+      const res = await probeMcpServer(server);
+      setMcpServers(listMcpServers());
+      setMcpFlash(
+        res.ok
+          ? `${server.name}: ${res.tools.length} tool${res.tools.length === 1 ? '' : 's'}`
+          : `${server.name}: ${res.error || 'probe failed'}`,
+      );
+    } finally {
+      setMcpBusyId(null);
+      window.setTimeout(() => setMcpFlash(''), 4000);
+    }
   };
 
   const runClearChatCache = async () => {
@@ -539,7 +642,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
       </div>
 
       <div className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden p-4 sm:p-6 lg:p-8">
-        <div className={`min-w-0 mx-auto ${activeSection === 'providers' || activeSection === 'models' ? 'max-w-4xl' : 'max-w-2xl'}`}>
+        <div className={`min-w-0 mx-auto ${activeSection === 'providers' || activeSection === 'models' || activeSection === 'mcp' ? 'max-w-4xl' : 'max-w-2xl'}`}>
           {activeSection === 'account' && (
             <SettingsSection title="Account" description="Profile, sign in, and session controls">
               <div className="space-y-5">
@@ -945,7 +1048,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                   <div className="grid grid-cols-1 gap-3">
                     <ToggleRow
                       label="Auto failover"
-                      description="If a provider is limited or offline, switch to the next healthy option automatically."
+                      description="If the pinned cloud model fails, try other cloud keys. Local ↔ cloud hops still apply for ARK Auto. A cloud model you pick never snaps back to local."
                       value={prefs.autoFailover}
                       onChange={v => patchPrefs({ autoFailover: v })}
                     />
@@ -971,8 +1074,8 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                       onChange={v => patchPrefs({ streamResponses: v })}
                     />
                     <ToggleRow
-                      label="Remember project context"
-                      description="Carry recent files and chat into the next request in a project."
+                      label="Remember chat context"
+                      description="Keep prior messages in long chats and builds. Turn off only if you want each message treated as a fresh start."
                       value={prefs.rememberContext}
                       onChange={v => patchPrefs({ rememberContext: v })}
                     />
@@ -1010,6 +1113,16 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                       These settings apply when ARK runs a <span className="text-content-secondary">local GGUF brain</span>.
                       They control creativity and how long each reply is allowed to grow before stopping.
                     </p>
+                    <div className="rounded-lg border border-surface-border/80 bg-ark-navy-950/40 px-3 py-2.5">
+                      <p className="text-[11px] font-medium text-content-secondary">Local chat history capacity</p>
+                      <p className="text-sm text-content-primary mt-0.5 tabular-nums">
+                        {ggufCtxCapacityLabel()}
+                      </p>
+                      <p className="text-[10px] text-content-tertiary mt-1 leading-relaxed">
+                        ARK reads this PC’s RAM and picks the largest safe context (up to 65,536 tokens).
+                        More RAM = longer threads before older turns are compressed. Cloud chats use the provider’s own limits.
+                      </p>
+                    </div>
                     <GgufSliderRow
                       label="Temperature"
                       valueLabel={Number(prefs.ggufTemperature ?? 0.55).toFixed(2)}
@@ -1025,7 +1138,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                     <GgufSliderRow
                       label="Max output tokens"
                       valueLabel={String(prefs.ggufNPredict ?? 4096)}
-                      hint="Cap on how many tokens the local model may write per reply. not your chat history size. 4096 is the recommended default (~3k words max). Higher values can mean slower replies and more RAM while generating, but nothing is “used up” over time."
+                      hint={`Cap on how many tokens the local model may write per reply — not your chat history size. History uses a RAM-scaled window (${getGgufCtx().toLocaleString()} tokens on this PC).`}
                       min={4096}
                       max={8192}
                       step={256}
@@ -1092,6 +1205,17 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
               title="Providers"
               description="Connect once. Keys stay on this device (OS-encrypted in Desktop) and power ARK Auto failover."
             >
+              <SettingsHelp label="What do I do with API keys?">
+                <ol className="list-decimal pl-4 space-y-1.5">
+                  <li>Pick a provider below (Groq / Google / OpenRouter are good free starts).</li>
+                  <li>Click <strong className="font-medium text-content-secondary">Add</strong>, open their site, create an API key, and copy it.</li>
+                  <li>Paste the key here → <strong className="font-medium text-content-secondary">Save key</strong> → optional <strong className="font-medium text-content-secondary">Test key</strong>.</li>
+                  <li>In Chat, pick that cloud model (or ARK Auto). Keys never leave this PC to ARK’s servers.</li>
+                </ol>
+                <p className="mt-2 text-[11px] text-content-tertiary leading-relaxed">
+                  No key needed for local models under Models / Local AI. Paid providers need a key from their dashboard.
+                </p>
+              </SettingsHelp>
               <div className="space-y-3">
                 {secretsEncrypted === false && window.arkDesktop ? (
                   <div className="rounded-xl border border-rose-500/40 bg-rose-950/30 px-4 py-3">
@@ -1166,12 +1290,23 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                         </div>
                         {editing && (
                           <div className="mt-2.5 space-y-2">
+                            {'keyUrl' in p && p.keyUrl ? (
+                              <button
+                                type="button"
+                                className="text-[11px] text-sky-400 hover:text-sky-300"
+                                onClick={() => void window.arkDesktop?.openExternal?.(p.keyUrl!)}
+                              >
+                                Where to get a {p.name} key →
+                              </button>
+                            ) : null}
                             <input
                               type="password"
                               value={keyDraft}
                               onChange={e => setKeyDraft(e.target.value)}
                               placeholder="Paste API key"
                               className="ark-input"
+                              spellCheck={false}
+                              autoComplete="off"
                             />
                             <div className="flex gap-2">
                               <button
@@ -1276,6 +1411,220 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                     ))}
                   </div>
                 </div>
+              </div>
+            </SettingsSection>
+          )}
+
+          {activeSection === 'mcp' && (
+            <SettingsSection
+              title="MCP"
+              description="Register external Model Context Protocol servers (stdio). Probe tools/list and call tools from Chat by name."
+            >
+              <SettingsHelp label="What is MCP?">
+                <p className="leading-relaxed">
+                  MCP servers expose tools (filesystem, docs, APIs) over a standard protocol. Add a stdio command here
+                  (same shape as Cursor/Claude Desktop configs). ARK can list those tools; calling them from Chat is still on the backlog.
+                </p>
+                <p className="mt-2 text-[11px] text-content-tertiary leading-relaxed">
+                  Example: command <code className="text-content-secondary">npx</code>, args{' '}
+                  <code className="text-content-secondary">-y @modelcontextprotocol/server-filesystem C:\path</code>
+                </p>
+              </SettingsHelp>
+              <div className="space-y-3">
+                {mcpFlash ? (
+                  <p className="text-xs text-content-secondary">{mcpFlash}</p>
+                ) : null}
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-xs text-content-tertiary">
+                    {mcpServers.length
+                      ? `${mcpServers.length} server${mcpServers.length === 1 ? '' : 's'} on this PC`
+                      : 'No servers yet'}
+                  </p>
+                  <button type="button" className="ark-btn-secondary text-xs" onClick={openMcpCreate}>
+                    Add server
+                  </button>
+                </div>
+
+                {mcpFormOpen && (
+                  <div className="rounded-xl border border-surface-border p-4 space-y-3">
+                    <p className="text-sm font-medium text-content-primary">
+                      {mcpEditingId ? 'Edit MCP server' : 'New MCP server'}
+                    </p>
+                    <label className="block space-y-1">
+                      <span className="text-[11px] text-content-tertiary">Name</span>
+                      <input
+                        className="ark-input w-full text-sm"
+                        value={mcpName}
+                        onChange={e => setMcpName(e.target.value)}
+                        placeholder="Filesystem"
+                      />
+                    </label>
+                    <div className="flex gap-2">
+                      {(['stdio', 'sse'] as const).map(t => (
+                        <button
+                          key={t}
+                          type="button"
+                          className={`text-xs px-2.5 py-1.5 rounded-lg border ${
+                            mcpTransport === t
+                              ? 'border-sky-500/50 bg-sky-500/10 text-sky-200'
+                              : 'border-surface-border text-content-tertiary'
+                          }`}
+                          onClick={() => setMcpTransport(t)}
+                        >
+                          {t}
+                        </button>
+                      ))}
+                    </div>
+                    {mcpTransport === 'stdio' ? (
+                      <>
+                        <label className="block space-y-1">
+                          <span className="text-[11px] text-content-tertiary">Command</span>
+                          <input
+                            className="ark-input w-full text-sm font-mono"
+                            value={mcpCommand}
+                            onChange={e => setMcpCommand(e.target.value)}
+                            placeholder="npx"
+                          />
+                        </label>
+                        <label className="block space-y-1">
+                          <span className="text-[11px] text-content-tertiary">Args</span>
+                          <input
+                            className="ark-input w-full text-sm font-mono"
+                            value={mcpArgs}
+                            onChange={e => setMcpArgs(e.target.value)}
+                            placeholder="-y @modelcontextprotocol/server-memory"
+                          />
+                        </label>
+                        <label className="block space-y-1">
+                          <span className="text-[11px] text-content-tertiary">Working folder (optional)</span>
+                          <input
+                            className="ark-input w-full text-sm font-mono"
+                            value={mcpCwd}
+                            onChange={e => setMcpCwd(e.target.value)}
+                            placeholder="C:\\Projects\\my-app"
+                          />
+                        </label>
+                      </>
+                    ) : (
+                      <label className="block space-y-1">
+                        <span className="text-[11px] text-content-tertiary">URL</span>
+                        <input
+                          className="ark-input w-full text-sm font-mono"
+                          value={mcpUrl}
+                          onChange={e => setMcpUrl(e.target.value)}
+                          placeholder="https://example.com/sse"
+                        />
+                        <span className="text-[10px] text-amber-200/80">SSE probe is registered but not live yet — use stdio for Test.</span>
+                      </label>
+                    )}
+                    <div className="flex gap-2 justify-end">
+                      <button type="button" className="ark-btn-ghost text-xs" onClick={resetMcpForm}>
+                        Cancel
+                      </button>
+                      <button type="button" className="ark-btn-primary text-xs" onClick={saveMcpForm}>
+                        Save
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {mcpServers.length === 0 && !mcpFormOpen ? (
+                  <div className="rounded-xl border border-dashed border-surface-border p-6 text-center">
+                    <Cable className="w-6 h-6 text-content-tertiary mx-auto mb-2" />
+                    <p className="text-sm text-content-secondary">Add an MCP server to list its tools in Chat.</p>
+                    <p className="text-xs text-content-tertiary mt-1">Ask Chat “list MCP tools” after you save one.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {mcpServers.map(server => {
+                      const toolCount = server.lastTools?.length ?? 0;
+                      return (
+                        <div key={server.id} className="rounded-xl border border-surface-border p-3.5 space-y-2">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium text-content-primary truncate">{server.name}</p>
+                              <p className="text-[11px] text-content-tertiary font-mono truncate mt-0.5">
+                                {server.transport === 'stdio'
+                                  ? `${server.command || '?'} ${server.args || ''}`.trim()
+                                  : server.url || 'sse'}
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              className={`relative rounded-full transition-colors shrink-0 ${server.enabled ? 'bg-content-primary' : 'bg-ark-navy-700'}`}
+                              style={{ height: '22px', width: '40px' }}
+                              aria-pressed={server.enabled}
+                              title={server.enabled ? 'Enabled' : 'Disabled'}
+                              onClick={() => {
+                                setMcpServerEnabled(server.id, !server.enabled);
+                                setMcpServers(listMcpServers());
+                              }}
+                            >
+                              <div
+                                className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
+                                  server.enabled ? 'translate-x-[18px]' : 'translate-x-0.5'
+                                }`}
+                              />
+                            </button>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2 text-[11px] text-content-tertiary">
+                            <span>
+                              {toolCount
+                                ? `${toolCount} tool${toolCount === 1 ? '' : 's'} cached`
+                                : 'Not probed'}
+                            </span>
+                            {server.lastError ? (
+                              <span className="text-rose-300/90 truncate max-w-full">{server.lastError}</span>
+                            ) : null}
+                          </div>
+                          {toolCount > 0 ? (
+                            <ul className="text-[11px] text-content-secondary space-y-0.5 max-h-28 overflow-y-auto">
+                              {(server.lastTools || []).slice(0, 12).map(t => (
+                                <li key={t.name} className="truncate">
+                                  <span className="font-mono text-content-primary">{t.name}</span>
+                                  {t.description ? ` — ${t.description}` : ''}
+                                </li>
+                              ))}
+                              {toolCount > 12 ? (
+                                <li className="text-content-tertiary">…and {toolCount - 12} more</li>
+                              ) : null}
+                            </ul>
+                          ) : null}
+                          <div className="flex flex-wrap gap-2 pt-1">
+                            <button
+                              type="button"
+                              className="ark-btn-secondary text-xs"
+                              disabled={mcpBusyId === server.id}
+                              onClick={() => void runMcpProbe(server)}
+                            >
+                              {mcpBusyId === server.id ? 'Testing…' : 'Test'}
+                            </button>
+                            <button
+                              type="button"
+                              className="text-xs text-content-tertiary hover:text-content-secondary"
+                              onClick={() => openMcpEdit(server)}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              className="text-xs text-rose-300/80 hover:text-rose-200"
+                              onClick={() => {
+                                if (!window.confirm(`Remove “${server.name}”?`)) return;
+                                void window.arkDesktop?.mcpStop?.({ id: server.id });
+                                removeMcpServer(server.id);
+                                setMcpServers(listMcpServers());
+                                flashSaved('MCP server removed');
+                              }}
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             </SettingsSection>
           )}
@@ -1595,6 +1944,17 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
 
           {activeSection === 'projects' && (
             <SettingsSection title="Projects" description="Defaults for new builds and folders">
+              <SettingsHelp label="What are locations for?">
+                <p className="leading-relaxed">
+                  <strong className="font-medium text-content-secondary">Default project location</strong> is where new builds
+                  and “Open folder” prefer to start (usually something like your Desktop or a Projects folder).
+                </p>
+                <ul className="mt-2 list-disc pl-4 space-y-1">
+                  <li>Type a folder path or name hint ARK should use for new work.</li>
+                  <li>Pick a default type (Web / API / Desktop) for new projects.</li>
+                  <li>Folder access toggles (Desktop / Documents / Full PC) live under <strong className="font-medium text-content-secondary">Security</strong> — turn those on if Chat should open folders by name.</li>
+                </ul>
+              </SettingsHelp>
               <div className="space-y-4">
                 <Field
                   label="Default project location"
@@ -1652,6 +2012,14 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
 
           {activeSection === 'security' && (
             <SettingsSection title="Security" description="Protect this PC and keep agent file writes inside the project sandbox">
+              <SettingsHelp label="Help with locations &amp; folder access">
+                <ul className="list-disc pl-4 space-y-1.5">
+                  <li><strong className="font-medium text-content-secondary">Desktop / Documents</strong> — allow ARK to work in those folders when you ask in Chat.</li>
+                  <li><strong className="font-medium text-content-secondary">Full PC access</strong> — broader access under your user profile (still not system folders). Only turn on if you need it.</li>
+                  <li><strong className="font-medium text-content-secondary">Sandbox agent</strong> — keeps automatic edits inside the project; blocks risky paths like <code className="text-[10px]">.env</code>.</li>
+                  <li>PIN only locks the ARK window on this PC. It is not your account password.</li>
+                </ul>
+              </SettingsHelp>
               <div className="space-y-4">
                 <div className="rounded-xl border border-surface-border p-4 space-y-3">
                   <div>
@@ -1724,8 +2092,20 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                   </div>
                   {pinMsg ? <p className="text-xs text-content-tertiary">{pinMsg}</p> : null}
                   <p className="text-[11px] text-content-tertiary">
-                    Forgot the PIN? Use Clear PIN above. That unlocks this copy of ARK. There is no email recovery.
+                    Forgot the PIN? Use Clear PIN above, or open the local recovery note (same folder as email/password).
+                    After 5 wrong tries, PIN entry locks for 1 minute. Email / authenticator PIN reset comes later.
                   </p>
+                  <button
+                    type="button"
+                    className="text-[11px] text-sky-400 hover:text-sky-300"
+                    onClick={() => {
+                      void import('@/lib/localAuthRecovery').then(({ revealLocalLoginRecovery }) => {
+                        void revealLocalLoginRecovery();
+                      });
+                    }}
+                  >
+                    Open local PIN / password note folder
+                  </button>
                 </div>
 
                 <ToggleRow
@@ -1968,7 +2348,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
           )}
 
           {activeSection === 'updates' && (
-            <SettingsSection title="Updates" description="Check for new ARK builds and install them in-app">
+            <SettingsSection title="Update" description="Check for a new ARK build and install it here">
               <div className="space-y-5">
                 <div className="ark-card p-4 flex flex-col gap-3">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -1992,7 +2372,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                         className="ark-btn-secondary"
                       >
                         {checkingUpdates ? <RefreshCw className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-                        Check
+                        {checkingUpdates ? 'Checking…' : 'Check for update'}
                       </button>
                       {updateInfo?.newerAvailable && (
                         <button
@@ -2009,7 +2389,23 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                     </div>
                   </div>
                   <p className="text-[11px] text-content-tertiary leading-relaxed">
-                    Check looks at GitHub Releases for a newer ARK-Setup.exe. Pushing code to main is not enough. a <code className="text-[10px]">v*</code> tag has to publish the installer first.
+                    Use <strong className="font-medium text-content-secondary">Check for update</strong>, then press{' '}
+                    <strong className="font-medium text-content-secondary">Update</strong> when a newer build is offered.
+                    That downloads ARK-Setup.exe from GitHub Releases and installs it.
+                  </p>
+                  <button
+                    type="button"
+                    className="ark-btn-secondary w-full sm:w-auto"
+                    onClick={() =>
+                      void window.arkDesktop?.openExternal?.('https://github.com/DrMeji/Ark/releases/latest')
+                    }
+                  >
+                    <Download className="w-4 h-4" />
+                    Click here to download
+                  </button>
+                  <p className="text-[11px] text-content-tertiary leading-relaxed -mt-1">
+                    Prefer a manual install? Opens the public releases page in your browser. After install, firewall or
+                    SmartScreen prompts are normal — minimize them and keep using ARK.
                   </p>
                   {signingStatus ? (
                     <p className="text-[11px] text-content-tertiary leading-relaxed">
@@ -2161,7 +2557,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                 <div className="rounded-xl border border-surface-border p-4 space-y-2">
                   <p className="text-sm font-medium text-content-primary">Updates</p>
                   <p className="text-xs text-content-tertiary leading-relaxed">
-                    Use a packaged install (not the build bat). Settings → Updates → Check, then Update when offered.
+                    Use a packaged install (not the build bat). Settings → Update → Check for update, then Update when offered.
                   </p>
                 </div>
                 <div className="rounded-xl border border-surface-border p-4 space-y-2">
@@ -2229,6 +2625,28 @@ function SettingsSection({ title, description, children }: { title: string; desc
       <h1 className="text-xl font-bold text-content-primary mb-1">{title}</h1>
       <p className="text-sm text-content-secondary mb-4">{description}</p>
       {children}
+    </div>
+  );
+}
+
+function SettingsHelp({ label, children }: { label: string; children: React.ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="mb-4">
+      <button
+        type="button"
+        onClick={() => setOpen(v => !v)}
+        className="inline-flex items-center gap-1.5 rounded-full border border-surface-border px-3 py-1.5 text-xs text-content-secondary hover:text-content-primary hover:bg-surface-hover/60"
+        aria-expanded={open}
+      >
+        <HelpCircle className="w-3.5 h-3.5 shrink-0" />
+        {open ? 'Hide help' : label}
+      </button>
+      {open ? (
+        <div className="mt-2 rounded-xl border border-sky-500/25 bg-sky-500/5 px-3.5 py-3 text-xs text-content-secondary leading-relaxed">
+          {children}
+        </div>
+      ) : null}
     </div>
   );
 }

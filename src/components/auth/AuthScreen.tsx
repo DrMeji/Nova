@@ -1,7 +1,15 @@
 import { useEffect, useState, useRef } from 'react';
 import { useAuth } from '@/context/AuthContext';
-import { Loader2, Mail, Lock, AlertCircle, Zap, Eye, EyeOff, User } from 'lucide-react';
+import { Loader2, Mail, Lock, AlertCircle, Zap, Eye, EyeOff, User, Download, FolderOpen, RefreshCw } from 'lucide-react';
 import { AuthAmbientOrbs } from '@/components/auth/AuthAmbientOrbs';
+import {
+  formatForgotPasswordHelp,
+  getLocalLoginRecoveryInfo,
+  markLocalRecoveryNoticeShown,
+  revealLocalLoginRecovery,
+  shouldShowLocalRecoveryNotice,
+} from '@/lib/localAuthRecovery';
+import { checkArkGitHubUpdate, downloadAndInstallArkUpdate } from '@/lib/arkUpdates';
 
 const TYPE_PHRASES = [
   'ARK',
@@ -79,6 +87,9 @@ export function AuthScreen() {
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [recoveryNotice, setRecoveryNotice] = useState(() => shouldShowLocalRecoveryNotice());
+  const [updateBusy, setUpdateBusy] = useState(false);
+  const [updateHint, setUpdateHint] = useState<string | null>(null);
   const passwordRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -100,23 +111,39 @@ export function AuthScreen() {
 
   const handleForgotPassword = async () => {
     setError(null);
-    setInfo(
-      [
-        'Password resets are handled by the ARK developer.',
-        '',
-        'Contact @DrMeji on GitHub and include the email on your ARK account:',
-        'https://github.com/DrMeji',
-        '',
-        'They will verify it is you and help reset the password.',
-      ].join('\n'),
-    );
-    if (email.trim() && email.includes('@')) {
-      try {
-        await navigator.clipboard.writeText(email.trim());
-        setInfo(prev => `${prev}\n\nYour email (${email.trim()}) was copied to the clipboard so you can paste it in the message.`);
-      } catch {
-        /* ignore */
+    const info = await getLocalLoginRecoveryInfo();
+    setInfo(formatForgotPasswordHelp(info));
+    if (info.exists || info.folder) {
+      void revealLocalLoginRecovery();
+    }
+  };
+
+  const handleSignedOutUpdateCheck = async () => {
+    if (updateBusy) return;
+    setUpdateBusy(true);
+    setUpdateHint('Checking for updates…');
+    try {
+      const info = await checkArkGitHubUpdate();
+      if (!info.ok) {
+        setUpdateHint(info.message || 'Could not check for updates.');
+        return;
       }
+      if (!info.newerAvailable || !info.setupAssetUrl) {
+        setUpdateHint(info.message || 'You are on the latest published build.');
+        return;
+      }
+      setUpdateHint(`${info.message} Downloading…`);
+      const result = await downloadAndInstallArkUpdate({
+        setupAssetUrl: info.setupAssetUrl,
+        latestTag: info.latestTag,
+      });
+      if (!result?.ok) {
+        setUpdateHint(result?.message || 'Update failed.');
+      }
+    } catch (err) {
+      setUpdateHint(err instanceof Error ? err.message : 'Update check failed');
+    } finally {
+      setUpdateBusy(false);
     }
   };
 
@@ -278,7 +305,28 @@ export function AuthScreen() {
                     disabled={loading}
                     className="text-xs text-content-tertiary hover:text-content-secondary"
                   >
-                    Forgot password? Contact developer
+                    Forgot password? Open local note
+                  </button>
+                </div>
+              )}
+
+              {recoveryNotice && (
+                <div className="rounded-xl border border-sky-500/25 bg-sky-500/10 px-3 py-2.5 text-[11px] text-sky-100/90 leading-relaxed space-y-2">
+                  <p>
+                    Temporary: after you sign in or create an account, ARK saves your email and password in a private
+                    file on this PC only (ARK app data). It does not leave your computer or go to ARK servers.
+                    Use <strong className="font-medium">Forgot password</strong> to open that folder until real email
+                    reset ships.
+                  </p>
+                  <button
+                    type="button"
+                    className="text-sky-300 hover:text-sky-200 underline"
+                    onClick={() => {
+                      markLocalRecoveryNoticeShown();
+                      setRecoveryNotice(false);
+                    }}
+                  >
+                    Got it
                   </button>
                 </div>
               )}
@@ -335,18 +383,44 @@ export function AuthScreen() {
               </>
             )}
 
-            <p className="text-center text-[11px] text-content-tertiary mt-4 leading-relaxed">
+            <div className="mt-4 space-y-2">
               <button
                 type="button"
-                className="underline hover:text-content-secondary"
+                className="ark-btn-secondary w-full h-11 rounded-xl"
                 onClick={() =>
                   void window.arkDesktop?.openExternal?.('https://github.com/DrMeji/Ark/releases/latest')
                 }
               >
-                Can&apos;t sign in? Download the latest installer
+                <Download className="w-4 h-4 shrink-0" />
+                Click here to download
               </button>
-              {' '}(no sign-in required)
-            </p>
+              <button
+                type="button"
+                className="ark-btn-ghost w-full h-10 rounded-xl text-xs"
+                disabled={updateBusy}
+                onClick={() => void handleSignedOutUpdateCheck()}
+              >
+                {updateBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                Check for update (no sign-in)
+              </button>
+              {updateHint ? (
+                <p className="text-center text-[11px] text-content-tertiary leading-relaxed whitespace-pre-wrap">
+                  {updateHint}
+                </p>
+              ) : (
+                <p className="text-center text-[11px] text-content-tertiary leading-relaxed">
+                  Opens the latest ARK installer on GitHub, or checks for an in-app update without signing in.
+                </p>
+              )}
+              <button
+                type="button"
+                className="ark-btn-ghost w-full h-9 rounded-xl text-xs text-content-tertiary"
+                onClick={() => void revealLocalLoginRecovery()}
+              >
+                <FolderOpen className="w-3.5 h-3.5" />
+                Open local password note folder
+              </button>
+            </div>
 
             <p className="text-center text-[11px] text-content-tertiary mt-3 leading-relaxed">
               By continuing, you agree to our{' '}

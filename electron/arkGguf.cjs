@@ -15,6 +15,33 @@ const arkPaths = require('./arkPaths.cjs');
 /** Pinned llama.cpp release — CUDA when NVIDIA is present, else CPU. */
 const LLAMA_TAG = 'b9992';
 
+/** Keep in sync with src/lib/ggufContext.ts resolveGgufCtx. */
+const GGUF_CTX_MAX = 65536;
+
+function resolveGgufCtx(ramGb) {
+  const g = Number(ramGb);
+  const ram = Number.isFinite(g) && g > 0 ? g : 8;
+  if (ram < 8) return 8192;
+  if (ram < 12) return 16384;
+  if (ram < 20) return 24576;
+  if (ram < 28) return 32768;
+  if (ram < 40) return 49152;
+  return GGUF_CTX_MAX;
+}
+
+function installedRamGb() {
+  return os.totalmem() / (1024 * 1024 * 1024);
+}
+
+let cachedGgufCtx = null;
+
+/** RAM-scaled llama.cpp context size for this machine. */
+function getGgufCtx() {
+  if (cachedGgufCtx != null) return cachedGgufCtx;
+  cachedGgufCtx = resolveGgufCtx(installedRamGb());
+  return cachedGgufCtx;
+}
+
 function modelsDir() {
   return arkPaths.modelsDir();
 }
@@ -485,7 +512,7 @@ let serverCtx = 0;
 const SERVER_PORT_BASE = require('./arkConfig.cjs').GGUF_SERVER_PORT_BASE;
 const SERVER_PORT_MAX = SERVER_PORT_BASE + require('./arkConfig.cjs').GGUF_SERVER_PORT_MAX_TRIES;
 let serverPort = SERVER_PORT_BASE;
-const GGUF_CTX = 8192;
+// Context size is RAM-scaled via getGgufCtx() — not a fixed constant.
 
 let lastServerError = null;
 
@@ -563,12 +590,12 @@ async function bindLlamaServer(bin, gguf) {
       '-m', gguf,
       '--host', '127.0.0.1',
       '--port', String(candidate),
-      '-c', String(GGUF_CTX),
+      '-c', String(getGgufCtx()),
       '--parallel', '1',
     ], { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
     serverChild = child;
     serverGguf = gguf;
-    serverCtx = GGUF_CTX;
+    serverCtx = getGgufCtx();
     serverPort = candidate;
     child.on('exit', () => {
       if (serverChild === child) {
@@ -596,7 +623,7 @@ async function ensureLlamaServer(modelId) {
   const gguf = findGgufForModel(modelId);
   const bin = findLlamaServer();
   if (!gguf || !bin) return false;
-  if (serverChild && serverGguf === gguf && serverCtx === GGUF_CTX && !serverChild.killed && await pingServer()) {
+  if (serverChild && serverGguf === gguf && serverCtx === getGgufCtx() && !serverChild.killed && await pingServer()) {
     return true;
   }
   return bindLlamaServer(bin, gguf);
@@ -975,7 +1002,7 @@ function runGgufCliStream(modelId, prompt, onChunk, timeoutMs = 240000, nPredict
       '-m', gguf,
       '-f', promptFile,
       '-n', String(nPredict),
-      '-c', String(GGUF_CTX),
+      '-c', String(getGgufCtx()),
       '-t', String(Math.max(4, os.cpus().length)),
       '--temp', String(temperature),
       '--no-conversation',
@@ -1088,5 +1115,7 @@ module.exports = {
   binDir,
   LLAMA_TAG,
   stripLlamaCliNoise,
-  GGUF_CTX,
+  getGgufCtx,
+  resolveGgufCtx,
+  get GGUF_CTX() { return getGgufCtx(); },
 };

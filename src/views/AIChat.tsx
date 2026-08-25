@@ -6,7 +6,10 @@ import { useRecentProjects } from '@/context/RecentProjectsContext';
 import { saveChatMessage } from '@/lib/api';
 import { getLocalPrefs, hasProviderApiKey, setLocalPrefs } from '@/lib/localPrefs';
 import { isCloudProviderEnabled } from '@/lib/cloudSources';
+import { resolvePreferredCloudProvider } from '@/lib/cloudChat';
 import { honestNoLiveChatReply, probeLiveCapacity, type LiveCapacity } from '@/lib/arkCapacity';
+import { tipAt, tipStartIndex } from '@/lib/arkTips';
+import { RotatingTip } from '@/components/RotatingTip';
 import {
   BACKUP_DOWNLOAD_EVENT,
 } from '@/lib/arkHuntBootstrap';
@@ -106,7 +109,7 @@ import { applyChatReplyEdits } from '@/lib/chatAgentApply';
 import { runProjectMultiAgent, wantsMultiAgentTurn } from '@/lib/arkMultiAgent';
 import { beginChatInflight, endChatInflight } from '@/lib/chatInflight';
 import { looksLikeNsfwAsk, nsfwBlockedReply } from '@/lib/nsfwGate';
-import { formatMcpToolsHelp } from '@/lib/arkMcp';
+import { formatMcpToolsHelp, parseMcpCallIntent, resolveMcpToolServer, callMcpTool } from '@/lib/arkMcp';
 import { reactUiMicroAskEdits } from '@/lib/webProjectCanon';
 import { deleteProjectFolderOnDisk, handleDeleteProjectChatRequest, looksLikeDeleteFolderAsk } from '@/lib/deleteProjectFlow';
 import { classifyDiskIntent, shouldRouteDeleteToStickyFile } from '@/lib/chatDiskIntent';
@@ -170,7 +173,7 @@ import { TokenUsageRing } from '@/components/TokenUsageRing';
 import { ArkErrorInline } from '@/components/ArkErrorInline';
 import { BrandMark } from '@/components/BrandMark';
 import { classifyErrorMessage, isLikelyErrorMessage } from '@/lib/errors';
-import { isVideoTabEnabled, isCodeTabEnabled } from '@/lib/featurePark';
+import { isVideoTabEnabled, isCodeTabEnabled, isVoiceTabEnabled } from '@/lib/featurePark';
 import { notifyChatDone } from '@/lib/activityIndicators';
 import { formatReplyElapsed } from '@/lib/speedTest';
 import { getTokenUsageRatio, recordTokenUsage, syncTokenUsage, estimateTokens } from '@/lib/tokenUsage';
@@ -206,7 +209,7 @@ import type { ChatMessage } from '@/types';
 import {
   Bot, User as UserIcon, Loader2, ImageIcon, Video, Code2,
   Upload, Cpu, Cloud, ChevronDown, Check, Blocks, Folder, Zap, Square, X, ImagePlus,
-  Puzzle, Briefcase, Github, Globe,
+  Puzzle, Briefcase, Github, Globe, Copy,
 } from 'lucide-react';
 import { engineGenerateCancel, getEngineStatus, setEngineModel } from '@/lib/arkEngine';
 import { ensureViteDevServer, isViteProject, openInAppPreview, ensureInAppPreview, refreshLivePreview } from '@/lib/projectPreview';
@@ -253,16 +256,17 @@ function previewFromText(text: string) {
 function ChatModeTabs() {
   const { route, navigate } = useRouter();
   const current = route.name === 'chat'
-    ? (route.mode === 'image' || route.mode === 'video' ? route.mode : 'general')
+    ? (route.mode === 'image' || route.mode === 'video' || route.mode === 'voice' ? route.mode : 'general')
     : 'general';
-  const go = (next: 'general' | 'image' | 'video') => {
+  const go = (next: 'general' | 'image' | 'video' | 'voice') => {
     if (next === 'video' && !isVideoTabEnabled()) return;
+    if (next === 'voice' && !isVoiceTabEnabled()) return;
     if (next === 'general') {
       if (route.name === 'chat' && !route.mode && !route.chatId) return;
       navigate({ name: 'chat' });
       return;
     }
-    // Already on this Image/Video thread. keep it (don't wipe an in-progress generate).
+    // Already on this Image/Video/Voice thread. keep it (don't wipe an in-progress generate).
     if (route.name === 'chat' && route.mode === next) return;
     // If a generate is still running for this mode, return to that chat instead of a blank canvas.
     try {
@@ -277,24 +281,31 @@ function ChatModeTabs() {
     }
     navigate({ name: 'chat', mode: next });
   };
-  const tabs: { id: 'general' | 'image' | 'video'; label: string }[] = [
+  const tabs: { id: 'general' | 'image' | 'video' | 'voice'; label: string }[] = [
     { id: 'general', label: 'Chat' },
     { id: 'image', label: 'Image' },
     { id: 'video', label: 'Video' },
+    { id: 'voice', label: 'Voice' },
   ];
   return (
     <div className="shrink-0 flex items-center justify-center gap-1 pt-3 pb-1">
       {tabs.map(t => {
-        const videoOff = t.id === 'video' && !isVideoTabEnabled();
+        const parked =
+          (t.id === 'video' && !isVideoTabEnabled())
+          || (t.id === 'voice' && !isVoiceTabEnabled());
+        const soonTitle =
+          t.id === 'voice'
+            ? 'Voice · coming soon (conversation only — no PC control or builds)'
+            : 'Video · coming soon';
         return (
         <button
           key={t.id}
           type="button"
-          disabled={videoOff}
+          disabled={parked}
           onClick={() => go(t.id)}
-          title={videoOff ? 'Video · coming soon' : undefined}
+          title={parked ? soonTitle : undefined}
           className={`rounded-full px-4 py-2 text-sm font-semibold transition-colors ${
-            videoOff
+            parked
               ? 'text-content-tertiary/40 cursor-not-allowed opacity-50'
               : current === t.id
               ? 'bg-surface-hover text-content-primary'
@@ -302,7 +313,7 @@ function ChatModeTabs() {
           }`}
         >
           {t.label}
-          {videoOff ? ' · soon' : ''}
+          {parked ? ' · soon' : ''}
         </button>
         );
       })}
@@ -362,12 +373,37 @@ function kindForMode(mode: ChatMode): ModelKind {
 
 function defaultModelForKind(kind: ModelKind): ChatModelOption {
   const prefs = getLocalPrefs();
-  const prefId = prefs.defaultModelId;
+  // Prefer an explicit default; otherwise keep the last chat pick so cloud models stick.
+  const prefId =
+    prefs.defaultModelId && prefs.defaultModelId !== 'ark-auto'
+      ? prefs.defaultModelId
+      : (prefs.lastChatModelId || prefs.defaultModelId);
+
   if (kind === 'chat' && prefId && prefId !== 'ark-auto') {
     const cloud = CLOUD_CHAT_WHEN_KEYED.find(m => m.id === prefId);
     if (cloud && hasProviderApiKey(cloud.keyId) && isCloudProviderEnabled(cloud.keyId)) return cloud;
+    const resolved = resolvePreferredCloudProvider(prefId, prefId);
+    if (resolved && hasProviderApiKey(resolved.providerId) && isCloudProviderEnabled(resolved.providerId)) {
+      return {
+        id: prefId,
+        name: cloud?.name || prefId,
+        source: 'cloud',
+        detail: `Cloud · ${resolved.label}`,
+        kind: 'chat',
+      };
+    }
     if (prefId.startsWith('ollama:')) {
       return { id: prefId, name: prefId.replace(/^ollama:/, ''), source: 'local', detail: 'Ollama', kind: 'chat' };
+    }
+    // Unknown ids that look like cloud (but key missing) must not be labeled local.
+    if (resolved) {
+      return {
+        id: prefId,
+        name: prefId,
+        source: 'cloud',
+        detail: `Cloud · ${resolved.label} · add key`,
+        kind: 'chat',
+      };
     }
     return { id: prefId, name: prefId, source: 'local', detail: 'Local · Settings default', kind: 'chat' };
   }
@@ -423,6 +459,10 @@ const PLACEHOLDERS: Record<ChatMode, string[]> = {
   video: [
     'Describe the video you want to create...',
     'Ask ARK to generate a short clip...',
+  ],
+  voice: [
+    'Voice conversation coming soon…',
+    'Talk with ARK — conversation only, no PC control…',
   ],
   code: [
     'Describe the code you want to write...',
@@ -708,6 +748,7 @@ export function AIChat() {
   const [engineReadyIds, setEngineReadyIds] = useState<Set<string>>(() => new Set());
   const [capacity, setCapacity] = useState<LiveCapacity | null>(null);
   const [generating, setGenerating] = useState(false);
+  const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
   const [queueLen, setQueueLen] = useState(0);
   const [pendingImages, setPendingImages] = useState<{ id: string; name: string; dataUrl: string }[]>([]);
   const [chatStudioFiles, setChatStudioFiles] = useState<Record<string, string>>({});
@@ -803,6 +844,7 @@ export function AIChat() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesScrollRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
+  const [showJumpToBottom, setShowJumpToBottom] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const modelMenuRef = useRef<HTMLDivElement>(null);
   const modelButtonRef = useRef<HTMLButtonElement>(null);
@@ -1116,10 +1158,6 @@ export function AIChat() {
   }, []);
 
   useEffect(() => {
-    setLocalPrefs({ defaultModelId: 'ark-auto', aiMode: 'automatic', autoFailover: true });
-  }, []);
-
-  useEffect(() => {
     if (generatingRef.current && messagesRef.current.length > messages.length) return;
     messagesRef.current = messages;
   }, [messages]);
@@ -1200,6 +1238,10 @@ export function AIChat() {
     const next = route.mode && route.mode !== 'general' ? route.mode : 'general';
     if (next === 'video' && !isVideoTabEnabled()) {
       navigate({ name: 'chat', mode: 'image' });
+      return;
+    }
+    if (next === 'voice' && !isVoiceTabEnabled()) {
+      navigate({ name: 'chat' });
       return;
     }
     setMode(next);
@@ -1597,6 +1639,18 @@ export function AIChat() {
     // Hysteresis: leave stick early when scrolling up; re-stick only when clearly at bottom.
     if (distFromBottom > 180) stickToBottomRef.current = false;
     else if (distFromBottom < 80) stickToBottomRef.current = true;
+    setShowJumpToBottom(distFromBottom > 220);
+  };
+
+  const jumpToBottom = () => {
+    const el = messagesScrollRef.current;
+    stickToBottomRef.current = true;
+    setShowJumpToBottom(false);
+    if (el) {
+      el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+      return;
+    }
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
   useLayoutEffect(() => {
     if (!modelMenuOpen) {
@@ -2807,12 +2861,24 @@ export function AIChat() {
         }
       }
 
-      if (diskIntent.type === 'add_file' && !looksLikeCodeEditAsk(intentText) && !isProjectCreateBrief(intentText)) {
+      if (diskIntent.type === 'add_file' && !isProjectCreateBrief(intentText)) {
+        // Pure create-file (esp. .md) must hit disk — don't divert to code-edit when it's clearly a new file.
+        const pureCreateFile =
+          !looksLikeCodeEditAsk(intentText)
+          || /\.(md|txt|json|csv)\b/i.test(diskIntent.name || intentText)
+          || /\bmarkdown\b|\breadme\b/i.test(intentText);
+        if (!pureCreateFile) {
+          /* fall through to studio / agent apply */
+        } else {
         pushAssistantStatus('Creating file…');
         const addOutcome = await handleAddFileChatRequest({
           fileName: diskIntent.name,
           parentHint: diskIntent.parentHint,
-          content: extractWriteFileContent(content) ?? '',
+          content: extractWriteFileContent(content) ?? (
+            /\.md$/i.test(diskIntent.name || '')
+              ? `# ${String(diskIntent.name || 'notes').replace(/\.md$/i, '')}\n\n`
+              : ''
+          ),
           workspaceDiskRoot: diskRoot,
           workspaceProjectId: diskProjectId,
           workspaceName: diskWorkspaceName,
@@ -2861,6 +2927,7 @@ export function AIChat() {
             `Created file **${addOutcome.fileName}**.\n\n\`${addOutcome.filePath}\``,
           );
           return;
+        }
         }
       }
     }
@@ -3661,14 +3728,46 @@ export function AIChat() {
       return;
     }
 
-    // MCP inventory (local tools today; external servers planned).
+    // MCP inventory (local + registered servers from Settings → MCP).
     if (
       (mode === 'general' || mode === 'code')
       && /\b(mcp|model context protocol)\b/i.test(content)
-      && /\b(what|how|list|show|tools|server|connect|setup|explain)\b/i.test(content)
+      && /\b(what|how|list|show|tools|server|connect|setup|explain|register)\b/i.test(content)
+      && !parseMcpCallIntent(content)
     ) {
       finishAgentReply(formatMcpToolsHelp(), 'ARK · mcp');
       return;
+    }
+
+    // Explicit MCP tools/call: "run mcp tool read_graph" / "call mcp create_entities {…}"
+    if (mode === 'general' || mode === 'code') {
+      const mcpCall = parseMcpCallIntent(content);
+      if (mcpCall) {
+        const server = resolveMcpToolServer(mcpCall.toolName);
+        if (!server) {
+          finishAgentReply(
+            `No enabled MCP server has tool **${mcpCall.toolName}**.\n\nAdd/enable a server in **Settings → MCP**, press **Test**, then try again.\n\n${formatMcpToolsHelp()}`,
+            'ARK · mcp',
+          );
+          return;
+        }
+        setMessages(prev => prev.map(m => (
+          m.id === assistantId ? { ...m, content: `__generating__:chat:Calling ${mcpCall.toolName}…` } : m
+        )));
+        const res = await callMcpTool(server, mcpCall.toolName, mcpCall.args);
+        if (res.ok) {
+          finishAgentReply(
+            `**${mcpCall.toolName}** (${server.name})\n\n\`\`\`\n${res.content || '(empty)'}\n\`\`\``,
+            'ARK · mcp',
+          );
+        } else {
+          finishAgentReply(
+            `**${mcpCall.toolName}** failed on **${server.name}**.\n\n${res.error || 'Unknown error'}`,
+            'ARK · mcp',
+          );
+        }
+        return;
+      }
     }
 
     // STEP 7: Clone into Chat workspace (no Code tab)
@@ -4164,7 +4263,9 @@ export function AIChat() {
     );
     const keepContinuity = mode === 'code'
       || Boolean(threadBrainRef.current?.pendingModelId || threadBrainRef.current?.freshBudget)
-      || histPrefs.rememberContext;
+      || histPrefs.rememberContext
+      // Long threads stay continuous even if the setting was turned off mid-chat.
+      || priorForHistory.length >= 4;
     // Inspect follow-ups must not pack the prior huge dump into GGUF (that hung Thinking…).
     const seedHistory = willInspect
       ? buildRouterHistory([], content)
@@ -4284,7 +4385,7 @@ export function AIChat() {
       notifyChatDone(threadChatId);
     };
 
-    // First-run guarantee: no live chat path → honest CTA reply (no fake ARK Core answer).
+    // First-run guarantee: no live chat path → wait if installing, else honest CTA (no fake ARK Core answer).
     // engineGenerate IPC exists on desktop even when no GGUF is installed — do not treat IPC as capacity.
     if (
       !pluginId
@@ -4292,8 +4393,17 @@ export function AIChat() {
       && capacity
       && !capacity.liveChat
     ) {
-      const honest = honestNoLiveChatReply();
-      finalizeAssistant(honest, 'ARK · setup needed');
+      const installing = engineInstallingModels[0];
+      const honest = installing
+        ? [
+          `Your local brain is still downloading${installing.detail ? ` (${installing.detail})` : ''}.`,
+          '',
+          'Hang tight until it says Ready — then send again. (A free cloud key also works right away.)',
+          '',
+          tipAt(tipStartIndex()),
+        ].join('\n')
+        : honestNoLiveChatReply();
+      finalizeAssistant(honest, installing ? 'ARK · installing' : 'ARK · setup needed');
       clearGeneratingIfMine();
       window.setTimeout(() => {
         if (mySeq === genSeqRef.current) flushQueuedSend();
@@ -5285,10 +5395,11 @@ export function AIChat() {
                     if (!model.id.startsWith('ollama:')) {
                       void setEngineModel(model.id).catch(() => undefined);
                     }
-                    setLocalPrefs({ lastChatModelId: model.id });
+                    setLocalPrefs({ lastChatModelId: model.id, defaultModelId: model.id });
                   } else if (model.source !== 'auto') {
                     unpickAutoSticky();
                   }
+                  setModelMenuOpen(false);
                 }}
                 className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-surface-hover"
               >
@@ -5382,10 +5493,15 @@ export function AIChat() {
                   setActiveModel(model);
                   if (model.kind === 'chat') {
                     unpickAutoSticky();
-                    setLocalPrefs({ lastChatModelId: model.id });
+                    setLocalPrefs({
+                      lastChatModelId: model.id,
+                      // Keep the menu on this cloud pick across remounts / new chats.
+                      defaultModelId: model.id,
+                    });
                   } else if (model.source !== 'auto') {
                     unpickAutoSticky();
                   }
+                  setModelMenuOpen(false);
                 }}
                 className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-surface-hover"
               >
@@ -5652,6 +5768,10 @@ export function AIChat() {
             ref={textareaRef}
             value={input}
             onChange={e => onInput(e.target.value)}
+            spellCheck
+            lang="en"
+            autoCorrect="on"
+            autoCapitalize="sentences"
             onKeyDown={e => {
               if (e.key === 'Enter' && !e.shiftKey) {
                 if (Date.now() < ignoreEnterUntilRef.current) {
@@ -5973,10 +6093,17 @@ export function AIChat() {
             </h1>
             <p className="text-xs text-content-tertiary mb-4 text-center max-w-lg">
               {capacity && !capacity.liveChat
-                ? 'No live model yet. Connect a free key or install a local brain, then send a message.'
+                ? (engineInstallingModels.length
+                  ? `Installing ${engineInstallingModels[0]?.name || 'local brain'}… Chat unlocks when it’s ready (or connect a free key).`
+                  : 'No live model yet. Connect a free key or install a local brain, then send a message.')
                 : null}
             </p>
-            {capacity && !capacity.liveChat && (
+            {capacity && !capacity.liveChat && engineInstallingModels.length > 0 && (
+              <div className="mb-6 max-w-md w-full px-2">
+                <RotatingTip />
+              </div>
+            )}
+            {capacity && !capacity.liveChat && !engineInstallingModels.length && (
               <div className="flex flex-wrap items-center justify-center gap-2 mb-8">
                 <button
                   type="button"
@@ -6046,11 +6173,13 @@ export function AIChat() {
         )
       ) : (
         <>
-          <div
-            ref={messagesScrollRef}
-            onScroll={onMessagesScroll}
-            className="flex-1 overflow-auto px-4 sm:px-8 py-6"
-          >            <div className="max-w-5xl mx-auto w-full space-y-5">
+          <div className="relative flex-1 min-h-0 flex flex-col">
+            <div
+              ref={messagesScrollRef}
+              onScroll={onMessagesScroll}
+              className="flex-1 min-h-0 overflow-auto px-4 sm:px-8 py-6 ark-scroll-quiet"
+            >
+            <div className="max-w-5xl mx-auto w-full space-y-5">
               {messages.length === 0 && showOpenThread && (
                 <p className="text-center text-xs text-content-tertiary py-8">
                   This chat is empty. Send a message to continue here.
@@ -6071,7 +6200,7 @@ export function AIChat() {
                   <div
                     className={`text-sm text-content-primary ${
                       msg.role === 'user'
-                        ? 'max-w-[min(42rem,78%)] min-w-0 rounded-2xl px-4 py-3 bg-surface-hover'
+                        ? 'max-w-[min(42rem,78%)] min-w-0 flex flex-col items-end gap-1'
                         : isMediaOnlyContent(msg.content)
                           || (msg.content.startsWith('__generating__:') && !isTraceMessage(msg.content))
                           || (
@@ -6080,16 +6209,48 @@ export function AIChat() {
                             && (mode === 'image' || mode === 'video')
                           )
                           ? 'shrink-0'
-                          : isCatalogMessage(String(msg.content || '')) || isPcExploreMessage(String(msg.content || ''))
-                            ? 'max-w-[min(44rem,92%)] min-w-0 rounded-2xl px-4 py-3.5 bg-ark-navy-900/95 border border-surface-border/80 shadow-sm'
-                            : 'max-w-[min(42rem,78%)] min-w-0 rounded-2xl px-4 py-3 bg-ark-navy-900 border border-surface-border'
+                          : 'max-w-[min(44rem,92%)] min-w-0'
                     }`}
                   >
+                    {msg.role === 'user' ? (
+                      <>
+                        <div className="min-w-0 max-w-full rounded-2xl px-4 py-3 bg-surface-hover">
+                          <MessageContent
+                            content={msg.content}
+                            live={false}
+                            onPromptChipPick={(prompt) => void sendMessageRef.current(prompt)}
+                          />
+                        </div>
+                        {(() => {
+                          const raw = String(msg.content || '').trim();
+                          if (!raw) return null;
+                          const copied = copiedMsgId === msg.id;
+                          return (
+                            <button
+                              type="button"
+                              title={copied ? 'Copied' : 'Copy prompt'}
+                              aria-label={copied ? 'Copied' : 'Copy prompt'}
+                              className="inline-flex items-center justify-center rounded-md p-1 text-content-tertiary/80 hover:text-content-secondary"
+                              onClick={() => {
+                                void navigator.clipboard.writeText(raw).then(() => {
+                                  setCopiedMsgId(msg.id);
+                                  window.setTimeout(() => {
+                                    setCopiedMsgId(prev => (prev === msg.id ? null : prev));
+                                  }, 1600);
+                                }).catch(() => undefined);
+                              }}
+                            >
+                              {copied ? <Check className="w-3.5 h-3.5 text-ark-accent-green" /> : <Copy className="w-3.5 h-3.5" />}
+                            </button>
+                          );
+                        })()}
+                      </>
+                    ) : (
+                      <>
                     {(() => {
                       const isAssistant = msg.role === 'assistant';
                       const isLast = msg.id === messages[messages.length - 1]?.id;
                       const raw = String(msg.content || '');
-                      const isCatalog = isAssistant && isCatalogMessage(raw);
                       // Only Image/Video tabs (or explicit image/video generating tags) show media placeholder.
                       // Empty chat bubbles must never become “Creating image”.
                       const showMediaGen = isAssistant && (
@@ -6123,15 +6284,39 @@ export function AIChat() {
                       );
                     })()}
                     {msg.role === 'assistant'
-                      && typeof msg.elapsed_ms === 'number'
-                      && msg.elapsed_ms >= 0
-                      && !msg.content.startsWith('__generating__:')
+                      && !String(msg.content || '').startsWith('__generating__:')
                       && !isTraceMessage(msg.content)
-                      && !isLikelyErrorMessage(msg.content) ? (
-                        <p className="text-[11px] text-content-tertiary mt-2 tabular-nums">
-                          Responded in {formatReplyElapsed(msg.elapsed_ms)}
-                          {msg.provider_used ? ` · ${msg.provider_used}` : ''}
-                        </p>
+                      && String(msg.content || '').trim() ? (
+                        <div className="mt-2 flex items-center gap-2 text-[11px] text-content-tertiary tabular-nums">
+                          {(() => {
+                            const raw = String(msg.content || '').trim();
+                            const copied = copiedMsgId === msg.id;
+                            return (
+                              <button
+                                type="button"
+                                title={copied ? 'Copied' : 'Copy response'}
+                                aria-label={copied ? 'Copied' : 'Copy response'}
+                                className="inline-flex items-center justify-center rounded-md p-0.5 text-content-tertiary hover:text-content-secondary"
+                                onClick={() => {
+                                  void navigator.clipboard.writeText(raw).then(() => {
+                                    setCopiedMsgId(msg.id);
+                                    window.setTimeout(() => {
+                                      setCopiedMsgId(prev => (prev === msg.id ? null : prev));
+                                    }, 1600);
+                                  }).catch(() => undefined);
+                                }}
+                              >
+                                {copied ? <Check className="w-3.5 h-3.5 text-ark-accent-green" /> : <Copy className="w-3.5 h-3.5" />}
+                              </button>
+                            );
+                          })()}
+                          {typeof msg.elapsed_ms === 'number' && msg.elapsed_ms >= 0 && !isLikelyErrorMessage(msg.content) ? (
+                            <span>
+                              Responded in {formatReplyElapsed(msg.elapsed_ms)}
+                              {msg.provider_used ? ` · ${msg.provider_used}` : ''}
+                            </span>
+                          ) : null}
+                        </div>
                       ) : null}
                     {msg.role === 'assistant' && /Stopped at length limit/i.test(msg.content) ? (
                       <button
@@ -6195,6 +6380,8 @@ export function AIChat() {
                         </button>
                       </div>
                     )}
+                      </>
+                    )}
                   </div>
                   {msg.role === 'user' && (
                     <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 bg-surface-hover border border-surface-border mt-0.5">
@@ -6205,6 +6392,18 @@ export function AIChat() {
               ))}
               <div ref={messagesEndRef} />
             </div>
+            </div>
+            {showJumpToBottom ? (
+              <button
+                type="button"
+                onClick={jumpToBottom}
+                title="Jump to latest"
+                aria-label="Jump to latest message"
+                className="absolute bottom-2 left-1/2 -translate-x-1/2 z-10 h-8 w-8 rounded-full border border-white/10 bg-ark-navy-950/75 text-content-tertiary/80 hover:text-content-secondary hover:bg-ark-navy-900/95 hover:border-white/20 backdrop-blur-sm flex items-center justify-center opacity-55 hover:opacity-100 transition-opacity shadow-sm"
+              >
+                <ChevronDown className="w-4 h-4" />
+              </button>
+            ) : null}
           </div>
           <div className="shrink-0 px-4 sm:px-8 pb-6 pt-2 space-y-2">
             {setupNote && (

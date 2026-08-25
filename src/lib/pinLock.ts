@@ -5,8 +5,8 @@ const SALT_KEY = 'ark:pin-salt';
 const SESSION_KEY = 'ark:pin-unlocked';
 const FAILURES_KEY = 'ark:pin-failures';
 const LOCKOUT_KEY = 'ark:pin-lockout-until';
-const MAX_FAILURES = 10_000;
-const LOCKOUT_MS = 0; // testing: no PIN lockout delay for now
+const MAX_FAILURES = 5;
+const LOCKOUT_MS = 60_000; // 1 minute after 5 wrong PINs
 
 
 function randomSalt() {
@@ -62,12 +62,19 @@ export async function setPin(pin: string) {
   localStorage.setItem(SALT_KEY, salt);
   localStorage.setItem(HASH_KEY, hash);
   markPinUnlocked();
+  // TEMP local recovery note (this PC only) — same folder as email/password.
+  void import('@/lib/localAuthRecovery')
+    .then(({ saveLocalPinRecovery }) => saveLocalPinRecovery(trimmed))
+    .catch(() => undefined);
 }
 
 export async function clearPin() {
   localStorage.removeItem(HASH_KEY);
   localStorage.removeItem(SALT_KEY);
   markPinUnlocked();
+  void import('@/lib/localAuthRecovery')
+    .then(({ clearLocalPinRecovery }) => clearLocalPinRecovery())
+    .catch(() => undefined);
 }
 
 export function getPinLockoutMs() {

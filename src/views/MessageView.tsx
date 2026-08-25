@@ -20,7 +20,7 @@ import {
   type MessageAttachment,
 } from '@/lib/arkSocial';
 import { formatArkId, isArkUserId, normalizeArkId } from '@/lib/arkUserId';
-import { isDevArkAlias } from '@/lib/arkDevAccount';
+import { isArkDevEmail, isDevArkAlias } from '@/lib/arkDevAccount';
 import { SOCIAL_DEMO_ENABLED } from '@/lib/socialDemo';
 import { GuestSocialBanner } from '@/components/GuestSocialBanner';
 import { ConnectShell } from '@/components/ConnectShell';
@@ -111,7 +111,7 @@ export function MessageView() {
   const { route, navigate } = useRouter();
   const { contacts, inviteByArkId, refreshContacts, removeFriend, blockFriend, unreadFrom } = useSocial();
   const { demoSimulateIncoming } = useCall();
-  const myArkId = profile?.ark_id || '';
+  const myArkId = isArkDevEmail(user?.email) ? 'DEV' : (profile?.ark_id || '');
   const peer = route.name === 'message' ? route.peer : undefined;
   const groupId = route.name === 'message' ? route.groupId : undefined;
   const [addId, setAddId] = useState('');
@@ -786,6 +786,8 @@ export function MessageView() {
                 <input
                   value={draft}
                   onChange={e => setDraft(e.target.value)}
+                  spellCheck
+                  lang="en"
                   onKeyDown={e => {
                     if (e.key === 'Enter' && !e.shiftKey) {
                       e.preventDefault();
@@ -910,6 +912,8 @@ export function MessageView() {
                 <input
                   value={draft}
                   onChange={e => setDraft(e.target.value)}
+                  spellCheck
+                  lang="en"
                   onKeyDown={e => {
                     if (e.key === 'Enter' && !e.shiftKey) {
                       e.preventDefault();

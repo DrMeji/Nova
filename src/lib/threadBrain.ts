@@ -6,7 +6,7 @@
 import type { ChatMode } from '@/context/RouterContext';
 import type { ArkRouterResult, RouterKind, RouterTier } from '@/lib/arkRouter';
 
-export type ThreadBrainKind = 'chat' | 'coding' | 'image' | 'video';
+export type ThreadBrainKind = 'chat' | 'coding' | 'image' | 'video' | 'voice';
 
 export type ThreadBrainPinnedSource = 'local' | 'cloud' | 'optional';
 
@@ -27,6 +27,7 @@ export function brainKindForChatMode(mode: ChatMode): ThreadBrainKind {
   if (mode === 'code') return 'coding';
   if (mode === 'image') return 'image';
   if (mode === 'video') return 'video';
+  if (mode === 'voice') return 'voice';
   return 'chat';
 }
 
@@ -122,7 +123,8 @@ export function threadBrainFromResult(
     pendingModelName: result.modelId && result.modelId === prev?.pendingModelId
       ? undefined
       : prev?.pendingModelName,
-    freshBudget: prev?.freshBudget,
+    // One-shot after a brain hot-swap. clear so long chats don't look "brand new" forever.
+    freshBudget: undefined,
   };
 }
 

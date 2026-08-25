@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, type ReactNode } from 'react';
 
-export type ChatMode = 'general' | 'image' | 'video' | 'code';
+export type ChatMode = 'general' | 'image' | 'video' | 'voice' | 'code';
 
 export type Route =
   | { name: 'dashboard' }

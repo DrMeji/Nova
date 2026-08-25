@@ -1,18 +1,27 @@
 /**
- * Local MCP-style tool catalog for ARK.
+ * MCP-style tool catalog + invoke for ARK.
  *
- * ARK already runs fully local (Electron + Brain API). This module exposes the
- * same capabilities as an MCP tool list so we can wire stdio MCP servers later
- * without inventing a second agent surface.
- *
- * Not a full MCP host yet. inventory + future connect points only.
+ * Local tools mirror capabilities Chat already has. Registered external servers
+ * (Settings → MCP) support stdio tools/list + tools/call. Full auto agent loop
+ * (model picks tools mid-reply) can come later — Chat can already call by name.
  */
+
+import {
+  getMcpServer,
+  listEnabledMcpServers,
+  listMcpServers,
+  patchMcpServerProbe,
+  type McpServerConfig,
+} from '@/lib/mcpServers';
 
 export type ArkMcpTool = {
   name: string;
   description: string;
   local: boolean;
-  status: 'ready' | 'planned';
+  status: 'ready' | 'planned' | 'registered';
+  /** External server id when status is registered. */
+  serverId?: string;
+  serverName?: string;
 };
 
 /** Tools ARK can already perform locally (chat / project / media). */
@@ -44,21 +53,240 @@ export function listLocalMcpTools(): ArkMcpTool[] {
     },
     {
       name: 'ark.mcp.connect',
-      description: 'Connect an external MCP server (stdio / SSE) into Chat +',
+      description: 'Register / call external MCP servers in Settings → MCP',
       local: true,
-      status: 'planned',
+      status: 'ready',
     },
   ];
 }
 
+/** Cached tools from enabled registered servers (last successful probe). */
+export function listRegisteredMcpTools(): ArkMcpTool[] {
+  const out: ArkMcpTool[] = [];
+  for (const server of listEnabledMcpServers()) {
+    const tools = server.lastTools || [];
+    if (!tools.length) {
+      out.push({
+        name: `${server.name}·(not probed)`,
+        description: server.lastError
+          ? `Last error: ${server.lastError}`
+          : 'Open Settings → MCP and press Test to list tools',
+        local: false,
+        status: 'registered',
+        serverId: server.id,
+        serverName: server.name,
+      });
+      continue;
+    }
+    for (const t of tools) {
+      out.push({
+        name: t.name,
+        description: t.description || `From ${server.name}`,
+        local: false,
+        status: 'registered',
+        serverId: server.id,
+        serverName: server.name,
+      });
+    }
+  }
+  return out;
+}
+
+export function listAllMcpTools(): ArkMcpTool[] {
+  return [...listLocalMcpTools(), ...listRegisteredMcpTools()];
+}
+
 export function formatMcpToolsHelp(): string {
-  const tools = listLocalMcpTools();
+  const local = listLocalMcpTools();
+  const servers = listMcpServers();
+  const enabled = servers.filter(s => s.enabled);
+  const registered = listRegisteredMcpTools().filter(t => !t.name.includes('(not probed)'));
+
   const lines = [
-    'ARK local tools (MCP-style):',
+    'ARK MCP tools',
     '',
-    ...tools.map(t => `• **${t.name}**. ${t.description} (${t.status})`),
+    '**Local (built-in)**',
+    ...local.map(t => `• **${t.name}** — ${t.description}`),
     '',
-    'External MCP servers are planned next: Settings will list connectable servers; Chat `+` will expose their tools.',
   ];
+
+  if (!servers.length) {
+    lines.push(
+      '**External servers** — none registered yet.',
+      'Add one in **Settings → MCP** (stdio command + args). Press **Test** to list tools.',
+      'Ask again with “list MCP tools” after you add a server.',
+    );
+  } else {
+    lines.push(`**Registered servers** (${enabled.length} enabled / ${servers.length} total)`);
+    for (const s of servers) {
+      const n = s.lastTools?.length ?? 0;
+      const state = !s.enabled
+        ? 'disabled'
+        : s.lastError
+          ? `error: ${s.lastError}`
+          : n
+            ? `${n} tool${n === 1 ? '' : 's'}`
+            : 'not probed yet';
+      lines.push(`• **${s.name}** (${s.transport}) — ${state}`);
+    }
+    if (registered.length) {
+      lines.push('', '**Tools from enabled servers**');
+      for (const t of registered.slice(0, 40)) {
+        const from = t.serverName ? ` · ${t.serverName}` : '';
+        lines.push(`• **${t.name}**${from} — ${t.description}`);
+      }
+      if (registered.length > 40) {
+        lines.push(`…and ${registered.length - 40} more (see Settings → MCP).`);
+      }
+      lines.push(
+        '',
+        '**Call a tool:** `run mcp tool read_graph` or `call mcp create_entities {"name":"…"}`',
+      );
+    } else {
+      lines.push('', 'Press **Test** on an enabled server in Settings → MCP, then call a tool by name.');
+    }
+  }
+
   return lines.join('\n');
+}
+
+/** Probe one server via Electron host; persist tools / error on the registry. */
+export async function probeMcpServer(server: McpServerConfig): Promise<{
+  ok: boolean;
+  tools: { name: string; description?: string }[];
+  error?: string | null;
+}> {
+  const api = window.arkDesktop?.mcpListTools;
+  if (!api) {
+    const error = 'Desktop MCP host unavailable — run the Electron app (not browser-only).';
+    patchMcpServerProbe(server.id, {
+      lastError: error,
+      lastCheckedAt: new Date().toISOString(),
+      lastTools: [],
+    });
+    return { ok: false, tools: [], error };
+  }
+
+  try {
+    const res = await api({
+      id: server.id,
+      transport: server.transport,
+      command: server.command,
+      args: server.args,
+      cwd: server.cwd,
+      url: server.url,
+    });
+    const tools = Array.isArray(res.tools) ? res.tools.filter(t => t?.name) : [];
+    const error = res.ok ? null : (res.error || 'Probe failed');
+    patchMcpServerProbe(server.id, {
+      lastTools: tools,
+      lastError: error,
+      lastCheckedAt: new Date().toISOString(),
+    });
+    return { ok: Boolean(res.ok), tools, error };
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err || 'Probe failed');
+    patchMcpServerProbe(server.id, {
+      lastError: error,
+      lastCheckedAt: new Date().toISOString(),
+      lastTools: [],
+    });
+    return { ok: false, tools: [], error };
+  }
+}
+
+export async function callMcpTool(
+  server: McpServerConfig,
+  name: string,
+  args?: Record<string, unknown>,
+): Promise<{ ok: boolean; content: string; error?: string | null }> {
+  const api = window.arkDesktop?.mcpCallTool;
+  if (!api) {
+    return {
+      ok: false,
+      content: '',
+      error: 'Desktop MCP host unavailable — run the Electron app.',
+    };
+  }
+  try {
+    const res = await api({
+      server: {
+        id: server.id,
+        transport: server.transport,
+        command: server.command,
+        args: server.args,
+        cwd: server.cwd,
+        url: server.url,
+      },
+      name,
+      arguments: args || {},
+    });
+    return {
+      ok: Boolean(res.ok),
+      content: String(res.content || ''),
+      error: res.ok ? null : (res.error || 'Tool call failed'),
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      content: '',
+      error: err instanceof Error ? err.message : String(err || 'Tool call failed'),
+    };
+  }
+}
+
+export type McpCallIntent = {
+  toolName: string;
+  serverId?: string;
+  args: Record<string, unknown>;
+};
+
+/**
+ * Parse “run/call/use mcp tool NAME …” (optional JSON args).
+ * Returns null if this isn’t an explicit MCP invoke.
+ */
+export function parseMcpCallIntent(content: string): McpCallIntent | null {
+  const text = String(content || '').trim();
+  if (!text) return null;
+
+  const m = text.match(
+    /\b(?:run|call|use|invoke)\s+(?:the\s+)?(?:mcp\s+)?(?:tool\s+)?([a-zA-Z0-9_.:-]+)\b/i,
+  );
+  if (!m) return null;
+  // Require mcp / tool / "run mcp" style so normal “use Autocomplete” doesn’t fire.
+  if (!/\bmcp\b/i.test(text) && !/\b(?:run|call|invoke)\s+(?:the\s+)?tool\b/i.test(text)) {
+    return null;
+  }
+
+  const toolName = m[1];
+  if (!toolName || toolName.toLowerCase().startsWith('ark.')) return null;
+
+  let args: Record<string, unknown> = {};
+  const jsonMatch = text.match(/\{[\s\S]*\}$/);
+  if (jsonMatch) {
+    try {
+      const parsed = JSON.parse(jsonMatch[0]) as unknown;
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        args = parsed as Record<string, unknown>;
+      }
+    } catch {
+      /* ignore bad json */
+    }
+  }
+
+  return { toolName, args };
+}
+
+/** Resolve which enabled server owns a tool name (prefer last probe cache). */
+export function resolveMcpToolServer(toolName: string): McpServerConfig | null {
+  const name = String(toolName || '').trim();
+  if (!name) return null;
+  const hits = listRegisteredMcpTools().filter(
+    t => t.serverId && t.name.toLowerCase() === name.toLowerCase(),
+  );
+  if (hits[0]?.serverId) {
+    return getMcpServer(hits[0].serverId);
+  }
+  // Fallback: first enabled stdio server (caller should have probed).
+  return listEnabledMcpServers().find(s => s.transport === 'stdio') || null;
 }

@@ -378,7 +378,20 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
   );
 
   // ── Pinned cloud model (skipped for ARK Auto) ──────────────────────
-  if (pinnedCloud && modeAllowsCloud(mode) && !isAuto) {
+  // Explicit cloud picks must stick: cascade among cloud keys only — never snap to local.
+  if (pinnedCloud && !isAuto) {
+    if (!modeAllowsCloud(mode)) {
+      return {
+        reply: [
+          'Local-only mode is on, so the cloud model you picked was not used.',
+          'Switch Routing mode in Settings → AI, or pick a local brain from the ARK menu.',
+        ].join(' '),
+        modelName: preferredName || 'Cloud',
+        source: 'none',
+        tier: 'paid',
+        attempted,
+      };
+    }
     const hit = await cloudChatPreferredThenCascade({
       modelId: preferredId || '',
       modelName: preferredName,
@@ -392,20 +405,28 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
       return withContinued({
         reply: hit.reply,
         modelName: `${hit.provider} · ${hit.model}`,
+        modelId: preferredId,
         source: hit.provider.toLowerCase().replace(/\s+/g, '-'),
         tier: hit.cost,
         attempted,
       }, history);
     }
-    if (!failover) {
-      return {
-        reply: 'Cloud request failed. Add a matching API key in Models → Cloud, or enable Auto failover in Settings.',
-        modelName: preferredName || 'Cloud',
-        source: 'none',
-        tier: 'paid',
-        attempted,
-      };
-    }
+    return {
+      reply: failover
+        ? [
+          `Cloud model **${preferredName || preferredId || 'Cloud'}** failed, and other cloud keys did not answer.`,
+          'ARK stayed on cloud (did not switch to a local brain).',
+          'Check the matching API key in Models → Cloud, or pick another cloud model.',
+        ].join(' ')
+        : [
+          'Cloud request failed.',
+          'Add a matching API key in Models → Cloud, or enable Auto failover in Settings → AI to try other cloud keys (still not local).',
+        ].join(' '),
+      modelName: preferredName || 'Cloud',
+      source: 'none',
+      tier: 'paid',
+      attempted,
+    };
   }
 
   // ── Pinned Ollama ──────────────────────────────────────────────────

@@ -62,6 +62,9 @@ export function isVideoTabEnabled(): boolean {
   return false;
 }
 
+/** Voice tab — re-export so AppShell / Search can park it next to Video. */
+export { isVoiceTabEnabled } from '@/lib/voiceMode';
+
 /** Code workspace tab. Explorer + editor + preview for builds. */
 export function isCodeTabEnabled(): boolean {
   return true;

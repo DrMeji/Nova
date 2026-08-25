@@ -316,6 +316,18 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.154',
+    channel: 'stable' as const,
+    date: 'Aug 25, 2026',
+    title: 'DEV ARK ID + local recovery notes',
+    notes: [
+      'Developer account public ARK ID is DEV for everyone (not digits)',
+      'Temp local recovery note saves email, password, and PIN on this PC only',
+      'Forgot password / open folder points at that note until email reset ships',
+      'Update check retries GitHub 504s; MCP tools can be called from Chat',
+    ],
+  },
+  {
     version: '0.1.153',
     channel: 'stable' as const,
     date: 'Aug 24, 2026',

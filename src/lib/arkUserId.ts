@@ -1,12 +1,14 @@
 /**
- * Each ARK account gets one 7-digit ID (1000000–9999999).
- * Share this instead of email. It is unique to that account.
+ * Each ARK account gets one 7-digit ID (1000000–9999999), except the designated
+ * developer account whose public ARK ID is the literal `DEV`.
+ * Share this instead of email. Users cannot edit their ARK ID.
  */
 
 import { supabase } from '@/lib/supabase';
-import { isDevArkAlias } from '@/lib/arkDevAccount';
+import { isArkDevEmail, isDevArkAlias } from '@/lib/arkDevAccount';
 
 export const ARK_ID_RE = /^[1-9]\d{6}$/;
+export const ARK_DEV_ID = 'DEV';
 
 function storageKey(userId: string) {
   return `ark:ark-id:${userId || 'guest-local'}`;
@@ -16,17 +18,24 @@ function usedKey() {
   return 'ark:ark-id-used';
 }
 
+/** True for a normal 7-digit ID or the developer alias DEV. */
 export function isArkUserId(value: string) {
-  return ARK_ID_RE.test(value.trim());
+  const v = String(value || '').trim();
+  if (isDevArkAlias(v)) return true;
+  return ARK_ID_RE.test(v);
 }
 
 export function formatArkId(id: string) {
-  const digits = id.replace(/\D/g, '');
-  return digits.length === 7 ? digits : id;
+  const raw = String(id || '').trim();
+  if (isDevArkAlias(raw)) return ARK_DEV_ID;
+  const digits = raw.replace(/\D/g, '');
+  return digits.length === 7 ? digits : raw;
 }
 
 export function normalizeArkId(value: string) {
-  return value.replace(/\D/g, '').slice(0, 7);
+  const raw = String(value || '').trim();
+  if (isDevArkAlias(raw)) return ARK_DEV_ID;
+  return raw.replace(/\D/g, '').slice(0, 7);
 }
 
 function readUsed(): string[] {
@@ -51,26 +60,27 @@ function rememberUsed(id: string) {
 export function readLocalArkId(userId: string): string | null {
   try {
     const v = localStorage.getItem(storageKey(userId));
-    return v && isArkUserId(v) ? v : null;
+    return v && isArkUserId(v) ? formatArkId(v) : null;
   } catch {
     return null;
   }
 }
 
 function writeLocalArkId(userId: string, id: string) {
+  const normalized = formatArkId(id);
   try {
-    localStorage.setItem(storageKey(userId), id);
+    localStorage.setItem(storageKey(userId), normalized);
   } catch {
     /* ignore */
   }
-  rememberUsed(id);
+  rememberUsed(normalized);
 }
 
 function randomArkId(avoid: Set<string>) {
   for (let i = 0; i < 40; i++) {
     const n = 1_000_000 + Math.floor(Math.random() * 9_000_000);
     const id = String(n);
-    if (!avoid.has(id)) return id;
+    if (!avoid.has(id) && id !== ARK_DEV_ID) return id;
   }
   return String(1_000_000 + Math.floor(Math.random() * 9_000_000));
 }
@@ -85,7 +95,7 @@ async function fetchCloudArkId(userId: string): Promise<string | null> {
       .maybeSingle();
     if (error) return null;
     const id = (data as { ark_id?: string } | null)?.ark_id;
-    return id && isArkUserId(id) ? id : null;
+    return id && isArkUserId(id) ? formatArkId(id) : null;
   } catch {
     return null;
   }
@@ -96,7 +106,7 @@ async function saveCloudArkId(userId: string, arkId: string): Promise<'ok' | 'ta
   try {
     const { error } = await supabase
       .from('profiles')
-      .update({ ark_id: arkId, updated_at: new Date().toISOString() })
+      .update({ ark_id: formatArkId(arkId), updated_at: new Date().toISOString() })
       .eq('id', userId);
     if (!error) return 'ok';
     const msg = String(error.message || '').toLowerCase();
@@ -107,34 +117,52 @@ async function saveCloudArkId(userId: string, arkId: string): Promise<'ok' | 'ta
   }
 }
 
+export type ArkLookupHit = {
+  arkId: string;
+  displayName: string | null;
+  avatarUrl?: string | null;
+  /** Legacy numeric id if DB still stores digits for DEV (for remapping contacts). */
+  legacyArkId?: string;
+};
+
 /** Look up a public ARK ID (no email). Returns null if unknown or offline. */
-const lookupCache = new Map<string, { at: number; value: { arkId: string; displayName: string | null; avatarUrl?: string | null } | null }>();
+const lookupCache = new Map<string, { at: number; value: ArkLookupHit | null }>();
 const LOOKUP_CACHE_MS = 15_000;
 
-export async function lookupArkUser(arkId: string): Promise<{ arkId: string; displayName: string | null; avatarUrl?: string | null } | null> {
+export async function lookupArkUser(arkId: string): Promise<ArkLookupHit | null> {
   const raw = String(arkId || '').trim();
-  const id = isDevArkAlias(raw) ? 'DEV' : normalizeArkId(raw);
-  if (!isDevArkAlias(raw) && !isArkUserId(id)) return null;
-  const cacheKey = isDevArkAlias(raw) ? 'DEV' : id;
+  const id = normalizeArkId(raw);
+  if (!isArkUserId(id)) return null;
+  const cacheKey = formatArkId(id);
   const cached = lookupCache.get(cacheKey);
   if (cached && Date.now() - cached.at < LOOKUP_CACHE_MS) return cached.value;
   try {
     const { data, error } = await supabase.rpc('lookup_ark_user', {
-      p_ark_id: isDevArkAlias(raw) ? 'DEV' : id,
+      p_ark_id: cacheKey,
     });
     if (error || !data) {
       lookupCache.set(cacheKey, { at: Date.now(), value: null });
       return null;
     }
     const row = Array.isArray(data) ? data[0] : data;
-    if (!row || !isArkUserId(String(row.ark_id || ''))) {
+    if (!row) {
       lookupCache.set(cacheKey, { at: Date.now(), value: null });
       return null;
     }
-    const value = {
-      arkId: String(row.ark_id),
-      displayName: row.display_name ? String(row.display_name) : null,
+    const rowId = String(row.ark_id || '');
+    // DEV lookup may still return a legacy numeric row — always expose public ID as DEV.
+    const isDevHit = isDevArkAlias(raw) || isDevArkAlias(rowId) || cacheKey === ARK_DEV_ID;
+    if (!isDevHit && !isArkUserId(rowId)) {
+      lookupCache.set(cacheKey, { at: Date.now(), value: null });
+      return null;
+    }
+    const value: ArkLookupHit = {
+      arkId: isDevHit ? ARK_DEV_ID : formatArkId(rowId),
+      displayName: isDevHit
+        ? ARK_DEV_ID
+        : (row.display_name ? String(row.display_name) : null),
       avatarUrl: row.avatar_url ? String(row.avatar_url) : null,
+      legacyArkId: isDevHit && ARK_ID_RE.test(rowId) ? rowId : undefined,
     };
     lookupCache.set(cacheKey, { at: Date.now(), value });
     return value;
@@ -143,21 +171,33 @@ export async function lookupArkUser(arkId: string): Promise<{ arkId: string; dis
   }
 }
 
-export async function ensureArkId(userId: string): Promise<string> {
+/**
+ * Ensure this account has a public ARK ID.
+ * Developer email is forced to the literal `DEV` so friends see DEV, not digits.
+ */
+export async function ensureArkId(userId: string, email?: string | null): Promise<string> {
   const uid = userId || 'guest-local';
+
+  if (isArkDevEmail(email)) {
+    writeLocalArkId(uid, ARK_DEV_ID);
+    await saveCloudArkId(uid, ARK_DEV_ID);
+    return ARK_DEV_ID;
+  }
+
   const local = readLocalArkId(uid);
-  if (local) {
+  if (local && !isDevArkAlias(local)) {
     void saveCloudArkId(uid, local);
     return local;
   }
 
   const fromCloud = await fetchCloudArkId(uid);
-  if (fromCloud) {
+  if (fromCloud && !isDevArkAlias(fromCloud)) {
     writeLocalArkId(uid, fromCloud);
     return fromCloud;
   }
 
   const avoid = new Set(readUsed());
+  avoid.add(ARK_DEV_ID);
   for (let attempt = 0; attempt < 8; attempt++) {
     const id = randomArkId(avoid);
     avoid.add(id);

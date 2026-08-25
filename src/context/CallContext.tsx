@@ -7,6 +7,7 @@ import {
 } from '@/lib/arkCall';
 import { playCallConnected, playCallEnded, startCallRingtone, stopCallRingtone } from '@/lib/callSounds';
 import { isRevealed } from '@/lib/featurePark';
+import { isArkDevEmail } from '@/lib/arkDevAccount';
 import { SOCIAL_DEMO_ENABLED } from '@/lib/socialDemo';
 import { notifyWorkDone } from '@/lib/activityIndicators';
 
@@ -60,7 +61,7 @@ export { formatElapsed as formatCallElapsed };
 
 export function CallProvider({ children }: { children: ReactNode }) {
   const { user, profile } = useAuth();
-  const myArkId = profile?.ark_id || '';
+  const myArkId = isArkDevEmail(user?.email) ? 'DEV' : (profile?.ark_id || '');
   const myName = profile?.display_name || myArkId || 'ARK user';
   const [session, setSession] = useState<CallSession | null>(null);
   const [incoming, setIncoming] = useState<IncomingCall | null>(null);

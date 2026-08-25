@@ -34,6 +34,7 @@ import { supabaseConfigError } from '@/lib/supabase';
 import { hasChatInflight, subscribeChatInflight } from '@/lib/chatInflight';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Loader2 } from 'lucide-react';
+import { RotatingTip } from '@/components/RotatingTip';
 
 runCleanBootIfNeeded();
 runSocialReleaseCleanIfNeeded();
@@ -129,8 +130,9 @@ function AppContent() {
 
   if (loading) {
     return (
-      <div className="h-full bg-ark-navy-950 flex items-center justify-center">
+      <div className="h-full bg-ark-navy-950 flex flex-col items-center justify-center gap-4 px-6">
         <Loader2 className="w-6 h-6 text-content-secondary animate-spin" />
+        <RotatingTip className="text-[11px] text-content-tertiary text-center leading-relaxed max-w-sm min-h-[2.5rem]" />
       </div>
     );
   }

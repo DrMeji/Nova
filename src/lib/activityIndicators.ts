@@ -120,7 +120,7 @@ export function notifyWorkDone(key: ActivityKey) {
   emit();
 }
 
-export function activityKeyForChatMode(mode: 'general' | 'code' | 'image' | 'video'): ActivityKey {
+export function activityKeyForChatMode(mode: 'general' | 'code' | 'image' | 'video' | 'voice'): ActivityKey {
   if (mode === 'image') return 'image';
   if (mode === 'video') return 'video';
   if (mode === 'code') return 'code';

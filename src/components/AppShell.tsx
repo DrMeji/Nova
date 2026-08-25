@@ -3,7 +3,7 @@ import { useRouter, type Route } from '@/context/RouterContext';
 import {
   SquarePen, Briefcase, Blocks, Database,
   Settings, Search, PanelLeft, ChevronDown, History, Clock3,
-  ImageIcon, Video, MessageSquare, Trash2, Code2, Pencil,
+  ImageIcon, Video, MessageSquare, Trash2, Code2, Pencil, Mic,
   Globe, Bell, Copy, Star, Download, Brain,
 } from 'lucide-react';
 import { Modal } from './Modal';
@@ -26,6 +26,7 @@ import {
 import { probeLiveCapacity, type LiveCapacity } from '@/lib/arkCapacity';
 import { probeAiModeLabel, type AiModeLabel } from '@/lib/aiModeStatus';
 import { JobsStrip } from '@/components/JobsStrip';
+import { PostLoginSafetyTip } from '@/components/PostLoginSafetyTip';
 import { comparePinnedThenRecent } from '@/lib/recentStore';
 import { formatArkId } from '@/lib/arkUserId';
 import { isArkDevEmail } from '@/lib/arkDevAccount';
@@ -39,7 +40,7 @@ import {
   type ActivityKey,
 } from '@/lib/activityIndicators';
 import { reattachEngineDownloads } from '@/lib/engineDownloads';
-import { checkArkGitHubUpdate, downloadAndInstallArkUpdate, type ArkUpdateInfo } from '@/lib/arkUpdates';
+import { ARK_UPDATE_INDICATOR_CACHE_KEY, checkArkGitHubUpdate, clearUpdateIndicatorCache, downloadAndInstallArkUpdate, type ArkUpdateInfo } from '@/lib/arkUpdates';
 
 function getNavGroups(): {
   id: string;
@@ -115,10 +116,6 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [avatarUrl, setAvatarUrl] = useState(() => getLocalPrefs().avatarDataUrl);
   const [presence, setPresence] = useState<PresenceStatus>(() => getLocalPrefs().presenceStatus || 'online');
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
-  const [sidebarWidth, setSidebarWidth] = useState(() => {
-    const w = getLocalPrefs().sidebarWidth;
-    return Number.isFinite(w) ? Math.min(360, Math.max(200, w)) : 256;
-  });
   const [capacity, setCapacity] = useState<LiveCapacity | null>(null);
   const [modeLabel, setModeLabel] = useState<AiModeLabel | null>(null);
   const [updateInfo, setUpdateInfo] = useState<ArkUpdateInfo | null>(null);
@@ -346,7 +343,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   useEffect(() => {
     // Lightweight update indicator (near Search). cached so we don't hammer GitHub.
     let alive = true;
-    const CACHE_KEY = 'ark:update-indicator-cache-v1';
+    const CACHE_KEY = ARK_UPDATE_INDICATOR_CACHE_KEY;
     const CACHE_MS = 30 * 60 * 1000; // 30 minutes
 
     const readCache = (): { at: number; info: ArkUpdateInfo } | null => {
@@ -405,6 +402,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const chatIcon = (mode: string) => {
     if (mode === 'image') return ImageIcon;
     if (mode === 'video') return Video;
+    if (mode === 'voice') return Mic;
     if (mode === 'code') return Code2;
     return MessageSquare;
   };
@@ -534,25 +532,6 @@ export function AppShell({ children }: { children: ReactNode }) {
     );
   };
 
-  const startSidebarResize = (e: { preventDefault: () => void; clientX: number }) => {
-    if (collapsed) return;
-    e.preventDefault();
-    const startX = e.clientX;
-    const startW = sidebarWidth;
-    let lastW = startW;
-    const onMove = (ev: MouseEvent) => {
-      lastW = Math.min(360, Math.max(200, startW + (ev.clientX - startX)));
-      setSidebarWidth(lastW);
-    };
-    const onUp = () => {
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
-      setLocalPrefs({ sidebarWidth: lastW });
-    };
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
-  };
-
   const handleNavClick = (item: { label: string; route?: Route; activity?: ActivityKey; comingSoon?: boolean }) => {
     if (item.comingSoon) {
       // Navigate into the route so the blur "Coming Soon" overlay is shown.
@@ -639,9 +618,8 @@ export function AppShell({ children }: { children: ReactNode }) {
     <div className="h-full min-w-0 flex bg-ark-navy-950 overflow-hidden">
       <aside
         className={`relative shrink-0 m-2 mr-0 flex flex-col min-w-0 rounded-2xl border border-surface-border bg-ark-navy-900/70 shadow-[0_8px_32px_rgba(0,0,0,0.35)] ${
-          collapsed ? 'w-16' : ''
+          collapsed ? 'w-16' : 'w-64'
         }`}
-        style={collapsed ? undefined : { width: sidebarWidth, maxWidth: 'min(22rem, 42vw)' }}
       >
           <div className={`flex-none ${collapsed ? 'px-2 pt-3 pb-2' : 'px-3 pt-3 pb-3'}`}>
             <div className={`flex items-center gap-2 ${collapsed ? 'flex-col w-full' : 'justify-between'}`}>
@@ -689,7 +667,11 @@ export function AppShell({ children }: { children: ReactNode }) {
                             setupAssetUrl: updateInfo.setupAssetUrl!,
                             latestTag: updateInfo.latestTag!,
                           });
-                          if (!result?.ok) setUpdateBusy(false);
+                          if (!result?.ok) {
+                            setUpdateBusy(false);
+                            setUpdateInfo(null);
+                            clearUpdateIndicatorCache();
+                          }
                         })();
                       }}
                       className={`relative rounded-lg !p-1.5 transition-colors ${
@@ -939,18 +921,10 @@ export function AppShell({ children }: { children: ReactNode }) {
               </div>
             )}
           </div>
-          {!collapsed ? (
-            <button
-              type="button"
-              aria-label="Resize sidebar"
-              title="Drag to resize"
-              className="absolute top-8 bottom-8 -right-1 w-2 cursor-ew-resize z-10"
-              onMouseDown={startSidebarResize}
-            />
-          ) : null}
       </aside>
 
         <main className="flex-1 min-h-0 min-w-0 overflow-hidden m-2 ml-2 relative flex flex-col">
+          <PostLoginSafetyTip />
           <div className="flex-1 min-h-0 overflow-hidden relative">
           {children}
           </div>

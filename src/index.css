@@ -117,6 +117,17 @@
   }
 }
 
+/* Chat keeps wheel/trackpad scroll; bar stays invisible (matches global hide). */
+.ark-scroll-quiet {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.ark-scroll-quiet::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
 @layer components {
   .ark-input {
     @apply w-full rounded-lg px-3.5 py-2.5 text-sm placeholder:text-content-tertiary transition-colors focus:outline-none focus:ring-1;

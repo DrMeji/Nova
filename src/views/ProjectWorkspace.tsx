@@ -44,6 +44,7 @@ import {
   serializeProjectThread,
 } from '@/lib/projectThread';
 import { getLocalPrefs, hasProviderApiKey, setLocalPrefs } from '@/lib/localPrefs';
+import { resolvePreferredCloudProvider } from '@/lib/cloudChat';
 import { safeProjectWrite } from '@/lib/projectWriteSafe';
 import { loadRecentProjects } from '@/lib/recentStore';
 import { encodeChatAttach, folderNameFromPaths, isChatAttachMessage, looksLikeFolderPick } from '@/lib/chatAttach';
@@ -236,6 +237,24 @@ function defaultCodeModel(): CodeModel {
   if (!pref || pref === 'ark-auto') return CODE_MODELS[0];
   const cloud = CLOUD_CODE_WHEN_KEYED.find(m => m.id === pref);
   if (cloud && hasProviderApiKey(cloud.keyId)) return cloud;
+  // Models catalog ids (gemini-2-flash, etc.) must stay cloud — never snap to a fake local label.
+  const resolved = resolvePreferredCloudProvider(pref, pref);
+  if (resolved && hasProviderApiKey(resolved.providerId)) {
+    return {
+      id: pref,
+      name: cloud?.name || pref,
+      source: 'cloud',
+      detail: `Cloud · ${resolved.label}`,
+    };
+  }
+  if (resolved) {
+    return {
+      id: pref,
+      name: pref,
+      source: 'cloud',
+      detail: `Cloud · ${resolved.label} · add key`,
+    };
+  }
   return { id: pref, name: pref, source: 'local', detail: 'Local · Settings default' };
 }
 
@@ -337,40 +356,8 @@ function BuildProgressBubble({
   );
 }
 
-function ResizeHandle({ onDrag }: { onDrag: (deltaX: number) => void }) {
-  const dragging = useRef(false);
-  const lastX = useRef(0);
-
-  const onPointerDown = (e: React.PointerEvent) => {
-    dragging.current = true;
-    lastX.current = e.clientX;
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
-  };
-
-  const onPointerMove = (e: React.PointerEvent) => {
-    if (!dragging.current) return;
-    const dx = e.clientX - lastX.current;
-    lastX.current = e.clientX;
-    if (dx !== 0) onDrag(dx);
-  };
-
-  const onPointerUp = () => {
-    dragging.current = false;
-  };
-
-  return (
-    <div
-      role="separator"
-      aria-orientation="vertical"
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
-      className="w-1.5 shrink-0 cursor-col-resize bg-transparent hover:bg-sky-500/30 active:bg-sky-500/50 transition-colors relative group"
-      title="Drag to resize"
-    >
-      <div className="absolute inset-y-0 -left-1 -right-1" />
-    </div>
-  );
+function ExplorerDivider() {
+  return <div className="w-px shrink-0 bg-surface-border/80" aria-hidden />;
 }
 
 export function ProjectWorkspace() {
@@ -402,8 +389,8 @@ export function ProjectWorkspace() {
   const [buildProgress, setBuildProgress] = useState(0);
   const [explorerOpen, setExplorerOpen] = useState(true);
   const [codeOpen, setCodeOpen] = useState(true);
-  const [explorerWidth, setExplorerWidth] = useState(260);
-  const [codeWidth, setCodeWidth] = useState(520);
+  const explorerWidth = 260;
+  const codeWidth = 520;
   /** Code from Chat is files+editor only. planning stays in Chat. */
   const showWorkspaceChat = false;
   const [buildLive, setBuildLive] = useState<{
@@ -2385,8 +2372,8 @@ export function ProjectWorkspace() {
           // Inspect: fresh history only (Chat parity). packing prior dumps hung GGUF.
           const turnSize = classifyCodeTurnSize(rawContent, fileContentsRef.current);
           const historyMaxTurns = inspectOnly
-            ? 4
-            : turnSize === 'micro' ? 3 : turnSize === 'small' ? 4 : 6;
+            ? 6
+            : turnSize === 'micro' ? 10 : turnSize === 'small' ? 14 : 24;
           const historyBase = inspectOnly
             ? buildRouterHistory([], content)
             : prefs.rememberContext
@@ -3058,14 +3045,6 @@ export function ProjectWorkspace() {
     })();
   };
 
-  const dragExplorer = useCallback((dx: number) => {
-    setExplorerWidth(w => Math.min(420, Math.max(160, w + dx)));
-  }, []);
-
-  const dragCode = useCallback((dx: number) => {
-    setCodeWidth(w => Math.min(560, Math.max(260, w - dx)));
-  }, []);
-
   const toggleFolder = (path: string) => {
     setExpandedFolders(prev => {
       const next = new Set(prev);
@@ -3534,7 +3513,7 @@ export function ProjectWorkspace() {
                 )}
               </div>
             </div>
-            <ResizeHandle onDrag={dragExplorer} />
+            <ExplorerDivider />
           </>
         )}
 
@@ -4300,7 +4279,7 @@ export function ProjectWorkspace() {
 
         {codeOpen && (
           <>
-            {showWorkspaceChat && <ResizeHandle onDrag={dragCode} />}
+            {showWorkspaceChat && <ExplorerDivider />}
             <div
               className={`flex flex-col min-h-0 min-w-0 bg-ark-navy-900/15 overflow-hidden transition-shadow ${
                 showWorkspaceChat ? 'shrink-0 max-w-[48vw]' : 'flex-1'

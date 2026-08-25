@@ -211,7 +211,25 @@ function consumePostUpdate() {
   }
 }
 
-function httpsJson(url) {
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isTransientHttpStatus(status) {
+  return status === 429 || status === 502 || status === 503 || status === 504;
+}
+
+function githubHttpHint(status) {
+  if (isTransientHttpStatus(status)) {
+    return ' GitHub is temporarily unavailable — try again in a moment.';
+  }
+  if (status === 404) {
+    return ` GitHub returned 404 for ${UPDATE_REPO} (private or missing). Updates need a public release feed.`;
+  }
+  return ` HTTP ${status}.`;
+}
+
+function httpsJsonOnce(url) {
   return new Promise((resolve, reject) => {
     const req = https.get(
       url,
@@ -242,6 +260,23 @@ function httpsJson(url) {
   });
 }
 
+/** GitHub JSON GET with retries on 429/502/503/504 and timeouts. */
+async function httpsJson(url, { retries = 3 } = {}) {
+  let last = { status: 0, data: null };
+  for (let attempt = 0; attempt < retries; attempt++) {
+    try {
+      const res = await httpsJsonOnce(url);
+      last = res;
+      if (res.status === 200 || !isTransientHttpStatus(res.status)) return res;
+    } catch (err) {
+      last = { status: 0, data: null, error: err };
+      if (attempt === retries - 1) throw err;
+    }
+    await sleep(700 * (attempt + 1));
+  }
+  return last;
+}
+
 function normalizeVersion(v) {
   return String(v || '')
     .trim()
@@ -265,7 +300,7 @@ function isNewer(latest, current) {
   return false;
 }
 
-function downloadFile(url, dest, onProgress) {
+function downloadFileOnce(url, dest, onProgress) {
   return new Promise((resolve, reject) => {
     if (!isTrustedSetupUrl(url) && !isTrustedDownloadHost(url)) {
       reject(new Error('Installer URL is not from the trusted ARK releases feed.'));
@@ -324,6 +359,34 @@ function downloadFile(url, dest, onProgress) {
     };
     follow(url, 8);
   });
+}
+
+/** Installer download with retries on gateway errors / timeouts. */
+async function downloadFile(url, dest, onProgress) {
+  const retries = 3;
+  let lastErr = null;
+  for (let attempt = 0; attempt < retries; attempt++) {
+    try {
+      return await downloadFileOnce(url, dest, onProgress);
+    } catch (err) {
+      lastErr = err;
+      const msg = err instanceof Error ? err.message : String(err || '');
+      const transient = /\(429\)|\(502\)|\(503\)|\(504\)|timeout/i.test(msg);
+      try {
+        if (fs.existsSync(dest)) fs.unlinkSync(dest);
+      } catch {
+        /* ignore */
+      }
+      if (!transient || attempt === retries - 1) {
+        if (/\(429\)|\(502\)|\(503\)|\(504\)/.test(msg)) {
+          throw new Error('GitHub is temporarily unavailable — try the update again in a moment.');
+        }
+        throw err;
+      }
+      await sleep(1000 * (attempt + 1));
+    }
+  }
+  throw lastErr || new Error('Download failed');
 }
 
 function fileSha512Base64(filePath) {
@@ -1094,9 +1157,7 @@ async function checkForUpdate() {
       }
     }
     if (res.status !== 200 || !Array.isArray(res.data)) {
-      const privateHint = res.status === 404
-        ? ` GitHub returned 404 for ${UPDATE_REPO} (private or missing). Updates need a public release feed.`
-        : ` HTTP ${res.status}.`;
+      const privateHint = githubHttpHint(res.status);
       sendProgress({
         status: 'error',
         percent: 0,

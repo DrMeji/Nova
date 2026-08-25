@@ -50,7 +50,22 @@ function looksLikeAddFileAsk(text: string): boolean {
   }
   if (/\b(?:add|create|make|write|put)\b[\s\S]{0,48}\b(?:a\s+|the\s+|new\s+)?file\b/i.test(t)) return true;
   if (/\bput\s+the\s+file\b/i.test(t)) return true;
+  // "create notes.md" / "write a readme" / "make a markdown file"
+  if (/\b(?:add|create|make|write|put|save)\b[\s\S]{0,64}\b(?:readme|markdown|\.md\b)/i.test(t)) return true;
+  if (
+    /\b(?:add|create|make|write|put|save)\b[\s\S]{0,40}\b[A-Za-z0-9_-]+\.[A-Za-z0-9]{1,12}\b/i.test(t)
+    && !/\b(?:app|website|site|project|folder)\b/i.test(t)
+  ) {
+    return true;
+  }
   return false;
+}
+
+function defaultNameFromAddAsk(text: string): string | null {
+  const t = String(text || '').trim();
+  if (/\breadme\b/i.test(t)) return 'README.md';
+  if (/\bmarkdown\b|\.md\b/i.test(t)) return 'notes.md';
+  return null;
 }
 
 function looksLikeCreateProjectAsk(text: string): boolean {
@@ -131,12 +146,16 @@ function extractFileName(text: string): string | null {
     /\bdelete\s+(?:the\s+)?file\s+["\u201c']([^"\u201d']+)["\u201d']/i,
     /\bdelete\s+(?:the\s+)?(?:file\s+)?([A-Za-z0-9_./\\-]+\.[A-Za-z0-9]{1,12})\b/i,
     /\b(?:add|create)\s+(?:a\s+)?file\s+(?:called|named)\s+["\u201c']?([A-Za-z0-9 _.-]{1,64})["\u201d']?/i,
+    // "create notes.md" / "write todo.md"
+    /\b(?:add|create|make|write|put|save)\b[\s\S]{0,40}\b([A-Za-z0-9_-]+\.[A-Za-z0-9]{1,12})\b/i,
+    /\b([A-Za-z0-9_-]+\.(?:md|txt|json|csv|html|css|js|ts|py))\b/i,
   ];
   for (const re of patterns) {
     const m = t.match(re);
     if (m?.[1]) {
       const raw = m[1].trim();
       if (isBlockedDiskTargetName(raw)) continue;
+      if (/^(file|files|folder|project|app|website)$/i.test(raw)) continue;
       return normalizeDiskFileName(raw);
     }
   }
@@ -386,8 +405,12 @@ export function classifyDiskIntent(
     const name = extractFileName(t)
       || extractNamedDiskTarget(t)
       || fileNameFromAddFileThread([...recent, t])
-      || pendingAddFile;
-    if (!name) return { type: 'none' };
+      || pendingAddFile
+      || defaultNameFromAddAsk(t);
+    if (!name) {
+      // Clear create-file intent — ask for a name instead of letting the LLM fake a write.
+      return { type: 'add_file', name: '', parentHint: extractAddFileParentHint(t) || extractDiskParentHintFromText(t) };
+    }
     return {
       type: 'add_file',
       name: normalizeDiskFileName(name),

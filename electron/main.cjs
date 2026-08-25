@@ -272,11 +272,47 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      spellcheck: true,
       additionalArguments: [`--ark-packaged=${packaged ? '1' : '0'}`],
     },
   });
 
   mainWindow = win;
+
+  // Packaged builds only — keep Vite HMR unconstrained in bat/dev.
+  if (packaged) {
+    try {
+      win.webContents.session.webRequest.onHeadersReceived((details, callback) => {
+        const headers = { ...(details.responseHeaders || {}) };
+        headers['Content-Security-Policy'] = [
+          [
+            "default-src 'self'",
+            "script-src 'self'",
+            "style-src 'self' 'unsafe-inline'",
+            "img-src 'self' data: blob: https:",
+            "font-src 'self' data:",
+            "media-src 'self' blob: data:",
+            "connect-src 'self' https: http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*",
+            "frame-src 'none'",
+            "object-src 'none'",
+            "base-uri 'self'",
+          ].join('; '),
+        ];
+        callback({ responseHeaders: headers });
+      });
+    } catch (err) {
+      console.warn('[ark] CSP setup failed', err);
+    }
+  }
+
+  try {
+    const langs = win.webContents.session.availableSpellCheckerLanguages || [];
+    const prefer = ['en-US', 'en-GB', 'en'].filter((l) => langs.includes(l));
+    win.webContents.session.setSpellCheckerEnabled(true);
+    if (prefer.length) win.webContents.session.setSpellCheckerLanguages(prefer);
+  } catch {
+    /* spellcheck optional on some builds */
+  }
 
   const sendMaximized = () => {
     if (win.isDestroyed()) return;
@@ -611,6 +647,31 @@ ipcMain.handle('ark:update-download', async (_event, payload) =>
 );
 ipcMain.handle('ark:update-state', async () => arkUpdater.getState());
 ipcMain.handle('ark:post-update-consume', async () => arkUpdater.consumePostUpdate());
+
+ipcMain.handle('ark:auth-recovery-save', async (_e, payload) => {
+  try {
+    const arkAuthRecovery = require('./arkAuthRecovery.cjs');
+    return arkAuthRecovery.saveLoginNote(payload || {});
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'recovery save failed' };
+  }
+});
+ipcMain.handle('ark:auth-recovery-info', async () => {
+  try {
+    const arkAuthRecovery = require('./arkAuthRecovery.cjs');
+    return arkAuthRecovery.getRecoveryInfo();
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'recovery info failed' };
+  }
+});
+ipcMain.handle('ark:auth-recovery-reveal', async () => {
+  try {
+    const arkAuthRecovery = require('./arkAuthRecovery.cjs');
+    return await arkAuthRecovery.revealRecoveryFolder();
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'recovery reveal failed' };
+  }
+});
 
 ipcMain.handle('ark:auth-storage-get', async (_event, key) => arkAuthStore.getItem(key));
 ipcMain.handle('ark:auth-storage-set', async (_event, key, value) => arkAuthStore.setItem(key, value));
@@ -1080,6 +1141,38 @@ ipcMain.handle('ark:agent-start-dev-server', async (_e, payload) => {
   }
 });
 
+ipcMain.handle('ark:mcp-list-tools', async (_e, payload) => {
+  try {
+    const arkMcpHost = require('./arkMcpHost.cjs');
+    return await arkMcpHost.listTools(payload || {});
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'MCP list failed', tools: [] };
+  }
+});
+
+ipcMain.handle('ark:mcp-call-tool', async (_e, payload) => {
+  try {
+    const arkMcpHost = require('./arkMcpHost.cjs');
+    const server = payload?.server || payload || {};
+    return await arkMcpHost.callTool(server, payload?.name, payload?.arguments);
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : 'MCP call failed',
+      content: '',
+    };
+  }
+});
+
+ipcMain.handle('ark:mcp-stop', async (_e, payload) => {
+  try {
+    const arkMcpHost = require('./arkMcpHost.cjs');
+    return arkMcpHost.stopServer(payload?.id);
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'MCP stop failed' };
+  }
+});
+
 ipcMain.handle('ark:workspace-delete-path', async (_e, payload) => {
   try {
     return arkProjects.deleteWorkspaceRelPath(payload?.projectId, payload?.relPath);
@@ -1521,6 +1614,7 @@ if (isUpdaterMode) {
 
     app.on('before-quit', () => {
       quitting = true;
+      try { require('./arkMcpHost.cjs').stopAll(); } catch { /* ignore */ }
       try { arkEngine.stop(); } catch { /* ignore */ }
       try { arkGguf.stopServer(); } catch { /* ignore */ }
       try { arkGguf.cancelGguf?.(); } catch { /* ignore */ }

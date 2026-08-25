@@ -34,6 +34,7 @@ import {
 import { syncWorkspaceGrantsFromPrefs } from '@/lib/workspaceGrants';
 import { openInSystemBrowser } from '@/lib/openExternal';
 import { AuthAmbientOrbs } from '@/components/auth/AuthAmbientOrbs';
+import { RotatingTip } from '@/components/RotatingTip';
 import {
   Loader2, Cpu, MemoryStick, HardDrive, Zap, CheckCircle2, Download,
   Monitor, MonitorCog, Check, Gauge, KeyRound, Shield, ExternalLink, Wifi, FolderOpen,
@@ -340,12 +341,23 @@ export function OnboardingScreen() {
       } catch {
         /* ignore */
       }
-    } else {
-      try {
-        localStorage.removeItem('ark:setup-brain-note');
-      } catch {
-        /* ignore */
+      // Cloud keys → Chat still works. No keys → stay here until they retry/skip (avoid empty chat dead-end).
+      if (connectedCount > 0) {
+        markSetupCompleted();
+        try {
+          await completeOnboarding();
+        } catch {
+          /* Guest / offline is fine */
+        }
+        await refreshProfile();
       }
+      return;
+    }
+
+    try {
+      localStorage.removeItem('ark:setup-brain-note');
+    } catch {
+      /* ignore */
     }
 
     markSetupCompleted();
@@ -921,20 +933,33 @@ export function OnboardingScreen() {
                 </div>
               </div>
               <p className="text-[11px] text-content-tertiary text-center leading-relaxed">
-                This is a one-time download (~1 GB for the default brain). You can keep working with cloud keys if you connected any.
+                This is a one-time download (~1 GB for the default brain). Stay here until it finishes so Chat has something real to talk to.
               </p>
+              <RotatingTip className="text-[11px] text-content-tertiary/90 text-center leading-relaxed min-h-[2.5rem] px-2" />
               {finishError && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    markSetupCompleted();
-                    void completeOnboarding().catch(() => undefined);
-                    void refreshProfile();
-                  }}
-                  className="ark-btn-secondary w-full h-11 rounded-xl"
-                >
-                  Skip to chat
-                </button>
+                <div className="space-y-2">
+                  <p className="text-xs text-rose-300/90 text-center leading-relaxed">{finishError}</p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void finish();
+                    }}
+                    className="ark-btn-primary w-full h-11 rounded-xl"
+                  >
+                    Retry download
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      markSetupCompleted();
+                      void completeOnboarding().catch(() => undefined);
+                      void refreshProfile();
+                    }}
+                    className="ark-btn-secondary w-full h-11 rounded-xl"
+                  >
+                    {connectedCount > 0 ? 'Continue with cloud keys' : 'Skip to chat anyway'}
+                  </button>
+                </div>
               )}
             </div>
           )}

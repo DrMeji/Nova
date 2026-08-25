@@ -31,6 +31,9 @@ contextBridge.exposeInMainWorld('arkDesktop', {
   updateDownload: (payload) => ipcRenderer.invoke('ark:update-download', payload || {}),
   updateState: () => ipcRenderer.invoke('ark:update-state'),
   postUpdateConsume: () => ipcRenderer.invoke('ark:post-update-consume'),
+  authRecoverySave: (payload) => ipcRenderer.invoke('ark:auth-recovery-save', payload || {}),
+  authRecoveryInfo: () => ipcRenderer.invoke('ark:auth-recovery-info'),
+  authRecoveryReveal: () => ipcRenderer.invoke('ark:auth-recovery-reveal'),
   onUpdateProgress: (handler) => {
     const listener = (_event, payload) => handler?.(payload);
     ipcRenderer.on('ark:update-progress', listener);
@@ -127,6 +130,9 @@ contextBridge.exposeInMainWorld('arkDesktop', {
   workspaceGetGrants: () => ipcRenderer.invoke('ark:workspace-get-grants'),
   agentRun: (payload) => ipcRenderer.invoke('ark:agent-run', payload),
   agentStartDevServer: (payload) => ipcRenderer.invoke('ark:agent-start-dev-server', payload),
+  mcpListTools: (payload) => ipcRenderer.invoke('ark:mcp-list-tools', payload || {}),
+  mcpCallTool: (payload) => ipcRenderer.invoke('ark:mcp-call-tool', payload || {}),
+  mcpStop: (payload) => ipcRenderer.invoke('ark:mcp-stop', payload || {}),
   workspaceDeletePath: (payload) => ipcRenderer.invoke('ark:workspace-delete-path', payload),
   workspaceDeleteRoot: (payload) => ipcRenderer.invoke('ark:workspace-delete-root', payload),
   workspaceDeleteFolder: (payload) => ipcRenderer.invoke('ark:workspace-delete-folder', payload),

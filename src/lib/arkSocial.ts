@@ -184,20 +184,38 @@ export async function listContacts(userId?: string | null): Promise<ArkContact[]
     })).filter(c => isArkUserId(c.arkId));
 
     // Live profile overlay — Settings name/avatar changes must show for friends.
-    const { lookupArkUser } = await import('@/lib/arkUserId');
+    const { lookupArkUser, ARK_DEV_ID, formatArkId } = await import('@/lib/arkUserId');
     const [devHit, ...lives] = await Promise.all([
       lookupArkUser('DEV'),
       ...cloud.map(c => lookupArkUser(c.arkId)),
     ]);
     const enriched = cloud.map((c, i) => {
       const live = lives[i];
-      let displayName = (live?.displayName || c.displayName || c.arkId).trim();
-      let avatarUrl = live?.avatarUrl || c.avatarUrl;
-      if (devHit && c.arkId === devHit.arkId) {
-        displayName = 'DEV';
-        avatarUrl = live?.avatarUrl || devHit.avatarUrl || avatarUrl;
+      const isDevPeer = Boolean(
+        devHit
+        && (
+          c.arkId === ARK_DEV_ID
+          || c.arkId === devHit.arkId
+          || (devHit.legacyArkId && c.arkId === devHit.legacyArkId)
+          || formatArkId(c.arkId) === ARK_DEV_ID
+        ),
+      );
+      if (isDevPeer) {
+        return {
+          ...c,
+          arkId: ARK_DEV_ID,
+          displayName: ARK_DEV_ID,
+          avatarUrl: live?.avatarUrl || devHit?.avatarUrl || c.avatarUrl,
+        };
       }
-      return { ...c, displayName, avatarUrl: avatarUrl || undefined };
+      const displayName = (live?.displayName || c.displayName || c.arkId).trim();
+      const avatarUrl = live?.avatarUrl || c.avatarUrl;
+      return {
+        ...c,
+        arkId: formatArkId(c.arkId),
+        displayName,
+        avatarUrl: avatarUrl || undefined,
+      };
     });
 
     // Persist fresher labels so the next open is instant.

@@ -629,19 +629,40 @@ export function NetworkingView() {
                           </button>
                           {menuOpen && (
                             <div className="absolute right-0 bottom-full mb-1 z-20 min-w-[8.5rem] rounded-xl border border-white/10 bg-ark-navy-900 shadow-xl overflow-hidden">
-                              <button
-                                type="button"
-                                className="w-full text-left px-3 py-2 text-xs text-rose-300 hover:bg-white/[0.05]"
-                                onClick={e => {
-                                  e.stopPropagation();
-                                  setMenuPostId(null);
-                                  setReportPost(post);
-                                  setReportReason('');
-                                  setReportProofName(null);
-                                }}
-                              >
-                                Report
-                              </button>
+                              {post.ownerArkId === myArkId && !String(post.id).startsWith('demo-') && (
+                                <button
+                                  type="button"
+                                  className="w-full text-left px-3 py-2 text-xs text-rose-300 hover:bg-white/[0.05]"
+                                  onClick={e => {
+                                    e.stopPropagation();
+                                    setMenuPostId(null);
+                                    void deleteNetworkPost(post.id, user?.id).then(() => {
+                                      if (selectedId === post.id) {
+                                        setSelectedId(null);
+                                        setDiscussionOpen(false);
+                                      }
+                                      return refresh();
+                                    });
+                                  }}
+                                >
+                                  Delete
+                                </button>
+                              )}
+                              {post.ownerArkId !== myArkId && (
+                                <button
+                                  type="button"
+                                  className="w-full text-left px-3 py-2 text-xs text-rose-300 hover:bg-white/[0.05]"
+                                  onClick={e => {
+                                    e.stopPropagation();
+                                    setMenuPostId(null);
+                                    setReportPost(post);
+                                    setReportReason('');
+                                    setReportProofName(null);
+                                  }}
+                                >
+                                  Report
+                                </button>
+                              )}
                             </div>
                           )}
                         </div>
@@ -844,6 +865,8 @@ export function NetworkingView() {
               <textarea
                 value={reportReason}
                 onChange={e => setReportReason(e.target.value)}
+                spellCheck
+                lang="en"
                 placeholder="e.g. This is my project. they copied it without permission…"
                 rows={4}
                 className="w-full rounded-xl bg-black/40 border border-white/10 px-3 py-2 text-sm text-content-primary placeholder:text-content-tertiary/70 outline-none focus:border-sky-500/40 resize-none leading-relaxed"
@@ -952,6 +975,8 @@ export function NetworkingView() {
             <textarea
               value={details}
               onChange={e => setDetails(e.target.value)}
+              spellCheck
+              lang="en"
               placeholder="What you’re building, what you need, how it should look…"
               rows={3}
               className="w-full rounded-xl bg-black/40 border border-white/10 px-3 py-2 text-sm text-content-primary placeholder:text-content-tertiary/70 focus:outline-none focus:border-sky-500/40 resize-none leading-relaxed"
