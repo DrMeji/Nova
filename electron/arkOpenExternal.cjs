@@ -41,6 +41,12 @@ const ALLOWED_EXTERNAL_HOST_SUFFIXES = [
   'cursor.com',
   'notion.so',
   'notion.com',
+  'maps.google.com',
+  'goo.gl',
+  'yelp.com',
+  'tripadvisor.com',
+  'wikipedia.org',
+  'duckduckgo.com',
 ];
 
 function hostAllowed(hostname) {

@@ -190,16 +190,17 @@ export async function ensureArkId(userId: string, email?: string | null): Promis
     return ARK_DEV_ID;
   }
 
-  const local = readLocalArkId(uid);
-  if (local && !isDevArkAlias(local)) {
-    void saveCloudArkId(uid, local);
-    return local;
-  }
-
+  // Cloud profile is source of truth — stale local cache must not hide friend requests.
   const fromCloud = await fetchCloudArkId(uid);
   if (fromCloud && !isDevArkAlias(fromCloud)) {
     writeLocalArkId(uid, fromCloud);
     return fromCloud;
+  }
+
+  const local = readLocalArkId(uid);
+  if (local && !isDevArkAlias(local)) {
+    void saveCloudArkId(uid, local);
+    return local;
   }
 
   const avoid = new Set(readUsed());

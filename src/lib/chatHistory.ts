@@ -25,6 +25,9 @@ const MAX_TURN_CHARS = 6_000;
 export const ANSWER_THE_ASK =
   'Answer the user’s latest question or request directly. chat fact, image, code, edit, ideas, or folder focus. '
   + 'Do not substitute a different topic, dump unrelated files, repeat an earlier overview, or invent a “better” answer they did not ask for. '
+  + 'If the latest message has multiple questions, answer EACH one in order with a clear take (short paragraph or bullet per question). '
+  + 'Do not replace a direct ask (timeline, worth-it, yes/no, recommendation) with a generic multi-week project plan unless they asked for a full plan. '
+  + 'When details are missing for a good answer (allergies, budget, goal, symptoms, location), ask 2–4 short clarifying questions first — then recommend. '
   + 'If you cannot answer, say so in one clear line.';
 
 export const BASE_SYSTEM =
@@ -33,14 +36,36 @@ export const BASE_SYSTEM =
   + 'Read past typos and misspellings: infer the intended word (e.g. “recomendation” → recommendation, “misplaned” → misspelled) and answer that intent. '
   + 'Do not lecture about spelling or grammar unless they ask you to proofread. '
   + `${ANSWER_THE_ASK} `
+  + 'Never invent bracket placeholders such as [current date], [name], [path], or [insert here]. Use real values or ask one clear question. '
+  + 'When they ask what day or date it is, use the real today date from the system context line — never write “[current date]”. '
+  + 'On this PC, ARK Chat can create, read, edit, rename, and delete files in granted folders when the user asks. '
+  + 'If they ask whether you can edit files (or yes/no): say yes, then ask for the path and what to change. Do not give a generic programming tutorial. '
+  + 'When web lookup notes are provided in the thread, prefer those facts over guessing. Still answer the user directly. '
+  + 'For places (restaurants, shops): if preferences/allergies are unknown, ask briefly first; then recommend and offer a maps link when you know a location. '
+  + 'For troubleshooting (car, PC, home): give likely causes and safe next steps, ask when the symptom happens, and say when a pro should look at it. '
   + 'When they ask for ideas for an app, website, coffee shop, etc.: give concrete pieces that product should have, then say where to start first and offer to begin. '
   + 'When they ask what a project is or what they are building: explain the product goal in plain language from the evidence, then suggest a practical next step. do not paste a generic file inventory. '
   + 'Never invent a new subject (movies, TV, celebrities, weather, EcoBuddy-style fake products) when the thread is about something else. '
   + 'Never echo the user’s greeting. If they only say hi/hello/hey, reply: “Hello! How can I assist you today?” '
   + 'Be accurate and complete. Cover the main facts they need, then one short follow-up: “Want more on any of that?” '
   + 'Only when they clearly ask about a person: who they are, companies they founded/own/run (list the well-known ones), and a couple of notable facts. '
+  + 'For section titles in long answers, prefer **Bold title** lines — not markdown # / ## / ### hashtags. '
   + 'Only when they clearly ask about movies or TV shows: Title (year). one line why it is good. Then typical places to watch (Netflix, Disney+, Prime Video, Max, YouTube) and IMDb for listings. Say availability varies by country. '
   + 'Write movie/TV lists as: 1. Drama: Title (year). … Watch: Netflix / Prime. Never nest asterisks. Never wrap genre names in **.';
+
+function todaySystemLine(): string {
+  try {
+    const label = new Date().toLocaleDateString('en-US', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    });
+    return `Today's date is ${label}.`;
+  } catch {
+    return '';
+  }
+}
 
 const CONTINUITY =
   'This is a follow-up in the same ARK chat. '
@@ -49,6 +74,7 @@ const CONTINUITY =
   + 'If they say “more details”, “dive deeper”, “recommended area”, or similar, deepen the PREVIOUS answer. do not switch subjects. '
   + 'Answer the latest user message with a brand-new reply. '
   + `${ANSWER_THE_ASK} `
+  + 'If they ask how fast / how long / is it worth it: give a direct judgment first (timeline estimate + yes/no with reasons), then optional short detail — not a fresh full project plan dump. '
   + 'If they ask where to start, what first, or for next steps: prioritize the topic from this thread. '
   + 'If they ask to continue, tell more, or go on, finish the previous answer from where it stopped. do not restart the same list from item 1. '
   + 'If they clearly switched topics (e.g. coding → ninja warriors), follow the new topic.';
@@ -363,15 +389,17 @@ export function routerSystemPrompt(history: RouterChatTurn[]): string {
   const visionNote = hasVision
     ? '\n\nThe user attached a photo. If this request includes image pixels, describe what you see. If you cannot see the image, say so in one line and do not invent the contents.'
     : '';
+  const today = todaySystemLine();
+  const todayNote = today ? `\n\n${today}` : '';
   const hasPrior = history.some(t => t.role === 'assistant') || history.length > 1;
-  if (!hasPrior) return `${BASE_SYSTEM}${visionNote}`;
+  if (!hasPrior) return `${BASE_SYSTEM}${todayNote}${visionNote}`;
   const topic = inferThreadTopic(history);
   const topicLine =
     `Current thread topic: ${topic.label}. Stay on this unless the user clearly switches to something else.`;
   if (isSoftContinuityAsk(latest.trim())) {
-    return `${BASE_SYSTEM}\n\n${topicLine}\nThis is a follow-up. Deepen the previous answer on that topic. Do not invent movies, TV, celebrities, or a new product.${visionNote}`;
+    return `${BASE_SYSTEM}${todayNote}\n\n${topicLine}\nThis is a follow-up. Deepen the previous answer on that topic. Do not invent movies, TV, celebrities, or a new product.${visionNote}`;
   }
-  return `${BASE_SYSTEM}\n\n${topicLine}\n${CONTINUITY}${visionNote}`;
+  return `${BASE_SYSTEM}${todayNote}\n\n${topicLine}\n${CONTINUITY}${visionNote}`;
 }
 
 function wantsChatCode(latest: string) {
@@ -388,16 +416,22 @@ export function flattenHistoryText(history: RouterChatTurn[]): string {
 /**
  * If the thread is over the GGUF prompt budget, fold oldest turns into one
  * memory blob and keep recent turns verbatim. Never wipe the thread.
+ * The full chat stays in localStorage / UI — only the model prompt is compacted.
  */
 export function compressHistoryIfNeeded(
   history: RouterChatTurn[],
   maxChars?: number,
+  opts?: { aggressive?: boolean },
 ): RouterChatTurn[] {
   // Scale soft cap with this PC’s usable token budget (~4 chars/token).
   const budgetChars = maxChars ?? Math.min(64_000, Math.max(24_000, getUsableTokens() * 4));
   const text = flattenHistoryText(history);
-  if (!history.length || text.length <= budgetChars) return history;
-  const keep = Math.min(16, history.length);
+  const aggressive = Boolean(opts?.aggressive) || text.length > budgetChars * 0.85;
+  const softBudget = aggressive ? Math.floor(budgetChars * 0.55) : budgetChars;
+  if (!history.length || text.length <= softBudget) {
+    if (!aggressive || history.length <= 10) return history;
+  }
+  const keep = aggressive ? Math.min(8, history.length) : Math.min(16, history.length);
   if (history.length <= keep) {
     return history.map(t => ({
       ...t,
@@ -406,17 +440,42 @@ export function compressHistoryIfNeeded(
   }
   const old = history.slice(0, -keep);
   const recent = history.slice(-keep);
-  const blob = old
-    .map(t => `${t.role === 'user' ? 'User' : 'ARK'}: ${t.content.replace(/\s+/g, ' ').slice(0, 360)}`)
-    .join('\n')
-    .slice(0, 6_000);
+  const firstUser = old.find(t => t.role === 'user')?.content.replace(/\s+/g, ' ').trim().slice(0, 420) || '';
+  const userBeats = old
+    .filter(t => t.role === 'user')
+    .slice(-6)
+    .map(t => `- ${t.content.replace(/\s+/g, ' ').trim().slice(0, 220)}`);
+  const asstBeats = old
+    .filter(t => t.role === 'assistant')
+    .slice(-5)
+    .map(t => {
+      const one = t.content.replace(/\s+/g, ' ').trim();
+      const cut = one.match(/^.{40,280}?[.!?](?:\s|$)/)?.[0] || one.slice(0, 220);
+      return `- ${cut}`;
+    });
+  const blob = [
+    firstUser ? `Original ask: ${firstUser}` : '',
+    userBeats.length ? `Earlier user points:\n${userBeats.join('\n')}` : '',
+    asstBeats.length ? `Earlier ARK points:\n${asstBeats.join('\n')}` : '',
+  ].filter(Boolean).join('\n').slice(0, aggressive ? 4_500 : 6_500);
   return [
     {
       role: 'user',
-      content: `Earlier in this chat (keep using this memory — do not restart the project or greet like a new chat):\n${blob}`,
+      content: `Earlier in this chat (memory compact — keep using this; do not greet like a new chat; full UI history is unchanged):\n${blob}`,
     },
-    ...recent,
+    ...recent.map(t => ({
+      ...t,
+      content: t.content.length > 2800 ? `${t.content.slice(0, 600)}\n…\n${t.content.slice(-1800)}` : t.content,
+    })),
   ];
+}
+
+/** True when compaction changed the shape of history (for UI note). */
+export function historyWasCompacted(before: RouterChatTurn[], after: RouterChatTurn[]): boolean {
+  if (before.length !== after.length) return true;
+  if (!before.length) return false;
+  return /Earlier in this chat/i.test(after[0]?.content || '')
+    && !/Earlier in this chat/i.test(before[0]?.content || '');
 }
 
 /** Pack history into one prompt for engines that only take a single string (GGUF / Core / Ollama generate). */
@@ -656,6 +715,15 @@ export function looksLikePromptEcho(reply: string): boolean {
   return false;
 }
 
+/** Exact system greeting parroted when the user did not say hi/hello/hey. */
+export function isCannedGreetingReply(reply: string, userMessage?: string): boolean {
+  const r = String(reply || '').trim();
+  if (!/^Hello! How can I assist you today\??\.?$/i.test(r)) return false;
+  const u = String(userMessage || '').trim();
+  if (!u) return true;
+  return !/^(hi|hello|hey)\b/i.test(u);
+}
+
 /** True when the assistant mostly repeated the user’s ask (e.g. “Updated Okay, on top right…”). */
 export function looksLikeUserAskEcho(reply: string, userMessage: string): boolean {
   const r = String(reply || '').trim().replace(/\s+/g, ' ');
@@ -687,10 +755,14 @@ export function usableAssistantText(
   previousAssistant?: string,
 ): string {
   const cleaned = sanitizeAssistantReply(raw, lastUserMessage, previousAssistant);
-  if (cleaned.trim()) return cleaned.trim();
+  if (cleaned.trim()) {
+    if (isCannedGreetingReply(cleaned, lastUserMessage)) return '';
+    return cleaned.trim();
+  }
 
   let light = String(raw || '').replace(/\r\n/g, '\n').trim();
   if (!light) return '';
+  if (isCannedGreetingReply(light, lastUserMessage)) return '';
   const markRe = /(?:^|\n)\s*(?:ARK|Assistant)\s*:\s*/gi;
   let lastMark: RegExpExecArray | null = null;
   let m: RegExpExecArray | null;
@@ -700,6 +772,7 @@ export function usableAssistantText(
   }
   light = light.replace(/^You are ARK[\s\S]*?(?:\n\n|User:\s*)/i, '').trim();
   light = light.replace(/^>\s*/gm, '').trim();
+  if (isCannedGreetingReply(light, lastUserMessage)) return '';
   if (light.length >= 2 && !/^You are ARK\b/i.test(light)) return light;
   return '';
 }

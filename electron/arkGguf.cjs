@@ -555,6 +555,9 @@ function cancelGguf() {
     killLlamaChild(activeChild);
     activeChild = null;
   }
+  // Always free the lock — Stop used to leave generateBusy=true while bindLlamaServer
+  // kept waiting, so every later chat sat on Thinking… forever with no llama process.
+  generateBusy = false;
   return { ok: true };
 }
 
@@ -604,13 +607,18 @@ async function bindLlamaServer(bin, gguf) {
         serverCtx = 0;
       }
     });
-    const deadline = Date.now() + 45_000;
+    const deadline = Date.now() + 20_000;
     while (Date.now() < deadline) {
+      if (cancelRequested) {
+        stopServer();
+        return false;
+      }
       if (child.killed || child.exitCode != null) break;
       if (await pingServer(candidate)) return true;
       await wait(250);
     }
     stopServer();
+    if (cancelRequested) return false;
   }
   lastServerError = 'llama-server failed to start — ARK will use one-shot CLI instead';
   return false;
@@ -726,10 +734,31 @@ const ARK_SYSTEM =
   'You are ARK, a normal helpful AI chat assistant. Talk like ChatGPT — not a design studio or image tool unless they ask to make something. '
   + 'Never echo the user’s greeting. If they only say hi/hello/hey, reply: “Hello! How can I assist you today?” '
   + 'Be accurate and complete. Cover the main facts, then ask: “Want more on any of that?” '
+  + 'If they ask multiple questions, answer each one directly. Do not replace a timeline/worth-it ask with a full project plan dump. '
+  + 'When details are missing, ask a few short clarifying questions before recommending. '
+  + 'Never invent bracket placeholders such as [current date], [name], or [path]. Use real values or ask one clear question. '
+  + 'On this PC, Chat can create, read, edit, rename, and delete files in granted folders when asked. '
+  + 'If they ask whether you can edit files: say yes, then ask for the path and what to change — never a generic coding tutorial. '
+  + 'When web lookup notes appear in the prompt, use them. Prefer facts over guessing. '
+  + 'For section titles prefer **Bold title** lines, not markdown # / ## / ### hashtags. '
   + 'People: who they are, companies they founded/own/run (list the well-known ones), and a couple of notable facts. '
   + 'Movies/shows: Title (year) — one line why. Then typical watch places (Netflix, Disney+, Prime Video, Max, YouTube) and IMDb for listings. Availability varies by country. '
   + 'Write lists as: 1. Drama: Title (year) — … Watch: Netflix / Prime. Never nest asterisks. Never wrap genre names in **. '
   + 'Answer the latest user request clearly. Do not echo the prompt.';
+
+function arkSystemWithToday() {
+  try {
+    const label = new Date().toLocaleDateString('en-US', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    });
+    return `${ARK_SYSTEM} Today's date is ${label}.`;
+  } catch {
+    return ARK_SYSTEM;
+  }
+}
 
 function llamaFamily(modelId) {
   return /llama3/i.test(String(modelId || ''));
@@ -766,13 +795,13 @@ function wrapChatPrompt(modelId, prompt) {
   }
   if (llamaFamily(modelId)) {
     return (
-      `<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n${ARK_SYSTEM}<|eot_id|>`
+      `<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n${arkSystemWithToday()}<|eot_id|>`
       + `<|start_header_id|>user<|end_header_id|>\n\n${body}<|eot_id|>`
       + `<|start_header_id|>assistant<|end_header_id|>\n\n`
     );
   }
   return (
-    `<|im_start|>system\n${ARK_SYSTEM}<|im_end|>\n`
+    `<|im_start|>system\n${arkSystemWithToday()}<|im_end|>\n`
     + `<|im_start|>user\n${body}<|im_end|>\n`
     + `<|im_start|>assistant\n`
   );
@@ -938,10 +967,16 @@ function runGgufStream(modelId, prompt, onChunk, timeoutMs = 240000, nPredict = 
     return Promise.reject(err);
   }
   generateBusy = true;
+  cancelRequested = false;
   return (async () => {
     try {
       if (await ensureLlamaServer(modelId)) {
         try {
+          if (cancelRequested) {
+            const stopped = new Error('Generation stopped');
+            stopped.code = 'CANCELED';
+            throw stopped;
+          }
           const hit = await runGgufServerStream(modelId, prompt, onChunk, timeoutMs, nPredict, temperature);
           if (hit?.cancelled) return hit;
           if (hit?.reply) return hit;

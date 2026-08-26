@@ -107,13 +107,20 @@ import { saveChatStudio, loadChatStudio, clearChatStudio, setLastListedFolder, g
 import { runCodeStudioCommand } from '@/lib/studioCommands';
 import { applyChatReplyEdits } from '@/lib/chatAgentApply';
 import { runProjectMultiAgent, wantsMultiAgentTurn } from '@/lib/arkMultiAgent';
-import { beginChatInflight, endChatInflight } from '@/lib/chatInflight';
+import { beginChatInflight, endChatInflight, hasChatInflight } from '@/lib/chatInflight';
 import { looksLikeNsfwAsk, nsfwBlockedReply } from '@/lib/nsfwGate';
-import { formatMcpToolsHelp, formatArkCapabilitiesHelp, looksLikeArkCapabilityAsk, parseMcpCallIntent, resolveMcpToolServer, callMcpTool } from '@/lib/arkMcp';
+import {
+  formatMcpToolsHelp,
+  parseMcpCallIntent,
+  resolveMcpToolServer,
+  callMcpTool,
+  looksLikeArkCapabilityAsk,
+  formatArkCapabilitiesHelp,
+} from '@/lib/arkMcp';
 import { reactUiMicroAskEdits } from '@/lib/webProjectCanon';
 import { deleteProjectFolderOnDisk, handleDeleteProjectChatRequest, looksLikeDeleteFolderAsk } from '@/lib/deleteProjectFlow';
 import { classifyDiskIntent, shouldRouteDeleteToStickyFile } from '@/lib/chatDiskIntent';
-import { deleteFileOnDisk, handleAddFileChatRequest, handleDeleteFileChatRequest, handleReadFileChatRequest } from '@/lib/chatDiskOps';
+import { deleteFileOnDisk, handleAddFileChatRequest, handleDeleteFileChatRequest, handleReadFileChatRequest, handleRenameFileChatRequest } from '@/lib/chatDiskOps';
 import {
   buildRestorePointCommand,
   extractWriteFileContent,
@@ -146,7 +153,7 @@ import { projectUsesNpm } from '@/lib/projectScaffolds';
 import { looksLikeImplementGo, shouldBlockChatFileWrites, planningConversationHint } from '@/lib/chatPlanMode';
 import { looksLikeInPlaceRebuildAsk, looksLikeProjectBuildAsk } from '@/lib/chatBuildIntent';
 import { isProjectCreateBrief } from '@/lib/chatCreateBrief';
-import { briefReadDelayMs, detectPlanFocus, extractGreenfieldName, looksLikeConversationalPlanningAsk, looksLikeGreenfieldCreateGo, looksLikeGreenfieldHaveFolder, looksLikeGreenfieldIdea, looksLikeGreenfieldKeepPlanning, looksLikeGreenfieldStartWorkGo, parseGreenfieldIdea, buildMissingWorkFolderReply, shouldInjectPlanningConversation, wantsPlanningOnly } from '@/lib/chatIdeaIntent';
+import { briefReadDelayMs, detectPlanFocus, extractGreenfieldName, looksLikeConversationalPlanningAsk, looksLikeDirectJudgmentAsk, looksLikeGreenfieldCreateGo, looksLikeGreenfieldHaveFolder, looksLikeGreenfieldIdea, looksLikeGreenfieldKeepPlanning, looksLikeGreenfieldStartWorkGo, parseGreenfieldIdea, buildMissingWorkFolderReply, shouldInjectPlanningConversation, wantsPlanningOnly } from '@/lib/chatIdeaIntent';
 import {
   chatTurnAllowsExec,
   chatTurnAllowsFileEdits,
@@ -185,7 +192,13 @@ import {
   looksLikePromptEcho,
   sanitizeAssistantReply,
   usableAssistantText,
+  historyWasCompacted,
 } from '@/lib/chatHistory';
+import {
+  looksLikeWebGroundedAsk,
+  webSearchForChat,
+  formatWebLookupForPrompt,
+} from '@/lib/webSearch';
 import {
   autoEquippedCaption,
   autoPillLabel,
@@ -810,6 +823,25 @@ export function AIChat() {
   const [attachBusy, setAttachBusy] = useState(false);
   const stopRequestedRef = useRef(false);
   const generatingRef = useRef(false);
+  /** Seed history/sticky for the send IIFE — must survive Rolldown DCE (outer consts were dropped). */
+  const chatRouteSeedRef = useRef<{
+    history: { role: 'user' | 'assistant'; content: string }[];
+    sticky: ReturnType<typeof loadThreadBrain> | null;
+  }>({ history: [], sticky: null });
+  /**
+   * Turn helpers for the send IIFE. Rolldown was leaving bare `clearGeneratingIfMine` /
+   * `finalizeAssistant` identifiers inside the IIFE (unbound → ReferenceError), which left
+   * Stop + queue stuck after the reply had already finished streaming.
+   */
+  const chatTurnCtlRef = useRef<{
+    clearGenerating: () => void;
+    finalizeAssistant: (finalText: string, provider: string, libraryId?: string) => void;
+    pushStatus: (label: string) => void;
+  }>({
+    clearGenerating: () => {},
+    finalizeAssistant: () => {},
+    pushStatus: () => {},
+  });
   /** Which chat id currently owns the in-flight generation (queue only for that chat). */
   const activeGenChatIdRef = useRef<string | null>(null);
   const pendingQueueRef = useRef<string[]>([]);
@@ -1187,11 +1219,9 @@ export function AIChat() {
       persistChatIdRef.current = effectiveChatId;
       return;
     }
-    if (generatingRef.current && activeGenChatIdRef.current) {
-      return;
-    }
-    // Explicit blank starter (New Chat / Image / Video with no id). never keep a stale thread id.
-    // Otherwise the next send attaches to the previous Recent chat and looks like a “duplicate mix”.
+    // Blank New Chat / Image / Video — always detach the view from the prior thread, even if
+    // a background reply is still finishing. Keeping routeChatIdRef mid-gen painted the old
+    // story onto the empty starter and left queue/Stop chrome looking "stuck on New Chat".
     routeChatIdRef.current = undefined;
     persistChatIdRef.current = null;
   }, [route, effectiveChatId]);
@@ -1433,18 +1463,31 @@ export function AIChat() {
         const raw = sessionStorage.getItem('ark:inflight-media');
         const inflight = raw ? JSON.parse(raw) as { chatId?: string; mode?: string; startedAt?: number } : null;
         const stale = Boolean(inflight?.startedAt && Date.now() - inflight.startedAt > 180_000);
-        if (stale || (inflight?.chatId && inflight.chatId !== route.chatId)) {
-          sessionStorage.removeItem('ark:inflight-media');
-          setMessages(prev => {
-            const next = prev.map(m => (
-              m.role === 'assistant' && String(m.content || '').startsWith('__generating__:')
-                ? { ...m, content: '(interrupted. send again)' }
-                : m
-            ));
-            messagesRef.current = next;
-            persistModeThread(mode, next, { chatId: route.chatId });
-            return next;
-          });
+        const liveHere = Boolean(
+          generatingRef.current && activeGenChatIdRef.current === route.chatId,
+        );
+        // Leftover "__generating__:chat:Thinking…" from a crashed turn — clear unless live.
+        if (!liveHere) {
+          const stuckChat = messagesRef.current.some(
+            m => m.role === 'assistant' && String(m.content || '').startsWith('__generating__:chat:'),
+          );
+          if (stuckChat || stale || (inflight?.chatId && inflight.chatId !== route.chatId)) {
+            if (stale || (inflight?.chatId && inflight.chatId !== route.chatId)) {
+              sessionStorage.removeItem('ark:inflight-media');
+            }
+            setMessages(prev => {
+              const next = prev.map(m => (
+                m.role === 'assistant' && String(m.content || '').startsWith('__generating__:')
+                  ? { ...m, content: '(interrupted. send again)' }
+                  : m
+              ));
+              messagesRef.current = next;
+              persistModeThread(mode, next, { chatId: route.chatId });
+              return next;
+            });
+            generatingRef.current = false;
+            setGenerating(false);
+          }
         } else if (inflight?.chatId === route.chatId) {
           const last = messagesRef.current[messagesRef.current.length - 1];
           if (last?.role === 'assistant' && String(last.content || '').startsWith('__generating__:')) {
@@ -1460,13 +1503,10 @@ export function AIChat() {
       return;
     }
 
-    // Fresh New Chat / Image / Video. empty canvas (never inherit a stuck Stop state)
-    // Guard: a send is mid-flight (including the await before generatingRef flips).
-    if (activeGenChatIdRef.current && (generatingRef.current || messagesRef.current.length > 0)) {
-      setLoading(false);
-      setGenerating(Boolean(generatingRef.current));
-      return;
-    }
+    // Fresh New Chat / Image / Video — always empty canvas.
+    // Never paint the previous recent thread here (that looked like "new chat shows old chat").
+    // Background generation for another chatId can keep running via keepChatAlive; this route
+    // must still show a blank starter.
     try {
       const raw = sessionStorage.getItem('ark:inflight-media');
       const inflight = raw ? JSON.parse(raw) as { chatId?: string; mode?: string } : null;
@@ -1475,6 +1515,7 @@ export function AIChat() {
         && inflight.mode
         && (route.mode === inflight.mode || (!route.mode && inflight.mode === 'general'))
       ) {
+        // Media mid-flight: jump back to that chat instead of a blank conflicting canvas.
         navigate({
           name: 'chat',
           mode: inflight.mode === 'general' ? undefined : (inflight.mode as 'image' | 'video'),
@@ -1506,12 +1547,16 @@ export function AIChat() {
       const staleId = persistChatIdRef.current || routeChatIdRef.current;
       if (staleId) clearLastPendingGreenfield(staleId);
     } catch { /* ignore */ }
-    if (!activeGenChatIdRef.current) {
-      generatingRef.current = false;
-      setGenerating(false);
-    } else {
-      setGenerating(Boolean(generatingRef.current));
-    }
+    persistChatIdRef.current = null;
+    // Blank starter must not keep another chat's Stop / queue UI.
+    // Bump genSeq so late idle/finalize from the previous thread cannot flip Stop back on.
+    genSeqRef.current += 1;
+    stopRequestedRef.current = true;
+    pendingQueueRef.current = [];
+    setQueueLen(0);
+    activeGenChatIdRef.current = null;
+    generatingRef.current = false;
+    setGenerating(false);
     setLoading(false);
   }, [route, mode, navigate]);
 
@@ -1715,6 +1760,8 @@ export function AIChat() {
     } catch {
       /* ignore */
     }
+    // Pair every beginChatInflight — Stop used to leave App thinking Chat was busy forever.
+    while (hasChatInflight()) endChatInflight();
     setGenerating(false);
     setMessages(prev => {
       const next = prev.map(m => (
@@ -2025,7 +2072,8 @@ export function AIChat() {
   useEffect(() => {
     const onEnter = (e: DragEvent) => {
       allowWindowFileDrop(e);
-      if (dropHasFiles(e.dataTransfer) || (e.dataTransfer?.types?.length ?? 0) === 0) {
+      // Only show overlay for real file drags — empty types (focus/tooling) used to stick the overlay open.
+      if (dropHasFiles(e.dataTransfer)) {
         setDragActive(true);
       }
     };
@@ -2548,40 +2596,13 @@ export function AIChat() {
     const histPrefs = getLocalPrefs();
     const replyStartedAt = Date.now();
 
-    // Recover folder files from every source before any model call.
-    const resolvedStudio = await resolveStudioFiles({
-      chatId: activeChatId,
-      memoryFiles: chatStudioFilesRef.current,
-      memoryProjectId: chatStudioProjectIdRef.current,
-      memoryDiskRoot: chatStudioDiskRootRef.current,
-      messages: messagesRef.current,
-    });
-    if (Object.keys(resolvedStudio.files).length) {
-      setChatStudioFiles(resolvedStudio.files);
-      chatStudioFilesRef.current = resolvedStudio.files;
-      if (resolvedStudio.projectId) {
-        setChatStudioProjectId(resolvedStudio.projectId);
-        chatStudioProjectIdRef.current = resolvedStudio.projectId;
-      }
-      if (resolvedStudio.diskRoot) {
-        setChatStudioDiskRoot(resolvedStudio.diskRoot);
-        chatStudioDiskRootRef.current = resolvedStudio.diskRoot;
-      }
-      persistStudioSnapshot(activeChatId, {
-        files: resolvedStudio.files,
-        projectId: resolvedStudio.projectId,
-        name: resolvedStudio.name,
-        diskRoot: resolvedStudio.diskRoot,
-      });
-    }
-
     const clearGeneratingIfMineEarly = () => {
+      endInflightOnce();
       if (mySeq !== genSeqRef.current) return;
       generatingRef.current = false;
       if (activeGenChatIdRef.current === activeChatId) {
         activeGenChatIdRef.current = null;
       }
-      endInflightOnce();
       setGenerating(false);
     };
 
@@ -2589,7 +2610,7 @@ export function AIChat() {
       const reply: ChatMessage = {
         id: assistantId,
         user_id: user?.id ?? 'guest',
-      project_id: null,
+        project_id: null,
         role: 'assistant',
         content: replyText,
         provider_used: 'ARK',
@@ -2609,6 +2630,54 @@ export function AIChat() {
       notifyChatDone(activeChatId);
     };
 
+    // Recover folder files from every source before any model call.
+    let resolvedStudio: Awaited<ReturnType<typeof resolveStudioFiles>>;
+    try {
+      resolvedStudio = await Promise.race([
+        resolveStudioFiles({
+          chatId: activeChatId,
+          memoryFiles: chatStudioFilesRef.current,
+          memoryProjectId: chatStudioProjectIdRef.current,
+          memoryDiskRoot: chatStudioDiskRootRef.current,
+          messages: messagesRef.current,
+        }),
+        new Promise<Awaited<ReturnType<typeof resolveStudioFiles>>>((resolve) => {
+          window.setTimeout(() => {
+            resolve({
+              files: chatStudioFilesRef.current,
+              projectId: chatStudioProjectIdRef.current,
+              diskRoot: chatStudioDiskRootRef.current,
+            });
+          }, 2_500);
+        }),
+      ]);
+    } catch {
+      resolvedStudio = {
+        files: chatStudioFilesRef.current,
+        projectId: chatStudioProjectIdRef.current,
+        diskRoot: chatStudioDiskRootRef.current,
+      };
+    }
+    try {
+    if (Object.keys(resolvedStudio.files).length) {
+      setChatStudioFiles(resolvedStudio.files);
+      chatStudioFilesRef.current = resolvedStudio.files;
+      if (resolvedStudio.projectId) {
+        setChatStudioProjectId(resolvedStudio.projectId);
+        chatStudioProjectIdRef.current = resolvedStudio.projectId;
+      }
+      if (resolvedStudio.diskRoot) {
+        setChatStudioDiskRoot(resolvedStudio.diskRoot);
+        chatStudioDiskRootRef.current = resolvedStudio.diskRoot;
+      }
+      persistStudioSnapshot(activeChatId, {
+        files: resolvedStudio.files,
+        projectId: resolvedStudio.projectId,
+        name: resolvedStudio.name,
+        diskRoot: resolvedStudio.diskRoot,
+      });
+    }
+
     const pushAssistantStatus = (label: string) => {
       if (mySeq !== genSeqRef.current) return;
       const statusContent = `__generating__:chat:${label}`;
@@ -2618,6 +2687,8 @@ export function AIChat() {
         return next;
       });
     };
+    // Rolldown drops the IIFE closure on this name — call via ref inside the async turn.
+    chatTurnCtlRef.current.pushStatus = pushAssistantStatus;
 
     const runFolderCatalog = async (opts: {
       targetPath: string;
@@ -2860,6 +2931,31 @@ export function AIChat() {
           await finishPlainReply(deletePrepareErrorReply(err));
           return;
         }
+      }
+
+      if (diskIntent.type === 'rename_file') {
+        pushAssistantStatus('Renaming…');
+        const renameOutcome = await handleRenameFileChatRequest({
+          fromName: diskIntent.fromName,
+          toName: diskIntent.toName,
+          parentHint: diskIntent.parentHint,
+          workspaceDiskRoot: diskRoot,
+          stickyTarget: getLastDiskTarget(activeChatId),
+          lastListedFolder: getLastListedFolder(activeChatId),
+        });
+        if (renameOutcome.kind === 'done') {
+          setLastDiskTarget(activeChatId, {
+            path: renameOutcome.filePath,
+            name: renameOutcome.toName,
+            kind: 'file',
+          });
+          await finishPlainReply(
+            `Renamed **${renameOutcome.fromName}** → **${renameOutcome.toName}**.\n\n\`${renameOutcome.filePath}\``,
+          );
+          return;
+        }
+        await finishPlainReply(renameOutcome.text);
+        return;
       }
 
       if (diskIntent.type === 'add_file' && !isProjectCreateBrief(intentText)) {
@@ -3529,7 +3625,9 @@ export function AIChat() {
     }
 
     // PC read file. AFTER create/greenfield so build briefs never become "open SignalDesk.txt".
-    const hasAttachContext = attaches.length > 0
+    // Use pendingAttaches here — `attaches` only exists in handleSend and threw ReferenceError,
+    // which aborted sendMessage after Thinking… and left the reply stuck forever.
+    const hasAttachContext = pendingAttaches.length > 0
       || /<!--ark-attach:/.test(content)
       || /<!--ark-auto-read-->/.test(content);
     if (
@@ -3706,7 +3804,10 @@ export function AIChat() {
     const agentCwd = chatStudioDiskRootRef.current
       || chatStudioDiskRoot
       || (workspaceProjectId
-        ? (await window.arkDesktop?.projectPath?.(workspaceProjectId))?.root
+        ? await Promise.race([
+          window.arkDesktop?.projectPath?.(workspaceProjectId).then(r => r?.root).catch(() => undefined),
+          new Promise<undefined>((resolve) => { window.setTimeout(() => resolve(undefined), 2_500); }),
+        ])
         : undefined);
 
     const finishAgentReply = (reply: string, provider = 'ARK · agent') => {
@@ -3737,7 +3838,26 @@ export function AIChat() {
       return;
     }
 
+    // Capability asks ("can you edit files?", "what can you do?") — answer as ARK, not a
+    // generic programming tutorial from the local model.
+    if (
+      (mode === 'general' || mode === 'code')
+      && looksLikeArkCapabilityAsk(content)
+      && !parseMcpCallIntent(content)
+    ) {
+      finishAgentReply(
+        formatArkCapabilitiesHelp({
+          question: content,
+          hasProject: Boolean(chatStudioProjectIdRef.current || chatStudioDiskRootRef.current),
+          hasFolderAccess: true,
+        }),
+        'ARK',
+      );
+      return;
+    }
+
     // MCP inventory (local + registered servers from Settings → MCP).
+    // (Handled early after soft greeting — kept here only if earlier path was skipped.)
     if (
       (mode === 'general' || mode === 'code')
       && /\b(mcp|model context protocol)\b/i.test(content)
@@ -3745,21 +3865,6 @@ export function AIChat() {
       && !parseMcpCallIntent(content)
     ) {
       finishAgentReply(formatMcpToolsHelp(), 'ARK · mcp');
-      return;
-    }
-
-    // Capability / "can you edit files?" — truth from ARK, not the raw local model.
-    if ((mode === 'general' || mode === 'code') && looksLikeArkCapabilityAsk(content) && !parseMcpCallIntent(content)) {
-      const wantsMcpList = /\b(?:list|show)\s+mcp\b/i.test(content) || /\bmcp tools\b/i.test(content);
-      finishAgentReply(
-        wantsMcpList
-          ? formatMcpToolsHelp()
-          : formatArkCapabilitiesHelp({
-            hasProject: Boolean(resolvedStudio.projectId || chatStudioDiskRootRef.current || Object.keys(resolvedStudio.files).length),
-            hasFolderAccess: hasFolderAccessGrant(),
-          }),
-        'ARK',
-      );
       return;
     }
 
@@ -4300,13 +4405,26 @@ export function AIChat() {
           kind: mode === 'code' ? 'coding' : 'chat',
         })
         : buildRouterHistory([], content);
-    const rotation = await prepareBrainRotation({
-      scopeId: activeChatId,
-      kind: brainKindForChatMode(mode),
-      history: seedHistory,
-      currentModelId: threadBrainRef.current?.modelId || pinnedModel.id,
-      brain: pinnedModel.source === 'auto' ? threadBrainRef.current : null,
-    });
+    const rotation = await Promise.race([
+      prepareBrainRotation({
+        scopeId: activeChatId,
+        kind: brainKindForChatMode(mode),
+        history: seedHistory,
+        currentModelId: threadBrainRef.current?.modelId || pinnedModel.id,
+        brain: pinnedModel.source === 'auto' ? threadBrainRef.current : null,
+      }),
+      new Promise<Awaited<ReturnType<typeof prepareBrainRotation>>>((resolve) => {
+        window.setTimeout(() => {
+          resolve({
+            history: seedHistory,
+            brain: pinnedModel.source === 'auto' ? threadBrainRef.current : null,
+            swapped: false,
+            pressure: 0,
+            threshold: 0.7,
+          });
+        }, 5_000);
+      }),
+    ]);
     if (rotation.brain) {
       threadBrainRef.current = rotation.brain;
       setThreadBrain(rotation.brain);
@@ -4314,17 +4432,27 @@ export function AIChat() {
     setTokenRatio(rotation.pressure);
     if (rotation.swapped) setModelRatio(0);
     else setModelRatio(getModelHealthRatio(activeChatId));
-    const rotatedHistory = willInspect
-      ? seedHistory
-      : rotation.swapped && histPrefs.rememberContext
-        ? buildRouterHistory(priorForHistory, content, undefined, {
-          keepContinuity: true,
-          kind: mode === 'code' ? 'coding' : 'chat',
-        })
-        : rotation.history;
-    const stickyBrain = pinnedModel.source === 'auto' ? rotation.brain : null;
+    if (rotation.swapped) {
+      setFailoverNote('Brain refreshed for this chat — history kept; model memory reset.');
+    } else if (historyWasCompacted(seedHistory, rotation.history)) {
+      setFailoverNote('Context compacted for speed — full chat history stays; the model uses a shorter memory.');
+    }
+    // Store on a ref so the async IIFE can read it — Rolldown DCE was dropping outer consts
+    // and leaving unbound names in the IIFE invocation (chat stuck on Thinking forever).
+    chatRouteSeedRef.current = {
+      history: willInspect
+        ? seedHistory
+        : rotation.swapped && histPrefs.rememberContext
+          ? buildRouterHistory(priorForHistory, content, undefined, {
+            keepContinuity: true,
+            kind: mode === 'code' ? 'coding' : 'chat',
+          })
+          : rotation.history,
+      sticky: pinnedModel.source === 'auto' ? rotation.brain : null,
+    };
 
     const clearGeneratingIfMine = () => {
+      endInflightOnce();
       if (mySeq !== genSeqRef.current) return;
       generatingRef.current = false;
       if (activeGenChatIdRef.current === activeChatId) {
@@ -4339,7 +4467,6 @@ export function AIChat() {
       } catch {
         sessionStorage.removeItem('ark:inflight-media');
       }
-      endInflightOnce();
       setGenerating(false);
     };
 
@@ -4389,7 +4516,10 @@ export function AIChat() {
       if (!next.some(m => m.id === assistantId)) {
         next = [...normalized, userMsg, { ...assistantMsg, content: finalText, provider_used: provider, elapsed_ms: elapsedMs }];
       }
-      if (!routeChat || routeChat === threadChatId) {
+      // Only mutate the live canvas when the user is still viewing THIS thread.
+      // Blank New Chat clears routeChatIdRef — never paint the finished recent story there.
+      const viewingThisThread = Boolean(routeChat && threadChatId && routeChat === threadChatId);
+      if (viewingThisThread) {
         messagesRef.current = next;
       }
 
@@ -4402,12 +4532,15 @@ export function AIChat() {
       });
 
       // Safe if unmounted. React ignores; persistence above already landed.
-      setMessages(prev => {
-        if (routeChat && threadChatId && routeChat !== threadChatId) return prev;
-        return next;
-      });
+      setMessages(prev => (viewingThisThread ? next : prev));
 
       notifyChatDone(threadChatId);
+    };
+
+    chatTurnCtlRef.current = {
+      clearGenerating: clearGeneratingIfMine,
+      finalizeAssistant,
+      pushStatus: pushAssistantStatus,
     };
 
     // First-run guarantee: no live chat path → wait if installing, else honest CTA (no fake ARK Core answer).
@@ -4436,7 +4569,20 @@ export function AIChat() {
       return;
     }
 
+    } catch (fatal) {
+      try {
+        await finishPlainReply(
+          `Something broke while preparing that reply.\n\n${fatal instanceof Error ? fatal.message : String(fatal)}`,
+        );
+      } catch {
+        clearGeneratingIfMineEarly();
+      }
+      return;
+    }
+
     void (async () => {
+      const routeHistory = chatRouteSeedRef.current.history;
+      const stickyBrain = chatRouteSeedRef.current.sticky;
       let response = 'ARK Router could not complete this request.';
       let usedPlugin = false;
       let skipReplySanitize = false;
@@ -4452,21 +4598,60 @@ export function AIChat() {
 
       const armStreamIdleFinish = () => {
         if (idleTimer) window.clearTimeout(idleTimer);
+        const draftNow = String(streamedPartial || '').trim();
+        // Once we have a real answer, finish quickly when the model goes quiet.
+        // Long 22s idle + "incomplete" early-return used to leave Stop + queue stuck forever.
+        const solid = draftNow.length >= 40 && /[.!?…]["')\]]*\s*$/.test(draftNow);
+        const idleMs = solid ? 2_500 : draftNow.length >= 12 ? 6_000 : 22_000;
         idleTimer = window.setTimeout(() => {
           if (mySeq !== genSeqRef.current || abandoned || stopRequestedRef.current) return;
           const cleaned = usableAssistantText(streamedPartial, content, previousAssistant);
-          if (cleaned.trim().length < 8 && streamedPartial.trim().length < 12) return;
-          if (looksLikePromptEcho(cleaned || streamedPartial)) return;
           const draft = (cleaned || streamedPartial).trim();
+          if (draft.length < 8) return;
+          // Echo-only garbage: fail closed. Long streamed answers always settle.
+          if (looksLikePromptEcho(draft) && draft.length < 200) {
+            abandoned = true;
+            void engineGenerateCancel();
+            chatTurnCtlRef.current.clearGenerating();
+            earlyResolve?.({
+              reply: 'Model echoed its system prompt. Try switching models and send again.',
+            });
+            return;
+          }
+          if (looksLikePromptEcho(draft) && draft.length < 400) {
+            // Keep waiting for a better chunk once; do not soft-lock Stop.
+            idleTimer = window.setTimeout(() => {
+              if (mySeq !== genSeqRef.current || abandoned || stopRequestedRef.current) return;
+              abandoned = true;
+              void engineGenerateCancel();
+              chatTurnCtlRef.current.clearGenerating();
+              const again = usableAssistantText(streamedPartial, content, previousAssistant);
+              earlyResolve?.({
+                reply: (again || streamedPartial).trim()
+                  || 'Model echoed its system prompt. Try switching models and send again.',
+              });
+            }, 4_000);
+            return;
+          }
           const incomplete = /[:;,—–-]\s*$/.test(draft)
             || /\n\s*(?:\d+\.|[-*])\s+[^\n]{0,80}:\s*$/.test(draft)
             || /\b(and|or|the|to|of|for|with|a|an)\s*$/i.test(draft);
-          if (incomplete && draft.length < 1200) return;
+          // Short incomplete drafts can wait one more beat; long drafts must release Stop.
+          if (incomplete && draft.length < 400) {
+            idleTimer = window.setTimeout(() => {
+              if (mySeq !== genSeqRef.current || abandoned || stopRequestedRef.current) return;
+              abandoned = true;
+              void engineGenerateCancel();
+              chatTurnCtlRef.current.clearGenerating();
+              earlyResolve?.({ reply: cleaned || draft });
+            }, 3_500);
+            return;
+          }
           abandoned = true;
-          clearGeneratingIfMine();
-          const echoFallback = looksLikePromptEcho(streamedPartial) ? '' : streamedPartial.trim();
-          earlyResolve?.({ reply: cleaned || echoFallback || 'Model echoed its system prompt. Try switching models and send again.' });
-        }, 22_000);
+          void engineGenerateCancel();
+          chatTurnCtlRef.current.clearGenerating();
+          earlyResolve?.({ reply: cleaned || draft });
+        }, idleMs);
       };
 
       try {
@@ -5084,13 +5269,13 @@ export function AIChat() {
           const planningTalk = shouldInjectPlanningConversation(content, { pendingIdea: Boolean(pendingIdea) });
           let routeMessage = content;
           let history = prefs.rememberContext
-            ? (rotatedHistory.length ? rotatedHistory : buildRouterHistory(priorForHistory, content, vision, {
+            ? (routeHistory.length ? routeHistory : buildRouterHistory(priorForHistory, content, vision, {
               keepContinuity: true,
               kind: 'chat',
             }))
             : buildRouterHistory([], content, vision);
           if (planningTalk) {
-            pushAssistantStatus('Thinking through your idea…');
+            chatTurnCtlRef.current.pushStatus('Thinking through your idea…');
             await new Promise<void>(r => {
               window.setTimeout(
                 r,
@@ -5105,9 +5290,44 @@ export function AIChat() {
             ];
             routeMessage = content;
           }
+          if (looksLikeWebGroundedAsk(content)) {
+            chatTurnCtlRef.current.pushStatus('Looking that up…');
+            try {
+              const hit = await webSearchForChat(content);
+              if (mySeq !== genSeqRef.current || stopRequestedRef.current) return;
+              const note = hit.ok ? formatWebLookupForPrompt(hit) : '';
+              if (note) {
+                history = [
+                  ...history,
+                  { role: 'user' as const, content: note },
+                  {
+                    role: 'assistant' as const,
+                    content: 'Understood — I will use those lookup notes where helpful, ask clarifying questions when needed, and answer their request directly.',
+                  },
+                ];
+              }
+            } catch {
+              /* offline / blocked — answer from local knowledge */
+            }
+          }
+          if (looksLikeDirectJudgmentAsk(content)) {
+            history = [
+              {
+                role: 'user' as const,
+                content:
+                  'Answer the latest user message directly. If they asked how fast AND whether it is worth building, cover both: (1) a realistic timeline to a usable beta, (2) a clear yes/no-with-reasons on worth. Do not greet. Do not dump a fresh multi-week plan template.',
+              },
+              {
+                role: 'assistant' as const,
+                content: 'Understood. I will answer the timeline and the worth-it judgment first, briefly.',
+              },
+              ...history,
+            ];
+          }
           const sticky = stickyBrain;
           const pinnedIsCoder = /coder|starcoder/i.test(`${pinnedModel.id || ''} ${pinnedModel.name || ''}`);
-          const useChatBrain = planningTalk && (pinnedIsCoder || /1\.5b|1.5B|0\.5b/i.test(`${pinnedModel.id || ''} ${pinnedModel.name || ''}`));
+          const judgmentAsk = looksLikeDirectJudgmentAsk(content);
+          const useChatBrain = (planningTalk || judgmentAsk) && (pinnedIsCoder || /1\.5b|1.5B|0\.5b/i.test(`${pinnedModel.id || ''} ${pinnedModel.name || ''}`));
           const timeoutMs = 250_000;
           const firstTokenMs = planningTalk ? 55_000 : 35_000;
           let sawToken = false;
@@ -5124,18 +5344,49 @@ export function AIChat() {
             onChunk: prefs.streamResponses
               ? (piece) => {
               if (abandoned || stopRequestedRef.current || mySeq !== genSeqRef.current) return;
-              sawToken = true;
+              if (!piece) return;
               streamedPartial += piece;
               const dump = /@@@FILE|```[\w]*\n|<!DOCTYPE\b|<html[\s>]|export\s+default\s+function/i.test(streamedPartial);
               const live = usableAssistantText(streamedPartial, content, previousAssistant)
                 || streamedPartial.trim();
+              const liveClean = live && !looksLikePromptEcho(live) ? live : '';
+              // Only real answer tokens count — echo used to flip sawToken and disable the 35s timeout.
+              if (liveClean) sawToken = true;
+              // Fast-fail when the model is only re-emitting the system prompt.
+              if (
+                !liveClean
+                && looksLikePromptEcho(streamedPartial)
+                && streamedPartial.trim().length > 140
+                && !abandoned
+              ) {
+                abandoned = true;
+                void engineGenerateCancel();
+                chatTurnCtlRef.current.clearGenerating();
+                earlyResolve?.({
+                  reply: 'Model echoed its system prompt. Try switching models and send again.',
+                });
+                return;
+              }
               setMessages(prev => {
+                // Don't stream another thread onto a blank New Chat / different recent.
+                if (routeChatIdRef.current !== activeChatId) {
+                  if (persistTimerRef.current) window.clearTimeout(persistTimerRef.current);
+                  persistTimerRef.current = window.setTimeout(() => {
+                    const liveMsg = {
+                      ...assistantMsg,
+                      content: liveClean || `__generating__:chat:${statusLabel}`,
+                    };
+                    persistModeThread(mode, [...normalized, userMsg, liveMsg], {
+                      chatId: activeChatId,
+                    });
+                  }, 220);
+                  return prev;
+                }
                 const next = prev.map(m => {
                   if (m.id !== assistantId) return m;
                   if (dump) {
                     return { ...m, content: `__generating__:chat:${liveCodingStatusText(streamedPartial)}` };
                   }
-                  const liveClean = live && !looksLikePromptEcho(live) ? live : '';
                   return { ...m, content: liveClean || `__generating__:chat:${planningTalk ? 'Thinking through your idea…' : statusLabel}` };
                 });
                 messagesRef.current = next;
@@ -5161,8 +5412,20 @@ export function AIChat() {
           if (prefs.streamResponses) {
             races.push(new Promise((_, reject) => {
               window.setTimeout(() => {
-                if (!sawToken && !streamedPartial.trim()) {
-                  reject(new Error('No response yet. Try again or pick another model.'));
+                if (mySeq !== genSeqRef.current) {
+                  reject(new Error('superseded'));
+                  return;
+                }
+                if (abandoned || stopRequestedRef.current) {
+                  reject(new Error('Generation stopped'));
+                  return;
+                }
+                if (!sawToken) {
+                  if (streamedPartial.trim() && looksLikePromptEcho(streamedPartial)) {
+                    reject(new Error('Model echoed its system prompt. Try again or pick another model.'));
+                  } else {
+                    reject(new Error('No response yet. Try again or pick another model.'));
+                  }
                 }
               }, firstTokenMs);
             }));
@@ -5170,7 +5433,7 @@ export function AIChat() {
           const routed = await Promise.race(races);
           if (idleTimer) window.clearTimeout(idleTimer);
           // Release Stop as soon as we have a usable reply. don't wait on trailing work.
-          clearGeneratingIfMine();
+          chatTurnCtlRef.current.clearGenerating();
           const rawReply = stopRequestedRef.current && streamedPartial
             ? streamedPartial
             : routed.reply;
@@ -5218,7 +5481,7 @@ export function AIChat() {
           if (idleTimer) window.clearTimeout(idleTimer);
           abandoned = true;
           void engineGenerateCancel();
-          clearGeneratingIfMine();
+          chatTurnCtlRef.current.clearGenerating();
           const timedOut = err instanceof Error && /timed out/i.test(err.message);
           const rawErr = stopRequestedRef.current && streamedPartial
             ? usableAssistantText(streamedPartial, content, previousAssistant) || streamedPartial.trim()
@@ -5233,7 +5496,7 @@ export function AIChat() {
       }
       } finally {
         if (idleTimer) window.clearTimeout(idleTimer);
-        clearGeneratingIfMine();
+        chatTurnCtlRef.current.clearGenerating();
       }
 
       if (mySeq !== genSeqRef.current) return;
@@ -5250,6 +5513,18 @@ export function AIChat() {
           });
         }
       }
+      if (
+        !String(response || '').trim()
+        && looksLikeDirectJudgmentAsk(content)
+      ) {
+        response = [
+          '**How fast:** for a focused MVP (core map view + a couple of layers), a usable beta is often about **3–8 weeks** of steady work — longer if you need heavy offline data, turn-by-turn, or polished mobile releases.',
+          '',
+          '**Worth building?** **Yes as a personal / niche project** if you care about the craft or a specific use case Google Maps does not cover. As a broad public “Google Maps competitor,” it is harder — the market already has strong apps, so you need a clear niche (private property maps, specialty layers, offline-first, etc.) and real testers.',
+          '',
+          'Want to lock the niche and a one-month beta scope next?',
+        ].join('\n');
+      }
       if (stopRequestedRef.current && !response.trim()) {
         response = '(stopped)';
       }
@@ -5259,7 +5534,7 @@ export function AIChat() {
           : '(no response)';
       }
 
-      finalizeAssistant(response, resolvedProvider, lastLibraryId);
+      chatTurnCtlRef.current.finalizeAssistant(response, resolvedProvider, lastLibraryId);
 
       if (mode === 'general') {
         try {

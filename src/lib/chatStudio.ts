@@ -62,7 +62,7 @@ export type StudioAskKind =
   | 'freeform';
 
 const SMALLTALK_RE =
-  /^(hi|hello|hey|yo|sup|howdy|thanks|thank you|ok|okay|cool|nice|sure)[.!\s]*$/i;
+  /^(hi+|hii+|hello+|heelo|hell+o|hey+|yo|sup|howdy|thanks|thank you|ok|okay|cool|nice|sure)[.!\s]*$/i;
 
 /** “How can we fix” / “tell me how we can fix”. always debug, never overview. */
 export const STUDIO_FIX_ASK_RE =
@@ -80,6 +80,13 @@ function cleanStudioAsk(message: string): string {
     .replace(/<!--ark-auto-read-->/g, '')
     .replace(/^[\[](?:Plan|Ask|Debug|Tasks)[\]]\s*/i, '')
     .trim();
+}
+
+/** Short hello / typo greetings — answer locally so small GGUFs don't hang on Thinking… */
+export function looksLikeSoftGreeting(text: string): boolean {
+  const t = cleanStudioAsk(text).replace(/[!?.…]+$/g, '').trim();
+  if (!t || t.length > 28) return false;
+  return SMALLTALK_RE.test(t) || /^(hi|hey|hello|heelo|yo|sup)\b/i.test(t);
 }
 
 /**

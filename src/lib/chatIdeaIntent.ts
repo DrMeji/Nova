@@ -588,9 +588,10 @@ export function looksLikeConversationalPlanningAsk(text: string): boolean {
   if (/\bgo\s+ahead(?:\s+and)?\s+(?:build|implement|create|scaffold)\b/i.test(t)) return false;
   if (/\bcreate\s+(?:the\s+)?files\b/i.test(t) && /\b(?:now|please|desktop)\b/i.test(t)) return false;
   if (wantsPlanningOnly(t)) return true;
-  if (/\bhow\s+(?:quick|long|fast|soon)\b/i.test(t)) return true;
+  // Timeline / worth-it follow-ups are normal Q&A — not a reason to inject “planning only” framing.
+  if (looksLikeDirectJudgmentAsk(t)) return false;
   if (/\bfirst\s+usable\s+version\b/i.test(t) || /\bkeep\s+scope\s+tiny\b/i.test(t)) return true;
-  if (/\bhow\s+(?:do|can|should|would|quick|long)\b/i.test(t)) return true;
+  if (/\bhow\s+(?:do|can|should|would)\b/i.test(t)) return true;
   if (/\bwhat\s+(?:do|should|would|type|stack|software|framework|language|code|kind)\b/i.test(t)) return true;
   if (/\b(?:get\s+started|where\s+(?:should|do)\s+(?:i|we)\s+(?:begin|start)|how\s+to\s+(?:begin|approach))\b/i.test(t)) return true;
   if (/\bhelp\s+me\s+(?:figure|understand|think|plan|decide)\b/i.test(t)) return true;
@@ -622,11 +623,26 @@ export function isBarePlanningFollowUp(text: string): boolean {
  * When true, Chat injects planningConversationHint (product-plan framing).
  * Bare teach-me / more-details follow-ups must stay normal chat unless a greenfield brief is pending.
  */
+export function looksLikeDirectJudgmentAsk(text: string): boolean {
+  const t = String(text || '').trim();
+  if (!t) return false;
+  if (/\b(?:is\s+it\s+worth|worth\s+(?:it|building|making|doing)|should\s+(?:i|we)\s+(?:build|make|pursue))\b/i.test(t)) {
+    return true;
+  }
+  if (/\bhow\s+(?:fast|quick|long|soon)\b/i.test(t)
+    && /\b(?:up\s+and\s+running|get\s+(?:this|it)|ship|launch|beta|mvp|finish|done)\b/i.test(t)) {
+    return true;
+  }
+  if (/\bhow\s+(?:fast|quick|long|soon)\b.{0,40}\b(?:think|estimate|take)\b/i.test(t)) return true;
+  return false;
+}
+
 export function shouldInjectPlanningConversation(
   content: string,
   opts?: { pendingIdea?: boolean },
 ): boolean {
   if (looksLikeImplementGo(content)) return false;
+  if (looksLikeDirectJudgmentAsk(content)) return false;
   const pending = Boolean(opts?.pendingIdea);
   const bare = isBarePlanningFollowUp(content);
   if (looksLikeGreenfieldIdea(content) || wantsPlanningOnly(content)) return true;

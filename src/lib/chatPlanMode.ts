@@ -39,6 +39,7 @@ export function planningConversationHint(topicHint?: string): string {
   return [
     'Planning conversation only. Do not create files, folders, or projects.',
     'Stay on the user’s actual topic. If they asked a general how-to (coding, learning, troubleshooting), deepen THAT answer.',
+    'If they asked how fast / is it worth it / yes-no judgment: answer those points first with a clear take, then short supporting detail — do not dump a fresh multi-week plan template.',
     'Do not invent a random product name, EcoBuddy-style demo app, stack, or timeline unless they described a product to build.',
     'If they already shared a product idea, answer that idea with concrete detail (stack, scope, tradeoffs).',
     'Never invent UI chips like Create project or Keep planning.',

@@ -156,48 +156,79 @@ export function looksLikeArkCapabilityAsk(text: string): boolean {
   if (!t) return false;
   if (/\b(?:list|show)\s+mcp\b/i.test(t) || /\bmcp tools\b/i.test(t)) return true;
   if (/\bwhat can you do\b/i.test(t) || /\bwhat(?:'s| is) ark\b/i.test(t)) return true;
-  if (/\b(?:break down|explain|describe)\b/i.test(t) && /\b(?:ark\.|mcp\b|tools?)\b/i.test(t)) return true;
+  if (/\b(?:break down|explain|describe)\b/i.test(t) && /\b(?:ark\.|mcp\b|tools?)\b/i.test(t)) {
+    return true;
+  }
   if (/\bark\.[a-z0-9_-]+\.[a-z0-9_-]+\b/i.test(t) && /\b(?:what|how|explain|break|describe)\b/i.test(t)) {
     return true;
   }
-  if (/\bcan you\b/i.test(t)) {
-    if (/\b(?:edit|read|write|create|modify|change|save|access|open|summarize|generate|connect|run)\b/i.test(t)
-      && /\b(?:files?|disk|folder|project|markdown|\.md\b|loops?|code|mcp|tools?)\b/i.test(t)) {
+  // Direct capability checks — including terse yes/no forms.
+  if (/\b(?:can|could|do|will)\s+you\b/i.test(t) || /\bare you able\b/i.test(t)) {
+    if (/\b(?:edit|read|write|create|modify|change|rename|save|access|open|delete|update)\b/i.test(t)
+      && /\b(?:files?|disk|folder|folders|project|markdown|\.md\b|code|mcp|tools?|png|jpe?g|image|document|notes?)\b/i.test(t)) {
       return true;
     }
-    if (/\b(?:edit|read|write)\s+files?\b/i.test(t)) return true;
+    if (/\b(?:edit|read|write|rename)\s+files?\b/i.test(t)) return true;
   }
   if (/\bi need you,?\s*ark\b/i.test(t)) return true;
   if (/\bhow long is your memory\b/i.test(t)) return true;
   return false;
 }
 
+function isFileCapabilityFocus(question: string): boolean {
+  const t = String(question || '');
+  return /\b(?:edit|read|write|create|modify|change|rename|delete|update)\b/i.test(t)
+    && /\b(?:files?|folder|disk|png|jpe?g|image|document|notes?|markdown|\.md\b)\b/i.test(t);
+}
+
 export function formatArkCapabilitiesHelp(opts?: {
+  question?: string;
   hasProject?: boolean;
   hasFolderAccess?: boolean;
 }): string {
+  const question = String(opts?.question || '').trim();
   const hasProject = Boolean(opts?.hasProject);
-  const hasFolder = Boolean(opts?.hasFolderAccess);
+  const hasFolder = opts?.hasFolderAccess !== false;
+  const wantsYesNo = /\byes\s*or\s*no\b|\by\/n\b/i.test(question);
+
+  if (isFileCapabilityFocus(question)) {
+    const lead = wantsYesNo
+      ? 'Yes.'
+      : 'Yes — I can work with files on this PC from Chat.';
+    return [
+      lead,
+      '',
+      'I can create, read, edit, rename, and delete files or folders in places you have granted (Desktop, Documents, Downloads, and bound project folders).',
+      '',
+      'To do something useful next, tell me:',
+      '1. **Where** the file or folder is (full path, or Desktop / Documents / a project name)',
+      '2. **What** you want done (rewrite text, rename a PNG, add a new file, change code, etc.)',
+      '3. **Any details** that matter (new name, what to put inside, what to keep)',
+      '',
+      hasProject
+        ? 'This chat already has a folder bound, so you can say something like *edit config.json* or *rename logo.png to brand.png*.'
+        : 'If it is not under Desktop/Documents yet, say the path or open the folder in Chat first.',
+      hasFolder ? '' : 'If folder access is off, turn it on in **Settings → Security**.',
+    ].filter(Boolean).join('\n');
+  }
+
   const lines = [
     '**What ARK can do in Chat**',
     '',
-    'ARK routes your message before the local model answers. When you see **ARK** under a reply, a built-in handler ran — not the raw LLM alone.',
+    'I read your message and either run a built-in action (files, projects, MCP) or answer with your local / cloud brain.',
     '',
-    '**Files & projects**',
-    `• **Read files** — say *read notes.txt* or attach files and ask to summarize.${hasFolder ? ' Folder access is on.' : ' Enable Desktop/Documents in **Settings → Security** first.'}`,
-    `• **Create a file** — *create a file named Notes.md in my project folder* (one file, not a whole app).`,
-    `• **Create / scaffold a project** — *build me a landing page called MyApp* (writes real files under Desktop\\Projects).${hasProject ? ' This chat already has a project bound.' : ''}`,
-    `• **Edit bound project files** — open **Code** or bind a folder, then ask to change UI, add pages, fix bugs.`,
+    '**Files & folders**',
+    `• **Create / edit / rename / delete** — point me at a path or project folder and say what to change.${hasFolder ? '' : ' Enable Desktop/Documents in **Settings → Security** first.'}`,
+    `• **Create a single file** — e.g. *create Notes.md on my Desktop with …*`,
+    `• **Scaffold a project** — e.g. *build a landing page called MyApp* (writes under Desktop\\Projects).${hasProject ? ' This chat already has a project bound.' : ''}`,
     '',
-    '**Built-in tools (same as MCP list)**',
-    '• **ark.project.read** — read from a granted folder',
-    '• **ark.project.write** — apply edits / scaffolds to a bound project',
-    '• **ark.media.image** — generate images (Image tab)',
-    '• **ark.brain.generate** — run a turn through ARK Engine / your pinned model',
-    '• **ark.mcp.connect** — register external MCP servers in **Settings → MCP**',
+    '**Built-in tools**',
+    '• **ark.project.read / write** — read and update granted folders',
+    '• **ark.media.image** — Image tab',
+    '• **ark.brain.generate** — your pinned local or cloud model',
+    '• **ark.mcp.connect** — external MCP servers in **Settings → MCP**',
     '',
-    '**What the local model alone cannot do**',
-    'Small local models (Qwen 7B, etc.) do not touch your disk by themselves. Ask ARK directly: *create file …*, *read …*, *list my projects*, or use **Code** for multi-file edits.',
+    'Ask directly when you want disk work — for example *create a file…*, *rename this.png to…*, or *edit README*. The local model alone does not touch disk without those intents.',
     '',
     'Say **list MCP tools** for registered external servers.',
   ];

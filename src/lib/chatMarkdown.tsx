@@ -3,6 +3,7 @@ import { tidyMarkdownStars } from '@/lib/chatHistory';
 
 type Block =
   | { type: 'p'; text: string }
+  | { type: 'h'; level: 1 | 2 | 3 | 4; text: string }
   | { type: 'ol'; items: string[] }
   | { type: 'ul'; items: string[] };
 
@@ -27,8 +28,16 @@ function splitBlocks(text: string): Block[] {
   };
 
   for (const line of lines) {
+    const heading = line.match(/^\s*(#{1,4})\s+(.+?)\s*#*\s*$/);
     const ordered = line.match(/^\s*\d+[.)]\s+(.*)$/);
     const bullet = line.match(/^\s*[-*•]\s+(.*)$/);
+    if (heading) {
+      flushPara();
+      flushList();
+      const level = Math.min(4, heading[1].length) as 1 | 2 | 3 | 4;
+      blocks.push({ type: 'h', level, text: heading[2].trim() });
+      continue;
+    }
     if (ordered) {
       flushPara();
       if (ul) {
@@ -107,6 +116,13 @@ function renderInline(text: string): ReactNode[] {
   return parts;
 }
 
+const HEADING_CLASS: Record<1 | 2 | 3 | 4, string> = {
+  1: 'text-base font-semibold text-content-primary mt-1',
+  2: 'text-[15px] font-semibold text-content-primary mt-1',
+  3: 'text-sm font-semibold text-content-primary mt-0.5',
+  4: 'text-sm font-medium text-content-primary mt-0.5',
+};
+
 export function ChatMarkdown({ text }: { text: string }) {
   const cleaned = tidyMarkdownStars(text).trim();
   if (!cleaned) return null;
@@ -114,6 +130,14 @@ export function ChatMarkdown({ text }: { text: string }) {
   return (
     <div className="space-y-2 leading-relaxed">
       {blocks.map((block, i) => {
+        if (block.type === 'h') {
+          const Tag = (`h${block.level}` as 'h1' | 'h2' | 'h3' | 'h4');
+          return (
+            <Tag key={i} className={HEADING_CLASS[block.level]}>
+              {renderInline(block.text)}
+            </Tag>
+          );
+        }
         if (block.type === 'ol') {
           return (
             <ol key={i} className="list-decimal pl-5 space-y-1">

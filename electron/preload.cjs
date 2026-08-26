@@ -75,6 +75,7 @@ contextBridge.exposeInMainWorld('arkDesktop', {
   engineGenerateStream: (message, modelId, kind, opts) =>
     ipcRenderer.invoke('ark:engine-generate-stream', { message, modelId, kind, ...(opts || {}) }),
   engineGenerateCancel: () => ipcRenderer.invoke('ark:engine-generate-cancel'),
+  webSearch: (query) => ipcRenderer.invoke('ark:web-search', { query }),
   onEngineChunk: (handler) => {
     const listener = (_event, payload) => handler?.(payload);
     ipcRenderer.on('ark:engine-chunk', listener);
@@ -137,6 +138,7 @@ contextBridge.exposeInMainWorld('arkDesktop', {
   workspaceDeleteRoot: (payload) => ipcRenderer.invoke('ark:workspace-delete-root', payload),
   workspaceDeleteFolder: (payload) => ipcRenderer.invoke('ark:workspace-delete-folder', payload),
   workspaceWriteFile: (payload) => ipcRenderer.invoke('ark:workspace-write-file', payload),
+  workspaceRenamePath: (payload) => ipcRenderer.invoke('ark:workspace-rename-path', payload),
   gitCloneOpen: (payload) => ipcRenderer.invoke('ark:git-clone-open', payload),
   onProjectImportProgress: (handler) => {
     const fn = (_e, payload) => {

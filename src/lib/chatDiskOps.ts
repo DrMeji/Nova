@@ -236,6 +236,91 @@ export async function handleAddFileChatRequest(opts: {
   return { kind: 'done', fileName: wantFile, filePath: written.path || fullPath };
 }
 
+export async function handleRenameFileChatRequest(opts: {
+  fromName: string | null;
+  toName: string | null;
+  parentHint?: string;
+  workspaceDiskRoot?: string | null;
+  workspaceName?: string | null;
+  stickyTarget?: { path: string; name: string; kind: 'file' | 'folder' } | null;
+  lastListedFolder?: LastListedFolder | null;
+}): Promise<{ kind: 'reply'; text: string } | { kind: 'done'; fromName: string; toName: string; filePath: string }> {
+  const {
+    fromName,
+    toName,
+    parentHint,
+    workspaceDiskRoot,
+    workspaceName,
+    stickyTarget,
+    lastListedFolder,
+  } = opts;
+
+  const wantFrom = fromName
+    ? normalizeDiskFileName(fromName)
+    : (stickyTarget?.kind === 'file' ? stickyTarget.name : null);
+  const wantTo = toName ? normalizeDiskFileName(toName) : null;
+
+  if (!wantFrom || !wantTo) {
+    return {
+      kind: 'reply',
+      text: 'Which file should I rename, and what is the new name?\n\nExample: *rename draft-notes.md to inventory-core.md on my Desktop*.',
+    };
+  }
+
+  let fromPath: string | null = null;
+  if (stickyTarget?.kind === 'file' && namesRoughlyMatch(stickyTarget.name, wantFrom)) {
+    fromPath = stickyTarget.path;
+  }
+  if (!fromPath) {
+    const parentPath = await resolveAddFileParentPath({
+      parentHint,
+      workspaceDiskRoot,
+      workspaceName,
+      stickyTarget,
+      lastListedFolder,
+    });
+    if (!parentPath) {
+      return {
+        kind: 'reply',
+        text: `Where is **${wantFrom}**?\n\nGive a path like Desktop\\Projects\\MyApp, or open that folder in Chat first.`,
+      };
+    }
+    fromPath = joinPath(parentPath, wantFrom);
+  }
+
+  const fromStat = await pathStat(fromPath);
+  if (!fromStat?.ok || !fromStat.isFile) {
+    return {
+      kind: 'reply',
+      text: `I could not find **${wantFrom}** at \`${fromPath}\`. Check the name or path and try again.`,
+    };
+  }
+
+  const toPath = joinPath(pathDirname(fromPath), wantTo);
+  if (!window.arkDesktop?.workspaceRenamePath) {
+    return { kind: 'reply', text: 'Rename is only available in the desktop app.' };
+  }
+  const renamed = await window.arkDesktop.workspaceRenamePath({
+    fromPath,
+    toPath,
+  });
+  if (!renamed?.ok) {
+    return { kind: 'reply', text: renamed?.error || `Could not rename **${wantFrom}**.` };
+  }
+  return {
+    kind: 'done',
+    fromName: wantFrom,
+    toName: wantTo,
+    filePath: renamed.path || toPath,
+  };
+}
+
+function pathDirname(full: string): string {
+  const norm = String(full || '').replace(/[/\\]+$/, '');
+  const i = Math.max(norm.lastIndexOf('\\'), norm.lastIndexOf('/'));
+  return i >= 0 ? norm.slice(0, i) : norm;
+}
+
 export async function handleReadFileChatRequest(opts: {
   fileName: string | null;
   parentHint?: string;

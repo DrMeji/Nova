@@ -120,7 +120,9 @@ export async function prepareBrainRotation(opts: {
   threshold: number;
 }> {
   ensureSpeedSample();
-  const history = compressHistoryIfNeeded(opts.history);
+  const history = compressHistoryIfNeeded(opts.history, undefined, {
+    aggressive: measureThreadPressure(opts.history) >= 0.72,
+  });
   let brain = opts.brain;
   let swapped = false;
   const engineKind = kindToEngine(opts.kind);

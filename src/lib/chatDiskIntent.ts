@@ -22,6 +22,7 @@ export type ProjectKind = 'static-web' | 'vite-react' | 'python' | 'node-cli' | 
 export type DiskIntent =
   | { type: 'create_project'; name: string; kind: ProjectKind }
   | { type: 'add_file'; name: string; parentHint?: string }
+  | { type: 'rename_file'; fromName: string | null; toName: string | null; parentHint?: string }
   | { type: 'delete_project'; name: string | null }
   | { type: 'delete_file'; name: string | null; parentHint?: string }
   | { type: 'catalog_or_explore' }
@@ -38,6 +39,48 @@ function detectProjectKind(text: string): ProjectKind {
   if (/\b(node\s+cli|cli\s+tool)\b/.test(t)) return 'node-cli';
   if (/\b(react|vite|web\s+app|website|site)\b/.test(t)) return 'vite-react';
   return 'vite-react';
+}
+
+function looksLikeRenameFileAsk(text: string): boolean {
+  const t = String(text || '').trim();
+  if (!t) return false;
+  if (/\b(?:rename|re-name)\b/i.test(t)) return true;
+  if (/\bchange\s+(?:the\s+)?(?:file\s+)?name\b/i.test(t)) return true;
+  if (/\b(?:call|name)\s+(?:the\s+)?(?:file|image|photo|png|jpe?g)\b/i.test(t) && /\b(?:to|as)\b/i.test(t)) {
+    return true;
+  }
+  return false;
+}
+
+function parseRenameFileTarget(text: string): {
+  fromName: string | null;
+  toName: string | null;
+  parentHint?: string;
+} {
+  const t = String(text || '').trim();
+  const parentHint = extractDiskParentHintFromText(t) || extractAddFileParentHint(t);
+  // rename foo.png to bar.png / rename "a" to "b"
+  const m = t.match(
+    /\brename\b\s+(?:the\s+)?(?:file\s+|image\s+|photo\s+)?["'`]?([A-Za-z0-9._-]+\.[A-Za-z0-9]{1,12}|[A-Za-z0-9._-]+)["'`]?\s+(?:to|as)\s+["'`]?([A-Za-z0-9._-]+\.[A-Za-z0-9]{1,12}|[A-Za-z0-9._-]+)["'`]?/i,
+  );
+  if (m) {
+    return {
+      fromName: normalizeDiskFileName(m[1]),
+      toName: normalizeDiskFileName(m[2]),
+      parentHint,
+    };
+  }
+  const change = t.match(
+    /\bchange\s+(?:the\s+)?(?:file\s+)?name\s+(?:of\s+)?["'`]?([A-Za-z0-9._-]+\.[A-Za-z0-9]{1,12})["'`]?\s+to\s+["'`]?([A-Za-z0-9._-]+\.[A-Za-z0-9]{1,12})["'`]?/i,
+  );
+  if (change) {
+    return {
+      fromName: normalizeDiskFileName(change[1]),
+      toName: normalizeDiskFileName(change[2]),
+      parentHint,
+    };
+  }
+  return { fromName: null, toName: null, parentHint };
 }
 
 function looksLikeAddFileAsk(text: string): boolean {
@@ -338,6 +381,16 @@ export function classifyDiskIntent(
   const recent = opts?.recentUserMessages || [];
   const pendingAddFile = opts?.pendingAddFile || null;
   const stickyDiskTarget = opts?.stickyDiskTarget || null;
+
+  if (looksLikeRenameFileAsk(t)) {
+    const parsed = parseRenameFileTarget(t);
+    return {
+      type: 'rename_file',
+      fromName: parsed.fromName,
+      toName: parsed.toName,
+      parentHint: parsed.parentHint,
+    };
+  }
 
   if (looksLikeDeleteFileAsk(t)) {
     const parsed = parseDeleteFileTarget(t);

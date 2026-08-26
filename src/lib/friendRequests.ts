@@ -4,9 +4,9 @@
 
 import { supabase } from '@/lib/supabase';
 import { canUseCloud } from '@/lib/arkSocial';
-import { isArkUserId, lookupArkUser, normalizeArkId } from '@/lib/arkUserId';
+import { formatArkId, isArkUserId, lookupArkUser, normalizeArkId } from '@/lib/arkUserId';
 import { isDevArkAlias } from '@/lib/arkDevAccount';
-import { pushLocalNotification, dismissFriendRequestNotification } from '@/lib/localNotifications';
+import { pushLocalNotification, dismissFriendRequestNotification, loadLocalNotifications } from '@/lib/localNotifications';
 import { pushSidebarToast } from '@/lib/sidebarToast';
 import { isBlockedArkId, isBlockedFromAdding } from '@/lib/arkSocial';
 
@@ -21,6 +21,11 @@ export type FriendRequest = {
 };
 
 const KEY = 'ark:friend-requests';
+
+function sameArkId(a?: string, b?: string): boolean {
+  if (!a || !b) return false;
+  return formatArkId(normalizeArkId(a)) === formatArkId(normalizeArkId(b));
+}
 
 function readLocal(): FriendRequest[] {
   try {
@@ -53,12 +58,13 @@ function mapRow(row: Record<string, unknown>): FriendRequest {
   };
 }
 
-async function fetchCloudRequests(myArkId: string): Promise<FriendRequest[]> {
+async function fetchCloudRequests(): Promise<FriendRequest[]> {
   try {
+    // RLS scopes rows to my_ark_id(); do not add a client-side ID filter — stale local
+    // cache IDs would hide valid inbound/outbound requests.
     const { data, error } = await supabase
       .from('ark_friend_requests')
       .select('*')
-      .or(`from_ark_id.eq.${myArkId},to_ark_id.eq.${myArkId}`)
       .order('created_at', { ascending: false })
       .limit(80);
     if (error || !data) return [];
@@ -79,29 +85,32 @@ function mergeRequests(local: FriendRequest[], cloud: FriendRequest[]): FriendRe
 export async function syncFriendRequests(myArkId: string, userId?: string | null): Promise<FriendRequest[]> {
   const me = normalizeArkId(myArkId);
   if (!isArkUserId(me)) return [];
-  const local = readLocal().filter(r => r.fromArkId === me || r.toArkId === me);
+  const local = readLocal().filter(r => sameArkId(r.fromArkId, me) || sameArkId(r.toArkId, me));
   if (!canUseCloud(userId)) return local;
-  const cloud = await fetchCloudRequests(me);
+  const cloud = await fetchCloudRequests();
   const merged = mergeRequests(local, cloud);
   writeLocal(merged);
+  notifyPendingInbound(myArkId, merged);
   return merged;
 }
 
 export function listPendingInbound(myArkId: string): FriendRequest[] {
   const me = normalizeArkId(myArkId);
   if (!isArkUserId(me)) return [];
-  return readLocal().filter(r => r.toArkId === me && r.status === 'pending');
+  return readLocal().filter(r => sameArkId(r.toArkId, me) && r.status === 'pending');
 }
 
 export function listPendingOutbound(myArkId: string): FriendRequest[] {
   const me = normalizeArkId(myArkId);
   if (!isArkUserId(me)) return [];
-  return readLocal().filter(r => r.fromArkId === me && r.status === 'pending');
+  return readLocal().filter(r => sameArkId(r.fromArkId, me) && r.status === 'pending');
 }
 
 function notifyInbound(req: FriendRequest) {
+  const notifId = `fr-in-${req.id}`;
+  if (loadLocalNotifications().some(n => n.id === notifId)) return;
   pushLocalNotification({
-    id: `fr-in-${req.id}`,
+    id: notifId,
     kind: 'friend',
     title: `${req.fromName} wants to be friends`,
     body: `${req.fromName} · ARK ID ${req.fromArkId} sent you a friend request.`,
@@ -111,6 +120,16 @@ function notifyInbound(req: FriendRequest) {
     fromName: req.fromName,
     fromAvatarUrl: req.fromAvatarUrl,
   });
+}
+
+/** Create Accept/Decline notifications for inbound pending rows (sync + offline catch-up). */
+export function notifyPendingInbound(myArkId: string, requests?: FriendRequest[]) {
+  const pending = (requests ?? readLocal()).filter(
+    r => sameArkId(r.toArkId, myArkId) && r.status === 'pending',
+  );
+  for (const req of pending) {
+    notifyInbound(req);
+  }
 }
 
 /**
@@ -177,7 +196,7 @@ export async function sendFriendRequest(opts: {
   }
 
   const all = await syncFriendRequests(from, opts.userId);
-  if (all.some(r => r.fromArkId === from && r.toArkId === found.arkId && r.status === 'pending')) {
+  if (all.some(r => sameArkId(r.fromArkId, from) && sameArkId(r.toArkId, found.arkId) && r.status === 'pending')) {
     return { ok: false, error: 'Friend request already sent' };
   }
 
@@ -285,7 +304,7 @@ export function subscribeFriendRequests(
         if (!existing.some(r => r.id === req.id)) {
           writeLocal([req, ...existing]);
         }
-        if (req.toArkId === myArkId && req.status === 'pending') {
+        if (sameArkId(req.toArkId, myArkId) && req.status === 'pending') {
           notifyInbound(req);
           handlers.onInbound?.(req);
         }
@@ -301,7 +320,7 @@ export function subscribeFriendRequests(
         if (i >= 0) list[i] = req;
         else list.unshift(req);
         writeLocal(list);
-        if (req.status === 'accepted' && req.fromArkId === myArkId) {
+        if (req.status === 'accepted' && sameArkId(req.fromArkId, myArkId)) {
           handlers.onAccepted?.(req);
         }
         if (req.status !== 'pending') {

@@ -77,6 +77,13 @@ export function parseReadFileTarget(text: string): { fileName: string | null; pa
 
 export function extractWriteFileContent(text: string): string | null {
   const t = String(text || '').trim();
+  if (!t) return null;
+  // Prefer a markdown fence when the user pastes code/notes to put in the file.
+  const fence = t.match(/```[^\n]*\n([\s\S]*?)```/);
+  if (fence?.[1] != null) {
+    const body = fence[1].replace(/\s+$/, '');
+    if (body.trim()) return `${body}\n`;
+  }
   const patterns = [
     /\bcontent\s+["“']([^"”']+)["”']/i,
     /\bwith\s+(?:the\s+)?(?:content|text)\s+["“']([^"”']+)["”']/i,

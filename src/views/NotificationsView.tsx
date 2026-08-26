@@ -57,6 +57,25 @@ export function NotificationsView() {
     () => (myArkId ? listPendingInbound(myArkId) : []),
     [myArkId, localTick],
   );
+  const inboundNotices = useMemo((): LocalNotification[] => {
+    if (!myArkId) return [];
+    const known = new Set(local.filter(n => n.friendRequestId).map(n => n.friendRequestId));
+    return inbound
+      .filter(req => !known.has(req.id))
+      .map(req => ({
+        id: `fr-in-${req.id}`,
+        kind: 'friend' as const,
+        title: `${req.fromName} wants to be friends`,
+        body: `${req.fromName} · ARK ID ${req.fromArkId} sent you a friend request.`,
+        createdAt: req.createdAt,
+        unread: true,
+        forArkId: myArkId,
+        friendRequestId: req.id,
+        fromArkId: req.fromArkId,
+        fromName: req.fromName,
+        fromAvatarUrl: req.fromAvatarUrl,
+      }));
+  }, [inbound, local, myArkId]);
 
   useEffect(() => {
     if (!myArkId) return;
@@ -81,8 +100,8 @@ export function NotificationsView() {
   }, []);
 
   const all = useMemo(() => {
-    return [...local, ...demos].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  }, [local, demos]);
+    return [...local, ...inboundNotices, ...demos].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }, [local, inboundNotices, demos]);
 
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();

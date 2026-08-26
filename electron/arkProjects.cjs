@@ -875,6 +875,24 @@ function writeGrantedFile(targetPath, content = '') {
   }
 }
 
+function renameGrantedPath(fromPath, toPath) {
+  const from = path.resolve(String(fromPath || ''));
+  const to = path.resolve(String(toPath || ''));
+  if (!from || !to) return { ok: false, error: 'Invalid path' };
+  if (!isAllowedExternalPath(from) || !isAllowedExternalPath(to)) {
+    return { ok: false, error: 'Path is outside an approved ARK workspace.' };
+  }
+  if (!fs.existsSync(from)) return { ok: false, error: 'Source file not found.' };
+  if (fs.existsSync(to)) return { ok: false, error: 'A file with that name already exists.' };
+  try {
+    fs.mkdirSync(path.dirname(to), { recursive: true });
+    fs.renameSync(from, to);
+    return { ok: true, path: to, from };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'Rename failed' };
+  }
+}
+
 function deleteGrantedFolderWindows(full) {
   const { execFileSync } = require('child_process');
   try {
@@ -1174,6 +1192,7 @@ module.exports = {
   deleteWorkspaceRoot,
   deleteGrantedFolder,
   writeGrantedFile,
+  renameGrantedPath,
   walkProjectFiles,
   walkProjectFilesPaced,
 };

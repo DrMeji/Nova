@@ -316,6 +316,18 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.160',
+    channel: 'stable' as const,
+    date: 'Aug 26, 2026',
+    title: 'Friend requests fix + solid update splash',
+    notes: [
+      'Inbound friend requests sync and show Accept/Decline even when Realtime is missed',
+      'One-time ARK ID rotation (DEV stays DEV); cloud ID is source of truth',
+      'Updating splash is a solid dark panel — no white outer frame or caption junk',
+      'Chat answer quality, web lookup, and context compaction improvements',
+    ],
+  },
+  {
     version: '0.1.156',
     channel: 'stable' as const,
     date: 'Aug 25, 2026',

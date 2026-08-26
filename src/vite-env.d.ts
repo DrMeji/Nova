@@ -223,6 +223,12 @@ declare global {
         media?: { kind: string; dataUrl: string; path?: string; libraryId?: string; real?: boolean };
       }>;
       engineGenerateCancel?: () => Promise<{ ok: boolean; error?: string }>;
+      webSearch?: (query: string) => Promise<{
+        ok: boolean;
+        text?: string;
+        sources?: { title: string; url: string }[];
+        error?: string;
+      }>;
       onEngineChunk?: (handler: (payload: { text?: string }) => void) => () => void;
       engineStatus?: () => Promise<import('@/lib/arkEngine').ArkEngineStatus>;
       engineStart?: () => Promise<import('@/lib/arkEngine').ArkEngineStatus>;
@@ -511,6 +517,10 @@ declare global {
         targetPath: string;
         content?: string;
       }) => Promise<{ ok: boolean; path?: string; error?: string }>;
+      workspaceRenamePath?: (payload: {
+        fromPath: string;
+        toPath: string;
+      }) => Promise<{ ok: boolean; path?: string; from?: string; error?: string }>;
       gitCloneOpen?: (payload: {
         projectId: string;
         projectName?: string;

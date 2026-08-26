@@ -26,7 +26,7 @@ import { ParkedNotice } from '@/components/ParkedNotice';
 import { PinLockGate } from '@/components/PinLockGate';
 import { isSocialParked, isRevealed, setRevealed, isCodeTabEnabled } from '@/lib/featurePark';
 import { runCleanBootIfNeeded } from '@/lib/clearSession';
-import { runSocialReleaseCleanIfNeeded } from '@/lib/socialCleanBoot';
+import { runSocialReleaseCleanIfNeeded, runArkIdRotationIfNeeded } from '@/lib/socialCleanBoot';
 import { isArkDevSession } from '@/lib/arkRuntime';
 import { getLocalPrefs } from '@/lib/localPrefs';
 import { startModelHuntCycle } from '@/lib/arkHuntBootstrap';
@@ -38,6 +38,7 @@ import { Loader2 } from 'lucide-react';
 import { RotatingTip } from '@/components/RotatingTip';
 
 runCleanBootIfNeeded();
+runArkIdRotationIfNeeded();
 runSocialReleaseCleanIfNeeded();
 
 function ensureDevFeatureAccess() {

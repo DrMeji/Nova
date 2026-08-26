@@ -19,6 +19,7 @@ const arkGguf = require('./arkGguf.cjs');
 const arkBrainApi = require('./arkBrainApi.cjs');
 const arkConfig = require('./arkConfig.cjs');
 const arkPcInventory = require('./arkPcInventory.cjs');
+const arkWebSearch = require('./arkWebSearch.cjs');
 
 const DEV_URL = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173';
 /** True only when Vite dev server is running (`npm run electron:dev`). Bat builds use dist/ instead. */
@@ -899,6 +900,14 @@ ipcMain.handle('ark:engine-generate-cancel', async () => {
   }
 });
 
+ipcMain.handle('ark:web-search', async (_e, payload) => {
+  try {
+    return await arkWebSearch.searchWeb(payload?.query || payload?.q || '');
+  } catch (err) {
+    return { ok: false, text: '', sources: [], error: err instanceof Error ? err.message : 'Web search failed' };
+  }
+});
+
 ipcMain.handle('ark:models-dir-info', async () => arkPaths.modelsDirInfo());
 ipcMain.handle('ark:models-dir-pick', async () => {
   const win = BrowserWindow.getFocusedWindow() || mainWindow;
@@ -1202,6 +1211,14 @@ ipcMain.handle('ark:workspace-write-file', async (_e, payload) => {
     return arkProjects.writeGrantedFile(payload?.targetPath, payload?.content ?? '');
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'write failed' };
+  }
+});
+
+ipcMain.handle('ark:workspace-rename-path', async (_e, payload) => {
+  try {
+    return arkProjects.renameGrantedPath(payload?.fromPath, payload?.toPath);
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'rename failed' };
   }
 });
 

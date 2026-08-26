@@ -531,14 +531,16 @@ function splashIconMarkup() {
 }
 
 function splashShellCss() {
+  // Opaque full-bleed panel — transparent / inset-card chrome on Windows paints a white
+  // outer frame, caption icons, and a bottom strip. Keep one solid dark surface.
   return `
-  html,body{margin:0;height:100%;background:transparent;color:#f2f2f3;font-family:"Segoe UI",system-ui,sans-serif;overflow:hidden;user-select:none;}
-  .wrap{box-sizing:border-box;height:calc(100% - 24px);margin:12px;padding:44px 40px 48px;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#0a0a0c;border-radius:28px;box-shadow:0 22px 64px rgba(0,0,0,0.55);}
+  html,body{margin:0;width:100%;height:100%;background:#0a0a0c;color:#f2f2f3;font-family:"Segoe UI",system-ui,sans-serif;overflow:hidden;user-select:none;}
+  .wrap{box-sizing:border-box;width:100%;height:100%;margin:0;padding:44px 40px 48px;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#0a0a0c;border-radius:0;box-shadow:none;}
   .logo-wrap{margin:0 0 28px;width:128px;height:128px;display:flex;align-items:center;justify-content:center;background:transparent;box-shadow:none;border:0;}
   .logo-wrap img{width:112px;height:112px;object-fit:contain;display:block;border:0;border-radius:0;background:transparent;}
   #label{font-size:16px;font-weight:600;letter-spacing:0.01em;margin:0 0 8px;text-align:center;color:#f2f2f3;}
   #pct{font-size:13px;font-weight:500;color:#a8a8b3;margin:0 0 22px;text-align:center;font-variant-numeric:tabular-nums;}
-  .track{width:340px;max-width:100%;height:12px;margin:0 auto;border-radius:999px;background:#3a3a44;overflow:hidden;}
+  .track{width:340px;max-width:calc(100% - 48px);height:12px;margin:0 auto;border-radius:999px;background:#3a3a44;overflow:hidden;}
   #fill{height:100%;width:0%;min-width:0;border-radius:999px;background:#f2f2f4;}
 `;
 }
@@ -935,12 +937,14 @@ async function runStandaloneSplash(argv) {
     width: 500,
     height: 360,
     frame: false,
+    thickFrame: false,
     resizable: false,
     maximizable: false,
     minimizable: false,
     fullscreenable: false,
-    transparent: true,
-    backgroundColor: '#00000000',
+    // Opaque — transparent frameless windows on Windows draw white chrome / caption junk.
+    transparent: false,
+    backgroundColor: '#0a0a0c',
     hasShadow: true,
     show: false,
     alwaysOnTop: true,
@@ -955,6 +959,11 @@ async function runStandaloneSplash(argv) {
     },
   });
   win.setMenuBarVisibility(false);
+  try {
+    win.removeMenu();
+  } catch {
+    /* ignore */
+  }
 
   try {
     await win.loadFile(splashPath);
@@ -1354,13 +1363,18 @@ function launchInstallHandoffSplash({ statusPath, expectedVersion, arkExe, shown
     '$trackH = 12',
     '$form = New-Object System.Windows.Forms.Form',
     `$form.Text = "ARK"`,
-    '$form.Size = New-Object System.Drawing.Size($formW, $formH)',
+    '$form.AutoScaleMode = "None"',
+    '$form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None',
+    '$form.ControlBox = $false',
+    '$form.MaximizeBox = $false',
+    '$form.MinimizeBox = $false',
+    '$form.ShowIcon = $false',
+    '$form.ClientSize = New-Object System.Drawing.Size($formW, $formH)',
     '$form.StartPosition = "CenterScreen"',
-    '$form.FormBorderStyle = "None"',
     '$form.BackColor = [System.Drawing.Color]::FromArgb(10, 10, 12)',
+    '$form.ForeColor = [System.Drawing.Color]::FromArgb(242, 242, 243)',
     '$form.TopMost = $true',
     '$form.ShowInTaskbar = $true',
-    'try { $form.Region = New-ArkRoundRegion $formW $formH 28 } catch {}',
     'if ($icoPath -and (Test-Path -LiteralPath $icoPath)) { try { $form.Icon = New-Object System.Drawing.Icon($icoPath) } catch {} }',
     'if (-not $form.Icon) {',
     '  try {',
@@ -1374,12 +1388,13 @@ function launchInstallHandoffSplash({ statusPath, expectedVersion, arkExe, shown
     '$pic.SizeMode = "Zoom"',
     '$pic.Size = New-Object System.Drawing.Size($picSize, $picSize)',
     '$pic.Location = New-Object System.Drawing.Point([int](($formW - $picSize) / 2), 48)',
-    '$pic.BackColor = [System.Drawing.Color]::Transparent',
+    '$pic.BackColor = [System.Drawing.Color]::FromArgb(10, 10, 12)',
     'if ($pngPath -and (Test-Path -LiteralPath $pngPath)) { try { $pic.Image = [System.Drawing.Image]::FromFile($pngPath) } catch {} }',
     'if (-not $pic.Image -and $form.Icon) { try { $pic.Image = $form.Icon.ToBitmap() } catch {} }',
     '$label = New-Object System.Windows.Forms.Label',
     '$label.Text = "Installing update"',
     '$label.ForeColor = [System.Drawing.Color]::FromArgb(242, 242, 243)',
+    '$label.BackColor = [System.Drawing.Color]::FromArgb(10, 10, 12)',
     '$label.Font = New-Object System.Drawing.Font("Segoe UI", 12, [System.Drawing.FontStyle]::Bold)',
     '$label.AutoSize = $false',
     '$label.TextAlign = "MiddleCenter"',
@@ -1388,6 +1403,7 @@ function launchInstallHandoffSplash({ statusPath, expectedVersion, arkExe, shown
     '$pct = New-Object System.Windows.Forms.Label',
     '$pct.Text = "8%"',
     '$pct.ForeColor = [System.Drawing.Color]::FromArgb(168, 168, 179)',
+    '$pct.BackColor = [System.Drawing.Color]::FromArgb(10, 10, 12)',
     '$pct.Font = New-Object System.Drawing.Font("Segoe UI", 11)',
     '$pct.AutoSize = $false',
     '$pct.TextAlign = "MiddleCenter"',
