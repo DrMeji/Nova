@@ -21,6 +21,7 @@ import {
   reportProjectProblems,
   type InspectFinding,
 } from '@/lib/projectInspect';
+import { looksLikeProjectDebugAsk } from '@/lib/chatProjectDebug';
 import { estimateTokens } from '@/lib/tokenUsage';
 
 export type StudioIntent =
@@ -78,6 +79,7 @@ const PACK_FILE_CHARS = 4_500;
 const PACK_FILE_CHARS_CODE = 2_600;
 const PACK_MAX_FILES_CODE = 12;
 const MODEL_TIMEOUT_MS = 55_000;
+const MODEL_TIMEOUT_CODE_MS = 90_000;
 
 function cleanAsk(message: string): string {
   return String(message || '')
@@ -105,6 +107,7 @@ export function classifyStudioIntent(
   if (!ask) return 'freeform';
   if (SMALLTALK_RE.test(ask) && ask.length < 24) return 'freeform';
 
+  if (looksLikeProjectDebugAsk(String(message || ''))) return 'debug';
   if (STUDIO_WIDER_RE.test(ask)) return 'wider';
   if (STUDIO_FIX_ASK_RE.test(ask) || /^(fix|how)\??$/i.test(ask) || /\bfix\s*#?\s*\d+\b/i.test(ask)) {
     return 'fix';
@@ -217,13 +220,20 @@ export function packStudioContext(input: StudioAnswerInput): {
   const focus = scanFocusForIntent(intent);
   let findings = (input.lastFindings && input.lastFindings.length && (intent === 'fix' || intent === 'recommend'))
     ? input.lastFindings
-    : collectProjectFindings(input.files, focus === 'wider' ? 'wider' : focus === 'security' ? 'security' : focus === 'ui' ? 'ui' : 'all');
+    : collectProjectFindings(input.files, focus === 'wider' ? 'wider' : focus === 'security' ? 'security' : focus === 'ui' ? 'ui' : 'all', ask);
 
-  const turnSize = classifyCodeTurnSize(ask, input.files);
-  const maxFiles = input.mode === 'code' ? PACK_MAX_FILES_CODE : turnSize === 'micro' ? 6 : turnSize === 'small' ? 12 : 24;
+  const handsFreeDebug = looksLikeProjectDebugAsk(input.userMessage);
+  const turnSize = handsFreeDebug ? 'full' : classifyCodeTurnSize(ask, input.files);
+  const maxFiles = input.mode === 'code'
+    ? (handsFreeDebug ? 16 : PACK_MAX_FILES_CODE)
+    : turnSize === 'micro' ? 6 : turnSize === 'small' ? 12 : 24;
   const picked = rankFilesForTurnPack(flat, ask, turnSize).slice(0, maxFiles);
-  const packBudget = input.mode === 'code' ? PACK_BUDGET_CODE : PACK_BUDGET;
-  const packFileChars = input.mode === 'code' ? PACK_FILE_CHARS_CODE : PACK_FILE_CHARS;
+  const packBudget = input.mode === 'code'
+    ? (handsFreeDebug ? 16_000 : PACK_BUDGET_CODE)
+    : PACK_BUDGET;
+  const packFileChars = input.mode === 'code'
+    ? (handsFreeDebug ? 3_600 : PACK_FILE_CHARS_CODE)
+    : PACK_FILE_CHARS;
   let used = 0;
   const chunks: string[] = [];
   for (const path of picked) {
@@ -246,7 +256,9 @@ export function packStudioContext(input: StudioAnswerInput): {
   const fileRule = input.planOnly
     ? 'PLAN ONLY. output a step-by-step plan. No @@@FILE blocks, no file writes. End with: Say "go implement" when you want me to build this.'
     : input.allowFileEdits
-      ? 'The user wants you to CHANGE THE CODE NOW. Emit @@@FILE blocks with COMPLETE file contents for every file you change. Do not only describe the change. Keep edits surgical. only files that need to change. After the files, add ONE short plain-English sentence (no code fences, no file dumps). Example: "Added the logo centered on screen."'
+      ? handsFreeDebug
+        ? 'Hands-free debug: start with 2-4 sentences naming the root cause (file in backticks + why it breaks). Then emit @@@FILE blocks with COMPLETE updated file contents for every file you change. Do not stop at a checklist. Keep edits surgical. After the files, add ONE short sentence on how to verify.'
+        : 'The user wants you to CHANGE THE CODE NOW. Emit @@@FILE blocks with COMPLETE file contents for every file you change. Do not only describe the change. Keep edits surgical. only files that need to change. After the files, add ONE short plain-English sentence (no code fences, no file dumps). Example: "Added the logo centered on screen."'
       : 'Do NOT write @@@FILE blocks. Do not dump whole files.';
 
   const system = [
@@ -324,7 +336,11 @@ function localScanAnswer(
     return reportProjectProblems(files, projectName, 'all');
   }
   if (intent === 'debug') {
-    return reportProjectProblems(files, projectName, 'debug', { focusFix: false });
+    const handsFree = looksLikeProjectDebugAsk(ask) || /\b(find why|root cause|fix it|fix this)\b/i.test(ask);
+    return reportProjectProblems(files, projectName, 'debug', {
+      focusFix: handsFree,
+      userQuestion: ask,
+    });
   }
   if (intent === 'file-detail') {
     return describeProjectInDetail(files, projectName);
@@ -402,9 +418,13 @@ export async function answerStudio(
   });
 
   try {
+    const routeKind = (input.mode === 'code' || input.allowFileEdits) ? 'coding' : 'chat';
+    const timeoutMs = routeKind === 'coding' && looksLikeProjectDebugAsk(input.userMessage)
+      ? MODEL_TIMEOUT_CODE_MS
+      : MODEL_TIMEOUT_MS;
     const routePromise = arkRoute({
       message: packed.prompt,
-      kind: 'chat',
+      kind: routeKind,
       preferredModelId: input.preferredModelId,
       preferredModelName: input.preferredModelName,
       preferredSource: input.preferredSource as 'local' | 'cloud' | 'auto' | undefined,
@@ -426,7 +446,7 @@ export async function answerStudio(
     const timed = await Promise.race([
       routePromise.then(r => ({ ok: true as const, routed: r })),
       new Promise<{ ok: false }>((resolve) => {
-        window.setTimeout(() => resolve({ ok: false }), MODEL_TIMEOUT_MS);
+        window.setTimeout(() => resolve({ ok: false }), timeoutMs);
       }),
     ]);
 
@@ -461,7 +481,8 @@ export async function answerStudio(
     }
 
     let spoken = stripStudioMeta(String(timed.routed.reply || streamed || '').trim());
-    const noAccess = /don'?t have (specific |any )?details|without more context|could you please provide more|i can'?t (see|access|read)|no (access|visibility) to (the )?files|project with the id/i.test(spoken);
+    const routerNoModel = /live model connected|install the default local brain|connect free capacity/i.test(spoken);
+    const noAccess = routerNoModel || /don'?t have (specific |any )?details|without more context|could you please provide more|i can'?t (see|access|read)|no (access|visibility) to (the )?files|project with the id/i.test(spoken);
     if (noAccess || !spoken || looksLikePromptEcho(spoken)) {
       if (!findings.length) findings = collectProjectFindings(input.files, 'all');
       spoken = stripStudioMeta(localScanAnswer(

@@ -8,6 +8,7 @@ const path = require('path');
 const fs = require('fs');
 const http = require('http');
 const arkProjects = require('./arkProjects.cjs');
+const arkSelfGuard = require('./arkSelfGuard.cjs');
 
 /** @type {Map<string, { url: string, pid?: number, child?: import('child_process').ChildProcess }>} */
 const devServersByCwd = new Map();
@@ -115,6 +116,9 @@ function resolveCwd(cwd) {
   const fallback = os.homedir();
   const p = path.resolve(String(cwd || fallback));
   if (!fs.existsSync(p)) return { ok: false, error: 'Working folder not found.' };
+  if (arkSelfGuard.isArkProtectedPath(p)) {
+    return { ok: false, error: arkSelfGuard.protectedPathError() };
+  }
   if (!arkProjects.isAllowedExternalPath(p)) {
     return { ok: false, error: 'That folder is outside ARK access. Enable Desktop/Documents or Full PC access in Settings.' };
   }

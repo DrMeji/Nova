@@ -20,6 +20,18 @@ const arkBrainApi = require('./arkBrainApi.cjs');
 const arkConfig = require('./arkConfig.cjs');
 const arkPcInventory = require('./arkPcInventory.cjs');
 const arkWebSearch = require('./arkWebSearch.cjs');
+const arkSelfGuard = require('./arkSelfGuard.cjs');
+
+function refreshArkSelfGuard() {
+  arkSelfGuard.init({
+    appPath: app.getAppPath(),
+    resourcesPath: process.resourcesPath,
+    execPath: process.execPath,
+    isPackaged: app.isPackaged,
+    allowDevSelfAccess: !app.isPackaged && process.env.ARK_DEV === '1',
+  });
+}
+refreshArkSelfGuard();
 
 const DEV_URL = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173';
 /** True only when Vite dev server is running (`npm run electron:dev`). Bat builds use dist/ instead. */
@@ -1363,11 +1375,22 @@ ipcMain.handle('ark:pick-browse-folder', async () => {
 
 ipcMain.handle('ark:read-text-file', async (_e, payload) => {
   try {
+    refreshArkSelfGuard();
     const target = typeof payload === 'string' ? payload : payload?.path;
     const maxBytes = typeof payload === 'object' && payload?.maxBytes ? payload.maxBytes : 2_000_000;
     return arkProjects.readTextFile(target, maxBytes);
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'read failed' };
+  }
+});
+
+ipcMain.handle('ark:is-protected-path', async (_e, targetPath) => {
+  try {
+    refreshArkSelfGuard();
+    const p = String(targetPath || '');
+    return { ok: true, protected: arkSelfGuard.isArkProtectedPath(p) };
+  } catch (err) {
+    return { ok: false, protected: false, error: err instanceof Error ? err.message : 'check failed' };
   }
 });
 

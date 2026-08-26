@@ -6,6 +6,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { app } = require('electron');
+const arkSelfGuard = require('./arkSelfGuard.cjs');
 
 const SKIP_DIRS = new Set([
   'node_modules', '.git', 'dist', 'build', 'out', '.next', 'coverage',
@@ -303,9 +304,17 @@ function resolveProjectRoot(projectId) {
   return resolveProjectDir(projectId);
 }
 
+function blockArkSelfPath(absPath) {
+  if (arkSelfGuard.isArkProtectedPath(absPath)) {
+    return { ok: false, error: arkSelfGuard.protectedPathError() };
+  }
+  return null;
+}
+
 function isAllowedExternalPath(absPath) {
   const p = path.resolve(String(absPath || ''));
   if (!p) return false;
+  if (arkSelfGuard.isArkProtectedPath(p)) return false;
   const pr = path.resolve(projectsRoot());
   if (isPathUnderRoot(p, pr)) return true;
   if (isUnderFullPcGrant(p)) return true;
@@ -630,6 +639,8 @@ async function openWorkspaceRoot(projectId, projectName, sourceDir, onProgress, 
       return { ok: false, error: resolved.error || 'That folder could not be opened.' };
     }
     const src = resolved.path;
+    const selfBlock = blockArkSelfPath(src);
+    if (selfBlock) return selfBlock;
     const folderName = resolved.name || path.basename(src);
     const hint = String(projectName || '').trim();
     const placeholder = /^(inspect|opened folder|new project|code project|code)$/i.test(hint);
@@ -1081,6 +1092,8 @@ function browseRoots() {
 function readTextFile(targetPath, maxBytes = 2_000_000) {
   const p = path.resolve(String(targetPath || ''));
   if (!p || !fs.existsSync(p)) return { ok: false, error: 'File not found' };
+  const selfBlock = blockArkSelfPath(p);
+  if (selfBlock) return selfBlock;
   if (!isAllowedExternalPath(p)) {
     return { ok: false, error: 'Path is outside an approved ARK workspace folder.' };
   }

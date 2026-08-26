@@ -68,5 +68,5 @@ echo  Build OK - launching ARK (dev profile ARK-Dev).
 echo  Settings - Testers is unlocked on source builds.
 echo  Close the app window when you are done testing.
 echo.
-start "" "%ELECTRON_EXE%" "%~dp0."
+start "" "%ELECTRON_EXE%" "%~dp0." --remote-debugging-port=9229
 exit /b 0

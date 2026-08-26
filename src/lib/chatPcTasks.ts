@@ -33,7 +33,7 @@ export function parseReadFileTarget(text: string): { fileName: string | null; pa
     return { fileName: quoted[1].replace(/[.,;:]+$/g, ''), parentHint: undefined };
   }
 
-  const readAbs = t.match(/\bread\s+(?:the\s+(?:file\s+)?)?([A-Za-z]:\\.+)$/i);
+  const readAbs = t.match(/\bread\s+(?:the\s+(?:file\s+)?)?([A-Za-z]:\\(?:[^\s"'<>|]+\\)*[^\s"'<>|]+)/i);
   if (readAbs?.[1]) {
     let path = readAbs[1].trim().replace(/[.,;:]+$/g, '');
     // "C:\...\folder file.ext" pasted from Explorer — prefer the last path segment as file.
@@ -49,7 +49,16 @@ export function parseReadFileTarget(text: string): { fileName: string | null; pa
 
   const winPath = t.match(/\b([A-Za-z]:\\(?:[^\s"'<>|]+\\)*[^\s"'<>|]+)\b/);
   if (winPath?.[1]) {
-    return { fileName: winPath[1].replace(/[.,;:]+$/g, ''), parentHint: undefined };
+    const path = winPath[1].replace(/[.,;:]+$/g, '');
+    const fileInFolder = t.match(
+      /\b(?:file\s+)?(?:called|named)\s+["'`]?([A-Za-z0-9._-]+)["'`]?/i,
+    ) || t.match(
+      /\b(?:read|show|open)\s+(?:me\s+)?(?:the\s+)?(?:file\s+)?["'`]?([A-Za-z0-9._-]+(?:\.[A-Za-z0-9]{1,12})?)["'`]?/i,
+    );
+    if (fileInFolder?.[1] && !/\.[A-Za-z0-9]{1,6}$/i.test(path)) {
+      return { fileName: normalizeDiskFileName(fileInFolder[1]), parentHint: path };
+    }
+    return { fileName: path, parentHint: undefined };
   }
 
   const fromDeleteParse = parseDeleteFileTarget(t.replace(/\b(?:read|open|show)\b/i, 'delete'));

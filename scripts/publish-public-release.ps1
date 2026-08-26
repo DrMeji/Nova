@@ -1,73 +1,61 @@
-# Publish installer-only assets to GitHub Releases (public and/or private).
-# Never uploads source. Run from the checkout after electron-builder.
 param(
   [Parameter(Mandatory = $true)]
   [string]$Tag,
-  [string[]]$Repos = @('DrMeji/Ark'),
-  [string]$Setup = 'release/ARK-Setup.exe',
-  [string]$Title = ''
+  [string[]]$Repos = @('DrMeji/Ark-Source', 'DrMeji/Ark')
 )
 
 $ErrorActionPreference = 'Stop'
-$root = Split-Path $PSScriptRoot -Parent
-Set-Location $root
 
-if ($Tag -notmatch '^v\d+\.\d+\.\d+') {
-  throw "Tag must look like v0.1.154 (got: $Tag)"
+if ($Tag -notmatch '^v\d+\.\d+\.\d+$') {
+  throw "Bad tag format: $Tag (expected vX.Y.Z)"
 }
 
-if (-not (Test-Path $Setup)) {
-  throw "Missing $Setup - run npm run electron:build first."
-}
+$releaseDir = Join-Path $PSScriptRoot '..' 'release'
+$assets = @(
+  'ARK-Setup.exe',
+  'ARK-Setup.exe.blockmap',
+  'latest.yml',
+  'ARK-Portable.exe'
+)
 
-$ver = $Tag.TrimStart('v')
-if (-not $Title) { $Title = "ARK $ver" }
-
-$files = @($Setup)
-foreach ($extra in @('release/ARK-Setup.exe.blockmap', 'release/latest.yml', 'release/ARK-Portable.exe')) {
-  if (Test-Path $extra) { $files += $extra }
-}
-
-$notes = @"
-## ARK $Tag
-
-Windows desktop installer.
-
-- ARK-Setup.exe - install ARK
-- After install: Settings -> Updates -> Check -> Download for newer builds
-
-Source code is not included in the public DrMeji/Ark repository.
-"@
-
-function Publish-ToRepo([string]$PublicRepo) {
-  if ($PublicRepo -eq 'DrMeji/Ark') {
-    $names = @(gh api "repos/$PublicRepo/contents" --jq '.[].name' 2>$null)
-    $blocked = @($names | Where-Object { $_ -match '^(src|electron|package\.json|dist|node_modules)$' })
-    if ($blocked.Count -gt 0) {
-      throw "Public repo $PublicRepo looks like it contains source ($($blocked -join ', ')). Aborting."
-    }
+function Get-ReleaseAssets {
+  $found = @()
+  foreach ($name in $assets) {
+    $p = Join-Path $releaseDir $name
+    if (Test-Path -LiteralPath $p) { $found += $p }
   }
-
-  # gh writes "release not found" to stderr; do not treat that as a terminating error.
-  $prevEap = $ErrorActionPreference
-  $ErrorActionPreference = 'Continue'
-  gh release view $Tag --repo $PublicRepo 1>$null 2>$null
-  $exists = ($LASTEXITCODE -eq 0)
-  $ErrorActionPreference = $prevEap
-
-  if ($exists) {
-    & gh release upload $Tag @files --repo $PublicRepo --clobber
-    if ($LASTEXITCODE -ne 0) { throw "Failed uploading assets to $PublicRepo $Tag (exit $LASTEXITCODE)" }
-    Write-Host "Updated assets on $PublicRepo $Tag"
-  } else {
-    & gh release create $Tag @files --repo $PublicRepo --title $Title --notes $notes
-    if ($LASTEXITCODE -ne 0) { throw "Failed creating release $PublicRepo $Tag (exit $LASTEXITCODE)" }
-    Write-Host "Created $PublicRepo $Tag"
-  }
-
-  Write-Host "Download: https://github.com/$PublicRepo/releases/tag/$Tag"
+  return $found
 }
 
 foreach ($repo in $Repos) {
-  Publish-ToRepo $repo
+  Write-Host "Publishing $Tag to $repo ..."
+
+  $existing = gh release view $Tag --repo $repo 2>$null
+  if ($LASTEXITCODE -eq 0) {
+    Write-Host "  Release $Tag already exists on $repo — uploading assets if any."
+    $files = Get-ReleaseAssets
+    if ($files.Count -gt 0) {
+      gh release upload $Tag @files --repo $repo --clobber
+    }
+    continue
+  }
+
+  $notes = @(
+    "ARK $Tag",
+    '',
+    'Download **ARK-Setup.exe** for the Windows installer.',
+    'Source code zip attachments on this public repo are README-only — not the app.'
+  ) -join "`n"
+
+  $files = Get-ReleaseAssets
+  if ($repo -eq 'DrMeji/Ark' -and $files.Count -eq 0) {
+    Write-Warning "  No installer files in release/ — creating release without assets (CI may upload later)."
+    gh release create $Tag --repo $repo --title "ARK $($Tag.TrimStart('v'))" --notes $notes
+  } elseif ($files.Count -gt 0) {
+    gh release create $Tag --repo $repo --title "ARK $($Tag.TrimStart('v'))" --notes $notes @files
+  } else {
+    gh release create $Tag --repo $repo --title "ARK $($Tag.TrimStart('v'))" --notes $notes
+  }
 }
+
+Write-Host "Done."

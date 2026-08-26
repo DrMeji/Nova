@@ -6,6 +6,7 @@ import { looksLikeBuildStart } from '@/lib/chatStudio';
 import { looksLikeImplementGo, isPlanPrefixedMessage } from '@/lib/chatPlanMode';
 import { looksLikePromptEcho } from '@/lib/chatHistory';
 import { looksLikeConversationalPlanningAsk, wantsPlanningOnly } from '@/lib/chatIdeaIntent';
+import { looksLikeProjectDebugAsk } from '@/lib/chatProjectDebug';
 
 export const NO_WORKSPACE_MSG =
   'No workspace yet. Use **+ → Open folder** or name a folder on your Desktop (turn on access in **Settings → Security**).\n\nIf you want to talk through an app idea first, just keep chatting. say **lets build this** only when you want files on disk.';
@@ -126,6 +127,7 @@ export function chatTurnAllowsFileEdits(content: string, composerMode: ComposerA
   if (modeBlocksFileWrites(mode, content)) return false;
   if (looksLikePromptEcho(content)) return false;
   if (wantsPlanningOnly(content) || looksLikeConversationalPlanningAsk(content)) return false;
+  if (looksLikeProjectDebugAsk(content)) return true;
   if (looksLikeImplementGo(content) || looksLikeBuildStart(content) || looksLikeCodeEditAsk(content)) {
     return true;
   }

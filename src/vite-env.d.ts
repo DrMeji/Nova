@@ -596,6 +596,7 @@ declare global {
         size?: number;
         error?: string;
       }>;
+      isProtectedPath?: (targetPath: string) => Promise<{ ok: boolean; protected?: boolean; error?: string }>;
       readDataUrl?: (payload: string | { path: string; maxBytes?: number }) => Promise<{
         ok: boolean;
         path?: string;

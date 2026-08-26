@@ -110,6 +110,11 @@ import { runProjectMultiAgent, wantsMultiAgentTurn } from '@/lib/arkMultiAgent';
 import { beginChatInflight, endChatInflight, hasChatInflight } from '@/lib/chatInflight';
 import { looksLikeNsfwAsk, nsfwBlockedReply } from '@/lib/nsfwGate';
 import {
+  arkSelfHarmBlockedReply,
+  isArkProtectedPathOnDisk,
+  looksLikeArkSelfHarmAsk,
+} from '@/lib/arkSelfGuard';
+import {
   formatMcpToolsHelp,
   parseMcpCallIntent,
   resolveMcpToolServer,
@@ -128,6 +133,12 @@ import {
   looksLikeRestorePointAsk,
   parseReadFileTarget,
 } from '@/lib/chatPcTasks';
+import {
+  looksLikeProjectDebugAsk,
+  parseProjectDebugTarget,
+  folderPathFromDebugTarget,
+} from '@/lib/chatProjectDebug';
+import { resolveDiskParentPath } from '@/lib/diskPathResolve';
 import {
   inferAgentCommand,
   looksLikeRuntimeInstallAsk,
@@ -2630,6 +2641,11 @@ export function AIChat() {
       notifyChatDone(activeChatId);
     };
 
+    if (looksLikeArkSelfHarmAsk(content)) {
+      await finishPlainReply(arkSelfHarmBlockedReply());
+      return;
+    }
+
     // Recover folder files from every source before any model call.
     let resolvedStudio: Awaited<ReturnType<typeof resolveStudioFiles>>;
     try {
@@ -3292,6 +3308,7 @@ export function AIChat() {
       && !looksLikeConversationalPlanningAsk(content)
       && !wantsPlanningOnly(content)
       && !looksLikeInPlaceRebuildAsk(intentText)
+      && !looksLikeProjectDebugAsk(content)
       && (looksLikeFolderCatalogAsk(content) || looksLikeProjectsInventoryAsk(content))
     ) {
       if (!hasFolderAccessGrant()) {
@@ -3765,6 +3782,7 @@ export function AIChat() {
       && looksLikeFolderPathAsk(content)
       && !shouldFullImportFolderAsk(content)
       && !looksLikePcExploreAsk(content)
+      && !looksLikeProjectDebugAsk(content)
     ) {
       if (!hasFolderAccessGrant()) {
         await finishPlainReply(GRANT_OFF_FOLDER_MSG);
@@ -3838,11 +3856,93 @@ export function AIChat() {
       return;
     }
 
+    // Hands-free debug: problem + path → open project on disk, then inspect/fix (no separate "work on" step).
+    if (
+      (mode === 'general' || mode === 'code')
+      && looksLikeProjectDebugAsk(content)
+      && !hasActiveWorkspace({
+        files: resolvedStudio.files,
+        projectId: resolvedStudio.projectId || chatStudioProjectIdRef.current,
+        diskRoot: resolvedStudio.diskRoot || chatStudioDiskRootRef.current,
+      })
+    ) {
+      if (!hasFolderAccessGrant()) {
+        await finishPlainReply(GRANT_OFF_FOLDER_MSG);
+        return;
+      }
+      const debugTarget = parseProjectDebugTarget(content);
+      if (!debugTarget) {
+        await finishPlainReply(
+          'Paste the project folder path (for example `C:\\Users\\you\\Desktop\\Projects\\MyApp`) and describe what is broken. I will open it, read the code, and help fix it.',
+        );
+        return;
+      }
+      await syncWorkspaceGrantsFromPrefs();
+      let openPath: string | null = folderPathFromDebugTarget(debugTarget);
+      if (!openPath && debugTarget.kind === 'folder') {
+        const located = await resolveScopedFolderPath(debugTarget.folderRef);
+        if (located.ok && located.path) openPath = located.path;
+      }
+      if (!openPath && debugTarget.kind === 'hint') {
+        openPath = await resolveDiskParentPath({ parentHint: debugTarget.parentHint });
+      }
+      if (!openPath) {
+        await finishPlainReply(
+          'I could not find that folder. Paste the full path like `C:\\Users\\you\\Desktop\\Projects\\MyApp`, or say **Let\'s work on MyApp**.',
+        );
+        return;
+      }
+      const pathStat = await window.arkDesktop?.pathStat?.(openPath);
+      if (pathStat?.ok && pathStat.isFile) {
+        openPath = openPath.replace(/[/\\][^/\\]+$/, '');
+      }
+      if (await isArkProtectedPathOnDisk(openPath)) {
+        await finishPlainReply(arkSelfHarmBlockedReply());
+        return;
+      }
+      setMessages(prev => prev.map(m => (
+        m.id === assistantId
+          ? { ...m, content: '__generating__:chat:Opening project folder…' }
+          : m
+      )));
+      const opened = await openFolderInChat(openPath);
+      if (!opened.ok || !opened.files) {
+        const err = opened.error && opened.error !== 'canceled'
+          ? opened.error
+          : 'Could not open that project folder.';
+        await finishPlainReply(err);
+        return;
+      }
+      resolvedStudio.files = opened.files;
+      resolvedStudio.projectId = opened.projectId || resolvedStudio.projectId;
+      resolvedStudio.name = opened.name || resolvedStudio.name;
+      resolvedStudio.diskRoot = opened.root || resolvedStudio.diskRoot;
+      setChatStudioFiles(opened.files);
+      chatStudioFilesRef.current = opened.files;
+      if (opened.projectId) {
+        setChatStudioProjectId(opened.projectId);
+        chatStudioProjectIdRef.current = opened.projectId;
+      }
+      if (opened.root) {
+        setChatStudioDiskRoot(opened.root);
+        chatStudioDiskRootRef.current = opened.root;
+      }
+      if (opened.name) renameChat(activeChatId, opened.name);
+      // Warm dev server for Vite projects so Preview is one tap away after fixes.
+      if (opened.root && isViteProject(opened.files)) {
+        void ensureViteDevServer(opened.root).then((dev) => {
+          if (dev.ok && dev.url) setPreviewUrl(dev.url);
+        });
+      }
+      // Fall through to inspect / code-edit below with files bound.
+    }
+
     // Capability asks ("can you edit files?", "what can you do?") — answer as ARK, not a
     // generic programming tutorial from the local model.
     if (
       (mode === 'general' || mode === 'code')
       && looksLikeArkCapabilityAsk(content)
+      && !looksLikeProjectDebugAsk(content)
       && !parseMcpCallIntent(content)
     ) {
       finishAgentReply(

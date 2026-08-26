@@ -193,6 +193,13 @@ export function rankFilesForTurnPack(
     if (/(^|\/)package\.json$/i.test(k)) bump(k, 14);
   }
 
+  // Bug-hunt hints: prefer chat/generating/stop-related sources when the user describes UI bugs.
+  if (/\b(stop|generating|stuck|inflight|streaming|button|chat)\b/i.test(userMessage)) {
+    for (const k of keys) {
+      if (/AIChat\.tsx$/i.test(k) || /chatInflight/i.test(k) || /chatAgent/i.test(k)) bump(k, 32);
+    }
+  }
+
   if (size === 'micro') {
     if (/\b(background|color|colour|css|style)\b/i.test(userMessage) && css) bump(css, 30);
     if (html) bump(html, 14);

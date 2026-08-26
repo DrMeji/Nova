@@ -9,6 +9,7 @@ import { looksLikeAddFileDestinationClarify } from '@/lib/chatDiskIntent';
 import { looksLikeConversationalPlanningAsk, looksLikeGreenfieldIdea } from '@/lib/chatIdeaIntent';
 import { isProjectCreateBrief } from '@/lib/chatCreateBrief';
 import { isBlockedDiskTargetName } from '@/lib/projectNames';
+import { looksLikeProjectDebugAsk } from '@/lib/chatProjectDebug';
 
 /** "What projects do I have on my PC / desktop?". not installed-apps asks. */
 export function looksLikeProjectsInventoryAsk(text: string): boolean {
@@ -201,6 +202,7 @@ export function parseWorkOnFolderName(text: string): string | null {
 /** Full file import only when the user clearly wants deep code work. not a listing ask. */
 export function shouldFullImportFolderAsk(text: string): boolean {
   const t = String(text || '').trim();
+  if (looksLikeProjectDebugAsk(t)) return true;
   if (looksLikeFolderCatalogAsk(t)) return false;
   if (WORK_ON_FOLDER_RE.test(t)) return true;
   if (/\b(?:folder|project)\b/i.test(t) && /\b(work\s+on|start\s+work|want\s+to\s+work|begin\s+work)\b/i.test(t)) {

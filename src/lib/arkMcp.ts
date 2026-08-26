@@ -194,20 +194,24 @@ export function formatArkCapabilitiesHelp(opts?: {
   if (isFileCapabilityFocus(question)) {
     const lead = wantsYesNo
       ? 'Yes.'
-      : 'Yes — I can work with files on this PC from Chat.';
+      : 'Yes. I can work with files on this PC from Chat.';
     return [
       lead,
       '',
       'I can create, read, edit, rename, and delete files or folders in places you have granted (Desktop, Documents, Downloads, and bound project folders).',
       '',
-      'To do something useful next, tell me:',
-      '1. **Where** the file or folder is (full path, or Desktop / Documents / a project name)',
-      '2. **What** you want done (rewrite text, rename a PNG, add a new file, change code, etc.)',
+      'You can answer in one message or step by step. Include:',
+      '1. **Where** the file or folder is (paste a full path like `C:\\Users\\you\\Desktop\\Projects\\MyApp`, or say Desktop / Documents / a project name)',
+      '2. **What** you want done (read it, rename it, change text inside, create a new file, etc.)',
       '3. **Any details** that matter (new name, what to put inside, what to keep)',
       '',
+      '**One-shot example:** *In `C:\\Users\\you\\Desktop\\Projects\\ARK-GitHub`, read `.cursorrules` and tell me what is in it.*',
+      '',
+      '**Rename example:** *Rename `draft.md` to `notes.md` in Desktop\\Projects\\MyApp.*',
+      '',
       hasProject
-        ? 'This chat already has a folder bound, so you can say something like *edit config.json* or *rename logo.png to brand.png*.'
-        : 'If it is not under Desktop/Documents yet, say the path or open the folder in Chat first.',
+        ? 'This chat already has a folder bound, so you can also say *edit config.json* or *rename logo.png to brand.png* without repeating the path.'
+        : 'If it is not under Desktop/Documents yet, paste the path or open the folder in Chat first.',
       hasFolder ? '' : 'If folder access is off, turn it on in **Settings → Security**.',
     ].filter(Boolean).join('\n');
   }
@@ -218,17 +222,17 @@ export function formatArkCapabilitiesHelp(opts?: {
     'I read your message and either run a built-in action (files, projects, MCP) or answer with your local / cloud brain.',
     '',
     '**Files & folders**',
-    `• **Create / edit / rename / delete** — point me at a path or project folder and say what to change.${hasFolder ? '' : ' Enable Desktop/Documents in **Settings → Security** first.'}`,
-    `• **Create a single file** — e.g. *create Notes.md on my Desktop with …*`,
-    `• **Scaffold a project** — e.g. *build a landing page called MyApp* (writes under Desktop\\Projects).${hasProject ? ' This chat already has a project bound.' : ''}`,
+    `• **Create / edit / rename / delete**: point me at a path or project folder and say what to change.${hasFolder ? '' : ' Enable Desktop/Documents in **Settings → Security** first.'}`,
+    `• **Create a single file**: e.g. *create Notes.md on my Desktop with …*`,
+    `• **Scaffold a project**: e.g. *build a landing page called MyApp* (writes under Desktop\\Projects).${hasProject ? ' This chat already has a project bound.' : ''}`,
     '',
     '**Built-in tools**',
-    '• **ark.project.read / write** — read and update granted folders',
-    '• **ark.media.image** — Image tab',
-    '• **ark.brain.generate** — your pinned local or cloud model',
-    '• **ark.mcp.connect** — external MCP servers in **Settings → MCP**',
+    '• **ark.project.read / write**: read and update granted folders',
+    '• **ark.media.image**: Image tab',
+    '• **ark.brain.generate**: your pinned local or cloud model',
+    '• **ark.mcp.connect**: external MCP servers in **Settings → MCP**',
     '',
-    'Ask directly when you want disk work — for example *create a file…*, *rename this.png to…*, or *edit README*. The local model alone does not touch disk without those intents.',
+    'Ask directly when you want disk work, for example *create a file…*, *rename this.png to…*, or *edit README*. The local model alone does not touch disk without those intents.',
     '',
     'Say **list MCP tools** for registered external servers.',
   ];

@@ -61,7 +61,7 @@ function parseRenameFileTarget(text: string): {
   const parentHint = extractDiskParentHintFromText(t) || extractAddFileParentHint(t);
   // rename foo.png to bar.png / rename "a" to "b"
   const m = t.match(
-    /\brename\b\s+(?:the\s+)?(?:file\s+|image\s+|photo\s+)?["'`]?([A-Za-z0-9._-]+\.[A-Za-z0-9]{1,12}|[A-Za-z0-9._-]+)["'`]?\s+(?:to|as)\s+["'`]?([A-Za-z0-9._-]+\.[A-Za-z0-9]{1,12}|[A-Za-z0-9._-]+)["'`]?/i,
+    /\brename\b\s+(?:the\s+)?(?:file\s+|image\s+|photo\s+)?["'`]?([A-Za-z0-9._-]+(?:\.[A-Za-z0-9]{1,12})?)["'`]?\s+(?:to|as)\s+["'`]?([A-Za-z0-9._-]+(?:\.[A-Za-z0-9]{1,12})?)["'`]?/i,
   );
   if (m) {
     return {

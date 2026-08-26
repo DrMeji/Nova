@@ -158,6 +158,7 @@ contextBridge.exposeInMainWorld('arkDesktop', {
   pcInstalledApps: (payload) => ipcRenderer.invoke('ark:pc-installed-apps', payload || {}),
   pathStat: (targetPath) => ipcRenderer.invoke('ark:path-stat', targetPath),
   readTextFile: (payload) => ipcRenderer.invoke('ark:read-text-file', payload),
+  isProtectedPath: (targetPath) => ipcRenderer.invoke('ark:is-protected-path', targetPath),
   readDataUrl: (payload) => ipcRenderer.invoke('ark:read-data-url', payload),
   projectSearch: (payload) => ipcRenderer.invoke('ark:project-search', payload),
   projectDeleteFiles: (projectId) => ipcRenderer.invoke('ark:project-delete-files', projectId),

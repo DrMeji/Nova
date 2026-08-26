@@ -118,10 +118,10 @@ function modePrefersCloud(mode: AiModePref) {
 }
 
 import { isTemplateEngineReply } from '@/lib/codeBuildHonesty';
-import { codingOutputIncomplete } from '@/lib/projectCodeEdit';
+import { codingOutputIncomplete, stripFileBlocks } from '@/lib/projectCodeEdit';
 
 function isStrongLocal(source?: string) {
-  return source === 'ark-gguf' || source === 'ark-media';
+  return source === 'ark-gguf' || source === 'ark-engine' || source === 'ark-media';
 }
 
 function historyFor(opts: ArkRouteOpts): RouterChatTurn[] {
@@ -171,10 +171,24 @@ async function tryLocalChat(
       const reply = cleaned || rawText;
       if (!reply || isTemplateEngineReply(reply)) return null;
       if (kind === 'coding' && codingOutputIncomplete(rawText, message)) {
+        const prose = stripFileBlocks(cleaned || rawText).trim();
+        if (prose.length >= 60 && !looksLikePromptEcho(prose) && !isTemplateEngineReply(prose)) {
+          return {
+            reply: prose,
+            media: result.media,
+            modelName: result.modelName || 'ARK Engine',
+            modelId: id || result.modelName,
+            source: result.source || 'ark-engine',
+            tier: 'local-free',
+            attempted,
+            continued: hasContinuity(history),
+            ipcFallback: 'ipcFallback' in result ? result.ipcFallback : undefined,
+          };
+        }
         onAttemptReset?.();
         return null;
       }
-      if (result.source === 'ark-engine' && !result.media) {
+      if (result.source === 'ark-engine' && !result.media && isTemplateEngineReply(reply)) {
         void import('@/lib/arkHuntBootstrap').then(m =>
           m.installNextWhenCurrentRanOut({
             kind,

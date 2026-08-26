@@ -33,6 +33,9 @@ const ENTRY_CANDIDATES = [
 const INSPECT_BUDGET = 8_000;
 const INSPECT_FILE_CHARS = 2_400;
 const INSPECT_MAX_FILES = 10;
+const INSPECT_BUDGET_DEBUG = 14_000;
+const INSPECT_FILE_CHARS_DEBUG = 3_200;
+const INSPECT_MAX_FILES_DEBUG = 16;
 /** Cap regex scan so 300+ file uploads don’t freeze the desktop. */
 const SCAN_MAX_FILES = 56;
 
@@ -79,7 +82,7 @@ export function isImproveAsk(message: string): boolean {
 export function isInspectAsk(message: string): boolean {
   return isExplainAsk(message)
     || isImproveAsk(message)
-    || /\b(look at (this|it|the code|the app|the project)|take a look|debug( this)?|inspect|what do you see|what'?s (wrong|broken)|what is broken|find (the |a )?(bug|problem|issue|issues)|review (this|the (code|app|project))|audit|tell me what you see)\b/i.test(
+    || /\b(look at (this|it|the code|the app|the project)|take a look|debug( this)?|inspect|what do you see|what'?s (wrong|broken)|what is broken|find (the |a )?(bug|problem|issue|issues)|review (this|the (code|app|project))|audit|tell me what you see|not working|won't work|doesn't work|doesnt work|nothing happens|having (?:a )?problem|having trouble|figure out why|why (?:is|won't|doesn't))\b/i.test(
       message,
     );
 }
@@ -247,7 +250,26 @@ export function pathsMentionedInText(text: string, files: ProjectFileMap): strin
   return [...found];
 }
 
+/** Higher limits when the user is debugging a real bug (not a quick overview). */
+export function inspectLimitsForMessage(message: string): {
+  budget: number;
+  fileChars: number;
+  maxFiles: number;
+} {
+  const t = String(message || '');
+  const debuggy = /\b(debug|fix|broken|bug|not working|won't|doesn't|stuck|crash|error|find why)\b/i.test(t);
+  if (debuggy) {
+    return {
+      budget: INSPECT_BUDGET_DEBUG,
+      fileChars: INSPECT_FILE_CHARS_DEBUG,
+      maxFiles: INSPECT_MAX_FILES_DEBUG,
+    };
+  }
+  return { budget: INSPECT_BUDGET, fileChars: INSPECT_FILE_CHARS, maxFiles: INSPECT_MAX_FILES };
+}
+
 export function pickFilesForInspect(files: ProjectFileMap, message: string): string[] {
+  const limits = inspectLimitsForMessage(message);
   const flat = flattenProjectFiles(files);
   const keys = Object.keys(flat).filter(k => !isBuildArtifactPath(k));
   if (!keys.length) return [];
@@ -267,6 +289,7 @@ export function pickFilesForInspect(files: ProjectFileMap, message: string): str
     if (/(^|\/)package\.json$/i.test(path)) bump(path, 16);
     if (/(engine|models|main|app|crypto|stocks|risk|paper)\.(py|ts|js|swift|kt)$/i.test(lower)) bump(path, 14);
     if (/electron\/main\.(ts|js)$/i.test(lower)) bump(path, 12);
+    if (/\b(stop|generating|inflight|stuck)\b/i.test(message) && /AIChat|chatInflight|chatAgent/i.test(path)) bump(path, 24);
     for (const w of words) {
       if (lower.includes(w)) bump(path, 12);
       if (body.includes(w)) bump(path, 4);
@@ -277,7 +300,7 @@ export function pickFilesForInspect(files: ProjectFileMap, message: string): str
   const ranked = [...scores.entries()].sort((a, b) => b[1] - a[1]).map(([p]) => p);
   const picked: string[] = [];
   for (const p of ranked) {
-    if (picked.length >= INSPECT_MAX_FILES) break;
+    if (picked.length >= limits.maxFiles) break;
     if (!picked.includes(p)) picked.push(p);
   }
   if (!picked.length) {
@@ -307,6 +330,43 @@ export function scanProjectFindings(files: ProjectFileMap, message: string): Ins
       ...ENTRY_CANDIDATES.filter(p => flat[p]),
       ...eligible.filter(p => /\.(tsx?|jsx?|py|html?|css|swift|kt|md)$/i.test(p)).slice(0, 24),
     ])].slice(0, SCAN_MAX_FILES);
+
+  // Chat UI runtime bugs (Stop stuck, generating chrome, inflight counters).
+  if (/\b(stop|generating|stuck|inflight|thinking)\b/i.test(message)) {
+    for (const path of scanPaths) {
+      if (!/(^|\/)AIChat\.tsx$/i.test(path.replace(/\\/g, '/'))
+        && !/(^|\/)chatInflight\.ts$/i.test(path.replace(/\\/g, '/'))) {
+        continue;
+      }
+      const raw = flat[path];
+      if (!raw) continue;
+      const content = String(raw);
+      const lines = content.split('\n');
+      lines.forEach((line, i) => {
+        if (/generatingRef\.current\s*=\s*true/.test(line)) {
+          push(path, `Line ${i + 1}: sets generatingRef — Stop can stick if a turn exits without clearing generatingRef/activeGenChatIdRef.`);
+        }
+        if (/setGenerating\s*\(\s*true\s*\)/.test(line)) {
+          push(path, `Line ${i + 1}: setGenerating(true) — pair with false on finish, Stop, and blank New Chat navigation.`);
+        }
+        if (/beginChatInflight\s*\(\s*\)/.test(line)) {
+          const tail = lines.slice(i, i + 40).join('\n');
+          if (!/endChatInflight\s*\(\s*\)/.test(tail)) {
+            push(path, `Line ${i + 1}: beginChatInflight without nearby endChatInflight — can leave Stop/queue stuck app-wide.`);
+          }
+        }
+        if (/__generating__:chat:/.test(line) && /Thinking|Opening project|Reading /.test(line)) {
+          push(path, `Line ${i + 1}: sets __generating__ placeholder — must finalize or replace on every exit path (including errors).`);
+        }
+      });
+      if (/(^|\/)AIChat\.tsx$/i.test(path.replace(/\\/g, '/'))
+        && /activeGenChatIdRef/.test(content)
+        && /route\.chatId/.test(content)
+        && !/activeGenChatIdRef\.current\s*=\s*null/.test(content)) {
+        push(path, 'activeGenChatIdRef is used but never cleared to null — blank New Chat can inherit another thread\'s Stop state.');
+      }
+    }
+  }
 
   for (const path of scanPaths) {
     const raw = flat[path];
@@ -631,11 +691,18 @@ export function reportProjectFocusAsk(
 export function collectProjectFindings(
   files: ProjectFileMap,
   focus: ProblemReportFocus = 'all',
+  userMessage?: string,
 ): InspectFinding[] {
-  const scanMsg = focus === 'wider'
-    ? 'wider scan find more issues security eval exec secrets innerHTML child_process shell'
-    : 'find problems debug bugs issues security ui';
+  const scanMsg = String(userMessage || '').trim()
+    || (focus === 'wider'
+      ? 'wider scan find more issues security eval exec secrets innerHTML child_process shell'
+      : 'find problems debug bugs issues security ui');
   let findings = scanProjectFindings(files, scanMsg);
+  if (/\b(stop|generating|stuck|inflight)\b/i.test(scanMsg)) {
+    const chatFirst = findings.filter(f => /AIChat|chatInflight|generatingRef|inflight/i.test(`${f.path} ${f.detail}`));
+    const rest = findings.filter(f => !chatFirst.includes(f));
+    findings = [...chatFirst, ...rest];
+  }
   if (focus === 'security') findings = findings.filter(f => isSecurityFinding(f.detail));
   else if (focus === 'ui') findings = findings.filter(f => isUiFinding(f.detail, f.path));
   return findings;
@@ -658,17 +725,18 @@ export function buildInspectPrompt(
   projectName?: string,
   mode: 'debug' | 'explain' | 'improve' = 'debug',
 ): string {
+  const limits = inspectLimitsForMessage(userMessage);
   const flat = flattenProjectFiles(files);
   let used = 0;
   const chunks: string[] = [];
   for (const path of picked) {
     const content = flat[path];
     if (!content) continue;
-    const body = content.length > INSPECT_FILE_CHARS
-      ? `${content.slice(0, INSPECT_FILE_CHARS)}\n/* …truncated… */`
+    const body = content.length > limits.fileChars
+      ? `${content.slice(0, limits.fileChars)}\n/* …truncated… */`
       : content;
     const block = `--- ${path} ---\n${body}`;
-    if (used + block.length > INSPECT_BUDGET) break;
+    if (used + block.length > limits.budget) break;
     chunks.push(block);
     used += block.length;
   }
