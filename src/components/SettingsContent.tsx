@@ -42,6 +42,7 @@ import { setCloudProviderEnabled } from '@/lib/cloudSources';
 import { getBrainUrl } from '@/lib/brainUrl';
 import { SettingsSystemHealth } from '@/components/SettingsSystemHealth';
 import { isArkDevSession } from '@/lib/arkRuntime';
+import { isBetaSettingsEnabled, isTestersSettingsEnabled } from '@/lib/featurePark';
 import { BrandMark, StatusCheck } from '@/components/BrandMark';
 import { useSocial } from '@/context/SocialContext';
 
@@ -124,9 +125,12 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
   const { blockedUsers, unblockFriend, refreshBlocked } = useSocial();
   const { theme, setTheme } = useTheme();
   const { navigate } = useRouter();
-  const [activeSection, setActiveSection] = useState(
-    initialSection && initialSection !== 'mcp' ? initialSection : 'account',
-  );
+  const [activeSection, setActiveSection] = useState(() => {
+    const s = initialSection && initialSection !== 'mcp' ? initialSection : 'account';
+    if (s === 'testers' && !isTestersSettingsEnabled()) return 'account';
+    if (s === 'beta' && !isBetaSettingsEnabled()) return 'account';
+    return s;
+  });
   const [prefs, setPrefs] = useState<LocalPrefs>(() => getLocalPrefs());
   const [displayName, setDisplayName] = useState(
     () => getLocalPrefs().displayName || profile?.display_name || 'Guest',
@@ -489,15 +493,15 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
     return entry.version === appVersion;
   }).slice(0, 1);
 
-  const navSections = useMemo(() => {
-    const dev = isArkDevSession();
-    return SECTIONS.map(section => {
-      if (dev && (section.id === 'testers' || section.id === 'beta')) {
-        return { ...section, comingSoon: false };
-      }
-      return section;
-    });
-  }, []);
+  const navSections = useMemo(() => SECTIONS.map(section => {
+    if (section.id === 'testers') {
+      return { ...section, comingSoon: !isTestersSettingsEnabled() };
+    }
+    if (section.id === 'beta') {
+      return { ...section, comingSoon: !isBetaSettingsEnabled() };
+    }
+    return section;
+  }), []);
 
   return (
     <div ref={settingsRootRef} className="flex h-full min-h-0 min-w-0 animate-fade-in">

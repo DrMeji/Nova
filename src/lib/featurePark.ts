@@ -57,13 +57,23 @@ export function isCallUiEnabled(): boolean {
   return !isSocialParked('call');
 }
 
-/** Video tab — Pollinations / motion-still pipeline is wired and tested. */
+/** Video tab parked until generative video is product-ready. */
 export function isVideoTabEnabled(): boolean {
-  return true;
+  return false;
 }
 
 /** Voice tab — re-export so AppShell / Search can park it next to Video. */
 export { isVoiceTabEnabled } from '@/lib/voiceMode';
+
+/** Settings → Testers (reveal parked features). */
+export function isTestersSettingsEnabled(): boolean {
+  return false;
+}
+
+/** Settings → Beta channel opt-in. */
+export function isBetaSettingsEnabled(): boolean {
+  return false;
+}
 
 /** Code workspace tab. Explorer + editor + preview for builds. */
 export function isCodeTabEnabled(): boolean {

@@ -11,7 +11,7 @@ Last updated: 2026-08-26 (v0.1.162 hardening pass)
 | **P2** Model routing | **Working** — ARK Auto: local → free cloud → paid; large-repo coding prefers cloud |
 | **P3** File ops | **Working** — read/rename/create/delete routing + disk guards |
 | **P4** Preview / localhost | **Working** — Vite warm-start + auto Preview window on debug open |
-| **P5** Voice / Video | **Working** — Video tab on (Pollinations/HF/motion-still); Voice Web Speech loop |
+| **P5** Voice / Video | **Parked** — tabs hidden; enable via `featurePark` when ready |
 | **P6** Social | **Working** — friend requests v0.1.160; apply Supabase migration on prod if needed |
 | **P7** Ship polish | **Working** — releases on Ark-Source + public Ark; CI needs `ARK_PUBLIC_RELEASE_TOKEN` for auto public publish |
 

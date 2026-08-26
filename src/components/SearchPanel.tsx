@@ -6,7 +6,12 @@ import {
 import { useRouter, type Route } from '@/context/RouterContext';
 import { useRecentProjects } from '@/context/RecentProjectsContext';
 import { CLOUD_MODELS } from '@/views/ModelsView';
-import { isRevealed, isVideoTabEnabled, isVoiceTabEnabled } from '@/lib/featurePark';
+import {
+  isRevealed,
+  isTestersSettingsEnabled,
+  isVideoTabEnabled,
+  isVoiceTabEnabled,
+} from '@/lib/featurePark';
 import { getEngineStatus } from '@/lib/arkEngine';
 
 type SearchItem = {
@@ -45,6 +50,7 @@ function navigateCatalog(): SearchItem[] {
   return CATALOG.filter(item => {
     if (item.id === 'video' && !isVideoTabEnabled()) return false;
     if (item.id === 'voice' && !isVoiceTabEnabled()) return false;
+    if (item.id === 'testers' && !isTestersSettingsEnabled()) return false;
     return true;
   });
 }

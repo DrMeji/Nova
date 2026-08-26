@@ -14,15 +14,9 @@
 
 import type { ChatMode } from '@/context/RouterContext';
 
-/** Voice mode — Web Speech conversation loop (no PC control or file edits). */
+/** Parked until voice session (mic → STT → chat brain → TTS) is product-ready. */
 export function isVoiceTabEnabled(): boolean {
-  if (typeof window === 'undefined') return false;
-  const w = window as unknown as {
-    SpeechRecognition?: unknown;
-    webkitSpeechRecognition?: unknown;
-    speechSynthesis?: unknown;
-  };
-  return Boolean((w.SpeechRecognition || w.webkitSpeechRecognition) && w.speechSynthesis);
+  return false;
 }
 
 export function isVoiceMode(mode: ChatMode | undefined): boolean {
