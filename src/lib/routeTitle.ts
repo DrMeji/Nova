@@ -24,6 +24,8 @@ export function titleForRoute(route: Route, extras?: { projectName?: string; cha
       return 'Models';
     case 'local-ai':
       return 'Models · Engine';
+    case 'mcp':
+      return 'MCP';
     case 'build':
       return 'Plugins';
     case 'creation':

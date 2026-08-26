@@ -331,11 +331,14 @@ const MARKS: Record<string, Mark> = {
     ),
   },
   ark: {
-    bg: 'bg-sky-600',
+    bg: 'bg-transparent',
     node: (
-      <Svg>
-        <path fill="#fff" d="M12 3.5 19 19h-3.2l-1.2-3.1H9.4L8.2 19H5L12 3.5zm0 4.2-2.1 5.4h4.2L12 7.7z" />
-      </Svg>
+      <img
+        src={`${import.meta.env.BASE_URL}ark-icon.png`}
+        alt=""
+        className="w-[88%] h-[88%] object-contain"
+        draggable={false}
+      />
     ),
   },
   together: {

@@ -109,7 +109,7 @@ import { applyChatReplyEdits } from '@/lib/chatAgentApply';
 import { runProjectMultiAgent, wantsMultiAgentTurn } from '@/lib/arkMultiAgent';
 import { beginChatInflight, endChatInflight } from '@/lib/chatInflight';
 import { looksLikeNsfwAsk, nsfwBlockedReply } from '@/lib/nsfwGate';
-import { formatMcpToolsHelp, parseMcpCallIntent, resolveMcpToolServer, callMcpTool } from '@/lib/arkMcp';
+import { formatMcpToolsHelp, formatArkCapabilitiesHelp, looksLikeArkCapabilityAsk, parseMcpCallIntent, resolveMcpToolServer, callMcpTool } from '@/lib/arkMcp';
 import { reactUiMicroAskEdits } from '@/lib/webProjectCanon';
 import { deleteProjectFolderOnDisk, handleDeleteProjectChatRequest, looksLikeDeleteFolderAsk } from '@/lib/deleteProjectFlow';
 import { classifyDiskIntent, shouldRouteDeleteToStickyFile } from '@/lib/chatDiskIntent';
@@ -172,6 +172,7 @@ import { ComposerPlusMenu, type ComposerPlusAction } from '@/components/Composer
 import { TokenUsageRing } from '@/components/TokenUsageRing';
 import { ArkErrorInline } from '@/components/ArkErrorInline';
 import { BrandMark } from '@/components/BrandMark';
+import { ArkMark } from '@/components/ArkMark';
 import { classifyErrorMessage, isLikelyErrorMessage } from '@/lib/errors';
 import { isVideoTabEnabled, isCodeTabEnabled, isVoiceTabEnabled } from '@/lib/featurePark';
 import { notifyChatDone } from '@/lib/activityIndicators';
@@ -207,8 +208,8 @@ import {
 } from '@/lib/plugins';
 import type { ChatMessage } from '@/types';
 import {
-  Bot, User as UserIcon, Loader2, ImageIcon, Video, Code2,
-  Upload, Cpu, Cloud, ChevronDown, Check, Blocks, Folder, Zap, Square, X, ImagePlus,
+  User as UserIcon, Loader2, ImageIcon, Video, Code2,
+  Upload, Cpu, Cloud, ChevronDown, Check, Blocks, Folder, Square, X, ImagePlus,
   Puzzle, Briefcase, Github, Globe, Copy,
 } from 'lucide-react';
 import { engineGenerateCancel, getEngineStatus, setEngineModel } from '@/lib/arkEngine';
@@ -3528,7 +3529,15 @@ export function AIChat() {
     }
 
     // PC read file. AFTER create/greenfield so build briefs never become "open SignalDesk.txt".
-    if ((mode === 'general' || mode === 'code') && hasFolderAccessGrant() && looksLikeReadFileAsk(content)) {
+    const hasAttachContext = attaches.length > 0
+      || /<!--ark-attach:/.test(content)
+      || /<!--ark-auto-read-->/.test(content);
+    if (
+      (mode === 'general' || mode === 'code')
+      && hasFolderAccessGrant()
+      && !hasAttachContext
+      && looksLikeReadFileAsk(content)
+    ) {
       await syncWorkspaceGrantsFromPrefs();
       const parsed = parseReadFileTarget(content);
       const readOutcome = await handleReadFileChatRequest({
@@ -3736,6 +3745,21 @@ export function AIChat() {
       && !parseMcpCallIntent(content)
     ) {
       finishAgentReply(formatMcpToolsHelp(), 'ARK · mcp');
+      return;
+    }
+
+    // Capability / "can you edit files?" — truth from ARK, not the raw local model.
+    if ((mode === 'general' || mode === 'code') && looksLikeArkCapabilityAsk(content) && !parseMcpCallIntent(content)) {
+      const wantsMcpList = /\b(?:list|show)\s+mcp\b/i.test(content) || /\bmcp tools\b/i.test(content);
+      finishAgentReply(
+        wantsMcpList
+          ? formatMcpToolsHelp()
+          : formatArkCapabilitiesHelp({
+            hasProject: Boolean(resolvedStudio.projectId || chatStudioDiskRootRef.current || Object.keys(resolvedStudio.files).length),
+            hasFolderAccess: hasFolderAccessGrant(),
+          }),
+        'ARK',
+      );
       return;
     }
 
@@ -4208,6 +4232,7 @@ export function AIChat() {
         changedPaths,
         applied: appliedOk,
         applyError: appliedOk ? undefined : (applyError || (allowEdits ? 'no_edits' : undefined)),
+        editMode: allowEdits,
       });
       const plainReply = locateNote ? `${locateNote}\n\n${bubble}` : bubble;
       const elapsedMs = Date.now() - replyStartedAt;
@@ -4688,6 +4713,7 @@ export function AIChat() {
               changedPaths,
               applied: appliedOk,
               applyError: appliedOk ? undefined : (applyError || (allowEdits ? 'no_edits' : undefined)),
+              editMode: allowEdits,
             });
             const elapsedMs = Date.now() - replyStartedAt;
             response = allowEdits
@@ -5364,8 +5390,8 @@ export function AIChat() {
                 }}
                 className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-surface-hover"
               >
-                <span className="w-7 h-7 rounded-lg bg-sky-500/15 text-sky-400 flex items-center justify-center shrink-0">
-                  <Zap className="w-3.5 h-3.5" />
+                <span className="w-7 h-7 flex items-center justify-center shrink-0">
+                  <ArkMark className="w-6 h-6" />
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="block text-sm text-content-primary truncate">{model.name}</span>
@@ -6193,8 +6219,8 @@ export function AIChat() {
                   }`}
                 >
                   {msg.role !== 'user' && (
-                    <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 bg-surface-hover border border-surface-border mt-0.5">
-                      <Bot className="w-4 h-4 text-content-secondary" />
+                    <div className="w-8 h-8 flex items-center justify-center shrink-0 mt-0.5">
+                      <ArkMark className="w-7 h-7" title="ARK" />
                     </div>
                   )}
                   <div

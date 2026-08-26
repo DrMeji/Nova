@@ -35,6 +35,7 @@ import { syncWorkspaceGrantsFromPrefs } from '@/lib/workspaceGrants';
 import { openInSystemBrowser } from '@/lib/openExternal';
 import { AuthAmbientOrbs } from '@/components/auth/AuthAmbientOrbs';
 import { RotatingTip } from '@/components/RotatingTip';
+import { PlayGameButton, PlayWhileDownloading } from '@/components/fun/PlayWhileDownloading';
 import {
   Loader2, Cpu, MemoryStick, HardDrive, Zap, CheckCircle2, Download,
   Monitor, MonitorCog, Check, Gauge, KeyRound, Shield, ExternalLink, Wifi, FolderOpen,
@@ -192,6 +193,7 @@ export function OnboardingScreen() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
   const [finishError, setFinishError] = useState<string | null>(null);
+  const [playOpen, setPlayOpen] = useState(false);
   const [expandedProvider, setExpandedProvider] = useState<string | null>(null);
   const [keyDrafts, setKeyDrafts] = useState<Record<string, string>>({});
   const [savedKeys, setSavedKeys] = useState<Record<string, boolean>>(() => {
@@ -935,6 +937,12 @@ export function OnboardingScreen() {
               <p className="text-[11px] text-content-tertiary text-center leading-relaxed">
                 This is a one-time download (~1 GB for the default brain). Stay here until it finishes so Chat has something real to talk to.
               </p>
+              {progress < 100 && !finishError ? (
+                <div className="flex flex-col items-center gap-2">
+                  <p className="text-[11px] text-content-tertiary">Slow connection? Pass the time.</p>
+                  <PlayGameButton onClick={() => setPlayOpen(true)} />
+                </div>
+              ) : null}
               <RotatingTip className="text-[11px] text-content-tertiary/90 text-center leading-relaxed min-h-[2.5rem] px-2" />
               {finishError && (
                 <div className="space-y-2">
@@ -965,6 +973,13 @@ export function OnboardingScreen() {
           )}
         </div>
       </div>
+      <PlayWhileDownloading
+        open={playOpen}
+        onClose={() => setPlayOpen(false)}
+        contextLabel={selected?.name || 'local brain'}
+        externalProgress={progress}
+        externalComplete={progress >= 100 && !finishError}
+      />
     </div>
   );
 }

@@ -163,7 +163,7 @@ const LOCAL_CATEGORIES: { id: LocalModel['category']; title: string; icon: typeo
 
 const CLOUD_PROVIDERS: CloudProvider[] = [
   { id: 'ollama', name: 'Ollama', description: 'Optional plug-in. Connect any Ollama models the same way you connect other sources. ARK never requires it.', tiers: ['free'], tone: 'from-zinc-400 to-zinc-700', initial: 'Ol', health: 'available', availability: 'live' },
-  { id: 'pollinations', name: 'Pollinations', description: 'Free no-key image generation used by ARK Image Core.', tiers: ['free'], tone: 'from-pink-500 to-rose-700', initial: 'Po', health: 'available', availability: 'live' },
+  { id: 'pollinations', name: 'Pollinations', description: 'Free images via Flux / GPT Image (ARK Image Core). Avoids Sana default.', tiers: ['free'], tone: 'from-pink-500 to-rose-700', initial: 'Po', health: 'available', availability: 'live' },
   { id: 'openrouter', name: 'OpenRouter', description: 'Free + paid routes used by ARK Router.', tiers: ['free', 'pro'], tone: 'from-violet-500 to-purple-800', initial: 'OR', health: 'available', availability: 'live' },
   { id: 'google', name: 'Google AI Studio', description: 'Gemini free tier. Wired into ARK Router.', tiers: ['free', 'pro'], tone: 'from-blue-500 to-sky-700', initial: 'G', health: 'available', availability: 'live' },
   { id: 'groq', name: 'Groq', description: 'Fast Llama free tier. Wired into ARK Router.', tiers: ['free', 'pro'], tone: 'from-orange-500 to-red-700', initial: 'Gq', health: 'available', availability: 'live' },

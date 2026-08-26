@@ -27,6 +27,31 @@ export function looksLikeReadFileAsk(text: string): boolean {
 
 export function parseReadFileTarget(text: string): { fileName: string | null; parentHint?: string } {
   const t = String(text || '').trim();
+
+  const quoted = t.match(/["“']([A-Za-z]:\\[^"”']+)["”']/);
+  if (quoted?.[1]) {
+    return { fileName: quoted[1].replace(/[.,;:]+$/g, ''), parentHint: undefined };
+  }
+
+  const readAbs = t.match(/\bread\s+(?:the\s+(?:file\s+)?)?([A-Za-z]:\\.+)$/i);
+  if (readAbs?.[1]) {
+    let path = readAbs[1].trim().replace(/[.,;:]+$/g, '');
+    // "C:\...\folder file.ext" pasted from Explorer — prefer the last path segment as file.
+    if (/\s+\S+\.\w+$/.test(path) && !/\\\s/.test(path)) {
+      const lastSpace = path.lastIndexOf(' ');
+      const tail = path.slice(lastSpace + 1);
+      if (/^[^\s\\/]+\.\w+$/.test(tail)) {
+        path = `${path.slice(0, lastSpace)}\\${tail}`.replace(/\\+/g, '\\');
+      }
+    }
+    return { fileName: path, parentHint: undefined };
+  }
+
+  const winPath = t.match(/\b([A-Za-z]:\\(?:[^\s"'<>|]+\\)*[^\s"'<>|]+)\b/);
+  if (winPath?.[1]) {
+    return { fileName: winPath[1].replace(/[.,;:]+$/g, ''), parentHint: undefined };
+  }
+
   const fromDeleteParse = parseDeleteFileTarget(t.replace(/\b(?:read|open|show)\b/i, 'delete'));
   if (fromDeleteParse.fileName) {
     return { fileName: fromDeleteParse.fileName, parentHint: fromDeleteParse.parentHint };

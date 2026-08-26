@@ -12,6 +12,7 @@ export type Route =
   | { name: 'models'; tab?: 'for-pc' | 'local' | 'cloud' | 'engine' }
   | { name: 'build' }
   | { name: 'local-ai' }
+  | { name: 'mcp' }
   | { name: 'networking' }
   | { name: 'message'; peer?: string; groupId?: string }
   | { name: 'notifications' }

@@ -73,6 +73,8 @@ export function finalizeCodingChatBubble(opts: {
   changedPaths?: string[];
   applied?: boolean;
   applyError?: string;
+  /** When false, code blocks are shown as chat text — not a failed save. */
+  editMode?: boolean;
 }): string {
   const stripped = stripFileBlocks(opts.rawReply);
   if (opts.applied && opts.changedPaths?.length) {
@@ -96,6 +98,10 @@ export function finalizeCodingChatBubble(opts: {
     return formatCodeChatReply(opts.userMessage, opts.changedPaths, '', { surface: 'chat' });
   }
   if (/```|@@@FILE/i.test(opts.rawReply)) {
+    if (opts.editMode === false) {
+      const body = stripped && stripped.length > 20 ? stripped : stripFileBlocks(opts.rawReply);
+      return body || 'Done.';
+    }
     return 'I drafted changes but could not save them to disk. Try the ask again in one short sentence.';
   }
   // Never show “I will modify App.jsx…” as if the work finished.

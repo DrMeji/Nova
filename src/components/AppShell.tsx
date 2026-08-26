@@ -4,7 +4,7 @@ import {
   SquarePen, Briefcase, Blocks, Database,
   Settings, Search, PanelLeft, ChevronDown, History, Clock3,
   ImageIcon, Video, MessageSquare, Trash2, Code2, Pencil, Mic,
-  Globe, Bell, Copy, Star, Download, Brain,
+  Globe, Bell, Copy, Star, Download, Brain, Cable,
 } from 'lucide-react';
 import { Modal } from './Modal';
 import { SettingsContent } from './SettingsContent';
@@ -76,6 +76,7 @@ function getNavGroups(): {
         { label: 'Plugins', icon: Blocks, route: { name: 'build' }, activity: 'plugins' },
         { label: 'Models', icon: Database, route: { name: 'models' }, activity: 'models' },
         { label: 'Local AI', icon: Brain, route: { name: 'local-ai' } },
+        { label: 'MCP', icon: Cable, route: { name: 'mcp' } },
       ],
     },
     {
@@ -251,6 +252,9 @@ export function AppShell({ children }: { children: ReactNode }) {
     }
     if (item.label === 'Local AI') {
       return route.name === 'local-ai';
+    }
+    if (item.label === 'MCP') {
+      return route.name === 'mcp';
     }
     return route.name === item.route.name;
   };

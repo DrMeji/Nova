@@ -19,10 +19,27 @@ export function normalizeChatIntentText(text: string): string {
   return String(text || '').trim();
 }
 
+/** User wants ONE file on disk — not a new app/site scaffold (even if they say "project folder"). */
+export function looksLikeSingleFileCreateAsk(text: string): boolean {
+  const t = normalizeChatIntentText(text);
+  if (!t) return false;
+  if (/\b(?:add|create|make|write|put)\b[\s\S]{0,48}\b(?:a\s+|the\s+|new\s+)?file\b/i.test(t)) return true;
+  if (/\bput\s+the\s+file\b/i.test(t)) return true;
+  if (/\b(?:add|create|make|write|put|save)\b[\s\S]{0,64}\b(?:readme|markdown|\.md\b)/i.test(t)) return true;
+  if (
+    /\b(?:add|create|make|write|put|save)\b[\s\S]{0,40}\b[A-Za-z0-9_-]+\.[A-Za-z0-9]{1,12}\b/i.test(t)
+    && !/\b(?:web\s+)?(?:app|application|website|site)\b/i.test(t)
+  ) {
+    return true;
+  }
+  return false;
+}
+
 /** User wants to CREATE / BUILD / SCAFFOLD a new app or site. */
 export function isProjectCreateBrief(text: string): boolean {
   const t = normalizeChatIntentText(text);
   if (!t) return false;
+  if (looksLikeSingleFileCreateAsk(t)) return false;
   if (wantsPlanningOnly(t)) return false;
   if (looksLikeConversationalPlanningAsk(t)) return false;
   if (wantsClarifyBeforeCreate(t)) return false;

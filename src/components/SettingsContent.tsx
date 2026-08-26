@@ -29,7 +29,7 @@ import { getGgufCtx, ggufCtxCapacityLabel } from '@/lib/ggufContext';
 import {
   User, Palette, Zap, Boxes, Cloud, Shield, HardDrive,
   FolderKanban, Lock, RefreshCw, Check, Cpu, KeyRound,
-  Smartphone, Sparkles, FlaskConical, Cable,
+  Smartphone, Sparkles, FlaskConical,
   Mail, BadgeCheck, Trash2, Download, Info, Monitor, Copy, X, FolderOpen, HelpCircle, Ban, Github,
 } from 'lucide-react';
 import { clearLocalAppCaches, clearLocalChatCache } from '@/lib/clearSession';
@@ -43,15 +43,6 @@ import { getBrainUrl } from '@/lib/brainUrl';
 import { SettingsSystemHealth } from '@/components/SettingsSystemHealth';
 import { isArkDevSession } from '@/lib/arkRuntime';
 import { BrandMark, StatusCheck } from '@/components/BrandMark';
-import { listMcpServers,
-  upsertMcpServer,
-  removeMcpServer,
-  setMcpServerEnabled,
-  MCP_CHANGED_EVENT,
-  type McpServerConfig,
-  type McpTransport,
-} from '@/lib/mcpServers';
-import { probeMcpServer } from '@/lib/arkMcp';
 import { useSocial } from '@/context/SocialContext';
 
 const REVEAL_FEATURES: { id: ParkId; label: string; description: string }[] = [
@@ -74,7 +65,6 @@ const SECTIONS: { id: string; label: string; icon: typeof User; disabled?: boole
   { id: 'ai', label: 'AI', icon: Zap },
   { id: 'models', label: 'Models', icon: Boxes },
   { id: 'providers', label: 'Providers', icon: Cloud },
-  { id: 'mcp', label: 'MCP', icon: Cable },
   { id: 'privacy', label: 'Privacy', icon: Shield },
   { id: 'storage', label: 'Storage', icon: HardDrive },
   { id: 'hardware', label: 'Hardware', icon: Monitor },
@@ -134,7 +124,9 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
   const { blockedUsers, unblockFriend, refreshBlocked } = useSocial();
   const { theme, setTheme } = useTheme();
   const { navigate } = useRouter();
-  const [activeSection, setActiveSection] = useState(initialSection || 'account');
+  const [activeSection, setActiveSection] = useState(
+    initialSection && initialSection !== 'mcp' ? initialSection : 'account',
+  );
   const [prefs, setPrefs] = useState<LocalPrefs>(() => getLocalPrefs());
   const [displayName, setDisplayName] = useState(
     () => getLocalPrefs().displayName || profile?.display_name || 'Guest',
@@ -142,17 +134,6 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
   const [providerKeys, setProviderKeys] = useState(() => getProviderApiKeys());
   const [editingProvider, setEditingProvider] = useState<string | null>(null);
   const [keyDraft, setKeyDraft] = useState('');
-  const [mcpServers, setMcpServers] = useState<McpServerConfig[]>(() => listMcpServers());
-  const [mcpEditingId, setMcpEditingId] = useState<string | null>(null);
-  const [mcpFormOpen, setMcpFormOpen] = useState(false);
-  const [mcpName, setMcpName] = useState('');
-  const [mcpTransport, setMcpTransport] = useState<McpTransport>('stdio');
-  const [mcpCommand, setMcpCommand] = useState('');
-  const [mcpArgs, setMcpArgs] = useState('');
-  const [mcpCwd, setMcpCwd] = useState('');
-  const [mcpUrl, setMcpUrl] = useState('');
-  const [mcpBusyId, setMcpBusyId] = useState<string | null>(null);
-  const [mcpFlash, setMcpFlash] = useState('');
   const [checkingUpdates, setCheckingUpdates] = useState(false);
   const [downloadingUpdate, setDownloadingUpdate] = useState(false);
   const [updateMsg, setUpdateMsg] = useState('Press Check for update to look for a newer ARK build.');
@@ -203,12 +184,6 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
     const onFeat = () => setFeatureTick(t => t + 1);
     window.addEventListener('ark:features-changed', onFeat);
     return () => window.removeEventListener('ark:features-changed', onFeat);
-  }, []);
-
-  useEffect(() => {
-    const refresh = () => setMcpServers(listMcpServers());
-    window.addEventListener(MCP_CHANGED_EVENT, refresh);
-    return () => window.removeEventListener(MCP_CHANGED_EVENT, refresh);
   }, []);
 
   useEffect(() => {
@@ -459,77 +434,6 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
     window.setTimeout(() => setSavedFlash(''), 2200);
   };
 
-  const resetMcpForm = () => {
-    setMcpEditingId(null);
-    setMcpFormOpen(false);
-    setMcpName('');
-    setMcpTransport('stdio');
-    setMcpCommand('');
-    setMcpArgs('');
-    setMcpCwd('');
-    setMcpUrl('');
-  };
-
-  const openMcpCreate = () => {
-    resetMcpForm();
-    setMcpFormOpen(true);
-  };
-
-  const openMcpEdit = (server: McpServerConfig) => {
-    setMcpEditingId(server.id);
-    setMcpFormOpen(true);
-    setMcpName(server.name);
-    setMcpTransport(server.transport);
-    setMcpCommand(server.command || '');
-    setMcpArgs(server.args || '');
-    setMcpCwd(server.cwd || '');
-    setMcpUrl(server.url || '');
-  };
-
-  const saveMcpForm = () => {
-    const name = mcpName.trim() || 'MCP server';
-    if (mcpTransport === 'stdio' && !mcpCommand.trim()) {
-      setMcpFlash('stdio needs a command (e.g. npx, node, python)');
-      window.setTimeout(() => setMcpFlash(''), 2800);
-      return;
-    }
-    if (mcpTransport === 'sse' && !mcpUrl.trim()) {
-      setMcpFlash('SSE needs a URL');
-      window.setTimeout(() => setMcpFlash(''), 2800);
-      return;
-    }
-    upsertMcpServer({
-      id: mcpEditingId || undefined,
-      name,
-      transport: mcpTransport,
-      command: mcpCommand,
-      args: mcpArgs,
-      cwd: mcpCwd,
-      url: mcpUrl,
-    });
-    setMcpServers(listMcpServers());
-    resetMcpForm();
-    flashSaved(mcpEditingId ? 'MCP server updated' : 'MCP server added');
-  };
-
-  const runMcpProbe = async (server: McpServerConfig) => {
-    if (mcpBusyId) return;
-    setMcpBusyId(server.id);
-    setMcpFlash(`Testing ${server.name}…`);
-    try {
-      const res = await probeMcpServer(server);
-      setMcpServers(listMcpServers());
-      setMcpFlash(
-        res.ok
-          ? `${server.name}: ${res.tools.length} tool${res.tools.length === 1 ? '' : 's'}`
-          : `${server.name}: ${res.error || 'probe failed'}`,
-      );
-    } finally {
-      setMcpBusyId(null);
-      window.setTimeout(() => setMcpFlash(''), 4000);
-    }
-  };
-
   const runClearChatCache = async () => {
     if (cacheBusy) return;
     if (!window.confirm('Clear local chat cache on this PC? Conversations in Recent will be removed. Models and API keys stay.')) {
@@ -643,7 +547,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
       </div>
 
       <div className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden p-4 sm:p-6 lg:p-8">
-        <div className={`min-w-0 mx-auto ${activeSection === 'providers' || activeSection === 'models' || activeSection === 'mcp' ? 'max-w-4xl' : 'max-w-2xl'}`}>
+        <div className={`min-w-0 mx-auto ${activeSection === 'providers' || activeSection === 'models' ? 'max-w-4xl' : 'max-w-2xl'}`}>
           {activeSection === 'account' && (
             <SettingsSection title="Account" description="Profile, sign in, and session controls">
               <div className="space-y-5">
@@ -1412,220 +1316,6 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                     ))}
                   </div>
                 </div>
-              </div>
-            </SettingsSection>
-          )}
-
-          {activeSection === 'mcp' && (
-            <SettingsSection
-              title="MCP"
-              description="Register external Model Context Protocol servers (stdio). Probe tools/list and call tools from Chat by name."
-            >
-              <SettingsHelp label="What is MCP?">
-                <p className="leading-relaxed">
-                  MCP servers expose tools (filesystem, docs, APIs) over a standard protocol. Add a stdio command here
-                  (same shape as Cursor/Claude Desktop configs). ARK can list those tools; calling them from Chat is still on the backlog.
-                </p>
-                <p className="mt-2 text-[11px] text-content-tertiary leading-relaxed">
-                  Example: command <code className="text-content-secondary">npx</code>, args{' '}
-                  <code className="text-content-secondary">-y @modelcontextprotocol/server-filesystem C:\path</code>
-                </p>
-              </SettingsHelp>
-              <div className="space-y-3">
-                {mcpFlash ? (
-                  <p className="text-xs text-content-secondary">{mcpFlash}</p>
-                ) : null}
-                <div className="flex items-center justify-between gap-3">
-                  <p className="text-xs text-content-tertiary">
-                    {mcpServers.length
-                      ? `${mcpServers.length} server${mcpServers.length === 1 ? '' : 's'} on this PC`
-                      : 'No servers yet'}
-                  </p>
-                  <button type="button" className="ark-btn-secondary text-xs" onClick={openMcpCreate}>
-                    Add server
-                  </button>
-                </div>
-
-                {mcpFormOpen && (
-                  <div className="rounded-xl border border-surface-border p-4 space-y-3">
-                    <p className="text-sm font-medium text-content-primary">
-                      {mcpEditingId ? 'Edit MCP server' : 'New MCP server'}
-                    </p>
-                    <label className="block space-y-1">
-                      <span className="text-[11px] text-content-tertiary">Name</span>
-                      <input
-                        className="ark-input w-full text-sm"
-                        value={mcpName}
-                        onChange={e => setMcpName(e.target.value)}
-                        placeholder="Filesystem"
-                      />
-                    </label>
-                    <div className="flex gap-2">
-                      {(['stdio', 'sse'] as const).map(t => (
-                        <button
-                          key={t}
-                          type="button"
-                          className={`text-xs px-2.5 py-1.5 rounded-lg border ${
-                            mcpTransport === t
-                              ? 'border-sky-500/50 bg-sky-500/10 text-sky-200'
-                              : 'border-surface-border text-content-tertiary'
-                          }`}
-                          onClick={() => setMcpTransport(t)}
-                        >
-                          {t}
-                        </button>
-                      ))}
-                    </div>
-                    {mcpTransport === 'stdio' ? (
-                      <>
-                        <label className="block space-y-1">
-                          <span className="text-[11px] text-content-tertiary">Command</span>
-                          <input
-                            className="ark-input w-full text-sm font-mono"
-                            value={mcpCommand}
-                            onChange={e => setMcpCommand(e.target.value)}
-                            placeholder="npx"
-                          />
-                        </label>
-                        <label className="block space-y-1">
-                          <span className="text-[11px] text-content-tertiary">Args</span>
-                          <input
-                            className="ark-input w-full text-sm font-mono"
-                            value={mcpArgs}
-                            onChange={e => setMcpArgs(e.target.value)}
-                            placeholder="-y @modelcontextprotocol/server-memory"
-                          />
-                        </label>
-                        <label className="block space-y-1">
-                          <span className="text-[11px] text-content-tertiary">Working folder (optional)</span>
-                          <input
-                            className="ark-input w-full text-sm font-mono"
-                            value={mcpCwd}
-                            onChange={e => setMcpCwd(e.target.value)}
-                            placeholder="C:\\Projects\\my-app"
-                          />
-                        </label>
-                      </>
-                    ) : (
-                      <label className="block space-y-1">
-                        <span className="text-[11px] text-content-tertiary">URL</span>
-                        <input
-                          className="ark-input w-full text-sm font-mono"
-                          value={mcpUrl}
-                          onChange={e => setMcpUrl(e.target.value)}
-                          placeholder="https://example.com/sse"
-                        />
-                        <span className="text-[10px] text-amber-200/80">SSE probe is registered but not live yet — use stdio for Test.</span>
-                      </label>
-                    )}
-                    <div className="flex gap-2 justify-end">
-                      <button type="button" className="ark-btn-ghost text-xs" onClick={resetMcpForm}>
-                        Cancel
-                      </button>
-                      <button type="button" className="ark-btn-primary text-xs" onClick={saveMcpForm}>
-                        Save
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {mcpServers.length === 0 && !mcpFormOpen ? (
-                  <div className="rounded-xl border border-dashed border-surface-border p-6 text-center">
-                    <Cable className="w-6 h-6 text-content-tertiary mx-auto mb-2" />
-                    <p className="text-sm text-content-secondary">Add an MCP server to list its tools in Chat.</p>
-                    <p className="text-xs text-content-tertiary mt-1">Ask Chat “list MCP tools” after you save one.</p>
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    {mcpServers.map(server => {
-                      const toolCount = server.lastTools?.length ?? 0;
-                      return (
-                        <div key={server.id} className="rounded-xl border border-surface-border p-3.5 space-y-2">
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0">
-                              <p className="text-sm font-medium text-content-primary truncate">{server.name}</p>
-                              <p className="text-[11px] text-content-tertiary font-mono truncate mt-0.5">
-                                {server.transport === 'stdio'
-                                  ? `${server.command || '?'} ${server.args || ''}`.trim()
-                                  : server.url || 'sse'}
-                              </p>
-                            </div>
-                            <button
-                              type="button"
-                              className={`relative rounded-full transition-colors shrink-0 ${server.enabled ? 'bg-content-primary' : 'bg-ark-navy-700'}`}
-                              style={{ height: '22px', width: '40px' }}
-                              aria-pressed={server.enabled}
-                              title={server.enabled ? 'Enabled' : 'Disabled'}
-                              onClick={() => {
-                                setMcpServerEnabled(server.id, !server.enabled);
-                                setMcpServers(listMcpServers());
-                              }}
-                            >
-                              <div
-                                className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
-                                  server.enabled ? 'translate-x-[18px]' : 'translate-x-0.5'
-                                }`}
-                              />
-                            </button>
-                          </div>
-                          <div className="flex flex-wrap items-center gap-2 text-[11px] text-content-tertiary">
-                            <span>
-                              {toolCount
-                                ? `${toolCount} tool${toolCount === 1 ? '' : 's'} cached`
-                                : 'Not probed'}
-                            </span>
-                            {server.lastError ? (
-                              <span className="text-rose-300/90 truncate max-w-full">{server.lastError}</span>
-                            ) : null}
-                          </div>
-                          {toolCount > 0 ? (
-                            <ul className="text-[11px] text-content-secondary space-y-0.5 max-h-28 overflow-y-auto">
-                              {(server.lastTools || []).slice(0, 12).map(t => (
-                                <li key={t.name} className="truncate">
-                                  <span className="font-mono text-content-primary">{t.name}</span>
-                                  {t.description ? ` — ${t.description}` : ''}
-                                </li>
-                              ))}
-                              {toolCount > 12 ? (
-                                <li className="text-content-tertiary">…and {toolCount - 12} more</li>
-                              ) : null}
-                            </ul>
-                          ) : null}
-                          <div className="flex flex-wrap gap-2 pt-1">
-                            <button
-                              type="button"
-                              className="ark-btn-secondary text-xs"
-                              disabled={mcpBusyId === server.id}
-                              onClick={() => void runMcpProbe(server)}
-                            >
-                              {mcpBusyId === server.id ? 'Testing…' : 'Test'}
-                            </button>
-                            <button
-                              type="button"
-                              className="text-xs text-content-tertiary hover:text-content-secondary"
-                              onClick={() => openMcpEdit(server)}
-                            >
-                              Edit
-                            </button>
-                            <button
-                              type="button"
-                              className="text-xs text-rose-300/80 hover:text-rose-200"
-                              onClick={() => {
-                                if (!window.confirm(`Remove “${server.name}”?`)) return;
-                                void window.arkDesktop?.mcpStop?.({ id: server.id });
-                                removeMcpServer(server.id);
-                                setMcpServers(listMcpServers());
-                                flashSaved('MCP server removed');
-                              }}
-                            >
-                              Remove
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
               </div>
             </SettingsSection>
           )}

@@ -4,6 +4,7 @@
 
 import { looksLikeLandingBrief, prefersReactAppScaffold } from '@/lib/webLandingFromBrief';
 import { looksLikeImplementGo } from '@/lib/chatPlanMode';
+import { looksLikeSingleFileCreateAsk } from '@/lib/chatCreateBrief';
 import {
   greenfieldToCreateIntent,
   looksLikeGreenfieldCreateGo,
@@ -50,6 +51,7 @@ const PROJECT_NOUN_RE =
 export function looksLikeCreateProjectBrief(message: string): boolean {
   const t = String(message || '').trim();
   if (!t) return false;
+  if (looksLikeSingleFileCreateAsk(t)) return false;
   if (/\b(?:do\s+not|don't|dont|never|without)\s+create\b/i.test(t)) return false;
   if (/\bask\s+me\b[\s\S]{0,80}\b(?:clarifying\s+)?questions?\b/i.test(t)) return false;
   if (/\b(?:add|create|make|write|put)\b[\s\S]{0,40}\bfiles?\b/i.test(t)
@@ -131,6 +133,7 @@ export function findBestProductBrief(recentUserLines: string[]): string | null {
 export function parseNewProjectIntent(message: string): NewProjectIntent | null {
   const t = String(message || '').trim();
   if (!t) return null;
+  if (looksLikeSingleFileCreateAsk(t)) return null;
 
   if (wantsPlanningOnly(t)) return null;
   if (/\b(?:do\s+not|don't|dont|never|without)\s+create\b/i.test(t)) return null;

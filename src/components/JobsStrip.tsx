@@ -14,6 +14,7 @@ import {
 import { ArkErrorInline } from '@/components/ArkErrorInline';
 import { ROTATION_NOTE_EVENT } from '@/lib/modelRotation';
 import { SIDEBAR_TOAST_EVENT, type SidebarToastDetail } from '@/lib/sidebarToast';
+import { PlayGameButton, PlayWhileDownloading } from '@/components/fun/PlayWhileDownloading';
 
 type ToastRow = { id: string; message: string };
 
@@ -22,6 +23,7 @@ export function JobsStrip({ variant = 'footer' }: { variant?: 'footer' | 'sideba
   const [updateJob, setUpdateJob] = useState<{ percent: number; message: string } | null>(null);
   const [rotationNote, setRotationNote] = useState<string | null>(null);
   const [toasts, setToasts] = useState<ToastRow[]>([]);
+  const [playOpen, setPlayOpen] = useState(false);
 
   useEffect(() => subscribeEngineDownloads(() => {
     setJobs(getEngineDownloadJobs());
@@ -89,7 +91,8 @@ export function JobsStrip({ variant = 'footer' }: { variant?: 'footer' | 'sideba
   }, []);
 
   const active = jobs.filter(j => j.progress < 100 || j.error || j.canceling);
-  if (active.length === 0 && !updateJob && !rotationNote && toasts.length === 0) return null;
+  const downloading = active.filter(j => j.progress < 100 && !j.error && !j.canceling);
+  if (active.length === 0 && !updateJob && !rotationNote && toasts.length === 0 && !playOpen) return null;
 
   const shell =
     variant === 'sidebar'
@@ -97,12 +100,19 @@ export function JobsStrip({ variant = 'footer' }: { variant?: 'footer' | 'sideba
       : 'shrink-0 border-t border-surface-border bg-ark-navy-950/95 px-3 py-2 space-y-1.5';
 
   return (
+    <>
     <div className={shell}>
       {toasts.map(t => (
         <p key={t.id} className="text-[11px] text-content-secondary leading-snug">
           {t.message}
         </p>
       ))}
+      {downloading.length > 0 ? (
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-[10px] text-content-tertiary">Slow install? Pass the time.</p>
+          <PlayGameButton onClick={() => setPlayOpen(true)} />
+        </div>
+      ) : null}
       {active.map(job => (
         <div key={job.id} className="flex items-start gap-2 text-xs">
           {!job.error && !job.canceling ? (
@@ -172,5 +182,7 @@ export function JobsStrip({ variant = 'footer' }: { variant?: 'footer' | 'sideba
         </div>
       ) : null}
     </div>
+    <PlayWhileDownloading open={playOpen} onClose={() => setPlayOpen(false)} />
+    </>
   );
 }

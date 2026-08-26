@@ -219,8 +219,10 @@ function hostSafeImagePrompt(raw) {
 
 function sourceDisplayName(source, fallback) {
   const s = String(source || '');
+  if (/pollinations-gpt-image|pollinations-gptimage/i.test(s)) return 'Pollinations GPT Image';
+  if (/pollinations-klein/i.test(s)) return 'Pollinations FLUX Klein';
   if (/pollinations-flux/i.test(s)) return 'Pollinations Flux';
-  if (/pollinations-zimage/i.test(s)) return 'Pollinations';
+  if (/pollinations-zimage|pollinations-sana|pollinations-dream/i.test(s)) return 'Pollinations';
   if (/pollinations/i.test(s)) return 'Pollinations';
   if (/ai-horde/i.test(s)) return 'AI Horde';
   if (/huggingface/i.test(s)) return 'Hugging Face FLUX';
@@ -292,6 +294,62 @@ function resolveImageDimensions(prompt) {
   return { width: 1024, height: 1024 };
 }
 
+const IMAGE_NEG = 'blurry, soft focus, shallow depth of field, bokeh on subject, out of focus, low resolution, mushy, smoothed skin, plastic, overprocessed, bad eyes, crossed eyes, asymmetrical eyes, melted eyes, deformed pupils, extra limbs, missing limbs, mutated hands, wrong subject, unrelated animal, watermark, logo overlay, ui chrome, taskbar, desktop icons';
+
+function buildPollinationsUrls(promptText, opts = {}) {
+  const encoded = encodeURIComponent(String(promptText || '').slice(0, 480));
+  const w = opts.width || 1024;
+  const h = opts.height || 1024;
+  const seed = opts.seed != null ? Number(opts.seed) % 999999 : freshImageSeed(promptText);
+  const neg = encodeURIComponent(IMAGE_NEG);
+  const common = `width=${w}&height=${h}&nologo=true&nofeed=true&negative_prompt=${neg}&seed=${seed}`;
+  // Legacy image.pollinations.ai still serves free Flux without a key.
+  // gen.pollinations.ai (Flux Klein / GPT Image / etc.) needs enter.pollinations.ai key.
+  // Never omit model= — bare legacy now routes to Sana/DreamShaper (weak anatomy / prompt drift).
+  const models = opts.models || [
+    { model: 'flux', source: 'pollinations-flux' },
+    { model: 'gptimage', source: 'pollinations-gptimage' },
+  ];
+  let pollenKey = '';
+  try {
+    const arkSecrets = require('./arkSecrets.cjs');
+    const keys = arkSecrets.loadMap() || {};
+    pollenKey = String(keys.pollinations || keys.pollen || '').trim();
+  } catch {
+    pollenKey = '';
+  }
+  const urls = [];
+  for (const tier of models) {
+    const modelQ = `&model=${encodeURIComponent(tier.model)}`;
+    urls.push({
+      model: tier.model,
+      source: tier.source,
+      url: `https://image.pollinations.ai/prompt/${encoded}?${common}${modelQ}`,
+    });
+    if (pollenKey) {
+      urls.push({
+        model: tier.model,
+        source: tier.source,
+        url: `https://gen.pollinations.ai/image/${encoded}?${common}${modelQ}&key=${encodeURIComponent(pollenKey)}`,
+      });
+    }
+  }
+  if (pollenKey) {
+    for (const tier of [
+      { model: 'klein', source: 'pollinations-klein' },
+      { model: 'gpt-image-2', source: 'pollinations-gpt-image' },
+    ]) {
+      const modelQ = `&model=${encodeURIComponent(tier.model)}`;
+      urls.push({
+        model: tier.model,
+        source: tier.source,
+        url: `https://gen.pollinations.ai/image/${encoded}?${common}${modelQ}&key=${encodeURIComponent(pollenKey)}`,
+      });
+    }
+  }
+  return urls;
+}
+
 /**
  * Fetch a unique Pollinations JPEG. Quality-first: skip instant soft frames.
  * Avoid retry storms — free hosts queue one request per IP and 429 after spam.
@@ -313,11 +371,6 @@ async function fetchRealImage(prompt, opts = {}) {
   const w = opts.width || 1024;
   const h = opts.height || 1024;
   const started = Date.now();
-  // Flux only for quality — zimage is softer / faster and looked blurry to users.
-  const tiers = [
-    { model: 'flux', source: 'pollinations-flux', ms: 90_000 },
-  ];
-
   const seen = new Set();
   let best = null;
   let rateLimitedStreak = 0;
@@ -325,22 +378,26 @@ async function fetchRealImage(prompt, opts = {}) {
 
   for (const text of texts) {
     for (let attempt = 0; attempt < 2; attempt++) {
-      const encoded = encodeURIComponent(text.slice(0, 480));
       const seed = opts.seed != null && attempt === 0
         ? (Number(opts.seed) % 999999)
         : freshImageSeed(`${text}:q${attempt}`);
+      const urls = buildPollinationsUrls(text, {
+        width: w,
+        height: h,
+        seed,
+        models: [
+          { model: 'flux', source: 'pollinations-flux' },
+          { model: 'gptimage', source: 'pollinations-gptimage' },
+        ],
+      });
 
-      for (const tier of tiers) {
+      for (const tier of urls) {
         const left = IMAGE_TOTAL_BUDGET_MS - (Date.now() - started);
         if (left < 3_000) break;
 
-        const timeoutMs = Math.min(tier.ms, left);
-        const modelQ = tier.model ? `&model=${encodeURIComponent(tier.model)}` : '';
-        // Do NOT use enhance=true — it often injects cinematic soft/shallow-DOF looks.
-        const neg = encodeURIComponent('blurry, soft focus, shallow depth of field, bokeh on subject, out of focus, low resolution, mushy, smoothed skin, plastic, overprocessed, bad eyes, crossed eyes, asymmetrical eyes, melted eyes, deformed pupils');
-        const url = `https://image.pollinations.ai/prompt/${encoded}?width=${w}&height=${h}&nologo=true&nofeed=true&negative_prompt=${neg}${modelQ}&seed=${seed}`;
+        const timeoutMs = Math.min(90_000, left);
         const t0 = Date.now();
-        const hit = await fetchImageUrl(url, timeoutMs);
+        const hit = await fetchImageUrl(tier.url, timeoutMs);
         const took = Date.now() - t0;
 
         if (hit && hit.error === 429) {
@@ -382,7 +439,6 @@ async function fetchRealImage(prompt, opts = {}) {
           try {
             console.log(`[ark-media] soft/fast reject model=${tier.model} tookMs=${took} bytes=${hit.buf.length} dims=${dim ? `${dim.width}x${dim.height}` : '?'} (want quality)`);
           } catch { /* ignore */ }
-          // Never accept a soft frame early — keep trying until the budget is nearly gone.
           if (left < 18_000 && softRejects >= 3 && best) {
             return best;
           }
@@ -681,24 +737,43 @@ function rewriteImagePrompt(prompt) {
     return raw;
   }
   const lower = raw.toLowerCase();
+  const isWallpaper = /\b(wallpaper|desktop background|desktop image|lock screen|banner)\b/.test(lower);
+  const wantsAnimal = /\b(cat|kitten|dog|puppy|bird|horse|fox|wolf|tiger|lion|bear)\b/.test(lower);
+  const wantsPerson = /\b(face|portrait|person|people|human|woman|man|girl|boy|character|elf|avatar|selfie|headshot)\b/.test(lower);
+  const wantsCar = /\b(car|truck|vehicle|tesla|bmw|porsche|ferrari|lamborghini|mustang|cybertruck)\b/.test(lower);
+
+  // Lead with the user's request so free hosts don't drift to random stock subjects.
+  const locked = [
+    `PRIMARY SUBJECT (follow exactly): ${raw}`,
+    'match the request literally — do not substitute a different subject',
+  ];
+
   const hints = [
-    'tack-sharp focus across the entire subject including face body and paws',
+    'tack-sharp focus across the entire subject including face body fur paws wheels and details',
     'deep depth of field f/8 style — entire subject in focus',
     'no soft bokeh blur on the main subject, no shallow DOF, no out-of-focus face',
-    'crisp clean detail, high resolution, 1080p or sharper',
+    'crisp clean detail, high resolution, photorealistic quality',
     'avoid blurry soft mushy low-detail renders',
   ];
-  if (/\b(face|portrait|person|people|human|woman|man|girl|boy|character|elf|avatar|selfie|headshot)\b/.test(lower)) {
+  if (wantsPerson) {
     hints.push(
       'symmetrical natural eyes with clear round pupils and matching catchlights',
       'correct eye anatomy, no warped irises, no crossed or melted eyes',
+      'natural facial proportions, intact hands with five fingers when visible',
     );
   }
   if (/\b(cat|kitten)\b/.test(lower) && !/\b(human|person|man|woman)\b/.test(lower)) {
-    hints.push('subject is a real cat animal, full body and face crisp and clear, whiskers visible, not a human');
+    hints.push('subject is a real cat animal, full body and face crisp and clear, whiskers and fur detail visible, not a human');
   }
   if (/\b(dog|puppy)\b/.test(lower) && !/\b(human|person|man|woman)\b/.test(lower)) {
-    hints.push('subject is a real dog animal, full body crisp and clear, not a human');
+    hints.push('subject is a real dog animal, full body crisp and clear, fur detail visible, not a human');
+  }
+  if (wantsCar) {
+    hints.push(
+      'single coherent vehicle body, correct wheel count and proportions',
+      'readable reflections on paint and glass, intact headlights and grille',
+      'no melted body panels, no floating parts',
+    );
   }
   if (/\b(wireless|bluetooth)\b/.test(lower) && /\b(mouse|keyboard|headset|earbuds|headphones)\b/.test(lower)) {
     hints.push('wireless device with no cable, no cord, no wire visible');
@@ -706,8 +781,15 @@ function rewriteImagePrompt(prompt) {
   if (/\b(logitech|razer|steelseries|corsair)\b/.test(lower)) {
     hints.push('accurate consumer electronics product design, no garbled logos or fake brand text');
   }
-  if (/\b(wallpaper|desktop background|lock screen)\b/.test(lower)) {
-    hints.push('16:9 landscape desktop wallpaper, no desktop icons, no taskbar, no UI chrome');
+  if (isWallpaper) {
+    hints.push('16:9 landscape desktop wallpaper composition filling the frame');
+    hints.push('no desktop icons, no taskbar, no window chrome, no UI overlays');
+    if (!wantsAnimal) {
+      hints.push('no random animals or pets unless the prompt asks for them');
+    }
+    if (!wantsPerson) {
+      hints.push('no random people or faces unless the prompt asks for them');
+    }
   }
   if (/\b(tesla|model\s*s|plaid|cybertruck|model\s*[3xy])\b/.test(lower)) {
     hints.push('accurate modern Tesla EV design, single coherent car body, correct proportions');
@@ -727,7 +809,7 @@ function rewriteImagePrompt(prompt) {
     ].join(', ');
   }
   return [
-    raw,
+    ...locked,
     ...hints,
     'follow the request exactly',
     'do not invent unrelated subjects',
@@ -956,8 +1038,8 @@ async function generateImage(prompt, modelName, opts = {}) {
     const aPx = aDim ? aDim.width * aDim.height : 0;
     const bPx = bDim ? bDim.width * bDim.height : 0;
     if (aPx !== bPx) return bPx > aPx ? b : a;
-    const aFlux = /flux|huggingface/i.test(String(a.source || ''));
-    const bFlux = /flux|huggingface/i.test(String(b.source || ''));
+    const aFlux = /flux|klein|gptimage|huggingface/i.test(String(a.source || ''));
+    const bFlux = /flux|klein|gptimage|huggingface/i.test(String(b.source || ''));
     if (aFlux !== bFlux) return aFlux ? a : b;
     return (b.buf?.length || 0) > (a.buf?.length || 0) ? b : a;
   };
@@ -984,7 +1066,39 @@ async function generateImage(prompt, modelName, opts = {}) {
     }
   }
 
-  // Primary: Pollinations Flux (enhanced) — wait for quality, not the first soft stub.
+  // Prefer on-device weights / HF when available — stronger prompt follow than free Sana drift.
+  try {
+    if (arkSd.isLocalImageReady()) {
+      const local = await arkSd.generateLocalImage(enhanced, {
+        width: Math.min(dim.width, 1024),
+        height: Math.min(dim.height, 1024),
+        steps: 28,
+        timeoutMs: 90_000,
+      });
+      if (isUsableImageHit(local)) {
+        best = pickBest(best, { ...local, source: local.source || 'local-sd' });
+        if (best && !isLowQualityHit(best.tookMs || 0, best.buf.length, best.buf)) {
+          return await saveWinner(best, modelName);
+        }
+      }
+    }
+  } catch {
+    /* continue */
+  }
+
+  try {
+    const hf = await fetchHfImage(enhanced);
+    if (isUsableImageHit(hf)) {
+      best = pickBest(best, hf);
+      if (best && !isLowQualityHit(best.tookMs || 0, best.buf.length, best.buf)) {
+        return await saveWinner(best, modelName);
+      }
+    }
+  } catch {
+    /* continue */
+  }
+
+  // Free host cascade: Pollinations Flux → GPT Image (never bare Sana).
   try {
     const flux = await fetchRealImage(enhanced, {
       width: dim.width,
@@ -993,7 +1107,7 @@ async function generateImage(prompt, modelName, opts = {}) {
     });
     if (isUsableImageHit(flux)) {
       best = pickBest(best, flux);
-      if (best && !isLowQualityHit(best.tookMs || 0, best.buf.length, best.buf) && /flux/i.test(String(best.source || ''))) {
+      if (best && !isLowQualityHit(best.tookMs || 0, best.buf.length, best.buf) && /flux|klein|gptimage/i.test(String(best.source || ''))) {
         return await saveWinner(best, modelName);
       }
     }
@@ -1003,28 +1117,12 @@ async function generateImage(prompt, modelName, opts = {}) {
 
   // Parallel secondary hosts (different networks — safe to race with each other).
   const secondary = await Promise.all([
-    fetchHfImage(enhanced).then((hit) => (isUsableImageHit(hit) ? hit : null)).catch(() => null),
     fetchHordeImage(enhanced, {
       width: 512,
       height: 512,
       referenceImageDataUrl: ref || undefined,
       allowNsfw,
     }).then((hit) => (isUsableImageHit(hit) ? { ...hit, source: hit.source || 'ai-horde' } : null)).catch(() => null),
-    (async () => {
-      if (!arkSd.isLocalImageReady()) return null;
-      try {
-        const local = await arkSd.generateLocalImage(enhanced, {
-          width: Math.min(dim.width, 1024),
-          height: Math.min(dim.height, 1024),
-          steps: 22,
-          timeoutMs: 28_000,
-        });
-        if (local && isUsableImageHit(local)) return { ...local, source: local.source || 'local-sd' };
-      } catch {
-        /* ignore */
-      }
-      return null;
-    })(),
   ]);
   for (const hit of secondary) {
     if (hit) best = pickBest(best, hit);
@@ -1037,10 +1135,19 @@ async function generateImage(prompt, modelName, opts = {}) {
   try {
     const plain = hostSafeImagePrompt(String(enhanced || prompt).slice(0, 280));
     const seed = freshImageSeed(plain);
-    const neg = encodeURIComponent('blurry, soft focus, shallow depth of field, out of focus, low resolution, bad eyes, crossed eyes, asymmetrical eyes');
-    const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(plain)}?width=${dim.width}&height=${dim.height}&nologo=true&nofeed=true&model=flux&negative_prompt=${neg}&seed=${seed}`;
-    const hit = await fetchImageUrl(url, 55_000);
-    if (isUsableImageHit(hit)) best = pickBest(best, { ...hit, source: 'pollinations-flux', tookMs: 55_000 });
+    const urls = buildPollinationsUrls(plain, {
+      width: dim.width,
+      height: dim.height,
+      seed,
+      models: [{ model: 'flux', source: 'pollinations-flux' }],
+    });
+    for (const tier of urls.slice(0, 2)) {
+      const hit = await fetchImageUrl(tier.url, 55_000);
+      if (isUsableImageHit(hit)) {
+        best = pickBest(best, { ...hit, source: tier.source, tookMs: 55_000 });
+        break;
+      }
+    }
   } catch {
     /* ignore */
   }

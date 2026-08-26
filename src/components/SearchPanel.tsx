@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ComponentType, type KeyboardEvent } from 'react';
 import {
   Search, Clock3, Settings, Briefcase, Database, Bot, Blocks, SquarePen, ArrowLeft,
-  ImageIcon, Video, MessageSquare, Globe, Bell, Mic,
+  ImageIcon, Video, MessageSquare, Globe, Bell, Mic, Cable,
 } from 'lucide-react';
 import { useRouter, type Route } from '@/context/RouterContext';
 import { useRecentProjects } from '@/context/RecentProjectsContext';
@@ -30,11 +30,11 @@ const CATALOG: SearchItem[] = [
   { id: 'plugins', label: 'Plugins', group: 'Navigate', description: 'Integrations and tools', icon: Blocks, route: { name: 'build' } },
   { id: 'models', label: 'Models', group: 'Navigate', description: 'Local, cloud, and engine', icon: Database, route: { name: 'models' } },
   { id: 'local-ai', label: 'Engine', group: 'Navigate', description: 'ARK Engine start, stop, and storage', icon: Bot, route: { name: 'local-ai' } },
+  { id: 'mcp', label: 'MCP', group: 'Navigate', description: 'Register external MCP tool servers', icon: Cable, route: { name: 'mcp' } },
   { id: 'settings', label: 'Settings', group: 'Settings', description: 'Account, appearance, AI preferences', icon: Settings, action: 'settings', settingsSection: 'account' },
   { id: 'appearance', label: 'Appearance', group: 'Settings', description: 'Theme and display options', icon: Settings, action: 'settings', settingsSection: 'appearance' },
   { id: 'ai', label: 'AI', group: 'Settings', description: 'Routing and failover', icon: Settings, action: 'settings', settingsSection: 'ai' },
   { id: 'providers', label: 'Providers', group: 'Settings', description: 'Cloud AI connections', icon: Settings, action: 'settings', settingsSection: 'providers' },
-  { id: 'mcp', label: 'MCP', group: 'Settings', description: 'Register external MCP tool servers', icon: Settings, action: 'settings', settingsSection: 'mcp' },
   { id: 'privacy', label: 'Privacy', group: 'Settings', description: 'What stays on this PC', icon: Settings, action: 'settings', settingsSection: 'privacy' },
   { id: 'security', label: 'Security', group: 'Settings', description: 'PIN, auto-lock, sandbox', icon: Settings, action: 'settings', settingsSection: 'security' },
   { id: 'updates', label: 'Updates', group: 'Settings', description: 'Check for new ARK builds', icon: Settings, action: 'settings', settingsSection: 'updates' },

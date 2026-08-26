@@ -24,6 +24,15 @@ export function shouldRouteReadFile(text: string): boolean {
   if (isAnyCreateBrief(t)) return false;
   if (/\b(delete|remove|trash)\b/i.test(t)) return false;
   if (/\bopen\s+(?:them|it|this|files?)\s+in\s+code\b/i.test(t)) return false;
+  // Attached-file follow-ups ("read these four files") — let the brain + attach context handle it.
+  if (/\b(?:these|those|attached|all)\b[\s\S]{0,32}\bfiles?\b/i.test(t)) return false;
+  if (/\b(?:summarize|summary|read)\b[\s\S]{0,48}\b(?:attached|uploaded)\b/i.test(t)) return false;
+  if (/\b(?:summarize|summary)\b/i.test(t) && /\bfiles?\b/i.test(t) && !/[A-Za-z0-9_-]+\.[A-Za-z0-9]{1,12}\b/.test(t)) {
+    return false;
+  }
+  // MCP / tool catalog asks ("break down ark.project.read") — not disk read.
+  if (/\bark\.[a-z0-9_-]+\.[a-z0-9_-]+\b/i.test(t)) return false;
+  if (/\b(?:break down|explain|describe)\b/i.test(t) && /\b(?:ark\.|mcp\b|tools?)\b/i.test(t)) return false;
 
   const readVerb = (
     /\b(?:read|show\s+me|display|what(?:'s| is)\s+in)\b/i.test(t)

@@ -7,7 +7,7 @@ import { fetchProjects, saveChatMessage, updateProject } from '@/lib/api';
 import type { Project, ChatMessage } from '@/types';
 import {
   ChevronRight, FileCode, Folder, FolderOpen, FileText,
-  Play, Square, CheckCircle2, Loader2, Bot, User as UserIcon,
+  Play, Square, CheckCircle2, Loader2, User as UserIcon,
   PanelLeft, PanelRight,
   Globe, Circle, ArrowUp, X, History, FilePlus2, FolderPlus,
   ChevronDown, Check, Cpu, Cloud, Zap, Search, GitBranch, Upload, Undo2, Smartphone,
@@ -15,6 +15,7 @@ import {
 import { Modal } from '@/components/Modal';
 import { ArkErrorInline } from '@/components/ArkErrorInline';
 import { BrandMark } from '@/components/BrandMark';
+import { ArkMark } from '@/components/ArkMark';
 import { classifyErrorMessage, isLikelyErrorMessage } from '@/lib/errors';
 import { openInSystemBrowser } from '@/lib/openExternal';
 import {
@@ -3636,10 +3637,10 @@ export function ProjectWorkspace() {
             )}
             {messages.map(msg => (
               <div key={msg.id} className={`flex gap-2 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
-                <div className="w-7 h-7 rounded-lg bg-surface-hover flex items-center justify-center shrink-0">
+                <div className="w-7 h-7 flex items-center justify-center shrink-0">
                   {msg.role === 'user'
                     ? <UserIcon className="w-3.5 h-3.5 text-content-secondary" />
-                    : <Bot className="w-3.5 h-3.5 text-content-secondary" />}
+                    : <ArkMark className="w-6 h-6" />}
                 </div>
                 <div className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-sm text-content-primary ${
                   msg.role === 'user' ? 'bg-surface-hover' : 'bg-ark-navy-900 border border-surface-border'

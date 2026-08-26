@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 type OrbSpec = {
   size: number;
@@ -21,9 +21,9 @@ const ORB_SETUP: Array<{ size: number; colorClass: string }> = [
   { size: 155, colorClass: 'auth-orb-tone-i' },
 ];
 
-/** Soft px/frame. slow roam, still readable */
 const SPEED_MIN = 0.22;
 const SPEED_MAX = 0.42;
+const CLICK_IMPULSE = 2.8;
 
 function rand(min: number, max: number) {
   return min + Math.random() * (max - min);
@@ -107,7 +107,7 @@ function bouncePair(a: OrbSpec, b: OrbSpec) {
   }
 }
 
-function paintOrbs(orbs: OrbSpec[], orbEls: (HTMLDivElement | null)[]) {
+function paintOrbs(orbs: OrbSpec[], orbEls: (HTMLButtonElement | null)[]) {
   for (let i = 0; i < orbs.length; i++) {
     const el = orbEls[i];
     if (!el) continue;
@@ -118,18 +118,40 @@ function paintOrbs(orbs: OrbSpec[], orbEls: (HTMLDivElement | null)[]) {
   }
 }
 
+/** Soft roaming color orbs — click one to send it bouncing. */
 export function AuthAmbientOrbs() {
   const layerRef = useRef<HTMLDivElement>(null);
-  const orbRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const orbRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const stateRef = useRef<OrbSpec[] | null>(null);
   const rafRef = useRef(0);
+
+  const kickOrb = useCallback((index: number, clientX: number, clientY: number) => {
+    const layer = layerRef.current;
+    const orbs = stateRef.current;
+    if (!layer || !orbs?.[index]) return;
+    const rect = layer.getBoundingClientRect();
+    const ox = clientX - rect.left;
+    const oy = clientY - rect.top;
+    const orb = orbs[index];
+    const dx = orb.x - ox;
+    const dy = orb.y - oy;
+    const dist = Math.hypot(dx, dy) || 1;
+    const nx = dx / dist;
+    const ny = dy / dist;
+    orb.vx += nx * CLICK_IMPULSE + rand(-0.4, 0.4);
+    orb.vy += ny * CLICK_IMPULSE + rand(-0.4, 0.4);
+    const s = Math.hypot(orb.vx, orb.vy);
+    const cap = SPEED_MAX * 3.2;
+    if (s > cap) {
+      orb.vx *= cap / s;
+      orb.vy *= cap / s;
+    }
+  }, []);
 
   useEffect(() => {
     const layer = layerRef.current;
     if (!layer) return;
 
-    // Soft ambient drift always runs. Windows "reduce motion" used to freeze
-    // orbs in place (or hide them). Login atmosphere should keep moving slowly.
     const ensureSeeded = () => {
       const w = layer.clientWidth;
       const h = layer.clientHeight;
@@ -156,6 +178,12 @@ export function AuthAmbientOrbs() {
       }
 
       for (const orb of orbs) {
+        // Ease click boosts back toward cruise speed
+        const s = Math.hypot(orb.vx, orb.vy);
+        if (s > SPEED_MAX * 1.2) {
+          orb.vx *= 0.992;
+          orb.vy *= 0.992;
+        }
         orb.x += orb.vx;
         orb.y += orb.vy;
         bounceWalls(orb, w, h);
@@ -185,18 +213,26 @@ export function AuthAmbientOrbs() {
   }, []);
 
   return (
-    <div ref={layerRef} className="absolute inset-0 pointer-events-none overflow-hidden" aria-hidden>
+    <div ref={layerRef} className="absolute inset-0 overflow-hidden pointer-events-none" aria-hidden>
       {ORB_SETUP.map((spec, i) => (
-        <div
+        <button
           key={spec.colorClass}
+          type="button"
+          tabIndex={-1}
+          aria-label="Bounce color light"
           ref={el => {
             orbRefs.current[i] = el;
           }}
-          className={`auth-orb ${spec.colorClass}`}
+          className={`auth-orb auth-orb-interactive ${spec.colorClass}`}
           style={{
             width: spec.size,
             height: spec.size,
             transform: 'translate3d(-9999px, -9999px, 0)',
+          }}
+          onPointerDown={e => {
+            e.preventDefault();
+            e.stopPropagation();
+            kickOrb(i, e.clientX, e.clientY);
           }}
         />
       ))}

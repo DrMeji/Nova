@@ -150,6 +150,60 @@ export function formatMcpToolsHelp(): string {
   return lines.join('\n');
 }
 
+/** Meta asks about what ARK can do — answer locally instead of the raw chat model. */
+export function looksLikeArkCapabilityAsk(text: string): boolean {
+  const t = String(text || '').trim();
+  if (!t) return false;
+  if (/\b(?:list|show)\s+mcp\b/i.test(t) || /\bmcp tools\b/i.test(t)) return true;
+  if (/\bwhat can you do\b/i.test(t) || /\bwhat(?:'s| is) ark\b/i.test(t)) return true;
+  if (/\b(?:break down|explain|describe)\b/i.test(t) && /\b(?:ark\.|mcp\b|tools?)\b/i.test(t)) return true;
+  if (/\bark\.[a-z0-9_-]+\.[a-z0-9_-]+\b/i.test(t) && /\b(?:what|how|explain|break|describe)\b/i.test(t)) {
+    return true;
+  }
+  if (/\bcan you\b/i.test(t)) {
+    if (/\b(?:edit|read|write|create|modify|change|save|access|open|summarize|generate|connect|run)\b/i.test(t)
+      && /\b(?:files?|disk|folder|project|markdown|\.md\b|loops?|code|mcp|tools?)\b/i.test(t)) {
+      return true;
+    }
+    if (/\b(?:edit|read|write)\s+files?\b/i.test(t)) return true;
+  }
+  if (/\bi need you,?\s*ark\b/i.test(t)) return true;
+  if (/\bhow long is your memory\b/i.test(t)) return true;
+  return false;
+}
+
+export function formatArkCapabilitiesHelp(opts?: {
+  hasProject?: boolean;
+  hasFolderAccess?: boolean;
+}): string {
+  const hasProject = Boolean(opts?.hasProject);
+  const hasFolder = Boolean(opts?.hasFolderAccess);
+  const lines = [
+    '**What ARK can do in Chat**',
+    '',
+    'ARK routes your message before the local model answers. When you see **ARK** under a reply, a built-in handler ran — not the raw LLM alone.',
+    '',
+    '**Files & projects**',
+    `• **Read files** — say *read notes.txt* or attach files and ask to summarize.${hasFolder ? ' Folder access is on.' : ' Enable Desktop/Documents in **Settings → Security** first.'}`,
+    `• **Create a file** — *create a file named Notes.md in my project folder* (one file, not a whole app).`,
+    `• **Create / scaffold a project** — *build me a landing page called MyApp* (writes real files under Desktop\\Projects).${hasProject ? ' This chat already has a project bound.' : ''}`,
+    `• **Edit bound project files** — open **Code** or bind a folder, then ask to change UI, add pages, fix bugs.`,
+    '',
+    '**Built-in tools (same as MCP list)**',
+    '• **ark.project.read** — read from a granted folder',
+    '• **ark.project.write** — apply edits / scaffolds to a bound project',
+    '• **ark.media.image** — generate images (Image tab)',
+    '• **ark.brain.generate** — run a turn through ARK Engine / your pinned model',
+    '• **ark.mcp.connect** — register external MCP servers in **Settings → MCP**',
+    '',
+    '**What the local model alone cannot do**',
+    'Small local models (Qwen 7B, etc.) do not touch your disk by themselves. Ask ARK directly: *create file …*, *read …*, *list my projects*, or use **Code** for multi-file edits.',
+    '',
+    'Say **list MCP tools** for registered external servers.',
+  ];
+  return lines.join('\n');
+}
+
 /** Probe one server via Electron host; persist tools / error on the registry. */
 export async function probeMcpServer(server: McpServerConfig): Promise<{
   ok: boolean;
