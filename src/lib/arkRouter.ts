@@ -87,6 +87,8 @@ export type ArkRouteOpts = {
   mediaDurationSec?: number;
   /** Optional reference photo for img2img recreation. */
   referenceImageDataUrl?: string;
+  /** Large-repo coding: try cloud keys before weak local GGUF. */
+  preferCloudCoding?: boolean;
 };
 
 function modeAllowsCloud(mode: AiModePref) {
@@ -562,6 +564,29 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
         opts.onAttemptReset,
       );
       if (sticky && sticky.source !== 'none') return sticky;
+    }
+
+    if (brainKind === 'coding' && opts.preferCloudCoding && modeAllowsCloud(mode) && hasAnyCloudChatKey()) {
+      const freeCloud = await tryFreeCloud();
+      if (freeCloud && acceptCodingReply(freeCloud.reply)) {
+        return withContinued({
+          reply: freeCloud.reply,
+          modelName: `${freeCloud.provider} · ${freeCloud.model}`,
+          source: hitSource(freeCloud.provider),
+          tier: 'free-key',
+          attempted,
+        }, history);
+      }
+      const paidCloud = await cloudChatPaidKeys(opts.message, attempted, history, opts.onChunk);
+      if (paidCloud && acceptCodingReply(paidCloud.reply)) {
+        return withContinued({
+          reply: paidCloud.reply,
+          modelName: `${paidCloud.provider} · ${paidCloud.model}`,
+          source: hitSource(paidCloud.provider),
+          tier: 'paid',
+          attempted,
+        }, history);
+      }
     }
 
     if (capableLocal) {

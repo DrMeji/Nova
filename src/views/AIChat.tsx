@@ -114,6 +114,8 @@ import {
   isArkProtectedPathOnDisk,
   looksLikeArkSelfHarmAsk,
 } from '@/lib/arkSelfGuard';
+import { redactArkSelfLeak } from '@/lib/replySanitizer';
+import { listenOnce, speakText, stopSpeaking, voiceBrainPrompt, voiceSupported } from '@/lib/voiceSession';
 import {
   formatMcpToolsHelp,
   parseMcpCallIntent,
@@ -2618,12 +2620,13 @@ export function AIChat() {
     };
 
     const finishPlainReply = async (replyText: string) => {
+      const safeText = redactArkSelfLeak(replyText);
       const reply: ChatMessage = {
         id: assistantId,
         user_id: user?.id ?? 'guest',
         project_id: null,
         role: 'assistant',
-        content: replyText,
+        content: safeText,
         provider_used: 'ARK',
         created_at: new Date().toISOString(),
         elapsed_ms: Date.now() - replyStartedAt,
@@ -2643,6 +2646,34 @@ export function AIChat() {
 
     if (looksLikeArkSelfHarmAsk(content)) {
       await finishPlainReply(arkSelfHarmBlockedReply());
+      return;
+    }
+
+    if (mode === 'voice') {
+      if (!voiceSupported()) {
+        await finishPlainReply(
+          'Voice needs a browser with speech recognition and text-to-speech. Use text Chat for builds and file edits.',
+        );
+        return;
+      }
+      await finishPlainReply('Listening… speak now.');
+      const heard = await listenOnce(14_000);
+      if (!heard.ok || !heard.text.trim()) {
+        await finishPlainReply(heard.error || 'I did not catch that. Tap send and try again.');
+        return;
+      }
+      const voiceMsg = heard.text.trim();
+      const routed = await arkRoute({
+        message: voiceBrainPrompt(voiceMsg),
+        kind: 'chat',
+        preferredModelId: pinnedModel.id,
+        preferredModelName: pinnedModel.name,
+        preferredSource: pinnedModel.source,
+      });
+      const spoken = redactArkSelfLeak(String(routed.reply || '').trim())
+        || 'I did not have a reply for that.';
+      await finishPlainReply(spoken);
+      void speakText(spoken.replace(/\*\*/g, '').replace(/[#*`]/g, ''));
       return;
     }
 
@@ -3830,9 +3861,10 @@ export function AIChat() {
 
     const finishAgentReply = (reply: string, provider = 'ARK · agent') => {
       const elapsedMs = Date.now() - replyStartedAt;
+      const safeText = redactArkSelfLeak(reply);
       const next = messagesRef.current.map(m => (
         m.id === assistantId
-          ? { ...m, content: reply, provider_used: provider, elapsed_ms: elapsedMs }
+          ? { ...m, content: safeText, provider_used: provider, elapsed_ms: elapsedMs }
           : m
       ));
       messagesRef.current = next;
@@ -3930,8 +3962,16 @@ export function AIChat() {
       if (opened.name) renameChat(activeChatId, opened.name);
       // Warm dev server for Vite projects so Preview is one tap away after fixes.
       if (opened.root && isViteProject(opened.files)) {
-        void ensureViteDevServer(opened.root).then((dev) => {
-          if (dev.ok && dev.url) setPreviewUrl(dev.url);
+        void ensureViteDevServer(opened.root).then(async (dev) => {
+          if (dev.ok && dev.url) {
+            setPreviewUrl(dev.url);
+            await ensureInAppPreview({
+              projectId: opened.projectId || chatStudioProjectIdRef.current || activeChatId,
+              title: opened.name || 'Preview',
+              files: opened.files || {},
+              preferUrl: dev.url,
+            });
+          }
         });
       }
       // Fall through to inspect / code-edit below with files bound.
@@ -4915,7 +4955,7 @@ export function AIChat() {
             const sticky = stickyBrain;
             const inspectAsk = isFreshAttach && !userAsk ? `What is ${projectLabel} about?` : (userAsk || content);
             const planTurn = isChatPlanTurn(content) && !looksLikeImplementGo(content);
-            const allowEdits = chatTurnAllowsFileEdits(content, turnComposerMode);
+            const allowEdits = chatTurnAllowsFileEdits(content, composerModeFromContent(content) || composerMode);
             const engineResult = await answerStudio(
               {
                 userMessage: inspectAsk,

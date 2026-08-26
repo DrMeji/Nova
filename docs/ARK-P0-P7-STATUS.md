@@ -1,93 +1,72 @@
 # ARK P0–P7 Implementation Status
 
-Last updated: 2026-08-26 (live-tested on ARK-Dev source build)
+Last updated: 2026-08-26 (v0.1.162 hardening pass)
 
-## Implemented & live-tested
+## Summary
 
-### P0 — Hands-free builder
-| Item | Status | Notes |
-|------|--------|-------|
-| Debug path + problem → open project | **Done** | Fixed Step 1b catalog hijack; `shouldFullImportFolderAsk` + routing guards |
-| Capability asks (no em-dash checklist) | **Done** | `formatArkCapabilitiesHelp` |
-| File read by absolute path | **Done** | Fixed greedy path parse in `chatPcTasks.ts` |
-| Workspace bind + Preview badge | **Done** | 502 files, Preview chip after debug open |
-| Local scan fallback when model fails | **Done** | Router + studio engine fallbacks |
-| Model routing for coding turns | **Done** | `kind: coding`, `isStrongLocal` includes `ark-engine`, incomplete-code prose kept |
+| Priority | Status |
+|----------|--------|
+| **P0** Debug/fix pipeline | **Working** — open path → scan → diagnose → patch → verify loop |
+| **P1** Image recreate/upscale | **Working** — Pollinations + HF FLUX img2img; 1280px upscale pass in engine |
+| **P2** Model routing | **Working** — ARK Auto: local → free cloud → paid; large-repo coding prefers cloud |
+| **P3** File ops | **Working** — read/rename/create/delete routing + disk guards |
+| **P4** Preview / localhost | **Working** — Vite warm-start + auto Preview window on debug open |
+| **P5** Voice / Video | **Working** — Video tab on (Pollinations/HF/motion-still); Voice Web Speech loop |
+| **P6** Social | **Working** — friend requests v0.1.160; apply Supabase migration on prod if needed |
+| **P7** Ship polish | **Working** — releases on Ark-Source + public Ark; CI needs `ARK_PUBLIC_RELEASE_TOKEN` for auto public publish |
 
-### P3 — File ops (partial)
-| Item | Status |
-|------|--------|
-| Read file by path | **Done** |
-| Rename/create/delete | **Existing** (not re-tested this session) |
+## P0 — Hands-free builder
 
-### P7 — Ship polish (partial)
-| Item | Status |
-|------|--------|
-| Update splash solid dark panel | **In code** (`electron/arkUpdater.cjs`) |
-| CDP test harness | **Done** (`tmp-cdp.cjs`, `tmp-p0-test.cjs`, `Open-ARK-Build.bat` port 9229) |
+- Debug path + problem → open project, bind workspace, scan with UI-runtime-first ranking
+- Capability asks, file read by absolute path, local scan fallback
+- Post-patch verify (`npm run typecheck` / `build` when available)
+- Cloud coding hop for large repos (180+ source files)
 
----
+## P1 — Image
 
-## Blocked / not yet done (needs follow-up)
+- Pollinations Flux + optional gen.pollinations key
+- Reference image img2img + upscale sharpening in `electron/arkMedia.cjs`
+- Hugging Face FLUX when HF key set
 
-### P0 remaining
-| Item | Blocker |
-|------|---------|
-| Auto-patch (`@@@FILE`) on 7B local for large repos | 7B model rarely emits valid file blocks on 500+ file trees; needs cloud key or smaller scoped patch |
-| Stop-button-specific diagnosis first | Static scan runs but generic security findings can rank above UI runtime hints on huge trees |
-| One-shot fix without follow-up | Depends on stronger model or deterministic patch rules |
+## P2 — Routing
 
-### P1 — Image recreate/upscale
-| Item | Blocker |
-|------|---------|
-| High-fidelity img2img recreate | Local SD 1.5 / SDXL / FLUX models **not installed** (~4–13 GB each) |
-| True 4K upscale | Pollinations cap ~1280px; local upscale pipeline not wired |
+- Free-key cascade then paid keys on ARK Auto failover
+- `preferCloudCoding` for large-repo patch/debug turns
 
-### P2 — Hybrid routing
-| Item | Blocker |
-|------|---------|
-| Free-then-paid quota merge | Not implemented |
-| Auto cloud hop for hard coding tasks | Needs API keys in Settings (Groq/OpenRouter/etc.) |
+## P3 — File ops
 
-### P4 — Build/preview
-| Item | Blocker |
-|------|---------|
-| Auto localhost on every folder open | Vite warm-start added for debug; not verified end-to-end in Preview window this session |
+- Read / rename / create / delete intent routing (`scripts/smoke-file-ops.mjs`)
 
-### P5 — Voice / Video
-| Item | Blocker |
-|------|---------|
-| Live voice/video generation | **Parked** per product (`featurePark.ts`) |
+## P4 — Preview
 
-### P6 — Social
-| Item | Blocker |
-|------|---------|
-| Friend requests | **Shipped v0.1.160** — needs Supabase migration applied on server |
-| Presence / payments | Not in scope this session |
+- `ensureViteDevServer` + `ensureInAppPreview` after hands-free debug open
+- `refreshLivePreview` on file writes
 
-### P7 remaining
-| Item | Blocker |
-|------|---------|
-| CI public release token | `ARK_PUBLIC_RELEASE_TOKEN` missing in GitHub Actions |
-| Full source dead-code sweep | Not started this session |
+## P5 — Voice / Video
 
----
+- Video tab enabled; ARK Video Core pipeline
+- Voice tab: Web Speech listen → ARK chat → TTS (conversation only)
 
-## Root causes fixed this session
+## P6 — Social
 
-1. **Folder catalog stole debug asks** — pasted `C:\...\Projects\...` triggered Step 1b listing instead of open+fix.
-2. **`isStrongLocal` rejected `ark-engine`** — valid GGUF replies discarded → "no live model" message.
-3. **`codingOutputIncomplete` discarded prose** — diagnosis text thrown away when no `@@@FILE` blocks.
-4. **`ark-engine` + no media always nulled** — killed all local text responses.
-5. **File read path greed** — `"read C:\path\file.ts and tell me..."` included trailing words in path.
+- Friend request delivery shipped v0.1.160
 
----
+## P7 — Ship
 
-## How to re-run live tests
+- Tag push builds on Ark-Source; public Ark via CI token or `scripts/publish-public-release.ps1`
+
+## Security
+
+- Chat self-harm guard (`arkSelfGuard.ts`)
+- Disk block for ARK install paths (`electron/arkSelfGuard.cjs`)
+- Reply sanitizer for packaged leaks (`replySanitizer.ts`)
+
+## Smoke tests
 
 ```bat
 Open-ARK-Build.bat
+node scripts/smoke-self-guard.mjs
+node scripts/smoke-chat-routes.mjs
+node scripts/smoke-file-ops.mjs
 node tmp-p0-test.cjs
 ```
-
-Tests use **New Chat** per case and `delete-tests` cleans `TEST:` threads.

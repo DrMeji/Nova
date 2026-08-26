@@ -26,7 +26,7 @@ export type RecentCreation = {
 /** Unified Recent list entry (ChatGPT-style). */
 export type RecentChat = {
   id: string;
-  mode: 'general' | 'image' | 'video' | 'code';
+  mode: 'general' | 'image' | 'video' | 'code' | 'voice';
   title: string;
   updatedAt: string;
   /** Last message snippet for the sidebar. */

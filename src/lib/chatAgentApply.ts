@@ -18,6 +18,7 @@ import { finalizeWebEdits, reactUiMicroAskEdits } from '@/lib/webProjectCanon';
 import { safeProjectWrite } from '@/lib/projectWriteSafe';
 import { skillPromptAppendix } from '@/lib/arkSkills';
 import { detectProjectKind } from '@/lib/projectKind';
+import { verifyProjectAfterPatch } from '@/lib/postPatchVerify';
 
 export type ChatApplyResult = {
   ok: boolean;
@@ -214,12 +215,18 @@ export async function applyChatReplyEdits(opts: {
     stripFileBlocks(opts.reply),
     { surface: 'chat' },
   );
+  const verify = await verifyProjectAfterPatch({
+    diskRoot: opts.diskRoot,
+    files: next,
+    changedPaths: changed,
+  });
+  const reply = verify.summary ? `${spoken}${verify.summary}` : spoken;
   return {
     ok: true,
     updated: changed,
     deleted: [],
     files: next,
-    reply: spoken,
+    reply,
   };
 }
 

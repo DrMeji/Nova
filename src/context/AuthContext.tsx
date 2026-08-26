@@ -340,7 +340,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         void mergeGuestSocialToCloud(data.user.id);
       }
     }
-    return { error: error?.message ?? null };
+    return { error: (error as { message?: string } | null)?.message ?? null };
   };
 
   const resetPassword = async (email: string) => {

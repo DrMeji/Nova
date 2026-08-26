@@ -21,7 +21,7 @@ type HistoryItem = {
   sizeLabel: string;
   tone: string;
   chatId?: string;
-  mode?: 'general' | 'image' | 'video' | 'code';
+  mode?: 'general' | 'image' | 'video' | 'code' | 'voice';
   creationId?: string;
   thumb?: string;
 };

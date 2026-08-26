@@ -652,7 +652,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                         if (!profile?.ark_id && !isArkDevEmail(user?.email)) return;
                         const arkIdText = isArkDevEmail(user?.email)
                           ? 'DEV'
-                          : formatArkId(profile!.ark_id);
+                          : formatArkId(String(profile?.ark_id ?? ''));
                         void navigator.clipboard.writeText(arkIdText).then(() => {
                           setArkCopied(true);
                           window.setTimeout(() => setArkCopied(false), 1600);

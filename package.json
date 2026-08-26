@@ -1,7 +1,7 @@
 {
   "name": "ark",
   "private": true,
-  "version": "0.1.161",
+  "version": "0.1.162",
   "type": "module",
   "main": "electron/main.cjs",
   "description": "ARK \u00e2\u20ac\u201d AI Creation Studio desktop app",

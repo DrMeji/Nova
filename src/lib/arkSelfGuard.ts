@@ -11,6 +11,7 @@ const SELF_HARM_PATTERNS: RegExp[] = [
   /\b(?:read|open|list|scan|search|grep|cat)\b[\s\S]{0,24}\b(?:your|ark'?s?|own)\b[\s\S]{0,24}\b(?:source|codebase|electron|app\.asar|main\.cjs|preload)\b/i,
   /\bapp\.asar\b/i,
   /\bDrMeji\/Ark-Source\b/i,
+  /\b(?:git\s+clone|clone\s+(?:the\s+)?(?:repo|repository|source))\b[\s\S]{0,48}\b(?:DrMeji\/Ark|Ark-Source|ark-source)\b/i,
   /\b(?:how\s+are\s+you\s+built|how\s+was\s+ark\s+built|what\s+is\s+inside\s+ark)\b/i,
 ];
 

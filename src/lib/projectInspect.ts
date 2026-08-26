@@ -698,10 +698,11 @@ export function collectProjectFindings(
       ? 'wider scan find more issues security eval exec secrets innerHTML child_process shell'
       : 'find problems debug bugs issues security ui');
   let findings = scanProjectFindings(files, scanMsg);
-  if (/\b(stop|generating|stuck|inflight)\b/i.test(scanMsg)) {
-    const chatFirst = findings.filter(f => /AIChat|chatInflight|generatingRef|inflight/i.test(`${f.path} ${f.detail}`));
-    const rest = findings.filter(f => !chatFirst.includes(f));
-    findings = [...chatFirst, ...rest];
+  if (/\b(stop|generating|stuck|inflight|button)\b/i.test(scanMsg)) {
+    const uiRuntime = findings.filter(f => /AIChat|chatInflight|generatingRef|inflight|Stop/i.test(`${f.path} ${f.detail}`));
+    const uiOther = findings.filter(f => isUiFinding(f.detail, f.path) && !uiRuntime.includes(f));
+    const rest = findings.filter(f => !uiRuntime.includes(f) && !uiOther.includes(f));
+    findings = [...uiRuntime, ...uiOther, ...rest];
   }
   if (focus === 'security') findings = findings.filter(f => isSecurityFinding(f.detail));
   else if (focus === 'ui') findings = findings.filter(f => isUiFinding(f.detail, f.path));

@@ -22,6 +22,7 @@ import {
   type InspectFinding,
 } from '@/lib/projectInspect';
 import { looksLikeProjectDebugAsk } from '@/lib/chatProjectDebug';
+import { shouldPreferCloudForCoding, countSourceFiles } from '@/lib/codingCloudPolicy';
 import { estimateTokens } from '@/lib/tokenUsage';
 
 export type StudioIntent =
@@ -425,6 +426,11 @@ export async function answerStudio(
     const routePromise = arkRoute({
       message: packed.prompt,
       kind: routeKind,
+      preferCloudCoding: shouldPreferCloudForCoding({
+        fileCount: countSourceFiles(input.files),
+        message: input.userMessage,
+        allowFileEdits: input.allowFileEdits,
+      }),
       preferredModelId: input.preferredModelId,
       preferredModelName: input.preferredModelName,
       preferredSource: input.preferredSource as 'local' | 'cloud' | 'auto' | undefined,

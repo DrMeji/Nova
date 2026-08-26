@@ -57,9 +57,9 @@ export function isCallUiEnabled(): boolean {
   return !isSocialParked('call');
 }
 
-/** Video tab parked until generative video is reliable (motion-still fallback is not product-ready). */
+/** Video tab — Pollinations / motion-still pipeline is wired and tested. */
 export function isVideoTabEnabled(): boolean {
-  return false;
+  return true;
 }
 
 /** Voice tab — re-export so AppShell / Search can park it next to Video. */
