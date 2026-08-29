@@ -32,6 +32,13 @@ jobs:
       - run: node scripts/smoke-catalog-ssot.cjs
       - run: node scripts/smoke-secrets-check.cjs
       - run: node scripts/smoke-thread-brain.cjs
+      - run: npm run smoke:delete
+      - run: npm run smoke:routes
+      - run: npm run smoke:parked
+      - run: npm run smoke:file-ops
+      - run: npm run smoke:self-guard
+      - run: npm run smoke:cloud-wiring
+      - run: npm run smoke:followup
       # Brain HTTP smoke only when a local brain is running (desktop app).
       - name: Brain API smoke (optional)
         env:

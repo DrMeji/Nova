@@ -46,11 +46,17 @@ Without TURN, calls work on most home networks but may fail on strict corporate 
 
 ## One-time backend setup (project owner)
 
-Apply SQL migrations to the hosted Supabase project (`supabase/migrations/`):
+Apply SQL migrations to the hosted Supabase project (`supabase/migrations/`), in order. **Core social will not work until these exist:**
 
 1. `20260818000000_profiles_ark_id.sql`
 2. `20260818010000_ark_social.sql`
-3. `20260824100000_ark_friend_requests.sql`
+3. `20260824100000_ark_friend_requests.sql` (or `supabase/apply-friend-requests.sql`)
+4. `20260824120000_avatar_lookup.sql`
+5. `20260825100001_broadcast_my_profile.sql`
+6. `20260825150000_friends_unadd_blocks.sql` (`are_mutual_ark_friends`, blocks, unfriend)
+7. **`20260827130000_harden_friend_messages.sql`** — DMs only between mutual friends (required)
+8. `20260828140000_avatars_storage.sql` (or `supabase/avatars-storage.sql`) — profile photos as HTTPS files
+9. `20260828150000_rls_core_audit.sql` — re-assert core RLS (safe if already applied)
 
 In the Supabase dashboard → **Database → Replication**, confirm these tables are in the **`supabase_realtime`** publication:
 
@@ -59,6 +65,8 @@ In the Supabase dashboard → **Database → Replication**, confirm these tables
 - `ark_friend_requests`
 
 CLI (if linked): `npx supabase db push`
+
+**Defer for later (not required for core app):** account-delete schedule SQL, custom SMTP / real email.
 
 ## Testing with two accounts
 

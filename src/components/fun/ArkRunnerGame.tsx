@@ -38,7 +38,7 @@ export function ArkRunnerGame({ active, onScore }: Props) {
     let dead = false;
     let sc = 0;
     let speed = 5.2;
-    let groundY = H - 36;
+    const groundY = H - 36;
     let player = { x: 56, y: groundY, vy: 0, w: 28, h: 32, onGround: true };
     let obstacles: { x: number; w: number; h: number }[] = [];
     let spawnAt = 90;

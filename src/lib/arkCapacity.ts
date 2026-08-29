@@ -57,7 +57,7 @@ export async function probeLiveCapacity(): Promise<LiveCapacity> {
   let localGguf = false;
   let imageFree = Boolean(window.arkDesktop?.engineGenerate);
   // Video tab is parked — never advertise free/live video capacity.
-  let videoFree = false;
+  const videoFree = false;
   try {
     const status = await getEngineStatus();
     localGguf = Boolean(status.ggufBinary && (status.ggufCount || 0) > 0);

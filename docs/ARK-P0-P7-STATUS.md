@@ -44,12 +44,13 @@ Last updated: 2026-08-26 (v0.1.162 hardening pass)
 
 ## P5 — Voice / Video
 
-- Video tab enabled; ARK Video Core pipeline
-- Voice tab: Web Speech listen → ARK chat → TTS (conversation only)
+- Video tab is parked in the current retail build; ARK Video Core remains an internal/fallback pipeline.
+- Voice tab is parked in the current retail build; Web Speech → ARK chat → TTS is not exposed as a retail route.
 
 ## P6 — Social
 
-- Friend request delivery shipped v0.1.160
+- Friend request delivery shipped v0.1.160.
+- Networking posts sync for signed-in users; post chat, code-view requests, and moderation reports remain local-only previews.
 
 ## P7 — Ship
 

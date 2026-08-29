@@ -21,6 +21,23 @@ export function looksLikeCodeAsk(text: string): boolean {
     && !/\b(?:create\s+the\s+files|scaffold|lets?\s+build\s+this)\b/i.test(t)) {
     return false;
   }
+  // Explicit "do not create / still planning" must never count as a code ask
+  // (otherwise "do not create any project" matches create…project).
+  if (/\b(?:do\s+not|don't|dont|never|without|not)\s+create\b/i.test(t)) return false;
+  if (/\bstill\s+do\s+not\s+create\b/i.test(t)) return false;
+  if (/\b(?:do\s+not|don't|dont)\s+(?:scaffold|build|write\s+files?)\b/i.test(t)) return false;
+  if (/\brefine\b[\s\S]{0,40}\b(?:ia|information\s+architecture|data\s+model|permissions?)\b/i.test(t)
+    && !/\b(?:code|tsx|jsx|file|scaffold)\b/i.test(t)) {
+    return false;
+  }
+  // Vague “help me build a coffee shop web” = advice first, not a silent disk write.
+  if (
+    /\bhelp\s+me\s+(?:to\s+)?(?:build|make|create)\b/i.test(t)
+    && !/\b(?:create\s+(?:the\s+)?(?:files|project)|scaffold|lets?\s+build\s+this|build\s+it\s+now|files\s+on\s+disk)\b/i.test(t)
+    && t.length < 160
+  ) {
+    return false;
+  }
   if (/\bi(?:'m| am)\s+building\b/i.test(t) && !/\b(?:create\s+project|files\s+now|scaffold)\b/i.test(t)) {
     return false;
   }
@@ -38,6 +55,21 @@ export function looksLikeCodeAsk(text: string): boolean {
   if (/\b(add|put|place|move|insert)\b[\s\S]{0,80}\b(button|icon|logo|search|settings|header|nav|page)\b/i.test(t)) {
     return true;
   }
+  return false;
+}
+
+/** User wants copy-pasteable source in the chat bubble (not a disk project / Preview). */
+export function looksLikeCopyPasteCodeAsk(text: string): boolean {
+  const t = String(text || '').trim();
+  if (!t) return false;
+  if (/\b(?:copy[\s-]?paste|paste(?:able)?|clipboard)\b/i.test(t) && /\b(?:code|snippet|html|css|js|tsx?|jsx)\b/i.test(t)) {
+    return true;
+  }
+  if (/\b(?:give|show|write|paste|provide)\b[\s\S]{0,40}\b(?:me\s+)?(?:the\s+)?(?:full\s+)?(?:code|source|snippet)\b/i.test(t)
+    && !/\b(?:create\s+(?:a\s+)?(?:project|folder)|on\s+disk|preview|localhost|scaffold)\b/i.test(t)) {
+    return true;
+  }
+  if (/\bin\s+chat\b/i.test(t) && /\b(?:code|snippet)\b/i.test(t)) return true;
   return false;
 }
 

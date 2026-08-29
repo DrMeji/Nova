@@ -79,13 +79,14 @@ export function classifyChatRoutes(
   };
 
   const createBrief = isProjectCreateBrief(t);
+  const readFileAsk = shouldRouteReadFile(t);
 
   const diskIntent = classifyDiskIntent(t, {
     recentUserMessages: opts.recentUserMessages || [],
     pendingAddFile: null,
     stickyDiskTarget: null,
   });
-  if (!createBrief && (diskIntent.type === 'delete_file' || diskIntent.type === 'delete_project' || diskIntent.type === 'add_file')) {
+  if (!createBrief && !readFileAsk && (diskIntent.type === 'delete_file' || diskIntent.type === 'delete_project' || diskIntent.type === 'add_file')) {
     push('disk');
   }
 
@@ -116,7 +117,7 @@ export function classifyChatRoutes(
     push('create_project');
   }
 
-  if (shouldRouteReadFile(t)) push('read_file');
+  if (readFileAsk) push('read_file');
 
   if (opts.workspaceEmpty !== false && parseFolderPathAsk(t) && looksLikeFolderPathAsk(t)) {
     push('folder_path');

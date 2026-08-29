@@ -12,7 +12,6 @@ import {
   type AiModePref,
   type DensityPref,
   type LocalPrefs,
-  type UpdateChannel,
 } from '@/lib/localPrefs';
 import { clearSetupCompleted } from '@/lib/setup';
 import { syncWorkspaceGrantsFromPrefs } from '@/lib/workspaceGrants';
@@ -121,7 +120,7 @@ const ACCENTS: { id: AccentPref; label: string; swatch: string }[] = [
 ];
 
 export function SettingsContent({ onClose, initialSection }: { onClose?: () => void; initialSection?: string } = {}) {
-  const { user, profile, settings, updateSettings, signOut, deleteAccountPermanently, refreshProfile } = useAuth();
+  const { user, profile, settings, updateSettings, signOut, scheduleAccountDeletion, cancelAccountDeletion, refreshProfile } = useAuth();
   const { blockedUsers, unblockFriend, refreshBlocked } = useSocial();
   const { theme, setTheme } = useTheme();
   const { navigate } = useRouter();
@@ -131,6 +130,18 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
     if (s === 'beta' && !isBetaSettingsEnabled()) return 'account';
     return s;
   });
+  useEffect(() => {
+    if (!initialSection || initialSection === 'mcp') return;
+    if (initialSection === 'testers' && !isTestersSettingsEnabled()) {
+      setActiveSection('account');
+      return;
+    }
+    if (initialSection === 'beta' && !isBetaSettingsEnabled()) {
+      setActiveSection('account');
+      return;
+    }
+    setActiveSection(initialSection);
+  }, [initialSection]);
   const [prefs, setPrefs] = useState<LocalPrefs>(() => getLocalPrefs());
   const [displayName, setDisplayName] = useState(
     () => getLocalPrefs().displayName || profile?.display_name || 'Guest',
@@ -155,6 +166,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
   const [arkCopied, setArkCopied] = useState(false);
   const [deleteAccountBusy, setDeleteAccountBusy] = useState(false);
   const [deleteAccountMsg, setDeleteAccountMsg] = useState<string | null>(null);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [navCompact, setNavCompact] = useState(false);
   const [cacheBusy, setCacheBusy] = useState(false);
   const [engineStatus, setEngineStatus] = useState<ArkEngineStatus | null>(null);
@@ -322,7 +334,10 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
         await supabase.from('profiles').upsert({
           id: user.id,
           display_name: name,
-          avatar_url: prefs.avatarDataUrl || null,
+          // Prefer existing cloud URL (https) over huge local data URLs.
+          avatar_url: (profile?.avatar_url && /^https?:\/\//i.test(profile.avatar_url))
+            ? profile.avatar_url
+            : (prefs.avatarDataUrl || null),
         });
         await pushProfileToFriends();
         await refreshProfile();
@@ -335,13 +350,33 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
   const syncAvatarToCloud = async (dataUrl: string | undefined) => {
     if (!user || user.id === 'guest-local') return;
     try {
-      const { supabase } = await import('@/lib/supabase');
-      await supabase.from('profiles').upsert({
-        id: user.id,
-        avatar_url: dataUrl || null,
-      });
-      await pushProfileToFriends();
-      await refreshProfile();
+      const { persistProfileAvatarUrl, removeAvatarFromStorage, uploadAvatarDataUrl } = await import('@/lib/avatarStorage');
+      if (!dataUrl) {
+        await removeAvatarFromStorage(user.id);
+        await persistProfileAvatarUrl(user.id, null);
+        await refreshProfile();
+        return;
+      }
+      const uploaded = await uploadAvatarDataUrl(user.id, dataUrl);
+      if (uploaded.ok) {
+        // Keep a local cache for fast sidebar paint; cloud stores HTTPS URL.
+        await persistProfileAvatarUrl(user.id, uploaded.url);
+        await refreshProfile();
+        return;
+      }
+      // Storage bucket not applied yet — fall back to previous inline behavior.
+      if (uploaded.error.startsWith('storage_unavailable:')) {
+        const { supabase } = await import('@/lib/supabase');
+        await supabase.from('profiles').upsert({
+          id: user.id,
+          avatar_url: dataUrl,
+        });
+        await pushProfileToFriends();
+        await refreshProfile();
+        return;
+      }
+      setSavedFlash(uploaded.error || 'Avatar upload failed');
+      window.setTimeout(() => setSavedFlash(''), 2800);
     } catch {
       /* keep local */
     }
@@ -349,7 +384,6 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
 
   const saveAllVisible = () => {
     void saveDisplayName();
-    setLocalPrefs(prefs);
     setSavedFlash('Settings saved');
     window.setTimeout(() => setSavedFlash(''), 2200);
   };
@@ -691,7 +725,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                   />
                 </div>
 
-                <div className="flex flex-wrap gap-2 pt-1">
+                <div className="flex flex-wrap gap-2 pt-1 items-center">
                   <button type="button" onClick={signOut} className="ark-btn-secondary !text-ark-accent-red">
                     Sign Out
                   </button>
@@ -705,50 +739,108 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                   >
                     Reset profile labels
                   </button>
+                  {user?.id && user.id !== 'guest-local' ? (
+                    profile?.delete_scheduled_at ? (
+                      <button
+                        type="button"
+                        disabled={deleteAccountBusy}
+                        className="ark-btn-secondary !text-amber-200 border-amber-500/40 disabled:opacity-50"
+                        onClick={() => {
+                          setDeleteAccountBusy(true);
+                          setDeleteAccountMsg(null);
+                          void cancelAccountDeletion().then((res) => {
+                            setDeleteAccountBusy(false);
+                            if (!res.ok) {
+                              setDeleteAccountMsg(res.error);
+                              return;
+                            }
+                            flashSaved('Deletion canceled');
+                          });
+                        }}
+                      >
+                        {deleteAccountBusy ? 'Canceling…' : 'Cancel account deletion'}
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={deleteAccountBusy}
+                        className="ark-btn-secondary !text-rose-300 border-rose-500/40 disabled:opacity-50"
+                        onClick={() => {
+                          setDeleteAccountMsg(null);
+                          setDeleteConfirmOpen(true);
+                        }}
+                      >
+                        Delete account
+                      </button>
+                    )
+                  ) : null}
                 </div>
-
-                {user?.id && user.id !== 'guest-local' ? (
-                  <div className="rounded-xl border border-rose-500/30 bg-rose-500/5 p-4 space-y-2">
-                    <p className="text-sm font-medium text-rose-200">Delete account</p>
-                    <p className="text-[11px] text-content-tertiary leading-relaxed">
-                      Permanently deletes this account right away (no waiting period). Your email can be used again to
-                      create a new account with a new ARK ID. This cannot be undone.
-                    </p>
-                    {deleteAccountMsg ? (
-                      <p className="text-[11px] text-amber-200/90">{deleteAccountMsg}</p>
-                    ) : null}
-                    <button
-                      type="button"
-                      disabled={deleteAccountBusy}
-                      className="ark-btn-secondary !text-rose-300 border-rose-500/40 disabled:opacity-50"
-                      onClick={() => {
-                        const email = user.email || 'this account';
-                        const ok = window.confirm(
-                          `Permanently delete ${email} right now?\n\nThis removes the account immediately. You can sign up again with the same email afterward.`,
-                        );
-                        if (!ok) return;
-                        const again = window.confirm('Last chance: delete permanently? There is no recovery.');
-                        if (!again) return;
-                        setDeleteAccountBusy(true);
-                        setDeleteAccountMsg(null);
-                        void deleteAccountPermanently().then((res) => {
-                          setDeleteAccountBusy(false);
-                          if (!res.ok) {
-                            setDeleteAccountMsg(res.error);
-                            return;
-                          }
-                          flashSaved('Account deleted');
-                          onClose?.();
-                        });
-                      }}
-                    >
-                      {deleteAccountBusy ? 'Deleting…' : 'Permanently delete account'}
-                    </button>
-                  </div>
+                {profile?.delete_scheduled_at ? (
+                  <p className="text-[11px] text-amber-200/90 leading-relaxed">
+                    Account deletion is scheduled for{' '}
+                    {new Date(profile.delete_scheduled_at).toLocaleString()}. You can cancel above before then.
+                    We will email {user?.email || 'you'} when mail delivery is live.
+                  </p>
+                ) : null}
+                {deleteAccountMsg ? (
+                  <p className="text-[11px] text-amber-200/90">{deleteAccountMsg}</p>
                 ) : null}
               </div>
             </SettingsSection>
           )}
+
+          {deleteConfirmOpen ? (
+            <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-black/70">
+              <div
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="ark-delete-account-title"
+                className="w-full max-w-md rounded-2xl border border-rose-500/40 bg-ark-navy-900 shadow-2xl p-5 space-y-3"
+              >
+                <h3 id="ark-delete-account-title" className="text-base font-semibold text-content-primary">
+                  You&apos;re about to delete your account
+                </h3>
+                <p className="text-sm text-content-secondary leading-relaxed">
+                  This starts a <span className="text-content-primary font-medium">24-hour</span> deletion window.
+                  Your account stays usable until then. After 24 hours it is permanently removed.
+                </p>
+                <p className="text-[12px] text-content-tertiary leading-relaxed">
+                  We&apos;ll send an email to <span className="text-content-secondary">{user?.email || 'your inbox'}</span>{' '}
+                  confirming the schedule (email delivery ships with SMTP — the notice is prepared on this PC for now).
+                </p>
+                <div className="flex flex-wrap gap-2 justify-end pt-1">
+                  <button
+                    type="button"
+                    className="ark-btn-secondary"
+                    disabled={deleteAccountBusy}
+                    onClick={() => setDeleteConfirmOpen(false)}
+                  >
+                    Keep account
+                  </button>
+                  <button
+                    type="button"
+                    className="ark-btn-secondary !text-rose-300 border-rose-500/40 disabled:opacity-50"
+                    disabled={deleteAccountBusy}
+                    onClick={() => {
+                      setDeleteAccountBusy(true);
+                      setDeleteAccountMsg(null);
+                      void scheduleAccountDeletion(24).then((res) => {
+                        setDeleteAccountBusy(false);
+                        if (!res.ok) {
+                          setDeleteAccountMsg(res.error);
+                          return;
+                        }
+                        setDeleteConfirmOpen(false);
+                        flashSaved('Deletion scheduled · 24 hours');
+                      });
+                    }}
+                  >
+                    {deleteAccountBusy ? 'Scheduling…' : 'Delete in 24 hours'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
 
           {activeSection === 'appearance' && (
             <SettingsSection title="Appearance" description="Theme, density, and visual preferences">
@@ -933,11 +1025,11 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                     <ToggleRow
                       label="Allow NSFW content"
                       description={
-                        Boolean(prefs.allowNsfw)
+                        prefs.allowNsfw
                           ? 'On. Image mode may generate nude or adult content. Chat still follows your routing mode.'
                           : 'Off (default). Image requests for nudity or porn are blocked in chat. Free image hosts also receive SFW constraints so they stay family-safe.'
                       }
-                      value={Boolean(prefs.allowNsfw)}
+                      value={prefs.allowNsfw}
                       onChange={v => patchPrefs({ allowNsfw: v })}
                       bare
                     />
@@ -1222,12 +1314,19 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                                 type="button"
                                 className="ark-btn-secondary flex-1"
                                 onClick={() => {
-                                  setProviderApiKey(p.id, '');
-                                  setProviderKeys(getProviderApiKeys());
-                                  setEditingProvider(null);
-                                  setKeyDraft('');
-                                  setSavedFlash('Key removed');
-                                  window.setTimeout(() => setSavedFlash(''), 1600);
+                                  void (async () => {
+                                    try {
+                                      await setProviderApiKey(p.id, '');
+                                      setProviderKeys(getProviderApiKeys());
+                                      setEditingProvider(null);
+                                      setKeyDraft('');
+                                      setSavedFlash('Key removed');
+                                      window.setTimeout(() => setSavedFlash(''), 1600);
+                                    } catch (err) {
+                                      setSavedFlash(err instanceof Error ? err.message : 'Could not remove key');
+                                      window.setTimeout(() => setSavedFlash(''), 2600);
+                                    }
+                                  })();
                                 }}
                               >
                                 Remove

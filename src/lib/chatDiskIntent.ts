@@ -445,7 +445,7 @@ export function classifyDiskIntent(
     // Only continue an add-file flow when we already asked where to put a file.
     const allLines = [...recent, t];
     const fileName = pendingAddFile || fileNameFromAddFileThread(allLines);
-    if (fileName && pendingAddFile) {
+    if (fileName) {
       return {
         type: 'add_file',
         name: fileName,

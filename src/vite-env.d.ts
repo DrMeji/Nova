@@ -18,6 +18,7 @@ declare global {
     arkDesktop?: {
       isElectron: boolean;
       isPackaged?: boolean;
+      isDevBuild?: boolean;
       platform: string;
       versions: {
         electron: string;
@@ -26,7 +27,7 @@ declare global {
       };
       /** Absolute path for a dropped/selected File (Electron 32+). */
       getPathForFile?: (file: File) => string;
-      openExternal?: (url: string) => Promise<boolean>;
+      openExternal?: (url: string) => Promise<{ ok: boolean; error?: string }>;
       openPath?: (targetPath: string) => Promise<boolean | { ok: boolean; error?: string }>;
       windowControls?: boolean;
       windowMinimize?: () => Promise<boolean>;
@@ -174,6 +175,7 @@ declare global {
           method?: string;
           headers?: Record<string, string>;
           body?: string;
+          authProviderId?: string;
           streamId?: string;
         },
       ) => Promise<{ ok: boolean; status?: number; streamId?: string; text?: string; error?: string }>;
@@ -321,6 +323,8 @@ declare global {
         device?: { label: string; width: number; height: number; family?: string };
         forceNavigate?: boolean;
       }) => Promise<{ ok: boolean; error?: string; reused?: boolean }>;
+      /** Close the shared Localhost/Preview window (disconnect on chat switch). */
+      previewCloseLive?: () => Promise<{ ok: boolean }>;
       previewUpdate?: (payload: {
         projectId: string;
         files?: Record<string, string>;

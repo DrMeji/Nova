@@ -245,7 +245,6 @@ async function loadDeviceIntoWindow(win, id, url, device, title) {
 }
 
 async function openPreviewWindow(payload) {
-  const id = String(payload?.projectId || 'default');
   const url = String(payload?.url || '');
   if (!url) return { ok: false, error: 'No preview URL' };
 
@@ -254,6 +253,36 @@ async function openPreviewWindow(payload) {
   const rawTitle = String(payload?.title || (device ? `${device.label} · ARK Preview` : 'ARK Preview'));
   const title = /ARK/i.test(rawTitle) ? rawTitle : `ARK Preview · ${rawTitle}`;
   const size = kind === 'device' && device ? deviceWindowSize(device) : { width: 1100, height: 780 };
+
+  // One live web preview window for the whole app — always navigate to the URL for the
+  // active chat's project (never leave another chat's localhost visible).
+  const id = kind === 'device'
+    ? String(payload?.projectId || 'device-preview')
+    : 'ark-live-preview';
+
+  if (kind === 'web') {
+    for (const [key, win] of [...previewWindows.entries()]) {
+      if (key === id) continue;
+      if (key.startsWith('chat:') || key === 'chat-preview' || key === 'default') {
+        try {
+          if (win && !win.isDestroyed()) win.close();
+        } catch {
+          /* ignore */
+        }
+        previewWindows.delete(key);
+      }
+    }
+  }
+
+  // Bust Vite/HTML caches so switching chats cannot show a stale document.
+  let navigateUrl = url;
+  try {
+    const u = new URL(url);
+    u.searchParams.set('_ark', String(Date.now()));
+    navigateUrl = u.toString();
+  } catch {
+    navigateUrl = url;
+  }
 
   const existing = previewWindows.get(id);
   if (existing && !existing.isDestroyed()) {
@@ -266,22 +295,11 @@ async function openPreviewWindow(payload) {
         existing.setMinimumSize(480, 360);
         existing.setMaximumSize(4000, 3000);
         existing.setTitle(title);
-        let sameHost = false;
-        try {
-          const cur = new URL(existing.webContents.getURL());
-          const next = new URL(url);
-          sameHost = cur.host === next.host;
-        } catch {
-          sameHost = false;
-        }
-        if (sameHost && !payload?.forceNavigate) {
-          await existing.webContents.reloadIgnoringCache();
-        } else {
-          await existing.loadURL(url);
-        }
+        // Always navigate for live web preview — never reload another project's host.
+        await existing.loadURL(navigateUrl);
       } catch {
         try {
-          await existing.loadURL(url);
+          await existing.loadURL(navigateUrl);
         } catch {
           /* keep */
         }
@@ -323,11 +341,29 @@ async function openPreviewWindow(payload) {
     enableDeviceZoom(win);
     await loadDeviceIntoWindow(win, id, url, device, title);
   } else {
-    await win.loadURL(url);
+    await win.loadURL(navigateUrl);
   }
   if (win.isMinimized()) win.restore();
   win.show();
   win.focus();
+  return { ok: true };
+}
+
+function closeLivePreviewWindow() {
+  const id = 'ark-live-preview';
+  const win = previewWindows.get(id);
+  if (win && !win.isDestroyed()) {
+    try { win.close(); } catch { /* ignore */ }
+  }
+  previewWindows.delete(id);
+  for (const [key, w] of [...previewWindows.entries()]) {
+    if (key.startsWith('chat:') || key === 'chat-preview' || key === 'default') {
+      try {
+        if (w && !w.isDestroyed()) w.close();
+      } catch { /* ignore */ }
+      previewWindows.delete(key);
+    }
+  }
   return { ok: true };
 }
 
@@ -400,6 +436,7 @@ module.exports = {
   stopPreview,
   previewStatus,
   openPreviewWindow,
+  closeLivePreviewWindow,
   updatePreview,
   reloadPreviewWindow,
 };

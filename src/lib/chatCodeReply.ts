@@ -98,11 +98,13 @@ export function finalizeCodingChatBubble(opts: {
     return formatCodeChatReply(opts.userMessage, opts.changedPaths, '', { surface: 'chat' });
   }
   if (/```|@@@FILE/i.test(opts.rawReply)) {
-    if (opts.editMode === false) {
-      const body = stripped && stripped.length > 20 ? stripped : stripFileBlocks(opts.rawReply);
-      return body || 'Done.';
+    // Only claim a failed save when this turn was meant to write files.
+    // Plain chat often includes sample HTML/code — keep that text.
+    if (opts.editMode === true) {
+      return 'I drafted changes but could not save them to disk. Try the ask again in one short sentence.';
     }
-    return 'I drafted changes but could not save them to disk. Try the ask again in one short sentence.';
+    const body = stripped && stripped.length > 20 ? stripped : stripFileBlocks(opts.rawReply);
+    return body || 'Done.';
   }
   // Never show “I will modify App.jsx…” as if the work finished.
   if (/\b(i will|i'll|going to)\b[\s\S]{0,80}\b(modify|update|edit|change|add)\b/i.test(stripped)) {

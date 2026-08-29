@@ -86,13 +86,20 @@ export function FreeKeyWizard({
     return ap - bp;
   });
 
-  const saveOne = (id: string) => {
+  const saveOne = async (id: string) => {
     setBusyId(id);
+    setValidation(prev => ({ ...prev, [id]: '' }));
     try {
       const value = drafts[id]?.trim() || '';
-      setProviderApiKey(id, value);
+      await setProviderApiKey(id, value);
       setSaved(prev => ({ ...prev, [id]: Boolean(value) }));
       if (value) setDrafts(prev => ({ ...prev, [id]: '' }));
+      setValidation(prev => ({ ...prev, [id]: 'Saved · ready in Chat' }));
+    } catch (err) {
+      setValidation(prev => ({
+        ...prev,
+        [id]: err instanceof Error ? err.message : 'Could not save key',
+      }));
     } finally {
       setBusyId(null);
     }
@@ -165,7 +172,7 @@ export function FreeKeyWizard({
                   type="button"
                   className="ark-btn-primary shrink-0"
                   disabled={busyId === p.id || !(drafts[p.id] || '').trim()}
-                  onClick={() => saveOne(p.id)}
+                  onClick={() => void saveOne(p.id)}
                 >
                   {busyId === p.id ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Save'}
                 </button>

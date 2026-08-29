@@ -2,19 +2,31 @@
  * Smoke: conversation continuity — soft follow-ups must keep history + coding topic.
  * npx tsx --tsconfig tsconfig.app.json scripts/smoke-followup-intent.mjs
  */
-import {
+const storage = {
+  getItem: () => null,
+  setItem: () => {},
+  removeItem: () => {},
+};
+globalThis.localStorage = storage;
+globalThis.window = {
+  localStorage: storage,
+  addEventListener: () => {},
+  removeEventListener: () => {},
+};
+
+const {
   looksLikeConversationalPlanningAsk,
   looksLikeGreenfieldIdea,
   shouldInjectPlanningConversation,
-} from '../src/lib/chatIdeaIntent.ts';
-import { planningConversationHint } from '../src/lib/chatPlanMode.ts';
-import {
+} = await import('../src/lib/chatIdeaIntent.ts');
+const { planningConversationHint } = await import('../src/lib/chatPlanMode.ts');
+const {
   buildRouterHistory,
   inferThreadTopic,
   isTopicShift,
   packHistoryPrompt,
   routerSystemPrompt,
-} from '../src/lib/chatHistory.ts';
+} = await import('../src/lib/chatHistory.ts');
 
 const planCases = [
   {

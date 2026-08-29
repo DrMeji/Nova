@@ -28,7 +28,7 @@ export function looksLikeProjectBuildAsk(text: string): boolean {
   // Explicit create / scaffold
   if (/\bcreate\s+(?:a\s+)?(?:new\s+)?project\b/i.test(t)) return true;
   if (/\bcreate\s+(?:a\s+)?(?:new\s+)?(?:website|site|web\s*app|app|application)\b/i.test(t)) return true;
-  // "Create a React + Vite app named SignalDesk". words between create and app are OK.
+  // "Create a React + Vite app named <Name>". words between create and app are OK.
   if (/\bcreate\s+(?:a\s+)?(?:new\s+)?[\s\S]{0,120}?\b(?:app|application|website|site|project)\b/i.test(t)) return true;
   if (/\b(?:react|vite)\b/i.test(t) && /\b(?:create|build|named|called)\b/i.test(t)) return true;
   if (/\bscaffold\b/i.test(t) && /\b(?:project|app|application|website|site)\b/i.test(t)) return true;

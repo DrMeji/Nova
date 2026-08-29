@@ -268,8 +268,10 @@ export async function setProviderApiKey(providerId: string, apiKey: string) {
   } else {
     delete map[providerId];
   }
-  providerKeyCache = map;
   await persistProviderKeys(map);
+  // Commit the in-memory value only after the durable write succeeds.
+  // Otherwise a failed secure-storage write looks connected until restart.
+  providerKeyCache = map;
   try {
     window.dispatchEvent(new Event('ark:provider-keys-changed'));
   } catch {
@@ -278,13 +280,13 @@ export async function setProviderApiKey(providerId: string, apiKey: string) {
   return map;
 }
 
-export function setProviderApiKeys(map: ProviderKeyMap) {
+export async function setProviderApiKeys(map: ProviderKeyMap) {
   const clean: ProviderKeyMap = {};
   for (const [id, value] of Object.entries(map)) {
     if (typeof value === 'string' && value.trim()) clean[id] = value.trim();
   }
+  await persistProviderKeys(clean);
   providerKeyCache = clean;
-  void persistProviderKeys(clean);
   try {
     window.dispatchEvent(new Event('ark:provider-keys-changed'));
   } catch {

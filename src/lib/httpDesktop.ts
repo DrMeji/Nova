@@ -10,6 +10,35 @@ export type DesktopHttpOptions = {
   authProviderId?: string;
 };
 
+function extractStreamText(data: unknown): string {
+  if (typeof data === 'object' && data && 'choices' in data) {
+    const choices = (data as {
+      choices?: { message?: { content?: string }; delta?: { content?: string } }[];
+    }).choices;
+    return choices?.map(choice => choice.message?.content || choice.delta?.content || '').join('') || '';
+  }
+  if (typeof data !== 'object' || !data || !('raw' in data)) return '';
+  const raw = String((data as { raw?: unknown }).raw || '');
+  let text = '';
+  for (const line of raw.split(/\r?\n/)) {
+    if (!line.startsWith('data:')) continue;
+    const payload = line.slice(5).trim();
+    if (!payload || payload === '[DONE]') continue;
+    try {
+      const parsed = JSON.parse(payload) as {
+        choices?: { message?: { content?: string }; delta?: { content?: string } }[];
+        delta?: { text?: string };
+      };
+      text += parsed.choices?.map(choice => choice.message?.content || choice.delta?.content || '').join('')
+        || parsed.delta?.text
+        || '';
+    } catch {
+      // Ignore non-JSON keep-alive/data lines.
+    }
+  }
+  return text;
+}
+
 export async function desktopRequest(
   url: string,
   options?: DesktopHttpOptions,
@@ -52,9 +81,11 @@ export async function desktopStreamRequest(
     if (!res.ok) {
       return { ok: false, status: res.status, text: '', error: apiErrorMessage(res, 'Stream error') };
     }
-    const data = res.data as { choices?: { message?: { content?: string } }[] };
-    const text = data.choices?.[0]?.message?.content?.trim() || '';
+    const text = extractStreamText(res.data).trim();
     if (text) onChunk(text);
+    if (!text) {
+      return { ok: false, status: res.status, text: '', error: 'Stream returned no text' };
+    }
     return { ok: true, status: res.status, text };
   }
 
@@ -80,6 +111,7 @@ export async function desktopStreamRequest(
       method: options.method,
       headers: options.headers,
       body: options.body,
+      authProviderId: options.authProviderId,
       streamId,
     });
     if (err) return { ok: false, text: full, error: err };

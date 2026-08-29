@@ -611,7 +611,7 @@ export function LocalAI() {
                   </button>
                 </div>
                 <div className="flex items-center gap-3 py-3 px-1 rounded-xl hover:bg-surface-hover/50 transition-colors">
-                  <BrandMark id={activeModel.id} name={activeModel.name} initial={activeModel.initial} tone={activeModel.tone} glyph="brain" />
+                  <BrandMark id={activeModel.id} name={activeModel.name} initial={activeModel.initial} tone={activeModel.tone} />
                   <span className="min-w-0 flex-1">
                     <span className="flex items-center gap-2 min-w-0 flex-wrap">
                       <span className="text-sm font-medium text-content-primary truncate">{activeModel.name}</span>
@@ -722,7 +722,7 @@ export function LocalAI() {
                           onClick={() => switchModel(model.id)}
                           className="flex items-center gap-3 min-w-0 flex-1 text-left"
                         >
-                        <BrandMark id={model.id} name={model.name} initial={model.initial} tone={model.tone} glyph="brain" />
+                        <BrandMark id={model.id} name={model.name} initial={model.initial} tone={model.tone} />
                         <span className="min-w-0 flex-1">
                           <span className="flex items-center gap-2 min-w-0 flex-wrap">
                             <span className="text-sm font-medium text-content-primary truncate">{model.name}</span>
@@ -774,7 +774,6 @@ export function LocalAI() {
                             name={model.name}
                             initial={huntSourceBadge(model.source)}
                             tone={model.source === 'modelscope' ? 'from-sky-500 to-indigo-700' : 'from-emerald-400 to-sky-700'}
-                            glyph="brain"
                           />
                           <span className="min-w-0 flex-1">
                             <span className="flex items-center gap-2 min-w-0 flex-wrap">
@@ -820,7 +819,7 @@ export function LocalAI() {
                             key={model.id}
                             className="flex items-center gap-3 py-3 px-1 rounded-xl hover:bg-surface-hover/50 transition-colors min-w-0"
                           >
-                            <BrandMark id={model.id} name={model.name} initial={model.initial} tone={model.tone} glyph="brain" />
+                            <BrandMark id={model.id} name={model.name} initial={model.initial} tone={model.tone} />
                             <span className="min-w-0 flex-1">
                               <span className="flex items-center gap-2 min-w-0 flex-wrap">
                                 <span className="text-sm font-medium text-content-primary truncate">{model.name}</span>

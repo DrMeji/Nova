@@ -780,15 +780,23 @@ async function importFolder(projectId, projectName, sourceDir, onProgress) {
   }
 }
 
-function readDataUrl(targetPath, maxBytes = 6_000_000) {
+function readDataUrl(targetPath, maxBytes = 6_000_000, options = {}) {
   const p = path.resolve(String(targetPath || ''));
   if (!p || !fs.existsSync(p)) return { ok: false, error: 'File not found' };
+  const selfBlock = blockArkSelfPath(p);
+  if (selfBlock) return selfBlock;
+  if (!options.allowUserSelectedImage && !isAllowedExternalPath(p)) {
+    return { ok: false, error: 'Path is outside an approved ARK workspace folder.' };
+  }
   const st = safeStatFollow(p);
   if (!st || !st.isFile()) return { ok: false, error: 'Not a file' };
   if (st.size > maxBytes) return { ok: false, error: 'Image too large' };
   try {
     const buf = fs.readFileSync(p);
     const ext = (path.extname(p).slice(1) || 'png').toLowerCase();
+    if (!['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg'].includes(ext)) {
+      return { ok: false, error: 'Only image files can be attached.' };
+    }
     const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg'
       : ext === 'gif' ? 'image/gif'
         : ext === 'webp' ? 'image/webp'

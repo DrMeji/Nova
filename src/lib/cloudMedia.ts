@@ -1,6 +1,7 @@
 /** Cloud image generation using keys stored in local prefs. */
 
 import { getProviderApiKeys } from '@/lib/localPrefs';
+import { isCloudProviderEnabled } from '@/lib/cloudSources';
 import { apiErrorMessage, desktopRequest } from '@/lib/httpDesktop';
 
 export async function cloudGenerateImage(prompt: string): Promise<{
@@ -14,7 +15,7 @@ export async function cloudGenerateImage(prompt: string): Promise<{
   const trimmed = String(prompt || '').slice(0, 3500);
 
   // Free-key first: Hugging Face Inference (FLUX schnell when available)
-  if (keys.huggingface) {
+  if (keys.huggingface && isCloudProviderEnabled('huggingface')) {
     const hosts = [
       'https://router.huggingface.co/hf-inference/models/black-forest-labs/FLUX.1-schnell',
       'https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-schnell',
@@ -51,7 +52,7 @@ export async function cloudGenerateImage(prompt: string): Promise<{
     }
   }
 
-  if (keys.openai) {
+  if (keys.openai && isCloudProviderEnabled('openai')) {
     const res = await desktopRequest('https://api.openai.com/v1/images/generations', {
       method: 'POST',
       headers: {

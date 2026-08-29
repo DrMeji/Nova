@@ -5,11 +5,131 @@ export type ChatStudioSnapshot = {
   projectId: string | null;
   name?: string;
   diskRoot?: string | null;
+  /** Last localhost / preview URL for this chat only (never reuse across threads). */
+  previewUrl?: string | null;
   savedAt?: number;
 };
 
 function chatStudioKey(chatId: string) {
   return `ark:chat-studio:${chatId}`;
+}
+
+export function studioPathBasename(diskRoot: string | null | undefined): string {
+  if (!diskRoot) return '';
+  const parts = String(diskRoot).split(/[/\\]/).filter(Boolean);
+  return parts[parts.length - 1] || '';
+}
+
+function studioPathJoin(root: string, name: string): string {
+  const sep = root.includes('\\') ? '\\' : '/';
+  return `${root.replace(/[/\\]+$/, '')}${sep}${name}`;
+}
+
+/**
+ * Resolve THIS chat's project folder.
+ * Never return another thread's in-memory root. Prefer Desktop\\Projects\\{chatTitle}
+ * when the stored studio diskRoot basename does not match the chat's product name
+ * (fixes cross-chat Localhost bleed after a wrong persist).
+ */
+export async function resolveChatProjectRoot(opts: {
+  chatId: string;
+  chatTitle?: string | null;
+}): Promise<{
+  diskRoot: string | null;
+  name?: string;
+  files: Record<string, string>;
+  projectId: string | null;
+  previewUrl: string | null;
+  healed: boolean;
+}> {
+  const chatId = String(opts.chatId || '').trim();
+  const snap = chatId ? loadChatStudio(chatId) : null;
+  const last = chatId ? getLastDiskTarget(chatId) : null;
+  const rawTitle = String(opts.chatTitle || snap?.name || last?.name || '').trim();
+  // Sidebar titles are short product names after create; ignore long prompt titles.
+  const productName = (
+    rawTitle
+    && rawTitle.length <= 48
+    && !/^(create|build|make|write|help)\b/i.test(rawTitle)
+  ) ? rawTitle.replace(/\s+and\s+build\b[\s\S]*$/i, '').trim() : '';
+  const wantName = productName || String(snap?.name || '').trim();
+  const wantKey = wantName.toLowerCase();
+
+  const candidates: string[] = [];
+  if (last?.path) candidates.push(last.path);
+  if (snap?.diskRoot) candidates.push(snap.diskRoot);
+
+  try {
+    const roots = await window.arkDesktop?.browseRoots?.();
+    const desktop = roots?.roots?.find(r => r.id === 'desktop')?.path;
+    if (desktop && wantName) {
+      const projectsDir = studioPathJoin(desktop, 'Projects');
+      candidates.unshift(studioPathJoin(projectsDir, wantName));
+      const listing = await window.arkDesktop?.listDir?.(projectsDir);
+      if (listing?.ok) {
+        for (const item of listing.items || []) {
+          if (item.kind !== 'dir') continue;
+          if (String(item.name || '').toLowerCase() === wantKey && item.path) {
+            candidates.unshift(item.path);
+          }
+        }
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+
+  let chosen: string | null = null;
+  if (wantKey) {
+    for (const c of candidates) {
+      if (studioPathBasename(c).toLowerCase() === wantKey) {
+        chosen = c;
+        break;
+      }
+    }
+  }
+  // Mismatched stored root (e.g. ReefLog chat pointing at LumenLoom) → do not keep it.
+  if (!chosen) {
+    const snapBase = studioPathBasename(snap?.diskRoot).toLowerCase();
+    if (wantKey && snap?.diskRoot && snapBase && snapBase !== wantKey) {
+      chosen = null;
+    } else {
+      chosen = snap?.diskRoot || last?.path || null;
+    }
+  }
+
+  const healed = Boolean(
+    chosen
+    && (
+      (snap?.diskRoot && chosen.replace(/[/\\]+$/, '').toLowerCase()
+        !== String(snap.diskRoot).replace(/[/\\]+$/, '').toLowerCase())
+      || (wantName && snap?.name && snap.name.toLowerCase() !== wantName.toLowerCase())
+    ),
+  );
+
+  if (healed && chatId && chosen) {
+    saveChatStudio(chatId, {
+      files: snap?.files || {},
+      projectId: snap?.projectId || null,
+      name: wantName || snap?.name,
+      diskRoot: chosen,
+      previewUrl: null,
+    });
+    setLastDiskTarget(chatId, {
+      path: chosen,
+      name: wantName || studioPathBasename(chosen),
+      kind: 'folder',
+    });
+  }
+
+  return {
+    diskRoot: chosen,
+    name: wantName || snap?.name,
+    files: snap?.files || {},
+    projectId: snap?.projectId || null,
+    previewUrl: healed ? null : (snap?.previewUrl || null),
+    healed,
+  };
 }
 
 export function saveChatStudio(
@@ -19,6 +139,7 @@ export function saveChatStudio(
     projectId: string | null;
     name?: string;
     diskRoot?: string | null;
+    previewUrl?: string | null;
   },
 ) {
   const hasFiles = Boolean(chatId && Object.keys(snapshot.files).length);
@@ -30,6 +151,7 @@ export function saveChatStudio(
       projectId: snapshot.projectId,
       name: snapshot.name ?? undefined,
       diskRoot: snapshot.diskRoot || null,
+      previewUrl: snapshot.previewUrl || null,
       savedAt: Date.now(),
     } satisfies ChatStudioSnapshot));
   } catch {
@@ -52,6 +174,7 @@ export function loadChatStudio(chatId: string): ChatStudioSnapshot | null {
       projectId: parsed.projectId || null,
       name: parsed.name || undefined,
       diskRoot: parsed.diskRoot || null,
+      previewUrl: parsed.previewUrl || null,
       savedAt: parsed.savedAt,
     };
   } catch {

@@ -24,7 +24,6 @@ import {
 import {
   getProviderApiKeys,
   hasProviderApiKey,
-  getLocalPrefs,
   setLocalPrefs,
   setProviderApiKey,
 } from '@/lib/localPrefs';
@@ -115,11 +114,11 @@ const LOCAL_MODELS: LocalModel[] = [
   { id: 'phi4-reasoning', name: 'Phi-4 Reasoning', description: 'Compact reasoning model for local use.', size: '8.5 GB', category: 'reasoning', tiers: ['free'], tone: 'from-sky-500 to-indigo-800', initial: 'Φ4' },
 
   // Vision (understand images, not generate)
-  { id: 'qwen2-vl-7b', name: 'Qwen2-VL 7B', description: 'Understand images and screenshots locally.', size: '5.8 GB', category: 'vision', tiers: ['free'], recommended: true, tone: 'from-teal-500 to-emerald-800', initial: 'VL' },
-  { id: 'llava-13b', name: 'LLaVA 13B', description: 'Image chat and visual Q&A.', size: '7.8 GB', category: 'vision', tiers: ['free'], tone: 'from-lime-500 to-green-800', initial: 'Lv' },
-  { id: 'minicpm-v', name: 'MiniCPM-V', description: 'Efficient multimodal model for vision tasks.', size: '5.1 GB', category: 'vision', tiers: ['free'], tone: 'from-green-500 to-teal-800', initial: 'Mv' },
-  { id: 'llama32-vision-11b', name: 'Llama 3.2 Vision 11B', description: 'Meta multimodal model for image understanding.', size: '7.9 GB', category: 'vision', tiers: ['free'], tone: 'from-indigo-400 to-violet-800', initial: 'LV' },
-  { id: 'moondream2', name: 'Moondream 2', description: 'Tiny vision model for quick image captions.', size: '1.7 GB', category: 'vision', tiers: ['free'], tone: 'from-yellow-500 to-amber-700', initial: 'Md' },
+  { id: 'qwen2-vl-7b', name: 'Qwen2-VL 7B', description: 'Understand images and screenshots. Chat auto-hops here once local VL downloads ship; until then use Google/OpenAI/Anthropic for vision.', size: '5.8 GB', category: 'vision', tiers: ['free'], recommended: true, tone: 'from-teal-500 to-emerald-800', initial: 'VL' },
+  { id: 'llava-13b', name: 'LLaVA 13B', description: 'Image chat and visual Q&A (local VL — coming to Engine downloads).', size: '7.8 GB', category: 'vision', tiers: ['free'], tone: 'from-lime-500 to-green-800', initial: 'Lv' },
+  { id: 'minicpm-v', name: 'MiniCPM-V', description: 'Efficient multimodal model for vision tasks (local VL — coming soon).', size: '5.1 GB', category: 'vision', tiers: ['free'], tone: 'from-green-500 to-teal-800', initial: 'Mv' },
+  { id: 'llama32-vision-11b', name: 'Llama 3.2 Vision 11B', description: 'Meta multimodal model for image understanding (local VL — coming soon).', size: '7.9 GB', category: 'vision', tiers: ['free'], tone: 'from-indigo-400 to-violet-800', initial: 'LV' },
+  { id: 'moondream2', name: 'Moondream 2', description: 'Tiny vision model for quick image captions (local VL — coming soon).', size: '1.7 GB', category: 'vision', tiers: ['free'], tone: 'from-yellow-500 to-amber-700', initial: 'Md' },
 
   // Image generation (Image tab)
   { id: 'ark-image-core', name: 'ARK Image Core', description: 'Free Pollinations images; uses local SD when installed.', size: 'Cloud / local', category: 'image', tiers: ['free'], recommended: true, tone: 'from-pink-500 to-rose-800', initial: 'AI' },
@@ -245,7 +244,7 @@ export const CLOUD_MODELS: CloudModel[] = [
   { id: 'sora', name: 'Sora', description: 'OpenAI video generation. Not wired in ARK yet.', provider: 'OpenAI', category: 'video', tiers: ['pro'], tone: 'from-emerald-400 to-green-800', initial: 'So' },
 
   // Fast
-  { id: 'groq-llama', name: 'Llama 3.3 70B (Groq)', description: 'Very fast Llama responses on Groq.', provider: 'Groq', category: 'fast', tiers: ['free', 'pro'], tone: 'from-orange-500 to-red-700', initial: 'Gq' },
+  { id: 'groq-llama-fast', name: 'Llama 3.3 70B (Groq)', description: 'Very fast Llama responses on Groq.', provider: 'Groq', category: 'fast', tiers: ['free', 'pro'], tone: 'from-orange-500 to-red-700', initial: 'Gq' },
   { id: 'groq-mixtral', name: 'Mixtral (Groq)', description: 'Quick Mixtral inference.', provider: 'Groq', category: 'fast', tiers: ['free', 'pro'], tone: 'from-amber-500 to-orange-700', initial: 'Mx' },
   { id: 'gemini-flash-lite', name: 'Gemini Flash-Lite', description: 'Ultra fast Google responses.', provider: 'Google', category: 'fast', tiers: ['free', 'pro'], tone: 'from-sky-400 to-cyan-700', initial: 'FL' },
   { id: 'cerebras-llama', name: 'Llama 3.1 8B (Cerebras)', description: 'High speed Cerebras inference.', provider: 'Cerebras', category: 'fast', tiers: ['free', 'pro'], tone: 'from-cyan-500 to-teal-800', initial: 'Ce' },
@@ -400,16 +399,6 @@ function ModelInstallControl({
   onCancel?: () => void;
   onDelete?: () => void;
 }) {
-  const [prefTick, setPrefTick] = useState(0);
-  useEffect(() => {
-    const on = () => setPrefTick(t => t + 1);
-    window.addEventListener('ark:prefs-changed', on);
-    return () => window.removeEventListener('ark:prefs-changed', on);
-  }, []);
-  void prefTick;
-  const prefs = getLocalPrefs();
-  const isChatDefault = prefs.defaultModelId === modelId;
-  const isCodeDefault = prefs.defaultCodeModelId === modelId;
   const canInstall = isEngineDownloadable(modelId);
   if (isOn) {
     return (
@@ -502,6 +491,8 @@ export function ModelsView() {
   const [hw, setHw] = useState(() => loadHardwareSnapshot() || detectHardware());
   const [connectTarget, setConnectTarget] = useState<CloudProvider | null>(null);
   const [apiKeyDraft, setApiKeyDraft] = useState('');
+  const [connectBusy, setConnectBusy] = useState(false);
+  const [connectError, setConnectError] = useState('');
   const [keyedProviders, setKeyedProviders] = useState<Set<string>>(
     () => new Set(Object.keys(getProviderApiKeys())),
   );
@@ -675,30 +666,42 @@ export function ModelsView() {
   const openConnect = (provider: CloudProvider) => {
     setConnectTarget(provider);
     setApiKeyDraft(getProviderApiKeys()[provider.id] ?? '');
+    setConnectError('');
   };
 
-  const saveConnect = () => {
+  const saveConnect = async () => {
     if (!connectTarget) return;
-    setProviderApiKey(connectTarget.id, apiKeyDraft);
+    const providerId = connectTarget.id;
+    const value = apiKeyDraft.trim();
+    setConnectBusy(true);
+    setConnectError('');
+    try {
+      await setProviderApiKey(providerId, value);
+    } catch (err) {
+      setConnectError(err instanceof Error ? err.message : 'Could not save API key securely');
+      setConnectBusy(false);
+      return;
+    }
     setKeyedProviders(prev => {
       const next = new Set(prev);
-      if (apiKeyDraft.trim()) next.add(connectTarget.id);
-      else next.delete(connectTarget.id);
+      if (value) next.add(providerId);
+      else next.delete(providerId);
       return next;
     });
     setConnected(prev => {
       const next = new Set(prev);
-      if (apiKeyDraft.trim()) next.add(connectTarget.id);
+      if (value) next.add(providerId);
       return next;
     });
-    if (apiKeyDraft.trim()) {
-      setCloudProviderEnabled(connectTarget.id, true);
+    if (value) {
+      setCloudProviderEnabled(providerId, true);
       const ids = CLOUD_MODELS
-        .filter(m => providerIdFromName(m.provider) === connectTarget.id && cloudModelAvailability(m) === 'live')
+        .filter(m => providerIdFromName(m.provider) === providerId && cloudModelAvailability(m) === 'live')
         .map(m => m.id);
       const currentlyOn = liveEnabledCloudIds();
       setEnabledCloud(addEnabledCloudModels(ids, currentlyOn));
     }
+    setConnectBusy(false);
     setConnectTarget(null);
     setApiKeyDraft('');
   };
@@ -1061,7 +1064,6 @@ export function ModelsView() {
                             name={model.name}
                             initial={huntSourceBadge(model.source)}
                             tone={model.source === 'modelscope' ? 'from-sky-500 to-indigo-700' : 'from-emerald-400 to-sky-700'}
-                            glyph="brain"
                           />
                           <span className="min-w-0 flex-1">
                             <span className="flex items-center gap-2 min-w-0 flex-wrap">
@@ -1112,7 +1114,7 @@ export function ModelsView() {
                                 key={`${section.id}-${model.id}`}
                                 className="flex items-center gap-3 py-3 rounded-xl px-1 hover:bg-surface-hover/50 transition-colors"
                               >
-                                <BrandMark id={model.id} name={model.name} initial={model.initial} tone={model.tone} glyph="brain" />
+                                <BrandMark id={model.id} name={model.name} initial={model.initial} tone={model.tone} />
                                 <span className="min-w-0 flex-1">
                                   <span className="flex items-center gap-2 min-w-0 flex-wrap">
                                     <span className="text-sm font-medium text-content-primary truncate">{model.name}</span>
@@ -1160,7 +1162,7 @@ export function ModelsView() {
                           key={model.id}
                           className="w-full flex items-center gap-3 py-3 px-1 rounded-xl hover:bg-surface-hover/50 transition-colors min-w-0"
                         >
-                          <BrandMark id={model.id} name={model.name} initial={model.initial} tone={model.tone} glyph="brain" />
+                          <BrandMark id={model.id} name={model.name} initial={model.initial} tone={model.tone} />
                           <span className="min-w-0 flex-1">
                             <span className="flex items-center gap-2 min-w-0 flex-wrap">
                               <span className="text-sm font-medium text-content-primary truncate">{model.name}</span>
@@ -1192,6 +1194,13 @@ export function ModelsView() {
                       <cat.icon className="w-4 h-4 text-content-secondary" />
                       <h2 className="text-base font-semibold text-content-primary">{cat.title}</h2>
                     </div>
+                    {cat.id === 'vision' && (
+                      <p className="text-xs text-content-tertiary mb-3 max-w-2xl leading-relaxed">
+                        Screenshot chat works today via a <span className="text-content-secondary">cloud vision hop</span>
+                        {' '}(Google AI Studio free tier, or OpenAI / Anthropic in <span className="text-content-secondary">Models → Cloud</span>).
+                        Local vision packs are listed for discovery only — Engine cannot download or run VL weights yet (needs mmproj support).
+                      </p>
+                    )}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1">
                       {cat.models.map(model => {
                         const isOn = installed.has(model.id);
@@ -1201,7 +1210,7 @@ export function ModelsView() {
                             key={model.id}
                             className="flex items-center gap-3 py-3 rounded-xl px-1 hover:bg-surface-hover/50 transition-colors"
                           >
-                            <BrandMark id={model.id} name={model.name} initial={model.initial} tone={model.tone} glyph="brain" />
+                            <BrandMark id={model.id} name={model.name} initial={model.initial} tone={model.tone} />
                             <span className="min-w-0 flex-1">
                               <span className="flex items-center gap-2 min-w-0 flex-wrap">
                                 <span className="text-sm font-medium text-content-primary truncate">{model.name}</span>
@@ -1497,7 +1506,7 @@ export function ModelsView() {
                               avail !== 'live' ? 'opacity-80' : ''
                             }`}
                           >
-                            <BrandMark id={model.id} name={model.name} initial={model.initial} tone={model.tone} glyph="brain" />
+                            <BrandMark id={model.id} name={model.name} initial={model.initial} tone={model.tone} />
                             <span className="min-w-0 flex-1">
                               <span className="flex items-center gap-2 min-w-0 flex-wrap">
                                 <span className="text-sm font-medium text-content-primary truncate">{model.name}</span>
@@ -1592,14 +1601,19 @@ export function ModelsView() {
               </button>
               <button
                 type="button"
-                onClick={saveConnect}
-                disabled={!apiKeyDraft.trim()}
+                onClick={() => void saveConnect()}
+                disabled={!apiKeyDraft.trim() || connectBusy}
                 className="ark-btn-primary flex-1 disabled:opacity-40"
               >
-                <KeyRound className="w-4 h-4" />
-                Save & connect
+                {connectBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <KeyRound className="w-4 h-4" />}
+                {connectBusy ? 'Saving…' : 'Save & connect'}
               </button>
             </div>
+            {connectError && (
+              <p className="mt-3 text-xs text-rose-400" role="alert">
+                {connectError}
+              </p>
+            )}
           </div>
         </div>
       )}

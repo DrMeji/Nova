@@ -1880,18 +1880,12 @@ export function reactUiMicroAskEdits(
   let appPath = findReactAppPath(flat);
 
   const nameKey = projectName.toLowerCase().replace(/[^a-z0-9]+/g, '');
-  // Project name wins over other prompts in the same paste.
+  // Do NOT force canned apps from product names (SignalDesk → Discord, BrewDesk → coffee, etc.).
+  // Only the user's brief keywords may choose a layout kind — every create stays fresh otherwise.
   const kindForced = ((): 'todo' | 'notes' | 'discord' | 'weather' | 'coffee' | 'finance' | 'kanban' | 'pulse' | null => {
-    if (/taskbox|todobox/.test(nameKey) || (/^todo/.test(nameKey) && !/discord|night/.test(nameKey))) return 'todo';
-    if (/pixelpad|noteark|stickynotes?/.test(nameKey)) return 'notes';
-    if (/coinnest|ledgerfox|vaultbean|moneypit|shelfledger/.test(nameKey)) return 'finance';
-    if (/flowdeck|taskrail|columnforge|boardly|kanban/.test(nameKey)) return 'kanban';
-    if (/deskpulse|chronopad|pomodoro|focuspulse/.test(nameKey)) return 'pulse';
-    if (/signaldesk|nexuslink|teamchat|messaging|chatdesk/.test(nameKey)) return 'discord';
-    if (/discord|nightchat|discorddesk/.test(nameKey)) return 'discord';
-    if (/weather/.test(nameKey)) return 'weather';
-    if (/brewdesk|coffee/.test(nameKey)) return 'coffee';
-    if (/task/.test(nameKey) && /box|list|todo/.test(nameKey)) return 'todo';
+    // Keep only unambiguous name tokens that are the product TYPE itself.
+    if (/^kanban/.test(nameKey)) return 'kanban';
+    if (/^todo/.test(nameKey)) return 'todo';
     return null;
   })();
 
@@ -1899,8 +1893,12 @@ export function reactUiMicroAskEdits(
   const wantsCenter = /\b(center|middle)\b/i.test(t) && /\b(screen|page|app|logo|icon)\b/i.test(t)
     && !/\b(sidebar|note|editor|title\s*bar|task|channel)\b/i.test(t);
   const wantsNotesLayout = (
-    /\b(title\s*bar|sidebar|note\s*list|main\s+editor|sticky\s*notes?|notes?\s+app)\b/i.test(t)
-    || (/\b(new\s+note|searchable|localStorage)\b/i.test(t) && /\b(note|list|sidebar|button)\b/i.test(t))
+    (
+      /\b(title\s*bar|sidebar|note\s*list|main\s+editor|sticky\s*notes?|notes?\s+app)\b/i.test(t)
+      || (/\b(new\s+note|searchable|localStorage)\b/i.test(t) && /\b(note|list|sidebar|button)\b/i.test(t))
+    )
+    // Hiking / trail / inventory "notes" are not a sticky-notes app.
+    && !/\b(trail|hiking|waypoint|elevation|kiln|glaze|aquarium|reef|livestock|greenhouse|plant)\b/i.test(t)
   );
   const wantsTodoLayout = (
     /\b(todo|task\s*list|add\s+task)\b/i.test(t)

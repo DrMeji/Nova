@@ -6,6 +6,7 @@ import type { ProjectKind } from '@/lib/createProjectIntent';
 import { slugifyProjectName } from '@/lib/projectNames';
 import { buildLandingPageFiles, looksLikeLandingBrief, prefersReactAppScaffold } from '@/lib/webLandingFromBrief';
 import { reactUiMicroAskEdits } from '@/lib/webProjectCanon';
+import { buildFreshSpaFromBrief, isChecklistMetaSpa, isEmptyReactAppShell } from '@/lib/freshSpaFromBrief';
 
 export type ScaffoldFile = { path: string; content: string };
 
@@ -172,7 +173,7 @@ export default function App() {
     { path: '.gitignore', content: gitignore('node') },
   ];
 
-  // Chat / app briefs → replace empty App.jsx via reactUiMicroAskEdits (no-op if no match).
+  // Prefer brief-driven layout. canned kinds only when the brief clearly matches.
   if (summary.trim()) {
     const map = Object.fromEntries(files.map(f => [f.path, f.content]));
     const edits = reactUiMicroAskEdits(map, summary, { projectName: title });
@@ -180,6 +181,27 @@ export default function App() {
       const i = files.findIndex(f => f.path === e.path);
       if (i >= 0) files[i] = { path: e.path, content: e.content };
       else files.push({ path: e.path, content: e.content });
+    }
+  }
+
+  // Never ship an empty App shell when the user gave a real product brief.
+  // Also replace misfired canned apps (e.g. sticky-notes) when the brief is a different domain.
+  const appIdx = files.findIndex(f => f.path === 'src/App.jsx');
+  if (appIdx >= 0 && summary.trim().length >= 40) {
+    const appSrc = files[appIdx].content;
+    const mismatchedNotes = /ark-notes-v1|Sticky notes/i.test(appSrc)
+      && !/\b(sticky\s*notes?|notes?\s+app)\b/i.test(summary);
+    const mismatchedDiscord = /ark-discord|server-rail|NightChat/i.test(appSrc)
+      && !/\b(discord|team\s+messaging|chat\s+app|voice\s+channel)\b/i.test(summary);
+    // Never ship the meta "What you asked for" checklist as the product Preview.
+    if (isEmptyReactAppShell(appSrc) || mismatchedNotes || mismatchedDiscord || isChecklistMetaSpa(appSrc)) {
+      const fresh = buildFreshSpaFromBrief(title, summary);
+      files[appIdx] = { path: 'src/App.jsx', content: fresh.appJsx };
+      const cssIdx = files.findIndex(f => f.path === 'src/App.css');
+      if (cssIdx >= 0) files[cssIdx] = { path: 'src/App.css', content: fresh.appCss };
+      else files.push({ path: 'src/App.css', content: fresh.appCss });
+      const indexCssIdx = files.findIndex(f => f.path === 'src/index.css');
+      if (indexCssIdx >= 0) files[indexCssIdx] = { path: 'src/index.css', content: fresh.indexCss };
     }
   }
 

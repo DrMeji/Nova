@@ -34,6 +34,8 @@ export function titleForRoute(route: Route, extras?: { projectName?: string; cha
       return 'Networking';
     case 'message':
       return 'Message';
+    case 'notifications':
+      return 'Notifications';
     case 'call':
       return 'Call';
     case 'settings':

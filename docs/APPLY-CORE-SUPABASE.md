@@ -1,0 +1,35 @@
+# Apply core Supabase (make ARK social + avatars work)
+
+Do this on the **hosted** Supabase project before inviting testers.  
+Skip for now: email/SMTP, account-delete grace period.
+
+## Checklist
+
+Run each file in **SQL → New → paste → Run** (or `npx supabase db push` if the project is linked):
+
+| # | File | Why |
+|---|------|-----|
+| 1 | `migrations/20260818000000_profiles_ark_id.sql` | ARK IDs |
+| 2 | `migrations/20260818010000_ark_social.sql` | Contacts, posts, DMs |
+| 3 | `migrations/20260824100000_ark_friend_requests.sql` | Add / accept friends |
+| 4 | `migrations/20260824120000_avatar_lookup.sql` | Friend avatar lookup |
+| 5 | `migrations/20260825100001_broadcast_my_profile.sql` | Push name/photo to friends |
+| 6 | `migrations/20260825150000_friends_unadd_blocks.sql` | Mutual friends + block/unfriend |
+| 7 | `migrations/20260827130000_harden_friend_messages.sql` | DMs only if mutual friends |
+| 8 | `migrations/20260828140000_avatars_storage.sql` | Avatar files in Storage (not giant data URLs) |
+| 9 | `migrations/20260828150000_rls_core_audit.sql` | Re-assert DM / posts / call RLS (safe to re-run) |
+
+Then **Database → Replication**: enable Realtime for `ark_direct_messages`, `ark_friend_requests` (and `ark_call_signals` if you test Call on bat/dev).
+
+## Quick verify
+
+1. Two signed-in accounts → Add friend by ARK ID → Accept in Notifications.  
+2. Message tab → send text both ways.  
+3. Settings → Account → set a photo → other friend’s contact list shows it (after Storage SQL).  
+4. Non-friends cannot DM each other (harden migration).
+
+## Not cloud yet (OK for MVP)
+
+- Group chat UI (this PC only)  
+- DM file attachments  
+- Post discussion threads under Networking posts  

@@ -2,7 +2,7 @@
  * Token plugins (GitHub, Notion, …) verify live and store secrets in the OS vault.
  */
 
-import { clearPluginToken, getPluginToken, setPluginToken } from '@/lib/localPrefs';
+import { getPluginToken, setPluginToken } from '@/lib/localPrefs';
 
 const STATE_KEY = 'ark:plugin-state';
 
@@ -272,12 +272,8 @@ export function upsertPluginRuntime(
   patch: Partial<PluginRuntimeState>,
 ): PluginStateMap {
   const current = getPluginRuntime(id, map);
-  if ('token' in patch) {
-    const nextToken = patch.token?.trim() || '';
-    if (nextToken) setPluginToken(id, nextToken);
-    else clearPluginToken(id);
-  }
-  const { token: _drop, ...safePatch } = patch;
+  const safePatch = { ...patch };
+  delete safePatch.token;
   const nextState: PluginRuntimeState = { ...current, ...safePatch };
   delete nextState.token;
   const next = { ...map, [id]: nextState };

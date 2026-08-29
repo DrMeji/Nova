@@ -116,16 +116,22 @@ child.stdout.on('data', (d) => log('OUT ' + d.toString().trim()));
           rootLen: (root?.innerHTML || '').length,
           text: (root?.innerText || '').slice(0, 400),
           hasArkDesktop: typeof window.arkDesktop !== 'undefined',
+          readyState: document.readyState,
           title: document.title,
         };
       })()`,
     );
     const value = result?.result?.value ?? result;
     log(JSON.stringify(value, null, 2));
+    const text = String(value?.text || '');
+    const fatal = /could not start|fatal error|configuration error/i.test(text);
     const ok =
       value &&
+      value.readyState === 'complete' &&
+      value.hasArkDesktop === true &&
       value.rootLen > 50 &&
-      /Sign in|Welcome|ARK|BUILD|could not start/i.test(value.text || '');
+      !fatal &&
+      /Sign in|Welcome|ARK|BUILD/i.test(text);
     log(ok ? 'PACKAGED SMOKE PASS' : 'PACKAGED SMOKE FAIL');
     code = ok ? 0 : 1;
   } catch (e) {

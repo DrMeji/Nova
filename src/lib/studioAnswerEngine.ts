@@ -219,7 +219,7 @@ export function packStudioContext(input: StudioAnswerInput): {
   const flat = flattenProjectFiles(input.files);
   const sourceKeys = Object.keys(flat).filter(k => !isBuildArtifactPath(k));
   const focus = scanFocusForIntent(intent);
-  let findings = (input.lastFindings && input.lastFindings.length && (intent === 'fix' || intent === 'recommend'))
+  const findings = (input.lastFindings && input.lastFindings.length && (intent === 'fix' || intent === 'recommend'))
     ? input.lastFindings
     : collectProjectFindings(input.files, focus === 'wider' ? 'wider' : focus === 'security' ? 'security' : focus === 'ui' ? 'ui' : 'all', ask);
 

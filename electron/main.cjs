@@ -55,6 +55,9 @@ const ALLOWED_HOSTS = new Set([
   'api.openai.com',
   'api.anthropic.com',
   'api.groq.com',
+  'api.perplexity.ai',
+  'api.x.ai',
+  'api.telegram.org',
   'openrouter.ai',
   'api.slack.com',
   'api.linear.app',
@@ -92,6 +95,26 @@ let mainWindow = null;
 /** @type {Tray | null} */
 let tray = null;
 let quitting = false;
+const userSelectedImageGrants = new Map();
+const USER_SELECTED_IMAGE_GRANT_MS = 10 * 60 * 1000;
+
+function grantUserSelectedImages(paths) {
+  const expiresAt = Date.now() + USER_SELECTED_IMAGE_GRANT_MS;
+  for (const targetPath of paths) {
+    userSelectedImageGrants.set(path.resolve(String(targetPath)), expiresAt);
+  }
+}
+
+function hasUserSelectedImageGrant(targetPath) {
+  const resolved = path.resolve(String(targetPath || ''));
+  const expiresAt = userSelectedImageGrants.get(resolved);
+  if (!expiresAt) return false;
+  if (expiresAt < Date.now()) {
+    userSelectedImageGrants.delete(resolved);
+    return false;
+  }
+  return true;
+}
 
 function resolveAppIcon() {
   const candidates = [
@@ -399,10 +422,11 @@ function createWindow() {
   });
 
   win.webContents.setWindowOpenHandler(({ url }) => {
-    try {
-      const { shell } = require('electron');
-      if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
-    } catch { /* ignore */ }
+    if (/^https?:\/\//i.test(url)) {
+      void arkOpenExternal.openExternal(url).catch(err => {
+        console.warn('[ark] blocked external link:', err instanceof Error ? err.message : String(err));
+      });
+    }
     return { action: 'deny' };
   });
 
@@ -955,6 +979,9 @@ ipcMain.handle('ark:preview-stop', async (_e, projectId) =>
 ipcMain.handle('ark:preview-open-window', async (_e, payload) =>
   arkPreview.openPreviewWindow(payload || {}),
 );
+ipcMain.handle('ark:preview-close-live', async () =>
+  arkPreview.closeLivePreviewWindow(),
+);
 ipcMain.handle('ark:preview-update', async (_e, payload) =>
   arkPreview.updatePreview(payload || {}),
 );
@@ -1312,6 +1339,7 @@ ipcMain.handle('ark:pick-files', async (_e, payload) => {
       if (!imagesOnly) return true;
       return /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(p);
     });
+    if (imagesOnly) grantUserSelectedImages(paths);
     return { ok: true, paths };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'pick failed', paths: [] };
@@ -1398,7 +1426,9 @@ ipcMain.handle('ark:read-data-url', async (_e, payload) => {
   try {
     const target = typeof payload === 'string' ? payload : payload?.path;
     const maxBytes = typeof payload === 'object' && payload?.maxBytes ? payload.maxBytes : 6_000_000;
-    return arkProjects.readDataUrl(target, maxBytes);
+    return arkProjects.readDataUrl(target, maxBytes, {
+      allowUserSelectedImage: hasUserSelectedImageGrant(target),
+    });
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'read failed' };
   }

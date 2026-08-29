@@ -54,9 +54,14 @@ export function classifyErrorMessage(raw: string): ArkErrorInfo {
     return { code: 'PORT_IN_USE', message: msg, action: 'Quit other ARK copies' };
   }
   if (/api key|connect a free key|provider key|unauthorized|\b401\b|\b403\b/i.test(lower)) {
-    return { code: 'KEY_MISSING', message: msg, action: 'Connect free key', route: { name: 'chat' } };
+    return { code: 'KEY_MISSING', message: msg, action: 'Connect free key' };
   }
-  if (/offline|engine is offline/i.test(lower)) {
+  // Require engine/connectivity failure — not product talk ("offline-first", "go offline").
+  if (
+    /\b(?:engine is offline|ark (?:is )?offline|brain is offline|provider offline|you(?:'re| are) offline|network (?:is )?offline|appears offline)\b/i.test(lower)
+    || (/\boffline\b/i.test(lower) && /\b(?:engine|brain|gguf|local ai|cannot connect|connection)\b/i.test(lower)
+      && !/\boffline[- ]first\b/i.test(lower))
+  ) {
     return { code: 'OFFLINE', message: msg, action: 'Start engine', route: { name: 'local-ai' } };
   }
   if (/stopped at length limit/i.test(lower)) {

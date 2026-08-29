@@ -12,14 +12,15 @@ Current source: **v0.1.147** · Private changelog: [docs/CHANGELOG.md](docs/CHAN
 ## Releasing (do not leak source)
 
 1. Develop and commit **only** to `DrMeji/Ark-Source` (private).
-2. Build the installer locally or via CI on **Ark-Source**.
-3. Publish **only** these files to public **DrMeji/Ark** Releases:
+2. Tag / run **Release** CI → installer lands on **Ark-Source** first (test that build, or a local bat/dev build).
+3. Only after it looks good, re-run Release with **publish_public** (or the helper below) so public **DrMeji/Ark** gets:
    - `ARK-Setup.exe`
    - `ARK-Setup.exe.blockmap` (optional)
-   - `latest.yml` (optional, for differential updates)
+   - `latest.yml` (optional, for differential updates — leave off until auto-update is intentional)
 4. **Never** `git push` source trees, `src/`, `electron/`, or docs internals to `DrMeji/Ark`.
 
-Helper: `pwsh scripts/publish-public-release.ps1 -Tag v0.1.xxx`
+Helper (public only, after a local `release/` build):  
+`pwsh scripts/publish-public-release.ps1 -Tag v0.1.xxx -Repos @('DrMeji/Ark')`
 
 See [docs/RELEASING.md](docs/RELEASING.md).
 

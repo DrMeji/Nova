@@ -11,7 +11,7 @@ import { SettingsContent } from './SettingsContent';
 import { SearchPanel } from './SearchPanel';
 import { useRecentProjects } from '@/context/RecentProjectsContext';
 import { useAuth } from '@/context/AuthContext';
-import { isSocialParked, isRevealed, isCodeTabEnabled } from '@/lib/featurePark';
+import { isSocialParked, isRevealed, isCodeTabEnabled, isVideoTabEnabled } from '@/lib/featurePark';
 import { useSocial } from '@/context/SocialContext';
 import { SidebarCallDock } from '@/components/CallRingUI';
 import { getLocalPrefs, setLocalPrefs } from '@/lib/localPrefs';
@@ -59,6 +59,13 @@ function getNavGroups(): {
       id: 'create',
       items: [
         { label: 'Chat', icon: SquarePen, route: { name: 'chat' }, activity: 'chat' },
+        { label: 'Image', icon: ImageIcon, route: { name: 'chat', mode: 'image' } },
+        {
+          label: 'Video',
+          icon: Video,
+          route: { name: 'chat', mode: 'video' },
+          comingSoon: !isVideoTabEnabled(),
+        },
       ],
     },
     {
@@ -235,11 +242,17 @@ export function AppShell({ children }: { children: ReactNode }) {
       if (item.label === 'Projects') return false;
       if (item.label === 'Code') return false;
     }
-    // Once a conversation is in Recent, highlight that item. not Chat.
+    // Once a conversation is in Recent, highlight that item. not Chat / Image / Voice starters.
     if (inRecentChat && item.route.name === 'chat') return false;
 
     if (item.label === 'Chat') {
-      return route.name === 'chat' && !route.chatId;
+      return route.name === 'chat' && !route.chatId && !route.mode;
+    }
+    if (item.label === 'Image') {
+      return route.name === 'chat' && route.mode === 'image' && !route.chatId;
+    }
+    if (item.label === 'Video') {
+      return route.name === 'chat' && route.mode === 'video' && !route.chatId;
     }
     if (item.label === 'Code') {
       return route.name === 'code';

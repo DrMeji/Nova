@@ -58,7 +58,7 @@ function isTextishName(name: string, type: string): boolean {
   return /javascript|typescript|json|text\/|xml|csv/.test(type);
 }
 
-async function readFileAsDataUrl(f: File): Promise<string | null> {
+export async function readFileAsDataUrl(f: File): Promise<string | null> {
   if (f.size > 12_000_000) return null;
   try {
     return await new Promise<string>((resolve, reject) => {
@@ -70,6 +70,49 @@ async function readFileAsDataUrl(f: File): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+/** Images from Ctrl+V / clipboard paste (Snipping Tool, screenshots, etc.). */
+export async function imagesFromClipboardData(
+  data: DataTransfer | null | undefined,
+): Promise<DroppedImage[]> {
+  if (!data) return [];
+  const out: DroppedImage[] = [];
+  const items = data.items;
+  if (items?.length) {
+    for (let i = 0; i < items.length && out.length < 4; i++) {
+      const item = items[i];
+      if (!item || !/^image\//i.test(item.type)) continue;
+      const file = item.getAsFile();
+      if (!file) continue;
+      const dataUrl = await readFileAsDataUrl(file);
+      if (!dataUrl?.startsWith('data:image/')) continue;
+      const ext = (item.type.split('/')[1] || 'png').replace(/[^a-z0-9]/gi, '') || 'png';
+      out.push({
+        id: `paste-${crypto.randomUUID().slice(0, 10)}`,
+        name: file.name && /\.(png|jpe?g|gif|webp|bmp)$/i.test(file.name)
+          ? file.name
+          : `screenshot.${ext}`,
+        dataUrl,
+      });
+    }
+  }
+  if (out.length) return out;
+  const files = data.files;
+  if (files?.length) {
+    for (let i = 0; i < files.length && out.length < 4; i++) {
+      const f = files[i];
+      if (!f || !isImageFile(f)) continue;
+      const dataUrl = await readFileAsDataUrl(f);
+      if (!dataUrl?.startsWith('data:image/')) continue;
+      out.push({
+        id: `paste-${crypto.randomUUID().slice(0, 10)}`,
+        name: f.name || 'screenshot.png',
+        dataUrl,
+      });
+    }
+  }
+  return out;
 }
 
 async function readBrowserText(f: File): Promise<string | null> {

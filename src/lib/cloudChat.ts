@@ -1,7 +1,7 @@
 /** Cloud chat completions using keys stored in local prefs. */
 
 import { getProviderApiKeys } from '@/lib/localPrefs';
-import { isCloudProviderEnabled } from '@/lib/cloudSources';
+import { isCloudModelEnabled, isCloudProviderEnabled } from '@/lib/cloudSources';
 import { apiErrorMessage, desktopRequest, desktopStreamRequest } from '@/lib/httpDesktop';
 import {
   latestUserMessage,
@@ -565,6 +565,35 @@ function mapPreferred(modelId: string, modelName: string): ProviderAttempt | nul
       run: chatOpenRouter,
     };
   }
+  // These catalog ids are hosted by OpenRouter but do not contain the
+  // provider name. Keep them selectable instead of silently returning null.
+  if (id === 'llama31-405b') {
+    return {
+      id: 'openrouter',
+      label: 'OpenRouter',
+      cost: 'free-key',
+      model: 'meta-llama/llama-3.1-405b-instruct',
+      run: chatOpenRouter,
+    };
+  }
+  if (id === 'qwen-coder-plus') {
+    return {
+      id: 'openrouter',
+      label: 'OpenRouter',
+      cost: 'free-key',
+      model: 'qwen/qwen-2.5-coder-32b-instruct',
+      run: chatOpenRouter,
+    };
+  }
+  if (id === 'qwq-cloud') {
+    return {
+      id: 'openrouter',
+      label: 'OpenRouter',
+      cost: 'free-key',
+      model: 'qwen/qwq-32b',
+      run: chatOpenRouter,
+    };
+  }
   if (id.includes('gpt') || id.includes('o3') || id.includes('o1') || name.includes('gpt') || id.includes('dall')) {
     return {
       id: 'openai',
@@ -723,6 +752,7 @@ export async function cloudChat(opts: {
 }): Promise<string | null> {
   const mapped = mapPreferred(opts.modelId, opts.modelName);
   if (!mapped) return null;
+  if (!isCloudModelEnabled(opts.modelId, mapped.id, true)) return null;
   const keys = getProviderApiKeys();
   const history = ensureHistory(opts.history, opts.message);
   const hit = await runAttempt(mapped, history, keys);
@@ -840,7 +870,9 @@ export async function cloudChatPreferredThenCascade(opts: {
   const history = ensureHistory(opts.history, opts.message);
   if (mapped) {
     opts.attempted.push(mapped.label);
-    const hit = await runAttempt(mapped, history, keys, opts.onChunk);
+    const hit = isCloudModelEnabled(opts.modelId, mapped.id, true)
+      ? await runAttempt(mapped, history, keys, opts.onChunk)
+      : null;
     if (hit) return hit;
     if (!opts.cascade) return null;
   }

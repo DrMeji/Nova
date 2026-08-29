@@ -1,11 +1,14 @@
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
+import { Check, Copy } from 'lucide-react';
 import { tidyMarkdownStars } from '@/lib/chatHistory';
+import { openInSystemBrowser } from '@/lib/openExternal';
 
 type Block =
   | { type: 'p'; text: string }
   | { type: 'h'; level: 1 | 2 | 3 | 4; text: string }
   | { type: 'ol'; items: string[] }
-  | { type: 'ul'; items: string[] };
+  | { type: 'ul'; items: string[] }
+  | { type: 'code'; lang: string; code: string };
 
 function splitBlocks(text: string): Block[] {
   const lines = text.replace(/\r\n/g, '\n').split('\n');
@@ -13,6 +16,8 @@ function splitBlocks(text: string): Block[] {
   let para: string[] = [];
   let ol: string[] | null = null;
   let ul: string[] | null = null;
+  let codeLang: string | null = null;
+  let codeLines: string[] | null = null;
 
   const flushPara = () => {
     if (!para.length) return;
@@ -26,8 +31,32 @@ function splitBlocks(text: string): Block[] {
     ol = null;
     ul = null;
   };
+  const flushCode = () => {
+    if (codeLines) {
+      blocks.push({ type: 'code', lang: codeLang || '', code: codeLines.join('\n').replace(/\n$/, '') });
+    }
+    codeLang = null;
+    codeLines = null;
+  };
 
   for (const line of lines) {
+    const fenceOpen = line.match(/^```([\w+-]*)\s*$/);
+    if (fenceOpen && codeLines === null) {
+      flushPara();
+      flushList();
+      codeLang = fenceOpen[1] || '';
+      codeLines = [];
+      continue;
+    }
+    if (/^```\s*$/.test(line) && codeLines !== null) {
+      flushCode();
+      continue;
+    }
+    if (codeLines !== null) {
+      codeLines.push(line);
+      continue;
+    }
+
     const heading = line.match(/^\s*(#{1,4})\s+(.+?)\s*#*\s*$/);
     const ordered = line.match(/^\s*\d+[.)]\s+(.*)$/);
     const bullet = line.match(/^\s*[-*•]\s+(.*)$/);
@@ -40,18 +69,14 @@ function splitBlocks(text: string): Block[] {
     }
     if (ordered) {
       flushPara();
-      if (ul) {
-        flushList();
-      }
+      if (ul) flushList();
       ol = ol || [];
       ol.push(ordered[1]);
       continue;
     }
     if (bullet) {
       flushPara();
-      if (ol) {
-        flushList();
-      }
+      if (ol) flushList();
       ul = ul || [];
       ul.push(bullet[1]);
       continue;
@@ -61,13 +86,12 @@ function splitBlocks(text: string): Block[] {
       flushList();
       continue;
     }
-    if (ol || ul) {
-      flushList();
-    }
+    if (ol || ul) flushList();
     para.push(line);
   }
   flushPara();
   flushList();
+  flushCode();
   return blocks;
 }
 
@@ -78,21 +102,19 @@ function renderInline(text: string): ReactNode[] {
   let match: RegExpExecArray | null;
   let key = 0;
   while ((match = re.exec(text)) !== null) {
-    if (match.index > last) {
-      parts.push(text.slice(last, match.index));
-    }
-    const token = match[1];
-    if (token.startsWith('**') && token.endsWith('**')) {
+    if (match.index > last) parts.push(text.slice(last, match.index));
+    const token = match[0];
+    if (token.startsWith('**')) {
       parts.push(<strong key={key++}>{token.slice(2, -2)}</strong>);
-    } else if (token.startsWith('*') && token.endsWith('*')) {
+    } else if (token.startsWith('*')) {
       parts.push(<em key={key++}>{token.slice(1, -1)}</em>);
     } else if (token.startsWith('`')) {
       parts.push(
-        <code key={key++} className="rounded bg-black/30 px-1 py-0.5 text-[0.9em]">
+        <code key={key++} className="rounded bg-surface-hover/80 px-1 py-0.5 text-[0.85em] font-mono">
           {token.slice(1, -1)}
         </code>,
       );
-    } else {
+    } else if (token.startsWith('[')) {
       const link = token.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
       if (link) {
         parts.push(
@@ -101,6 +123,10 @@ function renderInline(text: string): ReactNode[] {
             href={link[2]}
             target="_blank"
             rel="noreferrer"
+            onClick={event => {
+              event.preventDefault();
+              void openInSystemBrowser(link[2]).catch(() => undefined);
+            }}
             className="text-sky-400 underline-offset-2 hover:underline"
           >
             {link[1]}
@@ -109,11 +135,44 @@ function renderInline(text: string): ReactNode[] {
       } else {
         parts.push(token);
       }
+    } else {
+      parts.push(token);
     }
     last = match.index + token.length;
   }
   if (last < text.length) parts.push(text.slice(last));
   return parts;
+}
+
+function CodeCopyBox({ lang, code }: { lang: string; code: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className="relative rounded-xl border border-surface-border bg-ark-navy-950/90 overflow-hidden">
+      <div className="flex items-center justify-between gap-2 px-3 py-1.5 border-b border-surface-border/80 bg-surface-hover/30">
+        <span className="text-[10px] uppercase tracking-wide text-content-tertiary font-medium">
+          {lang || 'code'}
+        </span>
+        <button
+          type="button"
+          className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] text-content-secondary hover:text-content-primary hover:bg-surface-hover"
+          title={copied ? 'Copied' : 'Copy code'}
+          aria-label={copied ? 'Copied' : 'Copy code'}
+          onClick={() => {
+            void navigator.clipboard.writeText(code).then(() => {
+              setCopied(true);
+              window.setTimeout(() => setCopied(false), 1600);
+            }).catch(() => undefined);
+          }}
+        >
+          {copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+          {copied ? 'Copied' : 'Copy'}
+        </button>
+      </div>
+      <pre className="m-0 max-h-[min(28rem,50vh)] overflow-auto px-3 py-2.5 text-[12px] leading-relaxed font-mono text-content-primary whitespace-pre">
+        {code}
+      </pre>
+    </div>
+  );
 }
 
 const HEADING_CLASS: Record<1 | 2 | 3 | 4, string> = {
@@ -130,6 +189,9 @@ export function ChatMarkdown({ text }: { text: string }) {
   return (
     <div className="space-y-2 leading-relaxed">
       {blocks.map((block, i) => {
+        if (block.type === 'code') {
+          return <CodeCopyBox key={i} lang={block.lang} code={block.code} />;
+        }
         if (block.type === 'h') {
           const Tag = (`h${block.level}` as 'h1' | 'h2' | 'h3' | 'h4');
           return (

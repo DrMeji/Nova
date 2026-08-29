@@ -1,7 +1,10 @@
 import { createClient, type SupportedStorage } from '@supabase/supabase-js';
 
-const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.trim() || '';
-const supabaseAnonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined)?.trim() || '';
+// Vite always injects import.meta.env in the app, but Node-based smoke tests
+// and tooling can import this module without that object being present.
+const viteEnv = (import.meta as unknown as { env?: Record<string, unknown> }).env;
+const supabaseUrl = (typeof viteEnv?.VITE_SUPABASE_URL === 'string' ? viteEnv.VITE_SUPABASE_URL : '').trim();
+const supabaseAnonKey = (typeof viteEnv?.VITE_SUPABASE_ANON_KEY === 'string' ? viteEnv.VITE_SUPABASE_ANON_KEY : '').trim();
 
 /** Set when the production bundle was built without Vite env. UI should show this, not go blank. */
 export const supabaseConfigError =

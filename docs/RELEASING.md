@@ -11,11 +11,11 @@ In-app **Settings → Updates** reads the **public** repo anonymously. That only
 
 1. Bump `package.json` version and private changelog.
 2. Commit + tag on **Ark-Source** only (`git push origin main` and `git push origin vX.Y.Z`).
-3. Build: `npm run electron:build` → `release/ARK-Setup.exe`.
-4. Upload installers to **public** Ark:
+3. **Test first (private):** CI Release on a `v*` tag builds the installer and publishes to **Ark-Source** only. Download that build (or use a local bat/dev `electron:build`) and smoke-test before anything goes public.
+4. **Then public:** Actions → **Release** → Run workflow → same tag → check **publish_public**. That step needs repo secret `ARK_PUBLIC_RELEASE_TOKEN`. Or run locally after a good build:
 
 ```powershell
-pwsh scripts/publish-public-release.ps1 -Tag v0.1.147
+pwsh scripts/publish-public-release.ps1 -Tag v0.1.147 -Repos @('DrMeji/Ark')
 ```
 
 5. Confirm public repo tree is still **only** `README.md` (no `src/`, no `electron/`).
@@ -23,6 +23,8 @@ pwsh scripts/publish-public-release.ps1 -Tag v0.1.147
 ```powershell
 gh api repos/DrMeji/Ark/contents --jq "[.[].name]"
 ```
+
+In-app auto-update can stay off until you are ready to ship public `latest.yml` regularly — private testing does not require it.
 
 ## GitHub “Source code (zip)” on public Releases
 
@@ -35,4 +37,5 @@ When writing public release notes, remind downloaders to use **ARK-Setup.exe** o
 
 ## CI note
 
-If GitHub Actions builds from Ark-Source, the job must upload assets with a token that can write Releases on **DrMeji/Ark** (cross-repo). Default `GITHUB_TOKEN` only covers Ark-Source.
+Tag push / default Release run → **Ark-Source only**.  
+`workflow_dispatch` with **publish_public** → also writes Releases on **DrMeji/Ark** (needs `ARK_PUBLIC_RELEASE_TOKEN`). Default `GITHUB_TOKEN` only covers Ark-Source.

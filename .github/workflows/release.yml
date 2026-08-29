@@ -1,6 +1,7 @@
 name: Release
 
-# Build on private Ark-Source; publish installer to Ark-Source + public DrMeji/Ark.
+# Build on private Ark-Source. Default: publish installer to Ark-Source only (test first).
+# Public DrMeji/Ark is opt-in after you smoke-test the private release (or local bat/dev build).
 on:
   push:
     tags:
@@ -11,6 +12,11 @@ on:
         description: "Tag to publish (e.g. v0.1.154). Required for workflow_dispatch."
         required: true
         type: string
+      publish_public:
+        description: "Also publish to public DrMeji/Ark (only after private/test build looks good)"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -68,14 +74,18 @@ jobs:
           if ($tag -notmatch '^v\d+\.\d+\.\d+$') { throw "Bad tag: $tag" }
           "tag=$tag" >> $env:GITHUB_OUTPUT
 
-      - name: Publish to Ark-Source (private)
+      # Always land on private Ark-Source first so you can download + smoke-test.
+      - name: Publish to Ark-Source (private / test)
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           pwsh scripts/publish-public-release.ps1 -Tag "${{ steps.tag.outputs.tag }}" -Repos @('DrMeji/Ark-Source')
 
+      # Opt-in only. Tag pushes never auto-ship public; use Actions → Release → Run workflow
+      # with publish_public checked after you verified the Ark-Source (or bat/dev) build.
       - name: Publish to public DrMeji/Ark
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_public == true }}
         shell: pwsh
         env:
           # Cross-repo publish requires a PAT with repo scope on DrMeji/Ark.

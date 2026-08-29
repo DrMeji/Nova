@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, useLayoutEffect, useCallback } from 'react';
+import { useState, useEffect, useRef, useMemo, useLayoutEffect, useCallback, type ClipboardEvent as ReactClipboardEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { useAuth } from '@/context/AuthContext';
 import { useRouter, type ChatMode } from '@/context/RouterContext';
@@ -23,8 +23,9 @@ import {
   slimChatContent,
   titleFromPrompt,
   loadRecentProjects,
+  loadRecentChats,
 } from '@/lib/recentStore';
-import { looksLikeCodeAsk, looksLikeImageAsk } from '@/lib/chatIntent';
+import { looksLikeCodeAsk, looksLikeCopyPasteCodeAsk, looksLikeImageAsk } from '@/lib/chatIntent';
 import {
   formatChatInspectReply,
   formatRepoCatalog,
@@ -47,7 +48,7 @@ import {
   parseChatAttaches,
   type ChatAttachMeta,
 } from '@/lib/chatAttach';
-import { allowWindowFileDrop, dropHasFiles, resolveChatDrop } from '@/lib/chatDrop';
+import { allowWindowFileDrop, dropHasFiles, imagesFromClipboardData, resolveChatDrop } from '@/lib/chatDrop';
 import { AttachCard } from '@/components/AttachCard';
 import {
   describeProjectFromFiles,
@@ -103,7 +104,7 @@ import {
 } from '@/lib/pcExplore';
 import { isTraceMessage } from '@/lib/agentTrace';
 import { hasFolderAccessGrant, resolveScopedFolderPath, formatFolderLocatedMessage, syncWorkspaceGrantsFromPrefs, resolveWorkFolderPath } from '@/lib/workspaceGrants';
-import { saveChatStudio, loadChatStudio, clearChatStudio, setLastListedFolder, getLastListedFolder, clearLastListedFolder, setLastDiskTarget, getLastDiskTarget, clearLastDiskTarget, setLastPendingAddFile, getLastPendingAddFile, clearLastPendingAddFile, setLastPendingGreenfield, getLastPendingGreenfield, clearLastPendingGreenfield, setChatCodePill, hasChatCodePill } from '@/lib/chatStudioStore';
+import { saveChatStudio, loadChatStudio, clearChatStudio, setLastListedFolder, getLastListedFolder, clearLastListedFolder, setLastDiskTarget, getLastDiskTarget, clearLastDiskTarget, setLastPendingAddFile, getLastPendingAddFile, clearLastPendingAddFile, setLastPendingGreenfield, getLastPendingGreenfield, clearLastPendingGreenfield, setChatCodePill, hasChatCodePill, resolveChatProjectRoot, studioPathBasename } from '@/lib/chatStudioStore';
 import { runCodeStudioCommand } from '@/lib/studioCommands';
 import { applyChatReplyEdits } from '@/lib/chatAgentApply';
 import { runProjectMultiAgent, wantsMultiAgentTurn } from '@/lib/arkMultiAgent';
@@ -183,6 +184,15 @@ import {
   finalizeCodingChatBubble,
   liveCodingStatusText,
 } from '@/lib/chatCodeReply';
+import {
+  composeVisionToCoderBrief,
+  hasCloudVisionCapability,
+  looksLikeScreenshotFixAsk,
+  messageHasImages,
+  multiModelStatusLabel,
+  runVisionDescribeHop,
+  visionCapabilityGapReply,
+} from '@/lib/chatMultiModel';
 import { githubToken } from '@/lib/codeGitHubWorkflow';
 import { FreeKeyWizard } from '@/components/FreeKeyWizard';
 import { DeleteProjectFolderModal } from '@/components/DeleteProjectFolderModal';
@@ -236,10 +246,11 @@ import type { ChatMessage } from '@/types';
 import {
   User as UserIcon, Loader2, ImageIcon, Video, Code2,
   Upload, Cpu, Cloud, ChevronDown, Check, Blocks, Folder, Square, X, ImagePlus,
-  Puzzle, Briefcase, Github, Globe, Copy,
+  Puzzle, Briefcase, Github, Globe, Copy, Plus,
 } from 'lucide-react';
 import { engineGenerateCancel, getEngineStatus, setEngineModel } from '@/lib/arkEngine';
 import { ensureViteDevServer, isViteProject, openInAppPreview, ensureInAppPreview, refreshLivePreview } from '@/lib/projectPreview';
+import { cleanProductTitle } from '@/lib/freshSpaFromBrief';
 
 const COMPOSER_MODE_PREFIX: Record<'plan' | 'ask' | 'agent' | 'debug' | 'multitask', string> = {
   plan: 'Plan this out step by step, then we can build:\n\n',
@@ -308,22 +319,15 @@ function ChatModeTabs() {
     }
     navigate({ name: 'chat', mode: next });
   };
-  const tabs: { id: 'general' | 'image' | 'video' | 'voice'; label: string }[] = [
+  const tabs: { id: 'general' | 'voice'; label: string }[] = [
     { id: 'general', label: 'Chat' },
-    { id: 'image', label: 'Image' },
-    { id: 'video', label: 'Video' },
     { id: 'voice', label: 'Voice' },
   ];
   return (
     <div className="shrink-0 flex items-center justify-center gap-1 pt-3 pb-1">
       {tabs.map(t => {
-        const parked =
-          (t.id === 'video' && !isVideoTabEnabled())
-          || (t.id === 'voice' && !isVoiceTabEnabled());
-        const soonTitle =
-          t.id === 'voice'
-            ? 'Voice · coming soon (conversation only — no PC control or builds)'
-            : 'Video · coming soon';
+        const parked = t.id === 'voice' && !isVoiceTabEnabled();
+        const soonTitle = 'Voice · coming soon (conversation only — no PC control or builds)';
         return (
         <button
           key={t.id}
@@ -424,7 +428,10 @@ function defaultModelForKind(kind: ModelKind): ChatModelOption {
     }
     // Unknown ids that look like cloud (but key missing) must not be labeled local.
     if (resolved) {
-      return {
+      // A provider can be disconnected or its key can be removed between
+      // sessions. Do not restore a pinned cloud model that is not usable:
+      // it disappears from the picker and leaves Chat showing a dead model.
+      return CHAT_MODELS.find(m => m.id === 'ark-auto' && m.kind === 'chat') ?? {
         id: prefId,
         name: prefId,
         source: 'cloud',
@@ -859,6 +866,8 @@ export function AIChat() {
   const activeGenChatIdRef = useRef<string | null>(null);
   const pendingQueueRef = useRef<string[]>([]);
   const persistChatIdRef = useRef<string | null>(null);
+  /** Which chat owns the in-memory studio refs — never open Localhost from another thread's root. */
+  const studioBoundChatIdRef = useRef<string | null>(null);
   /** Always-current route chat id. avoid stale closures when flushing the queue. */
   const routeChatIdRef = useRef<string | undefined>(undefined);
   const ignoreEnterUntilRef = useRef(0);
@@ -905,6 +914,7 @@ export function AIChat() {
   const [codePillSticky, setCodePillSticky] = useState(false);
   const [codeOverlayOpen, setCodeOverlayOpen] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const previewUrlRef = useRef<string | null>(null);
   const attachInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const chatStudioFilesRef = useRef<Record<string, string>>({});
@@ -917,6 +927,7 @@ export function AIChat() {
   chatStudioFilesRef.current = chatStudioFiles;
   chatStudioProjectIdRef.current = chatStudioProjectId;
   chatStudioDiskRootRef.current = chatStudioDiskRoot;
+  previewUrlRef.current = previewUrl;
 
   const persistStudioSnapshot = (
     chatId: string,
@@ -925,20 +936,78 @@ export function AIChat() {
       projectId?: string | null;
       name?: string;
       diskRoot?: string | null;
+      previewUrl?: string | null;
     },
   ) => {
-    const files = patch?.files ?? chatStudioFilesRef.current;
-    const diskRoot = patch?.diskRoot ?? chatStudioDiskRootRef.current;
-    if (!chatId || (!Object.keys(files).length && !diskRoot)) return;
+    if (!chatId) return;
+    // Refs belong to studioBoundChatIdRef only. If unbound / other chat, never
+    // copy that disk root into this thread (that was the Localhost bleed).
+    const boundHere = studioBoundChatIdRef.current === chatId;
+    const existing = boundHere ? null : loadChatStudio(chatId);
+    const files = patch?.files
+      ?? (boundHere ? chatStudioFilesRef.current : (existing?.files || {}));
+    const diskRoot = patch?.diskRoot !== undefined
+      ? patch.diskRoot
+      : (boundHere ? chatStudioDiskRootRef.current : (existing?.diskRoot || null));
+    if (!Object.keys(files).length && !diskRoot) return;
     saveChatStudio(chatId, {
       files,
-      projectId: patch?.projectId ?? chatStudioProjectIdRef.current,
-      name: patch?.name,
+      projectId: patch?.projectId !== undefined
+        ? patch.projectId
+        : (boundHere ? chatStudioProjectIdRef.current : (existing?.projectId || null)),
+      name: patch?.name ?? (boundHere ? undefined : existing?.name),
       diskRoot,
+      previewUrl: patch?.previewUrl !== undefined
+        ? patch.previewUrl
+        : (boundHere ? previewUrlRef.current : (existing?.previewUrl || null)),
     });
   };
 
+  const applyStudioBinding = (
+    chatId: string,
+    snap: {
+      files?: Record<string, string>;
+      projectId?: string | null;
+      name?: string;
+      diskRoot?: string | null;
+      previewUrl?: string | null;
+    } | null,
+  ) => {
+    studioBoundChatIdRef.current = chatId;
+    const files = snap?.files || {};
+    setChatStudioFiles(files);
+    chatStudioFilesRef.current = files;
+    setChatStudioProjectId(snap?.projectId || null);
+    chatStudioProjectIdRef.current = snap?.projectId || null;
+    setChatStudioDiskRoot(snap?.diskRoot || null);
+    chatStudioDiskRootRef.current = snap?.diskRoot || null;
+    setPreviewUrl(snap?.previewUrl || null);
+    previewUrlRef.current = snap?.previewUrl || null;
+  };
+
+  const rebindStudioForChat = async (chatId: string) => {
+    const title = loadRecentChats().find(c => c.id === chatId)?.title || null;
+    const resolved = await resolveChatProjectRoot({ chatId, chatTitle: title });
+    if (routeChatIdRef.current && routeChatIdRef.current !== chatId) return;
+    applyStudioBinding(chatId, {
+      files: resolved.files,
+      projectId: resolved.projectId,
+      name: resolved.name,
+      diskRoot: resolved.diskRoot,
+      previewUrl: resolved.previewUrl,
+    });
+  };
+
+  /** Preview window id is always this chat — never another thread's localhost. */
+  const previewWindowIdForChat = (chatId?: string | null) => {
+    const id = String(chatId || persistChatIdRef.current || '').trim();
+    return id ? `chat:${id}` : 'chat-preview';
+  };
+
   const clearWorkspaceBinding = useCallback((chatId: string) => {
+    if (studioBoundChatIdRef.current === chatId) {
+      studioBoundChatIdRef.current = null;
+    }
     setChatStudioFiles({});
     chatStudioFilesRef.current = {};
     setChatStudioProjectId(null);
@@ -1255,11 +1324,24 @@ export function AIChat() {
 
   const workspaceBadgeLabel = useMemo(() => {
     if (pendingAttaches[0]?.name) return pendingAttaches[0].name;
-    if (chatStudioDiskRoot) {
-      const parts = chatStudioDiskRoot.split(/[/\\]/).filter(Boolean);
-      return parts[parts.length - 1] || chatStudioDiskRoot;
-    }
     const chatId = route.name === 'chat' ? route.chatId : undefined;
+    const recentTitle = chatId
+      ? (loadRecentChats().find(c => c.id === chatId)?.title || '').trim()
+      : '';
+    const productTitle = (
+      recentTitle
+      && recentTitle.length <= 48
+      && !/^(create|build|make|write|help)\b/i.test(recentTitle)
+    ) ? cleanProductTitle(recentTitle) : '';
+    if (chatStudioDiskRoot) {
+      const base = studioPathBasename(chatStudioDiskRoot);
+      // Bound folder from another project must not label this chat.
+      if (productTitle && base && base.toLowerCase() !== productTitle.toLowerCase()) {
+        return productTitle;
+      }
+      return base || chatStudioDiskRoot;
+    }
+    if (productTitle) return productTitle;
     if (chatId) {
       const snap = loadChatStudio(chatId);
       if (snap?.name) return snap.name;
@@ -1434,6 +1516,14 @@ export function AIChat() {
           skipChatLoadIdsRef.current.delete(route.chatId);
           setLoading(false);
           setGenerating(Boolean(generatingRef.current && activeGenChatIdRef.current === route.chatId));
+          // Still rebind studio — skipping this left Localhost on the previous chat's app.
+          const liveGenSkip = Boolean(
+            generatingRef.current && activeGenChatIdRef.current === route.chatId,
+          );
+          if (!liveGenSkip) {
+            void window.arkDesktop?.previewCloseLive?.().catch(() => undefined);
+            void rebindStudioForChat(route.chatId);
+          }
           return;
         }
         skipChatLoadIdsRef.current.delete(route.chatId);
@@ -1450,20 +1540,20 @@ export function AIChat() {
         messagesRef.current = [];
         setThreadBrain(null);
       }
-      // Don't carry a folder from another chat into this thread. but restore this chat's files.
-      if (activeGenChatIdRef.current !== route.chatId) {
-        const restored = loadChatStudio(route.chatId);
-        if (restored) {
-          setChatStudioFiles(restored.files);
-          setChatStudioProjectId(restored.projectId);
-          setChatStudioDiskRoot(restored.diskRoot || null);
-        } else {
-          setChatStudioFiles({});
-          setChatStudioProjectId(null);
-          setChatStudioDiskRoot(null);
-          lastStudioIntentRef.current = null;
-          lastFindingsRef.current = [];
-        }
+      // Don't carry a folder / localhost from another chat into this thread.
+      // Always rebind from THIS chat (heal poisoned diskRoot via chat title).
+      const liveGenHere = Boolean(
+        generatingRef.current && activeGenChatIdRef.current === route.chatId,
+      );
+      if (!liveGenHere) {
+        void window.arkDesktop?.previewCloseLive?.().catch(() => undefined);
+        // Sync clear first so the folder pill never keeps the previous chat's name.
+        studioBoundChatIdRef.current = null;
+        setChatStudioDiskRoot(null);
+        chatStudioDiskRootRef.current = null;
+        setPreviewUrl(null);
+        previewUrlRef.current = null;
+        void rebindStudioForChat(route.chatId);
         setPendingAttaches([]);
       }
       setCodePillSticky(hasChatCodePill(route.chatId));
@@ -1543,6 +1633,7 @@ export function AIChat() {
     setMessages([]);
     messagesRef.current = [];
     setThreadBrain(null);
+    studioBoundChatIdRef.current = null;
     setChatStudioFiles({});
     chatStudioFilesRef.current = {};
     setChatStudioProjectId(null);
@@ -1550,11 +1641,13 @@ export function AIChat() {
     setChatStudioDiskRoot(null);
     chatStudioDiskRootRef.current = null;
     setPreviewUrl(null);
+    previewUrlRef.current = null;
     setPendingAttaches([]);
     setPendingImages([]);
     setCodePillSticky(false);
     lastStudioIntentRef.current = null;
     lastFindingsRef.current = [];
+    void window.arkDesktop?.previewCloseLive?.().catch(() => undefined);
     // Drop any pending create brief so a new chat cannot inherit the previous idea.
     try {
       const staleId = persistChatIdRef.current || routeChatIdRef.current;
@@ -1577,16 +1670,26 @@ export function AIChat() {
     let cancelled = false;
     const refresh = () => {
       void probeLiveCapacity().then(cap => {
-        if (!cancelled) setCapacity(cap);
+        if (!cancelled) {
+          setCapacity(cap);
+          // Provider keys are hydrated asynchronously from the desktop vault.
+          // Re-resolve the picker after that event so a saved cloud preference
+          // does not remain stuck on a blank/invalid model.
+          setActiveModel(defaultModelForKind(activeModelRef.current.kind));
+        }
       });
     };
     refresh();
     window.addEventListener('focus', refresh);
     window.addEventListener('ark:ollama-changed', refresh);
+    window.addEventListener('ark:provider-keys-changed', refresh);
+    window.addEventListener('ark:cloud-sources-changed', refresh);
     return () => {
       cancelled = true;
       window.removeEventListener('focus', refresh);
       window.removeEventListener('ark:ollama-changed', refresh);
+      window.removeEventListener('ark:provider-keys-changed', refresh);
+      window.removeEventListener('ark:cloud-sources-changed', refresh);
     };
   }, []);
 
@@ -1640,6 +1743,7 @@ export function AIChat() {
               detail: 'Ready',
               kind: 'chat' as const,
             }));
+          const readyIds = new Set(ready.map(m => m.id));
           const installing = status.models
             .filter(m => m.status === 'downloading')
             .map(m => ({
@@ -1651,7 +1755,19 @@ export function AIChat() {
             }));
           setEngineLocalModels(ready);
           setEngineInstallingModels(installing);
-          setEngineReadyIds(new Set(status.models.filter(m => m.status === 'ready').map(m => m.id)));
+          setEngineReadyIds(readyIds);
+          // Resolve a saved local preference against the real Engine row.
+          // Before status loads it is only a placeholder, which made an
+          // installed model look absent from the connected picker.
+          setActiveModel(prev => {
+            if (prev.kind !== 'chat' || prev.source !== 'local' || prev.id.startsWith('ollama:')) return prev;
+            const installed = ready.find(m => m.id === prev.id);
+            if (installed) return installed;
+            if (!readyIds.has(prev.id)) {
+              return CHAT_MODELS.find(m => m.id === 'ark-auto' && m.kind === 'chat') || prev;
+            }
+            return prev;
+          });
         })
         .catch(() => {
           setEngineLocalModels([]);
@@ -1831,21 +1947,58 @@ export function AIChat() {
     try {
       const res = await window.arkDesktop?.openPath?.(root);
       if (res === true || (res && typeof res === 'object' && res.ok)) return;
-      // Fallback: open parent via file:// explorer-friendly open
-      if (window.arkDesktop?.openExternal) {
-        const href = `file:///${root.replace(/\\/g, '/')}`;
-        await window.arkDesktop.openExternal(href);
-      }
     } catch {
       /* ignore */
     }
   };
 
   const openProjectPreview = async (): Promise<string | null> => {
-    const root = chatStudioDiskRootRef.current;
-    const pid = chatStudioProjectIdRef.current || persistChatIdRef.current || 'chat-preview';
-    let files = chatStudioFilesRef.current;
-    const title = workspaceBadgeLabel || 'Preview';
+    const chatId = routeChatIdRef.current || persistChatIdRef.current;
+    if (!chatId) return null;
+
+    // Always resolve from THIS chat id + sidebar title — never another thread's refs.
+    if (studioBoundChatIdRef.current !== chatId) {
+      await rebindStudioForChat(chatId);
+    } else {
+      // Re-heal in case studio was poisoned while still "bound".
+      const title = loadRecentChats().find(c => c.id === chatId)?.title || null;
+      const resolved = await resolveChatProjectRoot({ chatId, chatTitle: title });
+      if (resolved.healed || resolved.diskRoot !== chatStudioDiskRootRef.current) {
+        applyStudioBinding(chatId, {
+          files: resolved.files,
+          projectId: resolved.projectId,
+          name: resolved.name,
+          diskRoot: resolved.diskRoot,
+          previewUrl: resolved.previewUrl,
+        });
+      }
+    }
+
+    const snap = loadChatStudio(chatId);
+    const root = String(
+      (studioBoundChatIdRef.current === chatId ? chatStudioDiskRootRef.current : null)
+      || snap?.diskRoot
+      || '',
+    ).trim() || null;
+    if (!root) return null;
+
+    const pid = previewWindowIdForChat(chatId);
+    let files = (snap?.files && Object.keys(snap.files).length)
+      ? snap.files
+      : (studioBoundChatIdRef.current === chatId ? chatStudioFilesRef.current : {});
+    const title = (snap?.name || workspaceBadgeLabel || 'Preview').toString();
+
+    chatStudioDiskRootRef.current = root;
+    setChatStudioDiskRoot(root);
+    studioBoundChatIdRef.current = chatId;
+    if (snap?.projectId) {
+      chatStudioProjectIdRef.current = snap.projectId;
+      setChatStudioProjectId(snap.projectId);
+    }
+    if (files && Object.keys(files).length) {
+      chatStudioFilesRef.current = files;
+      setChatStudioFiles(files);
+    }
 
     // Prefer freshest on-disk files when a project folder is bound.
     if (chatStudioProjectIdRef.current && window.arkDesktop?.projectRead) {
@@ -1861,20 +2014,26 @@ export function AIChat() {
       }
     }
 
-    // Vite/React → ARK preview window on the live localhost URL (HMR keeps it fresh).
-    if (root && isViteProject(files)) {
-      let url = previewUrl && /localhost|127\.0\.0\.1/.test(previewUrl) ? previewUrl : null;
-      if (!url) {
-        const dev = await ensureViteDevServer(root);
-        if (dev.ok && dev.url) {
-          url = dev.url;
-          setPreviewUrl(dev.url);
-        } else {
-          return null;
-        }
+    // Vite/React → always start/reuse THIS folder's server (cwd-keyed), never another chat's URL.
+    if (root) {
+      const looksVite = isViteProject(files);
+      // Even if in-memory files are empty/stale, try the disk folder (create always writes package.json).
+      const dev = await ensureViteDevServer(root);
+      if (dev.ok && dev.url) {
+        const url = dev.url;
+        setPreviewUrl(url);
+        previewUrlRef.current = url;
+        persistStudioSnapshot(chatId, {
+          files,
+          projectId: chatStudioProjectIdRef.current,
+          name: title,
+          diskRoot: root,
+          previewUrl: url,
+        });
+        await openInAppPreview(url, { projectId: pid, title, forceNavigate: true });
+        return url;
       }
-      await openInAppPreview(url, { projectId: pid, title, forceNavigate: true });
-      return url;
+      if (looksVite) return null;
     }
 
     // Static HTML/CSS/JS (and anything else) → local ARK preview server + closable window.
@@ -1883,21 +2042,28 @@ export function AIChat() {
         projectId: pid,
         title,
         files,
-        preferUrl: previewUrl,
+        preferUrl: null,
       });
-      if (url) setPreviewUrl(url);
+      if (url) {
+        setPreviewUrl(url);
+        previewUrlRef.current = url;
+        persistStudioSnapshot(chatId, {
+          files,
+          projectId: chatStudioProjectIdRef.current,
+          name: title,
+          diskRoot: root,
+          previewUrl: url,
+        });
+      }
       return url;
     }
 
-    if (previewUrl) {
-      await openInAppPreview(previewUrl, { projectId: pid, title });
-      return previewUrl;
-    }
     return null;
   };
 
   const pushLivePreview = async (files: Record<string, string>, openIfClosed = false) => {
-    const pid = chatStudioProjectIdRef.current || persistChatIdRef.current || 'chat-preview';
+    const chatId = persistChatIdRef.current;
+    const pid = previewWindowIdForChat(chatId);
     const title = workspaceBadgeLabel || 'Preview';
     const url = await refreshLivePreview({
       projectId: pid,
@@ -1906,7 +2072,17 @@ export function AIChat() {
       previewUrl,
       openIfClosed,
     });
-    if (url) setPreviewUrl(url);
+    if (url) {
+      setPreviewUrl(url);
+      if (chatId) {
+        persistStudioSnapshot(chatId, {
+          files,
+          projectId: chatStudioProjectIdRef.current,
+          diskRoot: chatStudioDiskRootRef.current,
+          previewUrl: url,
+        });
+      }
+    }
   };
 
   const clonePickedRepo = async (repo: GitHubRepo) => {
@@ -2474,6 +2650,7 @@ export function AIChat() {
       skipChatLoadIdsRef.current.add(activeChatId);
       messagesRef.current = [];
       // Fresh chat must not inherit the previous thread's workspace / preview.
+      studioBoundChatIdRef.current = null;
       chatStudioFilesRef.current = {};
       chatStudioProjectIdRef.current = null;
       chatStudioDiskRootRef.current = null;
@@ -3518,7 +3695,7 @@ export function AIChat() {
       const richestBrief = [pending?.summary, userBrief, bestBrief, createIntent.summary]
         .filter((s): s is string => Boolean(s && String(s).trim()))
         .sort((a, b) => b.length - a.length)[0] || createIntent.summary;
-      let buildIntent = {
+      const buildIntent = {
         ...createIntent,
         name: createIntent.name || pending?.name || createIntent.name,
         slug: createIntent.slug || pending?.slug || createIntent.slug,
@@ -3573,17 +3750,18 @@ export function AIChat() {
       chatStudioFilesRef.current = created.files;
       setChatStudioProjectId(created.projectId || newProjectId);
       chatStudioProjectIdRef.current = created.projectId || newProjectId;
+      studioBoundChatIdRef.current = activeChatId;
       if (created.projectPath) {
         setChatStudioDiskRoot(created.projectPath);
         chatStudioDiskRootRef.current = created.projectPath;
       }
       setChatCodePill(activeChatId, true);
       setCodePillSticky(true);
-      renameChat(activeChatId, buildIntent.name);
+      renameChat(activeChatId, cleanProductTitle(buildIntent.name));
       addChat({
         id: activeChatId,
         mode,
-        title: buildIntent.name,
+        title: cleanProductTitle(buildIntent.name),
         updatedAt: new Date().toISOString(),
         preview: previewFromText(content),
       });
@@ -3622,7 +3800,13 @@ export function AIChat() {
             name: buildIntent.name,
             diskRoot: created.projectPath || null,
           });
-          followNote = `\n\nLayout applied (${applied.updated.join(', ')}). Click **Preview** under the chat box to open the live window.`;
+          const appSrc = applied.files['src/App.jsx'] || applied.files['src/App.tsx'] || '';
+          const { isEmptyReactAppShell } = await import('@/lib/freshSpaFromBrief');
+          if (isEmptyReactAppShell(appSrc)) {
+            followNote = '\n\nStarter files are on disk, but the UI shell was still empty — say **rebuild the UI from my brief** and I will fill App.jsx.';
+          } else {
+            followNote = `\n\nLayout applied (${applied.updated.join(', ')}). Click **Preview** under the chat box to open the live window.`;
+          }
         }
       }
 
@@ -3645,19 +3829,36 @@ export function AIChat() {
         : { npmInstalled: true };
       if (bootstrap.devServerUrl) {
         setPreviewUrl(bootstrap.devServerUrl);
-        await openInAppPreview(bootstrap.devServerUrl, {
+        persistStudioSnapshot(activeChatId, {
+          files: chatStudioFilesRef.current,
           projectId: pid,
+          name: buildIntent.name,
+          diskRoot: created.projectPath || null,
+          previewUrl: bootstrap.devServerUrl,
+        });
+        await openInAppPreview(bootstrap.devServerUrl, {
+          projectId: previewWindowIdForChat(activeChatId),
           title: buildIntent.name,
+          forceNavigate: true,
         });
       } else {
         const liveFiles = chatStudioFilesRef.current;
         if (Object.keys(liveFiles).length) {
           const url = await ensureInAppPreview({
-            projectId: pid,
+            projectId: previewWindowIdForChat(activeChatId),
             title: buildIntent.name,
             files: liveFiles,
           });
-          if (url) setPreviewUrl(url);
+          if (url) {
+            setPreviewUrl(url);
+            persistStudioSnapshot(activeChatId, {
+              files: liveFiles,
+              projectId: pid,
+              name: buildIntent.name,
+              diskRoot: created.projectPath || null,
+              previewUrl: url,
+            });
+          }
         }
       }
 
@@ -3874,9 +4075,12 @@ export function AIChat() {
     };
 
     // Open / refresh the in-app Preview window (closable BrowserWindow. not system browser).
+    // Never steal a create/build turn — "…and open Preview" must create first, not yellow-bind.
     if (
       (mode === 'general' || mode === 'code')
       && /\b(open|show|launch|start)\b[\s\S]{0,40}\b(preview|localhost|live\s+preview)\b/i.test(content)
+      && !/\b(?:create|build|scaffold|make)\b/i.test(content)
+      && !createIntent
     ) {
       const url = await openProjectPreview();
       finishAgentReply(
@@ -3965,12 +4169,14 @@ export function AIChat() {
         void ensureViteDevServer(opened.root).then(async (dev) => {
           if (dev.ok && dev.url) {
             setPreviewUrl(dev.url);
-            await ensureInAppPreview({
-              projectId: opened.projectId || chatStudioProjectIdRef.current || activeChatId,
-              title: opened.name || 'Preview',
+            persistStudioSnapshot(activeChatId, {
               files: opened.files || {},
-              preferUrl: dev.url,
+              projectId: opened.projectId || chatStudioProjectIdRef.current,
+              name: opened.name,
+              diskRoot: opened.root,
+              previewUrl: dev.url,
             });
+            // Warm URL only — do not steal the preview window from another chat.
           }
         });
       }
@@ -4257,6 +4463,46 @@ export function AIChat() {
       }
     }
 
+    // Multi-model: image attached but nothing can see pixels → clear CTA.
+    if (messageHasImages(content) && !hasCloudVisionCapability()) {
+      const gap = visionCapabilityGapReply({
+        localOnly: getLocalPrefs().aiMode === 'local_only',
+      });
+      await finishPlainReply(gap);
+      return;
+    }
+
+    // Vision → coder hop when a screenshot + fix ask hits a bound project.
+    let editUserMessage = content;
+    let visionHopMeta: string | undefined;
+    if (
+      messageHasImages(content)
+      && hasCloudVisionCapability()
+      && (wantsCodeEdit || looksLikeScreenshotFixAsk(content))
+      && (stickyCount > 0 || diskBound)
+    ) {
+      setMessages(prev => prev.map(m => (
+        m.id === assistantId
+          ? { ...m, content: `__generating__:chat:${multiModelStatusLabel('vision')}` }
+          : m
+      )));
+      const visionHistory = buildRouterHistory([], content, extractVisionImages(content));
+      const hop = await runVisionDescribeHop({
+        userMessage: content,
+        history: visionHistory,
+      });
+      if (mySeq !== genSeqRef.current) return;
+      if (hop.ok && hop.notes) {
+        editUserMessage = composeVisionToCoderBrief(hop.notes, content);
+        visionHopMeta = hop.providerLabel;
+        setMessages(prev => prev.map(m => (
+          m.id === assistantId
+            ? { ...m, content: `__generating__:chat:${multiModelStatusLabel('coder')}` }
+            : m
+        )));
+      }
+    }
+
     if (
       (mode === 'general' || mode === 'code')
       && (stickyCount > 0 || (diskBound && wantsCodeEdit))
@@ -4264,7 +4510,7 @@ export function AIChat() {
     ) {
       setMessages(prev => prev.map(m => (
         m.id === assistantId
-          ? { ...m, content: `__generating__:chat:${wantsCodeEdit ? 'Updating project files…' : `Reading ${stickyCount || 'project'} file${stickyCount === 1 ? '' : 's'}…`}` }
+          ? { ...m, content: `__generating__:chat:${wantsCodeEdit ? (visionHopMeta ? multiModelStatusLabel('coder') : 'Updating project files…') : `Reading ${stickyCount || 'project'} file${stickyCount === 1 ? '' : 's'}…`}` }
           : m
       )));
       await new Promise<void>(r => { window.setTimeout(r, 40); });
@@ -4292,7 +4538,7 @@ export function AIChat() {
             : m
         )));
         const multi = await runProjectMultiAgent({
-          brief: content,
+          brief: editUserMessage,
           files: stickyFiles,
           projectId: workspaceProjectId || resolvedStudio.projectId || activeChatId || 'chat-project',
           projectName: projectLabel,
@@ -4310,7 +4556,10 @@ export function AIChat() {
             name: projectLabel,
           });
           void pushLivePreview(multi.files, false);
-          finishAgentReply(multi.reply, 'ARK · multi-agent');
+          finishAgentReply(
+            visionHopMeta ? `${multi.reply}\n\n_Vision hop: ${visionHopMeta}_` : multi.reply,
+            visionHopMeta ? 'ARK · vision → multi-agent' : 'ARK · multi-agent',
+          );
           return;
         }
         // If multi-agent produced nothing useful, fall through to normal edit path.
@@ -4319,7 +4568,7 @@ export function AIChat() {
       // Fast path: deterministic UI patches. surgical tweaks + layout rebuilds.
       if (allowEdits && (workspaceProjectId || chatStudioDiskRootRef.current)) {
         const { finalizeWebEdits } = await import('@/lib/webProjectCanon');
-        const micro = finalizeWebEdits(stickyFiles, content, [], { projectName: projectLabel });
+        const micro = finalizeWebEdits(stickyFiles, editUserMessage, [], { projectName: projectLabel });
         if (micro.length) {
           setMessages(prev => prev.map(m => (
             m.id === assistantId
@@ -4331,7 +4580,7 @@ export function AIChat() {
             projectId: workspaceProjectId,
             projectName: projectLabel,
             files: stickyFiles,
-            userMessage: content,
+            userMessage: editUserMessage,
             diskRoot: chatStudioDiskRootRef.current,
           });
           const elapsedMs = Date.now() - replyStartedAt;
@@ -4366,7 +4615,7 @@ export function AIChat() {
                 ? {
                   ...m,
                   content: reply,
-                  provider_used: 'ARK · local patch',
+                  provider_used: visionHopMeta ? `ARK · vision → patch` : 'ARK · local patch',
                   elapsed_ms: elapsedMs,
                 }
                 : m
@@ -4389,7 +4638,7 @@ export function AIChat() {
 
       const result = await answerStudio(
         {
-          userMessage: content,
+          userMessage: editUserMessage,
           files: stickyFiles,
           projectName: projectLabel,
           lastIntent: lastStudioIntentRef.current,
@@ -4447,7 +4696,7 @@ export function AIChat() {
           projectId: workspaceProjectId,
           projectName: projectLabel,
           files: stickyFiles,
-          userMessage: content,
+          userMessage: editUserMessage,
           diskRoot: chatStudioDiskRootRef.current,
         });
         if (applied.ok) {
@@ -4498,7 +4747,9 @@ export function AIChat() {
           ? {
             ...m,
             content: reply,
-            provider_used: result.meta || 'Local scan · attached files',
+            provider_used: visionHopMeta
+              ? `${visionHopMeta} → ${result.meta || 'coder'}`
+              : (result.meta || 'Local scan · attached files'),
             elapsed_ms: elapsedMs,
           }
           : m
@@ -5486,7 +5737,6 @@ export function AIChat() {
               if (abandoned || stopRequestedRef.current || mySeq !== genSeqRef.current) return;
               if (!piece) return;
               streamedPartial += piece;
-              const dump = /@@@FILE|```[\w]*\n|<!DOCTYPE\b|<html[\s>]|export\s+default\s+function/i.test(streamedPartial);
               const live = usableAssistantText(streamedPartial, content, previousAssistant)
                 || streamedPartial.trim();
               const liveClean = live && !looksLikePromptEcho(live) ? live : '';
@@ -5524,9 +5774,7 @@ export function AIChat() {
                 }
                 const next = prev.map(m => {
                   if (m.id !== assistantId) return m;
-                  if (dump) {
-                    return { ...m, content: `__generating__:chat:${liveCodingStatusText(streamedPartial)}` };
-                  }
+                  // Keep streaming the real answer even if it includes sample HTML/code.
                   return { ...m, content: liveClean || `__generating__:chat:${planningTalk ? 'Thinking through your idea…' : statusLabel}` };
                 });
                 messagesRef.current = next;
@@ -5582,7 +5830,7 @@ export function AIChat() {
             || usableAssistantText(streamedPartial, content, previousAssistant)
             || (looksLikePromptEcho(candidate) ? '' : candidate);
           if (
-            looksLikeCodeAsk(content)
+            looksLikeCopyPasteCodeAsk(content)
             && mode !== 'image'
             && mode !== 'video'
             && (!response.trim() || (!/```[\s\S]+```/.test(response) && response.length < 100))
@@ -5590,9 +5838,12 @@ export function AIChat() {
             response = [
               "I couldn't produce copy-pasteable code with the current brain yet.",
               '',
-              '**In chat:** try again with a stronger model from the ARK menu, or open **Code** (sidebar or **Yes** above) so ARK writes files you can edit and preview.',
+              '**Try this:**',
+              '1. Open **Models** (sidebar) and pick a stronger chat model from the ARK menu, then send again.',
+              '2. Or open **Local AI**, download/start a coding model, wait until it is ready, then retry.',
+              '3. Or connect a free cloud key (**Settings → Free keys** / the ARK menu), then retry.',
               '',
-              'Your prompt works. Code workspace is the best path for a full calculator app with Explorer + Preview.',
+              'Ask again with “give me the code I can copy-paste” once a brain is ready.',
             ].join('\n');
           }
           if (routed.full) {
@@ -5645,11 +5896,13 @@ export function AIChat() {
         const cleaned = usableAssistantText(response, content, previousAssistant);
         const candidate = String(cleaned || response || '').trim();
         response = looksLikePromptEcho(candidate) ? '' : (cleaned || candidate);
-        // Never dump raw @@@FILE / HTML source into the chat transcript.
+        // Never dump raw @@@FILE markers as a "failed save". Plain chat may include
+        // sample HTML/code — keep the answer text (editMode false).
         if (/@@@FILE|<!DOCTYPE\b|<html[\s>]/i.test(response)) {
           response = finalizeCodingChatBubble({
             userMessage: content,
             rawReply: response,
+            editMode: false,
           });
         }
       }
@@ -5705,8 +5958,11 @@ export function AIChat() {
       setComposerTall(false);
       return;
     }
-    // Leave pill layout early so wrapped lines are never clipped.
-    const wantsTall = value.includes('\n') || value.length > 24;
+
+    // Tall chrome only after an explicit new line with more text (Shift+Enter / pasted newlines).
+    // Soft-wrapped single lines still grow height below without the empty padded box.
+    // Trailing-only newlines (common after paste) do not force the tall toolbar layout.
+    const wantsTall = /\n\S/.test(value);
     setComposerTall(wantsTall);
 
     const applyHeight = () => {
@@ -5716,14 +5972,39 @@ export function AIChat() {
       void box.offsetHeight;
       const raw = box.scrollHeight;
       const max = Math.round(window.innerHeight * 0.4);
-      const minPx = wantsTall ? 56 : 22;
-      const next = Math.max(minPx, Math.min(Math.max(raw, minPx), max));
+      const minPx = wantsTall ? 40 : 22;
+      const next = Math.max(minPx, Math.min(raw, max));
       box.style.height = `${next}px`;
       box.style.overflowY = raw > max ? 'auto' : 'hidden';
     };
 
     applyHeight();
     requestAnimationFrame(applyHeight);
+  };
+
+  const onComposerPaste = (e: ReactClipboardEvent<HTMLTextAreaElement>) => {
+    const dt = e.clipboardData;
+    if (!dt) return;
+    // Prefer image paste (Snipping Tool / screenshot). let plain text use default.
+    const hasImage = [...(dt.items || [])].some(it => /^image\//i.test(it.type))
+      || [...(dt.files || [])].some(f => /^image\//i.test(f.type) || /\.(png|jpe?g|gif|webp|bmp)$/i.test(f.name));
+    if (!hasImage) {
+      // After text paste, remeasure so a single-line paste does not stay tall.
+      requestAnimationFrame(resizeComposer);
+      return;
+    }
+    e.preventDefault();
+    void (async () => {
+      const imgs = await imagesFromClipboardData(dt);
+      if (!imgs.length) {
+        setDropHint('Could not read that screenshot from the clipboard. Try + → Image, or drag the file in.');
+        return;
+      }
+      for (const img of imgs) rememberThumb(img.id, img.dataUrl);
+      setPendingImages(prev => [...prev, ...imgs].slice(0, 4));
+      setDropHint(null);
+      ignoreEnterUntilRef.current = Date.now() + 600;
+    })();
   };
 
   const onInput = (value: string) => {
@@ -5977,6 +6258,21 @@ export function AIChat() {
             </button>
           </div>
         )}
+        {kind === 'chat' && (
+          <div className="border-t border-surface-border mt-1 pt-1 px-2 pb-1">
+            <button
+              type="button"
+              className="w-full inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-[11px] text-content-secondary hover:bg-surface-hover hover:text-content-primary text-left"
+              onClick={() => {
+                setModelMenuOpen(false);
+                navigate({ name: 'models', tab: 'cloud' });
+              }}
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Add or manage connected models
+            </button>
+          </div>
+        )}
       </div>,
       document.body,
     )
@@ -6157,8 +6453,8 @@ export function AIChat() {
           <div
             className={`flex-1 min-w-0 border border-surface-border bg-ark-navy-900/90 shadow-lg shadow-black/20 ${
               composerTall
-                ? 'flex flex-col rounded-2xl overflow-visible'
-                : 'flex items-center gap-1 rounded-full min-h-11 pl-1 pr-1.5 py-1.5 overflow-visible'
+                ? 'flex flex-col rounded-xl overflow-hidden'
+                : 'flex items-center gap-1 rounded-xl min-h-11 pl-1 pr-1.5 py-1.5 overflow-hidden'
             }`}
           >
           <input
@@ -6209,6 +6505,7 @@ export function AIChat() {
             ref={textareaRef}
             value={input}
             onChange={e => onInput(e.target.value)}
+            onPaste={onComposerPaste}
             spellCheck
             lang="en"
             autoCorrect="on"
@@ -6229,11 +6526,11 @@ export function AIChat() {
                 : placeholder
             }
             rows={1}
-            title="Enter to send · Shift+Enter for a new line"
+            title="Enter to send · Shift+Enter for a new line · Ctrl+V pastes screenshots"
             aria-label="Message. Enter to send, Shift+Enter for a new line"
             className={`bg-transparent border-none resize-none text-sm text-content-primary placeholder:text-content-tertiary focus:outline-none leading-5 ${
               composerTall
-                ? 'w-full min-h-[3.25rem] px-3.5 pt-3.5 pb-2'
+                ? 'w-full min-h-[2.5rem] px-3 pt-2.5 pb-1'
                 : 'flex-1 min-w-0 min-h-[1.25rem] px-1 py-0 self-center'
             }`}
             style={{ overflowY: 'hidden' }}
@@ -6242,7 +6539,7 @@ export function AIChat() {
           <div
             className={
               composerTall
-                ? 'flex items-center justify-between gap-2 px-2 pb-2 pt-1'
+                ? 'flex items-center justify-between gap-2 px-2 pb-1.5 pt-0.5'
                 : 'flex items-center shrink-0'
             }
           >
@@ -6521,7 +6818,7 @@ export function AIChat() {
           <p className="text-[11px] text-content-tertiary mt-1">Add as many as you need. press Enter to read</p>
         </div>
       </div>
-      <ChatModeTabs />
+      {(mode === 'general' || mode === 'voice') ? <ChatModeTabs /> : null}
       {loading ? (
         <div className="flex-1 flex items-center justify-center text-content-tertiary">
           <Loader2 className="w-5 h-5 animate-spin" />
@@ -6655,7 +6952,7 @@ export function AIChat() {
                   >
                     {msg.role === 'user' ? (
                       <>
-                        <div className="min-w-0 max-w-full rounded-2xl px-4 py-3 bg-surface-hover">
+                        <div className="min-w-0 max-w-full rounded-xl px-3.5 py-2.5 bg-surface-hover">
                           <MessageContent
                             content={msg.content}
                             live={false}
@@ -6713,7 +7010,13 @@ export function AIChat() {
                         return <GeneratingPlaceholder kind={genKind} label={genLabel} sessionKey={msg.id} />;
                       }
                       if (isAssistant && isLikelyErrorMessage(msg.content)) {
-                        return <ArkErrorInline message={msg.content} />;
+                        const errorInfo = classifyErrorMessage(msg.content);
+                        return (
+                          <ArkErrorInline
+                            message={msg.content}
+                            onAction={errorInfo.code === 'KEY_MISSING' ? () => setFreeKeyOpen(true) : undefined}
+                          />
+                        );
                       }
                       return (
                         <MessageContent

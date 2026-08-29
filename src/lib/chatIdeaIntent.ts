@@ -54,12 +54,15 @@ const FEATURE_DESC_RE =
 const BUILD_IDEA_RE =
   /\b(?:i\s+)?(?:want\s+to\s+)?(?:build|create|make|design|develop|start)\b/i;
 
-/** Hardware / real-world builds. never greenfield software projects. */
+/** Hardware / real-world / ops playbooks. never greenfield software projects. */
 function isNonSoftwareBuildAsk(text: string): boolean {
   const t = String(text || '');
-  if (/\b(app|application|website|site|web\s*app|software|saas|react|vite|landing\s+page|mobile\s+app|kanban|dashboard)\b/i.test(t)) {
+  if (/\b(app|application|website|site|web\s*app|software|saas|react|vite|landing\s+page|mobile\s+app|kanban)\b/i.test(t)
+    && !/\b(?:do\s+not|don't|dont)\s+create\s+any\s+(?:software\s+)?project\b/i.test(t)) {
     return false;
   }
+  if (/\b(?:operating\s+playbook|radio\s+station|underwriting|on-air|board-op|live-show)\b/i.test(t)) return true;
+  if (/\b(?:marina|berth|harbormaster|haul-out|pump-out)\b/i.test(t) && /\b(?:design|plan|clarif|not\s+build)\b/i.test(t)) return true;
   return /\b(?:gaming\s+pc|build\s+a\s+pc|pc\s+build|custom\s+pc|fpv\s+drone|drone|quadcopter|car\s+engine|gasoline|fish\s+breathe|how\s+do\s+fish|motherboard|cpu\s+and\s+gpu|frame\s+size|radio\s+first|mid-?range\s+gaming)\b/i.test(t)
     || (/\b(?:pc|drone|car|bike|house|robot|engine)\b/i.test(t) && /\b(?:build|assemble|pick|recommend)\b/i.test(t));
 }
@@ -147,13 +150,17 @@ export function inferGreenfieldName(text: string): string | null {
     if (cleaned) return titleCaseWords(cleaned);
   }
 
-  if (/\b(?:coffee|copy)\s+shop\b/i.test(t)) return 'Coffee Shop';
-  if (/\brestaurant\b/i.test(t)) return 'Restaurant App';
-  if (/\b(?:e-?commerce|online\s+store|shop)\b/i.test(t)) return 'Online Shop';
-  if (/\b(?:booking|appointment|schedule)\b/i.test(t)) return 'Booking App';
-
-  if (/\bwebsite\b/i.test(t)) return 'My Website';
-  if (/\bweb\s*app\b/i.test(t)) return 'My Web App';
+  // Only for short product pitches — long design/ops briefs often mention booking/schedule/website
+  // as features and must not become empty "Booking App" / "My Website" Recent titles.
+  if (t.length <= 140) {
+    if (/\b(?:coffee|copy)\s+shop\b/i.test(t)) return 'Coffee Shop';
+    if (/\brestaurant\b/i.test(t)) return 'Restaurant App';
+    if (/\b(?:e-?commerce|online\s+store)\b/i.test(t)) return 'Online Shop';
+    if (/\b(?:booking|appointment)\s+(?:app|system|platform|product)\b/i.test(t)) return 'Booking App';
+    if (/\b(?:build|create|make)\s+(?:a\s+)?(?:booking|appointment)\b/i.test(t)) return 'Booking App';
+    if (/\b(?:build|create|make)\s+(?:a\s+)?website\b/i.test(t)) return 'My Website';
+    if (/\b(?:build|create|make)\s+(?:a\s+)?web\s*app\b/i.test(t)) return 'My Web App';
+  }
 
   return null;
 }
@@ -424,6 +431,9 @@ export function looksLikeGreenfieldIdea(text: string): boolean {
   if (hasPlanAsk && (hasBuild || NEW_PRODUCT_RE.test(t) || /\bproject\b/i.test(t) || /\bwebsite\b/i.test(t) || /\blanding\s+page\b/i.test(t))) return true;
   if (NEW_PRODUCT_RE.test(t) && (hasPlanAsk || hasFeatures)) return true;
   if (hasBuild && name) return true;
+  // A named direct build ask is enough to establish a product intent even
+  // when the user omits "app", "website", or another software noun.
+  if (name && /\b(?:i\s+want\s+to\s+)?build\s+[A-Za-z]/i.test(t)) return true;
   if (WANT_APP_RE.test(t) && name) return true;
   if (name && WORK_ON_NEW_PROJECT_RE.test(t)) return true;
   if (name && /\bi\s+want\s+to\s+work\s+on\b/i.test(t) && !/\blet'?s\s+work\s+on\b/i.test(t)) return true;
@@ -595,6 +605,13 @@ export function looksLikeConversationalPlanningAsk(text: string): boolean {
   if (/\bwhat\s+(?:do|should|would|type|stack|software|framework|language|code|kind)\b/i.test(t)) return true;
   if (/\b(?:get\s+started|where\s+(?:should|do)\s+(?:i|we)\s+(?:begin|start)|how\s+to\s+(?:begin|approach))\b/i.test(t)) return true;
   if (/\bhelp\s+me\s+(?:figure|understand|think|plan|decide)\b/i.test(t)) return true;
+  // “Help me build a coffee shop web” without create/scaffold = talk it through first.
+  if (
+    /\bhelp\s+me\s+(?:to\s+)?(?:build|make|create)\b/i.test(t)
+    && !/\b(?:create\s+(?:the\s+)?(?:files|project)|scaffold|lets?\s+build\s+this|build\s+it\s+now)\b/i.test(t)
+  ) {
+    return true;
+  }
   if (/\bdoes\s+(?:it|this)\s+need\b/i.test(t)) return true;
   if (/\bshould\s+(?:i|we)\s+use\b/i.test(t)) return true;
   if (/\b(?:would|will)\s+(?:something|this|it)\b.{0,40}\b(?:run|work|feel)\b/i.test(t)) return true;
@@ -743,7 +760,6 @@ export function buildPlanExpansionSection(
   focus: string,
   depth: number,
 ): string {
-  const name = idea.name;
   const brief = idea.summary;
   const hasImages = /unsplash|https?:\/\//i.test(brief);
   const financeBrief = isFinanceBrief(brief);

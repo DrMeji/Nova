@@ -81,6 +81,8 @@ function extractProjectName(text: string): string | null {
     const m = t.match(re);
     if (m?.[1]) {
       let raw = m[1].trim().replace(/[?.!,;:]+$/g, '');
+      // "ReefLog and build a reef…" → ReefLog (never the whole sentence as the product name).
+      raw = raw.replace(/\s+(?:and|with|that|which|where|when|so|for|but|featuring|including|—|–|-)\b.*$/i, '').trim();
       raw = raw.replace(/\s+(?:app|project|website|site|on|for|with)\b.*$/i, '').trim();
       if (raw.length >= 2 && raw.length <= 48) return raw;
     }
@@ -170,9 +172,13 @@ export function parseNewProjectIntent(message: string): NewProjectIntent | null 
 
   const kind = resolveProjectKindForCreate(t, detectProjectKind(t), detectProjectKind(t));
   // Rich briefs plan first (chips). Short "Create project X" builds now.
+  // Explicit disk/preview asks must build immediately — never bounce to yellow "Bind a project".
   const shortChip = /^create\s+project\s+[A-Za-z]/i.test(t.trim()) && t.length < 80;
+  const wantsImmediateBuild = /\b(?:create\s+(?:the\s+)?(?:project\s+)?(?:on\s+)?disk|files?\s+on\s+disk|scaffold\s+now|build\s+it\s+now|open\s+preview|and\s+open\s+preview)\b/i.test(t)
+    || /\bcreate\s+(?:a\s+)?(?:brand[- ]?new\s+)?project\s+folder\b/i.test(t);
   const preferPlan = !shortChip
     && !looksLikeImplementGo(t)
+    && !wantsImmediateBuild
     && (looksLikeLandingBrief(t) || prefersReactAppScaffold(t) || t.length > 200);
 
   return {

@@ -25,6 +25,11 @@ import {
   cloudChatVisionKeys,
   hasAnyCloudChatKey,
 } from '@/lib/cloudChat';
+import {
+  hasCloudVisionCapability,
+  historyHasImages,
+  visionCapabilityGapReply,
+} from '@/lib/chatMultiModel';
 import { cloudGenerateImage } from '@/lib/cloudMedia';
 import { getLocalPrefs, type AiModePref } from '@/lib/localPrefs';
 import {
@@ -393,6 +398,37 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
     { acceptReply: acceptCodingReply, onHop: opts.onAttemptReset },
   );
 
+  // ── Multi-model vision hop (before text-only local brains invent from blindness) ──
+  const hasVision = historyHasImages(history);
+  if (hasVision) {
+    if (modeAllowsCloud(mode) && hasCloudVisionCapability()) {
+      const vis = await cloudChatVisionKeys(opts.message, attempted, history, opts.onChunk);
+      if (vis) {
+        return withContinued({
+          reply: vis.reply,
+          modelName: `${vis.provider} · ${vis.model} · vision`,
+          source: hitSource(vis.provider),
+          tier: vis.cost,
+          attempted,
+        }, history);
+      }
+      return {
+        reply: visionCapabilityGapReply({ localOnly: false }),
+        modelName: 'Vision hop',
+        source: 'none',
+        tier: 'paid',
+        attempted,
+      };
+    }
+    return {
+      reply: visionCapabilityGapReply({ localOnly: !modeAllowsCloud(mode) }),
+      modelName: 'Vision hop',
+      source: 'none',
+      tier: 'local-free',
+      attempted,
+    };
+  }
+
   // ── Pinned cloud model (skipped for ARK Auto) ──────────────────────
   // Explicit cloud picks must stick: cascade among cloud keys only — never snap to local.
   if (pinnedCloud && !isAuto) {
@@ -524,33 +560,7 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
 
   // ── ARK Auto: Engine is the brain; Ollama is last-resort optional ──
   if (isAuto) {
-    const hasVision = history.some(t => Boolean(t.images?.length));
-    if (hasVision && modeAllowsCloud(mode)) {
-      const vis = await cloudChatVisionKeys(opts.message, attempted, history, opts.onChunk);
-      if (vis) {
-        return withContinued({
-          reply: vis.reply,
-          modelName: `${vis.provider} · ${vis.model}`,
-          source: hitSource(vis.provider),
-          tier: vis.cost,
-          attempted,
-        }, history);
-      }
-      if (!hasAnyCloudChatKey()) {
-        return {
-          reply: [
-            'This message includes an image, but no vision-capable cloud key is set.',
-            'Add OpenAI, Google, or Anthropic in Models → Cloud (free tiers available).',
-          ].join(' '),
-          modelName: 'Vision',
-          source: 'none',
-          tier: 'paid',
-          attempted,
-        };
-      }
-    }
-
-    if (opts.stickyModelId && opts.stickyPinnedSource && !(hasVision && opts.stickyPinnedSource === 'local')) {
+    if (opts.stickyModelId && opts.stickyPinnedSource) {
       const sticky = await tryStickyBrain(
         history,
         opts.message,

@@ -13,7 +13,7 @@ import {
 import { hydrateProviderApiKeys } from '@/lib/localPrefs';
 import { ensureArkId, formatArkId, readLocalArkId } from '@/lib/arkUserId';
 import { mergeGuestSocialToCloud } from '@/lib/arkSocial';
-import { deleteOwnAccountPermanently } from '@/lib/deleteAccount';
+import { cancelOwnAccountDeletion, deleteOwnAccountPermanently, finalizeScheduledDeletionIfDue, scheduleOwnAccountDeletion } from '@/lib/deleteAccount';
 
 // Guest identity used when login is bypassed (dev / testing only).
 const BYPASS_KEY = 'ark:bypass-enabled';
@@ -61,7 +61,11 @@ interface AuthContextValue {
   signUp: (email: string, password: string, displayName?: string) => Promise<{ error: string | null }>;
   resetPassword: (email: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
-  /** Permanently delete this account on the server (immediate). */
+  /** Schedule permanent deletion in ~24 hours (grace period). */
+  scheduleAccountDeletion: (hours?: number) => Promise<{ ok: true; deleteAt: string } | { ok: false; error: string }>;
+  /** Cancel a pending scheduled deletion. */
+  cancelAccountDeletion: () => Promise<{ ok: true } | { ok: false; error: string }>;
+  /** Immediately wipe the account (used when the grace period has elapsed). */
   deleteAccountPermanently: () => Promise<{ ok: true } | { ok: false; error: string }>;
   /** Guest login. skipSetup: true jumps straight into the app; false runs first-run optimize. */
   bypassLogin: (options?: { skipSetup?: boolean }) => void;
@@ -93,6 +97,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const accountEmail = authUserRes.data.user?.email || null;
     if (profileRes.data) {
       const p = profileRes.data as Profile;
+      const due = await finalizeScheduledDeletionIfDue(p.delete_scheduled_at);
+      if (due === 'deleted') {
+        setSession(null);
+        setUser(null);
+        setProfile(null);
+        setSettings(null);
+        return;
+      }
       const metaName = authUserRes.data.user?.user_metadata?.display_name as string | undefined;
       const display = p.display_name || metaName || null;
       setProfile({
@@ -160,7 +172,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         /* ignore */
       }
 
-      void hydrateProviderApiKeys();
+      // Chat and Models read provider keys synchronously on first render.
+      // Hydrate the encrypted desktop vault before mounting those surfaces so
+      // saved providers do not briefly appear disconnected and get overwritten.
+      try {
+        await hydrateProviderApiKeys();
+      } catch {
+        /* keep auth usable if secure-key hydration is unavailable */
+      }
 
       let isPackaged = false;
       try {
@@ -389,6 +408,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const scheduleAccountDeletion = async (hours = 24) => {
+    const result = await scheduleOwnAccountDeletion(hours);
+    if (!result.ok) return result;
+    await refreshProfile();
+    return result;
+  };
+
+  const cancelAccountDeletion = async () => {
+    const result = await cancelOwnAccountDeletion();
+    if (!result.ok) return result;
+    await refreshProfile();
+    return result;
+  };
+
   const deleteAccountPermanently = async () => {
     const result = await deleteOwnAccountPermanently();
     if (!result.ok) return result;
@@ -428,7 +461,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ session, user, profile, settings, loading, bypass, signIn, signUp, resetPassword, signOut, deleteAccountPermanently, bypassLogin, refreshProfile, updateSettings }}>
+    <AuthContext.Provider value={{
+      session,
+      user,
+      profile,
+      settings,
+      loading,
+      bypass,
+      signIn,
+      signUp,
+      resetPassword,
+      signOut,
+      scheduleAccountDeletion,
+      cancelAccountDeletion,
+      deleteAccountPermanently,
+      bypassLogin,
+      refreshProfile,
+      updateSettings,
+    }}>
       {children}
     </AuthContext.Provider>
   );

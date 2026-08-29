@@ -33,6 +33,7 @@ import { verifyTelegramToken } from '@/lib/telegram';
 import { verifyStripeToken } from '@/lib/stripe';
 import { openInSystemBrowser } from '@/lib/openExternal';
 import { getPluginAuthLink } from '@/lib/pluginAuth';
+import { clearPluginToken, setPluginToken } from '@/lib/localPrefs';
 import { BrandMark } from '@/components/BrandMark';
 
 export function BuildRun() {
@@ -54,14 +55,12 @@ export function BuildRun() {
 
   const filteredCategories = useMemo(() => {
     const q = query.trim().toLowerCase();
+    const installedIds = new Set(getInstalledPlugins(state).map(plugin => plugin.id));
     return PLUGIN_CATEGORIES.map(cat => ({
       ...cat,
       plugins: PLUGIN_CATALOG.filter(p => {
         if (p.category !== cat.id) return false;
-        // In the "Browse" shelf we want to show both live/wired and catalog-only plugins.
-        // (Users expect the "Coming soon" inventory to still appear.)
-        if (!q && pluginShelf === 'catalog' && false) return false;
-        if (pluginShelf === 'installed') return false;
+        if (pluginShelf === 'installed' && !installedIds.has(p.id)) return false;
         if (!q) return true;
         return (
           p.name.toLowerCase().includes(q)
@@ -70,7 +69,7 @@ export function BuildRun() {
         );
       }),
     })).filter(cat => cat.plugins.length > 0);
-  }, [query]);
+  }, [pluginShelf, query, state]);
 
   const installedPlugins = useMemo(() => getInstalledPlugins(state), [state]);
   const chatPlugins = useMemo(() => getChatEnabledPlugins(state), [state]);
@@ -108,16 +107,20 @@ export function BuildRun() {
     openPlugin(plugin);
   };
 
-  const uninstall = (id: string) => {
-    patch(id, {
-      installed: false,
-      connected: false,
-      enabledInChat: false,
-      token: undefined,
-      accountLabel: undefined,
-      connectedAt: undefined,
-    });
-    closePanel();
+  const uninstall = async (id: string) => {
+    try {
+      await clearPluginToken(id);
+      patch(id, {
+        installed: false,
+        connected: false,
+        enabledInChat: false,
+        accountLabel: undefined,
+        connectedAt: undefined,
+      });
+      closePanel();
+    } catch (err) {
+      setAuthError(err instanceof Error ? err.message : 'Could not remove this token securely');
+    }
   };
 
   const startConnect = () => {
@@ -138,7 +141,7 @@ export function BuildRun() {
     setConnectStep('auth');
   };
 
-  const finishConnect = () => {
+  const finishConnect = async () => {
     if (!selected) return;
     if (!isPluginWired(selected.id)) {
       setAuthError('Coming soon. not connected to a live API yet.');
@@ -149,20 +152,30 @@ export function BuildRun() {
       setConnectStep('auth');
       return;
     }
-    const required = selected.permissions.filter(p => p.required).map(p => p.id);
-    const granted = Array.from(new Set([...required, ...permDraft]));
-    patch(selected.id, {
-      installed: true,
-      connected: true,
-      enabledInChat: true,
-      permissions: granted,
-      token: tokenDraft.trim() || selectedRuntime?.token,
-      accountLabel: verifiedLogin || selectedRuntime?.accountLabel,
-      connectedAt: new Date().toISOString(),
-    });
-    setConnectStep('idle');
-    setTokenDraft('');
+    setAuthBusy(true);
     setAuthError('');
+    try {
+      const token = tokenDraft.trim() || selectedRuntime?.token || '';
+      if (selected.authKind !== 'none' && token) {
+        await setPluginToken(selected.id, token);
+      }
+      const required = selected.permissions.filter(p => p.required).map(p => p.id);
+      const granted = Array.from(new Set([...required, ...permDraft]));
+      patch(selected.id, {
+        installed: true,
+        connected: true,
+        enabledInChat: true,
+        permissions: granted,
+        accountLabel: verifiedLogin || selectedRuntime?.accountLabel,
+        connectedAt: new Date().toISOString(),
+      });
+      setConnectStep('idle');
+      setTokenDraft('');
+    } catch (err) {
+      setAuthError(err instanceof Error ? err.message : 'Could not securely save this token');
+    } finally {
+      setAuthBusy(false);
+    }
   };
 
   const continueFromAuth = async () => {
@@ -252,17 +265,21 @@ export function BuildRun() {
     }
   };
 
-  const disconnect = () => {
+  const disconnect = async () => {
     if (!selected) return;
-    patch(selected.id, {
-      connected: false,
-      enabledInChat: false,
-      token: undefined,
-      accountLabel: undefined,
-      connectedAt: undefined,
-    });
-    setVerifiedLogin('');
-    setConnectStep('idle');
+    try {
+      await clearPluginToken(selected.id);
+      patch(selected.id, {
+        connected: false,
+        enabledInChat: false,
+        accountLabel: undefined,
+        connectedAt: undefined,
+      });
+      setVerifiedLogin('');
+      setConnectStep('idle');
+    } catch (err) {
+      setAuthError(err instanceof Error ? err.message : 'Could not disconnect this account securely');
+    }
   };
 
   const togglePerm = (id: PluginPermission, required?: boolean) => {
@@ -803,9 +820,16 @@ export function BuildRun() {
                       );
                     })}
                   </div>
-                  <button type="button" className="ark-btn-primary w-full" onClick={finishConnect}>
-                    <Check className="w-4 h-4" />
-                    {verifiedLogin
+                  <button
+                    type="button"
+                    className="ark-btn-primary w-full"
+                    onClick={() => void finishConnect()}
+                    disabled={authBusy}
+                  >
+                    {authBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                    {authBusy
+                      ? 'Saving securely…'
+                      : verifiedLogin
                       ? `Save ${selected.id === 'gmail' ? verifiedLogin : `@${verifiedLogin}`} and enable in chat`
                       : 'Save and enable in chat'}
                   </button>

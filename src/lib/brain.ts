@@ -87,7 +87,13 @@ export async function brainGenerate(
   const res = await desktopRequest(`${base}/v1/chat`, {
     method: 'POST',
     headers,
-    body: JSON.stringify({ message, model: modelId, kind }),
+    body: JSON.stringify({
+      message,
+      model: modelId,
+      kind,
+      mediaDurationSec: mediaOpts?.mediaDurationSec,
+      referenceImageDataUrl: mediaOpts?.referenceImageDataUrl,
+    }),
   });
   if (!res.ok) {
     const errBody = res.data as { error?: string };

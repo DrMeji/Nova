@@ -22,6 +22,8 @@ export interface Profile {
   avatar_url: string | null;
   /** Unique 7-digit ARK ID for adding this account (not email). */
   ark_id?: string | null;
+  /** ISO time when the account will be permanently removed (24h grace). */
+  delete_scheduled_at?: string | null;
   onboarding_completed: boolean;
   created_at: string;
   updated_at: string;

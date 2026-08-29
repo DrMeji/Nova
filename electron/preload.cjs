@@ -113,6 +113,7 @@ contextBridge.exposeInMainWorld('arkDesktop', {
   previewStop: (projectId) => ipcRenderer.invoke('ark:preview-stop', projectId),
   previewStatus: (projectId) => ipcRenderer.invoke('ark:preview-status', projectId),
   previewOpenWindow: (payload) => ipcRenderer.invoke('ark:preview-open-window', payload),
+  previewCloseLive: () => ipcRenderer.invoke('ark:preview-close-live'),
   previewUpdate: (payload) => ipcRenderer.invoke('ark:preview-update', payload),
   previewReload: (projectId) => ipcRenderer.invoke('ark:preview-reload', projectId),
   mediaLibrary: () => ipcRenderer.invoke('ark:media-library'),

@@ -102,7 +102,7 @@ async function waitForFile(filePath, timeoutMs) {
 function tryElectronUpdater() {
   try {
     // Optional delta path — requires latest.yml from electron-builder publish.
-    // eslint-disable-next-line global-require
+
     const { autoUpdater } = require('electron-updater');
     autoUpdater.autoDownload = false;
     autoUpdater.autoInstallOnAppQuit = false;
@@ -535,8 +535,8 @@ function splashShellCss() {
   // outer frame, caption icons, and a bottom strip. Keep one solid dark surface.
   return `
   html,body{margin:0;width:100%;height:100%;background:#0a0a0c;color:#f2f2f3;font-family:"Segoe UI",system-ui,sans-serif;overflow:hidden;user-select:none;}
-  .wrap{box-sizing:border-box;width:100%;height:100%;margin:0;padding:44px 40px 48px;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#0a0a0c;border-radius:0;box-shadow:none;}
-  .logo-wrap{margin:0 0 28px;width:128px;height:128px;display:flex;align-items:center;justify-content:center;background:transparent;box-shadow:none;border:0;}
+  .wrap{box-sizing:border-box;width:100%;height:100%;margin:0;padding:44px 40px 48px;display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:auto auto auto auto;justify-items:center;align-content:center;background:#0a0a0c;border-radius:0;box-shadow:none;}
+  .logo-wrap{margin:0 0 28px;width:128px;height:128px;display:flex;align-items:center;justify-content:center;justify-self:center;background:transparent;box-shadow:none;border:0;}
   .logo-wrap img{width:112px;height:112px;object-fit:contain;display:block;border:0;border-radius:0;background:transparent;}
   #label{font-size:16px;font-weight:600;letter-spacing:0.01em;margin:0 0 8px;text-align:center;color:#f2f2f3;}
   #pct{font-size:13px;font-weight:500;color:#a8a8b3;margin:0 0 22px;text-align:center;font-variant-numeric:tabular-nums;}

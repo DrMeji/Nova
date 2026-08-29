@@ -14,7 +14,8 @@ export function looksLikeImplementGo(message: string): boolean {
   const t = String(message || '').trim();
   if (!t) return false;
   if (/\b(delete|remove|trash|wipe|uninstall)\b/i.test(t)) return false;
-  // Chip: "Create project SignalDesk". always execute, never re-plan.
+  // Chip: "Create project <Name>". always execute, never re-plan.
+  // (Do not hard-code sample app names — every create stays fresh.)
   if (/^create\s+project\s+[A-Za-z]/i.test(t) && t.length < 80) return true;
   if (IMPLEMENT_GO_RE.test(t)) return true;
   if (/\bbuild\s+it\s+now\b/i.test(t)) return true;

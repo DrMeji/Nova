@@ -5,10 +5,11 @@
 import type { NewProjectIntent } from '@/lib/createProjectIntent';
 import { resolveProjectKindForCreate } from '@/lib/projectKind';
 import { buildScaffoldFiles, projectUsesNpm } from '@/lib/projectScaffolds';
-import { skillPromptAppendix } from '@/lib/arkSkills';
 import { grantsFromPrefs, hasFolderAccessGrant, syncWorkspaceGrantsFromPrefs } from '@/lib/workspaceGrants';
 import { safeProjectWrite } from '@/lib/projectWriteSafe';
 import { runAgentCommand } from '@/lib/chatAgentExec';
+import { cleanProductTitle } from '@/lib/freshSpaFromBrief';
+import { slugifyProjectName } from '@/lib/projectNames';
 
 export type ProjectBootstrapResult = {
   npmInstalled: boolean;
@@ -81,7 +82,13 @@ export async function runCreateProjectFlow(
   intent: NewProjectIntent,
   projectId: string,
 ): Promise<CreateProjectResult> {
-  const { parentPath, source, grantHint } = await resolveNewProjectParent(intent);
+  const name = cleanProductTitle(intent.name);
+  const cleaned: NewProjectIntent = {
+    ...intent,
+    name,
+    slug: slugifyProjectName(name),
+  };
+  const { parentPath, source, grantHint } = await resolveNewProjectParent(cleaned);
   if (!parentPath) {
     return {
       ok: false,
@@ -99,7 +106,7 @@ export async function runCreateProjectFlow(
         ok: false,
         written: [],
         files: {},
-        error: `Folder already exists and is not empty:\n\`${parentPath}\`\n\nSay **“use existing folder ${intent.name}”** or pick another name.`,
+        error: `Folder already exists and is not empty:\n\`${parentPath}\`\n\nSay **“use existing folder ${cleaned.name}”** or pick another name.`,
         grantHint,
       };
     }
@@ -114,7 +121,7 @@ export async function runCreateProjectFlow(
 
   const bind = await window.arkDesktop?.workspaceOpenRoot?.({
     projectId,
-    projectName: intent.name,
+    projectName: cleaned.name,
     sourceDir: parentPath,
     catalogOnly: true,
   });
@@ -129,17 +136,14 @@ export async function runCreateProjectFlow(
     };
   }
 
-  const scaffoldKind = resolveProjectKindForCreate(intent.summary, intent.kind, intent.kind);
-  const skillAppendix = skillPromptAppendix(intent.summary, scaffoldKind);
-  const scaffoldSummary = skillAppendix
-    ? `${intent.summary}\n\n${skillAppendix}`
-    : intent.summary;
-  const scaffold = buildScaffoldFiles(scaffoldKind, { name: intent.name, summary: scaffoldSummary });
+  const scaffoldKind = resolveProjectKindForCreate(cleaned.summary, cleaned.kind, cleaned.kind);
+  // Skills are for LLM prompts only — never bake "ARK design skills" copy into App.jsx.
+  const scaffold = buildScaffoldFiles(scaffoldKind, { name: cleaned.name, summary: cleaned.summary });
   const fileMap = Object.fromEntries(scaffold.map(f => [f.path.replace(/\\/g, '/'), f.content]));
 
   const write = await safeProjectWrite({
     projectId,
-    projectName: intent.name,
+    projectName: cleaned.name,
     files: fileMap,
   });
 
@@ -265,11 +269,12 @@ export function formatCreateProjectReply(
     return result.error || 'Could not create the project.';
   }
 
+  const displayName = cleanProductTitle(intent.name);
   const isStatic = intent.kind === 'static-web'
     || (!bootstrap?.devServerUrl && result.files && !Object.keys(result.files).some(p => /package\.json$/i.test(p)));
 
   const lines = [
-    `**Created ${intent.name}**`,
+    `**Created ${displayName}**`,
     '',
     `**Path:** \`${result.projectPath}\``,
     result.parentSource ? `**Location:** ${result.parentSource}` : '',

@@ -13,7 +13,7 @@ const WIPE_KEYS = [
 ];
 
 /** Bump this string whenever we need a forced clean slate on next launch. */
-export const CLEAN_BOOT_TOKEN = 'clean-2026-08-15-g';
+export const CLEAN_BOOT_TOKEN = 'clean-2026-08-28-product-spa';
 
 export function clearArkSessionHistory() {
   for (const key of WIPE_KEYS) {
@@ -34,6 +34,13 @@ export function clearArkSessionHistory() {
       if (
         k.startsWith('ark:chat-thread:')
         || k.startsWith('ark:chat-draft:')
+        || k.startsWith('ark:chat-studio:')
+        || k.startsWith('ark:chat-studio-files:')
+        || k.startsWith('ark:chat-code-pill:')
+        || k.startsWith('ark:chat-last-folder:')
+        || k.startsWith('ark:chat-last-disk-target:')
+        || k.startsWith('ark:chat-pending-add-file:')
+        || k.startsWith('ark:chat-pending-greenfield:')
         || k.startsWith('ark:media-feedback:')
         || k === 'ark:recent-creations'
         || k === 'ark:recent-projects'

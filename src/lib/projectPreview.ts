@@ -27,7 +27,8 @@ export async function openInAppPreview(
       url,
       title: opts?.title || 'Preview',
       kind: 'web',
-      forceNavigate: opts?.forceNavigate,
+      // Always navigate when opening — never leave another project's page visible.
+      forceNavigate: opts?.forceNavigate !== false,
     });
     return true;
   }

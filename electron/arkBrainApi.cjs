@@ -181,7 +181,12 @@ function createBrainServer(opts) {
       kind = kind === 'coding' || arkModelRank.looksLikeCodeAsk(message) ? 'coding' : 'chat';
     }
     try {
-      return await arkEngine.generate(message, { modelId, kind });
+      return await arkEngine.generate(message, {
+        modelId,
+        kind,
+        mediaDurationSec: parsed.mediaDurationSec,
+        referenceImageDataUrl: parsed.referenceImageDataUrl,
+      });
     } catch (err) {
       const error = err instanceof Error ? err.message : 'Generation failed';
       return { ok: false, error };
@@ -197,7 +202,13 @@ function createBrainServer(opts) {
       kind = kind === 'coding' || arkModelRank.looksLikeCodeAsk(message) ? 'coding' : 'chat';
     }
     try {
-      return await arkEngine.generate(message, { modelId, kind, onChunk });
+      return await arkEngine.generate(message, {
+        modelId,
+        kind,
+        mediaDurationSec: parsed.mediaDurationSec,
+        referenceImageDataUrl: parsed.referenceImageDataUrl,
+        onChunk,
+      });
     } catch (err) {
       const error = err instanceof Error ? err.message : 'Generation failed';
       return { ok: false, error };

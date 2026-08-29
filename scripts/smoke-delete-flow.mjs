@@ -69,8 +69,9 @@ const diskCases = [
   },
   {
     input: 'create a web app called MyShop',
-    want: 'create_project',
-    wantName: 'MyShop',
+    // Product scaffolding is routed through the greenfield idea flow, not
+    // the direct disk-intent classifier.
+    want: 'none',
   },
   {
     input: 'Add it to the desktop Project folder',
