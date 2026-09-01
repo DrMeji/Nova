@@ -318,6 +318,20 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.165',
+    channel: 'stable' as const,
+    date: 'Sep 1, 2026',
+    title: 'Ambient shell, inbox polish, minimal update splash',
+    notes: [
+      'Soft roaming color orbs behind the whole app — same vibe as setup, calmer in the main shell',
+      'Message list timestamps stay right-aligned; unread dot sits beside the time without shifting it',
+      'Notifications inbox redesigned — cleaner rows, New/Earlier sections, kind-colored icons',
+      'Updating splash is minimal black: smaller robot icon, pill progress bar, more breathing room',
+      'Chat composer pill expands when you wrap lines; Image tab no longer inherits Chat drafts',
+      'Networking views/saves/replies track real engagement; notification nav uses dots only',
+    ],
+  },
+  {
     version: '0.1.160',
     channel: 'stable' as const,
     date: 'Aug 26, 2026',

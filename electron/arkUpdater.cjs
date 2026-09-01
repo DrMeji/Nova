@@ -511,6 +511,27 @@ function resolveUpdateIco() {
   return null;
 }
 
+const SPLASH_W = 440;
+const SPLASH_H = 300;
+const SPLASH_ICON_PX = 72;
+const SPLASH_ICON_GAP = 54;
+const SPLASH_TRACK_W = 280;
+const SPLASH_TRACK_H = 14;
+
+function splashRobotSvg() {
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80" width="${SPLASH_ICON_PX}" height="${SPLASH_ICON_PX}" aria-hidden="true" style="display:block;margin:0 auto;">
+    <g fill="none" stroke="#f4f4f5" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M18 30h44a8 8 0 0 1 8 8v22a8 8 0 0 1-8 8H18a8 8 0 0 1-8-8V38a8 8 0 0 1 8-8z"/>
+      <rect x="30" y="44" width="6" height="14" rx="1" fill="#f4f4f5" stroke="none"/>
+      <rect x="44" y="44" width="6" height="14" rx="1" fill="#f4f4f5" stroke="none"/>
+      <path d="M40 18v6"/>
+      <path d="M35 18h10"/>
+      <path d="M10 42a6 6 0 0 1 6-6"/>
+      <path d="M64 36a6 6 0 0 1 6 6"/>
+    </g>
+  </svg>`;
+}
+
 function splashIconDataUri() {
   const src = resolveUpdateIcon();
   if (!src) return '';
@@ -525,23 +546,20 @@ function splashIconDataUri() {
 function splashIconMarkup() {
   const data = splashIconDataUri();
   if (data) {
-    return `<img src="${data}" alt="" width="96" height="96" draggable="false" style="object-fit:contain;display:block;margin:0 auto;user-select:none;" />`;
+    return `<img src="${data}" alt="" width="${SPLASH_ICON_PX}" height="${SPLASH_ICON_PX}" draggable="false" style="object-fit:contain;display:block;margin:0 auto;user-select:none;" />`;
   }
-  return `<div style="width:96px;height:96px;margin:0 auto;display:flex;align-items:center;justify-content:center;color:#f2f2f3;font:700 18px Segoe UI,system-ui,sans-serif;">ARK</div>`;
+  return splashRobotSvg();
 }
 
 function splashShellCss() {
-  // Opaque full-bleed panel — transparent / inset-card chrome on Windows paints a white
-  // outer frame, caption icons, and a bottom strip. Keep one solid dark surface.
+  // Minimal splash — pure black, centered robot icon, pill progress bar below.
   return `
-  html,body{margin:0;width:100%;height:100%;background:#0a0a0c;color:#f2f2f3;font-family:"Segoe UI",system-ui,sans-serif;overflow:hidden;user-select:none;}
-  .wrap{box-sizing:border-box;width:100%;height:100%;margin:0;padding:44px 40px 48px;display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:auto auto auto auto;justify-items:center;align-content:center;background:#0a0a0c;border-radius:0;box-shadow:none;}
-  .logo-wrap{margin:0 0 28px;width:128px;height:128px;display:flex;align-items:center;justify-content:center;justify-self:center;background:transparent;box-shadow:none;border:0;}
-  .logo-wrap img{width:112px;height:112px;object-fit:contain;display:block;border:0;border-radius:0;background:transparent;}
-  #label{font-size:16px;font-weight:600;letter-spacing:0.01em;margin:0 0 8px;text-align:center;color:#f2f2f3;}
-  #pct{font-size:13px;font-weight:500;color:#a8a8b3;margin:0 0 22px;text-align:center;font-variant-numeric:tabular-nums;}
-  .track{width:340px;max-width:calc(100% - 48px);height:12px;margin:0 auto;border-radius:999px;background:#3a3a44;overflow:hidden;}
-  #fill{height:100%;width:0%;min-width:0;border-radius:999px;background:#f2f2f4;}
+  html,body{margin:0;width:100%;height:100%;background:#000;color:#f4f4f5;font-family:"Segoe UI",system-ui,sans-serif;overflow:hidden;user-select:none;}
+  .wrap{box-sizing:border-box;width:100%;height:100%;margin:0;padding:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#000;}
+  .logo-wrap{margin:0 0 ${SPLASH_ICON_GAP}px;width:${SPLASH_ICON_PX}px;height:${SPLASH_ICON_PX}px;display:flex;align-items:center;justify-content:center;background:transparent;}
+  .logo-wrap img{width:${SPLASH_ICON_PX}px;height:${SPLASH_ICON_PX}px;object-fit:contain;display:block;border:0;background:transparent;}
+  .track{width:${SPLASH_TRACK_W}px;max-width:calc(100% - 64px);height:${SPLASH_TRACK_H}px;margin:0 auto;border-radius:999px;border:2px solid #52525b;background:#000;overflow:hidden;box-sizing:border-box;}
+  #fill{height:100%;width:0%;min-width:0;border-radius:999px;background:#f4f4f5;transition:width 140ms ease;}
 `;
 }
 
@@ -615,7 +633,7 @@ function killParentTree(parentPid, writeLog) {
   }
 }
 
-/** Small centered card — logo, one status line, percent, bar. */
+/** Small centered splash — robot icon + progress bar only. */
 function splashHtml() {
   const icon = splashIconMarkup();
   return `<!DOCTYPE html>
@@ -627,19 +645,13 @@ ${splashShellCss()}
 <body>
   <div class="wrap">
     <div class="logo-wrap">${icon}</div>
-    <div id="label">Installing update</div>
-    <div id="pct">0%</div>
     <div class="track"><div id="fill"></div></div>
   </div>
   <script>
-    window.__arkSet = function(pct, text) {
+    window.__arkSet = function(pct) {
       var n = Math.max(0, Math.min(100, Math.round(Number(pct) || 0)));
       var f = document.getElementById('fill');
-      var l = document.getElementById('label');
-      var p = document.getElementById('pct');
-      if (f) f.style.width = Math.max(8, n) + '%';
-      if (p) p.textContent = n + '%';
-      if (l && text) l.textContent = text;
+      if (f) f.style.width = n + '%';
     };
   </script>
 </body></html>`;
@@ -677,8 +689,6 @@ ${splashShellCss()}
 <body>
   <div class="wrap">
     <div class="logo-wrap">${icon}</div>
-    <div id="label">Installing update</div>
-    <div id="pct">8%</div>
     <div class="track"><div id="fill"></div></div>
   </div>
   <script language="JScript">
@@ -705,14 +715,10 @@ ${splashShellCss()}
         return s;
       } catch (e) { return ""; }
     }
-    function setUi(n, text) {
+    function setUi(n) {
       n = Math.max(0, Math.min(100, Math.round(n || 0)));
       var fill = document.getElementById("fill");
-      var pct = document.getElementById("pct");
-      var lab = document.getElementById("label");
-      if (fill) fill.style.width = Math.max(8, n) + "%";
-      if (pct) pct.innerText = n + "%";
-      if (lab && text) lab.innerText = text;
+      if (fill) fill.style.width = n + "%";
     }
     function parseStatus(raw) {
       var map = {};
@@ -729,18 +735,17 @@ ${splashShellCss()}
       if (closing) return;
       if ((new Date()).getTime() - started > 600000) { window.close(); return; }
       var map = parseStatus(readText(STATUS));
-      var line = map.sub || map.label || "Installing update";
-      if (map.pct) setUi(parseInt(map.pct, 10) || 0, line);
+      if (map.pct) setUi(parseInt(map.pct, 10) || 0);
       try { window.focus(); } catch (e2) {}
       if (readText(SHOWN)) {
         closing = true;
-        setUi(100, "Opening ARK");
+        setUi(100);
         setTimeout(function () { window.close(); }, 450);
       }
     }
-    window.resizeTo(500, 360);
+    window.resizeTo(${SPLASH_W}, ${SPLASH_H});
     try {
-      window.moveTo(Math.max(0, (screen.width - 500) / 2), Math.max(0, (screen.height - 360) / 2));
+      window.moveTo(Math.max(0, (screen.width - ${SPLASH_W}) / 2), Math.max(0, (screen.height - ${SPLASH_H}) / 2));
     } catch (e) {}
     writeAlive();
     setInterval(tick, 350);
@@ -816,14 +821,12 @@ function launchHtaSplash({ statusPath, shownPath }) {
   return { ok: true, htaPath, alivePath };
 }
 
-async function setSplash(win, pct, text, sub) {
+async function setSplash(win, pct) {
   if (!win || win.isDestroyed()) return;
-  const line = String(sub || text || 'Installing update');
-  const esc = (v) => String(v || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
   try {
     await Promise.race([
       win.webContents.executeJavaScript(
-        `window.__arkSet && window.__arkSet(${Number(pct) || 0}, '${esc(line)}')`,
+        `window.__arkSet && window.__arkSet(${Number(pct) || 0})`,
       ),
       sleep(600),
     ]);
@@ -934,8 +937,8 @@ async function runStandaloneSplash(argv) {
   writeUpdateStatus(statusPath, 'waiting', 8, 'Installing update', 'Installing update');
 
   const win = new BrowserWindow({
-    width: 500,
-    height: 360,
+    width: SPLASH_W,
+    height: SPLASH_H,
     frame: false,
     thickFrame: false,
     resizable: false,
@@ -944,7 +947,7 @@ async function runStandaloneSplash(argv) {
     fullscreenable: false,
     // Opaque — transparent frameless windows on Windows draw white chrome / caption junk.
     transparent: false,
-    backgroundColor: '#0a0a0c',
+    backgroundColor: '#000000',
     hasShadow: true,
     show: false,
     alwaysOnTop: true,
@@ -1357,10 +1360,13 @@ function launchInstallHandoffSplash({ statusPath, expectedVersion, arkExe, shown
     '  $gp.CloseFigure()',
     '  return New-Object System.Drawing.Region($gp)',
     '}',
-    '$formW = 500',
-    '$formH = 360',
-    '$trackW = 340',
-    '$trackH = 12',
+    '$formW = 440',
+    '$formH = 300',
+    `$trackW = ${SPLASH_TRACK_W}`,
+    `$trackH = ${SPLASH_TRACK_H}`,
+    `$picSize = ${SPLASH_ICON_PX}`,
+    `$picY = [int](($formH - $picSize - ${SPLASH_ICON_GAP} - $trackH) / 2)`,
+    `$trackY = $picY + $picSize + ${SPLASH_ICON_GAP}`,
     '$form = New-Object System.Windows.Forms.Form',
     `$form.Text = "ARK"`,
     '$form.AutoScaleMode = "None"',
@@ -1371,8 +1377,8 @@ function launchInstallHandoffSplash({ statusPath, expectedVersion, arkExe, shown
     '$form.ShowIcon = $false',
     '$form.ClientSize = New-Object System.Drawing.Size($formW, $formH)',
     '$form.StartPosition = "CenterScreen"',
-    '$form.BackColor = [System.Drawing.Color]::FromArgb(10, 10, 12)',
-    '$form.ForeColor = [System.Drawing.Color]::FromArgb(242, 242, 243)',
+    '$form.BackColor = [System.Drawing.Color]::FromArgb(0, 0, 0)',
+    '$form.ForeColor = [System.Drawing.Color]::FromArgb(244, 244, 245)',
     '$form.TopMost = $true',
     '$form.ShowInTaskbar = $true',
     'if ($icoPath -and (Test-Path -LiteralPath $icoPath)) { try { $form.Icon = New-Object System.Drawing.Icon($icoPath) } catch {} }',
@@ -1383,46 +1389,36 @@ function launchInstallHandoffSplash({ statusPath, expectedVersion, arkExe, shown
     '    $form.Icon = [System.Drawing.Icon]::ExtractAssociatedIcon($exeForIcon)',
     '  } catch {}',
     '}',
-    '$picSize = 112',
     '$pic = New-Object System.Windows.Forms.PictureBox',
     '$pic.SizeMode = "Zoom"',
     '$pic.Size = New-Object System.Drawing.Size($picSize, $picSize)',
-    '$pic.Location = New-Object System.Drawing.Point([int](($formW - $picSize) / 2), 48)',
-    '$pic.BackColor = [System.Drawing.Color]::FromArgb(10, 10, 12)',
+    '$pic.Location = New-Object System.Drawing.Point([int](($formW - $picSize) / 2), $picY)',
+    '$pic.BackColor = [System.Drawing.Color]::FromArgb(0, 0, 0)',
     'if ($pngPath -and (Test-Path -LiteralPath $pngPath)) { try { $pic.Image = [System.Drawing.Image]::FromFile($pngPath) } catch {} }',
     'if (-not $pic.Image -and $form.Icon) { try { $pic.Image = $form.Icon.ToBitmap() } catch {} }',
-    '$label = New-Object System.Windows.Forms.Label',
-    '$label.Text = "Installing update"',
-    '$label.ForeColor = [System.Drawing.Color]::FromArgb(242, 242, 243)',
-    '$label.BackColor = [System.Drawing.Color]::FromArgb(10, 10, 12)',
-    '$label.Font = New-Object System.Drawing.Font("Segoe UI", 12, [System.Drawing.FontStyle]::Bold)',
-    '$label.AutoSize = $false',
-    '$label.TextAlign = "MiddleCenter"',
-    '$label.Size = New-Object System.Drawing.Size(($formW - 40), 28)',
-    '$label.Location = New-Object System.Drawing.Point(20, 188)',
-    '$pct = New-Object System.Windows.Forms.Label',
-    '$pct.Text = "8%"',
-    '$pct.ForeColor = [System.Drawing.Color]::FromArgb(168, 168, 179)',
-    '$pct.BackColor = [System.Drawing.Color]::FromArgb(10, 10, 12)',
-    '$pct.Font = New-Object System.Drawing.Font("Segoe UI", 11)',
-    '$pct.AutoSize = $false',
-    '$pct.TextAlign = "MiddleCenter"',
-    '$pct.Size = New-Object System.Drawing.Size(($formW - 40), 22)',
-    '$pct.Location = New-Object System.Drawing.Point(20, 220)',
     '$track = New-Object System.Windows.Forms.Panel',
-    '$track.BackColor = [System.Drawing.Color]::FromArgb(58, 58, 68)',
+    '$track.BackColor = [System.Drawing.Color]::FromArgb(0, 0, 0)',
     '$track.Size = New-Object System.Drawing.Size($trackW, $trackH)',
-    '$track.Location = New-Object System.Drawing.Point([int](($formW - $trackW) / 2), 262)',
+    '$track.Location = New-Object System.Drawing.Point([int](($formW - $trackW) / 2), $trackY)',
     'try { $track.Region = New-ArkRoundRegion $trackW $trackH ([int]($trackH / 2)) } catch {}',
+    '$track.Paint += {',
+    '  param($sender, $e)',
+    '  $g = $e.Graphics',
+    '  $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias',
+    '  $pen = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(82, 82, 91), 2)',
+    '  $rect = New-Object System.Drawing.Rectangle(1, 1, $sender.Width - 3, $sender.Height - 3)',
+    '  $g.DrawArc($pen, $rect.X, $rect.Y, $rect.Height, $rect.Height, 90, 180)',
+    '  $g.DrawArc($pen, $rect.Right - $rect.Height, $rect.Y, $rect.Height, $rect.Height, 270, 180)',
+    '  $g.DrawLine($pen, $rect.X + [int]($rect.Height / 2), $rect.Y, $rect.Right - [int]($rect.Height / 2), $rect.Y)',
+    '  $g.DrawLine($pen, $rect.X + [int]($rect.Height / 2), $rect.Bottom, $rect.Right - [int]($rect.Height / 2), $rect.Bottom)',
+    '}',
     '$fill = New-Object System.Windows.Forms.Panel',
-    '$fill.BackColor = [System.Drawing.Color]::FromArgb(242, 242, 244)',
+    '$fill.BackColor = [System.Drawing.Color]::FromArgb(244, 244, 245)',
     '$fill.Size = New-Object System.Drawing.Size(0, $trackH)',
     '$fill.Location = New-Object System.Drawing.Point(0, 0)',
     'try { $fill.Region = New-ArkRoundRegion $trackH $trackH ([int]($trackH / 2)) } catch {}',
     '$track.Controls.Add($fill)',
     '$form.Controls.Add($pic)',
-    '$form.Controls.Add($label)',
-    '$form.Controls.Add($pct)',
     '$form.Controls.Add($track)',
     '$script:baselinePids = @{}',
     'try { Get-Process -Name "ARK" -ErrorAction SilentlyContinue | ForEach-Object { $script:baselinePids[$_.Id] = $true } } catch {}',
@@ -1440,14 +1436,11 @@ function launchInstallHandoffSplash({ statusPath, expectedVersion, arkExe, shown
     '      Get-Content -LiteralPath $statusPath -ErrorAction SilentlyContinue | ForEach-Object {',
     '        if ($_ -match "^(.*?)=(.*)$") { $map[$matches[1]] = $matches[2] }',
     '      }',
-    '      if ($map.sub) { $label.Text = [string]$map.sub }',
-    '      elseif ($map.label) { $label.Text = [string]$map.label }',
     '      if ($map.pct) {',
     '        $n = [int]$map.pct',
     '        if ($n -lt 0) { $n = 0 }',
     '        if ($n -gt 100) { $n = 100 }',
-    '        $pct.Text = "$n%"',
-    '        $w = [Math]::Max($trackH, [int]($trackW * $n / 100))',
+    '        $w = [Math]::Max(0, [int]($trackW * $n / 100))',
     '        if ($w -gt $trackW) { $w = $trackW }',
     '        $fill.Width = $w',
     '        try { $fill.Region = New-ArkRoundRegion $w $trackH ([int]($trackH / 2)) } catch {}',
@@ -1455,10 +1448,7 @@ function launchInstallHandoffSplash({ statusPath, expectedVersion, arkExe, shown
     '      $stage = [string]$map.stage',
     '      if ($stage -eq "opening" -or $stage -eq "done" -or $stage -eq "waiting_reopen") {',
     '        $script:installFinished = $true',
-    '        if (-not $script:waitingReopen) {',
-    '          $script:waitingReopen = $true',
-    '          $label.Text = "Opening ARK"',
-    '        }',
+    '        if (-not $script:waitingReopen) { $script:waitingReopen = $true }',
     '      }',
     '    }',
     '  } catch {}',
@@ -1467,8 +1457,6 @@ function launchInstallHandoffSplash({ statusPath, expectedVersion, arkExe, shown
     '  if ($uiReady -and -not $script:closeArmed) {',
     '    $script:closeArmed = $true',
     '    $script:closeAt = [Environment]::TickCount + 400',
-    '    $label.Text = "Opening ARK"',
-    '    $pct.Text = "100%"',
     '    $fill.Width = $trackW',
     '    try { $fill.Region = New-ArkRoundRegion $trackW $trackH ([int]($trackH / 2)) } catch {}',
     '  }',

@@ -21,21 +21,31 @@ const ORB_SETUP: Array<{ size: number; colorClass: string }> = [
   { size: 155, colorClass: 'auth-orb-tone-i' },
 ];
 
+const APP_ORB_SETUP = ORB_SETUP.slice(0, 7);
+
 const SPEED_MIN = 0.22;
 const SPEED_MAX = 0.42;
+const APP_SPEED_MIN = 0.16;
+const APP_SPEED_MAX = 0.3;
 const CLICK_IMPULSE = 2.8;
 
 function rand(min: number, max: number) {
   return min + Math.random() * (max - min);
 }
 
-function seedOrbs(w: number, h: number): OrbSpec[] {
+function seedOrbs(
+  w: number,
+  h: number,
+  setup: Array<{ size: number; colorClass: string }>,
+  speedMin: number,
+  speedMax: number,
+): OrbSpec[] {
   const maxR = Math.min(w, h) * 0.28;
-  return ORB_SETUP.map((spec, i) => {
+  return setup.map((spec, i) => {
     const size = Math.min(spec.size, maxR * 2);
     const r = size / 2;
-    const angle = (i / ORB_SETUP.length) * Math.PI * 2 + rand(-0.4, 0.4);
-    const speed = rand(SPEED_MIN, SPEED_MAX);
+    const angle = (i / setup.length) * Math.PI * 2 + rand(-0.4, 0.4);
+    const speed = rand(speedMin, speedMax);
     return {
       size,
       colorClass: spec.colorClass,
@@ -107,7 +117,7 @@ function bouncePair(a: OrbSpec, b: OrbSpec) {
   }
 }
 
-function paintOrbs(orbs: OrbSpec[], orbEls: (HTMLButtonElement | null)[]) {
+function paintOrbs(orbs: OrbSpec[], orbEls: (HTMLButtonElement | HTMLDivElement | null)[]) {
   for (let i = 0; i < orbs.length; i++) {
     const el = orbEls[i];
     if (!el) continue;
@@ -118,10 +128,20 @@ function paintOrbs(orbs: OrbSpec[], orbEls: (HTMLButtonElement | null)[]) {
   }
 }
 
-/** Soft roaming color orbs — click one to send it bouncing. */
-export function AuthAmbientOrbs() {
+type AuthAmbientOrbsProps = {
+  /** `app` = softer, slower backdrop for the main shell (non-interactive). */
+  variant?: 'auth' | 'app';
+};
+
+/** Soft roaming color orbs — click one to send it bouncing (auth/setup only). */
+export function AuthAmbientOrbs({ variant = 'auth' }: AuthAmbientOrbsProps) {
+  const isApp = variant === 'app';
+  const setup = isApp ? APP_ORB_SETUP : ORB_SETUP;
+  const speedMin = isApp ? APP_SPEED_MIN : SPEED_MIN;
+  const speedMax = isApp ? APP_SPEED_MAX : SPEED_MAX;
+
   const layerRef = useRef<HTMLDivElement>(null);
-  const orbRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const orbRefs = useRef<(HTMLButtonElement | HTMLDivElement | null)[]>([]);
   const stateRef = useRef<OrbSpec[] | null>(null);
   const rafRef = useRef(0);
 
@@ -157,7 +177,7 @@ export function AuthAmbientOrbs() {
       const h = layer.clientHeight;
       if (w < 2 || h < 2) return false;
       if (!stateRef.current) {
-        stateRef.current = seedOrbs(w, h);
+        stateRef.current = seedOrbs(w, h, setup, speedMin, speedMax);
       } else {
         for (const orb of stateRef.current) {
           bounceWalls(orb, w, h);
@@ -209,33 +229,56 @@ export function AuthAmbientOrbs() {
     return () => {
       cancelAnimationFrame(rafRef.current);
       ro.disconnect();
+      stateRef.current = null;
     };
-  }, []);
+  }, [variant]);
 
   return (
-    <div ref={layerRef} className="absolute inset-0 overflow-hidden pointer-events-none" aria-hidden>
-      {ORB_SETUP.map((spec, i) => (
-        <button
-          key={spec.colorClass}
-          type="button"
-          tabIndex={-1}
-          aria-label="Bounce color light"
-          ref={el => {
-            orbRefs.current[i] = el;
-          }}
-          className={`auth-orb auth-orb-interactive ${spec.colorClass}`}
-          style={{
-            width: spec.size,
-            height: spec.size,
-            transform: 'translate3d(-9999px, -9999px, 0)',
-          }}
-          onPointerDown={e => {
-            e.preventDefault();
-            e.stopPropagation();
-            kickOrb(i, e.clientX, e.clientY);
-          }}
-        />
-      ))}
+    <div
+      ref={layerRef}
+      className={`absolute inset-0 overflow-hidden pointer-events-none ${isApp ? 'z-0' : ''}`}
+      aria-hidden
+    >
+      {setup.map((spec, i) => {
+        const style = {
+          width: spec.size,
+          height: spec.size,
+          transform: 'translate3d(-9999px, -9999px, 0)',
+        };
+        const className = `auth-orb ${isApp ? 'auth-orb-app' : 'auth-orb-interactive'} ${spec.colorClass}`;
+
+        if (isApp) {
+          return (
+            <div
+              key={spec.colorClass}
+              ref={el => {
+                orbRefs.current[i] = el;
+              }}
+              className={className}
+              style={style}
+            />
+          );
+        }
+
+        return (
+          <button
+            key={spec.colorClass}
+            type="button"
+            tabIndex={-1}
+            aria-label="Bounce color light"
+            ref={el => {
+              orbRefs.current[i] = el;
+            }}
+            className={className}
+            style={style}
+            onPointerDown={e => {
+              e.preventDefault();
+              e.stopPropagation();
+              kickOrb(i, e.clientX, e.clientY);
+            }}
+          />
+        );
+      })}
     </div>
   );
 }

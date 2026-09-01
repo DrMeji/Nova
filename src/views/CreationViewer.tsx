@@ -82,7 +82,7 @@ export function CreationViewer() {
   };
 
   return (
-    <div className="h-full flex flex-col bg-ark-navy-950">
+    <div className="h-full flex flex-col bg-transparent">
       <header className="flex-none flex items-center gap-3 px-5 py-3 border-b border-surface-border">
         <button
           type="button"

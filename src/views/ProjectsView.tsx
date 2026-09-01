@@ -149,8 +149,8 @@ export function ProjectsView() {
   };
 
   return (
-    <div className="h-full min-w-0 flex flex-col overflow-hidden animate-fade-in bg-ark-navy-950">
-      <div className="shrink-0 px-4 sm:px-6 pt-[min(12vh,6rem)] bg-ark-navy-950">
+    <div className="h-full min-w-0 flex flex-col overflow-hidden animate-fade-in bg-transparent">
+      <div className="shrink-0 px-4 sm:px-6 pt-[min(12vh,6rem)] bg-transparent">
         <div className="w-full max-w-3xl mx-auto min-w-0">
           {notice && (
             <p className="mb-3 rounded-xl border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-100/90">

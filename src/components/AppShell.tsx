@@ -27,6 +27,7 @@ import { probeLiveCapacity, type LiveCapacity } from '@/lib/arkCapacity';
 import { probeAiModeLabel, type AiModeLabel } from '@/lib/aiModeStatus';
 import { JobsStrip } from '@/components/JobsStrip';
 import { PostLoginSafetyTip } from '@/components/PostLoginSafetyTip';
+import { AuthAmbientOrbs } from '@/components/auth/AuthAmbientOrbs';
 import { comparePinnedThenRecent } from '@/lib/recentStore';
 import { formatArkId } from '@/lib/arkUserId';
 import { isArkDevEmail } from '@/lib/arkDevAccount';
@@ -469,7 +470,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     return (
       <div
         key={item.key}
-        className={`group relative flex items-center gap-0.5 rounded-lg ${active ? 'bg-surface-hover' : ''} ${doneAway ? 'ark-nav-activity' : ''}`}
+        className={`group relative flex items-center gap-0.5 rounded-lg ${active ? 'bg-surface-hover' : ''}`}
       >
         {editing ? (
           <input
@@ -498,7 +499,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               setRenamingId(renameKey);
               setRenameDraft(item.title);
             }}
-            className={`ark-nav-item !py-1.5 !gap-2.5 flex-1 min-w-0 ${active ? 'active' : ''} ${doneAway ? 'ark-nav-activity' : ''}`}
+            className={`ark-nav-item !py-1.5 !gap-2.5 flex-1 min-w-0 ${active ? 'active' : ''}`}
             title={`${item.title} · double-click to rename`}
           >
             <Icon className="w-3.5 h-3.5 shrink-0 text-content-tertiary" strokeWidth={1.75} />
@@ -628,7 +629,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         }
         onClick={() => handleNavClick(item)}
         title={collapsed ? item.label : undefined}
-        className={`ark-nav-item w-full relative ${collapsed ? '!justify-center' : ''} ${active ? 'active' : ''} ${busy || notifAttention ? 'ark-nav-activity' : ''}`}
+        className={`ark-nav-item w-full relative ${collapsed ? '!justify-center' : ''} ${active ? 'active' : ''}`}
       >
         <item.icon className="w-4 h-4 shrink-0" />
         {!collapsed && <span>{item.label}</span>}
@@ -654,9 +655,10 @@ export function AppShell({ children }: { children: ReactNode }) {
   };
 
   return (
-    <div className="h-full min-w-0 flex bg-ark-navy-950 overflow-hidden">
+    <div className="h-full min-w-0 flex overflow-hidden relative bg-ark-navy-950">
+      <AuthAmbientOrbs variant="app" />
       <aside
-        className={`relative shrink-0 m-2 mr-0 flex flex-col min-w-0 rounded-2xl border border-surface-border bg-ark-navy-900/70 shadow-[0_8px_32px_rgba(0,0,0,0.35)] ${
+        className={`relative z-10 shrink-0 m-2 mr-0 flex flex-col min-w-0 rounded-2xl border border-surface-border bg-ark-navy-900/70 shadow-[0_8px_32px_rgba(0,0,0,0.35)] ${
           collapsed ? 'w-16' : 'w-64'
         }`}
       >
@@ -823,7 +825,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                         type="button"
                         aria-label={item.title}
                         onClick={() => openRecent(item)}
-                        className={`ark-nav-item !justify-center relative ${active ? 'active' : ''} ${doneAway ? 'ark-nav-activity' : ''}`}
+                        className={`ark-nav-item !justify-center relative ${active ? 'active' : ''}`}
                         title={item.title}
                       >
                         <Icon className="w-3.5 h-3.5" strokeWidth={1.75} />
@@ -962,7 +964,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
       </aside>
 
-        <main className="flex-1 min-h-0 min-w-0 overflow-hidden m-2 ml-2 relative flex flex-col">
+        <main className="relative z-10 flex-1 min-h-0 min-w-0 overflow-hidden m-2 ml-2 flex flex-col">
           <PostLoginSafetyTip />
           <div className="flex-1 min-h-0 overflow-hidden relative">
           {children}

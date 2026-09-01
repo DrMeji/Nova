@@ -50,6 +50,20 @@ function formatBytes(n: number) {
   return `${(n / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
 
+/** Timestamp + unread dot with a fixed dot slot so times stay right-aligned. */
+function RailActivityMeta({ age, unread }: { age: string; unread?: boolean }) {
+  return (
+    <span className="shrink-0 flex items-center gap-1 self-center">
+      <span className="text-[10px] text-content-tertiary tabular-nums">{age}</span>
+      <span className="h-2 w-2 shrink-0 flex items-center justify-center">
+        {unread ? (
+          <span className="h-2 w-2 rounded-full bg-sky-400" aria-label="Unread message" />
+        ) : null}
+      </span>
+    </span>
+  );
+}
+
 function attachmentIcon(kind: MessageAttachment['kind']) {
   if (kind === 'image') return ImageIcon;
   if (kind === 'folder') return Folder;
@@ -542,7 +556,7 @@ export function MessageView() {
 
   if (people.length === 0) {
     return (
-      <div className="h-full box-border p-4 animate-fade-in bg-ark-navy-950">
+      <div className="h-full box-border p-4 animate-fade-in bg-transparent">
         <div className="h-full flex flex-col rounded-2xl border border-surface-border bg-ark-navy-900/55 overflow-hidden">
           <div className="px-6 pt-5 max-w-md mx-auto w-full">
             <GuestSocialBanner feature="message" />
@@ -687,11 +701,7 @@ export function MessageView() {
                       {g.memberArkIds.length} people
                     </span>
                   </span>
-                  {age && (
-                    <span className="shrink-0 text-[10px] text-content-tertiary tabular-nums self-center">
-                      {age}
-                    </span>
-                  )}
+                  {age && <RailActivityMeta age={age} />}
                 </button>
               );
             })}
@@ -739,14 +749,14 @@ export function MessageView() {
               return (
                 <div
                   key={c.arkId}
-                  className={`group relative w-full flex items-center gap-1 rounded-xl ${
+                  className={`group relative w-full rounded-xl ${
                     !groupId && peer === c.arkId ? 'bg-surface-hover' : 'hover:bg-surface-hover/60'
                   }`}
                 >
                   <button
                     type="button"
                     onClick={() => navigate({ name: 'message', peer: c.arkId })}
-                    className="flex-1 min-w-0 flex items-center gap-2.5 text-left rounded-xl px-2.5 py-2.5"
+                    className="w-full min-w-0 flex items-center gap-2.5 text-left rounded-xl px-2.5 py-2.5"
                   >
                     <span className="relative shrink-0">
                       <ArkAvatar name={c.displayName} src={c.avatarUrl} size="md" />
@@ -762,21 +772,14 @@ export function MessageView() {
                         {formatArkId(c.arkId)}
                       </span>
                     </span>
-                    <span className="shrink-0 flex flex-row items-center gap-1.5 self-center">
-                      {age && (
-                        <span className="text-[10px] text-content-tertiary tabular-nums">{age}</span>
-                      )}
-                      {hasUnread && (
-                        <span className="h-2 w-2 rounded-full bg-sky-400 shrink-0" aria-label="Unread message" />
-                      )}
-                    </span>
+                    {age && <RailActivityMeta age={age} unread={hasUnread} />}
                   </button>
                   <button
                     type="button"
                     title="Delete contact"
                     aria-label={`Delete ${c.displayName}`}
                     onClick={e => deleteFromList(c.arkId, e)}
-                    className="shrink-0 mr-1.5 h-8 w-8 rounded-full flex items-center justify-center text-content-tertiary hover:text-rose-300 hover:bg-rose-500/15 opacity-0 group-hover:opacity-100 transition-opacity"
+                    className="absolute right-1 top-1/2 -translate-y-1/2 z-10 h-8 w-8 rounded-full flex items-center justify-center text-content-tertiary hover:text-rose-300 hover:bg-rose-500/15 opacity-0 group-hover:opacity-100 transition-opacity"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>

@@ -230,6 +230,10 @@
   .auth-orb-interactive:active {
     filter: blur(64px) brightness(1.15);
   }
+  .auth-orb-app {
+    opacity: 0.38;
+    filter: blur(96px);
+  }
   .auth-orb-tone-a {
     background: rgb(56 189 248 / 0.38);
     animation: authOrbHueA 28s ease-in-out infinite alternate;

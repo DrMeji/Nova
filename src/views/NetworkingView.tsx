@@ -17,6 +17,17 @@ import { Modal } from '@/components/Modal';
 import { pushSidebarToast } from '@/lib/sidebarToast';
 import { pushLocalNotification } from '@/lib/localNotifications';
 import { getLocalPrefs } from '@/lib/localPrefs';
+import {
+  getSaveCount,
+  getViewCount,
+  hasUnreadDiscussion,
+  loadDiscussions,
+  markDiscussionRead,
+  recordPostSave,
+  recordPostView,
+  saveDiscussions,
+  type DiscussionMessage,
+} from '@/lib/networkEngagement';
 
 type FeedTab = 'public' | 'paid' | 'mine' | 'saved';
 
@@ -113,7 +124,10 @@ export function NetworkingView() {
   const [savedIds, setSavedIds] = useState<string[]>(() => loadSavedIds());
   const [discussionOpen, setDiscussionOpen] = useState(false);
   const [discussionDraft, setDiscussionDraft] = useState('');
-  const [discussionByPost, setDiscussionByPost] = useState<Record<string, { id: string; name: string; body: string; at: string }[]>>({});
+  const [discussionByPost, setDiscussionByPost] = useState<Record<string, DiscussionMessage[]>>(
+    () => loadDiscussions(),
+  );
+  const [engagementTick, setEngagementTick] = useState(0);
   const [codeAsked, setCodeAsked] = useState<Record<string, boolean>>({});
   const [allowDiscussionPost, setAllowDiscussionPost] = useState(true);
   const [reportPost, setReportPost] = useState<NetworkPost | null>(null);
@@ -209,13 +223,26 @@ export function NetworkingView() {
   const toggleSave = (postId: string, e?: { stopPropagation: () => void }) => {
     e?.stopPropagation();
     setSavedIds(prev => {
-      const next = prev.includes(postId) ? prev.filter(id => id !== postId) : [...prev, postId];
+      const saving = !prev.includes(postId);
+      const next = saving ? [...prev, postId] : prev.filter(id => id !== postId);
       persistSavedIds(next);
+      if (myArkId) {
+        recordPostSave(postId, myArkId, saving);
+        setEngagementTick(t => t + 1);
+      }
       return next;
     });
   };
 
   const selected = selectedId ? shown.find(p => p.id === selectedId) || posts.find(p => p.id === selectedId) : null;
+
+  useEffect(() => {
+    if (!selectedId || !myArkId) return;
+    const post = posts.find(p => p.id === selectedId);
+    if (!post) return;
+    recordPostView(selectedId, myArkId, post.ownerArkId);
+    setEngagementTick(t => t + 1);
+  }, [selectedId, myArkId, posts]);
 
   const resetComposer = () => {
     setTitle('');
@@ -257,15 +284,7 @@ export function NetworkingView() {
   const ensureDiscussion = (postId: string) => {
     setDiscussionByPost(prev => {
       if (prev[postId]) return prev;
-      const t = Date.now();
-      return {
-        ...prev,
-        [postId]: [
-          { id: `${postId}-d1`, name: 'Riley Park', body: 'Cool project. are you still looking for feedback?', at: new Date(t - 50 * 60_000).toISOString() },
-          { id: `${postId}-d2`, name: 'Jordan Lee', body: 'What’s the stack here?', at: new Date(t - 32 * 60_000).toISOString() },
-          { id: `${postId}-d3`, name: 'Maya Chen', body: 'Happy to chime in on the layout if you want.', at: new Date(t - 12 * 60_000).toISOString() },
-        ],
-      };
+      return { ...prev, [postId]: [] };
     });
   };
 
@@ -275,13 +294,31 @@ export function NetworkingView() {
     if (!body) return;
     const name = profile?.display_name || 'You';
     setDiscussionDraft('');
-    setDiscussionByPost(prev => ({
-      ...prev,
-      [selectedId]: [
-        ...(prev[selectedId] || []),
-        { id: crypto.randomUUID(), name, body, at: new Date().toISOString() },
-      ],
-    }));
+    setDiscussionByPost(prev => {
+      const next = {
+        ...prev,
+        [selectedId]: [
+          ...(prev[selectedId] || []),
+          {
+            id: crypto.randomUUID(),
+            name,
+            body,
+            at: new Date().toISOString(),
+            senderArkId: myArkId || undefined,
+          },
+        ],
+      };
+      saveDiscussions(next);
+      return next;
+    });
+  };
+
+  const openDiscussion = (postId: string) => {
+    ensureDiscussion(postId);
+    setDiscussionOpen(true);
+    const msgs = discussionByPost[postId] || [];
+    markDiscussionRead(postId, msgs.length);
+    setEngagementTick(t => t + 1);
   };
 
   const askToViewCode = (post: NetworkPost) => {
@@ -343,7 +380,7 @@ export function NetworkingView() {
 
   return (
     <>
-      <div className="h-full box-border p-4 animate-fade-in bg-ark-navy-950">
+      <div className="h-full box-border p-4 animate-fade-in bg-transparent">
         <div className="h-full min-h-0 flex flex-col rounded-2xl border border-surface-border bg-ark-navy-900/55 shadow-[0_8px_32px_rgba(0,0,0,0.35)] overflow-hidden">
           <div className="shrink-0 px-5 sm:px-8 pt-5 pb-3">
             <GuestSocialBanner feature="networking" />
@@ -534,7 +571,12 @@ export function NetworkingView() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
                   {shown.map(post => {
                     const isSaved = savedIds.includes(post.id);
-                    const saveCount = (post.saves || 0) + (isSaved ? 1 : 0);
+                    void engagementTick;
+                    const viewCount = getViewCount(post.id);
+                    const saveCount = getSaveCount(post.id);
+                    const replies = discussionByPost[post.id] || [];
+                    const replyCount = replies.length;
+                    const chatUnread = hasUnreadDiscussion(post.id, replies, myArkId);
                     const menuOpen = menuPostId === post.id;
                     return (
                       <div
@@ -599,11 +641,16 @@ export function NetworkingView() {
                               <div className="mt-3 flex items-center gap-3 min-w-0 text-[10px] text-content-tertiary">
                                 <span className="inline-flex items-center gap-1" title="Views">
                                   <Eye className="w-3 h-3" />
-                                  {formatCount(post.views || 0)}
+                                  {formatCount(viewCount)}
                                 </span>
                                 <span className="inline-flex items-center gap-1" title="Messages">
-                                  <MessageSquare className="w-3 h-3" />
-                                  {formatCount(post.replies || 0)}
+                                  <span className="relative inline-flex">
+                                    <MessageSquare className="w-3 h-3" />
+                                    {chatUnread ? (
+                                      <span className="absolute -top-0.5 -right-0.5 h-1.5 w-1.5 rounded-full bg-sky-400" aria-hidden />
+                                    ) : null}
+                                  </span>
+                                  {formatCount(replyCount)}
                                 </span>
                                 <span className="inline-flex items-center gap-1" title="Saved">
                                   <Bookmark className="w-3 h-3" />
@@ -750,10 +797,7 @@ export function NetworkingView() {
                 {selected.allowDiscussion !== false && (
                   <button
                     type="button"
-                    onClick={() => {
-                      ensureDiscussion(selected.id);
-                      setDiscussionOpen(true);
-                    }}
+                    onClick={() => openDiscussion(selected.id)}
                     className="inline-flex items-center gap-1.5 rounded-full bg-sky-600 px-3 py-1.5 text-xs text-white"
                   >
                     <MessageSquare className="w-3.5 h-3.5" />

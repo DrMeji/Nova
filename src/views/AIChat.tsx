@@ -765,6 +765,13 @@ export function AIChat() {
     return [];
   });
   const [input, setInput] = useState('');
+  /** Keep composer text per Chat / Image / Video / Voice — never bleed across tabs. */
+  const inputRef = useRef('');
+  const composerDraftByModeRef = useRef<Partial<Record<ChatMode, string>>>({});
+  const composerModeRef = useRef<ChatMode>(
+    route.name === 'chat' && route.mode && route.mode !== 'general' ? route.mode : 'general',
+  );
+  inputRef.current = input;
   const [mode, setMode] = useState<ChatMode>(() =>
     route.name === 'chat' && route.mode && route.mode !== 'general' ? route.mode : 'general',
   );
@@ -835,7 +842,8 @@ export function AIChat() {
   const [studioOfferKind, setStudioOfferKind] = useState<'actions' | 'handoff' | 'details' | null>(null);
   const [traceDetailsId, setTraceDetailsId] = useState<string | null>(null);
   const [githubOfferId, setGithubOfferId] = useState<string | null>(null);
-  const [composerTall, setComposerTall] = useState(false);
+  /** Pill = one row; expanded = textarea grows up, + / ARK pinned on bottom row. */
+  const [composerExpanded, setComposerExpanded] = useState(false);
   const [composerMode, setComposerMode] = useState<'plan' | 'ask' | 'agent' | 'debug' | 'multitask' | null>(null);
   const [videoDurationSec, setVideoDurationSec] = useState<10 | 20 | 30>(10);
   const [tokenRatio, setTokenRatio] = useState(0);
@@ -1370,20 +1378,30 @@ export function AIChat() {
       navigate({ name: 'chat' });
       return;
     }
+    const prev = composerModeRef.current;
+    if (prev !== next) {
+      // Stash outgoing tab text, restore the destination tab's own draft (or empty).
+      composerDraftByModeRef.current[prev] = inputRef.current;
+      let nextDraft = composerDraftByModeRef.current[next] ?? '';
+      if (next === 'image' || next === 'video') {
+        try {
+          const handoff = localStorage.getItem(`ark:chat-draft:${next}`);
+          if (handoff != null) {
+            nextDraft = handoff;
+            localStorage.removeItem(`ark:chat-draft:${next}`);
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+      setInput(nextDraft);
+      inputRef.current = nextDraft;
+      if (textareaRef.current) textareaRef.current.style.height = 'auto';
+      composerModeRef.current = next;
+    }
     setMode(next);
     const kind = kindForMode(next);
-    setActiveModel(prev => (prev.kind === kind ? prev : defaultModelForKind(kind)));
-    if (next === 'image' || next === 'video') {
-      try {
-        const draft = localStorage.getItem(`ark:chat-draft:${next}`);
-        if (draft) {
-          setInput(draft);
-          localStorage.removeItem(`ark:chat-draft:${next}`);
-        }
-      } catch {
-        /* ignore */
-      }
-    }
+    setActiveModel(prevModel => (prevModel.kind === kind ? prevModel : defaultModelForKind(kind)));
   }, [route, navigate]);
 
   // After Chat → Image handoff, auto-send the carried prompt once.
@@ -1917,17 +1935,20 @@ export function AIChat() {
     const seed = (seedPrompt ?? imageOfferPromptRef.current ?? input).trim();
     setImageOfferId(null);
     setImageSwitchDismissed(true);
+    // Preserve Chat (or current) composer text when jumping to Image.
+    composerDraftByModeRef.current[composerModeRef.current] = inputRef.current;
     try {
       if (seed) {
         localStorage.setItem('ark:chat-draft:image', seed);
         sessionStorage.setItem('ark:image-handoff-send', '1');
         sessionStorage.setItem('ark:image-handoff-prompt', seed);
+      } else {
+        // Explicit Image tab with no seed → blank Image composer (don't carry Chat letters).
+        composerDraftByModeRef.current.image = '';
       }
     } catch {
       /* ignore */
     }
-    setInput('');
-    setComposerTall(false);
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
     navigate({ name: 'chat', mode: 'image' });
   };
@@ -2619,7 +2640,6 @@ export function AIChat() {
       return;
     }
     setInput('');
-    setComposerTall(false);
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
     void sendMessageRef.current(content);
   };
@@ -5955,15 +5975,9 @@ export function AIChat() {
       el.style.height = '';
       el.style.maxHeight = '';
       el.style.overflowY = 'hidden';
-      setComposerTall(false);
+      setComposerExpanded(false);
       return;
     }
-
-    // Tall chrome only after an explicit new line with more text (Shift+Enter / pasted newlines).
-    // Soft-wrapped single lines still grow height below without the empty padded box.
-    // Trailing-only newlines (common after paste) do not force the tall toolbar layout.
-    const wantsTall = /\n\S/.test(value);
-    setComposerTall(wantsTall);
 
     const applyHeight = () => {
       const box = textareaRef.current;
@@ -5972,10 +5986,13 @@ export function AIChat() {
       void box.offsetHeight;
       const raw = box.scrollHeight;
       const max = Math.round(window.innerHeight * 0.4);
-      const minPx = wantsTall ? 40 : 22;
+      const minPx = 22;
       const next = Math.max(minPx, Math.min(raw, max));
       box.style.height = `${next}px`;
       box.style.overflowY = raw > max ? 'auto' : 'hidden';
+      // Pill until text wraps or user adds a real new line; then grow upward with fixed footer.
+      const multiLine = /\n\S/.test(value) || raw > 34;
+      setComposerExpanded(multiLine);
     };
 
     applyHeight();
@@ -6449,10 +6466,10 @@ export function AIChat() {
               <span className="text-[10px] text-content-tertiary">Max 30s · quality render may take up to ~30s</span>
             </div>
           )}
-          <div className={`flex gap-2 min-w-0 ${composerTall ? 'items-end' : 'items-center'}`}>
+          <div className={`flex gap-2 min-w-0 ${composerExpanded ? 'items-end' : 'items-center'}`}>
           <div
             className={`flex-1 min-w-0 border border-surface-border bg-ark-navy-900/90 shadow-lg shadow-black/20 ${
-              composerTall
+              composerExpanded
                 ? 'flex flex-col rounded-xl overflow-hidden'
                 : 'flex items-center gap-1 rounded-xl min-h-11 pl-1 pr-1.5 py-1.5 overflow-hidden'
             }`}
@@ -6480,7 +6497,7 @@ export function AIChat() {
             }}
           />
 
-          {!composerTall && mode === 'image' && (
+          {!composerExpanded && mode === 'image' && (
             <button
               type="button"
               onClick={() => void pickPhotosIntoChat()}
@@ -6492,7 +6509,7 @@ export function AIChat() {
             </button>
           )}
 
-          {!composerTall && (
+          {!composerExpanded && (
             <ComposerPlusMenu
               scope={mode === 'image' ? 'image' : 'chat'}
               busy={attachBusy || Boolean(attachUploading)}
@@ -6529,8 +6546,8 @@ export function AIChat() {
             title="Enter to send · Shift+Enter for a new line · Ctrl+V pastes screenshots"
             aria-label="Message. Enter to send, Shift+Enter for a new line"
             className={`bg-transparent border-none resize-none text-sm text-content-primary placeholder:text-content-tertiary focus:outline-none leading-5 ${
-              composerTall
-                ? 'w-full min-h-[2.5rem] px-3 pt-2.5 pb-1'
+              composerExpanded
+                ? 'w-full min-h-[1.25rem] px-3 pt-2.5 pb-1'
                 : 'flex-1 min-w-0 min-h-[1.25rem] px-1 py-0 self-center'
             }`}
             style={{ overflowY: 'hidden' }}
@@ -6538,18 +6555,31 @@ export function AIChat() {
 
           <div
             className={
-              composerTall
-                ? 'flex items-center justify-between gap-2 px-2 pb-1.5 pt-0.5'
+              composerExpanded
+                ? 'flex items-center justify-between gap-2 px-2 pb-1.5 pt-0.5 shrink-0'
                 : 'flex items-center shrink-0'
             }
           >
-          {composerTall && (
-            <ComposerPlusMenu
-              scope={mode === 'image' ? 'image' : 'chat'}
-              busy={attachBusy || Boolean(attachUploading)}
-              onAction={handlePlusAction}
-              buttonClassName="w-8 h-8 rounded-full flex items-center justify-center text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors shrink-0"
-            />
+          {composerExpanded && (
+            <div className="flex items-center gap-1">
+              {mode === 'image' && (
+                <button
+                  type="button"
+                  onClick={() => void pickPhotosIntoChat()}
+                  className="w-8 h-8 rounded-full flex items-center justify-center text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors shrink-0"
+                  title="Upload a reference photo to recreate or improve"
+                  aria-label="Upload reference photo"
+                >
+                  <ImagePlus className="w-4 h-4" />
+                </button>
+              )}
+              <ComposerPlusMenu
+                scope={mode === 'image' ? 'image' : 'chat'}
+                busy={attachBusy || Boolean(attachUploading)}
+                onAction={handlePlusAction}
+                buttonClassName="w-8 h-8 rounded-full flex items-center justify-center text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors shrink-0"
+              />
+            </div>
           )}
 
           <div className="flex items-center gap-1.5 shrink-0">
@@ -6588,11 +6618,11 @@ export function AIChat() {
             <button
               type="button"
               onClick={handleStop}
-              className="w-8 h-8 rounded-full flex items-center justify-center transition-colors shrink-0 bg-rose-500/20 text-rose-300 hover:bg-rose-500/30"
+              className="flex items-center justify-center shrink-0 p-0.5 text-rose-500 hover:text-rose-400 transition-colors"
               title="Stop generating"
               aria-label="Stop generating"
             >
-              <Square className="w-3.5 h-3.5 fill-current" />
+              <Square className="w-4 h-4 fill-current" />
             </button>
           )}
           </div>
@@ -6603,7 +6633,7 @@ export function AIChat() {
             contextRatio={tokenRatio}
             modelRatio={modelRatio}
             size={20}
-            className={`text-content-primary shrink-0 ${composerTall ? 'mb-2' : 'self-center'}`}
+            className={`text-content-primary shrink-0 ${composerExpanded ? 'mb-2' : 'self-center'}`}
             modelName={
               activeModel.source === 'auto'
                 ? autoModelLabel
