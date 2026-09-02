@@ -336,6 +336,17 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.169',
+    channel: 'stable' as const,
+    date: 'Sep 1, 2026',
+    title: 'Voice polish — brain hint, no preview button',
+    notes: [
+      'Voice tab shows a connect-key / install-brain hint when no model is ready',
+      'Pressing Enter or tapping the face speaks setup guidance instead of failing silently',
+      'Removed dev-only Preview voice button from the Voice tab',
+    ],
+  },
+  {
     version: '0.1.168',
     channel: 'stable' as const,
     date: 'Sep 1, 2026',

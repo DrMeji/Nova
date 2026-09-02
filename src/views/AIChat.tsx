@@ -2634,6 +2634,15 @@ export function AIChat() {
       return;
     }
 
+    const liveCap = await probeLiveCapacity();
+    if (!liveCap.liveChat) {
+      await finishVoice(
+        'idle',
+        'To use Voice, connect a free API key in Models, or install a local brain in Local AI.',
+      );
+      return;
+    }
+
     if (generatingRef.current) return;
     generatingRef.current = true;
     beginChatInflight();
@@ -6977,6 +6986,31 @@ export function AIChat() {
           onActivate={handleVoiceActivate}
           busy={voiceBusy}
           composer={composer}
+          brainHint={
+            capacity && !capacity.liveChat ? (
+              <div className="rounded-xl border border-amber-500/25 bg-amber-500/10 px-4 py-3 text-center space-y-2.5">
+                <p className="text-xs text-amber-100/90 leading-relaxed">
+                  Voice needs a brain to answer. Connect a free API key in Models, or install a local brain in Local AI.
+                </p>
+                <div className="flex flex-wrap items-center justify-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setFreeKeyOpen(true)}
+                    className="rounded-full bg-sky-500/15 text-sky-300 hover:bg-sky-500/25 px-3 py-1 text-[11px] font-medium transition-colors"
+                  >
+                    Connect free key
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => navigate({ name: 'local-ai' })}
+                    className="rounded-full bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25 px-3 py-1 text-[11px] font-medium transition-colors"
+                  >
+                    Install local brain
+                  </button>
+                </div>
+              </div>
+            ) : undefined
+          }
         />
       ) : showEmpty ? (
         mode === 'general' ? (

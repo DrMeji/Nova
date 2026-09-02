@@ -1,4 +1,4 @@
-import { type ReactNode, useCallback, useEffect, useState } from 'react';
+import { type ReactNode } from 'react';
 import type { VoiceSessionPhase } from '@/lib/voiceMode';
 import { VoiceArkFace } from '@/components/VoiceArkFace';
 
@@ -9,8 +9,6 @@ const PHASE_LABEL: Record<VoiceSessionPhase, string> = {
   speaking: 'Speaking…',
   error: 'Tap ARK to try again',
 };
-
-const PREVIEW_MS = 3200;
 
 type VoiceFaceProps = {
   phase: VoiceSessionPhase;
@@ -53,40 +51,21 @@ type VoiceModeLayoutProps = {
   onActivate: () => void;
   busy?: boolean;
   composer: ReactNode;
+  /** Shown below the face when Voice has no brain (no key / local model). */
+  brainHint?: ReactNode;
 };
 
 /** Voice tab — ARK face up top, chat composer at bottom, no on-screen history. */
-export function VoiceModeLayout({ phase, onActivate, busy, composer }: VoiceModeLayoutProps) {
-  const [previewSpeaking, setPreviewSpeaking] = useState(false);
-
-  useEffect(() => {
-    if (!previewSpeaking) return;
-    const id = window.setTimeout(() => setPreviewSpeaking(false), PREVIEW_MS);
-    return () => window.clearTimeout(id);
-  }, [previewSpeaking]);
-
-  const facePhase: VoiceSessionPhase = previewSpeaking ? 'speaking' : phase;
-
-  const handlePreview = useCallback(() => {
-    setPreviewSpeaking(true);
-  }, []);
-
+export function VoiceModeLayout({ phase, onActivate, busy, composer, brainHint }: VoiceModeLayoutProps) {
   return (
     <div className="flex-1 flex flex-col min-h-0 w-full">
       <div className="flex-1 flex flex-col items-center justify-center min-h-0 pb-6 -mt-12 sm:-mt-16">
-        <VoiceFace
-          phase={facePhase}
-          onActivate={onActivate}
-          activateBlocked={Boolean(busy && !previewSpeaking)}
-        />
-        <button
-          type="button"
-          onClick={handlePreview}
-          disabled={previewSpeaking}
-          className="mt-5 px-3 py-1.5 rounded-lg text-xs font-medium text-content-secondary bg-surface-secondary/80 border border-border-subtle hover:bg-surface-tertiary hover:text-content-primary transition-colors disabled:opacity-50"
-        >
-          {previewSpeaking ? 'Previewing…' : 'Preview voice'}
-        </button>
+        <VoiceFace phase={phase} onActivate={onActivate} activateBlocked={busy} />
+        {brainHint ? (
+          <div className="mt-5 w-full max-w-md px-4 sm:px-0">
+            {brainHint}
+          </div>
+        ) : null}
       </div>
       <div className="shrink-0 px-4 sm:px-8 pb-6 pt-2 max-w-3xl mx-auto w-full">
         {composer}
