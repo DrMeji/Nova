@@ -514,9 +514,12 @@ function resolveUpdateIco() {
 const SPLASH_W = 440;
 const SPLASH_H = 300;
 const SPLASH_ICON_PX = 72;
-const SPLASH_ICON_GAP = 54;
+const SPLASH_ICON_GAP = 56;
 const SPLASH_TRACK_W = 280;
 const SPLASH_TRACK_H = 14;
+const SPLASH_OUTER_BG = '#2a2a2e';
+const SPLASH_CARD_BG = '#1a1a1d';
+const SPLASH_RADIUS = 18;
 
 function splashRobotSvg() {
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80" width="${SPLASH_ICON_PX}" height="${SPLASH_ICON_PX}" aria-hidden="true" style="display:block;margin:0 auto;">
@@ -551,16 +554,35 @@ function splashIconMarkup() {
   return splashRobotSvg();
 }
 
-function splashShellCss() {
-  // Minimal splash — pure black, centered robot icon, pill progress bar below.
-  return `
-  html,body{margin:0;width:100%;height:100%;background:#000;color:#f4f4f5;font-family:"Segoe UI",system-ui,sans-serif;overflow:hidden;user-select:none;}
-  .wrap{box-sizing:border-box;width:100%;height:100%;margin:0;padding:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#000;}
-  .logo-wrap{margin:0 0 ${SPLASH_ICON_GAP}px;width:${SPLASH_ICON_PX}px;height:${SPLASH_ICON_PX}px;display:flex;align-items:center;justify-content:center;background:transparent;}
-  .logo-wrap img{width:${SPLASH_ICON_PX}px;height:${SPLASH_ICON_PX}px;object-fit:contain;display:block;border:0;background:transparent;}
-  .track{width:${SPLASH_TRACK_W}px;max-width:calc(100% - 64px);height:${SPLASH_TRACK_H}px;margin:0 auto;border-radius:999px;border:2px solid #52525b;background:#000;overflow:hidden;box-sizing:border-box;}
+function splashShellCss(opts = {}) {
+  const hta = Boolean(opts.hta);
+  // Soft gray shell + rounded card — visible on OLED; HTA uses table layout (no flexbox).
+  const shared = `
+  html,body{margin:0;width:100%;height:100%;background:${SPLASH_OUTER_BG};color:#f4f4f5;font-family:"Segoe UI",system-ui,sans-serif;overflow:hidden;user-select:none;}
+  .card{box-sizing:border-box;background:${SPLASH_CARD_BG};border-radius:${SPLASH_RADIUS}px;box-shadow:0 10px 40px rgba(0,0,0,.45);padding:36px 28px 32px;text-align:center;}
+  .logo-wrap{margin:0 auto ${SPLASH_ICON_GAP}px;width:${SPLASH_ICON_PX}px;height:${SPLASH_ICON_PX}px;display:block;}
+  .logo-wrap img{width:${SPLASH_ICON_PX}px;height:${SPLASH_ICON_PX}px;object-fit:contain;display:block;margin:0 auto;border:0;background:transparent;}
+  .track{width:${SPLASH_TRACK_W}px;max-width:100%;height:${SPLASH_TRACK_H}px;margin:12px auto 0;border-radius:999px;border:2px solid #52525b;background:#0f0f11;overflow:hidden;box-sizing:border-box;}
   #fill{height:100%;width:0%;min-width:0;border-radius:999px;background:#f4f4f5;transition:width 140ms ease;}
 `;
+  if (hta) {
+    return `${shared}
+  table.layout{width:100%;height:100%;border-collapse:collapse;}
+  td.cell{text-align:center;vertical-align:middle;padding:24px;}
+`;
+  }
+  return `${shared}
+  .wrap{box-sizing:border-box;width:100%;height:100%;margin:0;padding:24px;display:flex;align-items:center;justify-content:center;background:${SPLASH_OUTER_BG};}
+`;
+}
+
+function splashBodyMarkup() {
+  const icon = splashIconMarkup();
+  return `
+  <div class="card">
+    <div class="logo-wrap">${icon}</div>
+    <div class="track"><div id="fill"></div></div>
+  </div>`;
 }
 
 function pidAlive(pid) {
@@ -635,7 +657,6 @@ function killParentTree(parentPid, writeLog) {
 
 /** Small centered splash — robot icon + progress bar only. */
 function splashHtml() {
-  const icon = splashIconMarkup();
   return `<!DOCTYPE html>
 <html><head><meta charset="utf-8" />
 <style>
@@ -644,8 +665,7 @@ ${splashShellCss()}
 </style></head>
 <body>
   <div class="wrap">
-    <div class="logo-wrap">${icon}</div>
-    <div class="track"><div id="fill"></div></div>
+    ${splashBodyMarkup()}
   </div>
   <script>
     window.__arkSet = function(pct) {
@@ -662,7 +682,6 @@ ${splashShellCss()}
  * without killing this window. Stays up until main.cjs writes ark-ui-shown.flag.
  */
 function splashHtaHtml({ statusPath, shownPath, alivePath, icoName }) {
-  const icon = splashIconMarkup();
   const jsStr = (s) => JSON.stringify(String(s || ''));
   const icoAttr = icoName ? `\n  icon="${icoName}"` : '';
   return `<!DOCTYPE html>
@@ -683,14 +702,13 @@ function splashHtaHtml({ statusPath, shownPath, alivePath, icoName }) {
 />
 <title>ARK</title>
 <style>
-${splashShellCss()}
+${splashShellCss({ hta: true })}
 </style>
 </head>
 <body>
-  <div class="wrap">
-    <div class="logo-wrap">${icon}</div>
-    <div class="track"><div id="fill"></div></div>
-  </div>
+  <table class="layout" role="presentation"><tr><td class="cell">
+    ${splashBodyMarkup()}
+  </td></tr></table>
   <script language="JScript">
     var STATUS = ${jsStr(statusPath)};
     var SHOWN = ${jsStr(shownPath)};
@@ -947,7 +965,7 @@ async function runStandaloneSplash(argv) {
     fullscreenable: false,
     // Opaque — transparent frameless windows on Windows draw white chrome / caption junk.
     transparent: false,
-    backgroundColor: '#000000',
+    backgroundColor: SPLASH_OUTER_BG,
     hasShadow: true,
     show: false,
     alwaysOnTop: true,
@@ -1365,7 +1383,7 @@ function launchInstallHandoffSplash({ statusPath, expectedVersion, arkExe, shown
     `$trackW = ${SPLASH_TRACK_W}`,
     `$trackH = ${SPLASH_TRACK_H}`,
     `$picSize = ${SPLASH_ICON_PX}`,
-    `$picY = [int](($formH - $picSize - ${SPLASH_ICON_GAP} - $trackH) / 2)`,
+    `$picY = [int](($formH - $picSize - ${SPLASH_ICON_GAP} - $trackH - 24) / 2) + 8`,
     `$trackY = $picY + $picSize + ${SPLASH_ICON_GAP}`,
     '$form = New-Object System.Windows.Forms.Form',
     `$form.Text = "ARK"`,
@@ -1377,10 +1395,11 @@ function launchInstallHandoffSplash({ statusPath, expectedVersion, arkExe, shown
     '$form.ShowIcon = $false',
     '$form.ClientSize = New-Object System.Drawing.Size($formW, $formH)',
     '$form.StartPosition = "CenterScreen"',
-    '$form.BackColor = [System.Drawing.Color]::FromArgb(0, 0, 0)',
+    `$form.BackColor = [System.Drawing.ColorTranslator]::FromHtml('${SPLASH_OUTER_BG}')`,
     '$form.ForeColor = [System.Drawing.Color]::FromArgb(244, 244, 245)',
     '$form.TopMost = $true',
     '$form.ShowInTaskbar = $true',
+    'try { $form.Region = New-ArkRoundRegion $formW $formH 18 } catch {}',
     'if ($icoPath -and (Test-Path -LiteralPath $icoPath)) { try { $form.Icon = New-Object System.Drawing.Icon($icoPath) } catch {} }',
     'if (-not $form.Icon) {',
     '  try {',
@@ -1393,11 +1412,11 @@ function launchInstallHandoffSplash({ statusPath, expectedVersion, arkExe, shown
     '$pic.SizeMode = "Zoom"',
     '$pic.Size = New-Object System.Drawing.Size($picSize, $picSize)',
     '$pic.Location = New-Object System.Drawing.Point([int](($formW - $picSize) / 2), $picY)',
-    '$pic.BackColor = [System.Drawing.Color]::FromArgb(0, 0, 0)',
+    `$pic.BackColor = [System.Drawing.ColorTranslator]::FromHtml('${SPLASH_CARD_BG}')`,
     'if ($pngPath -and (Test-Path -LiteralPath $pngPath)) { try { $pic.Image = [System.Drawing.Image]::FromFile($pngPath) } catch {} }',
     'if (-not $pic.Image -and $form.Icon) { try { $pic.Image = $form.Icon.ToBitmap() } catch {} }',
     '$track = New-Object System.Windows.Forms.Panel',
-    '$track.BackColor = [System.Drawing.Color]::FromArgb(0, 0, 0)',
+    `$track.BackColor = [System.Drawing.ColorTranslator]::FromHtml('#0f0f11')`,
     '$track.Size = New-Object System.Drawing.Size($trackW, $trackH)',
     '$track.Location = New-Object System.Drawing.Point([int](($formW - $trackW) / 2), $trackY)',
     'try { $track.Region = New-ArkRoundRegion $trackW $trackH ([int]($trackH / 2)) } catch {}',

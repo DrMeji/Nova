@@ -749,7 +749,7 @@ export function MessageView() {
               return (
                 <div
                   key={c.arkId}
-                  className={`group relative w-full rounded-xl ${
+                  className={`group relative w-full rounded-xl pr-9 ${
                     !groupId && peer === c.arkId ? 'bg-surface-hover' : 'hover:bg-surface-hover/60'
                   }`}
                 >
@@ -779,7 +779,7 @@ export function MessageView() {
                     title="Delete contact"
                     aria-label={`Delete ${c.displayName}`}
                     onClick={e => deleteFromList(c.arkId, e)}
-                    className="absolute right-1 top-1/2 -translate-y-1/2 z-10 h-8 w-8 rounded-full flex items-center justify-center text-content-tertiary hover:text-rose-300 hover:bg-rose-500/15 opacity-0 group-hover:opacity-100 transition-opacity"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 z-10 h-7 w-7 rounded-full flex items-center justify-center text-content-tertiary hover:text-rose-300 hover:bg-rose-500/15 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>

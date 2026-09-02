@@ -80,6 +80,19 @@ export type LocalPrefs = {
   agentExecutionMode: 'allowlist' | 'auto_review' | 'run_all';
   /** Chat-first shell. hide Code tab from sidebar (Code still works via handoff). */
   chatFirst: boolean;
+  // Voice (Chat → Voice tab)
+  /** Enable spoken conversation tab in Chat. */
+  voiceChatEnabled: boolean;
+  /** When true, pick the active system mic automatically. */
+  voiceInputAuto: boolean;
+  /** When true, pick the default playback device automatically. */
+  voiceOutputAuto: boolean;
+  /** Preferred microphone deviceId from enumerateDevices. */
+  voiceInputDeviceId?: string;
+  /** Preferred speaker/headphone deviceId for output test + routing when supported. */
+  voiceOutputDeviceId?: string;
+  /** speechSynthesis voiceURI for ARK spoken replies. */
+  voiceTtsVoiceUri?: string;
   // Updates
   updateChannel: UpdateChannel;
   autoCheckUpdates: boolean;
@@ -129,6 +142,9 @@ const DEFAULT_PREFS: LocalPrefs = {
   allowFullPcAccess: false,
   agentExecutionMode: 'allowlist',
   chatFirst: true,
+  voiceChatEnabled: false,
+  voiceInputAuto: true,
+  voiceOutputAuto: true,
   updateChannel: 'stable',
   autoCheckUpdates: true,
   notifyOnUpdate: true,
@@ -140,6 +156,8 @@ export function getLocalPrefs(): LocalPrefs {
     const raw = localStorage.getItem(PREFS_KEY);
     if (!raw) return { ...DEFAULT_PREFS };
     const merged = { ...DEFAULT_PREFS, ...JSON.parse(raw) as Partial<LocalPrefs> };
+    if (typeof merged.voiceInputAuto !== 'boolean') merged.voiceInputAuto = true;
+    if (typeof merged.voiceOutputAuto !== 'boolean') merged.voiceOutputAuto = true;
     if (typeof merged.ggufNPredict === 'number' && merged.ggufNPredict < 4096) {
       merged.ggufNPredict = 4096;
     }
@@ -317,6 +335,19 @@ export function clearPluginToken(pluginId: string) {
 
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
+  {
+    version: '0.1.168',
+    channel: 'stable' as const,
+    date: 'Sep 1, 2026',
+    title: 'Voice tab, neural speech, animated ARK face',
+    notes: [
+      'Voice chat tab — talk back and forth for questions and stories, no history saved',
+      'Microsoft Edge neural TTS — Female or Male voice in Settings → Voice',
+      'Animated ARK face with inner shimmer and mouth bars while speaking',
+      'Dedicated voice router — cloud-first, capped local tokens, no PC freeze on send',
+      'Settings → Voice: mic, headphones, and spoken voice picker',
+    ],
+  },
   {
     version: '0.1.166',
     channel: 'stable' as const,

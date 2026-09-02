@@ -3,9 +3,9 @@
 const KEY = 'ark:model-health';
 
 /** ~45 minutes of continuous heavy use → ring near full (image waits are long). */
-const WEAR_MS_FULL = 45 * 60_000;
-/** ~40 coding/chat turns on the same brain → ring near full. */
-const WEAR_TURNS_FULL = 40;
+const WEAR_MS_FULL = 50 * 60_000;
+/** ~150 casual chat turns on the same brain → ring near full. */
+const WEAR_TURNS_FULL = 150;
 /** Token volume that fills wear when combined with turns/time. */
 const WEAR_TOKENS_FULL = 96_000;
 
@@ -53,7 +53,7 @@ export function getModelHealthRatio(scopeId: string): number {
   const turnPart = e.turns / WEAR_TURNS_FULL;
   const timePart = e.activeMs / WEAR_MS_FULL;
   const tokenPart = e.tokens / WEAR_TOKENS_FULL;
-  return Math.max(0, Math.min(1, turnPart * 0.35 + timePart * 0.4 + tokenPart * 0.25));
+  return Math.max(0, Math.min(1, turnPart * 0.08 + timePart * 0.35 + tokenPart * 0.18));
 }
 
 /** Call after each completed generate on this scope. */
@@ -66,8 +66,8 @@ export function recordModelTurn(
   const e = entry(scopeId, map);
   const now = Date.now();
   e.turns += 1;
-  e.tokens += Math.max(0, opts.tokens || 0);
-  e.activeMs += Math.max(0, opts.activeMs || 0);
+  e.tokens += Math.min(Math.max(0, opts.tokens || 0), 280);
+  e.activeMs += Math.min(Math.max(0, opts.activeMs || 0), 8_000);
   e.lastAt = now;
   map[scopeId] = e;
   writeMap(map);

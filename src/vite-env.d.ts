@@ -687,6 +687,17 @@ declare global {
         encrypted?: boolean;
         error?: string;
       }>;
+      voiceNeuralVoices?: () => Promise<{
+        ok: boolean;
+        voices?: Array<{ id: string; name: string; locale?: string; gender?: string }>;
+        error?: string;
+      }>;
+      voiceNeuralSpeak?: (payload: { text?: string; voice?: string }) => Promise<{
+        ok: boolean;
+        mime?: string;
+        base64?: string;
+        error?: string;
+      }>;
     };
   }
 }

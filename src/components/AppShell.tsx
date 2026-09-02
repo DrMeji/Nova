@@ -468,7 +468,9 @@ export function AppShell({ children }: { children: ReactNode }) {
     return (
       <div
         key={item.key}
-        className={`group relative flex items-center gap-0.5 rounded-lg ${active ? 'bg-surface-hover' : ''}`}
+        className={`group relative flex items-center gap-0.5 rounded-lg transition-colors ${
+          active ? 'bg-surface-active' : 'hover:bg-surface-hover'
+        }`}
       >
         {editing ? (
           <input
@@ -497,15 +499,14 @@ export function AppShell({ children }: { children: ReactNode }) {
               setRenamingId(renameKey);
               setRenameDraft(item.title);
             }}
-            className={`ark-nav-item !py-1.5 !gap-2.5 flex-1 min-w-0 ${active ? 'active' : ''}`}
+            className={`ark-nav-item !py-1.5 !gap-2.5 flex-1 min-w-0 !bg-transparent hover:!bg-transparent ${
+              active ? '!text-content-primary' : ''
+            }`}
             title={`${item.title} · double-click to rename`}
           >
             <Icon className="w-3.5 h-3.5 shrink-0 text-content-tertiary" strokeWidth={1.75} />
             <span className="min-w-0 flex-1 text-left">
               <span className="block truncate">{item.title}</span>
-              {item.preview ? (
-                <span className="block truncate text-[10px] text-content-tertiary font-normal">{item.preview}</span>
-              ) : null}
             </span>
             {item.pinned ? <Star className="w-2.5 h-2.5 text-amber-300 shrink-0 fill-amber-300" /> : null}
             {doneAway ? <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" aria-hidden /> : null}
@@ -522,7 +523,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 if (item.kind === 'chat') pinChat(item.id);
                 else pinProject(item.id);
               }}
-              className="opacity-0 group-hover:opacity-100 focus:opacity-100 w-7 h-7 rounded-md flex items-center justify-center text-content-tertiary hover:text-amber-300 hover:bg-surface-hover shrink-0 transition-opacity"
+              className="opacity-0 group-hover:opacity-100 focus:opacity-100 w-7 h-7 rounded-md flex items-center justify-center text-content-tertiary hover:text-amber-300 hover:bg-white/5 shrink-0 transition-opacity"
             >
               <Star className={`w-3.5 h-3.5 ${item.pinned ? 'fill-amber-300 text-amber-300' : ''}`} />
             </button>
@@ -535,7 +536,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 setRenamingId(renameKey);
                 setRenameDraft(item.title);
               }}
-              className="opacity-0 group-hover:opacity-100 focus:opacity-100 w-7 h-7 rounded-md flex items-center justify-center text-content-tertiary hover:text-content-primary hover:bg-surface-hover shrink-0 transition-opacity"
+              className="opacity-0 group-hover:opacity-100 focus:opacity-100 w-7 h-7 rounded-md flex items-center justify-center text-content-tertiary hover:text-content-primary hover:bg-white/5 shrink-0 transition-opacity"
             >
               <Pencil className="w-3.5 h-3.5" />
             </button>
@@ -548,7 +549,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 setDeleteTarget({ id: item.id, title: item.title, kind: item.kind });
                 setWipeProjectDisk(false);
               }}
-              className="opacity-0 group-hover:opacity-100 focus:opacity-100 w-7 h-7 rounded-md flex items-center justify-center text-content-tertiary hover:text-rose-400 hover:bg-surface-hover shrink-0 transition-opacity mr-0.5"
+              className="opacity-0 group-hover:opacity-100 focus:opacity-100 w-7 h-7 rounded-md flex items-center justify-center text-content-tertiary hover:text-rose-400 hover:bg-white/5 shrink-0 transition-opacity mr-0.5"
             >
               <Trash2 className="w-3.5 h-3.5" />
             </button>
@@ -604,7 +605,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           aria-label={`${item.label} (coming soon)`}
           title={`${item.label} · Coming Soon`}
           onClick={() => handleNavClick(item)}
-          className={`ark-nav-item w-full opacity-55 ${collapsed ? '!justify-center' : ''}`}
+          className={`ark-nav-item w-full opacity-55 ${collapsed ? 'ark-nav-item-rail' : ''}`}
         >
           <item.icon className="w-4 h-4 shrink-0" />
           {!collapsed && (
@@ -627,7 +628,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         }
         onClick={() => handleNavClick(item)}
         title={collapsed ? item.label : undefined}
-        className={`ark-nav-item w-full relative ${collapsed ? '!justify-center' : ''} ${active ? 'active' : ''}`}
+        className={`ark-nav-item w-full relative ${collapsed ? 'ark-nav-item-rail' : ''} ${active ? 'active' : ''}`}
       >
         <item.icon className="w-4 h-4 shrink-0" />
         {!collapsed && <span>{item.label}</span>}
@@ -678,7 +679,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <button
                   type="button"
                   onClick={toggleMainSidebar}
-                  className="ark-nav-item w-full !justify-center"
+                  className="ark-nav-item w-full ark-nav-item-rail"
                   title="Expand sidebar"
                   aria-label="Expand sidebar"
                 >
@@ -741,9 +742,9 @@ export function AppShell({ children }: { children: ReactNode }) {
             </div>
           </div>
 
-          <nav className={`flex-1 min-h-0 flex flex-col gap-1 overflow-y-auto ${collapsed ? 'px-2 pt-4' : 'px-3 pt-4'}`}>
+          <nav className={`flex-1 min-h-0 flex flex-col gap-1 overflow-y-auto ${collapsed ? 'px-2 pt-3' : 'px-3 pt-4'}`}>
             {NAV_GROUPS.map(group => (
-              <div key={group.id} className={group.label && !collapsed ? 'mt-3 first:mt-0' : ''}>
+              <div key={group.id} className={group.label ? (collapsed ? 'mt-2 first:mt-0' : 'mt-3 first:mt-0') : ''}>
                 {group.label && !collapsed ? (
                   <p className="px-2 pb-1 text-[10px] uppercase tracking-wider text-content-tertiary">{group.label}</p>
                 ) : null}
@@ -758,7 +759,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 onClick={() => setRecentOpen(o => !o)}
                 title={collapsed ? 'Recent' : undefined}
                 aria-label="Recent"
-                className={`ark-nav-item w-full ${collapsed ? '!justify-center' : ''}`}
+                className={`ark-nav-item w-full ${collapsed ? 'ark-nav-item-rail' : ''}`}
               >
                 <Clock3 className="w-4 h-4 shrink-0" />
                 {!collapsed && (
@@ -797,10 +798,10 @@ export function AppShell({ children }: { children: ReactNode }) {
                         type="button"
                         aria-label={item.title}
                         onClick={() => openRecent(item)}
-                        className={`ark-nav-item !justify-center relative ${active ? 'active' : ''}`}
+                        className={`ark-nav-item ark-nav-item-rail relative ${active ? 'active' : ''}`}
                         title={item.title}
                       >
-                        <Icon className="w-3.5 h-3.5" strokeWidth={1.75} />
+                        <Icon className="w-4 h-4 shrink-0" strokeWidth={1.75} />
                         {doneAway ? <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-emerald-400" aria-hidden /> : null}
                       </button>
                     );

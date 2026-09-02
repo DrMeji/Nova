@@ -1,10 +1,10 @@
 {
   "name": "ark",
   "private": true,
-  "version": "0.1.166",
+  "version": "0.1.168",
   "type": "module",
   "main": "electron/main.cjs",
-  "description": "ARK \u2014 AI Creation Studio desktop app",
+  "description": "ARK — AI Creation Studio desktop app",
   "author": "DrMeji",
   "repository": {
     "type": "git",
@@ -42,6 +42,7 @@
   "dependencies": {
     "@dev.icons/react": "^1.1.0",
     "@supabase/supabase-js": "^2.112.4",
+    "edge-tts": "^1.0.1",
     "electron-updater": "^6.8.9",
     "lucide-react": "^0.446.0",
     "react": "^18.3.1",

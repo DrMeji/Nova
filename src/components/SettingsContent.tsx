@@ -29,7 +29,7 @@ import {
   User, Palette, Zap, Boxes, Cloud, Shield, HardDrive,
   FolderKanban, Lock, RefreshCw, Check, Cpu, KeyRound,
   Sparkles, FlaskConical,
-  Mail, BadgeCheck, Trash2, Download, Info, Monitor, Copy, X, FolderOpen, Github,
+  Mail, BadgeCheck, Trash2, Download, Info, Monitor, Copy, X, FolderOpen, Github, Mic,
 } from 'lucide-react';
 import { clearLocalAppCaches, clearLocalChatCache } from '@/lib/clearSession';
 import { deleteEngineModel, engineDiskSpace, getEngineStatus, type ArkEngineModel, type ArkEngineStatus } from '@/lib/arkEngine';
@@ -43,6 +43,7 @@ import { SettingsSystemHealth } from '@/components/SettingsSystemHealth';
 import { isArkDevSession } from '@/lib/arkRuntime';
 import { isBetaSettingsEnabled, isTestersSettingsEnabled } from '@/lib/featurePark';
 import { BrandMark, StatusCheck } from '@/components/BrandMark';
+import { VoiceSettingsPanel } from '@/components/VoiceSettingsPanel';
 import { useSocial } from '@/context/SocialContext';
 import { supabase } from '@/lib/supabase';
 
@@ -62,6 +63,7 @@ const SECTIONS: { id: string; label: string; icon: typeof User; disabled?: boole
   { id: 'account', label: 'Account', icon: User },
   { id: 'appearance', label: 'Appearance', icon: Palette },
   { id: 'ai', label: 'AI', icon: Zap },
+  { id: 'voice', label: 'Voice', icon: Mic },
   { id: 'models', label: 'Models', icon: Boxes },
   { id: 'providers', label: 'Providers', icon: Cloud },
   { id: 'privacy', label: 'Privacy', icon: Shield },
@@ -133,9 +135,10 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
     if (initialSection === 'mcp') {
       onClose?.();
       navigate({ name: 'mcp' });
-      return;
     }
-    if (!initialSection) return;
+  }, [initialSection, navigate, onClose]);
+  useEffect(() => {
+    if (!initialSection || initialSection === 'mcp') return;
     if (initialSection === 'testers' && !isTestersSettingsEnabled()) {
       setActiveSection('account');
       return;
@@ -145,7 +148,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
       return;
     }
     setActiveSection(initialSection);
-  }, [initialSection, navigate, onClose]);
+  }, [initialSection]);
   const [prefs, setPrefs] = useState<LocalPrefs>(() => getLocalPrefs());
   const [displayName, setDisplayName] = useState(
     () => getLocalPrefs().displayName || profile?.display_name || 'Guest',
@@ -1072,6 +1075,17 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                     />
                   </div>
                 </SettingsGroup>
+              </div>
+            </SettingsSection>
+          )}
+
+          {activeSection === 'voice' && (
+            <SettingsSection title="Voice">
+              <div className="min-h-0 pb-6">
+                <VoiceSettingsPanel onSaved={msg => {
+                  setSavedFlash(msg);
+                  window.setTimeout(() => setSavedFlash(''), 2200);
+                }} />
               </div>
             </SettingsSection>
           )}

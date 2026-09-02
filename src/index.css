@@ -189,6 +189,13 @@
     background-color: rgb(var(--color-surface-active));
     color: rgb(var(--color-content-primary));
   }
+  /* Collapsed rail: same tap targets + icon size as expanded sidebar */
+  .ark-nav-item-rail {
+    @apply !justify-center !py-2 !px-2 !min-h-[2.25rem];
+  }
+  .ark-nav-item-rail svg {
+    @apply w-4 h-4 shrink-0;
+  }
   .ark-nav-activity {
     color: rgb(110 231 183);
   }
@@ -331,6 +338,88 @@
   @keyframes cursorBlink {
     0%, 100% { opacity: 1; }
     50% { opacity: 0; }
+  }
+  @keyframes voiceMouthSpeak {
+    0%, 100% { transform: scaleX(0.75); }
+    50% { transform: scaleX(1.2); }
+  }
+  @keyframes voiceMouthThink {
+    0%, 100% { opacity: 0.55; transform: scaleX(0.9); }
+    50% { opacity: 0.95; transform: scaleX(1.05); }
+  }
+  @keyframes voiceMouthOpen {
+    0%, 100% { transform: scaleY(0.85); }
+    50% { transform: scaleY(1.15); }
+  }
+  @keyframes voiceEyeBlink {
+    0%, 100% { transform: scaleY(1); }
+    45% { transform: scaleY(0.12); }
+  }
+  @keyframes voiceIconBlink {
+    0%, 100% { transform: scaleY(1); }
+    40% { transform: scaleY(0.97); }
+  }
+  @keyframes voiceFacePulse {
+    0%, 100% { opacity: 0.9; }
+    50% { opacity: 1; }
+  }
+  @keyframes voiceFaceSpeak {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 1; transform: scale(1.025); }
+  }
+  .voice-mouth-speak {
+    animation: voiceMouthSpeak 0.38s ease-in-out infinite;
+  }
+  .voice-mouth-think {
+    animation: voiceMouthThink 1.4s ease-in-out infinite;
+  }
+  .voice-mouth-open {
+    animation: voiceMouthOpen 1.1s ease-in-out infinite;
+  }
+  .voice-eye-blink {
+    animation: voiceEyeBlink 0.14s ease-in-out forwards;
+  }
+  .voice-eye-lid {
+    animation: voiceEyeBlink 0.12s ease-in-out forwards;
+  }
+  .voice-icon-blink {
+    animation: voiceIconBlink 0.16s ease-in-out forwards;
+  }
+  .voice-face-pulse {
+    animation: voiceFacePulse 1.6s ease-in-out infinite;
+  }
+  .voice-face-speaking {
+    animation: voiceFaceSpeak 1.1s ease-in-out infinite;
+    transform-origin: center;
+  }
+  .voice-face-pulse-slow {
+    animation: voiceFacePulse 2.4s ease-in-out infinite;
+  }
+  .voice-ark-eye-group {
+    transition: transform 0.11s ease-in;
+    transform-box: fill-box;
+    transform-origin: center;
+  }
+  .voice-ark-bar {
+    transform-box: fill-box;
+    transform-origin: center;
+    transition: opacity 0.06s linear;
+  }
+  @keyframes voiceHeadShimmer {
+    0% { transform: translate(0, 0) rotate(0deg); }
+    50% { transform: translate(12px, -8px) rotate(180deg); }
+    100% { transform: translate(0, 0) rotate(360deg); }
+  }
+  .voice-head-shimmer {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: voiceHeadShimmer 14s ease-in-out infinite;
+  }
+  .voice-composer-slot .max-w-3xl {
+    max-width: none;
+  }
+  .voice-composer-slot [class*='min-h-11'] {
+    min-height: 3.25rem;
   }
   @keyframes authTypeRainbow {
     0% { background-position: 0% 50%; }

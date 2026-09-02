@@ -137,12 +137,18 @@ export async function engineGenerate(
   message: string,
   modelId?: string,
   kind?: 'image' | 'video' | 'chat' | 'coding',
-  opts?: { mediaDurationSec?: number; referenceImageDataUrl?: string; visionImages?: string[] },
+  opts?: {
+    mediaDurationSec?: number;
+    referenceImageDataUrl?: string;
+    visionImages?: string[];
+    /** Override n_predict (e.g. voice tab short replies). */
+    nPredict?: number;
+  },
 ) {
   const prefs = getLocalPrefs();
   const sampling = {
     temperature: prefs.ggufTemperature,
-    nPredict: ggufNPredictForKind(kind),
+    nPredict: opts?.nPredict ?? ggufNPredictForKind(kind),
     mediaDurationSec: opts?.mediaDurationSec,
     referenceImageDataUrl: opts?.referenceImageDataUrl,
     allowNsfw: Boolean(prefs.allowNsfw),

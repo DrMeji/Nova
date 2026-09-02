@@ -174,6 +174,8 @@ contextBridge.exposeInMainWorld('arkDesktop', {
   secretsLoad: () => ipcRenderer.invoke('ark:secrets-load'),
   secretsGetKey: (providerId) => ipcRenderer.invoke('ark:secrets-get-key', providerId),
   secretsSave: (keys) => ipcRenderer.invoke('ark:secrets-save', { keys }),
+  voiceNeuralVoices: () => ipcRenderer.invoke('ark:voice-neural-voices'),
+  voiceNeuralSpeak: (payload) => ipcRenderer.invoke('ark:voice-neural-speak', payload || {}),
 });
 
 // Forward IPC push messages from main as DOM CustomEvents so the React app can listen.

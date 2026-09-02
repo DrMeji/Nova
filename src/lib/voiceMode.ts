@@ -13,10 +13,13 @@
  */
 
 import type { ChatMode } from '@/context/RouterContext';
+import { isArkDevSession } from '@/lib/arkRuntime';
+import { getLocalPrefs } from '@/lib/localPrefs';
 
-/** Parked until voice session (mic → STT → chat brain → TTS) is product-ready. */
+/** Live on bat/dev builds, or when the user turns it on in Settings → Voice. */
 export function isVoiceTabEnabled(): boolean {
-  return false;
+  if (isArkDevSession()) return true;
+  return getLocalPrefs().voiceChatEnabled === true;
 }
 
 export function isVoiceMode(mode: ChatMode | undefined): boolean {

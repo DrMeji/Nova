@@ -21,6 +21,7 @@ const arkConfig = require('./arkConfig.cjs');
 const arkPcInventory = require('./arkPcInventory.cjs');
 const arkWebSearch = require('./arkWebSearch.cjs');
 const arkSelfGuard = require('./arkSelfGuard.cjs');
+const arkEdgeTts = require('./arkEdgeTts.cjs');
 
 function refreshArkSelfGuard() {
   arkSelfGuard.init({
@@ -856,6 +857,11 @@ ipcMain.handle('ark:http-get', async (event, payload) =>
 );
 ipcMain.handle('ark:http-request', handleHttpRequest);
 ipcMain.handle('ark:http-stream', handleHttpStream);
+
+ipcMain.handle('ark:voice-neural-voices', async () => arkEdgeTts.listNeuralVoices());
+ipcMain.handle('ark:voice-neural-speak', async (_e, payload) =>
+  arkEdgeTts.synthesize(payload?.text, payload?.voice),
+);
 
 ipcMain.handle('ark:engine-status', async () => arkEngine.getStatus());
 ipcMain.handle('ark:engine-start', async () => arkEngine.start());

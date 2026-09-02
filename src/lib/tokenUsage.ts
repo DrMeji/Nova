@@ -41,12 +41,21 @@ export function estimateTokens(text: string) {
   return Math.max(1, Math.ceil(t.length / 4));
 }
 
+/** Display 0% until usage is meaningfully above noise (short casual chats). */
+export function displayUsagePercent(ratio: number): number {
+  const pct = Math.max(0, Math.min(1, ratio)) * 100;
+  if (pct < 2) return 0;
+  return Math.round(pct);
+}
+
 /** 0–1 how full the current model budget is for this thread. */
 export function getTokenUsageRatio(scopeId: string): number {
   if (!scopeId) return 0;
   const used = readMap()[scopeId] || 0;
   const budget = getUsableTokens();
-  return Math.max(0, Math.min(1, used / budget));
+  // Conversation-only estimate for the ring (ignore fixed system overhead).
+  const conversationUsed = Math.max(0, used - 900);
+  return Math.max(0, Math.min(1, conversationUsed / budget));
 }
 
 export function recordTokenUsage(scopeId: string, text: string) {

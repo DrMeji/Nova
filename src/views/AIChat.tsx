@@ -117,7 +117,11 @@ import {
   looksLikeArkSelfHarmAsk,
 } from '@/lib/arkSelfGuard';
 import { redactArkSelfLeak } from '@/lib/replySanitizer';
-import { listenOnce, speakText, stopSpeaking, voiceBrainPrompt, voiceSupported } from '@/lib/voiceSession';
+import { listenOnce, speakText, stopSpeaking, voiceSupported } from '@/lib/voiceSession';
+import { voiceChatRoute } from '@/lib/voiceRoute';
+import { syncAutoVoiceDevices } from '@/lib/voiceAudio';
+import type { VoiceSessionPhase } from '@/lib/voiceMode';
+import { VoiceModeLayout } from '@/components/VoiceModeLayout';
 import {
   formatMcpToolsHelp,
   parseMcpCallIntent,
@@ -246,7 +250,7 @@ import {
 } from '@/lib/plugins';
 import type { ChatMessage } from '@/types';
 import {
-  User as UserIcon, Loader2, ImageIcon, Video, Code2,
+  Loader2, ImageIcon, Video, Code2,
   Upload, Cpu, Cloud, ChevronDown, Check, Blocks, Folder, Square, X, ImagePlus,
   Puzzle, Briefcase, Github, Globe, Copy, Plus,
 } from 'lucide-react';
@@ -497,8 +501,8 @@ const PLACEHOLDERS: Record<ChatMode, string[]> = {
     'Ask ARK to generate a short clip...',
   ],
   voice: [
-    'Voice conversation coming soon…',
-    'Talk with ARK — conversation only, no PC control…',
+    'Tap send, then speak — ARK will listen and reply aloud.',
+    'Ask a question or request a short story…',
   ],
   code: [
     'Describe the code you want to write...',
@@ -791,6 +795,7 @@ export function AIChat() {
   const [engineReadyIds, setEngineReadyIds] = useState<Set<string>>(() => new Set());
   const [capacity, setCapacity] = useState<LiveCapacity | null>(null);
   const [generating, setGenerating] = useState(false);
+  const [voicePhase, setVoicePhase] = useState<VoiceSessionPhase>('idle');
   const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
   const [queueLen, setQueueLen] = useState(0);
   const [pendingImages, setPendingImages] = useState<{ id: string; name: string; dataUrl: string }[]>([]);
@@ -1417,6 +1422,25 @@ export function AIChat() {
     const kind = kindForMode(next);
     setActiveModel(prevModel => (prevModel.kind === kind ? prevModel : defaultModelForKind(kind)));
   }, [route, navigate]);
+
+  useEffect(() => {
+    if (mode !== 'voice') {
+      setVoicePhase('idle');
+      stopSpeaking();
+      return;
+    }
+    setMessages([]);
+    messagesRef.current = [];
+    persistChatIdRef.current = null;
+    routeChatIdRef.current = null;
+    activeGenChatIdRef.current = null;
+    setGenerating(false);
+    generatingRef.current = false;
+    const syncTimer = window.setTimeout(() => {
+      void syncAutoVoiceDevices();
+    }, 0);
+    return () => window.clearTimeout(syncTimer);
+  }, [mode]);
 
   // After Chat → Image handoff, auto-send the carried prompt once.
   useEffect(() => {
@@ -2587,7 +2611,96 @@ export function AIChat() {
     await attachFilesFromPaths(res.paths);
   };
 
+  const runEphemeralVoiceTurn = async (rawContent: string) => {
+    const pinnedModel = activeModelRef.current;
+    const isTap = !rawContent.trim() || rawContent === '<!--ark-voice-turn-->';
+    const typed = isTap ? '' : rawContent.trim();
+
+    const finishVoice = async (phase: VoiceSessionPhase, speak?: string) => {
+      if (speak) {
+        setVoicePhase('speaking');
+        await speakText(speak.replace(/\*\*/g, '').replace(/[#*`]/g, ''));
+      }
+      setVoicePhase(phase);
+    };
+
+    if (typed && looksLikeArkSelfHarmAsk(typed)) {
+      await finishVoice('idle', arkSelfHarmBlockedReply());
+      return;
+    }
+
+    if (!voiceSupported()) {
+      await finishVoice('idle', 'Voice needs speech recognition and text-to-speech in this browser.');
+      return;
+    }
+
+    if (generatingRef.current) return;
+    generatingRef.current = true;
+    beginChatInflight();
+    setGenerating(true);
+    stopRequestedRef.current = false;
+
+    try {
+      let voiceMsg = typed;
+      if (!voiceMsg) {
+        setVoicePhase('listening');
+        const heard = await listenOnce({ timeoutMs: 14_000 });
+        if (!heard.ok || !heard.text.trim()) {
+          await finishVoice('idle', heard.error
+            ? 'I could not hear you. Check your mic in Settings, then try again.'
+            : 'I did not catch that. Tap send and speak again.');
+          return;
+        }
+        voiceMsg = heard.text.trim();
+      }
+
+      if (looksLikeArkSelfHarmAsk(voiceMsg)) {
+        await finishVoice('idle', arkSelfHarmBlockedReply());
+        return;
+      }
+
+      setVoicePhase('thinking');
+      const routed = await voiceChatRoute(voiceMsg, {
+        id: pinnedModel.id,
+        name: pinnedModel.name,
+        source: pinnedModel.source,
+      });
+      const spoken = redactArkSelfLeak(String(routed.reply || '').trim())
+        || 'I did not have a reply for that.';
+      await finishVoice('idle', spoken);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Something went wrong.';
+      await finishVoice('idle', msg);
+    } finally {
+      generatingRef.current = false;
+      setGenerating(false);
+      endChatInflight();
+    }
+  };
+
+  const handleVoiceActivate = useCallback(() => {
+    if (!user || mode !== 'voice' || !isVoiceTabEnabled()) return;
+    const busy = generating
+      || voicePhase === 'listening'
+      || voicePhase === 'thinking'
+      || voicePhase === 'speaking';
+    if (busy) return;
+    void sendMessageRef.current('<!--ark-voice-turn-->');
+  }, [user, mode, generating, voicePhase]);
+
   const handleSend = () => {
+    if (mode === 'voice') {
+      if (!user) return;
+      const busy = generating
+        || voicePhase === 'listening'
+        || voicePhase === 'thinking'
+        || voicePhase === 'speaking';
+      if (busy) return;
+      void sendMessageRef.current(input.trim() || '<!--ark-voice-turn-->');
+      setInput('');
+      if (textareaRef.current) textareaRef.current.style.height = 'auto';
+      return;
+    }
     let content = input.trim();
     const images = pendingImages;
     const attaches = pendingAttaches;
@@ -2659,8 +2772,14 @@ export function AIChat() {
   };
 
   const sendMessage = async (content: string) => {
-    if (!content.trim() || !user) return;
-    if (mode === 'voice' && !isVoiceTabEnabled()) return;
+    if (!user) return;
+    if (mode === 'voice') {
+      if (!isVoiceTabEnabled()) return;
+      if (!content.trim()) content = '<!--ark-voice-turn-->';
+      await runEphemeralVoiceTurn(content);
+      return;
+    }
+    if (!content.trim()) return;
     // New send → follow the reply; history scroll stays free until the user scrolls up again.
     stickToBottomRef.current = true;
     // Free a stuck prior GGUF job (timed-out inspect was locking “More details”).
@@ -2858,34 +2977,6 @@ export function AIChat() {
 
     if (looksLikeArkSelfHarmAsk(content)) {
       await finishPlainReply(arkSelfHarmBlockedReply());
-      return;
-    }
-
-    if (mode === 'voice') {
-      if (!voiceSupported()) {
-        await finishPlainReply(
-          'Voice needs a browser with speech recognition and text-to-speech. Use text Chat for builds and file edits.',
-        );
-        return;
-      }
-      await finishPlainReply('Listening… speak now.');
-      const heard = await listenOnce(14_000);
-      if (!heard.ok || !heard.text.trim()) {
-        await finishPlainReply(heard.error || 'I did not catch that. Tap send and try again.');
-        return;
-      }
-      const voiceMsg = heard.text.trim();
-      const routed = await arkRoute({
-        message: voiceBrainPrompt(voiceMsg),
-        kind: 'chat',
-        preferredModelId: pinnedModel.id,
-        preferredModelName: pinnedModel.name,
-        preferredSource: pinnedModel.source,
-      });
-      const spoken = redactArkSelfLeak(String(routed.reply || '').trim())
-        || 'I did not have a reply for that.';
-      await finishPlainReply(spoken);
-      void speakText(spoken.replace(/\*\*/g, '').replace(/[#*`]/g, ''));
       return;
     }
 
@@ -6052,6 +6143,11 @@ export function AIChat() {
   const viewingChatId = route.name === 'chat' ? route.chatId : undefined;
   // Explore / idea grid only for brand-new chats. never when a Recent thread is open.
   const showEmpty = !loading && messages.length === 0 && !viewingChatId;
+
+  const voiceBusy = generating
+    || voicePhase === 'listening'
+    || voicePhase === 'thinking'
+    || voicePhase === 'speaking';
   const showOpenThread = !loading && Boolean(viewingChatId);
   const ModelSourceIcon = activeModel.source === 'cloud' ? Cloud : Cpu;
   const kind = kindForMode(mode);
@@ -6481,7 +6577,9 @@ export function AIChat() {
             className={`flex-1 min-w-0 border border-surface-border bg-ark-navy-900/90 shadow-lg shadow-black/20 ${
               composerExpanded
                 ? 'flex flex-col rounded-xl overflow-hidden'
-                : 'flex items-center gap-1 rounded-xl min-h-11 pl-1 pr-1.5 py-1.5 overflow-hidden'
+                : mode === 'voice'
+                  ? 'flex items-center gap-1.5 rounded-2xl min-h-[3.25rem] pl-1.5 pr-2 py-2 overflow-hidden'
+                  : 'flex items-center gap-1 rounded-xl min-h-11 pl-1 pr-1.5 py-1.5 overflow-hidden'
             }`}
           >
           <input
@@ -6873,6 +6971,13 @@ export function AIChat() {
         <div className="flex-1 flex items-center justify-center text-content-tertiary">
           <Loader2 className="w-5 h-5 animate-spin" />
         </div>
+      ) : mode === 'voice' ? (
+        <VoiceModeLayout
+          phase={voicePhase}
+          onActivate={handleVoiceActivate}
+          busy={voiceBusy}
+          composer={composer}
+        />
       ) : showEmpty ? (
         mode === 'general' ? (
           <div className="flex-1 flex flex-col items-center justify-center px-4 sm:px-8 pb-16 w-full">
@@ -6960,7 +7065,7 @@ export function AIChat() {
           </div>
         )
       ) : (
-        <>
+        <div className="flex-1 flex flex-col min-h-0">
           <div className="relative flex-1 min-h-0 flex flex-col">
             <div
               ref={messagesScrollRef}
@@ -6977,7 +7082,7 @@ export function AIChat() {
                 <div
                   key={msg.id}
                   className={`flex gap-3 animate-fade-in w-full ${
-                    msg.role === 'user' ? 'justify-end' : 'justify-start'
+                    msg.role === 'user' ? 'justify-end' : 'justify-start -ml-2 sm:-ml-3'
                   }`}
                 >
                   {msg.role !== 'user' && (
@@ -7177,11 +7282,6 @@ export function AIChat() {
                       </>
                     )}
                   </div>
-                  {msg.role === 'user' && (
-                    <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 bg-surface-hover border border-surface-border mt-0.5">
-                      <UserIcon className="w-4 h-4 text-content-secondary" />
-                    </div>
-                  )}
                 </div>
               ))}
               <div ref={messagesEndRef} />
@@ -7223,7 +7323,7 @@ export function AIChat() {
             )}
             {composer}
           </div>
-        </>
+        </div>
       )}
       <GitHubRepoPicker
         open={githubPickerOpen}

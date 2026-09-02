@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ggufCtxCapacityLabel } from '@/lib/ggufContext';
+import { displayUsagePercent } from '@/lib/tokenUsage';
 
 type Props = {
   /** 0–1 how full this turn’s packed prompt is */
@@ -33,8 +34,8 @@ export function TokenUsageRing({
   const innerR = Math.max(3, outerR - stroke - gap);
   const outerC = 2 * Math.PI * outerR;
   const innerC = 2 * Math.PI * innerR;
-  const ctxPct = Math.round(ctx * 100);
-  const mdlPct = Math.round(mdl * 100);
+  const ctxPct = displayUsagePercent(ctx);
+  const mdlPct = displayUsagePercent(mdl);
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ left: number; bottom: number } | null>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
