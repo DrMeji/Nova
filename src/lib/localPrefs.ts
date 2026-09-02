@@ -336,6 +336,17 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.170',
+    channel: 'stable' as const,
+    date: 'Sep 1, 2026',
+    title: 'Fix update splash icon + working neural voice',
+    notes: [
+      'Update splash uses the new ARK face (no ears/antenna, inner shimmer) instead of legacy icon.png',
+      'Neural Female/Male TTS fixed — edge-tts-universal replaces broken edge-tts in Electron',
+      'System voice fallback respects Female vs Male when neural path is unavailable',
+    ],
+  },
+  {
     version: '0.1.169',
     channel: 'stable' as const,
     date: 'Sep 1, 2026',

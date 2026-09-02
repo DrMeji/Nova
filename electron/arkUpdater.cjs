@@ -522,35 +522,28 @@ const SPLASH_CARD_BG = '#1a1a1d';
 const SPLASH_RADIUS = 18;
 
 function splashRobotSvg() {
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80" width="${SPLASH_ICON_PX}" height="${SPLASH_ICON_PX}" aria-hidden="true" style="display:block;margin:0 auto;">
-    <g fill="none" stroke="#f4f4f5" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M18 30h44a8 8 0 0 1 8 8v22a8 8 0 0 1-8 8H18a8 8 0 0 1-8-8V38a8 8 0 0 1 8-8z"/>
-      <rect x="30" y="44" width="6" height="14" rx="1" fill="#f4f4f5" stroke="none"/>
-      <rect x="44" y="44" width="6" height="14" rx="1" fill="#f4f4f5" stroke="none"/>
-      <path d="M40 18v6"/>
-      <path d="M35 18h10"/>
-      <path d="M10 42a6 6 0 0 1 6-6"/>
-      <path d="M64 36a6 6 0 0 1 6 6"/>
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80" width="${SPLASH_ICON_PX}" height="${SPLASH_ICON_PX}" aria-hidden="true" class="splash-ark-icon" style="display:block;margin:0 auto;">
+    <defs>
+      <clipPath id="splash-inner-clip">
+        <rect x="19" y="19" width="42" height="42" rx="13"/>
+      </clipPath>
+      <linearGradient id="splash-shimmer-grad" gradientUnits="userSpaceOnUse" x1="14" y1="14" x2="66" y2="66">
+        <stop offset="0%" stop-color="rgb(56 189 248)" stop-opacity="0.18"/>
+        <stop offset="45%" stop-color="rgb(129 140 248)" stop-opacity="0.14"/>
+        <stop offset="100%" stop-color="rgb(52 211 153)" stop-opacity="0.12"/>
+      </linearGradient>
+    </defs>
+    <g clip-path="url(#splash-inner-clip)">
+      <rect x="8" y="8" width="64" height="64" fill="url(#splash-shimmer-grad)" class="splash-shimmer"/>
     </g>
+    <rect x="14" y="14" width="52" height="52" rx="16" fill="none" stroke="#f4f4f5" stroke-width="2.5"/>
+    <line x1="32" y1="34" x2="32" y2="46" stroke="#f4f4f5" stroke-width="3" stroke-linecap="round"/>
+    <line x1="48" y1="34" x2="48" y2="46" stroke="#f4f4f5" stroke-width="3" stroke-linecap="round"/>
   </svg>`;
 }
 
-function splashIconDataUri() {
-  const src = resolveUpdateIcon();
-  if (!src) return '';
-  try {
-    return `data:image/png;base64,${fs.readFileSync(src).toString('base64')}`;
-  } catch {
-    return '';
-  }
-}
-
-/** Logo always inlined so HTA/Electron never show a broken-image box. */
+/** Updating splash always uses inline SVG — build/icon.png still has legacy ears/antenna art. */
 function splashIconMarkup() {
-  const data = splashIconDataUri();
-  if (data) {
-    return `<img src="${data}" alt="" width="${SPLASH_ICON_PX}" height="${SPLASH_ICON_PX}" draggable="false" style="object-fit:contain;display:block;margin:0 auto;user-select:none;" />`;
-  }
   return splashRobotSvg();
 }
 
@@ -562,6 +555,8 @@ function splashShellCss(opts = {}) {
   .card{box-sizing:border-box;background:${SPLASH_CARD_BG};border-radius:${SPLASH_RADIUS}px;box-shadow:0 10px 40px rgba(0,0,0,.45);padding:36px 28px 32px;text-align:center;}
   .logo-wrap{margin:0 auto ${SPLASH_ICON_GAP}px;width:${SPLASH_ICON_PX}px;height:${SPLASH_ICON_PX}px;display:block;}
   .logo-wrap img{width:${SPLASH_ICON_PX}px;height:${SPLASH_ICON_PX}px;object-fit:contain;display:block;margin:0 auto;border:0;background:transparent;}
+  @keyframes splashHeadShimmer{0%{transform:translate(0,0) rotate(0deg);}50%{transform:translate(6px,-4px) rotate(180deg);}100%{transform:translate(0,0) rotate(360deg);}}
+  .splash-shimmer{transform-box:fill-box;transform-origin:center;animation:splashHeadShimmer 14s ease-in-out infinite;}
   .track{width:${SPLASH_TRACK_W}px;max-width:100%;height:${SPLASH_TRACK_H}px;margin:12px auto 0;border-radius:999px;border:2px solid #52525b;background:#0f0f11;overflow:hidden;box-sizing:border-box;}
   #fill{height:100%;width:0%;min-width:0;border-radius:999px;background:#f4f4f5;transition:width 140ms ease;}
 `;
@@ -1408,13 +1403,50 @@ function launchInstallHandoffSplash({ statusPath, expectedVersion, arkExe, shown
     '    $form.Icon = [System.Drawing.Icon]::ExtractAssociatedIcon($exeForIcon)',
     '  } catch {}',
     '}',
-    '$pic = New-Object System.Windows.Forms.PictureBox',
-    '$pic.SizeMode = "Zoom"',
+    '$pic = New-Object System.Windows.Forms.Panel',
     '$pic.Size = New-Object System.Drawing.Size($picSize, $picSize)',
     '$pic.Location = New-Object System.Drawing.Point([int](($formW - $picSize) / 2), $picY)',
     `$pic.BackColor = [System.Drawing.ColorTranslator]::FromHtml('${SPLASH_CARD_BG}')`,
-    'if ($pngPath -and (Test-Path -LiteralPath $pngPath)) { try { $pic.Image = [System.Drawing.Image]::FromFile($pngPath) } catch {} }',
-    'if (-not $pic.Image -and $form.Icon) { try { $pic.Image = $form.Icon.ToBitmap() } catch {} }',
+    '$script:splashShimmerT = 0',
+    '$pic.Add_Paint({',
+    '  param($sender, $e)',
+    '  $g = $e.Graphics',
+    '  $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias',
+    '  $w = $sender.Width; $h = $sender.Height',
+    '  $pad = [int]($w * 0.12); $rx = [int]($w * 0.2)',
+    '  $rect = New-Object System.Drawing.Rectangle($pad, $pad, $w - 2*$pad, $h - 2*$pad)',
+    '  $path = New-Object System.Drawing.Drawing2D.GraphicsPath',
+    '  $d = $rx * 2',
+    '  $path.AddArc($rect.X, $rect.Y, $d, $d, 180, 90)',
+    '  $path.AddArc($rect.Right - $d, $rect.Y, $d, $d, 270, 90)',
+    '  $path.AddArc($rect.Right - $d, $rect.Bottom - $d, $d, $d, 0, 90)',
+    '  $path.AddArc($rect.X, $rect.Bottom - $d, $d, $d, 90, 90)',
+    '  $path.CloseFigure()',
+    '  $state = $g.Save()',
+    '  $g.SetClip($path)',
+    '  $brush = New-Object System.Drawing.Drawing2D.LinearGradientBrush(',
+    '    (New-Object System.Drawing.Point($rect.X, $rect.Y)),',
+    '    (New-Object System.Drawing.Point($rect.Right, $rect.Bottom)),',
+    '    [System.Drawing.Color]::FromArgb(46, 56, 189, 248),',
+    '    [System.Drawing.Color]::FromArgb(31, 52, 211, 153)',
+    '  )',
+    '  $g.FillRectangle($brush, $rect)',
+    '  $brush.Dispose()',
+    '  $g.Restore($state)',
+    '  $pen = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(244, 244, 245), 2.5)',
+    '  $g.DrawPath($pen, $path)',
+    '  $pen.Dispose()',
+    '  $eyePen = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(244, 244, 245), 3)',
+    '  $cx1 = [int]($w * 0.40); $cx2 = [int]($w * 0.60); $cy = [int]($h * 0.48); $eh = [int]($h * 0.14)',
+    '  $g.DrawLine($eyePen, $cx1, $cy - $eh, $cx1, $cy + $eh)',
+    '  $g.DrawLine($eyePen, $cx2, $cy - $eh, $cx2, $cy + $eh)',
+    '  $eyePen.Dispose()',
+    '  $path.Dispose()',
+    '})',
+    '$picTimer = New-Object System.Windows.Forms.Timer',
+    '$picTimer.Interval = 120',
+    '$picTimer.Add_Tick({ $script:splashShimmerT++; $pic.Invalidate() })',
+    '$picTimer.Start()',
     '$track = New-Object System.Windows.Forms.Panel',
     `$track.BackColor = [System.Drawing.ColorTranslator]::FromHtml('#0f0f11')`,
     '$track.Size = New-Object System.Drawing.Size($trackW, $trackH)',

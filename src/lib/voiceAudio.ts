@@ -198,15 +198,25 @@ export function ensureSpeechVoicesLoaded(): Promise<SpeechSynthesisVoice[]> {
   });
 }
 
-/** Pick the most natural English voice, honoring Settings → Voice override. */
+/** Pick English system voice when neural TTS is unavailable — honor Female/Male pref. */
 export function pickBestTtsVoice(voices: SpeechSynthesisVoice[]): SpeechSynthesisVoice | null {
   if (!voices.length) return null;
   const wanted = getVoiceTtsVoiceUri();
+  const en = voices.filter(v => v.lang.toLowerCase().startsWith('en'));
   if (wanted) {
-    const hit = voices.find(v => v.voiceURI === wanted);
-    if (hit) return hit;
+    const exact = voices.find(v => v.voiceURI === wanted);
+    if (exact) return exact;
+    const wantMale = wanted === VOICE_TTS_MALE_ID;
+    const gendered = en.filter(v => {
+      const label = `${v.name} ${v.voiceURI}`.toLowerCase();
+      if (wantMale) return /\bmale\b|david|guy|mark|ryan|james|brian|eric|steven|christopher|andrew|roger|tom/i.test(label);
+      return /\bfemale\b|zira|jenny|aria|samantha|susan|hazel|linda|laura|michelle|heather|sara|emma|natasha|sonia/i.test(label);
+    });
+    if (gendered.length) {
+      return sortTtsVoicesNaturalFirst(gendered)[0] ?? gendered[0];
+    }
   }
-  const ranked = sortTtsVoicesNaturalFirst(voices.filter(v => v.lang.toLowerCase().startsWith('en')));
+  const ranked = sortTtsVoicesNaturalFirst(en);
   return ranked[0] ?? voices.find(v => v.lang.toLowerCase().startsWith('en')) ?? null;
 }
 
