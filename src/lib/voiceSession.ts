@@ -60,12 +60,24 @@ async function primeOutputSink(): Promise<void> {
 
 let activeAudio: HTMLAudioElement | null = null;
 
-function playBase64Audio(base64: string, mime: string): Promise<void> {
+function playBase64Audio(
+  base64: string,
+  mime: string,
+  onPlaybackStart?: () => void,
+): Promise<void> {
   return new Promise((resolve) => {
     try {
       activeAudio?.pause();
       const audio = new Audio(`data:${mime};base64,${base64}`);
       activeAudio = audio;
+      let started = false;
+      const markStart = () => {
+        if (started) return;
+        started = true;
+        onPlaybackStart?.();
+      };
+      audio.onplaying = markStart;
+      audio.onplay = markStart;
       audio.onended = () => {
         if (activeAudio === audio) activeAudio = null;
         resolve();
@@ -81,17 +93,17 @@ function playBase64Audio(base64: string, mime: string): Promise<void> {
   });
 }
 
-async function speakViaNeural(text: string): Promise<boolean> {
+async function speakViaNeural(text: string, onPlaybackStart?: () => void): Promise<boolean> {
   if (!window.arkDesktop?.voiceNeuralSpeak) return false;
   const voice = resolveNeuralVoiceId(getVoiceTtsVoiceUri() || undefined);
   const res = await window.arkDesktop.voiceNeuralSpeak({ text, voice });
   if (!res?.ok || !res.base64) return false;
   await primeOutputSink();
-  await playBase64Audio(res.base64, res.mime || 'audio/mpeg');
+  await playBase64Audio(res.base64, res.mime || 'audio/mpeg', onPlaybackStart);
   return true;
 }
 
-async function speakViaOpenAI(text: string): Promise<boolean> {
+async function speakViaOpenAI(text: string, onPlaybackStart?: () => void): Promise<boolean> {
   const key = getProviderApiKeys().openai;
   if (!key?.trim() || !window.arkDesktop?.httpRequest) return false;
   const res = await desktopRequest('https://api.openai.com/v1/audio/speech', {
@@ -109,11 +121,11 @@ async function speakViaOpenAI(text: string): Promise<boolean> {
   const data = res.data as { __binary?: boolean; base64?: string; mime?: string };
   if (!data?.__binary || !data.base64) return false;
   await primeOutputSink();
-  await playBase64Audio(data.base64, data.mime || 'audio/mpeg');
+  await playBase64Audio(data.base64, data.mime || 'audio/mpeg', onPlaybackStart);
   return true;
 }
 
-async function speakViaSystem(text: string): Promise<void> {
+async function speakViaSystem(text: string, onPlaybackStart?: () => void): Promise<void> {
   const voices = await ensureSpeechVoicesLoaded();
   window.speechSynthesis.cancel();
   const utter = new SpeechSynthesisUtterance(String(text || '').slice(0, 1200));
@@ -122,13 +134,20 @@ async function speakViaSystem(text: string): Promise<void> {
   const voice = pickBestTtsVoice(voices);
   if (voice) utter.voice = voice;
   await new Promise<void>((resolve) => {
+    utter.onstart = () => onPlaybackStart?.();
     utter.onend = () => resolve();
     utter.onerror = () => resolve();
     window.speechSynthesis.speak(utter);
   });
 }
 
-export function speakText(text: string): Promise<void> {
+export type SpeakTextOptions = {
+  /** Fires when audio actually starts playing — use to sync mouth animation. */
+  onPlaybackStart?: () => void;
+};
+
+export function speakText(text: string, opts?: SpeakTextOptions): Promise<void> {
+  const onStart = opts?.onPlaybackStart;
   return new Promise((resolve) => {
     void (async () => {
       const chunk = String(text || '').trim();
@@ -140,15 +159,15 @@ export function speakText(text: string): Promise<void> {
       activeAudio?.pause();
       activeAudio = null;
 
-      if (await speakViaNeural(chunk)) {
+      if (await speakViaNeural(chunk, onStart)) {
         resolve();
         return;
       }
-      if (await speakViaOpenAI(chunk)) {
+      if (await speakViaOpenAI(chunk, onStart)) {
         resolve();
         return;
       }
-      await speakViaSystem(chunk);
+      await speakViaSystem(chunk, onStart);
       resolve();
     })();
   });

@@ -116,6 +116,10 @@ import {
   isArkProtectedPathOnDisk,
   looksLikeArkSelfHarmAsk,
 } from '@/lib/arkSelfGuard';
+import {
+  harmfulContentBlockedReply,
+  looksLikeHarmfulContentAsk,
+} from '@/lib/arkContentSafety';
 import { redactArkSelfLeak } from '@/lib/replySanitizer';
 import { listenOnce, speakText, stopSpeaking, voiceSupported } from '@/lib/voiceSession';
 import { voiceChatRoute } from '@/lib/voiceRoute';
@@ -306,6 +310,7 @@ function ChatModeTabs() {
     if (next === 'video' && !isVideoTabEnabled()) return;
     if (next === 'voice' && !isVoiceTabEnabled()) return;
     if (next === 'general') {
+      stopSpeaking();
       if (route.name === 'chat' && !route.mode && !route.chatId) return;
       navigate({ name: 'chat' });
       return;
@@ -330,7 +335,7 @@ function ChatModeTabs() {
     { id: 'voice', label: 'Voice' },
   ];
   return (
-    <div className="shrink-0 flex items-center justify-center gap-1 pt-3 pb-1">
+    <div className="relative z-30 shrink-0 flex items-center justify-center gap-1 pt-3 pb-1 pointer-events-auto">
       {tabs.map(t => {
         const parked = t.id === 'voice' && !isVoiceTabEnabled();
         const soonTitle = 'Voice · coming soon (conversation only — no PC control or builds)';
@@ -2618,11 +2623,17 @@ export function AIChat() {
 
     const finishVoice = async (phase: VoiceSessionPhase, speak?: string) => {
       if (speak) {
-        setVoicePhase('speaking');
-        await speakText(speak.replace(/\*\*/g, '').replace(/[#*`]/g, ''));
+        await speakText(speak.replace(/\*\*/g, '').replace(/[#*`]/g, ''), {
+          onPlaybackStart: () => setVoicePhase('speaking'),
+        });
       }
       setVoicePhase(phase);
     };
+
+    if (typed && looksLikeHarmfulContentAsk(typed)) {
+      await finishVoice('idle', harmfulContentBlockedReply(true));
+      return;
+    }
 
     if (typed && looksLikeArkSelfHarmAsk(typed)) {
       await finishVoice('idle', arkSelfHarmBlockedReply());
@@ -2661,6 +2672,11 @@ export function AIChat() {
           return;
         }
         voiceMsg = heard.text.trim();
+      }
+
+      if (looksLikeHarmfulContentAsk(voiceMsg)) {
+        await finishVoice('idle', harmfulContentBlockedReply(true));
+        return;
       }
 
       if (looksLikeArkSelfHarmAsk(voiceMsg)) {
@@ -2983,6 +2999,11 @@ export function AIChat() {
       clearGeneratingIfMineEarly();
       notifyChatDone(activeChatId);
     };
+
+    if (looksLikeHarmfulContentAsk(content)) {
+      await finishPlainReply(harmfulContentBlockedReply());
+      return;
+    }
 
     if (looksLikeArkSelfHarmAsk(content)) {
       await finishPlainReply(arkSelfHarmBlockedReply());

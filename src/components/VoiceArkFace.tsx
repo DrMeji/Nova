@@ -6,15 +6,15 @@ type VoiceArkFaceProps = {
   className?: string;
 };
 
-/** Head box in viewBox space (rounded square only — no ears/antenna). */
+/** Head box in viewBox space (rounded square only — no ears/antenna/outer ring). */
 const HEAD_X = 36;
 const HEAD_Y = 34;
 const HEAD_W = 128;
 const HEAD_H = 128;
 const HEAD_RX = 39;
-const HEAD_STROKE = 2.0;
-/** Inset for inner shimmer fill (inside the stroke). */
-const INNER_PAD = 5;
+
+/** Inset for inner shimmer fill. */
+const INNER_PAD = 4;
 
 const HEAD_SCALE = 128 / 36;
 function ix(x: number) {
@@ -42,12 +42,14 @@ const INNER_W = HEAD_W - INNER_PAD * 2;
 const INNER_H = HEAD_H - INNER_PAD * 2;
 const INNER_RX = HEAD_RX - 3;
 
-/** ARK voice face — rounded box, subtle inner shimmer, mouth bars while speaking. */
+/** ARK voice face — inner shimmer, thinking pulse, mouth bars synced to speaking phase. */
 export function VoiceArkFace({ phase, className = '' }: VoiceArkFaceProps) {
   const [blink, setBlink] = useState(false);
   const speaking = phase === 'speaking';
+  const thinking = phase === 'thinking';
 
   useEffect(() => {
+    if (thinking) return;
     let timer = 0;
     const schedule = () => {
       const delay = 2200 + Math.random() * 3000;
@@ -61,21 +63,31 @@ export function VoiceArkFace({ phase, className = '' }: VoiceArkFaceProps) {
     };
     schedule();
     return () => window.clearTimeout(timer);
-  }, []);
+  }, [thinking]);
 
-  const eyeScale = phase === 'listening' ? 1.08 : phase === 'error' ? 0.86 : 1;
+  const eyeScale = phase === 'listening' ? 1.08 : phase === 'error' ? 0.86 : thinking ? 1.04 : 1;
 
   return (
-    <div className={`select-none ${className}`}>
+    <div className={`select-none relative ${className}`}>
+      {thinking ? (
+        <div
+          className="absolute left-1/2 -translate-x-1/2 -top-2 sm:-top-3 z-10 voice-thinking-bubble"
+          aria-hidden="true"
+        >
+          <div className="rounded-full border border-sky-500/30 bg-ark-navy-900/95 px-3 py-1 text-[11px] font-medium text-sky-200/90 shadow-lg">
+            Thinking…
+          </div>
+        </div>
+      ) : null}
       <svg viewBox="0 0 200 200" className="w-full h-full" aria-hidden="true">
         <defs>
           <clipPath id="voice-head-inner-clip">
             <rect x={INNER_X} y={INNER_Y} width={INNER_W} height={INNER_H} rx={INNER_RX} />
           </clipPath>
           <linearGradient id="voice-head-shimmer-grad" gradientUnits="userSpaceOnUse" x1="36" y1="34" x2="164" y2="162">
-            <stop offset="0%" stopColor="rgb(56 189 248)" stopOpacity="0.14" />
-            <stop offset="45%" stopColor="rgb(129 140 248)" stopOpacity="0.11" />
-            <stop offset="100%" stopColor="rgb(52 211 153)" stopOpacity="0.1" />
+            <stop offset="0%" stopColor="rgb(56 189 248)" stopOpacity="0.18" />
+            <stop offset="45%" stopColor="rgb(129 140 248)" stopOpacity="0.14" />
+            <stop offset="100%" stopColor="rgb(52 211 153)" stopOpacity="0.12" />
           </linearGradient>
         </defs>
 
@@ -86,23 +98,12 @@ export function VoiceArkFace({ phase, className = '' }: VoiceArkFaceProps) {
             width={HEAD_W + 48}
             height={HEAD_H + 48}
             fill="url(#voice-head-shimmer-grad)"
-            className="voice-head-shimmer"
+            className={thinking ? 'voice-head-shimmer voice-head-shimmer-fast' : 'voice-head-shimmer'}
           />
         </g>
 
-        <rect
-          x={HEAD_X}
-          y={HEAD_Y}
-          width={HEAD_W}
-          height={HEAD_H}
-          rx={HEAD_RX}
-          fill="none"
-          stroke="white"
-          strokeWidth={HEAD_STROKE}
-        />
-
-        <Eye cx={LEFT_EYE_X} cy={EYE_Y} blink={blink} scale={eyeScale} />
-        <Eye cx={RIGHT_EYE_X} cy={EYE_Y} blink={blink} scale={eyeScale} />
+        <Eye cx={LEFT_EYE_X} cy={EYE_Y} blink={blink && !thinking} scale={eyeScale} thinking={thinking} />
+        <Eye cx={RIGHT_EYE_X} cy={EYE_Y} blink={blink && !thinking} scale={eyeScale} thinking={thinking} />
 
         {speaking ? <VoiceMouth /> : null}
       </svg>
@@ -155,17 +156,22 @@ function Eye({
   cy,
   blink,
   scale,
+  thinking,
 }: {
   cx: number;
   cy: number;
   blink: boolean;
   scale: number;
+  thinking?: boolean;
 }) {
   const blinkScale = blink ? 0.06 : scale;
 
   return (
     <g transform={`translate(${cx} ${cy})`}>
-      <g transform={`scale(1 ${blinkScale})`} className="voice-ark-eye-group">
+      <g
+        transform={`scale(1 ${blinkScale})`}
+        className={thinking ? 'voice-ark-eye-group voice-ark-eye-think' : 'voice-ark-eye-group'}
+      >
         <line
           x1={0}
           y1={-EYE_HALF_H}

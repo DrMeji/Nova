@@ -415,6 +415,23 @@
     transform-origin: center;
     animation: voiceHeadShimmer 14s ease-in-out infinite;
   }
+  .voice-head-shimmer-fast {
+    animation-duration: 5s;
+  }
+  @keyframes voiceEyeThink {
+    0%, 100% { opacity: 0.72; }
+    50% { opacity: 1; }
+  }
+  .voice-ark-eye-think {
+    animation: voiceEyeThink 1.1s ease-in-out infinite;
+  }
+  @keyframes voiceThinkingBubble {
+    0%, 100% { opacity: 0.88; transform: translate(-50%, 0); }
+    50% { opacity: 1; transform: translate(-50%, -2px); }
+  }
+  .voice-thinking-bubble {
+    animation: voiceThinkingBubble 1.6s ease-in-out infinite;
+  }
   .voice-composer-slot .max-w-3xl {
     max-width: none;
   }

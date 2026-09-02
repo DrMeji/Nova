@@ -336,6 +336,19 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.171',
+    channel: 'stable' as const,
+    date: 'Sep 1, 2026',
+    title: 'Voice sync, safety refusals, Chat/Voice tab fix',
+    notes: [
+      'Harmful/illegal asks get a direct refusal — no coding or positive-project pivot',
+      'Voice mouth animation syncs to actual audio playback (no early mouth move)',
+      'Thinking bubble + faster shimmer while Voice waits for a reply',
+      'Removed outer white ring on Voice face; Chat/Voice tab switch fixed',
+      'Chat stays on topic — no random coding offers on normal conversation',
+    ],
+  },
+  {
     version: '0.1.170',
     channel: 'stable' as const,
     date: 'Sep 1, 2026',

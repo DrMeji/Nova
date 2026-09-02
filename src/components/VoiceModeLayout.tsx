@@ -51,7 +51,6 @@ type VoiceModeLayoutProps = {
   onActivate: () => void;
   busy?: boolean;
   composer: ReactNode;
-  /** Shown below the face when Voice has no brain (no key / local model). */
   brainHint?: ReactNode;
 };
 
@@ -59,7 +58,7 @@ type VoiceModeLayoutProps = {
 export function VoiceModeLayout({ phase, onActivate, busy, composer, brainHint }: VoiceModeLayoutProps) {
   return (
     <div className="flex-1 flex flex-col min-h-0 w-full">
-      <div className="flex-1 flex flex-col items-center justify-center min-h-0 pb-6 -mt-12 sm:-mt-16">
+      <div className="flex-1 flex flex-col items-center justify-center min-h-0 pb-6 pt-2">
         <VoiceFace phase={phase} onActivate={onActivate} activateBlocked={busy} />
         {brainHint ? (
           <div className="mt-5 w-full max-w-md px-4 sm:px-0">
