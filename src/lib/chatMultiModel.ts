@@ -1,8 +1,8 @@
 /**
  * Multi-model chat orchestration (sequential hops — not parallel GGUF loads).
  *
- * Engine reality: one local chat brain at a time, text-only GGUF today.
- * Vision hop uses cloud vision keys (Gemini / GPT-4o / Claude) when available.
+ * Engine reality: one local chat brain at a time.
+ * Vision hop uses Qwen2-VL on-device when installed, else cloud vision keys.
  * Multi-agent = Design→Code→Verify on project files. Multi-model = vision then chat/coder.
  */
 
@@ -11,6 +11,7 @@ import {
   cloudChatVisionKeys,
   hasAnyCloudChatKey,
 } from '@/lib/cloudChat';
+import { engineGenerate, engineGenerateStream, getEngineStatus } from '@/lib/arkEngine';
 import { getProviderApiKeys, hasProviderApiKey } from '@/lib/localPrefs';
 import { isCloudProviderEnabled } from '@/lib/cloudSources';
 import type { RouterChatTurn } from '@/lib/chatHistory';
@@ -37,6 +38,31 @@ export function hasCloudVisionCapability(): boolean {
   return VISION_CLOUD_IDS.some(
     id => Boolean(keys[id]) && isCloudProviderEnabled(id) && hasProviderApiKey(id),
   );
+}
+
+/** True when Qwen2-VL GGUF + mmproj are installed and the engine is online. */
+export async function isLocalVisionReady(): Promise<boolean> {
+  if (!window.arkDesktop?.engineStatus) return false;
+  try {
+    const status = await getEngineStatus();
+    if (status.phase !== 'online' && status.phase !== 'degraded') return false;
+    const row = status.models?.find((m) => m.id === RECOMMENDED_VISION_MODEL_ID);
+    return row?.status === 'ready';
+  } catch {
+    return false;
+  }
+}
+
+/** Cloud or on-device vision available for this turn. */
+export async function hasVisionCapability(): Promise<boolean> {
+  if (hasCloudVisionCapability()) return true;
+  return isLocalVisionReady();
+}
+
+function visionImagesFromHistory(history: RouterChatTurn[]): string[] {
+  const last = [...history].reverse().find((t) => t.role === 'user' && t.images?.length);
+  if (!last?.images?.length) return [];
+  return last.images.map((img) => `data:${img.mime};base64,${img.data}`);
 }
 
 export function listVisionCloudProvidersReady(): string[] {
@@ -84,13 +110,11 @@ export function visionCapabilityGapReply(opts?: { localOnly?: boolean }): string
 
   if (opts?.localOnly) {
     return [
-      'I can see you attached an image, but **Local-only** mode is on — and the local chat brain cannot see pixels yet.',
+      'I can see you attached an image, but **Local-only** mode is on and nothing on this PC can read pixels yet.',
       '',
-      '**To read screenshots now:**',
-      '1. Settings → AI → turn off Local-only (use Automatic or Cloud when available)',
-      '2. Models → Cloud → connect **Google AI Studio** (free), OpenAI, or Anthropic',
+      `**Fix:** Models → Vision → install **${RECOMMENDED_VISION_MODEL_NAME}** (GGUF + mmproj bundle), then try again.`,
       '',
-      `**Later on this PC:** download **${RECOMMENDED_VISION_MODEL_NAME}** from Models → Vision when local vision downloads ship — then ARK can hop vision → your chat/coder brain automatically.`,
+      'Or turn off Local-only in Settings → AI to allow a cloud vision hop (Google / OpenAI / Anthropic).',
       '',
       'Until then, describe the problem in a sentence and I can still help from text.',
     ].join('\n');
@@ -99,14 +123,12 @@ export function visionCapabilityGapReply(opts?: { localOnly?: boolean }): string
   return [
     'I can see you attached an image, but I **cannot read it yet**.',
     '',
-    'Your current chat brain is text-only. To look at screenshots I need a vision hop:',
+    '**On this PC:** Models → Vision → download **${RECOMMENDED_VISION_MODEL_NAME}** (both files in the bundle). ARK will run vision → your chat/coder brain as a **multi-model hop**.',
     '',
-    '**Fastest (works today):** Models → Cloud → connect **Google AI Studio** (free Gemini), or OpenAI / Anthropic.',
-    '',
-    `**On this PC later:** Models → Vision → download **${RECOMMENDED_VISION_MODEL_NAME}** when that install is available. ARK will then run vision + your coding brain as a **multi-model hop** (one after the other — the engine loads one local model at a time).`,
+    '**Or use cloud vision:** Models → Cloud → connect **Google AI Studio** (free Gemini), OpenAI, or Anthropic.',
     '',
     'After vision is connected, paste a bug screenshot and say what to change — I will describe what I see, then fix the project files when a folder is open.',
-  ].join('\n');
+  ].join('\n').replace(/\$\{RECOMMENDED_VISION_MODEL_NAME\}/g, RECOMMENDED_VISION_MODEL_NAME);
 }
 
 export function buildVisionDescribePrompt(userMessage: string): string {
@@ -155,11 +177,49 @@ export async function runVisionDescribeHop(opts: {
   history: RouterChatTurn[];
   onChunk?: (text: string) => void;
 }): Promise<VisionHopResult> {
+  const attempted: string[] = [];
+  const describePrompt = buildVisionDescribePrompt(opts.userMessage);
+  const images = visionImagesFromHistory(opts.history);
+
+  if (images.length && await isLocalVisionReady()) {
+    try {
+      const genOpts = { visionImages: images };
+      const res = opts.onChunk
+        ? await engineGenerateStream(
+          describePrompt,
+          RECOMMENDED_VISION_MODEL_ID,
+          opts.onChunk,
+          'chat',
+          genOpts,
+        )
+        : await engineGenerate(
+          describePrompt,
+          RECOMMENDED_VISION_MODEL_ID,
+          'chat',
+          genOpts,
+        );
+      const notes = String(res.reply || '').trim();
+      if (notes) {
+        return {
+          ok: true,
+          notes,
+          providerLabel: `${RECOMMENDED_VISION_MODEL_NAME} · local`,
+        };
+      }
+    } catch (err) {
+      if (!hasCloudVisionCapability()) {
+        return {
+          ok: false,
+          notes: '',
+          error: err instanceof Error ? err.message : 'local_vision_failed',
+        };
+      }
+    }
+  }
+
   if (!hasCloudVisionCapability()) {
     return { ok: false, notes: '', error: 'no_vision' };
   }
-  const attempted: string[] = [];
-  const describePrompt = buildVisionDescribePrompt(opts.userMessage);
   try {
     const hit = await cloudChatVisionKeys(
       describePrompt,
@@ -208,8 +268,8 @@ export function multiModelCapabilitySummary(): {
 } {
   return {
     parallelLocal: false,
-    visionToday: 'Cloud vision keys (Google / OpenAI / Anthropic) as an automatic hop when you attach an image.',
-    visionSoon: `${RECOMMENDED_VISION_MODEL_NAME} local download + sequential vision→coder hop.`,
+    visionToday: 'Qwen2-VL on-device when installed, or cloud vision keys (Google / OpenAI / Anthropic) as an automatic hop.',
+    visionSoon: 'More local VL catalog entries (LLaVA, MiniCPM-V) after Qwen2-VL path is stable.',
   };
 }
 

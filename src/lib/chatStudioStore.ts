@@ -20,6 +20,17 @@ export function studioPathBasename(diskRoot: string | null | undefined): string 
   return parts[parts.length - 1] || '';
 }
 
+/** True when this chat actually started a build / code workspace — not a plain conversation. */
+export function chatHasBuildWorkspace(chatId: string, snap?: ChatStudioSnapshot | null): boolean {
+  if (!chatId) return false;
+  const studio = snap === undefined ? loadChatStudio(chatId) : snap;
+  if (hasChatCodePill(chatId)) return true;
+  if (getLastPendingGreenfield(chatId)) return true;
+  if (studio?.projectId) return true;
+  if (studio && Object.keys(studio.files || {}).length > 0) return true;
+  return false;
+}
+
 function studioPathJoin(root: string, name: string): string {
   const sep = root.includes('\\') ? '\\' : '/';
   return `${root.replace(/[/\\]+$/, '')}${sep}${name}`;
@@ -44,6 +55,28 @@ export async function resolveChatProjectRoot(opts: {
 }> {
   const chatId = String(opts.chatId || '').trim();
   const snap = chatId ? loadChatStudio(chatId) : null;
+  const buildIntent = chatId ? chatHasBuildWorkspace(chatId, snap) : false;
+
+  // Plain conversations must never bind to a folder just because the title matches
+  // Desktop\Projects\{title} after restart.
+  if (!buildIntent) {
+    if (snap?.diskRoot && !Object.keys(snap.files || {}).length && !snap.projectId) {
+      try {
+        localStorage.removeItem(chatStudioKey(chatId));
+      } catch {
+        /* ignore */
+      }
+    }
+    return {
+      diskRoot: null,
+      name: undefined,
+      files: {},
+      projectId: null,
+      previewUrl: null,
+      healed: false,
+    };
+  }
+
   const last = chatId ? getLastDiskTarget(chatId) : null;
   const rawTitle = String(opts.chatTitle || snap?.name || last?.name || '').trim();
   // Sidebar titles are short product names after create; ignore long prompt titles.
@@ -62,7 +95,7 @@ export async function resolveChatProjectRoot(opts: {
   try {
     const roots = await window.arkDesktop?.browseRoots?.();
     const desktop = roots?.roots?.find(r => r.id === 'desktop')?.path;
-    if (desktop && wantName) {
+    if (desktop && wantName && buildIntent) {
       const projectsDir = studioPathJoin(desktop, 'Projects');
       candidates.unshift(studioPathJoin(projectsDir, wantName));
       const listing = await window.arkDesktop?.listDir?.(projectsDir);

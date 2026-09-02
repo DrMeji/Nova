@@ -93,8 +93,8 @@ const DEVICONS: Record<string, DevMark> = {
   discord: { bg: 'bg-white', Icon: DiscordIcon },
   huggingface: { bg: 'bg-[#FFD21E]', Icon: HuggingFaceIcon },
   groq: { bg: 'bg-white', Icon: Groq },
-  nvidia: { bg: 'bg-black', Icon: Nvidia },
-  ollama: { bg: 'bg-white', Icon: OllamaIcon },
+  nvidia: { bg: 'bg-black', Icon: Nvidia, scale: 'w-[90%] h-[90%]' },
+  ollama: { bg: 'bg-[#1a1a1a]', Icon: OllamaIcon, monoWhite: true, scale: 'w-[72%] h-[72%]' },
   meta: { bg: 'bg-white', Icon: MetaIcon },
   mistral: { bg: 'bg-white', Icon: MistralAiIcon },
   deepseek: { bg: 'bg-white', Icon: Deepseek },
@@ -201,8 +201,11 @@ const FALLBACKS: Record<string, FallbackMark> = {
   sambanova: {
     bg: 'bg-[#EE3A8C]',
     node: (
-      <Svg>
-        <path fill="#fff" d="M7 12a5 5 0 0 1 5-5 5 5 0 0 1 4.6 3.1h-2.7A2.5 2.5 0 0 0 12 9.5 2.5 2.5 0 0 0 9.5 12 2.5 2.5 0 0 0 12 14.5a2.5 2.5 0 0 0 2-1h2.7A5 5 0 0 1 12 17a5 5 0 0 1-5-5z" />
+      <Svg viewBox="0 0 24 24">
+        <path
+          fill="#fff"
+          d="M14.2 6.2c-2.1 0-3.6 1.1-4.4 2.8-.6-1.5-1.9-2.8-4-2.8-2.6 0-4.4 2-4.4 4.8 0 2.9 1.9 4.9 4.5 4.9 1.8 0 3.1-.8 3.9-2.1.8 1.3 2.1 2.1 3.9 2.1 2.6 0 4.5-2 4.5-4.9 0-2.8-1.8-4.8-4.4-4.8zm-8.3 7.4c-1.4 0-2.3-1.1-2.3-2.6s.9-2.6 2.3-2.6c1.3 0 2.1.9 2.4 2.1h-2.1v1.1h3.3c0 .1 0 .2 0 .3 0 1.5-.9 2.7-2.7 2.7zm8.2 0c-1.4 0-2.4-1-2.6-2.4h5.1c-.2 1.4-1.2 2.4-2.5 2.4z"
+        />
       </Svg>
     ),
   },
@@ -248,6 +251,9 @@ const FALLBACKS: Record<string, FallbackMark> = {
 };
 
 function resolveBrand(id: string, name?: string): string | null {
+  const bare = id.toLowerCase().trim();
+  if (DEVICONS[bare] || FALLBACKS[bare]) return bare;
+  if (bare === 'github-models') return 'github';
   const raw = `${id} ${name || ''}`.toLowerCase();
   const hay = raw.replace(/[^a-z0-9]+/g, ' ');
   const checks: [string, string][] = [

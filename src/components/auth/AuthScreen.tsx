@@ -10,6 +10,7 @@ import {
   shouldShowLocalRecoveryNotice,
 } from '@/lib/localAuthRecovery';
 import { checkArkGitHubUpdate, downloadAndInstallArkUpdate } from '@/lib/arkUpdates';
+import { accountForgotPageUrl } from '@/lib/accountWeb';
 
 const TYPE_PHRASES = [
   'ARK',
@@ -77,7 +78,7 @@ function TypewriterHero() {
 }
 
 export function AuthScreen() {
-  const { signIn, signUp, bypassLogin } = useAuth();
+  const { signIn, signUp, bypassLogin, resetPassword } = useAuth();
   const [mode, setMode] = useState<AuthMode>('signin');
   const [showBypass, setShowBypass] = useState(false);
   const [email, setEmail] = useState('');
@@ -111,6 +112,27 @@ export function AuthScreen() {
 
   const handleForgotPassword = async () => {
     setError(null);
+    setInfo(null);
+    const trimmed = email.trim();
+    if (trimmed) {
+      setLoading(true);
+      try {
+        const res = await resetPassword(trimmed);
+        if (!res.error) {
+          setInfo(`If an account exists for ${trimmed}, check your email for a reset link.`);
+          return;
+        }
+        setError(res.error);
+      } finally {
+        setLoading(false);
+      }
+    }
+    const forgotUrl = accountForgotPageUrl();
+    if (forgotUrl && window.arkDesktop?.openExternal) {
+      void window.arkDesktop.openExternal(forgotUrl);
+      setInfo('Opened the ARK account site. Use Forgot password there if email reset is not configured in this build.');
+      return;
+    }
     const info = await getLocalLoginRecoveryInfo();
     setInfo(formatForgotPasswordHelp(info));
     if (info.exists || info.folder) {
@@ -305,7 +327,7 @@ export function AuthScreen() {
                     disabled={loading}
                     className="text-xs text-content-tertiary hover:text-content-secondary"
                   >
-                    Forgot password? Open local note
+                    Forgot password?
                   </button>
                 </div>
               )}
@@ -313,10 +335,7 @@ export function AuthScreen() {
               {recoveryNotice && (
                 <div className="rounded-xl border border-sky-500/25 bg-sky-500/10 px-3 py-2.5 text-[11px] text-sky-100/90 leading-relaxed space-y-2">
                   <p>
-                    Temporary: after you sign in or create an account, ARK saves your email and password in a private
-                    file on this PC only (ARK app data). It does not leave your computer or go to ARK servers.
-                    Use <strong className="font-medium">Forgot password</strong> to open that folder until real email
-                    reset ships.
+                    Temporary: ARK can also save a private login note on this PC (see folder after forgot-password). Real email reset works when VITE_ARK_WEBSITE_ORIGIN is set at build time.
                   </p>
                   <button
                     type="button"

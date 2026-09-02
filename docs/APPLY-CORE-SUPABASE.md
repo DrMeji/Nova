@@ -1,7 +1,6 @@
 # Apply core Supabase (make ARK social + avatars work)
 
-Do this on the **hosted** Supabase project before inviting testers.  
-Skip for now: email/SMTP, account-delete grace period.
+Do this on the **hosted** Supabase project before inviting testers.
 
 ## Checklist
 
@@ -21,15 +20,26 @@ Run each file in **SQL → New → paste → Run** (or `npx supabase db push` if
 
 Then **Database → Replication**: enable Realtime for `ark_direct_messages`, `ark_friend_requests` (and `ark_call_signals` if you test Call on bat/dev).
 
+## Auth + email reset (desktop + website)
+
+1. Deploy `website/` (Vercel/Netlify). See `website/README.md`.
+2. **Authentication → URL configuration** in Supabase:
+   - Add `https://YOUR-SITE/account/reset` to **Redirect URLs**
+   - Add `https://YOUR-SITE/**` (or localhost `http://localhost:5180/**` for dev)
+3. Set `VITE_ARK_WEBSITE_ORIGIN=https://YOUR-SITE` in `.env.production` before `npm run build` (desktop forgot-password uses Supabase `resetPasswordForEmail` with redirect to `/account/reset`).
+4. **Optional — custom SMTP** (higher email volume, branded sender): Supabase → Project Settings → Auth → SMTP. Built-in mail works at low volume for MVP.
+
 ## Quick verify
 
 1. Two signed-in accounts → Add friend by ARK ID → Accept in Notifications.  
 2. Message tab → send text both ways.  
 3. Settings → Account → set a photo → other friend’s contact list shows it (after Storage SQL).  
-4. Non-friends cannot DM each other (harden migration).
+4. Non-friends cannot DM each other (harden migration).  
+5. Auth screen → Forgot password → email arrives with link to `website/account/reset` (after steps above).
 
 ## Not cloud yet (OK for MVP)
 
 - Group chat UI (this PC only)  
 - DM file attachments  
 - Post discussion threads under Networking posts  
+- Windows Authenticode cert (see `build/signing.env.example` + Settings → Updates)

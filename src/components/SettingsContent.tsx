@@ -28,8 +28,8 @@ import { getGgufCtx, ggufCtxCapacityLabel } from '@/lib/ggufContext';
 import {
   User, Palette, Zap, Boxes, Cloud, Shield, HardDrive,
   FolderKanban, Lock, RefreshCw, Check, Cpu, KeyRound,
-  Smartphone, Sparkles, FlaskConical,
-  Mail, BadgeCheck, Trash2, Download, Info, Monitor, Copy, X, FolderOpen, HelpCircle, Ban, Github,
+  Sparkles, FlaskConical,
+  Mail, BadgeCheck, Trash2, Download, Info, Monitor, Copy, X, FolderOpen, Github,
 } from 'lucide-react';
 import { clearLocalAppCaches, clearLocalChatCache } from '@/lib/clearSession';
 import { deleteEngineModel, engineDiskSpace, getEngineStatus, type ArkEngineModel, type ArkEngineStatus } from '@/lib/arkEngine';
@@ -44,10 +44,9 @@ import { isArkDevSession } from '@/lib/arkRuntime';
 import { isBetaSettingsEnabled, isTestersSettingsEnabled } from '@/lib/featurePark';
 import { BrandMark, StatusCheck } from '@/components/BrandMark';
 import { useSocial } from '@/context/SocialContext';
+import { supabase } from '@/lib/supabase';
 
 const REVEAL_FEATURES: { id: ParkId; label: string; description: string }[] = [
-  { id: 'networking', label: 'Networking', description: 'Live. help feed, add/message builders (always on).' },
-  { id: 'message', label: 'Message', description: 'Live. direct messages between ARK users (always on).' },
   { id: 'call', label: 'Call', description: 'Voice calls (microphone + WebRTC). Parked on retail builds until signaling is hardened — enable here on bat/dev only.' },
 ];
 
@@ -71,8 +70,8 @@ const SECTIONS: { id: string; label: string; icon: typeof User; disabled?: boole
   { id: 'projects', label: 'Projects', icon: FolderKanban },
   { id: 'security', label: 'Security', icon: Lock },
   { id: 'updates', label: 'Update', icon: RefreshCw },
-  { id: 'testers', label: 'Testers', icon: FlaskConical, comingSoon: true },
-  { id: 'beta', label: 'Beta', icon: Sparkles, comingSoon: true },
+  { id: 'testers', label: 'Testers', icon: FlaskConical },
+  { id: 'beta', label: 'Beta', icon: Sparkles },
 ];
 
 const AI_MODES = [
@@ -131,7 +130,12 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
     return s;
   });
   useEffect(() => {
-    if (!initialSection || initialSection === 'mcp') return;
+    if (initialSection === 'mcp') {
+      onClose?.();
+      navigate({ name: 'mcp' });
+      return;
+    }
+    if (!initialSection) return;
     if (initialSection === 'testers' && !isTestersSettingsEnabled()) {
       setActiveSection('account');
       return;
@@ -141,7 +145,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
       return;
     }
     setActiveSection(initialSection);
-  }, [initialSection]);
+  }, [initialSection, navigate, onClose]);
   const [prefs, setPrefs] = useState<LocalPrefs>(() => getLocalPrefs());
   const [displayName, setDisplayName] = useState(
     () => getLocalPrefs().displayName || profile?.display_name || 'Guest',
@@ -318,7 +322,6 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
 
   const pushProfileToFriends = async () => {
     try {
-      const { supabase } = await import('@/lib/supabase');
       await supabase.rpc('broadcast_my_profile');
     } catch {
       /* RPC may not be applied yet; friends still refresh via live lookup */
@@ -330,7 +333,6 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
     patchPrefs({ displayName: name });
     if (user && user.id !== 'guest-local') {
       try {
-        const { supabase } = await import('@/lib/supabase');
         await supabase.from('profiles').upsert({
           id: user.id,
           display_name: name,
@@ -366,7 +368,6 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
       }
       // Storage bucket not applied yet — fall back to previous inline behavior.
       if (uploaded.error.startsWith('storage_unavailable:')) {
-        const { supabase } = await import('@/lib/supabase');
         await supabase.from('profiles').upsert({
           id: user.id,
           avatar_url: dataUrl,
@@ -527,14 +528,10 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
     return entry.version === appVersion;
   }).slice(0, 1);
 
-  const navSections = useMemo(() => SECTIONS.map(section => {
-    if (section.id === 'testers') {
-      return { ...section, comingSoon: !isTestersSettingsEnabled() };
-    }
-    if (section.id === 'beta') {
-      return { ...section, comingSoon: !isBetaSettingsEnabled() };
-    }
-    return section;
+  const navSections = useMemo(() => SECTIONS.filter(section => {
+    if (section.id === 'testers' && !isTestersSettingsEnabled()) return false;
+    if (section.id === 'beta' && !isBetaSettingsEnabled()) return false;
+    return true;
   }), []);
 
   return (
@@ -587,7 +584,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
       <div className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden p-4 sm:p-6 lg:p-8">
         <div className={`min-w-0 mx-auto ${activeSection === 'providers' || activeSection === 'models' ? 'max-w-4xl' : 'max-w-2xl'}`}>
           {activeSection === 'account' && (
-            <SettingsSection title="Account" description="Profile, sign in, and session controls">
+            <SettingsSection title="Account">
               <div className="space-y-5">
                 <div className="flex items-start gap-4">
                   <div className="relative shrink-0">
@@ -657,9 +654,6 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                       <Mail className="w-3 h-3" />
                       {user?.email ?? 'guest@ark.local'}
                     </p>
-                    <p className="text-[11px] text-content-tertiary mt-1.5 leading-relaxed">
-                      Click the circle to upload. Photos are cropped to a square and resized. Use × to remove.
-                    </p>
                     <p className="text-[11px] text-content-tertiary mt-1 inline-flex items-center gap-1">
                       <BadgeCheck className="w-3 h-3 text-sky-400" />
                       {user?.id === 'guest-local' ? 'Guest session on this device' : 'Signed in account'}
@@ -703,26 +697,12 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                       {arkCopied ? 'Copied' : 'Copy'}
                     </button>
                   </div>
-                  <p className="text-[11px] text-content-tertiary mt-1.5 leading-relaxed">
-                    This 7-digit ID belongs to this account only. Friends add you with this. not your email.
-                  </p>
                 </div>
                 <Field label="Email" value={user?.email ?? 'guest@ark.local'} onChange={() => {}} disabled />
-                <p className="text-[11px] text-content-tertiary -mt-3">
-                  Email is managed by sign-in (or guest@ark.local for a guest session). It is not editable here.
-                </p>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <InfoCard
-                    title="Plan"
-                    value="Free on this PC"
-                    hint="No billing in ARK yet. Local brain + optional keys you add."
-                  />
-                  <InfoCard
-                    title="Devices"
-                    value="This PC"
-                    hint="Multi-device sync is not live. This row is this machine only."
-                  />
+                  <InfoCard title="Plan" value="Free on this PC" />
+                  <InfoCard title="Devices" value="This PC" />
                 </div>
 
                 <div className="flex flex-wrap gap-2 pt-1 items-center">
@@ -843,7 +823,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
           ) : null}
 
           {activeSection === 'appearance' && (
-            <SettingsSection title="Appearance" description="Theme, density, and visual preferences">
+            <SettingsSection title="Appearance">
               <div className="space-y-6">
                 <div>
                   <label className="block text-xs font-medium text-content-secondary mb-2">Theme</label>
@@ -892,7 +872,6 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                         }`}
                       >
                         <span className="block text-sm font-medium text-content-primary">{d.label}</span>
-                        <span className="block text-[11px] text-content-tertiary mt-0.5">{d.hint}</span>
                       </button>
                     ))}
                   </div>
@@ -916,19 +895,16 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <ToggleRow
                   label="Compact sidebar"
-                  description="Use a narrower icon rail by default"
                   value={prefs.compactSidebar}
                   onChange={v => patchPrefs({ compactSidebar: v })}
                 />
                 <ToggleRow
                   label="Show status bar"
-                  description="Keep build and engine status visible at the bottom"
                   value={prefs.showStatusBar}
                   onChange={v => patchPrefs({ showStatusBar: v })}
                 />
                 <ToggleRow
                   label="Reduce motion"
-                  description="Limit animations and transitions"
                   value={prefs.reduceMotion}
                   onChange={v => patchPrefs({ reduceMotion: v })}
                 />
@@ -938,7 +914,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
           )}
 
           {activeSection === 'ai' && (
-            <SettingsSection title="AI" description="Routing, safety, failover, and local brain tuning">
+            <SettingsSection title="AI">
               <div className="space-y-6 max-w-3xl">
                 {/* Status */}
                 <div className="ark-card p-4 flex items-center gap-3">
@@ -948,22 +924,14 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-content-primary">Routing brain</p>
                     <p className="text-xs text-content-secondary">
-                      Mode: {AI_MODES.find(m => m.value === aiMode)?.label ?? 'Automatic'}
-                    </p>
-                    <p className="text-[11px] text-content-tertiary mt-0.5">
-                      Last answer: {prefs.lastAnsweredLabel || 'None yet this session'}
+                      {AI_MODES.find(m => m.value === aiMode)?.label ?? 'Automatic'}
                     </p>
                   </div>
                   <Sparkles className="w-4 h-4 text-sky-400 shrink-0" />
                 </div>
 
                 <div className="rounded-xl border border-surface-border p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-content-primary">ARK Brain details</p>
-                    <p className="text-xs text-content-tertiary mt-1 leading-relaxed">
-                      Engine status, active local brain, localhost API URL, and access token live in Models.
-                    </p>
-                  </div>
+                  <p className="text-sm font-medium text-content-primary">ARK Brain details</p>
                   <button
                     type="button"
                     className="ark-btn-secondary text-xs shrink-0 self-start sm:self-center"
@@ -983,10 +951,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                 />
 
                 {/* Routing mode */}
-                <SettingsGroup
-                  title="Routing mode"
-                  description="How ARK chooses local vs cloud models for chat and media."
-                >
+                <SettingsGroup title="Routing mode">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     {AI_MODES.map(mode => (
                       <button
@@ -1007,7 +972,6 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                             <p className={`text-sm font-medium ${aiMode === mode.value ? 'text-ark-blue-300' : 'text-content-primary'}`}>
                               {mode.label}
                             </p>
-                            <p className="text-[11px] text-content-tertiary mt-0.5 leading-snug">{mode.description}</p>
                           </div>
                           {aiMode === mode.value && <Check className="w-4 h-4 text-ark-blue-400 shrink-0" />}
                         </div>
@@ -1017,45 +981,26 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                 </SettingsGroup>
 
                 {/* Content safety. NSFW in one self-contained card */}
-                <SettingsGroup
-                  title="Content safety (Image)"
-                  description="Controls adult image generation and how free image hosts are prompted."
-                >
+                <SettingsGroup title="Content safety (Image)">
                   <div className="ark-card p-4 space-y-3">
                     <ToggleRow
                       label="Allow NSFW content"
-                      description={
-                        prefs.allowNsfw
-                          ? 'On. Image mode may generate nude or adult content. Chat still follows your routing mode.'
-                          : 'Off (default). Image requests for nudity or porn are blocked in chat. Free image hosts also receive SFW constraints so they stay family-safe.'
-                      }
                       value={prefs.allowNsfw}
                       onChange={v => patchPrefs({ allowNsfw: v })}
                       bare
                     />
-                    <p className="text-[11px] text-content-tertiary leading-relaxed border-t border-surface-border pt-3">
-                      This toggle only affects <span className="text-content-secondary">Image</span> generation.
-                      When off, ARK checks your prompt before sending and adds safe-for-work hints to Pollinations / Horde.
-                      When on, those blocks are removed. It does not change how Chat text answers work.
-                    </p>
                   </div>
                 </SettingsGroup>
 
-                {/* Failover */}
-                <SettingsGroup
-                  title="Failover & cloud"
-                  description="What happens when a local model is busy, offline, or out of capacity."
-                >
+                <SettingsGroup title="Failover & cloud">
                   <div className="grid grid-cols-1 gap-3">
                     <ToggleRow
                       label="Auto failover"
-                      description="If the pinned cloud model fails, try other cloud keys. Local ↔ cloud hops still apply for ARK Auto. A cloud model you pick never snaps back to local."
                       value={prefs.autoFailover}
                       onChange={v => patchPrefs({ autoFailover: v })}
                     />
                     <ToggleRow
                       label="Ask before cloud failover"
-                      description="Show a confirmation before a local request is sent to a cloud provider."
                       value={prefs.askBeforeCloudFailover}
                       onChange={v => patchPrefs({ askBeforeCloudFailover: v })}
                     />
@@ -1063,20 +1008,15 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                 </SettingsGroup>
 
                 {/* Chat behavior */}
-                <SettingsGroup
-                  title="Chat behavior"
-                  description="How replies stream and how much context carries into the next message."
-                >
+                <SettingsGroup title="Chat behavior">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <ToggleRow
                       label="Stream responses"
-                      description="Show tokens as they arrive instead of waiting for the full answer."
                       value={prefs.streamResponses}
                       onChange={v => patchPrefs({ streamResponses: v })}
                     />
                     <ToggleRow
                       label="Remember chat context"
-                      description="Keep prior messages in long chats and builds. Turn off only if you want each message treated as a fresh start."
                       value={prefs.rememberContext}
                       onChange={v => patchPrefs({ rememberContext: v })}
                     />
@@ -1084,20 +1024,15 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                 </SettingsGroup>
 
                 {/* Model discovery */}
-                <SettingsGroup
-                  title="Model discovery"
-                  description="Automatic search and install when ARK needs a new local brain."
-                >
+                <SettingsGroup title="Model discovery">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <ToggleRow
                       label="Hunt new models online"
-                      description="Use this PC’s specs to search Hugging Face for GGUF brains that fit."
                       value={prefs.huntInternetModels}
                       onChange={v => patchPrefs({ huntInternetModels: v })}
                     />
                     <ToggleRow
                       label="Download next when a model runs out"
-                      description="If chat, image, or video hits a limit, ARK starts installing the next fitting local brain."
                       value={prefs.autoInstallHuntModels}
                       onChange={v => patchPrefs({ autoInstallHuntModels: v })}
                     />
@@ -1105,29 +1040,17 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                 </SettingsGroup>
 
                 {/* Local GGUF */}
-                <SettingsGroup
-                  title="Local GGUF (advanced)"
-                  description="Fine-tune on-device text models only. Does not affect cloud chat or image/video hosts."
-                >
+                <SettingsGroup title="Local GGUF (advanced)">
                   <div className="rounded-xl border border-surface-border p-5 space-y-6 bg-surface/30">
-                    <p className="text-xs text-content-tertiary leading-relaxed">
-                      These settings apply when ARK runs a <span className="text-content-secondary">local GGUF brain</span>.
-                      They control creativity and how long each reply is allowed to grow before stopping.
-                    </p>
                     <div className="rounded-lg border border-surface-border/80 bg-ark-navy-950/40 px-3 py-2.5">
                       <p className="text-[11px] font-medium text-content-secondary">Local chat history capacity</p>
                       <p className="text-sm text-content-primary mt-0.5 tabular-nums">
                         {ggufCtxCapacityLabel()}
                       </p>
-                      <p className="text-[10px] text-content-tertiary mt-1 leading-relaxed">
-                        ARK reads this PC’s RAM and picks the largest safe context (up to 65,536 tokens).
-                        More RAM = longer threads before older turns are compressed. Cloud chats use the provider’s own limits.
-                      </p>
                     </div>
                     <GgufSliderRow
                       label="Temperature"
                       valueLabel={Number(prefs.ggufTemperature ?? 0.55).toFixed(2)}
-                      hint="Lower = focused and predictable. Higher = more creative and varied. Default 0.55 is a good balance for everyday chat."
                       min={0.1}
                       max={1.2}
                       step={0.05}
@@ -1139,7 +1062,6 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                     <GgufSliderRow
                       label="Max output tokens"
                       valueLabel={String(prefs.ggufNPredict ?? 4096)}
-                      hint={`Cap on how many tokens the local model may write per reply — not your chat history size. History uses a RAM-scaled window (${getGgufCtx().toLocaleString()} tokens on this PC).`}
                       min={4096}
                       max={8192}
                       step={256}
@@ -1155,7 +1077,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
           )}
 
           {activeSection === 'models' && (
-            <SettingsSection title="Models" description="Same library as the Models page. Cloud names need a saved key.">
+            <SettingsSection title="Models">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {DEFAULT_MODELS.map(m => {
                   const providerId = m.source === 'cloud'
@@ -1180,7 +1102,11 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                       }`}
                     >
                       <p className="text-sm font-medium text-content-primary truncate">{m.label}</p>
-                      <p className="text-[11px] text-content-tertiary truncate">{m.detail}{installed ? ' · installed' : ''}{missingKey ? ' · key needed' : ''}</p>
+                      {(installed || missingKey) && (
+                        <p className="text-[10px] text-content-tertiary mt-0.5">
+                          {installed ? 'Installed' : ''}{installed && missingKey ? ' · ' : ''}{missingKey ? 'Key needed' : ''}
+                        </p>
+                      )}
                       {isSelected && (
                         <p className="text-[10px] text-ark-blue-300 mt-1">Selected</p>
                       )}
@@ -1202,21 +1128,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
           )}
 
           {activeSection === 'providers' && (
-            <SettingsSection
-              title="Providers"
-              description="Connect once. Keys stay on this device (OS-encrypted in Desktop) and power ARK Auto failover."
-            >
-              <SettingsHelp label="What do I do with API keys?">
-                <ol className="list-decimal pl-4 space-y-1.5">
-                  <li>Pick a provider below (Groq / Google / OpenRouter are good free starts).</li>
-                  <li>Click <strong className="font-medium text-content-secondary">Add</strong>, open their site, create an API key, and copy it.</li>
-                  <li>Paste the key here → <strong className="font-medium text-content-secondary">Save key</strong> → optional <strong className="font-medium text-content-secondary">Test key</strong>.</li>
-                  <li>In Chat, pick that cloud model (or ARK Auto). Keys never leave this PC to ARK’s servers.</li>
-                </ol>
-                <p className="mt-2 text-[11px] text-content-tertiary leading-relaxed">
-                  No key needed for local models under Models / Local AI. Paid providers need a key from their dashboard.
-                </p>
-              </SettingsHelp>
+            <SettingsSection title="Providers">
               <div className="space-y-3">
                 {secretsEncrypted === false && window.arkDesktop ? (
                   <div className="rounded-xl border border-rose-500/40 bg-rose-950/30 px-4 py-3">
@@ -1253,7 +1165,6 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                             <BrandMark id={p.id} name={p.name} size="sm" />
                             <div className="min-w-0">
                               <p className="text-sm font-medium text-content-primary truncate">{p.name}</p>
-                              <p className="text-[11px] text-content-tertiary truncate">{p.hint}</p>
                             </div>
                           </div>
                           <div className="flex items-center gap-1.5 shrink-0">
@@ -1393,12 +1304,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
 
                 <div className="rounded-xl border border-surface-border p-3 space-y-2.5">
                   <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-content-primary">Plugin OAuth client IDs</p>
-                      <p className="text-[11px] text-content-tertiary mt-0.5 leading-snug">
-                        Register once, paste public client IDs, then one-click sign-in in Build.
-                      </p>
-                    </div>
+                    <p className="text-sm font-medium text-content-primary">Plugin OAuth client IDs</p>
                     <button
                       type="button"
                       className="text-[11px] text-sky-400 hover:text-sky-300 shrink-0"
@@ -1424,22 +1330,10 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
           )}
 
           {activeSection === 'privacy' && (
-            <SettingsSection title="Privacy" description="What stays on this device and what can leave">
+            <SettingsSection title="Privacy">
               <div className="space-y-3">
-                <div className="rounded-xl border border-surface-border bg-surface-hover/30 px-3.5 py-3 flex items-start gap-2.5">
-                  <Shield className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-                  <div>
-                    <p className="text-sm font-medium text-content-primary">API keys stay on this device</p>
-                    <p className="text-xs text-content-tertiary mt-0.5 leading-relaxed">
-                      Provider keys are stored locally
-                      {window.arkDesktop ? ' with OS-level encryption in Desktop' : ''}
-                      . They are only sent to the provider you connected. never to an ARK cloud for storage.
-                    </p>
-                  </div>
-                </div>
                 <ToggleRow
                   label="Keep project files on this device"
-                  description="Project source code stays local by default"
                   value={keepLocal}
                   onChange={v => {
                     patchPrefs({ keepFilesLocal: v });
@@ -1448,9 +1342,6 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                 />
                 <ToggleRow
                   label="Allow optional cloud sync"
-                  description={prefs.allowCloudSync
-                    ? 'On. ARK still has no live multi-device sync. This toggle is saved for later.'
-                    : 'Off. not syncing. Multi-device project sync is not live yet.'}
                   value={allowSync}
                   onChange={v => {
                     patchPrefs({ allowCloudSync: v });
@@ -1459,7 +1350,6 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                 />
                 <ToggleRow
                   label="Send anonymous diagnostics"
-                  description="Off by default. When on, crash-style notes would stay on this PC unless you add a backend. ARK does not send them today."
                   value={diagnostics}
                   onChange={v => {
                     patchPrefs({ sendDiagnostics: v });
@@ -1468,25 +1358,17 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                 />
                 <ToggleRow
                   label="Share usage stats"
-                  description="Optional product analytics with no project contents"
                   value={prefs.shareUsageStats}
                   onChange={v => patchPrefs({ shareUsageStats: v })}
                 />
                 <ToggleRow
                   label="Clear clipboard after paste"
-                  description="Reduce leftover secrets after pasting API keys"
                   value={prefs.clearClipboardAfterPaste}
                   onChange={v => patchPrefs({ clearClipboardAfterPaste: v })}
                 />
                 <div className="rounded-xl border border-surface-border p-4 space-y-3 mt-2">
-                  <div className="flex items-start gap-2.5">
-                    <Ban className="w-4 h-4 text-rose-300/90 shrink-0 mt-0.5" />
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium text-content-primary">Blocked users</p>
-                      <p className="text-xs text-content-tertiary mt-0.5 leading-relaxed">
-                        Blocked people cannot add you or message you. Unblock to allow friend requests again.
-                      </p>
-                    </div>
+                  <div className="flex items-center justify-between gap-2.5">
+                    <p className="text-sm font-medium text-content-primary">Blocked users</p>
                     <button
                       type="button"
                       className="ark-btn-secondary text-xs shrink-0"
@@ -1531,12 +1413,8 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                   <Trash2 className="w-4 h-4" />
                   {cacheBusy ? 'Clearing…' : 'Clear local chat cache'}
                 </button>
-                <p className="text-[11px] text-content-tertiary">
-                  Clear cache removes chat threads stored in this browser profile. Models, keys, and project folders stay.
-                </p>
                 <div className="rounded-xl border border-surface-border p-4 space-y-2 mt-2">
                   <p className="text-sm font-medium text-content-primary">Local reports & update errors</p>
-                  <p className="text-xs text-content-tertiary">Crash and update logs stay on this PC only.</p>
                   {localReports.length === 0 ? (
                     <p className="text-xs text-content-tertiary">No local reports yet.</p>
                   ) : (
@@ -1559,12 +1437,6 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                     </button>
                   </div>
                 </div>
-                <p className="text-[11px] text-amber-300/80 mt-2">
-                  Full uninstall via Setup.exe removes downloaded models, API keys, and local app data on this PC
-                  (<code>deleteAppDataOnUninstall</code>). In-app updates keep your keys. Clearing chat cache does not
-                  remove API keys — remove them under Connect. Export settings first if you need a copy. Quit from the
-                  tray menu stops the brain; closing the window only hides to tray.
-                </p>
                 <button
                   type="button"
                   className="ark-btn-secondary w-full"
@@ -1590,7 +1462,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
           )}
 
           {activeSection === 'storage' && (
-            <SettingsSection title="Storage" description="Models, projects, and cache on this PC">
+            <SettingsSection title="Storage">
               <div className="space-y-4 min-w-0">
                 <StorageBar
                   label="Model storage"
@@ -1613,12 +1485,10 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                   <InfoCard
                     title="Installed models"
                     value={String(installedModels.length)}
-                    hint="Delete from the list below or Local AI"
                   />
                   <InfoCard
                     title="Models folder"
                     value={engineStatus?.modelsDirIsCustom ? 'Custom' : 'Default'}
-                    hint={engineStatus?.modelsDir ? 'Path shown below' : 'Open ARK Desktop to manage files'}
                   />
                 </div>
 
@@ -1627,9 +1497,6 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                     <p className="text-sm font-medium text-content-primary flex items-center gap-2">
                       <FolderOpen className="w-4 h-4 text-sky-400 shrink-0" />
                       Download location
-                    </p>
-                    <p className="text-[11px] text-content-tertiary leading-relaxed">
-                      GGUF brains and local image weights are saved here when you install from Models or Local AI.
                     </p>
                     <code className="block text-[11px] font-mono text-content-secondary break-all rounded-lg bg-surface-active/60 border border-surface-border px-3 py-2">
                       {engineStatus.modelsDir}
@@ -1662,7 +1529,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                   <p className="text-xs font-medium text-content-secondary mb-2">Downloaded models</p>
                   {installedModels.length === 0 ? (
                     <p className="text-xs text-content-tertiary rounded-xl border border-surface-border px-3.5 py-3">
-                      No GGUF brains on this PC yet. Install from Models or Local AI.
+                      No models installed
                     </p>
                   ) : (
                     <div className="rounded-xl border border-surface-border divide-y divide-surface-border/80 overflow-hidden">
@@ -1701,9 +1568,6 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                     <Trash2 className="w-4 h-4" />
                     {cacheBusy ? 'Clearing…' : 'Clear cache'}
                   </button>
-                  <p className="text-[11px] text-content-tertiary w-full">
-                    Clears chat threads and local reports. Does not delete GGUF files, projects, or API keys.
-                  </p>
                   <button type="button" className="ark-btn-secondary" onClick={() => { onClose?.(); navigate({ name: 'local-ai' }); }}>
                     Manage models
                   </button>
@@ -1713,7 +1577,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
           )}
 
           {activeSection === 'hardware' && (
-            <SettingsSection title="Hardware" description="Detected on this PC">
+            <SettingsSection title="Hardware">
               <div className="space-y-4">
                 <div className="rounded-xl border border-surface-border px-4 py-3 space-y-2">
                   <div className="flex justify-between gap-3 text-sm">
@@ -1781,27 +1645,13 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
           )}
 
           {activeSection === 'projects' && (
-            <SettingsSection title="Projects" description="Defaults for new builds and folders">
-              <SettingsHelp label="What are locations for?">
-                <p className="leading-relaxed">
-                  <strong className="font-medium text-content-secondary">Default project location</strong> is where new builds
-                  and “Open folder” prefer to start (usually something like your Desktop or a Projects folder).
-                </p>
-                <ul className="mt-2 list-disc pl-4 space-y-1">
-                  <li>Type a folder path or name hint ARK should use for new work.</li>
-                  <li>Pick a default type (Web / API / Desktop) for new projects.</li>
-                  <li>Folder access toggles (Desktop / Documents / Full PC) live under <strong className="font-medium text-content-secondary">Security</strong> — turn those on if Chat should open folders by name.</li>
-                </ul>
-              </SettingsHelp>
+            <SettingsSection title="Projects">
               <div className="space-y-4">
                 <Field
                   label="Default project location"
                   value={prefs.projectLocation}
                   onChange={v => patchPrefs({ projectLocation: v })}
                 />
-                <p className="text-[11px] text-content-tertiary -mt-2">
-                  New projects and Open folder use this folder hint and the default type below.
-                </p>
                 <Field
                   label="Preferred language"
                   value={prefs.preferredLanguage}
@@ -1834,13 +1684,11 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
 
                 <ToggleRow
                   label="Auto save project edits"
-                  description="Keep explorer and code panel changes without asking"
                   value={prefs.autoSaveProjects}
                   onChange={v => patchPrefs({ autoSaveProjects: v })}
                 />
                 <ToggleRow
                   label="Open last project on launch"
-                  description="Jump back into your most recent workspace"
                   value={prefs.openLastProjectOnLaunch}
                   onChange={v => patchPrefs({ openLastProjectOnLaunch: v })}
                 />
@@ -1849,25 +1697,10 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
           )}
 
           {activeSection === 'security' && (
-            <SettingsSection title="Security" description="Protect this PC and keep agent file writes inside the project sandbox">
-              <SettingsHelp label="Help with locations &amp; folder access">
-                <ul className="list-disc pl-4 space-y-1.5">
-                  <li><strong className="font-medium text-content-secondary">Desktop / Documents</strong> — allow ARK to work in those folders when you ask in Chat.</li>
-                  <li><strong className="font-medium text-content-secondary">Full PC access</strong> — broader access under your user profile (still not system folders). Only turn on if you need it.</li>
-                  <li><strong className="font-medium text-content-secondary">Sandbox agent</strong> — keeps automatic edits inside the project; blocks risky paths like <code className="text-[10px]">.env</code>.</li>
-                  <li>PIN only locks the ARK window on this PC. It is not your account password.</li>
-                </ul>
-              </SettingsHelp>
+            <SettingsSection title="Security">
               <div className="space-y-4">
                 <div className="rounded-xl border border-surface-border p-4 space-y-3">
-                  <div>
-                    <p className="text-sm font-medium text-content-primary">Local PIN (UI lock only)</p>
-                    <p className="text-xs text-content-tertiary mt-0.5">
-                      {hasPinSet()
-                        ? 'PIN is set on this device and locks the app window. It is not encryption, login security, or cloud recovery — API keys stay in OS storage separately.'
-                        : 'Set a 4–8 digit PIN to lock the app window on this PC. Privacy screen only — not encryption, not account recovery. API keys stay in OS storage separately.'}
-                    </p>
-                  </div>
+                  <p className="text-sm font-medium text-content-primary">Local PIN (UI lock only)</p>
                   <div className="grid gap-2 sm:grid-cols-2">
                     <input
                       type="password"
@@ -1929,10 +1762,6 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                     ) : null}
                   </div>
                   {pinMsg ? <p className="text-xs text-content-tertiary">{pinMsg}</p> : null}
-                  <p className="text-[11px] text-content-tertiary">
-                    Forgot the PIN? Use Clear PIN above, or open the local recovery note (same folder as email/password).
-                    After 5 wrong tries, PIN entry locks for 1 minute. Email / authenticator PIN reset comes later.
-                  </p>
                   <button
                     type="button"
                     className="text-[11px] text-sky-400 hover:text-sky-300"
@@ -1948,7 +1777,6 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
 
                 <ToggleRow
                   label="Require PIN on launch"
-                  description={hasPinSet() ? 'Lock ARK until you enter your PIN after opening the app' : 'Set a PIN first to enable launch lock'}
                   value={prefs.requirePinOnLaunch}
                   onChange={v => {
                     if (v && !hasPinSet()) {
@@ -1960,7 +1788,6 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                 />
                 <ToggleRow
                   label="Lock when this PC sleeps"
-                  description={hasPinSet() ? 'Require PIN after Windows sleep. Locks the app UI only. keys stay in OS encryption.' : 'Set a PIN first'}
                   value={prefs.lockOnSleep}
                   onChange={v => {
                     if (v && !hasPinSet()) {
@@ -1972,12 +1799,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                 />
 
                 <div className="rounded-xl border border-surface-border p-4 flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-content-primary">Auto lock</p>
-                    <p className="text-xs text-content-tertiary mt-0.5">
-                      Lock after idle time when PIN on launch is enabled
-                    </p>
-                  </div>
+                  <p className="text-sm font-medium text-content-primary">Auto lock</p>
                   <select
                     value={String(prefs.autoLockMinutes)}
                     disabled={!prefs.requirePinOnLaunch || !hasPinSet()}
@@ -1991,20 +1813,9 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                 </div>
 
                 <div className="rounded-xl border border-surface-border p-4 space-y-3">
-                  <div className="flex items-start gap-3 min-w-0">
-                    <div className="w-10 h-10 rounded-lg bg-sky-500/10 flex items-center justify-center shrink-0">
-                      <Smartphone className="w-5 h-5 text-sky-400" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-content-primary">Extra unlock code</p>
-                      <p className="text-xs text-content-tertiary mt-0.5">
-                        After PIN, require a local security code to unlock the app UI. This does not encrypt keys and is not SMS or an authenticator app.
-                      </p>
-                    </div>
-                  </div>
+                  <p className="text-sm font-medium text-content-primary">Extra unlock code</p>
                   <ToggleRow
                     label="Require second factor"
-                    description={hasSecondFactorSet() ? 'Enabled when a security code is saved below' : 'Set a security code before turning this on'}
                     value={prefs.twoFactorEnabled}
                     onChange={v => {
                       if (v && !hasSecondFactorSet()) {
@@ -2077,52 +1888,42 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
 
                 <ToggleRow
                   label="Sandbox agent actions"
-                  description="Block agent writes to .env, node_modules, lockfiles, and paths outside the project folder"
                   value={prefs.sandboxAgent}
                   onChange={v => patchPrefs({ sandboxAgent: v })}
                 />
 
                 <ToggleRow
                   label="Allow Desktop folder access"
-                  description="Read and edit projects under your Desktop, not all of C:"
                   value={prefs.allowDesktopFolderAccess}
                   onChange={v => patchPrefs({ allowDesktopFolderAccess: v })}
                 />
                 <ToggleRow
                   label="Allow Documents folder access"
-                  description="Read and edit projects under your Documents, not all of C:"
                   value={prefs.allowDocumentsFolderAccess}
                   onChange={v => patchPrefs({ allowDocumentsFolderAccess: v })}
                 />
 
                 <ToggleRow
                   label="Full PC access (files)"
-                  description="Let ARK read and edit folders across your user profile when you ask, e.g. Desktop projects by name in chat"
                   value={prefs.allowFullPcAccess}
                   onChange={v => patchPrefs({ allowFullPcAccess: v })}
                 />
 
                 <div>
                   <label className="block text-xs font-medium text-content-secondary mb-2">Execution &amp; approvals</label>
-                  <p className="text-[11px] text-content-tertiary mb-3 leading-relaxed">
-                    How ARK runs tools like npm install, pip, and file cleanup when you ask in Chat.
-                  </p>
                   <div className="rounded-xl border border-surface-border overflow-hidden divide-y divide-surface-border">
                     {([
                       {
                         value: 'allowlist' as const,
                         title: 'Allowlist',
-                        detail: 'npm, pip, git only. Confirm each time',
                       },
                       {
                         value: 'auto_review' as const,
                         title: 'Auto-review',
-                        detail: 'Allowlisted runs automatically; others ask',
                       },
                       {
                         value: 'run_all' as const,
                         title: 'Run everything',
-                        detail: 'Allowlisted tools run without extra prompts',
                       },
                     ]).map(opt => {
                       const active = prefs.agentExecutionMode === opt.value;
@@ -2149,24 +1950,15 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                             <span className={`block text-sm font-medium ${active ? 'text-sky-300' : 'text-content-primary'}`}>
                               {opt.title}
                             </span>
-                            <span className="block text-[11px] text-content-tertiary mt-0.5 leading-snug">{opt.detail}</span>
                           </span>
                         </button>
                       );
                     })}
                   </div>
-                  <p className="text-[11px] text-content-tertiary mt-2 leading-relaxed">
-                    {prefs.agentExecutionMode === 'run_all'
-                      ? 'Allowlisted installs and git commands can run when you ask. System folders stay protected.'
-                      : prefs.agentExecutionMode === 'auto_review'
-                        ? 'Known installs (npm, pip, …) run after one confirm; unknown commands need approval.'
-                        : 'Each install or shell command asks before it runs.'}
-                  </p>
                 </div>
 
                 <ToggleRow
                   label="Chat-first layout"
-                  description="Prefer Chat for project work (Code tab is removed from the sidebar)"
                   value={prefs.chatFirst}
                   onChange={v => patchPrefs({ chatFirst: v })}
                 />
@@ -2177,7 +1969,6 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-content-primary">Credential storage</p>
-                    <p className="text-xs text-content-tertiary">API keys stored locally on this device</p>
                   </div>
                   <span className="text-xs text-ark-accent-green shrink-0">Active</span>
                 </div>
@@ -2186,7 +1977,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
           )}
 
           {activeSection === 'updates' && (
-            <SettingsSection title="Update" description="Check for a new ARK build and install it here">
+            <SettingsSection title="Update">
               <div className="space-y-5">
                 <div className="rounded-3xl border border-surface-border bg-ark-navy-900/55 p-5 sm:p-6 flex flex-col gap-4 shadow-[0_8px_28px_rgba(0,0,0,0.28)]">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -2237,15 +2028,9 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                       )}
                     </div>
                   </div>
-                  <p className="text-[11px] text-content-tertiary leading-relaxed">
-                    Use <strong className="font-medium text-content-secondary">Check for update</strong>, then press{' '}
-                    <strong className="font-medium text-content-secondary">Update</strong> when a newer build is offered.
-                    That downloads ARK-Setup.exe from GitHub Releases and installs it. The GitHub button opens the public
-                    releases page if you prefer a manual install.
-                  </p>
                   {signingStatus ? (
                     <p className="text-[11px] text-content-tertiary leading-relaxed">
-                      Code signing: {signingStatus}. See <code className="text-[10px]">build/signing.env.example</code> to configure Authenticode.
+                      Code signing: {signingStatus}
                     </p>
                   ) : null}
                 </div>
@@ -2272,7 +2057,6 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
 
                 <ToggleRow
                   label="Launch ARK when Windows starts"
-                  description="Open ARK automatically after you sign in to this PC"
                   value={prefs.launchOnStartup}
                   onChange={v => {
                     patchPrefs({ launchOnStartup: v });
@@ -2287,13 +2071,11 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                 />
                 <ToggleRow
                   label="Automatically check for updates"
-                  description="Look for new builds when ARK starts"
                   value={prefs.autoCheckUpdates}
                   onChange={v => patchPrefs({ autoCheckUpdates: v })}
                 />
                 <ToggleRow
                   label="Notify when an update is ready"
-                  description="Show a badge when a new version is available"
                   value={prefs.notifyOnUpdate}
                   onChange={v => patchPrefs({ notifyOnUpdate: v })}
                 />
@@ -2344,63 +2126,29 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
           )}
 
           {activeSection === 'testers' && (
-            <SettingsSection
-              title="For testers"
-              description={isArkDevSession()
-                ? 'Source build (Open-ARK-Build.bat). reveal parked features and test before you ship an installer.'
-                : 'Quick path to a first real reply, reveal parked features, then tell us what to improve'}
-            >
+            <SettingsSection title="Testers">
               {isArkDevSession() && (
-                <div className="rounded-xl border border-sky-500/25 bg-sky-500/10 p-4 mb-3 text-xs text-sky-100/90 leading-relaxed">
-                  You are on a <strong className="font-medium">dev profile</strong> (AppData/ARK-Dev). Models, keys, and chats here stay separate from an installed Start Menu ARK so the bat and Setup.exe never fight over the same files.
+                <div className="rounded-xl border border-sky-500/25 bg-sky-500/10 p-3 mb-3 text-xs text-sky-100/90">
+                  Dev profile · separate AppData from retail ARK
                 </div>
               )}
               <div className="space-y-3">
                 <div className="rounded-xl border border-surface-border p-4 space-y-3">
-                  <p className="text-sm font-medium text-content-primary">Reveal parked features</p>
-                  <p className="text-xs text-content-tertiary leading-relaxed">
-                    These surfaces are wired and working. Toggles only affect this PC. sidebar items appear when turned on.
-                  </p>
+                  <p className="text-sm font-medium text-content-primary">Experimental</p>
                   {REVEAL_FEATURES.map(opt => {
                     void featureTick;
-                    const lockedOn = opt.id === 'networking' || opt.id === 'message';
                     return (
                       <ToggleRow
                         key={opt.id}
                         label={opt.label}
-                        description={opt.description}
                         value={isRevealed(opt.id)}
                         onChange={v => setRevealed(opt.id, v)}
-                        disabled={lockedOn}
                       />
                     );
                   })}
                 </div>
                 <div className="rounded-xl border border-surface-border p-4 space-y-2">
-                  <p className="text-sm font-medium text-content-primary">First successful chat</p>
-                  <ol className="text-xs text-content-tertiary space-y-1.5 list-decimal list-inside leading-relaxed">
-                    <li>Connect a free key (Settings → Providers or the Chat “Connect free key” link), or</li>
-                    <li>Open Models → Engine (or Local AI) → Install recommended → wait until it says ready</li>
-                    <li>Chat with ARK Auto selected. try “Hello”</li>
-                  </ol>
-                </div>
-                <div className="rounded-xl border border-surface-border p-4 space-y-2">
-                  <p className="text-sm font-medium text-content-primary">Image &amp; video</p>
-                  <p className="text-xs text-content-tertiary leading-relaxed">
-                    Expect real images when a free path works. Video may show a labeled motion-still preview when MP4 hosts need credits. reopen creations from Recent.
-                  </p>
-                </div>
-                <div className="rounded-xl border border-surface-border p-4 space-y-2">
-                  <p className="text-sm font-medium text-content-primary">Updates</p>
-                  <p className="text-xs text-content-tertiary leading-relaxed">
-                    Use a packaged install (not the build bat). Settings → Update → Check for update, then Update when offered.
-                  </p>
-                </div>
-                <div className="rounded-xl border border-surface-border p-4 space-y-2">
                   <p className="text-sm font-medium text-content-primary">Feedback</p>
-                  <p className="text-xs text-content-tertiary leading-relaxed">
-                    Open a GitHub issue on the ARK repo with what worked, what confused you, and what you’d change.
-                  </p>
                   <button
                     type="button"
                     className="ark-btn-secondary text-xs"
@@ -2410,10 +2158,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                   </button>
                 </div>
                 <div className="rounded-xl border border-surface-border p-4 space-y-2">
-                  <p className="text-sm font-medium text-content-primary">Re-run first-time setup</p>
-                  <p className="text-xs text-content-tertiary leading-relaxed">
-                    Clears the setup flag so onboarding shows again on next launch (keys and models stay).
-                  </p>
+                  <p className="text-sm font-medium text-content-primary">Re-run setup</p>
                   <button
                     type="button"
                     className="ark-btn-secondary text-xs"
@@ -2431,21 +2176,13 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
           )}
 
           {activeSection === 'beta' && (
-            <SettingsSection title="Beta channel" description="Opt into beta builds and changelog notes on this PC">
+            <SettingsSection title="Beta channel">
               <div className="space-y-4">
                 <ToggleRow
                   label="Beta updates"
-                  description="Show beta changelog entries and prefer beta builds when Updates finds them"
                   value={prefs.updateChannel === 'beta'}
                   onChange={v => patchPrefs({ updateChannel: v ? 'beta' : 'stable' })}
                 />
-                <div className="rounded-xl border border-surface-border p-4 space-y-2">
-                  <p className="text-sm font-medium text-content-primary">What this does</p>
-                  <p className="text-xs text-content-tertiary leading-relaxed">
-                    Stable stays the default. Updates checks GitHub Releases
-                    {prefs.updateChannel === 'beta' ? ' and prefers pre-release / beta tags on this PC.' : ' for the latest stable tag.'}
-                  </p>
-                </div>
               </div>
             </SettingsSection>
           )}
@@ -2455,34 +2192,11 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
   );
 }
 
-function SettingsSection({ title, description, children }: { title: string; description: string; children: React.ReactNode }) {
+function SettingsSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="animate-fade-in min-w-0">
-      <h1 className="text-xl font-bold text-content-primary mb-1">{title}</h1>
-      <p className="text-sm text-content-secondary mb-4">{description}</p>
+      <h1 className="text-xl font-bold text-content-primary mb-4">{title}</h1>
       {children}
-    </div>
-  );
-}
-
-function SettingsHelp({ label, children }: { label: string; children: React.ReactNode }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <div className="mb-4">
-      <button
-        type="button"
-        onClick={() => setOpen(v => !v)}
-        className="inline-flex items-center gap-1.5 rounded-full border border-surface-border px-3 py-1.5 text-xs text-content-secondary hover:text-content-primary hover:bg-surface-hover/60"
-        aria-expanded={open}
-      >
-        <HelpCircle className="w-3.5 h-3.5 shrink-0" />
-        {open ? 'Hide help' : label}
-      </button>
-      {open ? (
-        <div className="mt-2 rounded-xl border border-sky-500/25 bg-sky-500/5 px-3.5 py-3 text-xs text-content-secondary leading-relaxed">
-          {children}
-        </div>
-      ) : null}
     </div>
   );
 }
@@ -2529,7 +2243,6 @@ function OAuthClientRow({
           Open console
         </button>
       </div>
-      <p className="text-[11px] text-content-tertiary leading-relaxed">{setup.steps}</p>
       <div className="flex gap-2 items-center">
         <input
           type="text"
@@ -2590,19 +2303,14 @@ function Field({
 
 function SettingsGroup({
   title,
-  description,
   children,
 }: {
   title: string;
-  description: string;
   children: React.ReactNode;
 }) {
   return (
     <section className="space-y-3">
-      <div>
-        <h3 className="text-sm font-semibold text-content-primary">{title}</h3>
-        <p className="text-xs text-content-tertiary mt-1 leading-relaxed max-w-2xl">{description}</p>
-      </div>
+      <h3 className="text-sm font-semibold text-content-primary">{title}</h3>
       {children}
     </section>
   );
@@ -2611,7 +2319,6 @@ function SettingsGroup({
 function GgufSliderRow({
   label,
   valueLabel,
-  hint,
   min,
   max,
   step,
@@ -2622,7 +2329,6 @@ function GgufSliderRow({
 }: {
   label: string;
   valueLabel: string;
-  hint: string;
   min: number;
   max: number;
   step: number;
@@ -2637,7 +2343,6 @@ function GgufSliderRow({
         <p className="text-sm font-medium text-content-primary">{label}</p>
         <span className="text-xs font-mono text-ark-blue-300 tabular-nums shrink-0">{valueLabel}</span>
       </div>
-      <p className="text-[11px] text-content-tertiary leading-relaxed">{hint}</p>
       <input
         type="range"
         min={min}
@@ -2657,14 +2362,12 @@ function GgufSliderRow({
 
 function ToggleRow({
   label,
-  description,
   value,
   onChange,
   disabled,
   bare,
 }: {
   label: string;
-  description: string;
   value: boolean;
   onChange: (v: boolean) => void;
   disabled?: boolean;
@@ -2675,7 +2378,6 @@ function ToggleRow({
     <div className={`flex items-center justify-between gap-4 min-w-0 ${bare ? '' : 'p-4 ark-card'} ${disabled ? 'opacity-70' : ''}`}>
       <div className="flex-1 min-w-0 pr-2">
         <p className="text-sm font-medium text-content-primary">{label}</p>
-        <p className="text-xs text-content-tertiary mt-1 leading-relaxed">{description}</p>
       </div>
       <button
         type="button"
@@ -2709,12 +2411,11 @@ function ThemeCard({ label, active, onClick }: { label: string; active: boolean;
   );
 }
 
-function InfoCard({ title, value, hint }: { title: string; value: string; hint: string }) {
+function InfoCard({ title, value }: { title: string; value: string }) {
   return (
     <div className="ark-card p-4">
       <p className="text-xs text-content-tertiary">{title}</p>
       <p className="text-sm font-medium text-content-primary mt-1">{value}</p>
-      <p className="text-[11px] text-content-tertiary mt-1">{hint}</p>
     </div>
   );
 }

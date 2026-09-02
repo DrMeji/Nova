@@ -1,12 +1,11 @@
 import { useMemo, useState } from 'react';
 import {
   Search, Plus, Check, X, KeyRound, Shield, MessageSquare,
-  Link2, Unplug, ChevronRight, Loader2, ExternalLink,
+  Link2, Unplug, ChevronRight, Loader2, ExternalLink, Globe, Download,
 } from 'lucide-react';
 import {
   PLUGIN_CATALOG,
   PLUGIN_CATEGORIES,
-  getChatEnabledPlugins,
   getInstalledPlugins,
   getPluginById,
   getPluginRuntime,
@@ -17,24 +16,25 @@ import {
   runPluginAction,
   type PluginDef,
   type PluginPermission,
+  type PluginRuntimeState,
   type PluginStateMap,
 } from '@/lib/plugins';
-import { verifyGitHubToken } from '@/lib/github';
-import { verifyNotionToken } from '@/lib/notion';
-import { verifyGmailToken } from '@/lib/gmail';
-import { verifySlackToken } from '@/lib/slack';
-import { verifyLinearToken } from '@/lib/linear';
-import { verifyFigmaToken } from '@/lib/figma';
-import { verifyVercelToken } from '@/lib/vercel';
-import { verifyDiscordToken } from '@/lib/discord';
-import { verifyDriveToken } from '@/lib/gdrive';
-import { verifyCalendarToken } from '@/lib/gcal';
-import { verifyTelegramToken } from '@/lib/telegram';
-import { verifyStripeToken } from '@/lib/stripe';
+import { verifyPluginToken, getCatalogPluginHandler } from '@/lib/catalogPlugins';
 import { openInSystemBrowser } from '@/lib/openExternal';
 import { getPluginAuthLink } from '@/lib/pluginAuth';
 import { clearPluginToken, setPluginToken } from '@/lib/localPrefs';
 import { BrandMark } from '@/components/BrandMark';
+
+function pluginStatusLine(
+  runtime: PluginRuntimeState,
+  wired: boolean,
+): string {
+  if (!wired) return 'Coming soon';
+  if (!runtime.installed) return 'Not added';
+  if (!runtime.connected) return 'Added';
+  if (runtime.enabledInChat) return 'Connected · in chat';
+  return 'Connected';
+}
 
 export function BuildRun() {
   const [query, setQuery] = useState('');
@@ -71,8 +71,9 @@ export function BuildRun() {
     })).filter(cat => cat.plugins.length > 0);
   }, [pluginShelf, query, state]);
 
+  const comingSoonPlugins = useMemo(() => [] as typeof PLUGIN_CATALOG, []);
+
   const installedPlugins = useMemo(() => getInstalledPlugins(state), [state]);
-  const chatPlugins = useMemo(() => getChatEnabledPlugins(state), [state]);
 
   const patch = (id: string, next: Parameters<typeof upsertPluginRuntime>[2]) => {
     setState(prev => upsertPluginRuntime(prev, id, next));
@@ -187,53 +188,15 @@ export function BuildRun() {
       return;
     }
 
-    if (!tokenDraft.trim()) {
+    if (!tokenDraft.trim() && !getCatalogPluginHandler(selected.id)?.noToken) {
       setAuthError('Paste a token to verify.');
       return;
     }
 
     setAuthBusy(true);
     try {
-      if (selected.id === 'github') {
-        const user = await verifyGitHubToken(tokenDraft);
-        setVerifiedLogin(user.login);
-      } else if (selected.id === 'notion') {
-        const user = await verifyNotionToken(tokenDraft);
-        setVerifiedLogin(user.label);
-      } else if (selected.id === 'gmail') {
-        const user = await verifyGmailToken(tokenDraft);
-        setVerifiedLogin(user.label);
-      } else if (selected.id === 'slack') {
-        const user = await verifySlackToken(tokenDraft);
-        setVerifiedLogin(user.label);
-      } else if (selected.id === 'linear') {
-        const user = await verifyLinearToken(tokenDraft);
-        setVerifiedLogin(user.label);
-      } else if (selected.id === 'vercel') {
-        const user = await verifyVercelToken(tokenDraft);
-        setVerifiedLogin(user.label);
-      } else if (selected.id === 'discord') {
-        const user = await verifyDiscordToken(tokenDraft);
-        setVerifiedLogin(user.label);
-      } else if (selected.id === 'figma') {
-        const user = await verifyFigmaToken(tokenDraft);
-        setVerifiedLogin(user.label);
-      } else if (selected.id === 'gdrive') {
-        const user = await verifyDriveToken(tokenDraft);
-        setVerifiedLogin(user.label);
-      } else if (selected.id === 'gcal') {
-        const user = await verifyCalendarToken(tokenDraft);
-        setVerifiedLogin(user.label);
-      } else if (selected.id === 'telegram') {
-        const user = await verifyTelegramToken(tokenDraft);
-        setVerifiedLogin(user.label);
-      } else if (selected.id === 'stripe') {
-        const user = await verifyStripeToken(tokenDraft);
-        setVerifiedLogin(user.label);
-      } else {
-        setAuthError('Coming soon. not connected to a live API yet.');
-        return;
-      }
+      const user = await verifyPluginToken(selected.id, tokenDraft);
+      setVerifiedLogin(user.label);
       setConnectStep('permissions');
     } catch (err) {
       setAuthError(err instanceof Error ? err.message : `Could not verify ${selected.name} token`);
@@ -294,22 +257,19 @@ export function BuildRun() {
           <div className="flex items-center justify-between gap-3 mb-6 min-w-0">
             <div className="min-w-0">
               <h1 className="text-2xl sm:text-3xl font-semibold text-content-primary tracking-tight">Plugins</h1>
-              <p className="text-xs text-content-tertiary mt-1.5 max-w-xl leading-relaxed">
-                Connect GitHub, Drive, and other tools for Chat. Add → connect account → optional “in chat”.
-                Green dot = connected. Catalog “Soon” cards are listed but not wired yet.
-              </p>
             </div>
             <div className="flex items-center gap-2">
-              <div className="flex rounded-full bg-surface-hover p-0.5">
+              <div className="flex items-center gap-1 rounded-full bg-surface-hover p-1 shrink-0">
                 {(['catalog', 'installed'] as const).map(id => (
                   <button
                     key={id}
                     type="button"
                     onClick={() => setPluginShelf(id)}
-                    className={`rounded-full px-3 py-1 text-xs ${
-                      pluginShelf === id ? 'bg-ark-navy-900 text-content-primary' : 'text-content-tertiary'
+                    className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm transition-colors ${
+                      pluginShelf === id ? 'bg-ark-navy-900 text-content-primary' : 'text-content-tertiary hover:text-content-secondary'
                     }`}
                   >
+                    {id === 'catalog' ? <Globe className="w-4 h-4 shrink-0" /> : <Download className="w-4 h-4 shrink-0" />}
                     {id === 'catalog' ? 'Browse' : 'Installed'}
                   </button>
                 ))}
@@ -335,12 +295,9 @@ export function BuildRun() {
             <>
               {pluginShelf === 'catalog' && (
               <section className="mb-8">
-                <h2 className="text-base font-semibold text-content-primary mb-1">Suggested</h2>
-                <p className="text-xs text-content-tertiary mb-3">
-                  Ready to connect now. Click one → Add → paste token or sign in → turn on for Chat if you want it there.
-                </p>
+                <h2 className="text-base font-semibold text-content-primary mb-3">Suggested</h2>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                  {PLUGIN_CATALOG.filter(p => isPluginLive(p.id)).map(plugin => {
+                  {PLUGIN_CATALOG.filter(p => isPluginLive(p.id) || p.id === 'telegram').map(plugin => {
                     const runtime = getPluginRuntime(plugin.id, state);
                     return (
                       <button
@@ -382,17 +339,9 @@ export function BuildRun() {
 
               <section className="mb-10">
                 <h2 className="text-base font-semibold text-content-primary mb-2">Your library</h2>
-                {chatPlugins.length > 0 && (
-                  <p className="text-xs text-content-tertiary mb-3">
-                    In chat: {chatPlugins.map(p => p.name).join(', ')}
-                  </p>
-                )}
                 {installedPlugins.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-surface-border px-4 py-6 text-center space-y-1">
+                  <div className="rounded-xl border border-dashed border-surface-border px-4 py-6 text-center">
                     <p className="text-sm text-content-secondary">Nothing installed yet</p>
-                    <p className="text-xs text-content-tertiary">
-                      Use Browse → Suggested, pick a live plugin, then connect. Tokens stay on this PC.
-                    </p>
                   </div>
                 ) : (
                   <div className="flex flex-wrap gap-2">
@@ -426,22 +375,13 @@ export function BuildRun() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1">
                   {category.plugins.map(plugin => {
                     const runtime = getPluginRuntime(plugin.id, state);
-                    const wired = isPluginWired(plugin.id);
                     return (
                       <button
                         key={`${category.id}-${plugin.id}`}
                         type="button"
-                        disabled={!wired}
-                        onClick={() => {
-                          if (!wired) return;
-                          openPlugin(plugin);
-                        }}
-                        title={wired ? plugin.name : `${plugin.name} · Soon`}
-                        className={`flex items-center gap-3 py-3 rounded-xl px-1 text-left transition-colors ${
-                          wired
-                            ? 'hover:bg-surface-hover/50'
-                            : 'opacity-45 cursor-not-allowed pointer-events-none grayscale-[0.35]'
-                        }`}
+                        onClick={() => openPlugin(plugin)}
+                        title={plugin.name}
+                        className="flex items-center gap-3 py-3 rounded-xl px-1 text-left transition-colors hover:bg-surface-hover/50"
                       >
                         <BrandMark id={plugin.id} name={plugin.name} initial={plugin.initial} tone={plugin.tone} />
                         <span className="min-w-0 flex-1">
@@ -451,29 +391,20 @@ export function BuildRun() {
                               <span className="text-[10px] rounded-full bg-emerald-500/15 text-emerald-400 px-1.5 py-0.5 shrink-0">
                                 Live
                               </span>
-                            ) : wired ? (
+                            ) : (
                               <span className="text-[10px] rounded-full bg-sky-500/15 text-sky-400 px-1.5 py-0.5 shrink-0">
                                 Ready
                               </span>
-                            ) : (
-                              <span className="text-[10px] rounded-full bg-white/10 text-content-tertiary px-1.5 py-0.5 shrink-0">
-                                Soon
-                              </span>
                             )}
                           </span>
-                          <span className="block text-xs text-content-tertiary truncate">{plugin.description}</span>
                         </span>
-                        {wired ? (
-                          <span className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${
-                            runtime.installed
-                              ? 'bg-surface-hover text-ark-accent-green'
-                              : 'text-content-secondary'
-                          }`}>
-                            {runtime.installed ? <Check className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-                          </span>
-                        ) : (
-                          <span className="text-[10px] text-content-tertiary shrink-0 pr-1">Soon</span>
-                        )}
+                        <span className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${
+                          runtime.installed
+                            ? 'bg-surface-hover text-ark-accent-green'
+                            : 'text-content-secondary'
+                        }`}>
+                          {runtime.installed ? <Check className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+                        </span>
                       </button>
                     );
                   })}
@@ -481,43 +412,72 @@ export function BuildRun() {
               </section>
             ))}
 
-            {filteredCategories.length === 0 && (
+            {filteredCategories.length === 0 && comingSoonPlugins.length === 0 && (
               <div className="flex flex-col items-center justify-center py-20 text-center">
                 <p className="text-base font-semibold text-content-primary mb-1">No plugins found</p>
                 <p className="text-sm text-content-tertiary">Try a different search.</p>
               </div>
+            )}
+
+            {pluginShelf === 'catalog' && comingSoonPlugins.length > 0 && (
+              <section className="mt-10 pt-8 border-t border-surface-border">
+                <h2 className="text-base font-semibold text-content-primary mb-4">Coming soon</h2>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1">
+                  {comingSoonPlugins.map(plugin => (
+                    <button
+                      key={`soon-${plugin.id}`}
+                      type="button"
+                      onClick={() => openPlugin(plugin)}
+                      title={plugin.name}
+                      className="flex items-center gap-3 py-3 rounded-xl px-1 text-left transition-colors hover:bg-surface-hover/40"
+                    >
+                      <BrandMark id={plugin.id} name={plugin.name} initial={plugin.initial} tone={plugin.tone} />
+                      <span className="min-w-0 flex-1">
+                        <span className="flex items-center gap-2 min-w-0">
+                          <span className="text-sm font-medium text-content-primary truncate">{plugin.name}</span>
+                          <span className="text-[10px] rounded-full bg-white/10 text-content-tertiary px-1.5 py-0.5 shrink-0">
+                            Soon
+                          </span>
+                        </span>
+                      </span>
+                      <ChevronRight className="w-4 h-4 text-content-tertiary shrink-0" />
+                    </button>
+                  ))}
+                </div>
+              </section>
             )}
           </div>
         </div>
       </div>
 
       {selected && selectedRuntime && (
-        <div className="absolute inset-0 z-20 flex items-center justify-end p-4 sm:p-6 bg-ark-navy-950/45 backdrop-blur-[2px]" onClick={closePanel}>
-          <aside
-            className="w-full max-w-md max-h-[min(92vh,720px)] overflow-hidden rounded-2xl border border-surface-border bg-ark-navy-900 shadow-2xl flex flex-col animate-slide-up"
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ark-navy-950/70 backdrop-blur-md"
+          onClick={closePanel}
+        >
+          <div
+            className="w-full max-w-md max-h-[min(92vh,720px)] overflow-hidden rounded-2xl border border-surface-border bg-ark-navy-900 shadow-2xl flex flex-col animate-fade-in"
             onClick={e => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="plugin-panel-title"
           >
             <div className="shrink-0 px-5 py-4 flex items-start justify-between gap-3 border-b border-surface-border">
               <div className="flex items-center gap-3 min-w-0">
                 <BrandMark id={selected.id} name={selected.name} initial={selected.initial} tone={selected.tone} size="lg" />
                 <div className="min-w-0">
-                  <h2 className="text-lg font-semibold text-content-primary truncate">{selected.name}</h2>
-                  <p className="text-xs text-content-tertiary">
-                    {!selectedRuntime.installed
-                      ? 'Not added yet'
-                      : !selectedRuntime.connected
-                        ? 'Added · connect your account'
-                        : selectedRuntime.enabledInChat
-                          ? selectedRuntime.accountLabel
-                            ? selected.id === 'gmail'
-                              ? `Connected as ${selectedRuntime.accountLabel} · in chat`
-                              : `Connected as @${selectedRuntime.accountLabel} · in chat`
-                            : 'Connected · in chat'
-                          : selectedRuntime.accountLabel
-                            ? selected.id === 'gmail'
-                              ? `Connected as ${selectedRuntime.accountLabel}`
-                              : `Connected as @${selectedRuntime.accountLabel}`
-                            : 'Connected'}
+                  <div className="flex items-center gap-2 min-w-0 flex-wrap">
+                    <h2 id="plugin-panel-title" className="text-lg font-semibold text-content-primary truncate">
+                      {selected.name}
+                    </h2>
+                    {!isPluginWired(selected.id) && (
+                      <span className="inline-flex items-center rounded-full bg-zinc-500/20 text-content-tertiary px-2 py-0.5 text-[10px] font-medium leading-none shrink-0">
+                        Soon
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-content-tertiary mt-0.5">
+                    {pluginStatusLine(selectedRuntime, isPluginWired(selected.id))}
                   </p>
                 </div>
               </div>
@@ -531,49 +491,36 @@ export function BuildRun() {
             </div>
 
             <div className="min-h-0 overflow-y-auto px-5 py-5 space-y-5">
-              <p className="text-sm text-content-secondary leading-relaxed">{selected.longDescription}</p>
-              {selected.id === 'github' && (
-                <p className="text-xs text-content-tertiary leading-relaxed rounded-xl border border-surface-border bg-ark-navy-950/50 px-3 py-2.5">
-                  Connect a GitHub token here so chat can list repos and PRs. GitHub Desktop on your PC is separate.
-                </p>
-              )}
-
               {connectStep === 'idle' && (
                 <>
                   <div className="space-y-2">
-                    <StepRow done={selectedRuntime.installed} label="Add to ARK" detail={`Save ${selected.name} in your library`} />
-                    <StepRow done={selectedRuntime.connected} label="Connect account" detail={`Link your ${selected.name} account`} />
+                    <StepRow done={selectedRuntime.installed} label="Add to ARK" />
+                    <StepRow done={selectedRuntime.connected} label="Connect account" />
                     <StepRow
                       done={selectedRuntime.connected && selectedRuntime.permissions.length > 0}
                       label="Permissions"
-                      detail="Choose what ARK may access"
                     />
-                    <StepRow done={selectedRuntime.enabledInChat} label="Use in chat" detail="Show as a tool chip in New Chat" />
+                    <StepRow done={selectedRuntime.enabledInChat} label="Use in chat" />
                   </div>
 
                   {selected.hero && selected.actions.length > 0 && selectedRuntime.connected && (
                     <div>
                       <p className="text-xs font-medium text-content-secondary mb-2">Try in chat</p>
-                      <div className="space-y-1.5">
+                      <div className="flex flex-wrap gap-1.5">
                         {selected.actions.map(action => (
-                          <div
+                          <span
                             key={action.id}
-                            className="rounded-xl border border-surface-border px-3 py-2 text-xs text-content-secondary"
+                            className="rounded-full border border-surface-border px-2.5 py-1 text-[11px] text-content-secondary"
                           >
-                            <span className="text-content-primary font-medium">{action.label}</span>
-                            <span className="block text-content-tertiary mt-0.5">{action.prompt}</span>
-                          </div>
+                            {action.label}
+                          </span>
                         ))}
                       </div>
                     </div>
                   )}
 
                   <div className="flex flex-col gap-2 pt-1">
-                    {!isPluginWired(selected.id) ? (
-                      <p className="text-sm text-content-tertiary rounded-xl border border-surface-border px-3 py-3">
-                        Coming soon. listed for discovery only. Not connected to a live API yet.
-                      </p>
-                    ) : !selectedRuntime.installed ? (
+                    {!isPluginWired(selected.id) ? null : !selectedRuntime.installed ? (
                       <button type="button" className="ark-btn-primary w-full" onClick={() => install(selected.id)}>
                         <Plus className="w-4 h-4" />
                         Add to ARK
@@ -649,7 +596,7 @@ export function BuildRun() {
                 <div className="space-y-4">
                   <div className="flex items-center gap-2 text-sm font-medium text-content-primary">
                     <KeyRound className="w-4 h-4 text-sky-400" />
-                    Connect with {selected.authKind === 'oauth' ? 'account' : 'token'}
+                    Connect {selected.name}
                   </div>
                   {selected.authKind === 'oauth' || selected.authKind === 'token' ? (
                     <>
@@ -657,18 +604,13 @@ export function BuildRun() {
                         const link = getPluginAuthLink(selected.id);
                         return (
                           <>
-                            <p className="text-xs text-content-tertiary leading-relaxed">
-                              {selected.authKind === 'oauth'
-                                ? `No in-app OAuth yet. Open ${selected.name} in the browser, copy a token, and paste it here. ARK stores it in the OS vault.`
-                                : link.hint}
-                            </p>
                             <button
                               type="button"
                               className="inline-flex items-center gap-1.5 text-xs text-sky-400 hover:text-sky-300"
                               onClick={() => void openInSystemBrowser(link.url)}
                             >
                               <ExternalLink className="w-3.5 h-3.5" />
-                              {selected.authKind === 'oauth' ? `Open ${selected.name} in browser` : link.label}
+                              {selected.authKind === 'oauth' ? `Open ${selected.name}` : link.label}
                             </button>
                             {(selected.id === 'github' || selected.id === 'gmail' || selected.authKind === 'oauth') && window.arkDesktop?.pluginOAuthStart && (
                               <button
@@ -679,8 +621,8 @@ export function BuildRun() {
                               >
                                 {authBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Link2 className="w-4 h-4" />}
                                 {selected.id === 'github'
-                                  ? 'Sign in with GitHub (device)'
-                                  : `Continue with ${selected.name} OAuth`}
+                                  ? 'Sign in with GitHub'
+                                  : `Continue with ${selected.name}`}
                               </button>
                             )}
                           </>
@@ -688,11 +630,6 @@ export function BuildRun() {
                       })()}
                       {['github', 'notion', 'gmail', 'slack', 'linear', 'figma'].includes(selected.id) ? (
                         <>
-                          {selected.id === 'github' && (
-                            <p className="text-[11px] text-content-tertiary leading-relaxed">
-                              Classic token: enable <span className="text-content-secondary">repo</span> and <span className="text-content-secondary">read:user</span>.
-                            </p>
-                          )}
                           <input
                             type="password"
                             value={tokenDraft}
@@ -764,15 +701,10 @@ export function BuildRun() {
                       )}
                     </>
                   ) : (
-                    <>
-                      <p className="text-xs text-content-tertiary leading-relaxed">
-                        No account needed. continue to grant permissions.
-                      </p>
-                      <button type="button" className="ark-btn-primary w-full" onClick={() => setConnectStep('permissions')}>
-                        Continue
-                        <ChevronRight className="w-4 h-4" />
-                      </button>
-                    </>
+                    <button type="button" className="ark-btn-primary w-full" onClick={() => setConnectStep('permissions')}>
+                      Continue
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
                   )}
                   <button type="button" className="ark-btn-secondary w-full" onClick={() => setConnectStep('idle')}>
                     Back
@@ -786,9 +718,6 @@ export function BuildRun() {
                     <Shield className="w-4 h-4 text-emerald-400" />
                     Permissions
                   </div>
-                  <p className="text-xs text-content-tertiary">
-                    Required permissions stay on. Optional ones you can turn off.
-                  </p>
                   <div className="space-y-2">
                     {selected.permissions.map(perm => {
                       const on = permDraft.includes(perm.id) || Boolean(perm.required);
@@ -802,10 +731,7 @@ export function BuildRun() {
                           }`}
                         >
                           <span className="flex items-center justify-between gap-2">
-                            <span>
-                              <span className="block text-sm text-content-primary">{perm.label}</span>
-                              <span className="block text-[11px] text-content-tertiary mt-0.5">{perm.detail}</span>
-                            </span>
+                            <span className="text-sm text-content-primary">{perm.label}</span>
                             <span className={`text-[10px] rounded-full px-2 py-0.5 ${
                               perm.required
                                 ? 'bg-sky-500/15 text-sky-400'
@@ -828,9 +754,7 @@ export function BuildRun() {
                   >
                     {authBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
                     {authBusy
-                      ? 'Saving securely…'
-                      : verifiedLogin
-                      ? `Save ${selected.id === 'gmail' ? verifiedLogin : `@${verifiedLogin}`} and enable in chat`
+                      ? 'Saving…'
                       : 'Save and enable in chat'}
                   </button>
                   <button type="button" className="ark-btn-secondary w-full" onClick={() => setConnectStep(selected.authKind === 'none' ? 'idle' : 'auth')}>
@@ -839,14 +763,14 @@ export function BuildRun() {
                 </div>
               )}
             </div>
-          </aside>
+          </div>
         </div>
       )}
     </div>
   );
 }
 
-function StepRow({ done, label, detail }: { done: boolean; label: string; detail: string }) {
+function StepRow({ done, label }: { done: boolean; label: string }) {
   return (
     <div className="flex items-center gap-3 rounded-xl border border-surface-border px-3 py-2.5">
       <span className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 ${
@@ -854,10 +778,7 @@ function StepRow({ done, label, detail }: { done: boolean; label: string; detail
       }`}>
         {done ? <Check className="w-3.5 h-3.5" /> : <span className="w-1.5 h-1.5 rounded-full bg-content-tertiary" />}
       </span>
-      <span className="min-w-0">
-        <span className="block text-sm text-content-primary">{label}</span>
-        <span className="block text-[11px] text-content-tertiary">{detail}</span>
-      </span>
+      <span className="text-sm text-content-primary">{label}</span>
     </div>
   );
 }

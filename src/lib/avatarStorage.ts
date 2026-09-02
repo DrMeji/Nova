@@ -95,3 +95,15 @@ export async function persistProfileAvatarUrl(userId: string, avatarUrl: string 
     /* RPC may not be applied yet */
   }
 }
+
+/** Move legacy data-URL avatars into Storage when the bucket migration is applied. */
+export async function migrateInlineAvatarToStorage(
+  userId: string,
+  avatarUrl: string | null | undefined,
+): Promise<string | null> {
+  if (!avatarUrl?.startsWith('data:image')) return null;
+  const uploaded = await uploadAvatarDataUrl(userId, avatarUrl);
+  if (!uploaded.ok || uploaded.via !== 'storage') return null;
+  await persistProfileAvatarUrl(userId, uploaded.url);
+  return uploaded.url;
+}

@@ -11,6 +11,7 @@ dist
 dist-ssr
 release
 tmp-media/
+tmp-*
 *.local
 
 .cursor/

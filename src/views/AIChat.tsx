@@ -10,6 +10,7 @@ import { resolvePreferredCloudProvider } from '@/lib/cloudChat';
 import { honestNoLiveChatReply, probeLiveCapacity, type LiveCapacity } from '@/lib/arkCapacity';
 import { tipAt, tipStartIndex } from '@/lib/arkTips';
 import { RotatingTip } from '@/components/RotatingTip';
+import { ParkedNotice } from '@/components/ParkedNotice';
 import {
   BACKUP_DOWNLOAD_EVENT,
 } from '@/lib/arkHuntBootstrap';
@@ -104,7 +105,7 @@ import {
 } from '@/lib/pcExplore';
 import { isTraceMessage } from '@/lib/agentTrace';
 import { hasFolderAccessGrant, resolveScopedFolderPath, formatFolderLocatedMessage, syncWorkspaceGrantsFromPrefs, resolveWorkFolderPath } from '@/lib/workspaceGrants';
-import { saveChatStudio, loadChatStudio, clearChatStudio, setLastListedFolder, getLastListedFolder, clearLastListedFolder, setLastDiskTarget, getLastDiskTarget, clearLastDiskTarget, setLastPendingAddFile, getLastPendingAddFile, clearLastPendingAddFile, setLastPendingGreenfield, getLastPendingGreenfield, clearLastPendingGreenfield, setChatCodePill, hasChatCodePill, resolveChatProjectRoot, studioPathBasename } from '@/lib/chatStudioStore';
+import { saveChatStudio, loadChatStudio, clearChatStudio, setLastListedFolder, getLastListedFolder, clearLastListedFolder, setLastDiskTarget, getLastDiskTarget, clearLastDiskTarget, setLastPendingAddFile, getLastPendingAddFile, clearLastPendingAddFile, setLastPendingGreenfield, getLastPendingGreenfield, clearLastPendingGreenfield, setChatCodePill, hasChatCodePill, chatHasBuildWorkspace, resolveChatProjectRoot, studioPathBasename } from '@/lib/chatStudioStore';
 import { runCodeStudioCommand } from '@/lib/studioCommands';
 import { applyChatReplyEdits } from '@/lib/chatAgentApply';
 import { runProjectMultiAgent, wantsMultiAgentTurn } from '@/lib/arkMultiAgent';
@@ -122,6 +123,7 @@ import {
   parseMcpCallIntent,
   resolveMcpToolServer,
   callMcpTool,
+  runMcpAutoToolLoop,
   looksLikeArkCapabilityAsk,
   formatArkCapabilitiesHelp,
 } from '@/lib/arkMcp';
@@ -186,7 +188,7 @@ import {
 } from '@/lib/chatCodeReply';
 import {
   composeVisionToCoderBrief,
-  hasCloudVisionCapability,
+  hasVisionCapability,
   looksLikeScreenshotFixAsk,
   messageHasImages,
   multiModelStatusLabel,
@@ -1358,6 +1360,26 @@ export function AIChat() {
     return null;
   }, [pendingAttaches, chatStudioDiskRoot, chatStudioFiles, route]);
 
+  const showStudioPills = useMemo(() => {
+    const chatId = route.name === 'chat' ? route.chatId : undefined;
+    if (codePillSticky && isCodeTabEnabled()) return true;
+    if (!chatId) return false;
+    if (!chatHasBuildWorkspace(chatId)) return false;
+    return Boolean(
+      chatStudioDiskRoot
+      || previewUrl
+      || Object.keys(chatStudioFiles).length > 0
+      || chatStudioProjectId,
+    );
+  }, [
+    route,
+    codePillSticky,
+    chatStudioDiskRoot,
+    previewUrl,
+    chatStudioFiles,
+    chatStudioProjectId,
+  ]);
+
   const autoModelLabel = useMemo(() => autoPillLabel(threadBrain), [threadBrain]);
   const threadKind = useMemo(() => brainKindForChatMode(mode), [mode]);
 
@@ -1370,14 +1392,6 @@ export function AIChat() {
   useEffect(() => {
     if (route.name !== 'chat') return;
     const next = route.mode && route.mode !== 'general' ? route.mode : 'general';
-    if (next === 'video' && !isVideoTabEnabled()) {
-      navigate({ name: 'chat', mode: 'image' });
-      return;
-    }
-    if (next === 'voice' && !isVoiceTabEnabled()) {
-      navigate({ name: 'chat' });
-      return;
-    }
     const prev = composerModeRef.current;
     if (prev !== next) {
       // Stash outgoing tab text, restore the destination tab's own draft (or empty).
@@ -2646,6 +2660,7 @@ export function AIChat() {
 
   const sendMessage = async (content: string) => {
     if (!content.trim() || !user) return;
+    if (mode === 'voice' && !isVoiceTabEnabled()) return;
     // New send → follow the reply; history scroll stays free until the user scrolls up again.
     stickToBottomRef.current = true;
     // Free a stuck prior GGUF job (timed-out inspect was locking “More details”).
@@ -4081,17 +4096,28 @@ export function AIChat() {
         : undefined);
 
     const finishAgentReply = (reply: string, provider = 'ARK · agent') => {
-      const elapsedMs = Date.now() - replyStartedAt;
-      const safeText = redactArkSelfLeak(reply);
-      const next = messagesRef.current.map(m => (
-        m.id === assistantId
-          ? { ...m, content: safeText, provider_used: provider, elapsed_ms: elapsedMs }
-          : m
-      ));
-      messagesRef.current = next;
-      persistModeThread(mode, next, { chatId: activeChatId });
-      setMessages(next);
-      clearGeneratingIfMineEarly();
+      const apply = (finalReply: string, finalProvider: string) => {
+        const elapsedMs = Date.now() - replyStartedAt;
+        const safeText = redactArkSelfLeak(finalReply);
+        const next = messagesRef.current.map(m => (
+          m.id === assistantId
+            ? { ...m, content: safeText, provider_used: finalProvider, elapsed_ms: elapsedMs }
+            : m
+        ));
+        messagesRef.current = next;
+        persistModeThread(mode, next, { chatId: activeChatId });
+        setMessages(next);
+        clearGeneratingIfMineEarly();
+      };
+
+      if (/ARK_MCP:/i.test(reply)) {
+        void runMcpAutoToolLoop(reply).then(loop => {
+          apply(loop.text, loop.ran.length ? 'ARK · mcp' : provider);
+        }).catch(() => apply(reply, provider));
+        return;
+      }
+
+      apply(reply, provider);
     };
 
     // Open / refresh the in-app Preview window (closable BrowserWindow. not system browser).
@@ -4238,7 +4264,7 @@ export function AIChat() {
     if (mode === 'general' || mode === 'code') {
       const mcpCall = parseMcpCallIntent(content);
       if (mcpCall) {
-        const server = resolveMcpToolServer(mcpCall.toolName);
+        const server = resolveMcpToolServer(mcpCall.toolName, mcpCall.serverId);
         if (!server) {
           finishAgentReply(
             `No enabled MCP server has tool **${mcpCall.toolName}**.\n\nAdd/enable a server in **Settings → MCP**, press **Test**, then try again.\n\n${formatMcpToolsHelp()}`,
@@ -4483,8 +4509,9 @@ export function AIChat() {
       }
     }
 
+    const visionReady = await hasVisionCapability();
     // Multi-model: image attached but nothing can see pixels → clear CTA.
-    if (messageHasImages(content) && !hasCloudVisionCapability()) {
+    if (messageHasImages(content) && !visionReady) {
       const gap = visionCapabilityGapReply({
         localOnly: getLocalPrefs().aiMode === 'local_only',
       });
@@ -4497,7 +4524,7 @@ export function AIChat() {
     let visionHopMeta: string | undefined;
     if (
       messageHasImages(content)
-      && hasCloudVisionCapability()
+      && visionReady
       && (wantsCodeEdit || looksLikeScreenshotFixAsk(content))
       && (stickyCount > 0 || diskBound)
     ) {
@@ -5079,11 +5106,7 @@ export function AIChat() {
         const runtime = getPluginRuntime('github', loadPluginState());
         const token = runtime.token?.trim();
         if (!token) {
-          response = [
-            'Connect GitHub under Plugins so ARK can see your repos.',
-            '',
-            'Then say “what repos do I have?” or **open owner/repo in Code**. Empty repos are fine. we start from a blank page.',
-          ].join('\n');
+          response = 'Connect GitHub in Plugins, then ask about your repos again.';
           usedPlugin = true;
         } else {
           try {
@@ -5145,11 +5168,7 @@ export function AIChat() {
 
       if (!usedPlugin && hasStudioFiles && (mode === 'general' || mode === 'code') && looksLikeImageAsk(content) && composerMode !== 'ask') {
         imageOfferPromptRef.current = content;
-        response = [
-          'That sounds like an image request.',
-          '',
-          'Switch to **Image** to generate it. your prompt carries over and the result saves to Creations.',
-        ].join('\n');
+        response = 'Switch to **Image** mode — your prompt will carry over.';
         setImageOfferId(assistantId);
         usedPlugin = true;
       }
@@ -5855,16 +5874,7 @@ export function AIChat() {
             && mode !== 'video'
             && (!response.trim() || (!/```[\s\S]+```/.test(response) && response.length < 100))
           ) {
-            response = [
-              "I couldn't produce copy-pasteable code with the current brain yet.",
-              '',
-              '**Try this:**',
-              '1. Open **Models** (sidebar) and pick a stronger chat model from the ARK menu, then send again.',
-              '2. Or open **Local AI**, download/start a coding model, wait until it is ready, then retry.',
-              '3. Or connect a free cloud key (**Settings → Free keys** / the ARK menu), then retry.',
-              '',
-              'Ask again with “give me the code I can copy-paste” once a brain is ready.',
-            ].join('\n');
+            response = 'No copy-pasteable code yet. Try a stronger model in **Models** or **Local AI**, then ask again.';
           }
           if (routed.full) {
             resolvedProvider = routerProviderLabel(routed.full, providerLabel);
@@ -6752,7 +6762,7 @@ export function AIChat() {
               </button>
             ))}
       </div>
-      {(mode === 'general' || mode === 'code') && (chatStudioDiskRoot || codePillSticky) && (
+      {(mode === 'general' || mode === 'code') && showStudioPills && (
         <div className="mt-2 flex flex-wrap items-center justify-start gap-1.5 px-1">
           {isCodeTabEnabled() && codePillSticky ? (
             <button
@@ -6848,6 +6858,16 @@ export function AIChat() {
           <p className="text-[11px] text-content-tertiary mt-1">Add as many as you need. press Enter to read</p>
         </div>
       </div>
+      {mode === 'video' && !isVideoTabEnabled() ? (
+        <div className="absolute inset-0 z-40">
+          <ParkedNotice feature="video" />
+        </div>
+      ) : null}
+      {mode === 'voice' && !isVoiceTabEnabled() ? (
+        <div className="absolute inset-0 z-40">
+          <ParkedNotice feature="voice" />
+        </div>
+      ) : null}
       {(mode === 'general' || mode === 'voice') ? <ChatModeTabs /> : null}
       {loading ? (
         <div className="flex-1 flex items-center justify-center text-content-tertiary">

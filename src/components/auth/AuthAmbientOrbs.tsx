@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 
 type OrbSpec = {
   size: number;
@@ -23,10 +23,11 @@ const ORB_SETUP: Array<{ size: number; colorClass: string }> = [
 
 const APP_ORB_SETUP = ORB_SETUP.slice(0, 7);
 
-const SPEED_MIN = 0.22;
-const SPEED_MAX = 0.42;
-const APP_SPEED_MIN = 0.16;
-const APP_SPEED_MAX = 0.3;
+const SPEED_MIN = 0.28;
+const SPEED_MAX = 0.5;
+const APP_SPEED_MIN = SPEED_MIN;
+const APP_SPEED_MAX = SPEED_MAX;
+const ORB_SEPARATION_PAD = 18;
 const CLICK_IMPULSE = 2.8;
 
 function rand(min: number, max: number) {
@@ -40,17 +41,25 @@ function seedOrbs(
   speedMin: number,
   speedMax: number,
 ): OrbSpec[] {
-  const maxR = Math.min(w, h) * 0.28;
+  const count = setup.length;
+  const cols = Math.ceil(Math.sqrt(count));
+  const rows = Math.ceil(count / cols);
   return setup.map((spec, i) => {
-    const size = Math.min(spec.size, maxR * 2);
+    const size = Math.min(spec.size, Math.min(w, h) * 0.34);
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    const cellW = w / cols;
+    const cellH = h / rows;
     const r = size / 2;
-    const angle = (i / setup.length) * Math.PI * 2 + rand(-0.4, 0.4);
+    const x = cellW * (col + 0.5) + rand(-cellW * 0.12, cellW * 0.12);
+    const y = cellH * (row + 0.5) + rand(-cellH * 0.12, cellH * 0.12);
+    const angle = rand(0, Math.PI * 2);
     const speed = rand(speedMin, speedMax);
     return {
       size,
       colorClass: spec.colorClass,
-      x: rand(r, Math.max(r + 1, w - r)),
-      y: rand(r, Math.max(r + 1, h - r)),
+      x: Math.min(w - r, Math.max(r, x)),
+      y: Math.min(h - r, Math.max(r, y)),
       vx: Math.cos(angle) * speed,
       vy: Math.sin(angle) * speed,
     };
@@ -75,11 +84,24 @@ function bounceWalls(orb: OrbSpec, w: number, h: number) {
   }
 }
 
-function bouncePair(a: OrbSpec, b: OrbSpec) {
+function clampSpeed(orb: OrbSpec, speedMin: number, speedMax: number) {
+  const s = Math.hypot(orb.vx, orb.vy);
+  if (s < speedMin) {
+    const scale = speedMin / (s || 0.001);
+    orb.vx *= scale;
+    orb.vy *= scale;
+  } else if (s > speedMax * 1.35) {
+    const scale = (speedMax * 1.2) / s;
+    orb.vx *= scale;
+    orb.vy *= scale;
+  }
+}
+
+function bouncePair(a: OrbSpec, b: OrbSpec, speedMin: number, speedMax: number) {
   const dx = b.x - a.x;
   const dy = b.y - a.y;
   const dist = Math.hypot(dx, dy) || 0.001;
-  const minDist = a.size / 2 + b.size / 2;
+  const minDist = a.size / 2 + b.size / 2 + ORB_SEPARATION_PAD;
   if (dist >= minDist) return;
 
   const overlap = (minDist - dist) / 2;
@@ -95,25 +117,23 @@ function bouncePair(a: OrbSpec, b: OrbSpec) {
   const dvx = a.vx - b.vx;
   const dvy = a.vy - b.vy;
   const vn = dvx * nx + dvy * ny;
-  if (vn > 0) return;
 
-  const impulse = (2 * vn) / (massA + massB);
-  a.vx -= impulse * massB * nx;
-  a.vy -= impulse * massB * ny;
-  b.vx += impulse * massA * nx;
-  b.vy += impulse * massA * ny;
+  const sep = speedMin * 1.25;
+  a.vx -= nx * sep;
+  a.vy -= ny * sep;
+  b.vx += nx * sep;
+  b.vy += ny * sep;
+
+  if (vn <= 0) {
+    const impulse = (2 * vn) / (massA + massB);
+    a.vx -= impulse * massB * nx;
+    a.vy -= impulse * massB * ny;
+    b.vx += impulse * massA * nx;
+    b.vy += impulse * massA * ny;
+  }
 
   for (const orb of [a, b]) {
-    const s = Math.hypot(orb.vx, orb.vy);
-    if (s < SPEED_MIN) {
-      const scale = SPEED_MIN / (s || 0.001);
-      orb.vx *= scale;
-      orb.vy *= scale;
-    } else if (s > SPEED_MAX * 1.4) {
-      const scale = (SPEED_MAX * 1.15) / s;
-      orb.vx *= scale;
-      orb.vy *= scale;
-    }
+    clampSpeed(orb, speedMin, speedMax);
   }
 }
 
@@ -129,11 +149,9 @@ function paintOrbs(orbs: OrbSpec[], orbEls: (HTMLButtonElement | HTMLDivElement 
 }
 
 type AuthAmbientOrbsProps = {
-  /** `app` = softer, slower backdrop for the main shell (non-interactive). */
   variant?: 'auth' | 'app';
 };
 
-/** Soft roaming color orbs — click one to send it bouncing (auth/setup only). */
 export function AuthAmbientOrbs({ variant = 'auth' }: AuthAmbientOrbsProps) {
   const isApp = variant === 'app';
   const setup = isApp ? APP_ORB_SETUP : ORB_SETUP;
@@ -198,9 +216,8 @@ export function AuthAmbientOrbs({ variant = 'auth' }: AuthAmbientOrbsProps) {
       }
 
       for (const orb of orbs) {
-        // Ease click boosts back toward cruise speed
         const s = Math.hypot(orb.vx, orb.vy);
-        if (s > SPEED_MAX * 1.2) {
+        if (s > speedMax * 1.2) {
           orb.vx *= 0.992;
           orb.vy *= 0.992;
         }
@@ -209,9 +226,14 @@ export function AuthAmbientOrbs({ variant = 'auth' }: AuthAmbientOrbsProps) {
         bounceWalls(orb, w, h);
       }
 
-      for (let i = 0; i < orbs.length; i++) {
-        for (let j = i + 1; j < orbs.length; j++) {
-          bouncePair(orbs[i], orbs[j]);
+      for (let pass = 0; pass < 4; pass++) {
+        for (let i = 0; i < orbs.length; i++) {
+          for (let j = i + 1; j < orbs.length; j++) {
+            bouncePair(orbs[i], orbs[j], speedMin, speedMax);
+          }
+        }
+        for (const orb of orbs) {
+          bounceWalls(orb, w, h);
         }
       }
 

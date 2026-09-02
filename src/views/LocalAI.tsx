@@ -26,6 +26,7 @@ import {
 } from '@/lib/engineDownloads';
 import { ArkErrorInline } from '@/components/ArkErrorInline';
 import { BrandMark, StatusCheck } from '@/components/BrandMark';
+import { ModelDownloadConfirm } from '@/components/ModelDownloadConfirm';
 import { classifyErrorMessage } from '@/lib/errors';
 import { probeBrain } from '@/lib/brain';
 import { refreshBrainUrl } from '@/lib/brainUrl';
@@ -207,7 +208,39 @@ export function LocalAI() {
     const saved = loadSavedSpeed();
     return saved ? computePreloadPlan(saved.MBps, NEXT_PRELOAD_MODEL) : null;
   });
+  const [downloadConfirm, setDownloadConfirm] = useState<{
+    id: string;
+    name: string;
+    sizeGb: number;
+    category?: string;
+    detail?: string;
+    hunt?: HuntedModel;
+  } | null>(null);
   const pcClass = useMemo(() => getHardwareClass(hw), [hw]);
+
+  const sortedSpeedHosts = useMemo(() => {
+    const hosts = speedSample?.hosts || [];
+    return [...hosts].sort((a, b) => {
+      if (!a.ok && !b.ok) return 0;
+      if (!a.ok) return 1;
+      if (!b.ok) return -1;
+      return (b.MBps ?? 0) - (a.MBps ?? 0);
+    });
+  }, [speedSample?.hosts]);
+
+  const sortedApiProbes = useMemo(() => {
+    return [...apiProbes].sort((a, b) => {
+      if (!a.ok && !b.ok) return 0;
+      if (!a.ok) return 1;
+      if (!b.ok) return -1;
+      return (a.ms ?? Number.MAX_SAFE_INTEGER) - (b.ms ?? Number.MAX_SAFE_INTEGER);
+    });
+  }, [apiProbes]);
+
+  const recommendationInstalled = useMemo(
+    () => installed.some(m => m.id === recommendation.id),
+    [installed, recommendation.id],
+  );
 
   const availableByCategory = useMemo(() => {
     const installedIds = new Set(installed.map(m => m.id));
@@ -380,7 +413,7 @@ export function LocalAI() {
       });
   };
 
-  const downloadModel = (model: { id: string; name: string; sizeGb: number; hunt?: HuntedModel }) => {
+  const runDownload = (model: { id: string; name: string; sizeGb: number; hunt?: HuntedModel }) => {
     if (isEngineDownloading(model.id)) return;
     void engineDiskSpace().then(disk => {
       const needGb = model.sizeGb * 1.15;
@@ -417,6 +450,18 @@ export function LocalAI() {
           }
         }, 600);
       });
+    });
+  };
+
+  const downloadModel = (model: { id: string; name: string; sizeGb: number; hunt?: HuntedModel; category?: string; detail?: string }) => {
+    if (isEngineDownloading(model.id)) return;
+    setDownloadConfirm({
+      id: model.id,
+      name: model.name,
+      sizeGb: model.sizeGb,
+      category: model.category ?? model.hunt?.category,
+      detail: model.detail ?? model.hunt?.detail,
+      hunt: model.hunt,
     });
   };
 
@@ -877,17 +922,7 @@ export function LocalAI() {
                     Open Speed
                   </button>
                 </div>
-                <p className="text-sm text-content-tertiary px-1">
-                  Open Speed to measure download rate before large installs.
-                </p>
               </section>
-
-              <p className="flex items-start gap-2 text-xs text-content-tertiary pt-2">
-                <Shield className="w-3.5 h-3.5 shrink-0 mt-0.5 text-content-secondary" />
-                <span>
-                  Local AI keeps prompts and generations on this PC. Nothing is sent to the cloud while you use local models.
-                </span>
-              </p>
             </div>
           )}
 
@@ -909,11 +944,6 @@ export function LocalAI() {
                     {speedTesting ? 'Measuring…' : 'Run speed test'}
                   </button>
                 </div>
-                <p className="text-xs text-content-tertiary mb-4 px-1 leading-relaxed">
-                  One run measures the path from this PC to each model host and back:
-                  Hugging Face, HF Mirror, and ModelScope. ARK then hunts and installs
-                  from the fastest one. Plugged-in API keys are pinged separately for chat latency.
-                </p>
                 <div className="flex flex-col">
                   <div className="flex items-center gap-3 py-3 px-1">
                     <span className="w-40 shrink-0 text-sm text-content-secondary">Fastest download</span>
@@ -928,7 +958,7 @@ export function LocalAI() {
                         || (speedSample?.source === 'huggingface' ? 'Hugging Face' : speedSample ? 'Measured' : 'n/a')}
                     </span>
                   </div>
-                  {(speedSample?.hosts || []).map(host => (
+                  {(sortedSpeedHosts).map(host => (
                     <div key={host.id} className="flex items-center gap-3 py-3 px-1">
                       <span className="w-40 shrink-0 text-sm text-content-secondary">{host.name}</span>
                       <span className={`text-sm tabular-nums ${host.ok ? 'text-content-primary' : 'text-amber-400'}`}>
@@ -1011,9 +1041,6 @@ export function LocalAI() {
                       </div>
                     </div>
 
-                    <p className="text-xs text-content-tertiary px-1 leading-relaxed">
-                      {preloadPlan.summary}
-                    </p>
                   </>
                 )}
               </section>
@@ -1023,19 +1050,11 @@ export function LocalAI() {
                   <Globe className="w-4 h-4 text-content-secondary" />
                   <h2 className="text-base font-semibold text-content-primary">Connected APIs</h2>
                 </div>
-                <p className="text-xs text-content-tertiary mb-4 px-1 leading-relaxed">
-                  These are the keys you plugged in on Models. ARK chats through them. it does not
-                  download their weights. Latency is time to list models / authenticate, not MB/s.
-                </p>
                 {apiProbes.length === 0 ? (
-                  <p className="text-sm text-content-tertiary px-1">
-                    {speedSample
-                      ? 'No API keys connected yet. Add Groq, OpenRouter, NVIDIA, and others on Models, then run the test again.'
-                      : 'Run a speed test to ping every plugged-in API key.'}
-                  </p>
+                  <p className="text-sm text-content-tertiary px-1">No API keys connected yet.</p>
                 ) : (
                   <div className="flex flex-col">
-                    {apiProbes.map(probe => (
+                    {sortedApiProbes.map(probe => (
                       <div key={probe.id} className="flex items-center gap-3 py-3 px-1">
                         <span className="w-40 shrink-0 text-sm text-content-secondary">{probe.name}</span>
                         <span className={`text-sm tabular-nums ${probe.ok ? 'text-ark-accent-green' : 'text-amber-400'}`}>
@@ -1050,32 +1069,6 @@ export function LocalAI() {
                 )}
               </section>
 
-              <section>
-                <div className="flex items-center gap-2 mb-4">
-                  <Zap className="w-4 h-4 text-content-secondary" />
-                  <h2 className="text-base font-semibold text-content-primary">How it works</h2>
-                </div>
-                <div className="flex flex-col text-sm">
-                  <div className="py-3 px-1">
-                    <p className="text-content-primary font-medium">1. Measure every model host</p>
-                    <p className="text-xs text-content-tertiary mt-1">
-                      Hugging Face, HF Mirror, and ModelScope. plus a ping to each connected API key.
-                    </p>
-                  </div>
-                  <div className="py-3 px-1">
-                    <p className="text-content-primary font-medium">2. Time the next download</p>
-                    <p className="text-xs text-content-tertiary mt-1">
-                      A 5 GB model on a slow line needs to start much earlier than on a fast line.
-                    </p>
-                  </div>
-                  <div className="py-3 px-1">
-                    <p className="text-content-primary font-medium">3. Preload while you work</p>
-                    <p className="text-xs text-content-tertiary mt-1">
-                      While you chat on the current model, ARK downloads the next one in the background and switches when ready, with no stall.
-                    </p>
-                  </div>
-                </div>
-              </section>
             </div>
           )}
 
@@ -1102,50 +1095,45 @@ export function LocalAI() {
               <section>
                 <div className="flex items-center gap-2 mb-4">
                   <Zap className="w-4 h-4 text-content-secondary" />
-                  <h2 className="text-base font-semibold text-content-primary">What this means</h2>
+                  <h2 className="text-base font-semibold text-content-primary">Recommended</h2>
                 </div>
-                <div className="flex flex-col text-sm">
-                  <div className="py-3 px-1">
-                    <p className="text-content-primary font-medium">Recommended model</p>
-                    <p className="text-xs text-content-tertiary mt-1">
-                      {recommendation.name} · {recommendation.size}
+                <div className="py-3 px-1 text-sm">
+                  <p className="text-content-primary font-medium">{recommendation.name}</p>
+                  <p className="text-xs text-content-tertiary mt-1 tabular-nums">{recommendation.size}</p>
+                  {recommendationInstalled ? (
+                    <p className="mt-3 inline-flex items-center gap-2 text-xs text-emerald-300/90">
+                      <Check className="w-3.5 h-3.5 shrink-0" />
+                      Already on this PC
                     </p>
-                    <button
-                      type="button"
-                      disabled={downloadProgressMap[recommendation.id] != null && downloadProgressMap[recommendation.id] < 100}
-                      onClick={() => {
-                        const hit = CATALOG.find(m => m.id === recommendation.id) || CATALOG[0];
-                        downloadModel(hit);
-                      }}
-                      className="mt-3 inline-flex items-center gap-2 rounded-full bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25 px-3.5 py-1.5 text-xs font-medium transition-colors disabled:opacity-50"
-                    >
-                      {downloadProgressMap[recommendation.id] != null && downloadProgressMap[recommendation.id] < 100
-                        ? `Installing… ${Math.round(downloadProgressMap[recommendation.id])}%`
-                        : `Install recommended (${recommendation.size})`}
-                    </button>
-                    {downloadProgressMap[recommendation.id] != null && downloadProgressMap[recommendation.id] < 100 && (
-                      <div className="mt-2 h-1.5 bg-surface-hover rounded-full overflow-hidden max-w-xs">
-                        <div
-                          className="h-full bg-emerald-500/80 rounded-full transition-all"
-                          style={{ width: `${Math.min(100, downloadProgressMap[recommendation.id])}%` }}
-                        />
-                      </div>
-                    )}
-                  </div>
-                  <div className="py-3 px-1">
-                    <p className="text-content-primary font-medium">Acceleration</p>
-                    <p className="text-xs text-content-tertiary mt-1">
-                      {hw.acceleration === 'CPU'
-                        ? 'Running on CPU. Smaller models will feel snappier.'
-                        : `Using ${hw.acceleration} for faster local responses when a model is loaded.`}
+                  ) : installed.length > 0 ? (
+                    <p className="mt-3 text-xs text-content-secondary">
+                      {installed.length} model{installed.length === 1 ? '' : 's'} already installed — pick one from Overview or Storage.
                     </p>
-                  </div>
-                  <div className="py-3 px-1">
-                    <p className="text-content-primary font-medium">Privacy</p>
-                    <p className="text-xs text-content-tertiary mt-1">
-                      Inference stays on this machine. Cloud providers are only used when you choose Cloud AI.
-                    </p>
-                  </div>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        disabled={downloadProgressMap[recommendation.id] != null && downloadProgressMap[recommendation.id] < 100}
+                        onClick={() => {
+                          const hit = CATALOG.find(m => m.id === recommendation.id) || CATALOG[0];
+                          downloadModel({ ...hit, sizeGb: hit.sizeGb });
+                        }}
+                        className="mt-3 inline-flex items-center gap-2 rounded-full bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25 px-3.5 py-1.5 text-xs font-medium transition-colors disabled:opacity-50"
+                      >
+                        {downloadProgressMap[recommendation.id] != null && downloadProgressMap[recommendation.id] < 100
+                          ? `Installing… ${Math.round(downloadProgressMap[recommendation.id])}%`
+                          : `Install recommended (${recommendation.size})`}
+                      </button>
+                      {downloadProgressMap[recommendation.id] != null && downloadProgressMap[recommendation.id] < 100 && (
+                        <div className="mt-2 h-1.5 bg-surface-hover rounded-full overflow-hidden max-w-xs">
+                          <div
+                            className="h-full bg-emerald-500/80 rounded-full transition-all"
+                            style={{ width: `${Math.min(100, downloadProgressMap[recommendation.id])}%` }}
+                          />
+                        </div>
+                      )}
+                    </>
+                  )}
                 </div>
               </section>
             </div>
@@ -1384,14 +1372,26 @@ export function LocalAI() {
                     Manage models
                   </button>
                 </div>
-                <p className="text-xs text-content-tertiary mt-4">
-                  Controls talk to ARK Engine on this PC. Hardware and speed values are measured from your machine.
-                </p>
               </section>
             </div>
           )}
         </div>
       </div>
+
+      {downloadConfirm && (
+        <ModelDownloadConfirm
+          name={downloadConfirm.name}
+          sizeLabel={`${downloadConfirm.sizeGb.toFixed(1)} GB`}
+          category={downloadConfirm.category}
+          detail={downloadConfirm.detail}
+          onCancel={() => setDownloadConfirm(null)}
+          onConfirm={() => {
+            const pending = downloadConfirm;
+            setDownloadConfirm(null);
+            runDownload(pending);
+          }}
+        />
+      )}
     </div>
   );
 }

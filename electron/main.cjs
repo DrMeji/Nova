@@ -908,6 +908,7 @@ ipcMain.handle('ark:engine-generate', async (_e, payload) =>
     nPredict: payload?.nPredict,
     mediaDurationSec: payload?.mediaDurationSec,
     referenceImageDataUrl: payload?.referenceImageDataUrl,
+    visionImages: payload?.visionImages,
   }),
 );
 
@@ -918,6 +919,7 @@ ipcMain.handle('ark:engine-generate-stream', async (event, payload) => {
     kind: payload?.kind,
     temperature: payload?.temperature,
     nPredict: payload?.nPredict,
+    visionImages: payload?.visionImages,
     onChunk: (text) => {
       try {
         event.sender.send('ark:engine-chunk', { webContentsId, text: String(text || '') });

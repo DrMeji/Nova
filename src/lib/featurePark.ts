@@ -1,4 +1,4 @@
-/** Parked product surfaces. Networking + Message are live; Call stays parked on retail until signaling is hardened. */
+/** Parked product surfaces — wired in code, hidden from retail UI until flags flip. */
 
 export type ParkId = 'networking' | 'message' | 'call' | 'testers';
 
@@ -57,20 +57,20 @@ export function isCallUiEnabled(): boolean {
   return !isSocialParked('call');
 }
 
-/** Video tab parked until generative video is product-ready. */
+/** Video tab — UI + engine routes exist; hidden until isVideoTabEnabled() is true. */
 export function isVideoTabEnabled(): boolean {
   return false;
 }
 
-/** Voice tab — re-export so AppShell / Search can park it next to Video. */
+/** Voice tab — session hooks exist; hidden until isVoiceTabEnabled() is true. */
 export { isVoiceTabEnabled } from '@/lib/voiceMode';
 
-/** Settings → Testers (reveal parked features). */
+/** Settings → Testers — reveal toggles wired; hidden until enabled. */
 export function isTestersSettingsEnabled(): boolean {
   return false;
 }
 
-/** Settings → Beta channel opt-in. */
+/** Settings → Beta channel — wired; hidden until enabled. */
 export function isBetaSettingsEnabled(): boolean {
   return false;
 }

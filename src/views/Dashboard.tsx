@@ -232,9 +232,6 @@ export function Dashboard() {
               </select>
             </div>
           </div>
-          <p className="text-[11px] text-content-tertiary mb-3">
-            Older chats leave Recent and land here. Delete forever removes the chat and any images with it.
-          </p>
         </div>
       </div>
 
@@ -244,10 +241,7 @@ export function Dashboard() {
             <div className="flex flex-col items-center justify-center py-20 text-center">
               <FileText className="w-10 h-10 text-content-tertiary mb-3" strokeWidth={1.5} />
               <p className="text-base font-semibold text-content-primary mb-1">Nothing in History yet</p>
-              <p className="text-sm text-content-tertiary mb-4 max-w-sm">
-                Keep working in Recent. when it fills up, older chats move here automatically.
-              </p>
-              <div className="flex flex-wrap items-center justify-center gap-2">
+              <div className="flex flex-wrap items-center justify-center gap-2 mt-4">
                 <button type="button" className="ark-btn-secondary text-xs" onClick={() => navigate({ name: 'chat' })}>
                   New chat
                 </button>

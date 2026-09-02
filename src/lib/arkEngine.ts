@@ -137,7 +137,7 @@ export async function engineGenerate(
   message: string,
   modelId?: string,
   kind?: 'image' | 'video' | 'chat' | 'coding',
-  opts?: { mediaDurationSec?: number; referenceImageDataUrl?: string },
+  opts?: { mediaDurationSec?: number; referenceImageDataUrl?: string; visionImages?: string[] },
 ) {
   const prefs = getLocalPrefs();
   const sampling = {
@@ -146,6 +146,7 @@ export async function engineGenerate(
     mediaDurationSec: opts?.mediaDurationSec,
     referenceImageDataUrl: opts?.referenceImageDataUrl,
     allowNsfw: Boolean(prefs.allowNsfw),
+    visionImages: opts?.visionImages,
   };
   if (window.arkDesktop?.engineGenerate) {
     return window.arkDesktop.engineGenerate(message, modelId, kind, sampling);
@@ -171,11 +172,13 @@ export async function engineGenerateStream(
   modelId: string | undefined,
   onChunk: (text: string) => void,
   kind?: 'image' | 'video' | 'chat' | 'coding',
+  opts?: { visionImages?: string[] },
 ) {
   const prefs = getLocalPrefs();
   const sampling = {
     temperature: prefs.ggufTemperature,
     nPredict: ggufNPredictForKind(kind),
+    visionImages: opts?.visionImages,
   };
   if (window.arkDesktop?.engineGenerateStream) {
     const stop = window.arkDesktop.onEngineChunk?.((payload) => {

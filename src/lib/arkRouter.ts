@@ -22,12 +22,12 @@ import {
   cloudChatFreeKeys,
   cloudChatPaidKeys,
   cloudChatPreferredThenCascade,
-  cloudChatVisionKeys,
   hasAnyCloudChatKey,
 } from '@/lib/cloudChat';
 import {
-  hasCloudVisionCapability,
+  hasVisionCapability,
   historyHasImages,
+  runVisionDescribeHop,
   visionCapabilityGapReply,
 } from '@/lib/chatMultiModel';
 import { cloudGenerateImage } from '@/lib/cloudMedia';
@@ -41,6 +41,18 @@ import { getEngineStatus } from '@/lib/arkEngine';
 import { classifyChatIntent } from '@/lib/chatIntent';
 import { isWeakChatBrain, rankedReadyEngineIds } from '@/lib/enginePick';
 import { loadHardwareSnapshot, parseRamGb } from '@/lib/api';
+
+type HuntRunOutOpts = {
+  kind: 'chat' | 'coding' | 'image' | 'video';
+  reason: 'quota' | 'timeout' | 'empty' | 'context' | 'media';
+  currentModelId?: string;
+};
+
+function queueHuntBootstrap(opts: HuntRunOutOpts) {
+  void import('@/lib/arkHuntBootstrap').then(m =>
+    m.installNextWhenCurrentRanOut(opts),
+  ).catch(() => undefined);
+}
 
 export type RouterKind = 'chat' | 'image' | 'video' | 'coding';
 
@@ -196,13 +208,11 @@ async function tryLocalChat(
         return null;
       }
       if (result.source === 'ark-engine' && !result.media && isTemplateEngineReply(reply)) {
-        void import('@/lib/arkHuntBootstrap').then(m =>
-          m.installNextWhenCurrentRanOut({
-            kind,
-            reason: 'empty',
-            currentModelId: id,
-          }),
-        ).catch(() => undefined);
+        queueHuntBootstrap({
+          kind,
+          reason: 'empty',
+          currentModelId: id,
+        });
         return null;
       }
       return {
@@ -219,13 +229,11 @@ async function tryLocalChat(
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       if (/timed out|Empty GGUF|not ready|No GGUF|llama-cli|No local GGUF/i.test(msg)) {
-        void import('@/lib/arkHuntBootstrap').then(m =>
-          m.installNextWhenCurrentRanOut({
-            kind,
-            reason: /timed out/i.test(msg) ? 'timeout' : 'empty',
-            currentModelId: id,
-          }),
-        ).catch(() => undefined);
+        queueHuntBootstrap({
+          kind,
+          reason: /timed out/i.test(msg) ? 'timeout' : 'empty',
+          currentModelId: id,
+        });
       }
       onAttemptReset?.();
       return null;
@@ -401,24 +409,31 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
   // ── Multi-model vision hop (before text-only local brains invent from blindness) ──
   const hasVision = historyHasImages(history);
   if (hasVision) {
-    if (modeAllowsCloud(mode) && hasCloudVisionCapability()) {
-      const vis = await cloudChatVisionKeys(opts.message, attempted, history, opts.onChunk);
-      if (vis) {
+    const visionReady = await hasVisionCapability();
+    if (visionReady) {
+      const hop = await runVisionDescribeHop({
+        userMessage: opts.message,
+        history,
+        onChunk: opts.onChunk,
+      });
+      if (hop.ok && hop.notes) {
         return withContinued({
-          reply: vis.reply,
-          modelName: `${vis.provider} · ${vis.model} · vision`,
-          source: hitSource(vis.provider),
-          tier: vis.cost,
+          reply: hop.notes,
+          modelName: hop.providerLabel || 'Vision hop',
+          source: hop.providerLabel?.includes('local') ? 'ark-gguf-vl' : 'cloud-vision',
+          tier: hop.providerLabel?.includes('local') ? 'local-free' : 'paid',
           attempted,
         }, history);
       }
-      return {
-        reply: visionCapabilityGapReply({ localOnly: false }),
-        modelName: 'Vision hop',
-        source: 'none',
-        tier: 'paid',
-        attempted,
-      };
+      if (!hop.ok && hop.error !== 'no_vision') {
+        return {
+          reply: visionCapabilityGapReply({ localOnly: !modeAllowsCloud(mode) }),
+          modelName: 'Vision hop',
+          source: 'none',
+          tier: 'local-free',
+          attempted,
+        };
+      }
     }
     return {
       reply: visionCapabilityGapReply({ localOnly: !modeAllowsCloud(mode) }),
@@ -1014,13 +1029,11 @@ async function routeImage(opts: ArkRouteOpts): Promise<ArkRouterResult> {
   // Last resort: labeled preview only. never treat SVG fallback as finished art.
   // Never invent “use Canva / Photoshop” text. hosts failed; tell the user to retry or add a key.
   if (local?.media?.dataUrl && !local.media.real) {
-    void import('@/lib/arkHuntBootstrap').then(m =>
-      m.installNextWhenCurrentRanOut({
-        kind: 'image',
-        reason: 'media',
-        currentModelId: opts.preferredModelId,
-      }),
-    ).catch(() => undefined);
+    queueHuntBootstrap({
+      kind: 'image',
+      reason: 'media',
+      currentModelId: opts.preferredModelId,
+    });
     return {
       ...local,
       reply: [
@@ -1035,13 +1048,11 @@ async function routeImage(opts: ArkRouteOpts): Promise<ArkRouterResult> {
 
   if (local) return local;
 
-  void import('@/lib/arkHuntBootstrap').then(m =>
-    m.installNextWhenCurrentRanOut({
-      kind: 'image',
-      reason: 'media',
-      currentModelId: opts.preferredModelId,
-    }),
-  ).catch(() => undefined);
+  queueHuntBootstrap({
+    kind: 'image',
+    reason: 'media',
+    currentModelId: opts.preferredModelId,
+  });
 
   return {
     reply: [
@@ -1090,13 +1101,11 @@ async function routeVideo(opts: ArkRouteOpts): Promise<ArkRouterResult> {
         '',
         result.reply,
       ].join('\n');
-      void import('@/lib/arkHuntBootstrap').then(m =>
-        m.installNextWhenCurrentRanOut({
-          kind: 'video',
-          reason: 'media',
-          currentModelId: modelId,
-        }),
-      ).catch(() => undefined);
+      queueHuntBootstrap({
+        kind: 'video',
+        reason: 'media',
+        currentModelId: modelId,
+      });
     }
     return {
       reply,
@@ -1129,13 +1138,11 @@ async function routeVideo(opts: ArkRouteOpts): Promise<ArkRouterResult> {
         /* fall through */
       }
     }
-    void import('@/lib/arkHuntBootstrap').then(m =>
-      m.installNextWhenCurrentRanOut({
-        kind: 'video',
-        reason: 'media',
-        currentModelId: modelId,
-      }),
-    ).catch(() => undefined);
+    queueHuntBootstrap({
+      kind: 'video',
+      reason: 'media',
+      currentModelId: modelId,
+    });
     return {
       reply: [
         err instanceof Error ? err.message : 'Video generation failed',

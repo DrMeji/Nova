@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Search, Plus, Check, Download, Loader2, Cpu, Cloud, Monitor,
-  Code, Boxes, Brain, Eye, Zap, Image as ImageIcon, Video, Gauge, Sparkles, Rocket, X, KeyRound, Globe, RefreshCw, Trash2,
+  Code, Boxes, Brain, Eye, Zap, Image as ImageIcon, Video, Gauge, Sparkles, Rocket, X, KeyRound, Globe, RefreshCw, Trash2, ExternalLink,
 } from 'lucide-react';
 import { detectHardware, getAccurateHardware, getHardwareClass, isEngineDownloadable, loadHardwareSnapshot, parseRamGb, type HardwareClass } from '@/lib/api';
 import {
@@ -12,6 +12,7 @@ import {
 import { engineDiskSpace, getEngineStatus, deleteEngineModel, type ArkEngineStatus } from '@/lib/arkEngine';
 import { BrandMark, StatusCheck } from '@/components/BrandMark';
 import { BrainApiCard } from '@/components/BrainApiCard';
+import { ModelDownloadConfirm } from '@/components/ModelDownloadConfirm';
 import { useRouter } from '@/context/RouterContext';
 import {
   cancelEngineDownload,
@@ -47,6 +48,8 @@ import {
 import { FREE_SOURCES } from '@/lib/freeSources';
 import { huntModelsForPc, huntSourceBadge, type HuntedModel } from '@/lib/arkModelHunt';
 import { probeLiveCapacity, type LiveCapacity } from '@/lib/arkCapacity';
+import { openInSystemBrowser } from '@/lib/openExternal';
+import { providerKeyUrl } from '@/lib/providerKeyUrls';
 
 type TabId = 'for-pc' | 'local' | 'cloud' | 'engine';
 type Tier = 'free' | 'pro';
@@ -114,7 +117,7 @@ const LOCAL_MODELS: LocalModel[] = [
   { id: 'phi4-reasoning', name: 'Phi-4 Reasoning', description: 'Compact reasoning model for local use.', size: '8.5 GB', category: 'reasoning', tiers: ['free'], tone: 'from-sky-500 to-indigo-800', initial: 'Φ4' },
 
   // Vision (understand images, not generate)
-  { id: 'qwen2-vl-7b', name: 'Qwen2-VL 7B', description: 'Understand images and screenshots. Chat auto-hops here once local VL downloads ship; until then use Google/OpenAI/Anthropic for vision.', size: '5.8 GB', category: 'vision', tiers: ['free'], recommended: true, tone: 'from-teal-500 to-emerald-800', initial: 'VL' },
+  { id: 'qwen2-vl-7b', name: 'Qwen2-VL 7B', description: 'Vision bundle (~7.4 GB). On-device image chat when both GGUF + mmproj are installed — ARK hops vision → your chat/coder brain automatically.', size: '7.4 GB', category: 'vision', tiers: ['free'], recommended: true, tone: 'from-teal-500 to-emerald-800', initial: 'VL' },
   { id: 'llava-13b', name: 'LLaVA 13B', description: 'Image chat and visual Q&A (local VL — coming to Engine downloads).', size: '7.8 GB', category: 'vision', tiers: ['free'], tone: 'from-lime-500 to-green-800', initial: 'Lv' },
   { id: 'minicpm-v', name: 'MiniCPM-V', description: 'Efficient multimodal model for vision tasks (local VL — coming soon).', size: '5.1 GB', category: 'vision', tiers: ['free'], tone: 'from-green-500 to-teal-800', initial: 'Mv' },
   { id: 'llama32-vision-11b', name: 'Llama 3.2 Vision 11B', description: 'Meta multimodal model for image understanding (local VL — coming soon).', size: '7.9 GB', category: 'vision', tiers: ['free'], tone: 'from-indigo-400 to-violet-800', initial: 'LV' },
@@ -504,6 +507,15 @@ export function ModelsView() {
   const [huntNote, setHuntNote] = useState('');
   const [huntBusy, setHuntBusy] = useState(false);
   const [liveCapacity, setLiveCapacity] = useState<LiveCapacity | null>(null);
+  const [showRetiredSources, setShowRetiredSources] = useState(false);
+  const [downloadConfirm, setDownloadConfirm] = useState<{
+    id: string;
+    name: string;
+    sizeLabel?: string;
+    category?: string;
+    detail?: string;
+    hunt?: HuntedModel;
+  } | null>(null);
   const pcClass = useMemo(() => getHardwareClass(hw), [hw]);
   const ramGb = useMemo(() => parseRamGb(hw), [hw]);
   const fitLists = useMemo(() => buildFitLists(pcClass, ramGb), [pcClass, ramGb]);
@@ -835,25 +847,29 @@ export function ModelsView() {
   );
 
   const connectedProviders = useMemo(
-    () => CLOUD_PROVIDERS.filter(p => connected.has(p.id)),
-    [connected],
+    () => CLOUD_PROVIDERS.filter(p => connected.has(p.id) && (showRetiredSources || p.availability !== 'retired')),
+    [connected, showRetiredSources],
   );
 
   const filteredProviders = useMemo(() => {
-    if (!q) return CLOUD_PROVIDERS;
-    return CLOUD_PROVIDERS.filter(
+    const pool = showRetiredSources
+      ? CLOUD_PROVIDERS
+      : CLOUD_PROVIDERS.filter(p => p.availability !== 'retired');
+    if (!q) return pool;
+    return pool.filter(
       p =>
         p.name.toLowerCase().includes(q) ||
         p.description.toLowerCase().includes(q) ||
         p.tiers.some(t => t.includes(q)),
     );
-  }, [q]);
+  }, [q, showRetiredSources]);
 
   const cloudCategories = useMemo(() => {
     return CLOUD_MODEL_CATEGORIES.map(cat => ({
       ...cat,
       models: CLOUD_MODELS.filter(m => {
         if (m.category !== cat.id) return false;
+        if (cloudModelAvailability(m) !== 'live') return false;
         if (!q) return true;
         return (
           m.name.toLowerCase().includes(q) ||
@@ -864,13 +880,45 @@ export function ModelsView() {
         );
       }),
     })).filter(cat => cat.models.length > 0);
+  }, [q, showRetiredSources]);
+
+  const comingSoonCloudModels = useMemo(() => {
+    return CLOUD_MODELS.filter(m => {
+      if (cloudModelAvailability(m) !== 'coming_soon') return false;
+      if (!q) return true;
+      return (
+        m.name.toLowerCase().includes(q) ||
+        m.description.toLowerCase().includes(q) ||
+        m.provider.toLowerCase().includes(q) ||
+        m.tiers.some(t => t.includes(q))
+      );
+    });
   }, [q]);
 
-  const toggleInstall = (id: string, hunt?: HuntedModel) => {
+  const retiredCloudModels = useMemo(() => {
+    if (!showRetiredSources) return [];
+    return CLOUD_MODELS.filter(m => {
+      if (cloudModelAvailability(m) !== 'retired') return false;
+      if (!q) return true;
+      return (
+        m.name.toLowerCase().includes(q) ||
+        m.description.toLowerCase().includes(q) ||
+        m.provider.toLowerCase().includes(q) ||
+        m.tiers.some(t => t.includes(q))
+      );
+    });
+  }, [q, showRetiredSources]);
+
+  const executeInstall = (target: {
+    id: string;
+    name: string;
+    hunt?: HuntedModel;
+    category?: string;
+  }) => {
+    const { id, hunt } = target;
     if (hunt) {
       if (installed.has(id) || isEngineDownloading(id)) return;
 
-      // Auto-set defaults based on the model category (keep Models tab simple).
       if (hunt.category === 'coding') {
         setLocalPrefs({ defaultCodeModelId: id });
       } else {
@@ -905,7 +953,6 @@ export function ModelsView() {
     if (installed.has(id) || isEngineDownloading(id)) return;
     const model = LOCAL_MODELS.find(m => m.id === id);
 
-    // Auto-set defaults based on local model category.
     if (model?.category === 'coding') {
       setLocalPrefs({ defaultCodeModelId: id });
     } else {
@@ -925,6 +972,36 @@ export function ModelsView() {
         source: 'models',
       });
     });
+  };
+
+  const requestInstall = (id: string, hunt?: HuntedModel) => {
+    if (installed.has(id) || isEngineDownloading(id)) return;
+    if (hunt) {
+      setDownloadConfirm({
+        id: hunt.id,
+        name: hunt.name,
+        sizeLabel: `${hunt.sizeGb.toFixed(1)} GB`,
+        category: hunt.category,
+        detail: hunt.detail,
+        hunt,
+      });
+      return;
+    }
+    if (!isEngineDownloadable(id)) {
+      setOllamaNote('Not downloadable in ARK Engine yet. search shows discovery only.');
+      return;
+    }
+    const model = LOCAL_MODELS.find(m => m.id === id);
+    setDownloadConfirm({
+      id,
+      name: model?.name || id,
+      sizeLabel: model?.size,
+      category: model?.category,
+    });
+  };
+
+  const toggleInstall = (id: string, hunt?: HuntedModel) => {
+    requestInstall(id, hunt);
   };
 
   const cancelInstall = (id: string) => {
@@ -1025,10 +1102,7 @@ export function ModelsView() {
         <div className="w-full max-w-4xl mx-auto min-w-0">
           {tab === 'for-pc' ? (
             <>
-              <div className="flex items-center justify-between gap-3 mb-8">
-                <p className="text-xs text-content-tertiary truncate min-w-0">
-                  {huntNote || 'Find more models that fit this PC'}
-                </p>
+              <div className="flex items-center justify-end gap-3 mb-8">
                 <button
                   type="button"
                   onClick={() => void runHunt()}
@@ -1043,13 +1117,10 @@ export function ModelsView() {
 
               {hunted.length > 0 && (
                 <section className="mb-10">
-                  <div className="flex items-center gap-2 mb-1">
+                  <div className="flex items-center gap-2 mb-4">
                     <Globe className="w-4 h-4 text-content-secondary" />
                     <h2 className="text-base font-semibold text-content-primary">Found online for this PC</h2>
                   </div>
-                  <p className="text-xs text-content-tertiary mb-4">
-                    {huntNote || 'Live search on Hugging Face + ModelScope · GGUF · sized for your RAM'}
-                  </p>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1">
                     {hunted.map(model => {
                       const isOn = installed.has(model.id);
@@ -1071,9 +1142,6 @@ export function ModelsView() {
                               <span className="inline-flex items-center rounded-full bg-emerald-500/15 text-emerald-300 px-2 py-0.5 text-[10px] font-medium leading-none">
                                 Online
                               </span>
-                            </span>
-                            <span className="block text-xs text-content-tertiary truncate mt-0.5">
-                              {model.detail}
                             </span>
                           </span>
                           <ModelInstallControl
@@ -1194,13 +1262,7 @@ export function ModelsView() {
                       <cat.icon className="w-4 h-4 text-content-secondary" />
                       <h2 className="text-base font-semibold text-content-primary">{cat.title}</h2>
                     </div>
-                    {cat.id === 'vision' && (
-                      <p className="text-xs text-content-tertiary mb-3 max-w-2xl leading-relaxed">
-                        Screenshot chat works today via a <span className="text-content-secondary">cloud vision hop</span>
-                        {' '}(Google AI Studio free tier, or OpenAI / Anthropic in <span className="text-content-secondary">Models → Cloud</span>).
-                        Local vision packs are listed for discovery only — Engine cannot download or run VL weights yet (needs mmproj support).
-                      </p>
-                    )}
+                    {cat.id === 'vision' && null}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1">
                       {cat.models.map(model => {
                         const isOn = installed.has(model.id);
@@ -1246,9 +1308,6 @@ export function ModelsView() {
             <div className="py-6 max-w-xl space-y-4">
               <div>
                 <h2 className="text-lg font-semibold text-content-primary mb-2">ARK Brain</h2>
-                <p className="text-sm text-content-tertiary mb-4 leading-relaxed">
-                  ARK Brain is the built-in local engine and localhost API that powers on-device inference for ARK and external apps.
-                </p>
                 <div className="rounded-xl border border-surface-border p-4 space-y-2 text-sm">
                   <p className="text-content-secondary">
                     Status:{' '}
@@ -1295,19 +1354,11 @@ export function ModelsView() {
             </div>
           ) : (
             <>
-              <p className="text-sm text-content-tertiary mb-8 leading-relaxed">
-                Cloud AI does not download a file. A checkmark means “ARK may use this in Chat.”
-                Providers are the companies (OpenRouter, Groq, NVIDIA…). Chat / Coding / Fast rows
-                are the models on those companies. If a Key badge is showing, that source is already
-                saved from Settings and stays checked when you leave this page.
-              </p>
               {!q && (
                 <section className="mb-10">
                   <h2 className="text-base font-semibold text-content-primary mb-4">Connected</h2>
                   {connectedProviders.length === 0 ? (
-                    <p className="text-sm text-content-tertiary">
-                      None on yet. If you already saved keys in Settings, they should appear checked here after this page loads.
-                    </p>
+                    <p className="text-sm text-content-tertiary">No providers connected.</p>
                   ) : (
                     <div className="flex flex-col">
                       {connectedProviders.map(provider => (
@@ -1338,9 +1389,6 @@ export function ModelsView() {
                                 </span>
                               )}
                             </span>
-                            <span className="block text-xs text-content-tertiary truncate mt-0.5">
-                              {provider.id === 'ollama' ? (ollamaNote || provider.name) : provider.name}
-                            </span>
                           </span>
                           <StatusCheck label={`${provider.name} connected`} />
                         </button>
@@ -1365,7 +1413,7 @@ export function ModelsView() {
               <section className="mb-10">
                 <h2 className="text-base font-semibold text-content-primary mb-4">Free sources</h2>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1">
-                  {FREE_SOURCES.filter(s => !q || s.name.toLowerCase().includes(q) || s.detail.toLowerCase().includes(q)).map(src => (
+                  {FREE_SOURCES.filter(src => src.wired && (!q || src.name.toLowerCase().includes(q) || src.detail.toLowerCase().includes(q))).map(src => (
                     <div
                       key={src.id}
                       className="flex items-center gap-3 py-3 rounded-xl px-1 hover:bg-surface-hover/50 transition-colors"
@@ -1385,7 +1433,6 @@ export function ModelsView() {
                             </span>
                           )}
                         </span>
-                        <span className="block text-xs text-content-tertiary mt-0.5 truncate">{src.detail}</span>
                       </span>
                     </div>
                   ))}
@@ -1393,11 +1440,7 @@ export function ModelsView() {
               </section>
 
               <section className="mb-10">
-                <h2 className="text-base font-semibold text-content-primary mb-1">Providers</h2>
-                <p className="text-xs text-content-tertiary mb-4">
-                  Turn a source on for Chat Auto. Plus asks for a key only if one is not saved yet.
-                  Pollinations and Ollama have no cloud key. plus just enables them.
-                </p>
+                <h2 className="text-base font-semibold text-content-primary mb-4">Providers</h2>
                 {filteredProviders.length === 0 ? (
                   <EmptySearch />
                 ) : (
@@ -1480,13 +1523,33 @@ export function ModelsView() {
                     })}
                   </div>
                 )}
+                <button
+                  type="button"
+                  className="text-[11px] text-content-tertiary hover:text-content-secondary"
+                  onClick={() => setShowRetiredSources(v => !v)}
+                >
+                  {showRetiredSources ? 'Hide retired' : 'Show retired (GitHub Models)'}
+                </button>
+                {showRetiredSources && retiredCloudModels.length > 0 && (
+                  <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1">
+                    {retiredCloudModels.map(model => (
+                      <div key={model.id} className="flex items-center gap-3 py-3 rounded-xl px-1 opacity-75">
+                        <BrandMark id={model.id} name={model.name} initial={model.initial} tone={model.tone} />
+                        <span className="min-w-0 flex-1">
+                          <span className="flex items-center gap-2 min-w-0 flex-wrap">
+                            <span className="text-sm font-medium text-content-primary truncate">{model.name}</span>
+                            <span className="inline-flex items-center rounded-full bg-zinc-500/20 text-content-tertiary px-2 py-0.5 text-[10px] font-medium leading-none">
+                              Retired
+                            </span>
+                          </span>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </section>
 
               <div className="space-y-10">
-                <p className="text-xs text-content-tertiary -mt-4">
-                  Chat, Coding, Reasoning, Vision, and Fast are cloud models. Not files you download.
-                  Checkmark = this model is available in Chat. It stays selected when you leave this page.
-                </p>
                 {cloudCategories.map(cat => (
                   <section key={cat.id}>
                     <div className="flex items-center gap-2 mb-4">
@@ -1525,9 +1588,6 @@ export function ModelsView() {
                                   </span>
                                 )}
                               </span>
-                              <span className="block text-xs text-content-tertiary truncate mt-0.5">
-                                {categoryDisplayLabel(model.category)} · {model.provider}
-                              </span>
                             </span>
                             <button
                               type="button"
@@ -1552,14 +1612,54 @@ export function ModelsView() {
                   </section>
                 ))}
 
-                {cloudCategories.length === 0 && filteredProviders.length > 0 && q && (
+                {cloudCategories.length === 0 && comingSoonCloudModels.length === 0 && filteredProviders.length > 0 && q && (
                   <p className="text-sm text-content-tertiary">No matching cloud models.</p>
+                )}
+
+                {!q && comingSoonCloudModels.length > 0 && (
+                  <section className="mt-10 pt-8 border-t border-surface-border">
+                    <h2 className="text-base font-semibold text-content-primary mb-4">Coming soon</h2>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1">
+                      {comingSoonCloudModels.map(model => (
+                        <div
+                          key={`soon-${model.id}`}
+                          className="flex items-center gap-3 py-3 rounded-xl px-1 opacity-80"
+                        >
+                          <BrandMark id={model.id} name={model.name} initial={model.initial} tone={model.tone} />
+                          <span className="min-w-0 flex-1">
+                            <span className="flex items-center gap-2 min-w-0 flex-wrap">
+                              <span className="text-sm font-medium text-content-primary truncate">{model.name}</span>
+                              <TierBadges tiers={model.tiers} />
+                              <span className="inline-flex items-center rounded-full bg-amber-500/15 text-amber-400/90 px-2 py-0.5 text-[10px] font-medium leading-none">
+                                Soon
+                              </span>
+                            </span>
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
                 )}
               </div>
             </>
           )}
         </div>
       </div>
+
+      {downloadConfirm && (
+        <ModelDownloadConfirm
+          name={downloadConfirm.name}
+          sizeLabel={downloadConfirm.sizeLabel}
+          category={downloadConfirm.category}
+          detail={downloadConfirm.detail}
+          onCancel={() => setDownloadConfirm(null)}
+          onConfirm={() => {
+            const pending = downloadConfirm;
+            setDownloadConfirm(null);
+            executeInstall(pending);
+          }}
+        />
+      )}
 
       {connectTarget && (
         <div
@@ -1571,13 +1671,7 @@ export function ModelsView() {
             onClick={e => e.stopPropagation()}
           >
             <div className="flex items-start justify-between gap-3 mb-4">
-              <div>
-                <h2 className="text-lg font-semibold text-content-primary">Connect {connectTarget.name}</h2>
-                <p className="text-xs text-content-tertiary mt-1">
-                  Paste an API key. It stays on this device. After you save, this provider stays checked
-                  and Chat Auto can use it. same as adding it in Settings.
-                </p>
-              </div>
+              <h2 className="text-lg font-semibold text-content-primary">Connect {connectTarget.name}</h2>
               <button
                 type="button"
                 onClick={() => setConnectTarget(null)}
@@ -1595,6 +1689,16 @@ export function ModelsView() {
               className="ark-input"
               autoFocus
             />
+            {providerKeyUrl(connectTarget.id) ? (
+              <button
+                type="button"
+                onClick={() => void openInSystemBrowser(providerKeyUrl(connectTarget.id)!)}
+                className="mt-3 w-full inline-flex items-center justify-center gap-2 rounded-xl border border-surface-border px-3 py-2.5 text-sm text-sky-400 hover:text-sky-300 hover:bg-surface-hover/50 transition-colors"
+              >
+                <ExternalLink className="w-4 h-4 shrink-0" />
+                Get API key
+              </button>
+            ) : null}
             <div className="flex gap-2 mt-5">
               <button type="button" onClick={() => setConnectTarget(null)} className="ark-btn-secondary flex-1">
                 Cancel

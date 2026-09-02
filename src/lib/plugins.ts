@@ -3,6 +3,13 @@
  */
 
 import { getPluginToken, setPluginToken } from '@/lib/localPrefs';
+import { intentPermission, requirePluginPermission, hasPluginPermission } from '@/lib/pluginPermissions';
+import {
+  getCatalogPluginHandler,
+  isCatalogPluginId,
+  pluginMentionsText,
+  runCatalogPluginLive,
+} from '@/lib/catalogPlugins';
 
 const STATE_KEY = 'ark:plugin-state';
 
@@ -48,18 +55,16 @@ export const LIVE_PLUGIN_IDS = [
   'discord',
 ] as const;
 
-/** Extra APIs that work when connected, but stay off the default list until Testers reveals them. */
-export const WIRED_PLUGIN_IDS = [
-  ...LIVE_PLUGIN_IDS,
-  'telegram',
-] as const;
+/** Every catalog plugin has a live verify + chat runner. */
+export function isPluginWired(id: string): boolean {
+  return isCatalogPluginId(id);
+}
+
+/** @deprecated Use isPluginWired — all catalog plugins are wired. */
+export const WIRED_PLUGIN_IDS = [] as const;
 
 export function isPluginLive(id: string): boolean {
   return (LIVE_PLUGIN_IDS as readonly string[]).includes(id);
-}
-
-export function isPluginWired(id: string): boolean {
-  return (WIRED_PLUGIN_IDS as readonly string[]).includes(id);
 }
 
 export type PluginRuntimeState = {
@@ -184,9 +189,9 @@ export const PLUGIN_CATALOG: PluginDef[] = [
   { id: 'runway', name: 'Runway', description: 'Generate and edit video with AI.', longDescription: 'Runway video tools.', tone: 'from-emerald-400 to-teal-700', initial: 'Rw', category: 'creativity', authKind: 'token', permissions: [{ id: 'write', label: 'Generate', detail: 'Create video', required: true }], actions: [] },
 
   { id: 'datadog', name: 'Datadog', description: 'Search and act on your data.', longDescription: 'Observability in ARK.', tone: 'from-violet-600 to-purple-900', initial: 'Dd', category: 'developer', authKind: 'token', permissions: [{ id: 'search', label: 'Search', detail: 'Search telemetry', required: true }], actions: [] },
-  { id: 'supabase', name: 'Supabase', description: 'Manage and query databases.', longDescription: 'Supabase projects in ARK.', tone: 'from-emerald-500 to-green-800', initial: 'Sb', category: 'developer', authKind: 'token', permissions: [{ id: 'read', label: 'Query', detail: 'Run read queries', required: true }], actions: [] },
+  { id: 'supabase', name: 'Supabase', description: 'Manage and query databases.', longDescription: 'Supabase projects in ARK.', tone: 'from-emerald-500 to-green-800', initial: 'Sb', category: 'developer', hero: true, live: true, authKind: 'token', permissions: [{ id: 'read', label: 'Query', detail: 'Run read queries', required: true }], actions: [{ id: 'projects', label: 'List projects', prompt: 'Using Supabase, list my projects.' }] },
   { id: 'vercel', name: 'Vercel', description: 'Build and deploy web apps and agents.', longDescription: 'Deployments from ARK.', tone: 'from-zinc-500 to-black', initial: 'V', category: 'developer', hero: true, live: true, authKind: 'token', permissions: [{ id: 'read', label: 'Read deploys', detail: 'View deployments', required: true }, { id: 'write', label: 'Redeploy', detail: 'Trigger redeploys', required: false }], actions: [{ id: 'deploys', label: 'Recent deploys', prompt: 'Using Vercel, list my recent deployments.' }] },
-  { id: 'exa', name: 'Exa', description: 'Web search for AI agents.', longDescription: 'Web search tool.', tone: 'from-blue-500 to-indigo-700', initial: 'Ex', category: 'developer', authKind: 'token', permissions: [{ id: 'search', label: 'Search web', detail: 'Run searches', required: true }], actions: [] },
+  { id: 'exa', name: 'Exa', description: 'Web search for AI agents.', longDescription: 'Web search tool.', tone: 'from-blue-500 to-indigo-700', initial: 'Ex', category: 'developer', hero: true, live: true, authKind: 'token', permissions: [{ id: 'search', label: 'Search web', detail: 'Run searches', required: true }], actions: [{ id: 'search', label: 'Search the web', prompt: 'Using Exa, search for the latest on this topic.' }] },
   { id: 'neon', name: 'Neon Postgres', description: 'Manage Neon Postgres databases.', longDescription: 'Neon database access.', tone: 'from-green-400 to-emerald-700', initial: 'Ne', category: 'developer', authKind: 'token', permissions: [{ id: 'read', label: 'Query', detail: 'Read data', required: true }], actions: [] },
   { id: 'devpost', name: 'Devpost Hackathons', description: 'Find and submit to hackathons.', longDescription: 'Hackathon discovery.', tone: 'from-sky-500 to-blue-700', initial: 'Dp', category: 'developer', authKind: 'none', permissions: [{ id: 'read', label: 'Browse', detail: 'Browse events', required: true }], actions: [] },
   { id: 'context7', name: 'Context7', description: 'Up to date library docs for agents.', longDescription: 'Library docs for coding.', tone: 'from-amber-500 to-orange-700', initial: 'C7', category: 'developer', authKind: 'token', permissions: [{ id: 'read', label: 'Read docs', detail: 'Fetch docs', required: true }], actions: [] },
@@ -197,7 +202,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
   { id: 'hubspot', name: 'HubSpot', description: 'Insights to action in HubSpot.', longDescription: 'HubSpot CRM.', tone: 'from-orange-500 to-red-600', initial: 'Hs', category: 'business', authKind: 'oauth', permissions: [{ id: 'read', label: 'Read CRM', detail: 'View deals', required: true }], actions: [] },
   { id: 'apollo', name: 'Apollo.io', description: 'Find buyers and close deals.', longDescription: 'Apollo sales data.', tone: 'from-yellow-500 to-orange-700', initial: 'Ap', category: 'business', authKind: 'token', permissions: [{ id: 'search', label: 'Search', detail: 'Find leads', required: true }], actions: [] },
   { id: 'quickbooks', name: 'QuickBooks', description: 'Track finances and invoices.', longDescription: 'QuickBooks data.', tone: 'from-green-500 to-emerald-800', initial: 'Qb', category: 'business', authKind: 'oauth', permissions: [{ id: 'read', label: 'Read finance', detail: 'View invoices', required: true }], actions: [] },
-  { id: 'stripe', name: 'Stripe', description: 'Payments and billing workflows.', longDescription: 'Stripe payments.', tone: 'from-indigo-500 to-violet-800', initial: 'St', category: 'business', authKind: 'token', permissions: [{ id: 'read', label: 'Read payments', detail: 'View charges', required: true }], actions: [] },
+  { id: 'stripe', name: 'Stripe', description: 'Payments and billing workflows.', longDescription: 'Stripe payments.', tone: 'from-indigo-500 to-violet-800', initial: 'St', category: 'business', hero: true, live: true, authKind: 'token', permissions: [{ id: 'read', label: 'Read payments', detail: 'View charges', required: true }], actions: [{ id: 'charges', label: 'Recent charges', prompt: 'Using Stripe, list my recent charges.' }] },
   { id: 'salesforce', name: 'Salesforce', description: 'CRM and customer workflows.', longDescription: 'Salesforce CRM.', tone: 'from-sky-400 to-blue-700', initial: 'Sf', category: 'business', authKind: 'oauth', permissions: [{ id: 'read', label: 'Read CRM', detail: 'View records', required: true }], actions: [] },
   { id: 'asana', name: 'Asana', description: 'Organize work across teams.', longDescription: 'Asana tasks.', tone: 'from-rose-400 to-red-700', initial: 'As', category: 'business', authKind: 'oauth', permissions: [{ id: 'read', label: 'Read tasks', detail: 'View tasks', required: true }], actions: [] },
 
@@ -300,28 +305,14 @@ export async function runPluginAction(
   token?: string,
   permissions?: PluginPermission[],
 ): Promise<string | null> {
+  const handler = getCatalogPluginHandler(pluginId);
+  if (!handler) return null;
+
   const lower = userText.toLowerCase();
-  const mentions =
-    lower.includes(pluginId) ||
-    (pluginId === 'github' && /github|repo|repositor|pull request|\bpr\b|issue/.test(lower)) ||
-    (pluginId === 'notion' && /notion|spec|brief|workspace/.test(lower)) ||
-    (pluginId === 'gmail' && /gmail|inbox|email|mail|unread/.test(lower)) ||
-    (pluginId === 'slack' && /slack|channel|dm/.test(lower)) ||
-    (pluginId === 'linear' && /linear|ticket|issue/.test(lower)) ||
-    (pluginId === 'figma' && /figma|design file|frame/.test(lower)) ||
-    (pluginId === 'gdrive' && /drive|google drive|docs|sheets|slides/.test(lower)) ||
-    (pluginId === 'gcal' && /calendar|schedule|meeting|agenda|gcal/.test(lower)) ||
-    (pluginId === 'vercel' && /vercel|deploy/.test(lower)) ||
-    (pluginId === 'discord' && /discord|server|guild/.test(lower)) ||
-    (pluginId === 'telegram' && /telegram|bot/.test(lower)) ||
-    (pluginId === 'stripe' && /stripe|charge|payment/.test(lower));
+  if (!pluginMentionsText(pluginId, lower)) return null;
 
-  if (!mentions) return null;
-
-  const { intentPermission, requirePluginPermission, hasPluginPermission } = await import('@/lib/pluginPermissions');
   const needed = intentPermission(pluginId, userText);
   if (permissions && permissions.length > 0) {
-    // Always need read for live calls
     if (!hasPluginPermission(permissions, 'read') && needed === 'read') {
       return requirePluginPermission(permissions, 'read', pluginId);
     }
@@ -336,214 +327,23 @@ export async function runPluginAction(
     }
   }
 
-  if (pluginId === 'github') {
-    if (token) {
-      try {
-        const { runGitHubLive } = await import('@/lib/github');
-        return await runGitHubLive(token, userText, { permissions });
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : 'GitHub request failed';
-        return [
-          'GitHub · error',
-          '',
-          msg,
-          '',
-          'Check your token in Plugins → GitHub → Connect. Fine-grained tokens need Contents/Metadata read; classic tokens need `repo` (and `read:user`).',
-        ].join('\n');
-      }
-    }
+  if (!handler.noToken && !token) {
     return runPluginStub(pluginId, userText);
   }
 
-  if (pluginId === 'notion') {
-    if (token) {
-      try {
-        const { runNotionLive } = await import('@/lib/notion');
-        return await runNotionLive(token, userText, { permissions });
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : 'Notion request failed';
-        return [
-          'Notion · error',
-          '',
-          msg,
-          '',
-          'Use an internal integration secret and share target pages with that integration.',
-        ].join('\n');
-      }
-    }
-    return runPluginStub(pluginId, userText);
+  try {
+    return await runCatalogPluginLive(pluginId, token || '', userText, { permissions });
+  } catch (err) {
+    const name = getPluginById(pluginId)?.name || pluginId;
+    const msg = err instanceof Error ? err.message : 'Request failed';
+    return [`${name} · error`, '', msg].join('\n');
   }
-
-  if (pluginId === 'gmail') {
-    if (token) {
-      try {
-        const { runGmailLive } = await import('@/lib/gmail');
-        return await runGmailLive(token, userText, { permissions });
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : 'Gmail request failed';
-        return [
-          'Gmail · error',
-          '',
-          msg,
-          '',
-          'Paste a Google OAuth access token with gmail.readonly (and userinfo.email).',
-        ].join('\n');
-      }
-    }
-    return runPluginStub(pluginId, userText);
-  }
-
-  if (pluginId === 'slack') {
-    if (token) {
-      try {
-        const { runSlackLive } = await import('@/lib/slack');
-        return await runSlackLive(token, userText, { permissions });
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : 'Slack request failed';
-        return ['Slack · error', '', msg].join('\n');
-      }
-    }
-    return runPluginStub(pluginId, userText);
-  }
-
-  if (pluginId === 'linear') {
-    if (token) {
-      try {
-        const { runLinearLive } = await import('@/lib/linear');
-        return await runLinearLive(token, userText, { permissions });
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : 'Linear request failed';
-        return ['Linear · error', '', msg].join('\n');
-      }
-    }
-    return runPluginStub(pluginId, userText);
-  }
-
-  if (pluginId === 'figma') {
-    if (token) {
-      try {
-        const { runFigmaLive } = await import('@/lib/figma');
-        return await runFigmaLive(token, userText, { permissions });
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : 'Figma request failed';
-        return ['Figma · error', '', msg].join('\n');
-      }
-    }
-    return runPluginStub(pluginId, userText);
-  }
-
-  if (pluginId === 'gdrive') {
-    if (token) {
-      try {
-        const { runDriveLive } = await import('@/lib/gdrive');
-        return await runDriveLive(token, userText, { permissions });
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : 'Drive request failed';
-        return [
-          'Drive · error',
-          '',
-          msg,
-          '',
-          'Paste a Google OAuth token with drive.readonly scope.',
-        ].join('\n');
-      }
-    }
-    return runPluginStub(pluginId, userText);
-  }
-
-  if (pluginId === 'gcal') {
-    if (token) {
-      try {
-        const { runCalendarLive } = await import('@/lib/gcal');
-        return await runCalendarLive(token, userText, { permissions });
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : 'Calendar request failed';
-        return [
-          'Calendar · error',
-          '',
-          msg,
-          '',
-          'Paste a Google OAuth token with calendar.readonly scope.',
-        ].join('\n');
-      }
-    }
-    return runPluginStub(pluginId, userText);
-  }
-
-  if (pluginId === 'vercel') {
-    if (token) {
-      try {
-        const { runVercelLive } = await import('@/lib/vercel');
-        return await runVercelLive(token, userText, { permissions });
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : 'Vercel request failed';
-        return ['Vercel · error', '', msg].join('\n');
-      }
-    }
-    return runPluginStub(pluginId, userText);
-  }
-
-  if (pluginId === 'discord') {
-    if (token) {
-      try {
-        const { runDiscordLive } = await import('@/lib/discord');
-        return await runDiscordLive(token, userText, { permissions });
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : 'Discord request failed';
-        return ['Discord · error', '', msg].join('\n');
-      }
-    }
-    return runPluginStub(pluginId, userText);
-  }
-
-  if (pluginId === 'telegram') {
-    if (token) {
-      try {
-        const { runTelegramLive } = await import('@/lib/telegram');
-        return await runTelegramLive(token, userText);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : 'Telegram request failed';
-        return ['Telegram · error', '', msg].join('\n');
-      }
-    }
-    return runPluginStub(pluginId, userText);
-  }
-
-  if (pluginId === 'stripe') {
-    if (token) {
-      try {
-        const { runStripeLive } = await import('@/lib/stripe');
-        return await runStripeLive(token, userText);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : 'Stripe request failed';
-        return ['Stripe · error', '', msg].join('\n');
-      }
-    }
-    return runPluginStub(pluginId, userText);
-  }
-
-  return runPluginStub(pluginId, userText);
 }
 
 /** Honest reply when a plugin is named but not connected. never invent account data. */
 export function runPluginStub(pluginId: string, userText: string): string | null {
   const lower = userText.toLowerCase();
-  const mentions =
-    lower.includes(pluginId.replace(/-/g, ' ')) ||
-    (pluginId === 'github' && /\bgithub\b/.test(lower)) ||
-    (pluginId === 'notion' && /\bnotion\b/.test(lower)) ||
-    (pluginId === 'gmail' && /\bgmail\b|\binbox\b/.test(lower)) ||
-    (pluginId === 'slack' && /\bslack\b/.test(lower)) ||
-    (pluginId === 'linear' && /\blinear\b/.test(lower)) ||
-    (pluginId === 'figma' && /\bfigma\b/.test(lower)) ||
-    (pluginId === 'gdrive' && /google drive|\bgdrive\b/.test(lower)) ||
-    (pluginId === 'gcal' && /google calendar|\bgcal\b/.test(lower)) ||
-    (pluginId === 'vercel' && /\bvercel\b/.test(lower)) ||
-    (pluginId === 'discord' && /\bdiscord\b/.test(lower)) ||
-    (pluginId === 'telegram' && /\btelegram\b/.test(lower)) ||
-    (pluginId === 'stripe' && /\bstripe\b/.test(lower));
-
-  if (!mentions) return null;
+  if (!pluginMentionsText(pluginId, lower)) return null;
 
   const name = getPluginById(pluginId)?.name || pluginId;
   return [

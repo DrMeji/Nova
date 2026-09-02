@@ -215,7 +215,7 @@ declare global {
         message: string,
         modelId?: string,
         kind?: string,
-        opts?: { temperature?: number; nPredict?: number; mediaDurationSec?: number; referenceImageDataUrl?: string },
+        opts?: { temperature?: number; nPredict?: number; mediaDurationSec?: number; referenceImageDataUrl?: string; visionImages?: string[] },
       ) => Promise<{
         ok?: boolean;
         reply: string;
@@ -270,7 +270,7 @@ declare global {
         message: string,
         modelId?: string,
         kind?: 'image' | 'video' | 'chat' | 'coding',
-        opts?: { temperature?: number; nPredict?: number; mediaDurationSec?: number; referenceImageDataUrl?: string },
+        opts?: { temperature?: number; nPredict?: number; mediaDurationSec?: number; referenceImageDataUrl?: string; visionImages?: string[] },
       ) => Promise<{
         ok: boolean;
         reply: string;

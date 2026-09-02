@@ -318,6 +318,20 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.166',
+    channel: 'stable' as const,
+    date: 'Sep 1, 2026',
+    title: 'Full plugin wiring, MCP remote, local vision',
+    notes: [
+      'All catalog plugins wired with verify + live actions — Build & Run shelf emptied',
+      'MCP remote HTTP/SSE servers + inline auto tool loop in chat',
+      'Qwen2-VL on-device vision hop when the bundle is installed (vision → chat/coder)',
+      'Models cloud/local polish, download confirm, and honest capability copy',
+      'Auth groundwork: avatar Storage migration + email reset ready when domain ships',
+      'Video, Voice, Testers, Beta plugged in but hidden behind feature flags',
+    ],
+  },
+  {
     version: '0.1.165',
     channel: 'stable' as const,
     date: 'Sep 1, 2026',

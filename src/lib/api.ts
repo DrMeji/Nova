@@ -34,6 +34,7 @@ export const ENGINE_DOWNLOADABLE_IDS = [
   'sd15-local',
   'sdxl-turbo-local',
   'flux-schnell-local',
+  'qwen2-vl-7b',
 ] as const;
 
 export function isEngineDownloadable(id: string) {

@@ -73,7 +73,7 @@ export function looksLikeCopyPasteCodeAsk(text: string): boolean {
   return false;
 }
 
-/** Show the “Switch to Code” banner. disabled while Code tab is parked. */
+/** “Switch to Code” banner — off while Code workspace handles builds. */
 export function shouldSuggestCodeSwitch(
   _text: string,
   _opts?: { hasStudioFiles?: boolean; composerAsk?: boolean },

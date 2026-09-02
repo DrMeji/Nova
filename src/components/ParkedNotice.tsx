@@ -1,7 +1,7 @@
 import { Clock } from 'lucide-react';
 import type { ParkId } from '@/lib/featurePark';
 
-export type ParkedFeature = Exclude<ParkId, 'testers'> | 'code' | 'project';
+export type ParkedFeature = Exclude<ParkId, 'testers'> | 'code' | 'project' | 'video' | 'voice';
 
 const LABEL: Record<ParkedFeature, string> = {
   networking: 'Networking',
@@ -9,11 +9,15 @@ const LABEL: Record<ParkedFeature, string> = {
   call: 'Call',
   code: 'Code',
   project: 'Code workspace',
+  video: 'Video',
+  voice: 'Voice',
 };
 
 const SUBTITLE: Partial<Record<ParkedFeature, string>> = {
   code: 'Code panels are coming back inside Chat',
   project: 'Open folders and edit projects in Chat for now',
+  video: 'Coming soon',
+  voice: 'Coming soon',
 };
 
 export function ParkedNotice({ feature }: { feature: ParkedFeature }) {

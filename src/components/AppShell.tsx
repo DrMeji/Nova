@@ -120,8 +120,6 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [settingsSection, setSettingsSection] = useState('account');
   const [searchOpen, setSearchOpen] = useState(false);
   const [recentOpen, setRecentOpen] = useState(true);
-  const [chatsOpen, setChatsOpen] = useState(true);
-  const [projectsOpen, setProjectsOpen] = useState(true);
   const [prefsName, setPrefsName] = useState(() => getLocalPrefs().displayName);
   const [avatarUrl, setAvatarUrl] = useState(() => getLocalPrefs().avatarDataUrl);
   const [presence, setPresence] = useState<PresenceStatus>(() => getLocalPrefs().presenceStatus || 'online');
@@ -304,7 +302,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     return {
       chats: [...chats].sort(byPin).slice(0, 16),
       projects: [...projects].sort(byPin).slice(0, 12),
-      mixed: [...chats, ...projects].sort(byPin).slice(0, 16),
+      mixed: [...chats, ...projects].sort(byPin).slice(0, 20),
     };
   }, [activeChats, recent]);
 
@@ -774,40 +772,14 @@ export function AppShell({ children }: { children: ReactNode }) {
               </button>
 
               {recentOpen && !collapsed && (
-                <div className="mt-1 flex flex-col gap-2 pl-1">
-                  {recentFeed.chats.length === 0 && recentFeed.projects.length === 0 ? (
+                <div className="mt-1 flex flex-col gap-0.5 pl-1">
+                  {recentFeed.mixed.length === 0 ? (
                     <p className="px-3 py-2 text-[11px] text-content-tertiary leading-snug">
                       Chats and Code workspaces you start will show up here.
                     </p>
-                  ) : null}
-                  {recentFeed.chats.length > 0 ? (
-                    <div>
-                      <button
-                        type="button"
-                        aria-label="Toggle chats"
-                        onClick={() => setChatsOpen(o => !o)}
-                        className="w-full flex items-center px-2 py-1 text-[10px] uppercase tracking-wider text-content-tertiary"
-                      >
-                        <span className="flex-1 text-left">Chats</span>
-                        <ChevronDown className={`w-3 h-3 transition-transform ${chatsOpen ? '' : '-rotate-90'}`} />
-                      </button>
-                      {chatsOpen ? recentFeed.chats.map(renderRecentRow) : null}
-                    </div>
-                  ) : null}
-                  {recentFeed.projects.length > 0 ? (
-                    <div>
-                      <button
-                        type="button"
-                        aria-label="Toggle projects"
-                        onClick={() => setProjectsOpen(o => !o)}
-                        className="w-full flex items-center px-2 py-1 text-[10px] uppercase tracking-wider text-content-tertiary"
-                      >
-                        <span className="flex-1 text-left">Projects</span>
-                        <ChevronDown className={`w-3 h-3 transition-transform ${projectsOpen ? '' : '-rotate-90'}`} />
-                      </button>
-                      {projectsOpen ? recentFeed.projects.map(renderRecentRow) : null}
-                    </div>
-                  ) : null}
+                  ) : (
+                    recentFeed.mixed.map(renderRecentRow)
+                  )}
                 </div>
               )}
 

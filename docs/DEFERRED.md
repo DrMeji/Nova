@@ -14,7 +14,7 @@ Master list of things not done yet, half-done, or parked.
 | **2** | MCP **tools/call** in Chat | ✅ Done |
 | **3** | Plugins UX polish | ✅ Done (clarity pass, not full redesign) |
 | **4** | Auth (local recovery note + PIN lockout) | ✅ Temp local recovery; real email reset still later |
-| **5** | Ship slice (CSP packaged, signed-out update, SQL migrations) | ✅ Partial — signing cert + avatar Storage + RLS audit still open |
+| **5** | Ship slice (CSP packaged, signed-out update, SQL migrations) | ✅ Partial — signing cert still needs purchase; avatar Storage + RLS SQL ready to apply |
 | — | Call / Video / Voice | Parked side add-ons — later |
 
 ---
@@ -65,5 +65,5 @@ Master list of things not done yet, half-done, or parked.
 
 ## Rule of thumb
 
-1. **Remaining hard items:** Windows signing cert, RLS audit, avatar Storage, custom SMTP / real email reset site  
+1. **Remaining hard items:** Windows signing cert (purchase), Supabase dashboard apply (avatars + RLS migrations), deploy `website/` + set `VITE_ARK_WEBSITE_ORIGIN`, optional custom SMTP  
 2. **Later (side add-ons):** Call, Voice, Video  

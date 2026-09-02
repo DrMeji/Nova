@@ -6,6 +6,7 @@
 const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
+const mcpRemote = require('./arkMcpRemote.cjs');
 
 /** @type {Map<string, { child: import('child_process').ChildProcess, buf: string, pending: Map<number, { resolve: Function, reject: Function, timer: NodeJS.Timeout }>, nextId: number }>} */
 const sessions = new Map();
@@ -172,11 +173,27 @@ async function listTools(server) {
   if (!server || !server.id) return { ok: false, error: 'Missing server id', tools: [] };
 
   if (server.transport === 'sse') {
-    return {
-      ok: false,
-      error: 'SSE MCP connect is registered, but live probe is not wired yet. Use stdio for now.',
-      tools: [],
-    };
+    const url = String(server.url || '').trim();
+    if (!url) {
+      return { ok: false, error: 'Remote MCP needs a URL', tools: [] };
+    }
+    try {
+      const result = await mcpRemote.remoteRpc(server, 'tools/list', {});
+      const tools = Array.isArray(result?.tools)
+        ? result.tools.map((t) => ({
+          name: String(t?.name || ''),
+          description: t?.description ? String(t.description) : undefined,
+        })).filter((t) => t.name)
+        : [];
+      return { ok: true, tools, error: null };
+    } catch (err) {
+      mcpRemote.stopRemoteSession(String(server.id));
+      return {
+        ok: false,
+        error: err instanceof Error ? err.message : String(err || 'Remote MCP probe failed'),
+        tools: [],
+      };
+    }
   }
 
   try {
@@ -216,11 +233,22 @@ async function callTool(server, name, args) {
   if (!toolName) return { ok: false, error: 'Missing tool name', content: '' };
 
   if (server.transport === 'sse') {
-    return {
-      ok: false,
-      error: 'SSE MCP tools/call is not wired yet. Use stdio.',
-      content: '',
-    };
+    try {
+      const result = await mcpRemote.remoteRpc(server, 'tools/call', {
+        name: toolName,
+        arguments: args && typeof args === 'object' ? args : {},
+      });
+      const content = formatToolResult(result);
+      const isError = Boolean(result?.isError);
+      return { ok: !isError, content, isError, error: isError ? content : null, raw: result };
+    } catch (err) {
+      mcpRemote.stopRemoteSession(String(server.id));
+      return {
+        ok: false,
+        error: err instanceof Error ? err.message : String(err || 'Remote MCP call failed'),
+        content: '',
+      };
+    }
   }
 
   try {
@@ -270,11 +298,13 @@ function formatToolResult(result) {
 
 function stopServer(id) {
   stopSession(String(id || ''));
+  mcpRemote.stopRemoteSession(String(id || ''));
   return { ok: true };
 }
 
 function stopAll() {
   for (const id of [...sessions.keys()]) stopSession(id);
+  mcpRemote.stopAllRemote();
   return { ok: true };
 }
 

@@ -185,6 +185,27 @@ const CATALOG = [
     status: 'missing',
     url: 'https://huggingface.co/bartowski/DeepSeek-R1-Distill-Llama-8B-GGUF/resolve/main/DeepSeek-R1-Distill-Llama-8B-Q4_K_M.gguf',
   },
+  {
+    id: 'qwen2-vl-7b',
+    name: 'Qwen2-VL 7B Instruct',
+    detail: 'Vision bundle · ~7.4 GB · download ready · local VL chat inference next',
+    sizeGb: 7.4,
+    status: 'missing',
+    format: 'bundle',
+    runtime: 'vl',
+    bundle: [
+      {
+        file: 'qwen2-vl-7b.gguf',
+        url: 'https://huggingface.co/ggml-org/Qwen2-VL-7B-Instruct-GGUF/resolve/main/Qwen2-VL-7B-Instruct-Q4_K_M.gguf',
+        role: 'llm',
+      },
+      {
+        file: 'qwen2-vl-7b-mmproj.gguf',
+        url: 'https://huggingface.co/ggml-org/Qwen2-VL-7B-Instruct-GGUF/resolve/main/mmproj-Qwen2-VL-7B-Instruct-f16.gguf',
+        role: 'mmproj',
+      },
+    ],
+  },
 ];
 
 const MODEL_ALIASES = {

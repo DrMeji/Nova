@@ -177,11 +177,6 @@ export function NotificationsView() {
                 <p className="text-sm text-content-secondary">
                   {query.trim() ? 'No notifications match that search.' : 'You’re all caught up.'}
                 </p>
-                <p className="text-xs mt-1.5 max-w-xs mx-auto leading-relaxed">
-                  {query.trim()
-                    ? 'Try a different keyword.'
-                    : 'Friend requests, updates, and model downloads will show up here.'}
-                </p>
               </div>
             ) : (
               <div className="rounded-xl border border-white/[0.07] bg-ark-navy-950/30 overflow-hidden divide-y divide-white/[0.06]">

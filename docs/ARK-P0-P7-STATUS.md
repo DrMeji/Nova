@@ -69,5 +69,4 @@ Open-ARK-Build.bat
 node scripts/smoke-self-guard.mjs
 node scripts/smoke-chat-routes.mjs
 node scripts/smoke-file-ops.mjs
-node tmp-p0-test.cjs
 ```

@@ -14,6 +14,7 @@ import { hydrateProviderApiKeys } from '@/lib/localPrefs';
 import { ensureArkId, formatArkId, readLocalArkId } from '@/lib/arkUserId';
 import { mergeGuestSocialToCloud } from '@/lib/arkSocial';
 import { cancelOwnAccountDeletion, deleteOwnAccountPermanently, finalizeScheduledDeletionIfDue, scheduleOwnAccountDeletion } from '@/lib/deleteAccount';
+import { accountResetRedirectUrl } from '@/lib/accountWeb';
 
 // Guest identity used when login is bypassed (dev / testing only).
 const BYPASS_KEY = 'ark:bypass-enabled';
@@ -130,6 +131,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         } catch {
           /* ignore */
         }
+      }
+      if (p.avatar_url?.startsWith('data:image')) {
+        void import('@/lib/avatarStorage').then(({ migrateInlineAvatarToStorage }) =>
+          migrateInlineAvatarToStorage(userId, p.avatar_url).then(url => {
+            if (url) setProfile(prev => prev ? { ...prev, avatar_url: url } : prev);
+          }),
+        );
       }
     } else {
       setProfile({
@@ -363,12 +371,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const resetPassword = async (email: string) => {
-    // Real email reset still needs a hosted redirect site. Prefer local recovery note for now.
-    void email;
-    return {
-      error:
-        'Email password reset is not available yet. Use Forgot password on the sign-in screen to open the local recovery note on this PC.',
-    };
+    const trimmed = String(email || '').trim();
+    if (!trimmed) {
+      return { error: 'Enter your account email first.' };
+    }
+    const redirectTo = accountResetRedirectUrl();
+    if (!redirectTo) {
+      return {
+        error:
+          'Email reset is not configured for this build (missing VITE_ARK_WEBSITE_ORIGIN). Use the local recovery note on this PC, or open your ARK account site → Forgot password.',
+      };
+    }
+    const { error } = await supabase.auth.resetPasswordForEmail(trimmed, { redirectTo });
+    if (error) {
+      return { error: error.message || 'Could not send reset email.' };
+    }
+    return { error: null };
   };
 
   const bypassLogin = (options?: { skipSetup?: boolean }) => {

@@ -77,17 +77,17 @@ export function McpView() {
       return;
     }
     if (mcpTransport === 'sse' && !mcpUrl.trim()) {
-      flash('SSE needs a URL');
+      flash('Remote MCP needs an endpoint URL');
       return;
     }
     upsertMcpServer({
       id: mcpEditingId || undefined,
       name,
       transport: mcpTransport,
-      command: mcpCommand,
-      args: mcpArgs,
-      cwd: mcpCwd,
-      url: mcpUrl,
+      command: mcpTransport === 'stdio' ? mcpCommand : '',
+      args: mcpTransport === 'stdio' ? mcpArgs : '',
+      cwd: mcpTransport === 'stdio' ? mcpCwd : '',
+      url: mcpTransport === 'sse' ? mcpUrl.trim() : '',
     });
     setMcpServers(listMcpServers());
     resetMcpForm();
@@ -120,7 +120,7 @@ export function McpView() {
           <div className="min-w-0">
             <h1 className="text-xl font-semibold text-content-primary tracking-tight">MCP</h1>
             <p className="mt-1 text-sm text-content-tertiary leading-relaxed">
-              Connect external tool servers for Chat. Same stdio shape as Cursor or Claude Desktop.
+              Connect external tool servers for Chat. stdio (local) or remote URL (HTTP / SSE).
             </p>
           </div>
           <button type="button" className="ark-btn-primary text-xs shrink-0" onClick={openMcpCreate}>
@@ -159,7 +159,7 @@ export function McpView() {
                     }`}
                     onClick={() => setMcpTransport(t)}
                   >
-                    {t}
+                    {t === 'stdio' ? 'stdio' : 'Remote URL'}
                   </button>
                 ))}
               </div>
@@ -195,14 +195,16 @@ export function McpView() {
                 </>
               ) : (
                 <label className="block space-y-1 sm:col-span-2">
-                  <span className="text-[11px] text-content-tertiary">URL</span>
+                  <span className="text-[11px] text-content-tertiary">MCP endpoint URL</span>
                   <input
                     className="ark-input w-full text-sm font-mono"
                     value={mcpUrl}
                     onChange={e => setMcpUrl(e.target.value)}
-                    placeholder="https://example.com/sse"
+                    placeholder="https://example.com/mcp"
                   />
-                  <span className="text-[10px] text-amber-200/80">SSE probe is not live yet. Use stdio for Test.</span>
+                  <span className="text-[10px] text-content-tertiary">
+                    Streamable HTTP or legacy HTTP+SSE (same hosts as Cursor remote MCP).
+                  </span>
                 </label>
               )}
             </div>
@@ -253,6 +255,11 @@ export function McpView() {
                           <span className="shrink-0 text-[10px] uppercase tracking-wide text-content-tertiary">
                             {server.transport}
                           </span>
+                          {server.transport === 'sse' ? (
+                            <span className="shrink-0 rounded-full bg-sky-500/15 text-sky-300 px-2 py-0.5 text-[10px]">
+                              Remote
+                            </span>
+                          ) : null}
                           {toolCount > 0 ? (
                             <span className="shrink-0 rounded-full bg-ark-navy-950/80 border border-white/10 px-2 py-0.5 text-[10px] text-content-tertiary">
                               {toolCount} tool{toolCount === 1 ? '' : 's'}

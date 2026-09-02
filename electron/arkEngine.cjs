@@ -50,6 +50,17 @@ function hasRealWeights(id) {
   if (meta?.runtime === 'flux') {
     return arkSd.hasFluxBundle();
   }
+  if (meta?.runtime === 'vl' && Array.isArray(meta.bundle)) {
+    for (const part of meta.bundle) {
+      const p = path.join(modelsDir(), part.file);
+      try {
+        if (!fs.existsSync(p) || fs.statSync(p).size < 1024 * 1024) return false;
+      } catch {
+        return false;
+      }
+    }
+    return true;
+  }
   if (meta?.format === 'safetensors' || meta?.runtime === 'sd') {
     const p = arkSd.weightsPathForId(id);
     if (!p) return false;
@@ -126,7 +137,7 @@ function listModels() {
       status: downloading ? 'downloading' : ready ? 'ready' : 'missing',
       progress: downloads[m.id]?.progress,
       downloadPhase: downloads[m.id]?.phase || null,
-      gguf: m.runtime === 'sd' || m.runtime === 'flux' ? false : ready,
+      gguf: m.runtime === 'sd' || m.runtime === 'flux' || m.runtime === 'vl' ? false : ready,
       localImage: m.runtime === 'sd' || m.runtime === 'flux' ? ready : undefined,
     };
   }).concat(
@@ -366,22 +377,28 @@ function startDownloadJob(id, meta) {
       if (downloads[id]?.cancel) throw new Error('Download canceled');
 
       if (hasRealWeights(id)) {
+        const mainPath =
+          meta.runtime === 'flux'
+            ? arkSd.fluxDiffusionPath()
+            : meta.runtime === 'sd'
+              ? arkSd.weightsPathForId(id)
+              : meta.runtime === 'vl' && Array.isArray(meta.bundle)
+                ? path.join(modelsDir(), (meta.bundle.find((p) => p.role === 'llm') || meta.bundle[0]).file)
+                : arkGguf.findGgufForModel(id);
         writeMarker(id, meta, {
-          path:
-            meta.runtime === 'flux'
-              ? arkSd.fluxDiffusionPath()
-              : meta.runtime === 'sd'
-                ? arkSd.weightsPathForId(id)
-                : arkGguf.findGgufForModel(id),
+          path: mainPath,
+          ...(meta.runtime === 'vl' ? { bundle: true, vl: true } : {}),
         });
         if (downloads[id]) downloads[id].progress = 100;
         delete downloads[id];
         activeModelId = id;
-        try {
-          const ggufId = String(id).startsWith('gguf:') ? String(id).slice(5) : id;
-          void arkGguf.warmServer(ggufId);
-        } catch {
-          /* warmup is best-effort */
+        if (meta.runtime !== 'vl') {
+          try {
+            const ggufId = String(id).startsWith('gguf:') ? String(id).slice(5) : id;
+            void arkGguf.warmServer(ggufId);
+          } catch {
+            /* warmup is best-effort */
+          }
         }
         pumpDownloadQueue();
         return;
@@ -389,7 +406,7 @@ function startDownloadJob(id, meta) {
 
       downloads[id].phase = 'weights';
 
-      if (meta.runtime === 'flux' && Array.isArray(meta.bundle)) {
+      if ((meta.runtime === 'flux' || meta.runtime === 'vl') && Array.isArray(meta.bundle)) {
         const parts = meta.bundle;
         for (let i = 0; i < parts.length; i++) {
           const part = parts[i];
@@ -416,7 +433,14 @@ function startDownloadJob(id, meta) {
             );
           }
         }
-        writeMarker(id, meta, { path: arkSd.fluxDiffusionPath(), bundle: true });
+        writeMarker(id, meta, {
+          path:
+            meta.runtime === 'flux'
+              ? arkSd.fluxDiffusionPath()
+              : path.join(modelsDir(), (meta.bundle.find((p) => p.role === 'llm') || meta.bundle[0]).file),
+          bundle: true,
+          ...(meta.runtime === 'vl' ? { vl: true } : {}),
+        });
       } else {
         const ext = meta.format === 'safetensors' ? 'safetensors' : 'gguf';
         const dest = path.join(modelsDir(), `${id}.${ext}`);
@@ -433,11 +457,13 @@ function startDownloadJob(id, meta) {
       if (downloads[id]) downloads[id].progress = 100;
       delete downloads[id];
       activeModelId = id;
-      try {
-        const ggufId = String(id).startsWith('gguf:') ? String(id).slice(5) : id;
-        void arkGguf.warmServer(ggufId);
-      } catch {
-        /* warmup is best-effort */
+      if (meta.runtime !== 'vl') {
+        try {
+          const ggufId = String(id).startsWith('gguf:') ? String(id).slice(5) : id;
+          void arkGguf.warmServer(ggufId);
+        } catch {
+          /* warmup is best-effort */
+        }
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -696,6 +722,35 @@ async function generate(message, opts = {}) {
         libraryId: media.libraryId,
         real: Boolean(media.real),
       } : undefined,
+    };
+  }
+
+  const visionImages = opts.visionImages;
+  if (Array.isArray(visionImages) && visionImages.length > 0) {
+    const vlId = 'qwen2-vl-7b';
+    if (!hasRealWeights(vlId) || !(arkGguf.hasVlBundle?.(vlId))) {
+      throw new Error('Qwen2-VL is not installed. Download the vision bundle from Models → Vision in Local AI.');
+    }
+    if (phase !== 'online' && phase !== 'degraded') {
+      throw new Error('ARK Engine is offline. Start it from Local AI.');
+    }
+    const onChunk = typeof opts.onChunk === 'function' ? opts.onChunk : null;
+    const gguf = await arkGguf.runGgufStream(
+      vlId,
+      message,
+      onChunk,
+      300_000,
+      2048,
+      0.35,
+      { images: visionImages },
+    );
+    return {
+      ok: true,
+      reply: gguf.reply,
+      modelId: vlId,
+      modelName: 'Qwen2-VL 7B Instruct',
+      source: 'ark-gguf-vl',
+      streamed: Boolean(gguf.streamed),
     };
   }
 

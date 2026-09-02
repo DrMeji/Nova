@@ -2,7 +2,7 @@
  * MCP-style tool catalog + invoke for ARK.
  *
  * Local tools mirror capabilities Chat already has. Registered external servers
- * (Settings → MCP) support stdio tools/list + tools/call. Full auto agent loop
+ * (sidebar **MCP**) support stdio tools/list + tools/call. Full auto agent loop
  * (model picks tools mid-reply) can come later — Chat can already call by name.
  */
 
@@ -53,7 +53,7 @@ export function listLocalMcpTools(): ArkMcpTool[] {
     },
     {
       name: 'ark.mcp.connect',
-      description: 'Register / call external MCP servers in Settings → MCP',
+      description: 'Register / call external MCP servers in the MCP tab',
       local: true,
       status: 'ready',
     },
@@ -70,7 +70,7 @@ export function listRegisteredMcpTools(): ArkMcpTool[] {
         name: `${server.name}·(not probed)`,
         description: server.lastError
           ? `Last error: ${server.lastError}`
-          : 'Open Settings → MCP and press Test to list tools',
+          : 'Open **MCP** and press Test to list tools',
         local: false,
         status: 'registered',
         serverId: server.id,
@@ -113,7 +113,7 @@ export function formatMcpToolsHelp(): string {
   if (!servers.length) {
     lines.push(
       '**External servers** — none registered yet.',
-      'Add one in **Settings → MCP** (stdio command + args). Press **Test** to list tools.',
+      'Add one in **MCP** (stdio command + args). Press **Test** to list tools.',
       'Ask again with “list MCP tools” after you add a server.',
     );
   } else {
@@ -136,14 +136,14 @@ export function formatMcpToolsHelp(): string {
         lines.push(`• **${t.name}**${from} — ${t.description}`);
       }
       if (registered.length > 40) {
-        lines.push(`…and ${registered.length - 40} more (see Settings → MCP).`);
+        lines.push(`…and ${registered.length - 40} more (see **MCP**).`);
       }
       lines.push(
         '',
         '**Call a tool:** `run mcp tool read_graph` or `call mcp create_entities {"name":"…"}`',
       );
     } else {
-      lines.push('', 'Press **Test** on an enabled server in Settings → MCP, then call a tool by name.');
+      lines.push('', 'Press **Test** on an enabled server in **MCP**, then call a tool by name.');
     }
   }
 
@@ -230,7 +230,7 @@ export function formatArkCapabilitiesHelp(opts?: {
     '• **ark.project.read / write**: read and update granted folders',
     '• **ark.media.image**: Image tab',
     '• **ark.brain.generate**: your pinned local or cloud model',
-    '• **ark.mcp.connect**: external MCP servers in **Settings → MCP**',
+    '• **ark.mcp.connect**: external MCP servers in **MCP**',
     '',
     'Ask directly when you want disk work, for example *create a file…*, *rename this.png to…*, or *edit README*. The local model alone does not touch disk without those intents.',
     '',
@@ -342,13 +342,12 @@ export function parseMcpCallIntent(content: string): McpCallIntent | null {
     /\b(?:run|call|use|invoke)\s+(?:the\s+)?(?:mcp\s+)?(?:tool\s+)?([a-zA-Z0-9_.:-]+)\b/i,
   );
   if (!m) return null;
-  // Require mcp / tool / "run mcp" style so normal “use Autocomplete” doesn’t fire.
-  if (!/\bmcp\b/i.test(text) && !/\b(?:run|call|invoke)\s+(?:the\s+)?tool\b/i.test(text)) {
-    return null;
-  }
 
   const toolName = m[1];
   if (!toolName || toolName.toLowerCase().startsWith('ark.')) return null;
+
+  const explicitMcp =
+    /\bmcp\b/i.test(text) || /\b(?:run|call|invoke)\s+(?:the\s+)?tool\b/i.test(text);
 
   let args: Record<string, unknown> = {};
   const jsonMatch = text.match(/\{[\s\S]*\}$/);
@@ -363,11 +362,29 @@ export function parseMcpCallIntent(content: string): McpCallIntent | null {
     }
   }
 
-  return { toolName, args };
+  if (explicitMcp) {
+    return { toolName, args };
+  }
+
+  // Auto-match when the tool name is uniquely registered (no "mcp" keyword needed).
+  const registered = listRegisteredMcpTools().filter(
+    t => t.name.toLowerCase() === toolName.toLowerCase(),
+  );
+  if (registered.length !== 1) return null;
+
+  return {
+    toolName: registered[0].name,
+    serverId: registered[0].serverId,
+    args,
+  };
 }
 
 /** Resolve which enabled server owns a tool name (prefer last probe cache). */
-export function resolveMcpToolServer(toolName: string): McpServerConfig | null {
+export function resolveMcpToolServer(toolName: string, serverId?: string): McpServerConfig | null {
+  if (serverId) {
+    const direct = getMcpServer(serverId);
+    if (direct?.enabled) return direct;
+  }
   const name = String(toolName || '').trim();
   if (!name) return null;
   const hits = listRegisteredMcpTools().filter(
@@ -376,6 +393,69 @@ export function resolveMcpToolServer(toolName: string): McpServerConfig | null {
   if (hits[0]?.serverId) {
     return getMcpServer(hits[0].serverId);
   }
-  // Fallback: first enabled stdio server (caller should have probed).
-  return listEnabledMcpServers().find(s => s.transport === 'stdio') || null;
+  // Fallback: first enabled server (stdio or remote).
+  return listEnabledMcpServers().find(s => s.transport === 'stdio' || s.transport === 'sse') || null;
+}
+
+/** Model-emitted inline MCP invoke: `ARK_MCP:tool_name {"arg":"value"}` */
+export function extractInlineMcpToolCalls(text: string): McpCallIntent[] {
+  const out: McpCallIntent[] = [];
+  const re = /ARK_MCP:\s*([a-zA-Z0-9_.:-]+)\s*(\{[\s\S]*?\})?/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const toolName = m[1];
+    if (!toolName) continue;
+    let args: Record<string, unknown> = {};
+    if (m[2]) {
+      try {
+        const parsed = JSON.parse(m[2]) as unknown;
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          args = parsed as Record<string, unknown>;
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    const server = resolveMcpToolServer(toolName);
+    out.push({ toolName, serverId: server?.id, args });
+  }
+  return out;
+}
+
+/** Run MCP tools the model requested inline (max steps to avoid loops). */
+export async function runMcpAutoToolLoop(
+  assistantText: string,
+  maxSteps = 3,
+): Promise<{ text: string; ran: string[] }> {
+  let text = String(assistantText || '');
+  const ran: string[] = [];
+  for (let step = 0; step < maxSteps; step++) {
+    const calls = extractInlineMcpToolCalls(text);
+    if (!calls.length) break;
+    const call = calls[0];
+    const server = resolveMcpToolServer(call.toolName, call.serverId);
+    if (!server) {
+      text = text.replace(/ARK_MCP:[^\n]+/i, `_(MCP tool **${call.toolName}** not found — probe servers in Settings → MCP.)_`);
+      break;
+    }
+    const res = await callMcpTool(server, call.toolName, call.args);
+    ran.push(call.toolName);
+    const block = res.ok
+      ? `\n\n**${call.toolName}** (${server.name})\n\`\`\`\n${res.content || '(empty)'}\n\`\`\``
+      : `\n\n**${call.toolName}** failed: ${res.error || 'unknown error'}`;
+    text = text.replace(/ARK_MCP:[^\n]+/i, block.trim());
+  }
+  return { text, ran };
+}
+
+export function mcpAutoToolSystemHint(): string {
+  const tools = listRegisteredMcpTools().slice(0, 24);
+  if (!tools.length) return '';
+  const names = tools.map(t => t.name).join(', ');
+  return [
+    'Registered MCP tools (user enabled servers):',
+    names,
+    'To call one, emit a single line: ARK_MCP:tool_name {"optional":"json args"}',
+    'ARK will execute it and replace the line with results.',
+  ].join('\n');
 }

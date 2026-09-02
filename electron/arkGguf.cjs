@@ -80,6 +80,39 @@ function findGgufForModel(modelId) {
   return null;
 }
 
+function findMmprojForModel(modelId) {
+  const rawId = String(modelId || '').replace(/^gguf:/, '');
+  const exact = path.join(modelsDir(), `${rawId}-mmproj.gguf`);
+  if (fs.existsSync(exact)) return exact;
+  return null;
+}
+
+function hasVlBundle(modelId = 'qwen2-vl-7b') {
+  return Boolean(findGgufForModel(modelId) && findMmprojForModel(modelId));
+}
+
+function normalizeVisionImages(images) {
+  if (!Array.isArray(images)) return [];
+  return images
+    .map((img) => {
+      const raw = String(img || '');
+      const m = raw.match(/^data:image\/[a-zA-Z0-9.+-]+;base64,(.+)$/);
+      return m ? m[1] : raw.replace(/\s/g, '');
+    })
+    .filter(Boolean);
+}
+
+function writeTempVisionImages(b64List) {
+  const paths = [];
+  for (let i = 0; i < b64List.length; i++) {
+    const buf = Buffer.from(b64List[i], 'base64');
+    const p = path.join(os.tmpdir(), `ark-vl-${process.pid}-${Date.now()}-${i}.png`);
+    fs.writeFileSync(p, buf);
+    paths.push(p);
+  }
+  return paths;
+}
+
 function findNamedBinary(names) {
   ensureDirs();
   for (const name of names) {
@@ -508,6 +541,7 @@ let cancelRequested = false;
 let activeAbort = null;
 let serverChild = null;
 let serverGguf = null;
+let serverMmproj = null;
 let serverCtx = 0;
 const SERVER_PORT_BASE = require('./arkConfig.cjs').GGUF_SERVER_PORT_BASE;
 const SERVER_PORT_MAX = SERVER_PORT_BASE + require('./arkConfig.cjs').GGUF_SERVER_PORT_MAX_TRIES;
@@ -566,6 +600,7 @@ function stopServer() {
     killLlamaChild(serverChild);
     serverChild = null;
     serverGguf = null;
+    serverMmproj = null;
     serverCtx = 0;
   }
 }
@@ -585,25 +620,30 @@ async function pingServer(port = serverPort) {
   }
 }
 
-async function bindLlamaServer(bin, gguf) {
+async function bindLlamaServer(bin, gguf, modelId) {
   lastServerError = null;
+  const mmproj = findMmprojForModel(modelId);
   for (let candidate = SERVER_PORT_BASE; candidate < SERVER_PORT_MAX; candidate += 1) {
     stopServer();
-    const child = spawn(bin, [
+    const args = [
       '-m', gguf,
       '--host', '127.0.0.1',
       '--port', String(candidate),
       '-c', String(getGgufCtx()),
       '--parallel', '1',
-    ], { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
+    ];
+    if (mmproj) args.push('--mmproj', mmproj);
+    const child = spawn(bin, args, { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
     serverChild = child;
     serverGguf = gguf;
+    serverMmproj = mmproj;
     serverCtx = getGgufCtx();
     serverPort = candidate;
     child.on('exit', () => {
       if (serverChild === child) {
         serverChild = null;
         serverGguf = null;
+        serverMmproj = null;
         serverCtx = 0;
       }
     });
@@ -629,12 +669,20 @@ async function bindLlamaServer(bin, gguf) {
  */
 async function ensureLlamaServer(modelId) {
   const gguf = findGgufForModel(modelId);
+  const mmproj = findMmprojForModel(modelId);
   const bin = findLlamaServer();
   if (!gguf || !bin) return false;
-  if (serverChild && serverGguf === gguf && serverCtx === getGgufCtx() && !serverChild.killed && await pingServer()) {
+  if (
+    serverChild
+    && serverGguf === gguf
+    && serverMmproj === mmproj
+    && serverCtx === getGgufCtx()
+    && !serverChild.killed
+    && await pingServer()
+  ) {
     return true;
   }
-  return bindLlamaServer(bin, gguf);
+  return bindLlamaServer(bin, gguf, modelId);
 }
 
 async function warmServer(modelId) {
@@ -645,7 +693,7 @@ async function warmServer(modelId) {
   }
 }
 
-async function runGgufServerStream(modelId, prompt, onChunk, timeoutMs, nPredict = 4096, temperature = 0.55) {
+async function runGgufServerStream(modelId, prompt, onChunk, timeoutMs, nPredict = 4096, temperature = 0.55, visionImages = []) {
   const promptStr = wrapChatPrompt(modelId, prompt);
   const started = Date.now();
   cancelRequested = false;
@@ -653,18 +701,23 @@ async function runGgufServerStream(modelId, prompt, onChunk, timeoutMs, nPredict
   activeAbort = ac;
   const timer = setTimeout(() => ac.abort(), timeoutMs);
   let out = '';
+  const images = normalizeVisionImages(visionImages);
   try {
+    const body = {
+      prompt: promptStr,
+      n_predict: nPredict,
+      temperature,
+      stream: true,
+      cache_prompt: true,
+      stop: [stopToken(modelId)],
+    };
+    if (images.length) {
+      body.image_data = images.map((data, id) => ({ data, id }));
+    }
     const res = await fetch(`http://127.0.0.1:${serverPort}/completion`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        prompt: promptStr,
-        n_predict: nPredict,
-        temperature,
-        stream: true,
-        cache_prompt: true,
-        stop: [stopToken(modelId)],
-      }),
+      body: JSON.stringify(body),
       signal: ac.signal,
     });
     if (!res.ok || !res.body) throw new Error(`llama-server ${res.status}`);
@@ -960,7 +1013,8 @@ function writeGgufDebug(payload) {
  * Stream llama-cli stdout as it arrives.
  * onChunk(textDelta) may be called many times; final resolve still returns full reply.
  */
-function runGgufStream(modelId, prompt, onChunk, timeoutMs = 240000, nPredict = 4096, temperature = 0.55) {
+function runGgufStream(modelId, prompt, onChunk, timeoutMs = 240000, nPredict = 4096, temperature = 0.55, extra = {}) {
+  const visionImages = normalizeVisionImages(extra?.images);
   if (generateBusy || activeChild) {
     const err = new Error('Generation already running — stop the current reply or wait, then try again');
     err.code = 'RATE_LIMITED';
@@ -977,7 +1031,7 @@ function runGgufStream(modelId, prompt, onChunk, timeoutMs = 240000, nPredict = 
             stopped.code = 'CANCELED';
             throw stopped;
           }
-          const hit = await runGgufServerStream(modelId, prompt, onChunk, timeoutMs, nPredict, temperature);
+          const hit = await runGgufServerStream(modelId, prompt, onChunk, timeoutMs, nPredict, temperature, visionImages);
           if (hit?.cancelled) return hit;
           if (hit?.reply) return hit;
         } catch (err) {
@@ -994,16 +1048,17 @@ function runGgufStream(modelId, prompt, onChunk, timeoutMs = 240000, nPredict = 
         stopped.code = 'CANCELED';
         throw stopped;
       }
-      return await runGgufCliStream(modelId, prompt, onChunk, timeoutMs, nPredict, temperature);
+      return await runGgufCliStream(modelId, prompt, onChunk, timeoutMs, nPredict, temperature, visionImages);
     } finally {
       generateBusy = false;
     }
   })();
 }
 
-function runGgufCliStream(modelId, prompt, onChunk, timeoutMs = 240000, nPredict = 4096, temperature = 0.55) {
+function runGgufCliStream(modelId, prompt, onChunk, timeoutMs = 240000, nPredict = 4096, temperature = 0.55, visionImages = []) {
   return new Promise((resolve, reject) => {
     const gguf = findGgufForModel(modelId);
+    const mmproj = findMmprojForModel(modelId);
     const bin = findLlamaBinary();
     if (!gguf) {
       reject(new Error('No GGUF weights found in ARK Engine models folder'));
@@ -1033,6 +1088,8 @@ function runGgufCliStream(modelId, prompt, onChunk, timeoutMs = 240000, nPredict
       reject(err);
       return;
     }
+    const images = normalizeVisionImages(visionImages);
+    const tempImages = images.length ? writeTempVisionImages(images) : [];
     const args = [
       '-m', gguf,
       '-f', promptFile,
@@ -1045,6 +1102,8 @@ function runGgufCliStream(modelId, prompt, onChunk, timeoutMs = 240000, nPredict
       '--no-display-prompt',
       '--simple-io',
     ];
+    if (mmproj) args.push('--mmproj', mmproj);
+    for (const imgPath of tempImages) args.push('--image', imgPath);
     const child = spawn(bin, args, { windowsHide: true });
     try {
       child.stdin?.end();
@@ -1057,6 +1116,9 @@ function runGgufCliStream(modelId, prompt, onChunk, timeoutMs = 240000, nPredict
     let emitted = '';
     const cleanupPrompt = () => {
       try { fs.unlinkSync(promptFile); } catch { /* ignore */ }
+      for (const p of tempImages) {
+        try { fs.unlinkSync(p); } catch { /* ignore */ }
+      }
     };
     const timer = setTimeout(() => {
       killLlamaChild(child);
@@ -1135,6 +1197,8 @@ function runGgufCliStream(modelId, prompt, onChunk, timeoutMs = 240000, nPredict
 
 module.exports = {
   findGgufForModel,
+  findMmprojForModel,
+  hasVlBundle,
   findLlamaBinary,
   listGgufFiles,
   runGguf,
