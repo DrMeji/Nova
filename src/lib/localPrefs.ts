@@ -336,6 +336,17 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.174',
+    channel: 'stable' as const,
+    date: 'Sep 3, 2026',
+    title: 'Transparent shell icon (no black tile)',
+    notes: [
+      'Taskbar / Start ARK mark is transparent. no black square behind the glyph',
+      'Installer refreshes Windows icon cache after update so Start menu picks up the new mark',
+      'Tray icon stays the clean transparent voice mark',
+    ],
+  },
+  {
     version: '0.1.173',
     channel: 'stable' as const,
     date: 'Sep 3, 2026',

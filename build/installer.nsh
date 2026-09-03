@@ -12,6 +12,10 @@
     Delete "$APPDATA\ARK\ark-install-id"
     Delete "$APPDATA\ARK\ark-auth-storage.dat"
   ${endIf}
+
+  ; Force Windows to re-read ARK.exe / shortcut icons after upgrades
+  ; (Start menu + taskbar otherwise keep a cached older mark).
+  System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, i 0, i 0)'
 !macroend
 
 !macro customUnInstall

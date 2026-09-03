@@ -1,5 +1,15 @@
 ﻿# ARK changelog
 
+## 0.1.174 — 2026-09-03
+
+Transparent shell icon (no black taskbar tile) + Start menu icon cache refresh.
+
+**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.174/ARK-Setup.exe) · [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.174)
+
+### Icons
+- Taskbar / Start mark is transparent (no black square behind the glyph)
+- Installer asks Windows to refresh icon cache after update
+
 ## 0.1.173 — 2026-09-03
 
 Larger ARK mark, official update splash, safer chat follow-ups.

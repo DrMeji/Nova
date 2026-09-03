@@ -1,6 +1,7 @@
 """Generate ARK voice mark: rounded head + two eye bars. no ears / antenna.
 
-Glyph fills most of the tile so Windows taskbar / tray icons read at size.
+Transparent background everywhere (taskbar / Start / tray) so Windows never
+shows a black tile behind the glyph.
 """
 from PIL import Image, ImageDraw
 from pathlib import Path
@@ -14,31 +15,31 @@ def draw_mark(size: int, fg=(255, 255, 255, 255), bg=None) -> Image.Image:
     img = Image.new('RGBA', (size, size), bg if bg is not None else (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
     s = size / 64.0
-    # Slightly thicker strokes so small tray sizes stay crisp.
+    # Slightly thicker strokes so small tray/taskbar sizes stay crisp.
     stroke = max(2, int(round(3.8 * s)))
     eye_w = max(2, int(round(4.2 * s)))
 
     def L(x, y):
         return (x * s, y * s)
 
-    # Larger head (~6..58 in 64-space) so taskbar/tray tiles aren't tiny.
+    # Larger head (~6..58 in 64-space) so tiles aren't tiny.
     hx0, hy0 = L(6, 6)
     hx1, hy1 = L(58, 58)
     head_r = max(2, int(round(14 * s)))
     draw.rounded_rectangle([hx0, hy0, hx1, hy1], radius=head_r, outline=fg, width=stroke)
 
-    # Eyes — scaled with the larger head
     draw.line([L(24, 22), L(24, 42)], fill=fg, width=eye_w)
     draw.line([L(40, 22), L(40, 42)], fill=fg, width=eye_w)
     return img
 
 
 def main():
+    # Always transparent for shell icons (taskbar, Start, window).
     icon = draw_mark(1024)
     icon.save(ROOT / 'build' / 'icon.png', 'PNG')
-    # Opaque black plate for Windows taskbar / installer (reads cleaner than pure alpha).
-    tray = draw_mark(1024, bg=(10, 10, 12, 255))
-    tray.save(ROOT / 'build' / 'oauth-app-logo.png', 'PNG')
+
+    # OAuth / store logos sometimes prefer opaque; keep transparent mark too.
+    icon.save(ROOT / 'build' / 'oauth-app-logo.png', 'PNG')
 
     ui = draw_mark(512)
     ui.save(ROOT / 'public' / 'ark-icon.png', 'PNG')
@@ -59,8 +60,8 @@ def main():
     (ROOT / 'website' / 'public' / 'ark-mark.svg').write_text(svg, encoding='utf-8')
 
     sizes = [256, 128, 64, 48, 32, 24, 16]
-    # ICO uses opaque plate so Explorer / taskbar never show a hollow glyph.
-    ico_base = draw_mark(1024, bg=(10, 10, 12, 255))
+    # Transparent ICO — black plate was showing as a black square on the taskbar.
+    ico_base = draw_mark(1024)
     variants = [ico_base.resize((s, s), Image.Resampling.LANCZOS) for s in sizes]
     variants[0].save(
         ROOT / 'build' / 'icon.ico',
@@ -68,7 +69,12 @@ def main():
         sizes=[(im.width, im.height) for im in variants],
         append_images=variants[1:],
     )
-    print('Updated build/icon.png, build/icon.ico, build/oauth-app-logo.png')
+    # Sanity: corners must be fully transparent.
+    check = Image.open(ROOT / 'build' / 'icon.ico').convert('RGBA')
+    corner = check.getpixel((0, 0))
+    if corner[3] != 0:
+        raise SystemExit(f'ICO corner not transparent: {corner}')
+    print('Updated build/icon.png, build/icon.ico, build/oauth-app-logo.png (transparent)')
     print('Updated public/ark-icon.png, website/public/ark-icon.png, public/ark-mark.svg')
     print('Also saved to Desktop: ARK-icon.png, ARK-mark-light.png, ARK-mark-dark.png, ARK-mark.svg')
 
