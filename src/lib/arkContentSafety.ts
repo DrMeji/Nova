@@ -1,5 +1,6 @@
 /**
- * Refuse illegal / violent / weapons asks with a direct answer — no coding pivots.
+ * Refuse illegal / violent / weapons asks with a clear, professional answer.
+ * Hard refuse stays — never route these through a model that might lecture about coding.
  */
 
 const HARM_PATTERNS: RegExp[] = [
@@ -16,18 +17,20 @@ export function looksLikeHarmfulContentAsk(text: string): boolean {
   return HARM_PATTERNS.some(re => re.test(t));
 }
 
-/** Direct refusal — no programming / positive-project pivot. */
+/** Professional refusal — no programming / positive-project pivot. */
 export function harmfulContentBlockedReply(spoken = false): string {
   if (spoken) {
     return [
       "I understand what you're asking for, but I can't help with that.",
-      "It's illegal, dangerous, and could seriously hurt someone.",
-      "I won't provide instructions for weapons, explosives, or violence.",
+      'Providing guidance on weapons, explosives, or violence is illegal and could seriously harm people.',
+      "I'm happy to help with safe, legal topics instead — what else can I assist with?",
     ].join(' ');
   }
   return [
     "I understand what you're asking for, but I can't help with that.",
     '',
-    "It's illegal, dangerous, and could seriously hurt someone. I won't provide instructions for weapons, explosives, or violence.",
+    'Providing guidance on weapons, explosives, or violence is illegal and could seriously harm people. I have to decline requests like this.',
+    '',
+    "I'm happy to help with safe, legal topics instead — what else can I assist with?",
   ].join('\n');
 }

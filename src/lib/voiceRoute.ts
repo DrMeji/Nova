@@ -14,7 +14,8 @@ import {
 } from '@/lib/cloudChat';
 import { isWeakChatBrain, rankedReadyEngineIds } from '@/lib/enginePick';
 import { getLocalPrefs } from '@/lib/localPrefs';
-import { voiceBrainPrompt } from '@/lib/voiceSession';
+import { voiceBrainPrompt, scrubVoiceConstraintEcho } from '@/lib/voiceSession';
+import { voiceConversationSystemPrompt } from '@/lib/voiceMode';
 
 export type VoiceRouteModel = {
   id: string;
@@ -93,10 +94,14 @@ async function tryLocalVoiceRoute(
   const picked = ranked.find(id => !isWeakChatBrain(id));
   if (!picked) return null;
 
-  const prompt = packHistoryPrompt(history, message);
+  const prompt = [
+    voiceConversationSystemPrompt(),
+    '',
+    packHistoryPrompt(history, message),
+  ].join('\n');
   const result = await engineGenerate(prompt, picked, 'chat', { nPredict: VOICE_LOCAL_N_PREDICT });
   const reply = usableAssistantText(result.reply, message)?.trim() || String(result.reply || '').trim();
-  return reply || null;
+  return scrubVoiceConstraintEcho(reply) || null;
 }
 
 async function routeVoiceReply(userText: string, model?: VoiceRouteModel): Promise<string> {
@@ -105,7 +110,7 @@ async function routeVoiceReply(userText: string, model?: VoiceRouteModel): Promi
   const attempted: string[] = [];
 
   const cloud = await tryCloudRoute(message, history, attempted, model);
-  if (cloud) return cloud;
+  if (cloud) return scrubVoiceConstraintEcho(cloud);
 
   const prefs = getLocalPrefs();
   const shouldTryLocal =

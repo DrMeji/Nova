@@ -336,6 +336,20 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.172',
+    channel: 'stable' as const,
+    date: 'Sep 2, 2026',
+    title: 'Voice think ring, safer startup, cleaner refusals',
+    notes: [
+      'Harmful-content refusals are more professional and no longer feel like a 1 ms stub',
+      'Voice no longer speaks internal capability rules out loud',
+      'Thinking uses a spinning ring around the face instead of a text bubble',
+      'Voice face and composer sit higher in the layout',
+      'Title bar maximize uses a single box icon',
+      'Local brain warmup is deferred after launch to reduce freezes on open',
+    ],
+  },
+  {
     version: '0.1.171',
     channel: 'stable' as const,
     date: 'Sep 1, 2026',

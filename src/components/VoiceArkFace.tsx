@@ -6,7 +6,7 @@ type VoiceArkFaceProps = {
   className?: string;
 };
 
-/** Head box in viewBox space (rounded square only — no ears/antenna/outer ring). */
+/** Head box in viewBox space (rounded square only — no ears/antenna/outer white ring). */
 const HEAD_X = 36;
 const HEAD_Y = 34;
 const HEAD_W = 128;
@@ -42,7 +42,15 @@ const INNER_W = HEAD_W - INNER_PAD * 2;
 const INNER_H = HEAD_H - INNER_PAD * 2;
 const INNER_RX = HEAD_RX - 3;
 
-/** ARK voice face — inner shimmer, thinking pulse, mouth bars synced to speaking phase. */
+/** Loading ring sits just outside the head. */
+const RING_PAD = 10;
+const RING_X = HEAD_X - RING_PAD;
+const RING_Y = HEAD_Y - RING_PAD;
+const RING_W = HEAD_W + RING_PAD * 2;
+const RING_H = HEAD_H + RING_PAD * 2;
+const RING_RX = HEAD_RX + 6;
+
+/** ARK voice face — inner shimmer, thinking spinner ring, mouth bars synced to audio. */
 export function VoiceArkFace({ phase, className = '' }: VoiceArkFaceProps) {
   const [blink, setBlink] = useState(false);
   const speaking = phase === 'speaking';
@@ -69,16 +77,6 @@ export function VoiceArkFace({ phase, className = '' }: VoiceArkFaceProps) {
 
   return (
     <div className={`select-none relative ${className}`}>
-      {thinking ? (
-        <div
-          className="absolute left-1/2 -translate-x-1/2 -top-2 sm:-top-3 z-10 voice-thinking-bubble"
-          aria-hidden="true"
-        >
-          <div className="rounded-full border border-sky-500/30 bg-ark-navy-900/95 px-3 py-1 text-[11px] font-medium text-sky-200/90 shadow-lg">
-            Thinking…
-          </div>
-        </div>
-      ) : null}
       <svg viewBox="0 0 200 200" className="w-full h-full" aria-hidden="true">
         <defs>
           <clipPath id="voice-head-inner-clip">
@@ -89,7 +87,29 @@ export function VoiceArkFace({ phase, className = '' }: VoiceArkFaceProps) {
             <stop offset="45%" stopColor="rgb(129 140 248)" stopOpacity="0.14" />
             <stop offset="100%" stopColor="rgb(52 211 153)" stopOpacity="0.12" />
           </linearGradient>
+          <linearGradient id="voice-think-ring-grad" gradientUnits="userSpaceOnUse" x1={RING_X} y1={RING_Y} x2={RING_X + RING_W} y2={RING_Y + RING_H}>
+            <stop offset="0%" stopColor="rgb(56 189 248)" stopOpacity="0" />
+            <stop offset="35%" stopColor="rgb(125 211 252)" stopOpacity="0.85" />
+            <stop offset="70%" stopColor="rgb(129 140 248)" stopOpacity="0.35" />
+            <stop offset="100%" stopColor="rgb(56 189 248)" stopOpacity="0" />
+          </linearGradient>
         </defs>
+
+        {thinking ? (
+          <rect
+            x={RING_X}
+            y={RING_Y}
+            width={RING_W}
+            height={RING_H}
+            rx={RING_RX}
+            fill="none"
+            stroke="url(#voice-think-ring-grad)"
+            strokeWidth="2.4"
+            strokeLinecap="round"
+            strokeDasharray="42 168"
+            className="voice-think-ring"
+          />
+        ) : null}
 
         <g clipPath="url(#voice-head-inner-clip)">
           <rect

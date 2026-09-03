@@ -4,7 +4,6 @@
 
 import { desktopRequest } from '@/lib/httpDesktop';
 import { getProviderApiKeys } from '@/lib/localPrefs';
-import { voiceConversationSystemPrompt } from '@/lib/voiceMode';
 import {
   ensureSpeechVoicesLoaded,
   getVoiceOutputDeviceId,
@@ -238,9 +237,26 @@ export async function listenOnce(
 }
 
 export function voiceBrainPrompt(userText: string): string {
-  return [
-    voiceConversationSystemPrompt(),
-    '',
-    `User (spoken): ${userText}`,
-  ].join('\n');
+  // User text only — system identity is applied separately so models do not speak their rules aloud.
+  return String(userText || '').trim();
+}
+
+/** Soft strip if a model still echoes capability / constraint boilerplate. */
+export function scrubVoiceConstraintEcho(reply: string): string {
+  let t = String(reply || '').trim();
+  if (!t) return t;
+  const lines = t.split(/\n+/).map(l => l.trim()).filter(Boolean);
+  const filtered = lines.filter(l => {
+    if (/^you (?:are|cannot|can'?t|will not|won'?t)\b/i.test(l) && /\b(?:pc|build|install|file|weapon|violent|coding|program)\b/i.test(l)) {
+      return false;
+    }
+    if (/\bi (?:cannot|can'?t|will not|won'?t)\b[\s\S]{0,80}\b(?:control (?:this )?pc|install software|create or edit|build apps?|make (?:a )?code|give you anything violent)\b/i.test(l)) {
+      return false;
+    }
+    if (/\buse text chat or code instead\b/i.test(l)) return false;
+    if (/\bspoken conversation partner\b/i.test(l)) return false;
+    return true;
+  });
+  t = (filtered.length ? filtered : lines).join(' ').replace(/\s+/g, ' ').trim();
+  return t;
 }

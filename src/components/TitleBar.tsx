@@ -76,10 +76,7 @@ export function TitleBar() {
           }}
         >
           {maximized ? (
-            <span className="relative w-3 h-3.5">
-              <Square className="w-2.5 h-2.5 absolute top-0.5 left-0.5 opacity-70" />
-              <Square className="w-2.5 h-2.5 absolute top-0 left-0" />
-            </span>
+            <Square className="w-3 h-3.5" strokeWidth={1.75} />
           ) : (
             <Square className="w-3 h-3.5" />
           )}

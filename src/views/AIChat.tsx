@@ -121,7 +121,7 @@ import {
   looksLikeHarmfulContentAsk,
 } from '@/lib/arkContentSafety';
 import { redactArkSelfLeak } from '@/lib/replySanitizer';
-import { listenOnce, speakText, stopSpeaking, voiceSupported } from '@/lib/voiceSession';
+import { listenOnce, speakText, stopSpeaking, voiceSupported, scrubVoiceConstraintEcho } from '@/lib/voiceSession';
 import { voiceChatRoute } from '@/lib/voiceRoute';
 import { syncAutoVoiceDevices } from '@/lib/voiceAudio';
 import type { VoiceSessionPhase } from '@/lib/voiceMode';
@@ -2690,8 +2690,9 @@ export function AIChat() {
         name: pinnedModel.name,
         source: pinnedModel.source,
       });
-      const spoken = redactArkSelfLeak(String(routed.reply || '').trim())
-        || 'I did not have a reply for that.';
+      const spoken = scrubVoiceConstraintEcho(
+        redactArkSelfLeak(String(routed.reply || '').trim()),
+      ) || 'I did not have a reply for that.';
       await finishVoice('idle', spoken);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Something went wrong.';
@@ -3001,11 +3002,14 @@ export function AIChat() {
     };
 
     if (looksLikeHarmfulContentAsk(content)) {
+      // Brief pause so the reply reads like a normal answer, not a 1 ms stub.
+      await new Promise<void>(r => window.setTimeout(r, 480 + Math.floor(Math.random() * 220)));
       await finishPlainReply(harmfulContentBlockedReply());
       return;
     }
 
     if (looksLikeArkSelfHarmAsk(content)) {
+      await new Promise<void>(r => window.setTimeout(r, 360 + Math.floor(Math.random() * 180)));
       await finishPlainReply(arkSelfHarmBlockedReply());
       return;
     }

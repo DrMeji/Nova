@@ -54,19 +54,19 @@ type VoiceModeLayoutProps = {
   brainHint?: ReactNode;
 };
 
-/** Voice tab — ARK face up top, chat composer at bottom, no on-screen history. */
+/** Voice tab — face raised in the viewport, composer lifted off the bottom edge. */
 export function VoiceModeLayout({ phase, onActivate, busy, composer, brainHint }: VoiceModeLayoutProps) {
   return (
     <div className="flex-1 flex flex-col min-h-0 w-full">
-      <div className="flex-1 flex flex-col items-center justify-center min-h-0 pb-6 pt-2">
+      <div className="flex-1 flex flex-col items-center justify-center min-h-0 pb-2 pt-4 sm:pt-6 -mt-6 sm:-mt-10">
         <VoiceFace phase={phase} onActivate={onActivate} activateBlocked={busy} />
         {brainHint ? (
-          <div className="mt-5 w-full max-w-md px-4 sm:px-0">
+          <div className="mt-4 w-full max-w-md px-4 sm:px-0">
             {brainHint}
           </div>
         ) : null}
       </div>
-      <div className="shrink-0 px-4 sm:px-8 pb-6 pt-2 max-w-3xl mx-auto w-full">
+      <div className="shrink-0 px-4 sm:px-8 pb-10 sm:pb-12 pt-1 max-w-3xl mx-auto w-full">
         {composer}
       </div>
     </div>

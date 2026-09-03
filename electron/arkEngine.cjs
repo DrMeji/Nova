@@ -214,9 +214,12 @@ function start() {
     const ready = listModels().find((m) => m.gguf && m.status === 'ready' && m.id !== 'ark-core');
     if (runtimeOk && llamaBin) {
       phase = 'online';
+      // Defer GGUF warm so opening ARK / typing does not peg CPU while the UI is settling.
       if (ready) {
         const ggufId = String(ready.id).startsWith('gguf:') ? String(ready.id).slice(5) : ready.id;
-        void arkGguf.warmServer(ggufId);
+        setTimeout(() => {
+          void arkGguf.warmServer(ggufId);
+        }, 12_000);
       }
     } else {
       // Engine process is up, but binary/weights may still be missing.

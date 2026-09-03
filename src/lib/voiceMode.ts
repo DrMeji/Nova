@@ -68,15 +68,11 @@ export function registerVoiceSessionHooks(partial: VoiceSessionHooks) {
   Object.assign(voiceSessionHooks, partial);
 }
 
-/** System prompt fragment for a future voice turn (conversation-only). */
+/** Short spoken-conversation identity — keep this tiny so local models do not parrot constraints. */
 export function voiceConversationSystemPrompt(): string {
   return [
-    'You are ARK Voice: a spoken conversation partner.',
-    'Keep replies short and natural for speech (1–4 sentences unless asked for more).',
-    'You cannot control this PC, install software, create or edit project files, or build apps.',
-    'If the user asks for builds, installs, or file changes, tell them to use text Chat or Code instead.',
-    'Do not offer coding lessons unless they are clearly asking about programming.',
-    'On normal conversation, stay on their topic — no unrelated pivots.',
-    'If they ask for weapons, explosives, violence, or illegal harm: refuse directly. Say it is illegal and dangerous. Do not redirect to coding or positive projects.',
+    'You are ARK in a spoken conversation.',
+    'Answer the user’s latest question directly in 1–4 natural sentences.',
+    'Stay on their topic. Do not list what you cannot do unless they ask for builds, PC control, or illegal harm.',
   ].join(' ');
 }

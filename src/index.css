@@ -418,19 +418,20 @@
   .voice-head-shimmer-fast {
     animation-duration: 5s;
   }
+  @keyframes voiceThinkRing {
+    to { stroke-dashoffset: -210; }
+  }
+  .voice-think-ring {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: voiceThinkRing 1.15s linear infinite;
+  }
   @keyframes voiceEyeThink {
     0%, 100% { opacity: 0.72; }
     50% { opacity: 1; }
   }
   .voice-ark-eye-think {
     animation: voiceEyeThink 1.1s ease-in-out infinite;
-  }
-  @keyframes voiceThinkingBubble {
-    0%, 100% { opacity: 0.88; transform: translate(-50%, 0); }
-    50% { opacity: 1; transform: translate(-50%, -2px); }
-  }
-  .voice-thinking-bubble {
-    animation: voiceThinkingBubble 1.6s ease-in-out infinite;
   }
   .voice-composer-slot .max-w-3xl {
     max-width: none;
