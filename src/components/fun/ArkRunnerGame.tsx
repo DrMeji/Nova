@@ -82,21 +82,26 @@ export function ArkRunnerGame({ active, onScore }: Props) {
       ctx.strokeStyle = '#e8eef7';
       ctx.lineWidth = 2.4;
       ctx.lineCap = 'round';
-      // body
-      ctx.strokeRect(x + 4, y + 6, 20, 20);
+      // body (voice mark — rounded head, no ears/antenna)
+      ctx.beginPath();
+      const r = 5;
+      const bx = x + 4;
+      const by = y + 4;
+      const bw = 20;
+      const bh = 20;
+      ctx.moveTo(bx + r, by);
+      ctx.arcTo(bx + bw, by, bx + bw, by + bh, r);
+      ctx.arcTo(bx + bw, by + bh, bx, by + bh, r);
+      ctx.arcTo(bx, by + bh, bx, by, r);
+      ctx.arcTo(bx, by, bx + bw, by, r);
+      ctx.closePath();
+      ctx.stroke();
       // eyes
       ctx.beginPath();
-      ctx.moveTo(x + 10, y + 12);
-      ctx.lineTo(x + 10, y + 20);
-      ctx.moveTo(x + 18, y + 12);
-      ctx.lineTo(x + 18, y + 20);
-      ctx.stroke();
-      // antenna
-      ctx.beginPath();
-      ctx.moveTo(x + 14, y + 6);
-      ctx.lineTo(x + 14, y);
-      ctx.moveTo(x + 10, y);
-      ctx.lineTo(x + 18, y);
+      ctx.moveTo(x + 10, y + 10);
+      ctx.lineTo(x + 10, y + 18);
+      ctx.moveTo(x + 18, y + 10);
+      ctx.lineTo(x + 18, y + 18);
       ctx.stroke();
     };
 

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, useLayoutEffect, useCallback, type ClipboardEvent as ReactClipboardEvent } from 'react';
+import { useState, useEffect, useRef, useMemo, useLayoutEffect, useCallback, startTransition, type ClipboardEvent as ReactClipboardEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { useAuth } from '@/context/AuthContext';
 import { useRouter, type ChatMode } from '@/context/RouterContext';
@@ -1582,8 +1582,15 @@ export function AIChat() {
             generatingRef.current && activeGenChatIdRef.current === route.chatId,
           );
           if (!liveGenSkip) {
-            void window.arkDesktop?.previewCloseLive?.().catch(() => undefined);
-            void rebindStudioForChat(route.chatId);
+            const hadPreview = Boolean(previewUrlRef.current);
+            const switchChatId = route.chatId;
+            window.setTimeout(() => {
+              if (routeChatIdRef.current !== switchChatId) return;
+              if (hadPreview) {
+                void window.arkDesktop?.previewCloseLive?.().catch(() => undefined);
+              }
+              void rebindStudioForChat(switchChatId);
+            }, 0);
           }
           return;
         }
@@ -1593,13 +1600,19 @@ export function AIChat() {
       try {
         const raw = localStorage.getItem(chatThreadKey(route.chatId));
         const loaded = raw ? JSON.parse(raw) as ChatMessage[] : [];
-        setMessages(Array.isArray(loaded) ? loaded : []);
-        messagesRef.current = Array.isArray(loaded) ? loaded : [];
-        setThreadBrain(loadThreadBrain(route.chatId, kind));
+        const nextMsgs = Array.isArray(loaded) ? loaded : [];
+        // Paint the thread ASAP; defer studio/preview IPC so chat switches stay snappy in bat/dev.
+        messagesRef.current = nextMsgs;
+        startTransition(() => {
+          setMessages(nextMsgs);
+          setThreadBrain(loadThreadBrain(route.chatId, kind));
+        });
       } catch {
-        setMessages([]);
         messagesRef.current = [];
-        setThreadBrain(null);
+        startTransition(() => {
+          setMessages([]);
+          setThreadBrain(null);
+        });
       }
       // Don't carry a folder / localhost from another chat into this thread.
       // Always rebind from THIS chat (heal poisoned diskRoot via chat title).
@@ -1607,15 +1620,23 @@ export function AIChat() {
         generatingRef.current && activeGenChatIdRef.current === route.chatId,
       );
       if (!liveGenHere) {
-        void window.arkDesktop?.previewCloseLive?.().catch(() => undefined);
+        const hadPreview = Boolean(previewUrlRef.current);
         // Sync clear first so the folder pill never keeps the previous chat's name.
         studioBoundChatIdRef.current = null;
         setChatStudioDiskRoot(null);
         chatStudioDiskRootRef.current = null;
         setPreviewUrl(null);
         previewUrlRef.current = null;
-        void rebindStudioForChat(route.chatId);
         setPendingAttaches([]);
+        const switchChatId = route.chatId;
+        // Defer heavy preview/studio work until after the new messages paint.
+        window.setTimeout(() => {
+          if (routeChatIdRef.current !== switchChatId) return;
+          if (hadPreview) {
+            void window.arkDesktop?.previewCloseLive?.().catch(() => undefined);
+          }
+          void rebindStudioForChat(switchChatId);
+        }, 0);
       }
       setCodePillSticky(hasChatCodePill(route.chatId));
       setGenerating(Boolean(generatingRef.current && activeGenChatIdRef.current === route.chatId));

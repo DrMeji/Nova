@@ -47,9 +47,12 @@ export const BASE_SYSTEM =
   + 'For troubleshooting (car, PC, home): give likely causes and safe next steps, ask when the symptom happens, and say when a pro should look at it. '
   + 'When they ask for ideas for an app, website, coffee shop, etc.: give concrete pieces that product should have, then say where to start first and offer to begin. '
   + 'When they ask what a project is or what they are building: explain the product goal in plain language from the evidence, then suggest a practical next step. do not paste a generic file inventory. '
+  + 'Be accurate and complete. Cover the main facts they need, then one short follow-up: "Want more on any of that?" '
+  + 'If they reply yes / yeah / sure / more / go on / overall / full detail, continue that SAME topic with NEW depth. Never restart with a greeting. Never restate the same summary. '
+  + 'Read every user message carefully before answering. Prefer a thorough, useful reply over a rushed short one. '
+  + 'Never use em dashes or en dashes (the long dash characters). Prefer periods or commas. Do not put a long dash between clauses. '
   + 'Never invent a new subject (movies, TV, celebrities, weather, EcoBuddy-style fake products) when the thread is about something else. '
-  + 'Never echo the user’s greeting. If they only say hi/hello/hey, reply: “Hello! How can I assist you today?” '
-  + 'Be accurate and complete. Cover the main facts they need, then one short follow-up: “Want more on any of that?” '
+  + 'Never echo the user’s greeting. If they only say hi/hello/hey, reply: "Hello! How can I assist you today?" '
   + 'When they give concrete product/device/gear specs (camera mm / f-stop / ISO / shutter, iPhone model + lenses, bike size, GPU, phone storage, etc.), '
   + 'ground every recommendation in THOSE specs: best settings, technique, or next steps for that exact kit — not generic advice that ignores what they listed. '
   + 'Name their gear back once so it is clear you used it, then give tailored guidance. '
@@ -74,12 +77,12 @@ function todaySystemLine(): string {
 
 const CONTINUITY =
   'This is a follow-up in the same ARK chat. '
-  + 'Stay on the same topic as the earlier turns (coding lesson, app idea, troubleshooting, etc.). '
+  + 'Stay on the same topic as the earlier turns (coding lesson, app idea, troubleshooting, weather, etc.). '
   + 'Interpret typos the same way: guess the intended words and stay helpful. '
-  + 'If they say “more details”, “dive deeper”, “recommended area”, or similar, deepen the PREVIOUS answer. do not switch subjects. '
+  + 'If they say “more details”, “dive deeper”, “recommended area”, “yes”, “yeah”, “sure”, “overall”, or similar, deepen the PREVIOUS answer with NEW facts. do not switch subjects, do not greet them again, and do not paraphrase the same numbers. '
   + 'Answer the latest user message with a brand-new reply. '
   + `${ANSWER_THE_ASK} `
-  + 'If they ask how fast / how long / is it worth it: give a direct judgment first (timeline estimate + yes/no with reasons), then optional short detail — not a fresh full project plan dump. '
+  + 'If they ask how fast / how long / is it worth it: give a direct judgment first (timeline estimate + yes/no with reasons), then optional short detail. not a fresh full project plan dump. '
   + 'If they ask where to start, what first, or for next steps: prioritize the topic from this thread. '
   + 'If they ask to continue, tell more, or go on, finish the previous answer from where it stopped. do not restart the same list from item 1. '
   + 'If they clearly switched topics (e.g. coding → ninja warriors), follow the new topic.';
@@ -109,8 +112,9 @@ const CODING_WORKSPACE_ECHO_RE =
 
 const BUILD_HINT =
   /\b(build|create|make|implement|develop)\b.{0,48}\b(app|apps|website|site|calculator|program|game|page|ui)\b|\b(write|give|paste|show)\b.{0,32}\b(code|html|css|javascript|python|script|source)\b|\bfull (file|source)\b|\bcopy and paste\b/i;
+/** Coding lessons only — not generic “teach me …” (weather, cooking, etc.). */
 const TEACH_HINT =
-  /\b(teach|learn|tutorial|explain how|how (do i|to|can i) (learn|code|program|start)|teach me how to code|learning to code)\b/i;
+  /\b(?:teach\s+me\s+how\s+to\s+code|learning\s+to\s+code|learn(?:ing)?\s+(?:to\s+)?(?:code|program)|coding\s+tutorial|programming\s+tutorial|how\s+(?:do\s+i|to|can\s+i)\s+(?:learn\s+to\s+)?(?:code|program)|explain\s+how\s+to\s+code)\b/i;
 const CODING_TOPIC_HINT =
   /\b(code|coding|program(?:ming)?|python|javascript|typescript|java|html|css|leetcode|variables?|functions?|loops?|syntax|debug(?:ging)?|software|developer|compiler)\b/i;
 
@@ -139,9 +143,17 @@ function significantTokens(text: string): Set<string> {
   );
 }
 
-function isSoftContinuityAsk(text: string): boolean {
+export function isSoftContinuityAsk(text: string): boolean {
   const t = String(text || '').trim();
   if (!t) return false;
+  // Bare affirmatives after "Want more on any of that?" must deepen the prior answer.
+  if (/^(?:yes|yeah|yep|yup|sure|ok|okay|please|more|go\s+on|continue)[.!?]*$/i.test(t)) {
+    return true;
+  }
+  // "give me overall" / full detail / everything — deepen, do not restate.
+  if (/^(?:(?:please\s+)?(?:give|tell|show)\s+(?:me\s+)?)?(?:the\s+)?(?:overall|full(?:\s+details?)?|complete(?:\s+(?:picture|overview|details?))?|everything|all\s+(?:of\s+)?(?:it|that)|more\s+(?:details?|info(?:rmation)?))[.!?]*$/i.test(t)) {
+    return true;
+  }
   return FOLLOW_UP_HINT.test(t) || SOFT_FOLLOW_UP_HINT.test(t) || THREAD_CONTINUE_HINT.test(t);
 }
 
@@ -162,33 +174,38 @@ export function inferThreadTopic(history: RouterChatTurn[]): { kind: ThreadTopic
   if (BUILD_HINT.test(latestUser)) {
     return { kind: 'product', label: 'building a software product' };
   }
-  // Soft follow-ups: topic comes from earlier turns + last assistant.
-  const priorBlob = [
-    ...users.filter(u => u !== latestUser).slice(-4),
-    ...assistants.slice(-2),
-  ].join('\n');
+  // Soft follow-ups: topic from earlier USER turns only (assistant refusals often
+  // mention “coding” and must not hijack weather / chit-chat threads).
+  const priorUsers = users.filter(u => u !== latestUser && u.trim() && !isSoftContinuityAsk(u));
+  const priorUserBlob = priorUsers.slice(-4).join('\n');
   if (isSoftContinuityAsk(latestUser) || !latestUser) {
-    if (TEACH_HINT.test(priorBlob) || CODING_TOPIC_HINT.test(priorBlob)) {
+    if (TEACH_HINT.test(priorUserBlob) || CODING_TOPIC_HINT.test(priorUserBlob)) {
       return { kind: 'coding', label: 'learning to code / programming' };
     }
-    if (BUILD_HINT.test(priorBlob) || /\b(app|website|mvp|stack|scaffold|project)\b/i.test(priorBlob)) {
+    if (BUILD_HINT.test(priorUserBlob) || /\b(app|website|mvp|stack|scaffold|project)\b/i.test(priorUserBlob)) {
       return { kind: 'product', label: 'building a software product' };
     }
-    if (MEDIA_ASK_HINT.test(priorBlob)) {
+    if (MEDIA_ASK_HINT.test(priorUserBlob)) {
       return { kind: 'media', label: 'movies / TV' };
     }
+    const priorAsk = [...priorUsers].reverse().find(u => u.trim() && !GREET_HINT.test(u.trim()));
+    if (priorAsk) {
+      return { kind: 'general', label: priorAsk.replace(/\s+/g, ' ').trim().slice(0, 80) };
+    }
   }
-  const blob = [...users, ...assistants.slice(-2)].join('\n');
-  if (TEACH_HINT.test(blob) || CODING_TOPIC_HINT.test(blob)) {
+  // Prefer user messages for topic; ignore assistant text (refusals / pivots pollute).
+  const userBlob = users.join('\n');
+  if (TEACH_HINT.test(userBlob) || CODING_TOPIC_HINT.test(userBlob)) {
     return { kind: 'coding', label: 'learning to code / programming' };
   }
-  if (BUILD_HINT.test(blob) || /\b(app|website|mvp|stack|scaffold|project)\b/i.test(blob)) {
+  if (BUILD_HINT.test(userBlob) || /\b(app|website|mvp|stack|scaffold|project)\b/i.test(userBlob)) {
     return { kind: 'product', label: 'building a software product' };
   }
-  if (latestUser) {
+  if (latestUser && !isSoftContinuityAsk(latestUser)) {
     const clip = latestUser.replace(/\s+/g, ' ').trim().slice(0, 80);
     return { kind: 'general', label: clip };
   }
+  void assistants;
   return { kind: 'general', label: 'the ongoing conversation' };
 }
 
@@ -402,7 +419,14 @@ export function routerSystemPrompt(history: RouterChatTurn[]): string {
   const topicLine =
     `Current thread topic: ${topic.label}. Stay on this unless the user clearly switches to something else.`;
   if (isSoftContinuityAsk(latest.trim())) {
-    return `${BASE_SYSTEM}${todayNote}\n\n${topicLine}\nThis is a follow-up. Deepen the previous answer on that topic. Do not invent movies, TV, celebrities, or a new product.${visionNote}`;
+    return `${BASE_SYSTEM}${todayNote}\n\n${topicLine}\n`
+      + 'The user asked to continue / deepen (yes, more, overall, full detail). '
+      + 'Read the previous assistant answer carefully. Then write a LONGER follow-up with NEW facts, numbers, examples, or angles that were NOT already said. '
+      + 'Do not paraphrase the same temperatures, precip totals, or summary. Do not restart with Hello. '
+      + 'Take your time. Prefer thorough, useful detail over a short restatement. '
+      + 'For weather: add week-by-week feel, humidity, wind, sunshine vs rain days, packing/clothing, how it compares to adjacent months, and tourist tips. '
+      + 'Do not offer coding or programming unless that was already the topic.'
+      + visionNote;
   }
   return `${BASE_SYSTEM}${todayNote}\n\n${topicLine}\n${CONTINUITY}${visionNote}`;
 }
@@ -528,7 +552,12 @@ export function packHistoryPrompt(history: RouterChatTurn[], latestFallback?: st
     `Thread topic: ${topic.label}. Stay on it unless Latest clearly switches.`,
     priorUsers.length ? `Earlier user asks${softFollow ? '' : ' (already answered)'}:\n${priorUsers.join('\n')}` : '',
     lastAssistant
-      ? `${softFollow ? 'Previous answer. continue / deepen from here, do not restart or change subject:\n' : 'Previous answer:\n'}${lastAssistant}`
+      ? `${softFollow
+        ? 'Previous answer (already given). Your job is to ADD new depth, not repeat it:\n'
+        : 'Previous answer:\n'}${lastAssistant}`
+      : '',
+    softFollow
+      ? 'Instruction: Write a thorough NEW expansion with facts or angles missing above. Do not copy or lightly rephrase the previous answer. At least 2–3 substantial new paragraphs when the topic supports it.'
       : '',
     `Latest:\n${latest}`,
   ].filter(Boolean).join('\n\n');
@@ -595,6 +624,16 @@ export function sanitizeAssistantReply(
   text = text.replace(/^[a-z]\.\s+(?:If you have any specific|I(?:['’]d| would) be happy)[^\n]*\n*/i, '').trim();
   text = text.replace(/^Hello!\s+It (?:looks|seems) like you might have (?:meant|a typo)[^\n]*\n*/i, '').trim();
   text = tidyMarkdownStars(text);
+
+  // Strip fancy dashes from model output (em/en dash). keep normal hyphens in words/versions.
+  text = text
+    .replace(/\u2014|\u2013|\u2212/g, '. ')
+    .replace(/\s+\.\s+/g, '. ')
+    .replace(/([.!?])\s*\./g, '$1')
+    .replace(/\.\s*\./g, '.')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/ {2,}/g, ' ')
+    .trim();
 
   const user = String(lastUserMessage || '').trim();
   if (user) {
@@ -678,6 +717,41 @@ export function sanitizeAssistantReply(
       .trim();
   }
 
+  // Unsolicited coding pivots (common local-model habit after refusals / chit-chat).
+  const userAskedCode =
+    Boolean(user)
+    && (TEACH_HINT.test(user) || CODING_TOPIC_HINT.test(user) || BUILD_HINT.test(user));
+  if (!userAskedCode) {
+    text = text
+      .replace(
+        /(?:^|\n+)(?:Instead[,.]?\s+)?(?:I\s+can\s+help\s+you\s+(?:get\s+started\s+with\s+)?learning\s+(?:to\s+)?(?:code|coding|program(?:ming)?)[^.!?\n]*[.!?]?\s*)+/gi,
+        '\n',
+      )
+      .replace(
+        /(?:^|\n+)What\s+specific\s+aspect\s+of\s+coding[^.!?\n]*[.!?]?\s*/gi,
+        '\n',
+      )
+      .replace(
+        /(?:^|\n+)(?:For\s+example,\s+)?do\s+you\s+want\s+to\s+learn\s+(?:a\s+)?particular\s+programming\s+language[^.!?\n]*[.!?]?\s*/gi,
+        '\n',
+      )
+      .replace(
+        /(?:^|\n+)I(?:'m|\s+am)\s+happy\s+to\s+help\s+you\s+(?:get\s+started\s+with\s+)?(?:coding|programming|learning\s+to\s+code)[^.!?\n]*[.!?]?\s*/gi,
+        '\n',
+      )
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  }
+
+  // Soft “yes” after a real answer: drop fresh greetings that ignore continuity.
+  if (user && isSoftContinuityAsk(user)) {
+    text = text
+      .replace(/^Hello[!.,]?\s+/i, '')
+      .replace(/^Hi[!.,]?\s+How\s+can\s+I\s+assist[^.!?\n]*[.!?]?\s*/i, '')
+      .replace(/^How\s+can\s+I\s+assist\s+you\s+further[^.!?\n]*[.!?]?\s*/i, '')
+      .trim();
+  }
+
   // Drop "Latest request: ..." echo lines from packed prompts
   text = text.replace(/^Latest request:\s*.+\n+/im, '').trim();
 
@@ -727,6 +801,25 @@ export function isCannedGreetingReply(reply: string, userMessage?: string): bool
   const u = String(userMessage || '').trim();
   if (!u) return true;
   return !/^(hi|hello|hey)\b/i.test(u);
+}
+
+/** True when a soft follow-up reply mostly restates the previous assistant answer. */
+export function looksLikeRestatedPriorAnswer(reply: string, previousAssistant?: string): boolean {
+  const r = String(reply || '').trim().replace(/\s+/g, ' ').toLowerCase();
+  const p = String(previousAssistant || '').trim().replace(/\s+/g, ' ').toLowerCase();
+  if (!r || p.length < 80) return false;
+  if (r === p) return true;
+  // Share of reply tokens that already appeared in the prior answer.
+  const rt = r.split(/[^a-z0-9]+/).filter(w => w.length > 3);
+  const pt = new Set(p.split(/[^a-z0-9]+/).filter(w => w.length > 3));
+  if (rt.length < 12 || pt.size < 12) return false;
+  let hit = 0;
+  for (const w of rt) if (pt.has(w)) hit += 1;
+  const overlap = hit / rt.length;
+  // Near-copy, or shorter paraphrase of the same content.
+  if (overlap >= 0.72) return true;
+  if (overlap >= 0.58 && r.length < p.length * 1.15) return true;
+  return false;
 }
 
 /** True when the assistant mostly repeated the user’s ask (e.g. “Updated Okay, on top right…”). */

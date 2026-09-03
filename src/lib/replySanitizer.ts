@@ -14,8 +14,17 @@ const LEAK_PATTERNS: RegExp[] = [
 ];
 
 export function redactArkSelfLeak(text: string): string {
-  const raw = String(text || '');
-  if (!raw || isArkDevSession() || !isArkPackagedApp()) return raw;
+  let raw = String(text || '');
+  if (!raw) return raw;
+  // Always normalize fancy dashes in chat bubbles (model + safety copy).
+  raw = raw
+    .replace(/\u2014|\u2013|\u2212/g, '. ')
+    .replace(/\s+\.\s+/g, '. ')
+    .replace(/([.!?])\s*\./g, '$1')
+    .replace(/\.\s*\./g, '.')
+    .replace(/ {2,}/g, ' ');
+
+  if (isArkDevSession() || !isArkPackagedApp()) return raw.trim();
 
   let hit = false;
   for (const re of LEAK_PATTERNS) {
@@ -24,7 +33,7 @@ export function redactArkSelfLeak(text: string): string {
       break;
     }
   }
-  if (!hit) return raw;
+  if (!hit) return raw.trim();
 
   if (/require\s*\(\s*['"]electron['"]\s*\)/.test(raw) && raw.length > 400) {
     return arkSelfHarmBlockedReply();
@@ -32,5 +41,6 @@ export function redactArkSelfLeak(text: string): string {
 
   return raw
     .replace(/[^\s'"]*app\.asar[^\s'"]*/gi, '[ARK internal path]')
-    .replace(/electron[/\\](?:main|preload)\.cjs/gi, '[ARK internal file]');
+    .replace(/electron[/\\](?:main|preload)\.cjs/gi, '[ARK internal file]')
+    .trim();
 }

@@ -66,6 +66,9 @@ declare global {
         version?: string;
         error?: string;
       }>;
+      updateSplashPreview?: (payload?: {
+        durationMs?: number;
+      }) => Promise<{ ok: boolean; error?: string }>;
       postUpdateConsume?: () => Promise<{ ok: boolean; land?: string | null }>;
       authRecoverySave?: (payload: {
         email?: string;

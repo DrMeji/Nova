@@ -165,8 +165,17 @@ function sendProgress(payload) {
       /* ignore */
     }
   }
+  const pct = Number(payload?.percent);
+  if (Number.isFinite(pct)) {
+    void setUpdateSplashPercent(pct);
+  }
+  if (payload?.status === 'error') {
+    closeUpdateSplash();
+  }
   for (const win of BrowserWindow.getAllWindows()) {
     try {
+      // Don't push progress IPC into the splash window itself.
+      if (updateSplashWin && !updateSplashWin.isDestroyed() && win.id === updateSplashWin.id) continue;
       win.webContents.send('ark:update-progress', state);
     } catch {
       /* ignore */
@@ -511,63 +520,69 @@ function resolveUpdateIco() {
   return null;
 }
 
-const SPLASH_W = 440;
-const SPLASH_H = 300;
-const SPLASH_ICON_PX = 72;
-const SPLASH_ICON_GAP = 56;
-const SPLASH_TRACK_W = 280;
-const SPLASH_TRACK_H = 14;
-const SPLASH_OUTER_BG = '#2a2a2e';
-const SPLASH_CARD_BG = '#1a1a1d';
-const SPLASH_RADIUS = 18;
+const SPLASH_W = 540;
+const SPLASH_H = 360;
+const SPLASH_ICON_PX = 136;
+const SPLASH_ICON_GAP = 72;
+const SPLASH_TRACK_W = 320;
+const SPLASH_TRACK_H = 12;
+/** Single panel color — no outer/inner nested frames. */
+const SPLASH_BG = '#161618';
+const SPLASH_OUTER_BG = SPLASH_BG;
+const SPLASH_CARD_BG = SPLASH_BG;
+const SPLASH_RADIUS = 0;
 
 function splashRobotSvg() {
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80" width="${SPLASH_ICON_PX}" height="${SPLASH_ICON_PX}" aria-hidden="true" class="splash-ark-icon" style="display:block;margin:0 auto;">
     <defs>
       <clipPath id="splash-inner-clip">
-        <rect x="19" y="19" width="42" height="42" rx="13"/>
+        <rect x="14" y="14" width="52" height="52" rx="16"/>
       </clipPath>
-      <linearGradient id="splash-shimmer-grad" gradientUnits="userSpaceOnUse" x1="14" y1="14" x2="66" y2="66">
-        <stop offset="0%" stop-color="rgb(56 189 248)" stop-opacity="0.18"/>
-        <stop offset="45%" stop-color="rgb(129 140 248)" stop-opacity="0.14"/>
-        <stop offset="100%" stop-color="rgb(52 211 153)" stop-opacity="0.12"/>
+      <linearGradient id="splash-shimmer-grad" gradientUnits="userSpaceOnUse" x1="12" y1="12" x2="68" y2="68">
+        <stop offset="0%" stop-color="rgb(56 189 248)" stop-opacity="0.22"/>
+        <stop offset="45%" stop-color="rgb(129 140 248)" stop-opacity="0.16"/>
+        <stop offset="100%" stop-color="rgb(52 211 153)" stop-opacity="0.14"/>
       </linearGradient>
     </defs>
     <g clip-path="url(#splash-inner-clip)">
-      <rect x="8" y="8" width="64" height="64" fill="url(#splash-shimmer-grad)" class="splash-shimmer"/>
+      <rect x="6" y="6" width="68" height="68" fill="url(#splash-shimmer-grad)" class="splash-shimmer"/>
     </g>
-    <rect x="14" y="14" width="52" height="52" rx="16" fill="none" stroke="#f4f4f5" stroke-width="2.5"/>
-    <line x1="32" y1="34" x2="32" y2="46" stroke="#f4f4f5" stroke-width="3" stroke-linecap="round"/>
-    <line x1="48" y1="34" x2="48" y2="46" stroke="#f4f4f5" stroke-width="3" stroke-linecap="round"/>
+    <line x1="31" y1="32" x2="31" y2="48" stroke="#f4f4f5" stroke-width="3.4" stroke-linecap="round"/>
+    <line x1="49" y1="32" x2="49" y2="48" stroke="#f4f4f5" stroke-width="3.4" stroke-linecap="round"/>
   </svg>`;
 }
 
-/** Updating splash always uses inline SVG — build/icon.png still has legacy ears/antenna art. */
+/** Updating splash always uses inline SVG. build/icon.png still has legacy ears/antenna art. */
 function splashIconMarkup() {
   return splashRobotSvg();
 }
 
+/** One solid panel: logo upper, progress bar lower. no nested outer/inner frames. */
 function splashShellCss(opts = {}) {
   const hta = Boolean(opts.hta);
-  // Soft gray shell + rounded card — visible on OLED; HTA uses table layout (no flexbox).
   const shared = `
-  html,body{margin:0;width:100%;height:100%;background:${SPLASH_OUTER_BG};color:#f4f4f5;font-family:"Segoe UI",system-ui,sans-serif;overflow:hidden;user-select:none;}
-  .card{box-sizing:border-box;background:${SPLASH_CARD_BG};border-radius:${SPLASH_RADIUS}px;box-shadow:0 10px 40px rgba(0,0,0,.45);padding:36px 28px 32px;text-align:center;}
-  .logo-wrap{margin:0 auto ${SPLASH_ICON_GAP}px;width:${SPLASH_ICON_PX}px;height:${SPLASH_ICON_PX}px;display:block;}
-  .logo-wrap img{width:${SPLASH_ICON_PX}px;height:${SPLASH_ICON_PX}px;object-fit:contain;display:block;margin:0 auto;border:0;background:transparent;}
+  html,body{margin:0;width:100%;height:100%;background:${SPLASH_BG};color:#f4f4f5;font-family:"Segoe UI",system-ui,sans-serif;overflow:hidden;user-select:none;}
+  .card{box-sizing:border-box;width:100%;height:100%;background:${SPLASH_BG};border-radius:0;box-shadow:none;padding:40px 40px 48px;text-align:center;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:56px;}
+  .logo-wrap{margin:0 auto;width:${SPLASH_ICON_PX}px;height:${SPLASH_ICON_PX}px;display:block;flex-shrink:0;}
+  .logo-wrap img,.logo-wrap svg{width:${SPLASH_ICON_PX}px;height:${SPLASH_ICON_PX}px;object-fit:contain;display:block;margin:0 auto;border:0;background:transparent;}
   @keyframes splashHeadShimmer{0%{transform:translate(0,0) rotate(0deg);}50%{transform:translate(6px,-4px) rotate(180deg);}100%{transform:translate(0,0) rotate(360deg);}}
   .splash-shimmer{transform-box:fill-box;transform-origin:center;animation:splashHeadShimmer 14s ease-in-out infinite;}
-  .track{width:${SPLASH_TRACK_W}px;max-width:100%;height:${SPLASH_TRACK_H}px;margin:12px auto 0;border-radius:999px;border:2px solid #52525b;background:#0f0f11;overflow:hidden;box-sizing:border-box;}
+  .spacer{display:none;}
+  .track{width:${SPLASH_TRACK_W}px;max-width:100%;height:${SPLASH_TRACK_H}px;margin:0 auto;border-radius:999px;border:1.5px solid #a1a1aa;background:transparent;overflow:hidden;box-sizing:border-box;flex-shrink:0;}
   #fill{height:100%;width:0%;min-width:0;border-radius:999px;background:#f4f4f5;transition:width 140ms ease;}
 `;
   if (hta) {
     return `${shared}
+  .card{display:flex;padding:40px;position:relative;justify-content:center;gap:56px;}
+  .logo-wrap{margin:0 auto;}
+  .spacer{display:none;}
+  .track{position:static;left:auto;bottom:auto;transform:none;margin:0 auto;}
   table.layout{width:100%;height:100%;border-collapse:collapse;}
-  td.cell{text-align:center;vertical-align:middle;padding:24px;}
+  td.cell{text-align:center;vertical-align:middle;padding:20px;}
 `;
   }
   return `${shared}
-  .wrap{box-sizing:border-box;width:100%;height:100%;margin:0;padding:24px;display:flex;align-items:center;justify-content:center;background:${SPLASH_OUTER_BG};}
+  .wrap{box-sizing:border-box;width:100%;height:100%;margin:0;padding:0;display:block;background:${SPLASH_BG};}
 `;
 }
 
@@ -576,6 +591,7 @@ function splashBodyMarkup() {
   return `
   <div class="card">
     <div class="logo-wrap">${icon}</div>
+    <div class="spacer" aria-hidden="true"></div>
     <div class="track"><div id="fill"></div></div>
   </div>`;
 }
@@ -1373,13 +1389,13 @@ function launchInstallHandoffSplash({ statusPath, expectedVersion, arkExe, shown
     '  $gp.CloseFigure()',
     '  return New-Object System.Drawing.Region($gp)',
     '}',
-    '$formW = 440',
-    '$formH = 300',
+    `$formW = ${SPLASH_W}`,
+    `$formH = ${SPLASH_H}`,
     `$trackW = ${SPLASH_TRACK_W}`,
     `$trackH = ${SPLASH_TRACK_H}`,
     `$picSize = ${SPLASH_ICON_PX}`,
-    `$picY = [int](($formH - $picSize - ${SPLASH_ICON_GAP} - $trackH - 24) / 2) + 8`,
-    `$trackY = $picY + $picSize + ${SPLASH_ICON_GAP}`,
+    `$picY = [int](($formH - $picSize - $trackH - 56) / 2)`,
+    `$trackY = $picY + $picSize + 56`,
     '$form = New-Object System.Windows.Forms.Form',
     `$form.Text = "ARK"`,
     '$form.AutoScaleMode = "None"',
@@ -1390,11 +1406,10 @@ function launchInstallHandoffSplash({ statusPath, expectedVersion, arkExe, shown
     '$form.ShowIcon = $false',
     '$form.ClientSize = New-Object System.Drawing.Size($formW, $formH)',
     '$form.StartPosition = "CenterScreen"',
-    `$form.BackColor = [System.Drawing.ColorTranslator]::FromHtml('${SPLASH_OUTER_BG}')`,
+    `$form.BackColor = [System.Drawing.ColorTranslator]::FromHtml('${SPLASH_BG}')`,
     '$form.ForeColor = [System.Drawing.Color]::FromArgb(244, 244, 245)',
     '$form.TopMost = $true',
     '$form.ShowInTaskbar = $true',
-    'try { $form.Region = New-ArkRoundRegion $formW $formH 18 } catch {}',
     'if ($icoPath -and (Test-Path -LiteralPath $icoPath)) { try { $form.Icon = New-Object System.Drawing.Icon($icoPath) } catch {} }',
     'if (-not $form.Icon) {',
     '  try {',
@@ -1403,17 +1418,21 @@ function launchInstallHandoffSplash({ statusPath, expectedVersion, arkExe, shown
     '    $form.Icon = [System.Drawing.Icon]::ExtractAssociatedIcon($exeForIcon)',
     '  } catch {}',
     '}',
+    '$card = New-Object System.Windows.Forms.Panel',
+    `$card.BackColor = [System.Drawing.ColorTranslator]::FromHtml('${SPLASH_BG}')`,
+    '$card.Size = New-Object System.Drawing.Size($formW, $formH)',
+    '$card.Location = New-Object System.Drawing.Point(0, 0)',
     '$pic = New-Object System.Windows.Forms.Panel',
     '$pic.Size = New-Object System.Drawing.Size($picSize, $picSize)',
     '$pic.Location = New-Object System.Drawing.Point([int](($formW - $picSize) / 2), $picY)',
-    `$pic.BackColor = [System.Drawing.ColorTranslator]::FromHtml('${SPLASH_CARD_BG}')`,
+    `$pic.BackColor = [System.Drawing.ColorTranslator]::FromHtml('${SPLASH_BG}')`,
     '$script:splashShimmerT = 0',
     '$pic.Add_Paint({',
     '  param($sender, $e)',
     '  $g = $e.Graphics',
     '  $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias',
     '  $w = $sender.Width; $h = $sender.Height',
-    '  $pad = [int]($w * 0.12); $rx = [int]($w * 0.2)',
+    '  $pad = [int]($w * 0.12); $rx = [int]($w * 0.20)',
     '  $rect = New-Object System.Drawing.Rectangle($pad, $pad, $w - 2*$pad, $h - 2*$pad)',
     '  $path = New-Object System.Drawing.Drawing2D.GraphicsPath',
     '  $d = $rx * 2',
@@ -1427,17 +1446,14 @@ function launchInstallHandoffSplash({ statusPath, expectedVersion, arkExe, shown
     '  $brush = New-Object System.Drawing.Drawing2D.LinearGradientBrush(',
     '    (New-Object System.Drawing.Point($rect.X, $rect.Y)),',
     '    (New-Object System.Drawing.Point($rect.Right, $rect.Bottom)),',
-    '    [System.Drawing.Color]::FromArgb(46, 56, 189, 248),',
-    '    [System.Drawing.Color]::FromArgb(31, 52, 211, 153)',
+    '    [System.Drawing.Color]::FromArgb(56, 56, 189, 248),',
+    '    [System.Drawing.Color]::FromArgb(36, 52, 211, 153)',
     '  )',
     '  $g.FillRectangle($brush, $rect)',
     '  $brush.Dispose()',
     '  $g.Restore($state)',
-    '  $pen = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(244, 244, 245), 2.5)',
-    '  $g.DrawPath($pen, $path)',
-    '  $pen.Dispose()',
-    '  $eyePen = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(244, 244, 245), 3)',
-    '  $cx1 = [int]($w * 0.40); $cx2 = [int]($w * 0.60); $cy = [int]($h * 0.48); $eh = [int]($h * 0.14)',
+    '  $eyePen = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(244, 244, 245), 3.4)',
+    '  $cx1 = [int]($w * 0.39); $cx2 = [int]($w * 0.61); $cy = [int]($h * 0.48); $eh = [int]($h * 0.16)',
     '  $g.DrawLine($eyePen, $cx1, $cy - $eh, $cx1, $cy + $eh)',
     '  $g.DrawLine($eyePen, $cx2, $cy - $eh, $cx2, $cy + $eh)',
     '  $eyePen.Dispose()',
@@ -1448,7 +1464,7 @@ function launchInstallHandoffSplash({ statusPath, expectedVersion, arkExe, shown
     '$picTimer.Add_Tick({ $script:splashShimmerT++; $pic.Invalidate() })',
     '$picTimer.Start()',
     '$track = New-Object System.Windows.Forms.Panel',
-    `$track.BackColor = [System.Drawing.ColorTranslator]::FromHtml('#0f0f11')`,
+    `$track.BackColor = [System.Drawing.ColorTranslator]::FromHtml('${SPLASH_BG}')`,
     '$track.Size = New-Object System.Drawing.Size($trackW, $trackH)',
     '$track.Location = New-Object System.Drawing.Point([int](($formW - $trackW) / 2), $trackY)',
     'try { $track.Region = New-ArkRoundRegion $trackW $trackH ([int]($trackH / 2)) } catch {}',
@@ -1456,7 +1472,7 @@ function launchInstallHandoffSplash({ statusPath, expectedVersion, arkExe, shown
     '  param($sender, $e)',
     '  $g = $e.Graphics',
     '  $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias',
-    '  $pen = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(82, 82, 91), 2)',
+    '  $pen = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(161, 161, 170), 1.5)',
     '  $rect = New-Object System.Drawing.Rectangle(1, 1, $sender.Width - 3, $sender.Height - 3)',
     '  $g.DrawArc($pen, $rect.X, $rect.Y, $rect.Height, $rect.Height, 90, 180)',
     '  $g.DrawArc($pen, $rect.Right - $rect.Height, $rect.Y, $rect.Height, $rect.Height, 270, 180)',
@@ -1469,8 +1485,9 @@ function launchInstallHandoffSplash({ statusPath, expectedVersion, arkExe, shown
     '$fill.Location = New-Object System.Drawing.Point(0, 0)',
     'try { $fill.Region = New-ArkRoundRegion $trackH $trackH ([int]($trackH / 2)) } catch {}',
     '$track.Controls.Add($fill)',
-    '$form.Controls.Add($pic)',
-    '$form.Controls.Add($track)',
+    '$card.Controls.Add($pic)',
+    '$card.Controls.Add($track)',
+    '$form.Controls.Add($card)',
     '$script:baselinePids = @{}',
     'try { Get-Process -Name "ARK" -ErrorAction SilentlyContinue | ForEach-Object { $script:baselinePids[$_.Id] = $true } } catch {}',
     '$script:installFinished = $false',
@@ -1897,6 +1914,13 @@ async function downloadAndInstall(setupUrl, latestTag) {
   const expectedVersion = normalizeVersion(check.latestTag || latestTag || '');
   setupUrl = resolvedUrl;
 
+  // Official update splash for the whole download → handoff flow.
+  try {
+    await openUpdateSplash();
+  } catch (err) {
+    console.error('[ark] update splash failed to open', err);
+  }
+
   const handoffAndExit = async (installerPath) => {
     // Copy out of electron-updater's pending/ folder before the parent exits —
     // that directory can be cleaned or locked when the main app dies.
@@ -2048,6 +2072,102 @@ async function downloadAndInstall(setupUrl, latestTag) {
   return handoffAndExit(dest);
 }
 
+/**
+ * Official Updating splash (logo + progress bar). Used for real installs and bat preview.
+ */
+let updateSplashWin = null;
+
+function closeUpdateSplash() {
+  try {
+    if (updateSplashWin && !updateSplashWin.isDestroyed()) updateSplashWin.close();
+  } catch {
+    /* ignore */
+  }
+  updateSplashWin = null;
+}
+
+async function setUpdateSplashPercent(pct) {
+  const win = updateSplashWin;
+  if (!win || win.isDestroyed()) return;
+  const n = Math.max(0, Math.min(100, Math.round(Number(pct) || 0)));
+  try {
+    await win.webContents.executeJavaScript(
+      `typeof window.__arkSet==='function'&&window.__arkSet(${n});`,
+      true,
+    );
+  } catch {
+    /* ignore */
+  }
+}
+
+async function openUpdateSplash() {
+  closeUpdateSplash();
+  const iconPath = resolveUpdateIco() || resolveUpdateIcon();
+  const win = new BrowserWindow({
+    width: SPLASH_W,
+    height: SPLASH_H,
+    resizable: false,
+    maximizable: false,
+    minimizable: false,
+    fullscreenable: false,
+    frame: false,
+    thickFrame: false,
+    transparent: false,
+    backgroundColor: SPLASH_OUTER_BG,
+    alwaysOnTop: true,
+    skipTaskbar: false,
+    show: true,
+    center: true,
+    autoHideMenuBar: true,
+    title: 'ARK',
+    icon: iconPath || undefined,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  });
+  try {
+    win.removeMenu();
+  } catch {
+    /* ignore */
+  }
+  win.setMenuBarVisibility(false);
+  updateSplashWin = win;
+  win.on('closed', () => {
+    if (updateSplashWin === win) updateSplashWin = null;
+  });
+  await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(splashHtml())}`);
+  await setUpdateSplashPercent(2);
+  return win;
+}
+
+/**
+ * Dev/bat only: show the official Updating splash for ~2s with a fake progress fill, then close.
+ * Packaged installs must never call this — Update uses openUpdateSplash + real download instead.
+ */
+async function previewSplashDev(durationMs = 2000) {
+  if (app.isPackaged) {
+    return { ok: false, error: 'Splash preview is only available in bat/dev builds.' };
+  }
+  const ms = Math.max(800, Math.min(8000, Number(durationMs) || 2000));
+  try {
+    await openUpdateSplash();
+    const steps = 12;
+    for (let i = 1; i <= steps; i++) {
+      if (!updateSplashWin || updateSplashWin.isDestroyed()) break;
+      await setUpdateSplashPercent(Math.round((i / steps) * 100));
+      await sleep(Math.floor(ms / steps));
+    }
+  } catch (err) {
+    closeUpdateSplash();
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  } finally {
+    closeUpdateSplash();
+  }
+  return { ok: true };
+}
+
 module.exports = {
   checkForUpdate,
   downloadAndInstall,
@@ -2057,5 +2177,6 @@ module.exports = {
   setForceExitHook,
   markUiShown,
   clearUiShown,
+  previewSplashDev,
   UPDATE_REPO,
 };

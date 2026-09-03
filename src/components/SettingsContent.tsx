@@ -444,6 +444,29 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
     })();
   };
 
+  /** Bat/dev: preview the official update splash (~2s). */
+  const previewUpdateSplash = () => {
+    if (!isArkDevSession()) return;
+    setDownloadingUpdate(true);
+    setUpdatePercent(0);
+    setUpdateMsg('Previewing update splash…');
+    void (async () => {
+      try {
+        const result = await window.arkDesktop?.updateSplashPreview?.({ durationMs: 2000 });
+        if (!result?.ok) {
+          setUpdateMsg(result?.error || 'Splash preview failed.');
+        } else {
+          setUpdateMsg('Splash preview done.');
+        }
+      } catch (err) {
+        setUpdateMsg(err instanceof Error ? err.message : 'Splash preview failed.');
+      } finally {
+        setDownloadingUpdate(false);
+        setUpdatePercent(0);
+      }
+    })();
+  };
+
   const installedModels = useMemo(
     () =>
       (engineStatus?.models ?? []).filter(
@@ -2028,16 +2051,28 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                         {checkingUpdates ? <RefreshCw className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
                         {checkingUpdates ? 'Checking…' : 'Check for update'}
                       </button>
-                      {updateInfo?.newerAvailable && (
+                      {!isArkDevSession() && updateInfo?.newerAvailable && (
                         <button
                           type="button"
                           onClick={downloadUpdate}
                           disabled={downloadingUpdate || !updateInfo.setupAssetUrl}
-                          title={!updateInfo.setupAssetUrl ? 'Update is disabled until GitHub publishes an installer file for this build' : 'Download and install'}
+                          title={!updateInfo.setupAssetUrl ? 'Update is disabled until GitHub publishes an installer file for this build' : 'Download and install with the ARK update splash'}
                           className="ark-btn-primary !rounded-full"
                         >
                           {downloadingUpdate ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
                           {downloadingUpdate ? 'Updating…' : 'Update'}
+                        </button>
+                      )}
+                      {isArkDevSession() && (
+                        <button
+                          type="button"
+                          onClick={previewUpdateSplash}
+                          disabled={downloadingUpdate || checkingUpdates}
+                          title="Bat/dev: preview the official update splash"
+                          className="ark-btn-primary !rounded-full"
+                        >
+                          {downloadingUpdate ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                          {downloadingUpdate ? 'Preview…' : 'Preview splash'}
                         </button>
                       )}
                     </div>
@@ -2110,7 +2145,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                         <div className="flex items-center justify-between gap-2 mb-2">
                           <div>
                             <p className="text-sm font-medium text-content-primary">
-                              v{entry.version} · {entry.title}
+                              v{entry.version} · {String(entry.title || '').replace(/\u2014|\u2013|\u2212/g, '. ')}
                             </p>
                             <p className="text-[11px] text-content-tertiary mt-0.5">{entry.date}</p>
                           </div>
@@ -2126,7 +2161,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                           {(entry.notes || []).map(note => (
                             <li key={note} className="text-xs text-content-secondary flex gap-2">
                               <span className="text-content-tertiary">·</span>
-                              <span>{note}</span>
+                              <span>{String(note).replace(/\u2014|\u2013|\u2212/g, '. ')}</span>
                             </li>
                           ))}
                         </ul>

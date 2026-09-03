@@ -1,4 +1,4 @@
-/** Bare ARK robot mark — no rounded box / plate behind it. */
+/** Bare ARK voice mark — rounded head + eyes, no ears/antenna plate. */
 export function ArkMark({
   className = 'w-7 h-7',
   title = 'ARK',

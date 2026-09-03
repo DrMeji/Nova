@@ -30,6 +30,12 @@ contextBridge.exposeInMainWorld('arkDesktop', {
   updateCheck: () => ipcRenderer.invoke('ark:update-check'),
   updateDownload: (payload) => ipcRenderer.invoke('ark:update-download', payload || {}),
   updateState: () => ipcRenderer.invoke('ark:update-state'),
+  // Bat/dev only. never expose the fake 2s splash preview in packaged installs.
+  ...(isPackagedApp
+    ? {}
+    : {
+        updateSplashPreview: (payload) => ipcRenderer.invoke('ark:update-splash-preview', payload || {}),
+      }),
   postUpdateConsume: () => ipcRenderer.invoke('ark:post-update-consume'),
   authRecoverySave: (payload) => ipcRenderer.invoke('ark:auth-recovery-save', payload || {}),
   authRecoveryInfo: () => ipcRenderer.invoke('ark:auth-recovery-info'),

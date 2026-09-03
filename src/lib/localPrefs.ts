@@ -336,6 +336,19 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.173',
+    channel: 'stable' as const,
+    date: 'Sep 3, 2026',
+    title: 'Larger mark, real update splash, safer chat',
+    notes: [
+      'Taskbar and tray ARK mark is larger and clearer',
+      'Official update splash (logo + progress) on real installs. bat preview stays bat-only',
+      'Harmful asks use a professional refusal without decline lecture wording',
+      'Yes / overall follow-ups deepen with new detail instead of repeating',
+      'Chat switching in bat builds is snappier',
+    ],
+  },
+  {
     version: '0.1.172',
     channel: 'stable' as const,
     date: 'Sep 2, 2026',
@@ -355,11 +368,11 @@ export const ARK_CHANGELOG = [
     date: 'Sep 1, 2026',
     title: 'Voice sync, safety refusals, Chat/Voice tab fix',
     notes: [
-      'Harmful/illegal asks get a direct refusal — no coding or positive-project pivot',
+      'Harmful/illegal asks get a direct refusal. no coding or positive-project pivot',
       'Voice mouth animation syncs to actual audio playback (no early mouth move)',
       'Thinking bubble + faster shimmer while Voice waits for a reply',
       'Removed outer white ring on Voice face; Chat/Voice tab switch fixed',
-      'Chat stays on topic — no random coding offers on normal conversation',
+      'Chat stays on topic. no random coding offers on normal conversation',
     ],
   },
   {

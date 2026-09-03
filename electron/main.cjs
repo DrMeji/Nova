@@ -684,6 +684,13 @@ ipcMain.handle('ark:update-download', async (_event, payload) =>
   arkUpdater.downloadAndInstall(payload?.setupAssetUrl, payload?.latestTag),
 );
 ipcMain.handle('ark:update-state', async () => arkUpdater.getState());
+ipcMain.handle('ark:update-splash-preview', async (_event, payload) => {
+  // Hard gate: packaged / Setup.exe installs never run the fake bat preview splash.
+  if (app.isPackaged) {
+    return { ok: false, error: 'Splash preview is only available in bat/dev builds.' };
+  }
+  return arkUpdater.previewSplashDev(payload?.durationMs);
+});
 ipcMain.handle('ark:post-update-consume', async () => arkUpdater.consumePostUpdate());
 
 ipcMain.handle('ark:auth-recovery-save', async (_e, payload) => {

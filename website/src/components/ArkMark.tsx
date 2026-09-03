@@ -1,4 +1,4 @@
-/** Robot mark only — no squircle box (matches app icon face). */
+/** Voice mark — rounded head + two eye bars. no ears / antenna. */
 export function ArkMark({ size = 32, className = '' }: { size?: number; className?: string }) {
   return (
     <svg
@@ -10,36 +10,19 @@ export function ArkMark({ size = 32, className = '' }: { size?: number; classNam
       className={className}
       aria-hidden
     >
-      {/* antenna */}
-      <path
-        d="M32 8v7M26 8h12"
-        stroke="currentColor"
-        strokeWidth="3.2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      {/* head */}
       <rect
-        x="14"
-        y="16"
-        width="36"
-        height="36"
-        rx="11"
+        x="6"
+        y="6"
+        width="52"
+        height="52"
+        rx="14"
         stroke="currentColor"
-        strokeWidth="3.2"
+        strokeWidth="3.8"
       />
-      {/* ears */}
       <path
-        d="M14 34c-3.2 0-5 2-5 4.5S10.8 43 14 43M50 34c3.2 0 5 2 5 4.5S53.2 43 50 43"
+        d="M24 22v20M40 22v20"
         stroke="currentColor"
-        strokeWidth="3.2"
-        strokeLinecap="round"
-      />
-      {/* eyes */}
-      <path
-        d="M25 28v12M39 28v12"
-        stroke="currentColor"
-        strokeWidth="3.6"
+        strokeWidth="4.2"
         strokeLinecap="round"
       />
     </svg>

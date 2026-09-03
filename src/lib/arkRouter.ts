@@ -13,6 +13,8 @@ import {
   packHistoryPrompt,
   sanitizeAssistantReply,
   looksLikePromptEcho,
+  looksLikeRestatedPriorAnswer,
+  isSoftContinuityAsk,
   usableAssistantText,
   type RouterChatTurn,
 } from '@/lib/chatHistory';
@@ -182,8 +184,30 @@ async function tryLocalChat(
         ? await brainGenerateStream(prompt, id, onChunk, kind)
         : await brainGenerate(prompt, id, kind);
       const prevAsst = [...history].reverse().find(t => t.role === 'assistant')?.content;
-      const cleaned = usableAssistantText(result.reply, message, prevAsst);
-      const rawText = String(result.reply || '').trim();
+      let cleaned = usableAssistantText(result.reply, message, prevAsst);
+      let rawText = String(result.reply || '').trim();
+      // Soft “yes / more / overall”: if the model restated the prior answer, retry once with a harder deepen prompt.
+      if (
+        kind === 'chat'
+        && isSoftContinuityAsk(message)
+        && prevAsst
+        && looksLikeRestatedPriorAnswer(cleaned || rawText, prevAsst)
+      ) {
+        onAttemptReset?.();
+        const deepenPrompt = [
+          packHistoryPrompt(history, message),
+          '',
+          'CRITICAL RETRY: Your last draft repeated the previous answer. Write a longer NEW expansion with facts and angles that were not already covered. Do not restate the same temperatures, totals, or summary.',
+        ].join('\n');
+        const retry = onChunk
+          ? await brainGenerateStream(deepenPrompt, id, onChunk, kind)
+          : await brainGenerate(deepenPrompt, id, kind);
+        cleaned = usableAssistantText(retry.reply, message, prevAsst);
+        rawText = String(retry.reply || '').trim();
+        if (cleaned || rawText) {
+          Object.assign(result, retry);
+        }
+      }
       // If a local GGUF echoes the system prompt, we must fail this attempt so failover
       // can hop to a model that returns a real answer.
       if (!cleaned.trim() && looksLikePromptEcho(rawText)) return null;

@@ -1,5 +1,20 @@
 ﻿# ARK changelog
 
+## 0.1.173 — 2026-09-03
+
+Larger ARK mark, official update splash, safer chat follow-ups.
+
+**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.173/ARK-Setup.exe) · [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.173)
+
+### Icons & updates
+- Taskbar / tray mark is larger and clearer
+- Real Update uses the official logo + progress splash; bat-only preview splash is not available in packaged installs
+
+### Chat
+- Professional harmful-content refusal wording
+- Yes / overall follow-ups deepen instead of repeating
+- Snappier chat switching in bat builds
+
 ## 0.1.152 — 2026-08-24
 
 Permanent Delete account in Settings (immediate, no waiting period).
