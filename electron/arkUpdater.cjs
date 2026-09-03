@@ -557,10 +557,24 @@ function splashIconMarkup() {
   return splashRobotSvg();
 }
 
-/** One solid panel: logo upper, progress bar lower. no nested outer/inner frames. */
+/** One solid panel: logo + progress. Electron uses flex+SVG; HTA uses absolute+PNG (IE). */
 function splashShellCss(opts = {}) {
   const hta = Boolean(opts.hta);
-  const shared = `
+  if (hta) {
+    // mshta = IE engine: no flex, weak SVG. Absolute + PNG only.
+    return `
+  html,body{margin:0;width:100%;height:100%;background:${SPLASH_BG};overflow:hidden;user-select:none;}
+  .card{position:relative;width:100%;height:100%;background:${SPLASH_BG};}
+  .logo-wrap{position:absolute;left:50%;top:42%;width:${SPLASH_ICON_PX}px;height:${SPLASH_ICON_PX}px;margin-left:-${Math.round(SPLASH_ICON_PX / 2)}px;margin-top:-${Math.round(SPLASH_ICON_PX / 2)}px;}
+  .logo-wrap img{width:${SPLASH_ICON_PX}px;height:${SPLASH_ICON_PX}px;display:block;border:0;background:transparent;}
+  .spacer{display:none;}
+  .track{position:absolute;left:50%;bottom:48px;width:${SPLASH_TRACK_W}px;height:${SPLASH_TRACK_H}px;margin-left:-${Math.round(SPLASH_TRACK_W / 2)}px;border:1px solid #a1a1aa;background:transparent;overflow:hidden;}
+  #fill{height:100%;width:0;background:#f4f4f5;}
+  table.layout{width:100%;height:100%;border-collapse:collapse;}
+  td.cell{padding:0;vertical-align:top;}
+`;
+  }
+  return `
   html,body{margin:0;width:100%;height:100%;background:${SPLASH_BG};color:#f4f4f5;font-family:"Segoe UI",system-ui,sans-serif;overflow:hidden;user-select:none;}
   .card{box-sizing:border-box;width:100%;height:100%;background:${SPLASH_BG};border-radius:0;box-shadow:none;padding:40px 40px 48px;text-align:center;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:56px;}
   .logo-wrap{margin:0 auto;width:${SPLASH_ICON_PX}px;height:${SPLASH_ICON_PX}px;display:block;flex-shrink:0;}
@@ -570,24 +584,45 @@ function splashShellCss(opts = {}) {
   .spacer{display:none;}
   .track{width:${SPLASH_TRACK_W}px;max-width:100%;height:${SPLASH_TRACK_H}px;margin:0 auto;border-radius:999px;border:1.5px solid #a1a1aa;background:transparent;overflow:hidden;box-sizing:border-box;flex-shrink:0;}
   #fill{height:100%;width:0%;min-width:0;border-radius:999px;background:#f4f4f5;transition:width 140ms ease;}
-`;
-  if (hta) {
-    return `${shared}
-  .card{display:flex;padding:40px;position:relative;justify-content:center;gap:56px;}
-  .logo-wrap{margin:0 auto;}
-  .spacer{display:none;}
-  .track{position:static;left:auto;bottom:auto;transform:none;margin:0 auto;}
-  table.layout{width:100%;height:100%;border-collapse:collapse;}
-  td.cell{text-align:center;vertical-align:middle;padding:20px;}
-`;
-  }
-  return `${shared}
   .wrap{box-sizing:border-box;width:100%;height:100%;margin:0;padding:0;display:block;background:${SPLASH_BG};}
 `;
 }
 
-function splashBodyMarkup() {
-  const icon = splashIconMarkup();
+/** Inline PNG for mshta (IE). Prefer data URI so the mark never depends on a sidecar file. */
+function splashMarkDataUri() {
+  const src = resolveUpdateIcon();
+  if (!src) return '';
+  try {
+    return `data:image/png;base64,${fs.readFileSync(src).toString('base64')}`;
+  } catch {
+    return '';
+  }
+}
+
+/** CSS pause-mark for HTA when no PNG is available (IE-safe, no SVG). */
+function splashHtaFallbackMark() {
+  const half = Math.round(SPLASH_ICON_PX / 2);
+  return `<div style="position:relative;width:${SPLASH_ICON_PX}px;height:${SPLASH_ICON_PX}px;margin:0 auto;">
+    <div style="position:absolute;left:50%;top:50%;width:${SPLASH_ICON_PX}px;height:${SPLASH_ICON_PX}px;margin-left:-${half}px;margin-top:-${half}px;border-radius:20%;background:#2a2a2e;"></div>
+    <div style="position:absolute;left:39%;top:40%;width:4px;height:20%;margin-left:-2px;background:#f4f4f5;border-radius:2px;"></div>
+    <div style="position:absolute;left:61%;top:40%;width:4px;height:20%;margin-left:-2px;background:#f4f4f5;border-radius:2px;"></div>
+  </div>`;
+}
+
+function splashBodyMarkup(opts = {}) {
+  const hta = Boolean(opts.hta);
+  let icon;
+  if (hta) {
+    if (opts.pngDataUri) {
+      icon = `<img src="${opts.pngDataUri}" width="${SPLASH_ICON_PX}" height="${SPLASH_ICON_PX}" alt="" />`;
+    } else if (opts.pngName) {
+      icon = `<img src="${opts.pngName}" width="${SPLASH_ICON_PX}" height="${SPLASH_ICON_PX}" alt="" />`;
+    } else {
+      icon = splashHtaFallbackMark();
+    }
+  } else {
+    icon = splashIconMarkup();
+  }
   return `
   <div class="card">
     <div class="logo-wrap">${icon}</div>
@@ -692,9 +727,10 @@ ${splashShellCss()}
  * Independent HTML splash via mshta — not ARK.exe, so NSIS can replace the install
  * without killing this window. Stays up until main.cjs writes ark-ui-shown.flag.
  */
-function splashHtaHtml({ statusPath, shownPath, alivePath, icoName }) {
+function splashHtaHtml({ statusPath, shownPath, alivePath, icoName, pngDataUri, pngName }) {
   const jsStr = (s) => JSON.stringify(String(s || ''));
   const icoAttr = icoName ? `\n  icon="${icoName}"` : '';
+  const markData = pngDataUri || splashMarkDataUri();
   return `<!DOCTYPE html>
 <html>
 <head>
@@ -718,7 +754,7 @@ ${splashShellCss({ hta: true })}
 </head>
 <body>
   <table class="layout" role="presentation"><tr><td class="cell">
-    ${splashBodyMarkup()}
+    ${splashBodyMarkup({ hta: true, pngDataUri: markData, pngName })}
   </td></tr></table>
   <script language="JScript">
     var STATUS = ${jsStr(statusPath)};
@@ -812,6 +848,7 @@ function launchHtaSplash({ statusPath, shownPath }) {
   const htaPath = path.join(temp, `${base}.hta`);
   const alivePath = splashAliveFlagPath();
   const icoPath = copySplashIcoToTemp(temp, `${base}.ico`);
+  const pngDataUri = splashMarkDataUri();
   try {
     fs.writeFileSync(
       htaPath,
@@ -820,6 +857,7 @@ function launchHtaSplash({ statusPath, shownPath }) {
         shownPath,
         alivePath,
         icoName: icoPath ? `${base}.ico` : '',
+        pngDataUri,
       }),
       'utf8',
     );
@@ -1015,31 +1053,23 @@ async function runStandaloneSplash(argv) {
     }
   };
 
+  // ONE splash only: official HTML (HTA survives NSIS replacing ARK.exe).
   const alivePath = splashAliveFlagPath();
-  const winforms = launchInstallHandoffSplash({
-    statusPath,
-    expectedVersion,
-    arkExe: process.execPath,
-    shownPath,
-    alivePath,
-  });
-  writeLog(`winforms splash launched ok=${winforms.ok} err=${winforms.error || ''}`);
-
-  const winformsAlive = await waitForFile(alivePath, 7000);
-  writeLog(`winforms alive=${winformsAlive}`);
-
-  if (!winformsAlive) {
-    const hta = launchHtaSplash({ statusPath, shownPath });
-    writeLog(`hta splash launched ok=${hta.ok} path=${hta.htaPath || ''} err=${hta.error || ''}`);
-    const htaAlive = await waitForFile(hta.alivePath, 3500);
-    writeLog(`hta alive=${htaAlive}`);
-    if (!htaAlive) {
-      writeLog('independent splash did not paint; showing Electron splash');
-      showElectronSplash();
-      await setSplash(win, 4, 'Installing update');
-    }
+  try {
+    if (fs.existsSync(alivePath)) fs.unlinkSync(alivePath);
+  } catch {
+    /* ignore */
+  }
+  const hta = launchHtaSplash({ statusPath, shownPath });
+  writeLog(`hta splash launched ok=${hta.ok} path=${hta.htaPath || ''} err=${hta.error || ''}`);
+  const htaAlive = await waitForFile(hta.alivePath || alivePath, 4500);
+  writeLog(`hta alive=${htaAlive}`);
+  if (!htaAlive) {
+    writeLog('HTA splash did not paint; showing Electron HTML splash');
+    showElectronSplash();
+    await setSplash(win, 4, 'Installing update');
   } else {
-    writeLog('WinForms splash is up; Electron window stays hidden so the splash never blinks off');
+    writeLog('HTA splash is up; Electron window stays hidden');
   }
 
   // Only then tell the parent it can quit — splash is already on screen.
@@ -1129,7 +1159,7 @@ async function runStandaloneSplash(argv) {
 
     /**
      * Do NOT run NSIS while this process still holds ARK.exe open.
-     * Independent HTA/WinForms splash stays until the new ARK window is shown.
+     * Independent HTA splash stays until the new ARK window is shown.
      */
     writeUpdateStatus(statusPath, 'waiting', 40, 'Installing update', 'Installing update');
     await setSplash(win, 40, 'Installing update');
@@ -1333,256 +1363,9 @@ function writeUpdateStatus(statusPath, stage, pct, label, sub) {
 }
 
 /**
- * Independent WinForms splash — not loaded from install-dir ARK.exe, so NSIS cannot kill it.
- * Stays up through install until ARK.exe is running again, then closes.
- */
-function launchInstallHandoffSplash({ statusPath, expectedVersion, arkExe, shownPath, alivePath }) {
-  const temp = app.getPath('temp');
-  const stamp = Date.now();
-  const ps1Path = path.join(temp, `ark-update-handoff-${stamp}.ps1`);
-  const ver = normalizeVersion(expectedVersion) || 'update';
-  const qPs = (s) => String(s).replace(/'/g, "''");
-  const splashAlive = alivePath || splashAliveFlagPath();
-
-  const icoForForm = copySplashIcoToTemp(temp, `ark-update-handoff-${stamp}.ico`);
-  const pngSrc = resolveUpdateIcon();
-  let pngForForm = '';
-  if (pngSrc) {
-    pngForForm = path.join(temp, `ark-update-handoff-${stamp}.png`);
-    try {
-      fs.copyFileSync(pngSrc, pngForForm);
-    } catch {
-      pngForForm = pngSrc;
-    }
-  }
-
-  const ps1 = [
-    '$ErrorActionPreference = "Continue"',
-    'Add-Type -AssemblyName System.Windows.Forms | Out-Null',
-    'Add-Type -AssemblyName System.Drawing | Out-Null',
-    'try {',
-    '  Add-Type -TypeDefinition @"',
-    'using System.Runtime.InteropServices;',
-    'public static class ArkSplashAppId {',
-    '  [DllImport("shell32.dll", CharSet = CharSet.Unicode)]',
-    '  public static extern int SetCurrentProcessExplicitAppUserModelID(string AppID);',
-    '}',
-    '"@',
-    '  [void][ArkSplashAppId]::SetCurrentProcessExplicitAppUserModelID("ARK.Studio.Update")',
-    '} catch {}',
-    `$statusPath = '${qPs(statusPath)}'`,
-    `$arkExe = '${qPs(arkExe || '')}'`,
-    `$shownPath = '${qPs(shownPath || uiShownFlagPath())}'`,
-    `$alivePath = '${qPs(splashAlive)}'`,
-    `$icoPath = '${qPs(icoForForm || '')}'`,
-    `$pngPath = '${qPs(pngForForm || '')}'`,
-    `$ver = '${qPs(ver)}'`,
-    'function Write-ArkAlive { try { Set-Content -LiteralPath $alivePath -Value "ok" -Encoding ASCII } catch {} }',
-    'function New-ArkRoundRegion([int]$w, [int]$h, [int]$r) {',
-    '  $gp = New-Object System.Drawing.Drawing2D.GraphicsPath',
-    '  $rad = [Math]::Max(1, [Math]::Min($r, [Math]::Min([int]($w / 2), [int]($h / 2))))',
-    '  $d = $rad * 2',
-    '  $gp.AddArc(0, 0, $d, $d, 180, 90)',
-    '  $gp.AddArc($w - $d, 0, $d, $d, 270, 90)',
-    '  $gp.AddArc($w - $d, $h - $d, $d, $d, 0, 90)',
-    '  $gp.AddArc(0, $h - $d, $d, $d, 90, 90)',
-    '  $gp.CloseFigure()',
-    '  return New-Object System.Drawing.Region($gp)',
-    '}',
-    `$formW = ${SPLASH_W}`,
-    `$formH = ${SPLASH_H}`,
-    `$trackW = ${SPLASH_TRACK_W}`,
-    `$trackH = ${SPLASH_TRACK_H}`,
-    `$picSize = ${SPLASH_ICON_PX}`,
-    `$picY = [int](($formH - $picSize - $trackH - 56) / 2)`,
-    `$trackY = $picY + $picSize + 56`,
-    '$form = New-Object System.Windows.Forms.Form',
-    `$form.Text = "ARK"`,
-    '$form.AutoScaleMode = "None"',
-    '$form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None',
-    '$form.ControlBox = $false',
-    '$form.MaximizeBox = $false',
-    '$form.MinimizeBox = $false',
-    '$form.ShowIcon = $false',
-    '$form.ClientSize = New-Object System.Drawing.Size($formW, $formH)',
-    '$form.StartPosition = "CenterScreen"',
-    `$form.BackColor = [System.Drawing.ColorTranslator]::FromHtml('${SPLASH_BG}')`,
-    '$form.ForeColor = [System.Drawing.Color]::FromArgb(244, 244, 245)',
-    '$form.TopMost = $true',
-    '$form.ShowInTaskbar = $true',
-    'if ($icoPath -and (Test-Path -LiteralPath $icoPath)) { try { $form.Icon = New-Object System.Drawing.Icon($icoPath) } catch {} }',
-    'if (-not $form.Icon) {',
-    '  try {',
-    '    $exeForIcon = $arkExe',
-    '    if (-not $exeForIcon -or -not (Test-Path -LiteralPath $exeForIcon)) { $exeForIcon = [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName }',
-    '    $form.Icon = [System.Drawing.Icon]::ExtractAssociatedIcon($exeForIcon)',
-    '  } catch {}',
-    '}',
-    '$card = New-Object System.Windows.Forms.Panel',
-    `$card.BackColor = [System.Drawing.ColorTranslator]::FromHtml('${SPLASH_BG}')`,
-    '$card.Size = New-Object System.Drawing.Size($formW, $formH)',
-    '$card.Location = New-Object System.Drawing.Point(0, 0)',
-    '$pic = New-Object System.Windows.Forms.Panel',
-    '$pic.Size = New-Object System.Drawing.Size($picSize, $picSize)',
-    '$pic.Location = New-Object System.Drawing.Point([int](($formW - $picSize) / 2), $picY)',
-    `$pic.BackColor = [System.Drawing.ColorTranslator]::FromHtml('${SPLASH_BG}')`,
-    '$script:splashShimmerT = 0',
-    '$pic.Add_Paint({',
-    '  param($sender, $e)',
-    '  $g = $e.Graphics',
-    '  $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias',
-    '  $w = $sender.Width; $h = $sender.Height',
-    '  $pad = [int]($w * 0.12); $rx = [int]($w * 0.20)',
-    '  $rect = New-Object System.Drawing.Rectangle($pad, $pad, $w - 2*$pad, $h - 2*$pad)',
-    '  $path = New-Object System.Drawing.Drawing2D.GraphicsPath',
-    '  $d = $rx * 2',
-    '  $path.AddArc($rect.X, $rect.Y, $d, $d, 180, 90)',
-    '  $path.AddArc($rect.Right - $d, $rect.Y, $d, $d, 270, 90)',
-    '  $path.AddArc($rect.Right - $d, $rect.Bottom - $d, $d, $d, 0, 90)',
-    '  $path.AddArc($rect.X, $rect.Bottom - $d, $d, $d, 90, 90)',
-    '  $path.CloseFigure()',
-    '  $state = $g.Save()',
-    '  $g.SetClip($path)',
-    '  $brush = New-Object System.Drawing.Drawing2D.LinearGradientBrush(',
-    '    (New-Object System.Drawing.Point($rect.X, $rect.Y)),',
-    '    (New-Object System.Drawing.Point($rect.Right, $rect.Bottom)),',
-    '    [System.Drawing.Color]::FromArgb(56, 56, 189, 248),',
-    '    [System.Drawing.Color]::FromArgb(36, 52, 211, 153)',
-    '  )',
-    '  $g.FillRectangle($brush, $rect)',
-    '  $brush.Dispose()',
-    '  $g.Restore($state)',
-    '  $eyePen = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(244, 244, 245), 3.4)',
-    '  $cx1 = [int]($w * 0.39); $cx2 = [int]($w * 0.61); $cy = [int]($h * 0.48); $eh = [int]($h * 0.16)',
-    '  $g.DrawLine($eyePen, $cx1, $cy - $eh, $cx1, $cy + $eh)',
-    '  $g.DrawLine($eyePen, $cx2, $cy - $eh, $cx2, $cy + $eh)',
-    '  $eyePen.Dispose()',
-    '  $path.Dispose()',
-    '})',
-    '$picTimer = New-Object System.Windows.Forms.Timer',
-    '$picTimer.Interval = 120',
-    '$picTimer.Add_Tick({ $script:splashShimmerT++; $pic.Invalidate() })',
-    '$picTimer.Start()',
-    '$track = New-Object System.Windows.Forms.Panel',
-    `$track.BackColor = [System.Drawing.ColorTranslator]::FromHtml('${SPLASH_BG}')`,
-    '$track.Size = New-Object System.Drawing.Size($trackW, $trackH)',
-    '$track.Location = New-Object System.Drawing.Point([int](($formW - $trackW) / 2), $trackY)',
-    'try { $track.Region = New-ArkRoundRegion $trackW $trackH ([int]($trackH / 2)) } catch {}',
-    '$track.Paint += {',
-    '  param($sender, $e)',
-    '  $g = $e.Graphics',
-    '  $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias',
-    '  $pen = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(161, 161, 170), 1.5)',
-    '  $rect = New-Object System.Drawing.Rectangle(1, 1, $sender.Width - 3, $sender.Height - 3)',
-    '  $g.DrawArc($pen, $rect.X, $rect.Y, $rect.Height, $rect.Height, 90, 180)',
-    '  $g.DrawArc($pen, $rect.Right - $rect.Height, $rect.Y, $rect.Height, $rect.Height, 270, 180)',
-    '  $g.DrawLine($pen, $rect.X + [int]($rect.Height / 2), $rect.Y, $rect.Right - [int]($rect.Height / 2), $rect.Y)',
-    '  $g.DrawLine($pen, $rect.X + [int]($rect.Height / 2), $rect.Bottom, $rect.Right - [int]($rect.Height / 2), $rect.Bottom)',
-    '}',
-    '$fill = New-Object System.Windows.Forms.Panel',
-    '$fill.BackColor = [System.Drawing.Color]::FromArgb(244, 244, 245)',
-    '$fill.Size = New-Object System.Drawing.Size(0, $trackH)',
-    '$fill.Location = New-Object System.Drawing.Point(0, 0)',
-    'try { $fill.Region = New-ArkRoundRegion $trackH $trackH ([int]($trackH / 2)) } catch {}',
-    '$track.Controls.Add($fill)',
-    '$card.Controls.Add($pic)',
-    '$card.Controls.Add($track)',
-    '$form.Controls.Add($card)',
-    '$script:baselinePids = @{}',
-    'try { Get-Process -Name "ARK" -ErrorAction SilentlyContinue | ForEach-Object { $script:baselinePids[$_.Id] = $true } } catch {}',
-    '$script:installFinished = $false',
-    '$script:waitingReopen = $false',
-    '$script:closeArmed = $false',
-    '$script:closeAt = 0',
-    '$script:startedAt = [Environment]::TickCount',
-    '$timer = New-Object System.Windows.Forms.Timer',
-    '$timer.Interval = 350',
-    '$timer.Add_Tick({',
-    '  try {',
-    '    if (Test-Path -LiteralPath $statusPath) {',
-    '      $map = @{}',
-    '      Get-Content -LiteralPath $statusPath -ErrorAction SilentlyContinue | ForEach-Object {',
-    '        if ($_ -match "^(.*?)=(.*)$") { $map[$matches[1]] = $matches[2] }',
-    '      }',
-    '      if ($map.pct) {',
-    '        $n = [int]$map.pct',
-    '        if ($n -lt 0) { $n = 0 }',
-    '        if ($n -gt 100) { $n = 100 }',
-    '        $w = [Math]::Max(0, [int]($trackW * $n / 100))',
-    '        if ($w -gt $trackW) { $w = $trackW }',
-    '        $fill.Width = $w',
-    '        try { $fill.Region = New-ArkRoundRegion $w $trackH ([int]($trackH / 2)) } catch {}',
-    '      }',
-    '      $stage = [string]$map.stage',
-    '      if ($stage -eq "opening" -or $stage -eq "done" -or $stage -eq "waiting_reopen") {',
-    '        $script:installFinished = $true',
-    '        if (-not $script:waitingReopen) { $script:waitingReopen = $true }',
-    '      }',
-    '    }',
-    '  } catch {}',
-    '  $uiReady = $false',
-    '  try { if (Test-Path -LiteralPath $shownPath) { $uiReady = $true } } catch {}',
-    '  if ($uiReady -and -not $script:closeArmed) {',
-    '    $script:closeArmed = $true',
-    '    $script:closeAt = [Environment]::TickCount + 400',
-    '    $fill.Width = $trackW',
-    '    try { $fill.Region = New-ArkRoundRegion $trackW $trackH ([int]($trackH / 2)) } catch {}',
-    '  }',
-    '  if (([Environment]::TickCount - $script:startedAt) -gt 600000) { $timer.Stop(); $form.Close() }',
-    '  if ($script:closeArmed -and [Environment]::TickCount -ge $script:closeAt) {',
-    '    $timer.Stop()',
-    '    $form.Close()',
-    '  }',
-    '})',
-    '$timer.Start()',
-    '$form.Add_Shown({ Write-ArkAlive; $form.Activate(); $form.BringToFront() })',
-    'Write-ArkAlive',
-    '[void]$form.ShowDialog()',
-  ].join('\r\n');
-
-  try {
-    fs.writeFileSync(ps1Path, ps1, 'utf8');
-  } catch (err) {
-    return { ok: false, error: String(err) };
-  }
-
-  const psExe = path.join(
-    process.env.SystemRoot || 'C:\\Windows',
-    'System32',
-    'WindowsPowerShell',
-    'v1.0',
-    'powershell.exe',
-  );
-  try {
-    spawn(
-      psExe,
-      ['-STA', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', ps1Path],
-      {
-        detached: true,
-        stdio: 'ignore',
-        windowsHide: false,
-        cwd: temp,
-      },
-    ).unref();
-  } catch (err) {
-    return { ok: false, error: String(err) };
-  }
-
-  setTimeout(() => {
-    try {
-      fs.unlinkSync(ps1Path);
-    } catch {
-      /* ignore */
-    }
-  }, 300_000);
-
-  return { ok: true, ps1Path };
-}
-
-/**
  * Breakaway launch via wscript + cmd fallback so Electron's job object cannot kill the updater.
  * Prefer a plain CMD apply script (no second Electron) — it cannot blank itself with taskkill.
- * A separate WinForms splash (launchInstallHandoffSplash) covers the install gap.
+ * Official HTA splash (launchHtaSplash / runStandaloneSplash) covers the install gap.
  */
 function launchCmdApplyUpdate({ setupPath, installDir, expectedVersion, parentPid, arkExe, statusPath }) {
   const temp = app.getPath('temp');
@@ -1914,12 +1697,8 @@ async function downloadAndInstall(setupUrl, latestTag) {
   const expectedVersion = normalizeVersion(check.latestTag || latestTag || '');
   setupUrl = resolvedUrl;
 
-  // Official update splash for the whole download → handoff flow.
-  try {
-    await openUpdateSplash();
-  } catch (err) {
-    console.error('[ark] update splash failed to open', err);
-  }
+  // Download stays in Settings. Splash opens only after the installer is staged (handoff).
+  closeUpdateSplash();
 
   const handoffAndExit = async (installerPath) => {
     // Copy out of electron-updater's pending/ folder before the parent exits —
@@ -1953,7 +1732,8 @@ async function downloadAndInstall(setupUrl, latestTag) {
     const arkExe = process.execPath;
 
     try {
-      // Primary: small Updating ARK splash (logo + %). Hidden CMD only if splash fails.
+      // Breakaway updater owns the official HTML splash (HTA). Do not open a splash
+      // in this process during download — that caused a premature + duplicate screen.
       const electronHandoff = launchUpdaterBreakaway({
         payload: stable,
         expectedVersion,
@@ -1965,12 +1745,7 @@ async function downloadAndInstall(setupUrl, latestTag) {
           app.getPath('temp'),
           `ark-update-status-fallback-${process.pid}.txt`,
         );
-        launchInstallHandoffSplash({
-          statusPath,
-          expectedVersion,
-          arkExe,
-          shownPath: uiShownFlagPath(),
-        });
+        launchHtaSplash({ statusPath, shownPath: uiShownFlagPath() });
         const handoff = launchCmdApplyUpdate({
           setupPath: stable,
           installDir,

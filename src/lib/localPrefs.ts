@@ -336,6 +336,17 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.175',
+    channel: 'stable' as const,
+    date: 'Sep 3, 2026',
+    title: 'Update splash only at install, one clean screen',
+    notes: [
+      'Update button no longer pops the splash while download / verify still runs in Settings',
+      'Install splash is the official logo + progress screen only — old blank WinForms path removed',
+      'HTA splash embeds the ARK mark so the logo cannot go missing mid-update',
+    ],
+  },
+  {
     version: '0.1.174',
     channel: 'stable' as const,
     date: 'Sep 3, 2026',
