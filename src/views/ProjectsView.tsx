@@ -4,6 +4,7 @@ import { useRecentProjects } from '@/context/RecentProjectsContext';
 import { fetchProjects, createProject } from '@/lib/api';
 import { getLocalPrefs } from '@/lib/localPrefs';
 import { listArkProjectFolders } from '@/lib/arkProjectsHome';
+import { requestOpenChatCode } from '@/lib/openChatCode';
 import type { Project } from '@/types';
 import { Search, Folder, Loader2, Plus, FolderOpen, Pencil, Trash2, MoreHorizontal } from 'lucide-react';
 
@@ -33,6 +34,16 @@ function formatModified(date: Date) {
 export function ProjectsView() {
   const { navigate } = useRouter();
   const { recent, addRecent, renameRecent, removeRecent } = useRecentProjects();
+
+  const openProjectInChat = (opts: { projectId: string; name?: string; diskPath?: string }) => {
+    navigate({ name: 'chat' });
+    requestOpenChatCode({
+      projectId: opts.projectId,
+      name: opts.name,
+      diskPath: opts.diskPath,
+    });
+  };
+
   const [remote, setRemote] = useState<ProjectRow[]>([]);
   const [arkFolders, setArkFolders] = useState<Array<{
     id: string;
@@ -116,7 +127,8 @@ export function ProjectsView() {
       setShowCreate(false);
       setNewName('');
       setCreating(false);
-      navigate({ name: 'project', id: project.id });
+      navigate({ name: 'chat' });
+      requestOpenChatCode({ projectId: project.id, name: project.name });
     } catch {
       const local = addRecent(name);
       setShowCreate(false);
@@ -124,7 +136,7 @@ export function ProjectsView() {
       setCreating(false);
       setNotice('Saved on this PC only. cloud sync unavailable');
       window.setTimeout(() => setNotice(null), 4000);
-      navigate({ name: 'project', id: local.id });
+      openProjectInChat({ projectId: local.id, name: local.name });
     }
   };
 
@@ -133,7 +145,7 @@ export function ProjectsView() {
     try {
       if (!window.arkDesktop?.projectImportFolder) {
         const local = addRecent('New project');
-        navigate({ name: 'project', id: local.id });
+        openProjectInChat({ projectId: local.id, name: local.name });
         return;
       }
       const project = addRecent('Opened folder');
@@ -156,7 +168,11 @@ export function ProjectsView() {
         setNotice(`Opened on this PC. Skipped ${skipBits.join(', ')}.`);
         window.setTimeout(() => setNotice(null), 6000);
       }
-      navigate({ name: 'project', id: project.id });
+      openProjectInChat({
+        projectId: project.id,
+        name: res.name || project.name,
+        diskPath: typeof res.root === 'string' ? res.root : undefined,
+      });
     } finally {
       setOpeningFolder(false);
     }
@@ -177,13 +193,17 @@ export function ProjectsView() {
           window.setTimeout(() => setNotice(null), 4000);
           return;
         }
-        navigate({ name: 'project', id: project.id });
+        openProjectInChat({
+          projectId: project.id,
+          name: item.name,
+          diskPath: item.diskPath,
+        });
       } finally {
         setOpeningFolder(false);
       }
       return;
     }
-    navigate({ name: 'project', id: item.id });
+    openProjectInChat({ projectId: item.id, name: item.name, diskPath: item.diskPath });
   };
 
   const commitRename = (id: string) => {

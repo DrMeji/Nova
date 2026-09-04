@@ -12,6 +12,7 @@ import { SearchPanel } from './SearchPanel';
 import { useRecentProjects } from '@/context/RecentProjectsContext';
 import { useAuth } from '@/context/AuthContext';
 import { isSocialParked, isRevealed, isCodeTabEnabled, isVideoTabEnabled } from '@/lib/featurePark';
+import { requestOpenChatCode } from '@/lib/openChatCode';
 import { useSocial } from '@/context/SocialContext';
 import { SidebarCallDock } from '@/components/CallRingUI';
 import { getLocalPrefs, setLocalPrefs } from '@/lib/localPrefs';
@@ -480,6 +481,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       });
     } else if (!isCodeTabEnabled()) {
       navigate({ name: 'chat' });
+      requestOpenChatCode({ projectId: item.id, name: item.title });
     } else {
       navigate({ name: 'project', id: item.id });
     }
@@ -965,7 +967,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
         <main className="relative z-10 flex-1 min-h-0 min-w-0 overflow-hidden m-2 ml-2 flex flex-col">
           <PostLoginSafetyTip />
-          <div className="flex-1 min-h-0 overflow-hidden relative">
+          <div className="flex-1 min-h-0 overflow-hidden relative flex flex-col h-full">
           {children}
           </div>
         </main>

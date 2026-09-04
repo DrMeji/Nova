@@ -26,6 +26,7 @@ import { CallProvider } from '@/context/CallContext';
 import { ParkedNotice } from '@/components/ParkedNotice';
 import { PinLockGate } from '@/components/PinLockGate';
 import { isSocialParked, isRevealed, setRevealed, isCodeTabEnabled } from '@/lib/featurePark';
+import { requestOpenChatCode } from '@/lib/openChatCode';
 import { runCleanBootIfNeeded } from '@/lib/clearSession';
 import { runSocialReleaseCleanIfNeeded, runArkIdRotationIfNeeded } from '@/lib/socialCleanBoot';
 import { isArkDevSession } from '@/lib/arkRuntime';
@@ -48,6 +49,20 @@ function ensureDevFeatureAccess() {
 }
 ensureDevFeatureAccess();
 
+/** Old Code / Project workspace routes redirect into Chat + Code pill. */
+function LegacyCodeRedirect({ projectId }: { projectId?: string }) {
+  const { navigate } = useRouter();
+  useEffect(() => {
+    navigate({ name: 'chat' });
+    requestOpenChatCode(projectId ? { projectId } : undefined);
+  }, [navigate, projectId]);
+  return (
+    <div className="h-full flex items-center justify-center text-sm text-content-tertiary">
+      Opening Code…
+    </div>
+  );
+}
+
 function AppRoutes() {
   const { route } = useRouter();
   const [keepChatAlive, setKeepChatAlive] = useState(() => hasChatInflight());
@@ -63,10 +78,12 @@ function AppRoutes() {
       case 'dashboard': other = <Dashboard />; break;
       case 'projects': other = <ProjectsView />; break;
       case 'code':
-        other = isCodeTabEnabled() ? <ProjectWorkspace /> : <ParkedNotice feature="code" />;
+        other = isCodeTabEnabled() ? <ProjectWorkspace /> : <LegacyCodeRedirect />;
         break;
       case 'project':
-        other = isCodeTabEnabled() ? <ProjectWorkspace /> : <ParkedNotice feature="project" />;
+        other = isCodeTabEnabled()
+          ? <ProjectWorkspace />
+          : <LegacyCodeRedirect projectId={route.id} />;
         break;
       case 'creation': other = <CreationViewer />; break;
       case 'models': other = <ModelsView />; break;
@@ -97,7 +114,11 @@ function AppRoutes() {
           <AIChat />
         </div>
       )}
-      {!chatVisible && other}
+      {!chatVisible && (
+        <div className="h-full min-h-0 flex flex-col overflow-hidden">
+          {other}
+        </div>
+      )}
     </>
   );
 }

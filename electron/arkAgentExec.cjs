@@ -246,6 +246,27 @@ function spawnHiddenDevServer(cwd, port) {
   });
 }
 
+/** Ensure node_modules exists before Vite — blank Localhost is usually a missing install. */
+async function ensureNodeModules(cwd) {
+  const nm = path.join(cwd, 'node_modules');
+  if (fs.existsSync(nm)) {
+    try {
+      const entries = fs.readdirSync(nm);
+      if (entries.length > 0) return { ok: true };
+    } catch {
+      /* fall through to install */
+    }
+  }
+  const ran = await runCommand('npm install', cwd, 300_000);
+  if (!ran.ok) {
+    return {
+      ok: false,
+      error: ran.error || ran.stderr || ran.stdout || 'npm install failed',
+    };
+  }
+  return { ok: true };
+}
+
 /** Start npm run dev in the background on a free port. No visible terminal. */
 async function agentStartDevServer(payload) {
   const cwdRes = resolveCwd(payload?.cwd);
@@ -267,6 +288,11 @@ async function agentStartDevServer(payload) {
     return { ok: false, error: 'No package.json in this folder.' };
   }
 
+  const deps = await ensureNodeModules(cwdRes.path);
+  if (!deps.ok) {
+    return { ok: false, error: deps.error || 'npm install failed before starting the preview server.' };
+  }
+
   const port = await findFreeDevPort();
   if (!port) {
     return { ok: false, error: 'No free port in 5173–5180 for the project dev server.' };
@@ -275,7 +301,7 @@ async function agentStartDevServer(payload) {
   try {
     const child = spawnHiddenDevServer(cwdRes.path, port);
     // Keep child referenced in the Map (no unref) so the console stays hidden and we can kill later.
-    const url = await waitForDevServerUrl(port, 25_000);
+    const url = await waitForDevServerUrl(port, 45_000);
     devServersByCwd.set(cwdKey, { url, pid: child.pid, child });
     return { ok: true, cwd: cwdRes.path, url };
   } catch (err) {

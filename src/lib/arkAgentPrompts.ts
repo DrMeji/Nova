@@ -22,6 +22,7 @@ export function agentKindGuidance(kind: ProjectKind): string {
     case 'vite-react':
       return [
         'Stack: Vite + React. Prefer editing src/*.tsx / src/*.jsx and CSS modules.',
+        'Be thorough: ship a usable first screen with real copy, layout, and working primary actions — not an empty shell or lorem placeholders.',
         'Verify with: npm run build (or npm run typecheck if present).',
         'Prefer TOOL: patch over rewriting whole components.',
         'Do not invent new package deps unless required; if needed run npm install <pkg>.',

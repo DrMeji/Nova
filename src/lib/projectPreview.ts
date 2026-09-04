@@ -215,6 +215,8 @@ export async function ensureBoundFolderPreview(opts: {
     : await loadPreviewFilesFromDisk(root);
 
   // Prefer a live project server when the folder has one (Vite / run.bat / FastAPI).
+  // Never fall through to static HTML for Vite — serving raw JSX is a blank black window.
+  const viteLike = isViteProject(files) || Boolean(files['package.json']);
   if (window.arkDesktop?.agentStartFolderPreview) {
     const live = await window.arkDesktop.agentStartFolderPreview({ cwd: root });
     if (live?.ok && live.url) {
@@ -225,7 +227,14 @@ export async function ensureBoundFolderPreview(opts: {
       });
       return { ok: true, url: live.url };
     }
-  } else if (isViteProject(files) || files['package.json']) {
+    if (viteLike) {
+      return {
+        ok: false,
+        error: live?.error
+          || 'Could not start the live preview. Say **install npm dependencies** then click Localhost again.',
+      };
+    }
+  } else if (viteLike) {
     const dev = await ensureViteDevServer(root);
     if (dev.ok && dev.url) {
       await openInAppPreview(dev.url, {
@@ -235,6 +244,11 @@ export async function ensureBoundFolderPreview(opts: {
       });
       return { ok: true, url: dev.url };
     }
+    return {
+      ok: false,
+      error: dev.error
+        || 'Could not start the Vite preview. Say **install npm dependencies** then click Localhost again.',
+    };
   }
 
   if (!Object.keys(files).length) {

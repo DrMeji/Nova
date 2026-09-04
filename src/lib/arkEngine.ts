@@ -155,6 +155,12 @@ export async function engineGenerate(
     visionImages: opts?.visionImages,
   };
   if (window.arkDesktop?.engineGenerate) {
+    // Let Thinking… dots paint before a heavy local GGUF turn can stall the UI thread.
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => {
+        window.setTimeout(resolve, 0);
+      });
+    });
     return window.arkDesktop.engineGenerate(message, modelId, kind, sampling);
   }
   return {

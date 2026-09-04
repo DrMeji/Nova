@@ -228,7 +228,7 @@ import { ArkErrorInline } from '@/components/ArkErrorInline';
 import { BrandMark } from '@/components/BrandMark';
 import { ArkMark } from '@/components/ArkMark';
 import { classifyErrorMessage, isLikelyErrorMessage } from '@/lib/errors';
-import { isVideoTabEnabled, isCodeTabEnabled, isVoiceTabEnabled } from '@/lib/featurePark';
+import { isVideoTabEnabled, isVoiceTabEnabled } from '@/lib/featurePark';
 import { notifyChatDone } from '@/lib/activityIndicators';
 import { formatReplyElapsed } from '@/lib/speedTest';
 import { getTokenUsageRatio, recordTokenUsage, syncTokenUsage, estimateTokens } from '@/lib/tokenUsage';
@@ -1403,7 +1403,7 @@ export function AIChat() {
 
   const showStudioPills = useMemo(() => {
     const chatId = route.name === 'chat' ? route.chatId : undefined;
-    if (codePillSticky && isCodeTabEnabled()) return true;
+    if (codePillSticky) return true;
     if (!chatId) return false;
     if (!chatHasBuildWorkspace(chatId)) return false;
     return Boolean(
@@ -2070,13 +2070,71 @@ export function AIChat() {
   };
 
   const openCodeWorkspace = (_seedPrompt?: string, _seedFiles?: Record<string, string>) => {
-    if (!isCodeTabEnabled()) return;
+    // Code pill overlay is the only code UI — old ProjectWorkspace tab is retired.
     if (_seedFiles && Object.keys(_seedFiles).length) {
       setChatStudioFiles(_seedFiles);
       chatStudioFilesRef.current = _seedFiles;
     }
     setCodeOverlayOpen(true);
+    setCodePillSticky(true);
   };
+
+  useEffect(() => {
+    const onOpenCode = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ projectId?: string; diskPath?: string; name?: string }>).detail || {};
+      void (async () => {
+        try {
+          if (detail.projectId && window.arkDesktop?.projectRead) {
+            const read = await window.arkDesktop.projectRead(detail.projectId);
+            if (read?.ok && read.files && Object.keys(read.files).length) {
+              const files = read.files as Record<string, string>;
+              setChatStudioFiles(files);
+              chatStudioFilesRef.current = files;
+              setChatStudioProjectId(detail.projectId);
+              chatStudioProjectIdRef.current = detail.projectId;
+              if (read.root) {
+                setChatStudioDiskRoot(read.root);
+                chatStudioDiskRootRef.current = read.root;
+              }
+              const chatId = routeChatIdRef.current || persistChatIdRef.current;
+              if (chatId) {
+                persistStudioSnapshot(chatId, {
+                  files,
+                  projectId: detail.projectId,
+                  name: detail.name || studioPathBasename(read.root || '') || undefined,
+                  diskRoot: read.root || null,
+                });
+                setChatCodePill(chatId, true);
+              }
+            }
+          } else if (detail.diskPath) {
+            const files = await loadPreviewFilesFromDisk(detail.diskPath);
+            if (Object.keys(files).length) {
+              setChatStudioFiles(files);
+              chatStudioFilesRef.current = files;
+              setChatStudioDiskRoot(detail.diskPath);
+              chatStudioDiskRootRef.current = detail.diskPath;
+              const chatId = routeChatIdRef.current || persistChatIdRef.current;
+              if (chatId) {
+                persistStudioSnapshot(chatId, {
+                  files,
+                  name: detail.name || studioPathBasename(detail.diskPath),
+                  diskRoot: detail.diskPath,
+                });
+                setChatCodePill(chatId, true);
+              }
+            }
+          }
+        } catch {
+          /* still open overlay with whatever is already bound */
+        }
+        setCodeOverlayOpen(true);
+        setCodePillSticky(true);
+      })();
+    };
+    window.addEventListener('ark:open-code-overlay', onOpenCode);
+    return () => window.removeEventListener('ark:open-code-overlay', onOpenCode);
+  }, []);
 
   const openProjectFolder = async () => {
     const root = chatStudioDiskRootRef.current;
@@ -4185,9 +4243,12 @@ export function AIChat() {
           title: buildIntent.name,
           forceNavigate: true,
         });
-      } else {
+      } else if (!needsNpm || bootstrap.npmInstalled) {
+        // Static HTML only — never open a Vite/React tree as static (blank black window).
         const liveFiles = chatStudioFilesRef.current;
-        if (Object.keys(liveFiles).length) {
+        const viteLike = isViteProject(liveFiles)
+          || Object.keys(liveFiles).some(p => /(^|\/)package\.json$/i.test(p.replace(/\\/g, '/')));
+        if (!viteLike && Object.keys(liveFiles).length) {
           const url = await ensureInAppPreview({
             projectId: previewWindowIdForChat(activeChatId),
             title: buildIntent.name,
@@ -5788,14 +5849,41 @@ export function AIChat() {
                   localStorage.setItem(`ark:project-draft:${project.id}`, seed);
                 } catch { /* ignore */ }
                 response = [
-                  `Pulled **${picked.full_name}** into Code.`,
+                  `Pulled **${picked.full_name}** into this chat.`,
                   cloned.branch ? `Branch: ${cloned.branch}` : '',
                   (picked.size ?? 1) === 0
                     ? 'It looks empty. say what to add and I will start building.'
-                    : 'Explorer has the files. Keep chatting in Code to add, remove, upgrade, or fix.',
+                    : 'Click **Code** under the chat box to browse files. Keep chatting to add, remove, upgrade, or fix.',
                 ].filter(Boolean).join('\n');
                 usedPlugin = true;
-                window.setTimeout(() => navigate({ name: 'project', id: project.id }), 120);
+                window.setTimeout(() => {
+                  navigate({ name: 'chat' });
+                  void (async () => {
+                    const read = await window.arkDesktop?.projectRead?.(project.id);
+                    if (read?.ok && read.files) {
+                      setChatStudioFiles(read.files as Record<string, string>);
+                      chatStudioFilesRef.current = read.files as Record<string, string>;
+                      setChatStudioProjectId(project.id);
+                      chatStudioProjectIdRef.current = project.id;
+                      if (read.root) {
+                        setChatStudioDiskRoot(read.root);
+                        chatStudioDiskRootRef.current = read.root;
+                      }
+                      const chatId = routeChatIdRef.current || persistChatIdRef.current;
+                      if (chatId) {
+                        persistStudioSnapshot(chatId, {
+                          files: read.files as Record<string, string>,
+                          projectId: project.id,
+                          name: picked.name || repo,
+                          diskRoot: read.root || null,
+                        });
+                        setChatCodePill(chatId, true);
+                      }
+                    }
+                    setCodeOverlayOpen(true);
+                    setCodePillSticky(true);
+                  })();
+                }, 120);
               }
             }
           } catch (err) {
@@ -7353,7 +7441,7 @@ export function AIChat() {
                 {previewUrl && /localhost|127\.0\.0\.1/.test(previewUrl) ? 'Localhost' : 'Preview'}
               </button>
             ) : null}
-            {(mode === 'general' || mode === 'code') && showStudioPills && isCodeTabEnabled() && codePillSticky ? (
+            {(mode === 'general' || mode === 'code') && showStudioPills && codePillSticky ? (
               <button
                 type="button"
                 onClick={() => openCodeWorkspace()}

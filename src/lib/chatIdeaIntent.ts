@@ -578,12 +578,12 @@ export function buildPlanningStarterReply(): string {
   return [
     'I can help you shape this before we touch any files.',
     '',
-    'Best way to start is to lock the *job* of the first version: who opens it, what they do in one sitting, and what “done for today” looks like. Once that’s clear, the UI and stack fall into place.',
+    'Best way to start is to lock the *job* of the first version: who opens it, what they do in one sitting, and what “done for today” looks like. I’ll handle the technical choices (privacy defaults, data storage, auth when it matters) — you don’t need to know that stuff.',
     '',
     'A few things that help me steer:',
     '- Who is this for, and what’s the one outcome they should get in a session?',
-    '- Browser web app, desktop-style utility, or more of a marketing page?',
-    '- Does it need to work offline, or is online-only fine for v1?',
+    '- Web app in the browser, or more of a phone-style experience?',
+    '- Calm and simple, or a little more playful?',
     '',
     'Tell me whatever you already know — even rough notes — and we’ll keep talking it through until you’re ready to build.',
   ].join('\n');
@@ -597,7 +597,7 @@ export function looksLikeConversationalPlanningAsk(text: string): boolean {
   if (/\b(?:go\s+build|go\s+implement|implement\s+it|build\s+it\s+now|lets?\s+build\s+(?:this|that|it)|build\s+this|build\s+that|create\s+(?:the\s+)?(?:files|project)\s+now)\b/i.test(t)) {
     return false;
   }
-  if (/\bgo\s+ahead(?:\s+and)?\s+(?:build|implement|create|scaffold)\b/i.test(t)) return false;
+  if (/\bgo\s+ahead(?:\s+and)?\s+(?:start\s+)?(?:building|build|implement|create|scaffold)\b/i.test(t)) return false;
   if (/\bcreate\s+(?:the\s+)?files\b/i.test(t) && /\b(?:now|please|desktop)\b/i.test(t)) return false;
   if (wantsPlanningOnly(t)) return true;
   // Timeline / worth-it follow-ups are normal Q&A — not a reason to inject “planning only” framing.

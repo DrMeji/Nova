@@ -75,7 +75,7 @@ export function isBetaSettingsEnabled(): boolean {
   return false;
 }
 
-/** Code workspace tab. Explorer + editor + preview for builds. */
+/** Legacy Code / ProjectWorkspace tab — retired; Code pill overlay is the only code UI. */
 export function isCodeTabEnabled(): boolean {
-  return true;
+  return false;
 }

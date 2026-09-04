@@ -348,6 +348,19 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.178',
+    channel: 'stable' as const,
+    date: 'Sep 3, 2026',
+    title: 'Smarter planning, Code pill only, Localhost fix',
+    notes: [
+      'Planning asks product questions (web vs phone, who it’s for) — never tech experience, auth, or privacy quizzes',
+      'Brain tab content is truly vertically centered',
+      'Old empty Code / Project workspace screen removed — only the Code pill opens files (folders left, editor right)',
+      'Localhost no longer opens a blank black window for Vite apps; npm install runs before the preview server',
+      'Builds lean thorough over empty shells',
+    ],
+  },
+  {
     version: '0.1.177',
     channel: 'stable' as const,
     date: 'Sep 3, 2026',

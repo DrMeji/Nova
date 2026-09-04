@@ -1,5 +1,21 @@
 ﻿# ARK changelog
 
+## 0.1.178 — 2026-09-03
+
+Smarter planning questions, Brain true center, Code pill only, Localhost blank-screen fix.
+
+**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.178/ARK-Setup.exe) · [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.178)
+
+### Planning
+- Asks product questions (web vs phone, who it’s for) — never tech experience, auth, or privacy quizzes
+- ARK assumes privacy-minded defaults instead of interviewing users
+
+### Code & preview
+- Old empty Code / Project workspace screen removed; Code pill is the only code UI
+- Recent / Projects open Chat + Code overlay (folders left, editor right)
+- Localhost installs npm deps when needed and starts Vite — no more blank black preview for React apps
+- Brain tab content truly vertically centered
+
 ## 0.1.177 — 2026-09-03
 
 Update UX cleanup, splash layout fix, Brain centering, warmer planning chat.
