@@ -1,5 +1,23 @@
 ﻿# ARK changelog
 
+## 0.1.179 — 2026-09-03
+
+Splash progress polish, Projects ghost cleanup, Image SOON for retail.
+
+**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.179/ARK-Setup.exe) · [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.179)
+
+### Update splash
+- Progress bar lifted and fills left→right
+- Electron splash uses rounded corners (HTA install splash stays square — Windows limitation)
+
+### Projects & create
+- Ghost `code` / `uploads` internal folders no longer appear in Projects
+- Remove deletes the real folder on disk
+- Create auto-picks a free name when an old folder is still present
+
+### Image
+- Image tab is SOON on packaged installs (same idea as Video); bat/DEV still has Image
+
 ## 0.1.178 — 2026-09-03
 
 Smarter planning questions, Brain true center, Code pill only, Localhost blank-screen fix.

@@ -3,6 +3,9 @@
  * Used by create flow + Projects view listing.
  */
 
+/** Internal sandbox dirs — never show these as user projects. */
+const RESERVED_PROJECT_DIR_NAMES = new Set(['code', 'uploads', '.ark', 'node_modules']);
+
 function joinPath(root: string, name: string): string {
   const sep = root.includes('\\') ? '\\' : '/';
   return `${root.replace(/[/\\]+$/, '')}${sep}${name}`;
@@ -19,11 +22,6 @@ export async function resolveArkProjectsHomes(): Promise<Array<{ label: string; 
   }
   if (desktop) {
     out.push({ label: 'Desktop\\ARK Projects', path: joinPath(desktop, 'ARK Projects') });
-  }
-
-  const sandbox = await window.arkDesktop?.workspaceSandboxRoot?.();
-  if (sandbox?.ok && sandbox.path) {
-    out.push({ label: 'ARK storage', path: sandbox.path });
   }
 
   return out;
@@ -52,6 +50,7 @@ export async function listArkProjectFolders(): Promise<Array<{
     if (!listed?.ok || !listed.items?.length) continue;
     for (const item of listed.items) {
       if (item.kind !== 'dir') continue;
+      if (RESERVED_PROJECT_DIR_NAMES.has(String(item.name || '').toLowerCase())) continue;
       const key = item.path.toLowerCase();
       if (seen.has(key)) continue;
       seen.add(key);

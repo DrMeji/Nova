@@ -367,10 +367,26 @@ export function ProjectsView() {
                             type="button"
                             className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-rose-300 hover:bg-rose-500/10"
                             onClick={() => {
-                              if (window.confirm(`Remove “${item.name}” from this list? Files on disk stay.`)) {
-                                removeRecent(item.id);
-                              }
-                              setMenuId(null);
+                              void (async () => {
+                                const label = item.name;
+                                if (!window.confirm(`Remove “${label}” from this list and delete its folder if it still exists?`)) {
+                                  setMenuId(null);
+                                  return;
+                                }
+                                if (item.diskPath && window.arkDesktop?.workspaceDeleteFolder) {
+                                  await window.arkDesktop.workspaceDeleteFolder({ targetPath: item.diskPath });
+                                } else if (item.id.startsWith('ark-folder:')) {
+                                  const disk = item.id.slice('ark-folder:'.length);
+                                  await window.arkDesktop?.workspaceDeleteFolder?.({ targetPath: disk });
+                                }
+                                if (!item.id.startsWith('ark-folder:')) {
+                                  removeRecent(item.id);
+                                }
+                                setArkFolders(prev => prev.filter(f => f.id !== item.id && f.path !== item.diskPath));
+                                setMenuId(null);
+                                setNotice(`Removed “${label}”.`);
+                                window.setTimeout(() => setNotice(null), 3000);
+                              })();
                             }}
                           >
                             <Trash2 className="w-3 h-3" />
@@ -381,7 +397,7 @@ export function ProjectsView() {
                     </div>
                   </span>
                   <span className="text-xs text-content-tertiary capitalize truncate">
-                    {item.source === 'remote' ? item.typeLabel : 'This PC'}
+                    {item.source === 'remote' ? item.typeLabel : (item.diskPath ? 'ARK Projects' : 'This PC')}
                   </span>
                   <span className="text-right text-sm text-content-secondary tabular-nums">
                     {formatModified(item.modified)}

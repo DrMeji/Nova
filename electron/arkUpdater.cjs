@@ -530,7 +530,8 @@ const SPLASH_TRACK_H = 12;
 const SPLASH_BG = '#161618';
 const SPLASH_OUTER_BG = SPLASH_BG;
 const SPLASH_CARD_BG = SPLASH_BG;
-const SPLASH_RADIUS = 0;
+/** Soft corner radius on the Electron card face (HTA window chrome stays square). */
+const SPLASH_RADIUS = 20;
 
 function splashRobotSvg() {
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80" width="${SPLASH_ICON_PX}" height="${SPLASH_ICON_PX}" aria-hidden="true" class="splash-ark-icon" style="display:block;margin:0 auto;">
@@ -563,29 +564,30 @@ function splashShellCss(opts = {}) {
   const hta = Boolean(opts.hta);
   if (hta) {
     // mshta = IE engine: no flex, weak SVG. Table rows for reliable vertical layout.
+    // Fill is absolute left→right (never centered / middle-out). Extra bottom pad lifts the bar.
     return `
   html,body{margin:0;width:100%;height:100%;background:${SPLASH_BG};overflow:hidden;user-select:none;}
   table.layout{width:100%;height:100%;border-collapse:collapse;background:${SPLASH_BG};}
-  td.pad{height:18%;padding:0;font-size:0;line-height:0;}
-  td.mid{height:52%;padding:0;text-align:center;vertical-align:middle;}
-  td.bot{height:30%;padding:0 0 48px 0;text-align:center;vertical-align:bottom;}
+  td.pad{height:16%;padding:0;font-size:0;line-height:0;}
+  td.mid{height:48%;padding:0;text-align:center;vertical-align:middle;}
+  td.bot{height:36%;padding:0 0 88px 0;text-align:center;vertical-align:bottom;}
   .logo-wrap{width:${SPLASH_ICON_PX}px;height:${SPLASH_ICON_PX}px;margin:0 auto;}
   .logo-wrap img{width:${SPLASH_ICON_PX}px;height:${SPLASH_ICON_PX}px;display:block;border:0;background:transparent;margin:0 auto;}
-  .track{width:${SPLASH_TRACK_W}px;height:${SPLASH_TRACK_H}px;margin:0 auto;border:1px solid #a1a1aa;background:transparent;overflow:hidden;}
-  #fill{height:100%;width:0;background:#f4f4f5;}
+  .track{position:relative;width:${SPLASH_TRACK_W}px;height:${SPLASH_TRACK_H}px;margin:0 auto;border:1px solid #a1a1aa;background:transparent;overflow:hidden;text-align:left;}
+  #fill{position:absolute;left:0;top:0;bottom:0;width:0;height:100%;background:#f4f4f5;font-size:0;line-height:0;}
 `;
   }
   return `
-  html,body{margin:0;width:100%;height:100%;background:${SPLASH_BG};color:#f4f4f5;font-family:"Segoe UI",system-ui,sans-serif;overflow:hidden;user-select:none;}
-  .wrap{box-sizing:border-box;width:100%;height:100%;margin:0;padding:0;display:flex;align-items:center;justify-content:center;background:${SPLASH_BG};}
-  .card{box-sizing:border-box;width:100%;height:100%;max-width:100%;background:${SPLASH_BG};padding:48px 40px 56px;text-align:center;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:48px;}
+  html,body{margin:0;width:100%;height:100%;background:transparent;color:#f4f4f5;font-family:"Segoe UI",system-ui,sans-serif;overflow:hidden;user-select:none;}
+  .wrap{box-sizing:border-box;width:100%;height:100%;margin:0;padding:10px;display:flex;align-items:center;justify-content:center;background:transparent;}
+  .card{box-sizing:border-box;width:100%;height:100%;max-width:100%;background:${SPLASH_CARD_BG};border-radius:${SPLASH_RADIUS}px;padding:48px 40px 88px;text-align:center;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:44px;overflow:hidden;}
   .logo-wrap{margin:0 auto;width:${SPLASH_ICON_PX}px;height:${SPLASH_ICON_PX}px;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
   .logo-wrap img,.logo-wrap svg{width:${SPLASH_ICON_PX}px;height:${SPLASH_ICON_PX}px;object-fit:contain;display:block;margin:0 auto;border:0;background:transparent;}
   @keyframes splashHeadShimmer{0%{transform:translate(0,0) rotate(0deg);}50%{transform:translate(6px,-4px) rotate(180deg);}100%{transform:translate(0,0) rotate(360deg);}}
   .splash-shimmer{transform-box:fill-box;transform-origin:center;animation:splashHeadShimmer 14s ease-in-out infinite;}
   .spacer{display:none;}
-  .track{width:${SPLASH_TRACK_W}px;max-width:100%;height:${SPLASH_TRACK_H}px;margin:0 auto;border-radius:999px;border:1.5px solid #a1a1aa;background:transparent;overflow:hidden;box-sizing:border-box;flex-shrink:0;}
-  #fill{height:100%;width:0%;min-width:0;border-radius:999px;background:#f4f4f5;transition:width 140ms ease;}
+  .track{position:relative;width:${SPLASH_TRACK_W}px;max-width:100%;height:${SPLASH_TRACK_H}px;margin:0 auto;border-radius:999px;border:1.5px solid #a1a1aa;background:transparent;overflow:hidden;box-sizing:border-box;flex-shrink:0;text-align:left;}
+  #fill{position:absolute;left:0;top:0;bottom:0;width:0%;min-width:0;height:100%;border-radius:999px;background:#f4f4f5;transition:width 140ms ease;}
 `;
 }
 
@@ -1021,9 +1023,10 @@ async function runStandaloneSplash(argv) {
     maximizable: false,
     minimizable: false,
     fullscreenable: false,
-    // Opaque — transparent frameless windows on Windows draw white chrome / caption junk.
-    transparent: false,
-    backgroundColor: SPLASH_OUTER_BG,
+    // Transparent host so the inner card can show rounded corners (card paints the panel).
+    transparent: true,
+    backgroundColor: '#00000000',
+    roundedCorners: true,
     hasShadow: true,
     show: false,
     alwaysOnTop: true,
@@ -1896,8 +1899,9 @@ async function openUpdateSplash() {
     fullscreenable: false,
     frame: false,
     thickFrame: false,
-    transparent: false,
-    backgroundColor: SPLASH_OUTER_BG,
+    transparent: true,
+    backgroundColor: '#00000000',
+    roundedCorners: true,
     alwaysOnTop: true,
     skipTaskbar: false,
     show: true,

@@ -348,6 +348,18 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.179',
+    channel: 'stable' as const,
+    date: 'Sep 3, 2026',
+    title: 'Splash bar polish, Projects cleanup, Image SOON',
+    notes: [
+      'Update splash progress bar sits higher and fills left→right; Electron splash uses rounded corners',
+      'Projects list no longer shows internal code/uploads folders; Remove deletes the real folder',
+      'Create auto-picks a free folder name when an old project folder is still on disk',
+      'Image tab is SOON for packaged installs (DEV / bat still has Image); focus stays on Chat coding',
+    ],
+  },
+  {
     version: '0.1.178',
     channel: 'stable' as const,
     date: 'Sep 3, 2026',

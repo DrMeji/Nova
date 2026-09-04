@@ -10,6 +10,7 @@ import {
   isRevealed,
   isTestersSettingsEnabled,
   isVideoTabEnabled,
+  isImageTabEnabled,
   isVoiceTabEnabled,
 } from '@/lib/featurePark';
 import { getEngineStatus } from '@/lib/arkEngine';
@@ -50,6 +51,7 @@ const CATALOG: SearchItem[] = [
 
 function navigateCatalog(): SearchItem[] {
   return CATALOG.filter(item => {
+    if (item.id === 'image' && !isImageTabEnabled()) return false;
     if (item.id === 'video' && !isVideoTabEnabled()) return false;
     if (item.id === 'voice' && !isVoiceTabEnabled()) return false;
     if (item.id === 'testers' && !isTestersSettingsEnabled()) return false;

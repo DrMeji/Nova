@@ -11,7 +11,7 @@ import { SettingsContent } from './SettingsContent';
 import { SearchPanel } from './SearchPanel';
 import { useRecentProjects } from '@/context/RecentProjectsContext';
 import { useAuth } from '@/context/AuthContext';
-import { isSocialParked, isRevealed, isCodeTabEnabled, isVideoTabEnabled } from '@/lib/featurePark';
+import { isSocialParked, isRevealed, isCodeTabEnabled, isVideoTabEnabled, isImageTabEnabled } from '@/lib/featurePark';
 import { requestOpenChatCode } from '@/lib/openChatCode';
 import { useSocial } from '@/context/SocialContext';
 import { SidebarCallDock } from '@/components/CallRingUI';
@@ -66,7 +66,12 @@ function getNavGroups(): {
       id: 'create',
       items: [
         { label: 'Chat', icon: SquarePen, route: { name: 'chat' }, activity: 'chat' },
-        { label: 'Image', icon: ImageIcon, route: { name: 'chat', mode: 'image' } },
+        {
+          label: 'Image',
+          icon: ImageIcon,
+          route: { name: 'chat', mode: 'image' },
+          comingSoon: !isImageTabEnabled(),
+        },
         {
           label: 'Video',
           icon: Video,
@@ -804,7 +809,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <div className="mt-1 flex flex-col gap-0.5 pl-1">
                   {recentFeed.mixed.length === 0 ? (
                     <p className="px-3 py-2 text-[11px] text-content-tertiary leading-snug">
-                      Chats and Code workspaces you start will show up here.
+                      Chats you start will show up here.
                     </p>
                   ) : (
                     recentFeed.mixed.map(renderRecentRow)

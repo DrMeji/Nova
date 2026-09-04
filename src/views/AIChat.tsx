@@ -228,7 +228,7 @@ import { ArkErrorInline } from '@/components/ArkErrorInline';
 import { BrandMark } from '@/components/BrandMark';
 import { ArkMark } from '@/components/ArkMark';
 import { classifyErrorMessage, isLikelyErrorMessage } from '@/lib/errors';
-import { isVideoTabEnabled, isVoiceTabEnabled } from '@/lib/featurePark';
+import { isVideoTabEnabled, isImageTabEnabled, isVoiceTabEnabled } from '@/lib/featurePark';
 import { notifyChatDone } from '@/lib/activityIndicators';
 import { formatReplyElapsed } from '@/lib/speedTest';
 import { getTokenUsageRatio, recordTokenUsage, syncTokenUsage, estimateTokens } from '@/lib/tokenUsage';
@@ -321,6 +321,7 @@ function ChatModeTabs() {
     ? (route.mode === 'image' || route.mode === 'video' || route.mode === 'voice' ? route.mode : 'general')
     : 'general';
   const go = (next: 'general' | 'image' | 'video' | 'voice') => {
+    if (next === 'image' && !isImageTabEnabled()) return;
     if (next === 'video' && !isVideoTabEnabled()) return;
     if (next === 'voice' && !isVoiceTabEnabled()) return;
     if (next === 'general') {
@@ -1514,7 +1515,7 @@ export function AIChat() {
     hydratedCreationRef.current = creationId;
     const tab = creation.kind === 'video'
       ? (isVideoTabEnabled() ? 'video' : 'general')
-      : 'image';
+      : (isImageTabEnabled() ? 'image' : 'general');
     let cancelled = false;
 
     void (async () => {
@@ -6304,7 +6305,7 @@ export function AIChat() {
         }
       } else if (!usedPlugin && mode === 'video') {
         if (!isVideoTabEnabled()) {
-          response = 'Video generation is coming soon. Use **Image** or **Chat** for now.';
+          response = 'Video generation is coming soon. Use **Chat** for now.';
           usedPlugin = true;
         } else {
         try {
@@ -7697,6 +7698,11 @@ export function AIChat() {
           <p className="text-[11px] text-content-tertiary mt-1">Add as many as you need. press Enter to read</p>
         </div>
       </div>
+      {mode === 'image' && !isImageTabEnabled() ? (
+        <div className="absolute inset-0 z-40">
+          <ParkedNotice feature="image" />
+        </div>
+      ) : null}
       {mode === 'video' && !isVideoTabEnabled() ? (
         <div className="absolute inset-0 z-40">
           <ParkedNotice feature="video" />

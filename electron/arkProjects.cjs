@@ -859,7 +859,16 @@ function getProjectPath(projectId) {
 function deleteGrantedFolder(targetPath) {
   const full = path.resolve(String(targetPath || ''));
   if (!full || !fs.existsSync(full)) return { ok: false, error: 'Folder not found' };
-  if (!isAllowedExternalPath(full)) {
+  const pr = path.resolve(projectsRoot());
+  const underSandbox = isPathUnderRoot(full, pr);
+  // Never delete the sandbox root itself or reserved system dirs.
+  if (underSandbox) {
+    const base = path.basename(full).toLowerCase();
+    if (full.toLowerCase() === pr.toLowerCase() || base === 'code' || base === 'uploads') {
+      return { ok: false, error: 'That folder is reserved by ARK.' };
+    }
+  }
+  if (!isAllowedExternalPath(full) && !underSandbox) {
     return { ok: false, error: 'Path is outside an approved ARK workspace.' };
   }
   try {

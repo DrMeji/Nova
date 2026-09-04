@@ -128,7 +128,15 @@ export function cleanProductTitle(name: string): string {
     const token = s.split(/\s+/).find(w => /^[A-Z][a-zA-Z0-9_-]{2,32}$/.test(w) && !/^(Add|Make|Fix|Update|Bigger|Please|Create|Build|Help)$/.test(w));
     if (token) return token;
   }
-  if (s.length >= 2 && s.length <= 48) return s;
+  if (s.length >= 2 && s.length <= 48) {
+    // "My App" → strip "App" → "My" — keep a real product label instead.
+    if (/^(my|the|a|an|new|app|project|site)$/i.test(s)) {
+      const raw = String(name || '').trim();
+      if (raw.length >= 2 && raw.length <= 48 && !/^(my|the|a|an)$/i.test(raw)) return raw;
+      return 'New App';
+    }
+    return s;
+  }
   const first = String(name || '').trim().split(/\s+/).find(w => /^[A-Za-z][A-Za-z0-9_-]{1,40}$/.test(w));
   return first && first.length >= 2 ? first : 'New App';
 }

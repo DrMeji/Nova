@@ -100,17 +100,24 @@ export async function runCreateProjectFlow(
     };
   }
 
-  const mkdir = await window.arkDesktop?.workspaceMkdir?.({ targetPath: parentPath });
-  if (!mkdir?.ok) {
-    if (mkdir?.error === 'exists_nonempty') {
-      return {
-        ok: false,
-        written: [],
-        files: {},
-        error: `Folder already exists and is not empty:\n\`${parentPath}\`\n\nSay **“use existing folder ${cleaned.name}”** or pick another name.`,
-        grantHint,
-      };
+  // If the preferred name is taken, pick My 2 / Northline 3 — never block on a leftover folder.
+  const parentDir = parentPath.replace(/[/\\][^/\\]+$/, '');
+  let finalPath = parentPath;
+  let finalName = cleaned.name;
+  let finalSlug = cleaned.slug;
+  let mkdir: { ok?: boolean; error?: string; path?: string; existed?: boolean; created?: boolean } | undefined;
+  for (let i = 0; i < 24; i++) {
+    const trySlug = i === 0 ? cleaned.slug : `${cleaned.slug}-${i + 1}`;
+    const tryName = i === 0 ? cleaned.name : `${cleaned.name} ${i + 1}`;
+    const tryPath = i === 0 ? parentPath : joinPath(parentDir, trySlug);
+    mkdir = await window.arkDesktop?.workspaceMkdir?.({ targetPath: tryPath });
+    if (mkdir?.ok) {
+      finalPath = tryPath;
+      finalName = tryName;
+      finalSlug = trySlug;
+      break;
     }
+    if (mkdir?.error === 'exists_nonempty') continue;
     return {
       ok: false,
       written: [],
@@ -119,11 +126,20 @@ export async function runCreateProjectFlow(
       grantHint,
     };
   }
+  if (!mkdir?.ok) {
+    return {
+      ok: false,
+      written: [],
+      files: {},
+      error: `Could not find a free folder name near “${cleaned.name}”. Remove an old project in Projects, or pick another name.`,
+      grantHint,
+    };
+  }
 
   const bind = await window.arkDesktop?.workspaceOpenRoot?.({
     projectId,
-    projectName: cleaned.name,
-    sourceDir: parentPath,
+    projectName: finalName,
+    sourceDir: finalPath,
     catalogOnly: true,
   });
 
@@ -132,10 +148,13 @@ export async function runCreateProjectFlow(
       ok: false,
       written: [],
       files: {},
-      error: bind?.error || 'Created folder but could not bind workspace.',
+      error: bind?.error || 'Could not open the new project folder.',
       grantHint,
     };
   }
+
+  cleaned.name = finalName;
+  cleaned.slug = finalSlug;
 
   const scaffoldKind = resolveProjectKindForCreate(cleaned.summary, cleaned.kind, cleaned.kind);
   // Skills are for LLM prompts only — never bake "ARK design skills" copy into App.jsx.

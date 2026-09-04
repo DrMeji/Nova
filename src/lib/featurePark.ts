@@ -1,5 +1,7 @@
 /** Parked product surfaces — wired in code, hidden from retail UI until flags flip. */
 
+import { isArkDevSession } from '@/lib/arkRuntime';
+
 export type ParkId = 'networking' | 'message' | 'call' | 'testers';
 
 const KEY = 'ark:revealed-features';
@@ -60,6 +62,24 @@ export function isCallUiEnabled(): boolean {
 /** Video tab — UI + engine routes exist; hidden until isVideoTabEnabled() is true. */
 export function isVideoTabEnabled(): boolean {
   return false;
+}
+
+/**
+ * Image tab — DEV / bat sessions keep it.
+ * Packaged retail builds show Image as SOON (same as Video) until image gen is ready to ship.
+ * Also keep Image for the local DEV profile name used while testing packaged builds.
+ */
+export function isImageTabEnabled(): boolean {
+  if (isArkDevSession()) return true;
+  try {
+    const raw = localStorage.getItem('ark:local-prefs');
+    if (!raw) return false;
+    const prefs = JSON.parse(raw) as { displayName?: string };
+    const name = String(prefs?.displayName || '').trim().toLowerCase();
+    return name === 'dev';
+  } catch {
+    return false;
+  }
 }
 
 /** Voice tab — session hooks exist; hidden until isVoiceTabEnabled() is true. */
