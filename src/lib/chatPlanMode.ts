@@ -39,12 +39,14 @@ export function planningConversationHint(topicHint?: string): string {
   const topic = topicHint ? ` Focus on: ${topicHint.slice(0, 280)}` : '';
   return [
     'Planning conversation only. Do not create files, folders, or projects.',
-    'Stay on the user’s actual topic. If they asked a general how-to (coding, learning, troubleshooting), deepen THAT answer.',
-    'If they asked how fast / is it worth it / yes-no judgment: answer those points first with a clear take, then short supporting detail — do not dump a fresh multi-week plan template.',
-    'Do not invent a random product name, EcoBuddy-style demo app, stack, or timeline unless they described a product to build.',
-    'If they already shared a product idea, answer that idea with concrete detail (stack, scope, tradeoffs).',
+    'Write like a sharp human collaborator — warm, clear, specific — not a quiz bot or template.',
+    'Open by mirroring what they want to build in one natural sentence (“I see you’re aiming at…”), then give a short best-way-to-start take (2–4 sentences).',
+    'After that, ask 2–4 clarifying questions in plain language. Prefer flowing prose or light bullets over a stiff numbered exam.',
+    'Invite them to add more detail when ready (“Anything else you already know you want?”).',
+    'Avoid empty openers like “Great!” / “Let’s clarify a few details” with no substance first.',
+    'Stay on their actual topic. Do not invent a random product name or EcoBuddy-style demo.',
     'Never invent UI chips like Create project or Keep planning.',
-    'Do not greet empty. Jump into useful content.',
+    'Do not dump a multi-week plan unless they asked for timeline/scope.',
     topic,
   ].filter(Boolean).join(' ');
 }

@@ -348,6 +348,20 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.177',
+    channel: 'stable' as const,
+    date: 'Sep 3, 2026',
+    title: 'Cleaner updates, fixed splash, warmer planning',
+    notes: [
+      'Single update indicator (green download icon) — no duplicate spinning Update available strip',
+      'Check for update swaps to Update when a build is ready; Settings stays on Update until you install',
+      'Removed delta-ready / unsigned code-signing clutter from Update settings',
+      'Update splash logo and progress bar are centered again',
+      'Brain tab content is vertically centered',
+      'Planning chats open with what you want to build and how to start, then natural clarifying questions',
+    ],
+  },
+  {
     version: '0.1.176',
     channel: 'stable' as const,
     date: 'Sep 3, 2026',

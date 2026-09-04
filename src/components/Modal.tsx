@@ -10,6 +10,8 @@ interface ModalProps {
   size?: 'sm' | 'md' | 'lg' | 'xl' | 'full' | 'settings' | 'search';
   /** Hide the top title/back row (search embeds its own back control) */
   hideHeader?: boolean;
+  /** When true, Escape / backdrop cannot dismiss (e.g. required update). */
+  preventClose?: boolean;
 }
 
 const sizeClasses = {
@@ -32,8 +34,13 @@ export function Modal({
   className = '',
   size = 'lg',
   hideHeader = false,
+  preventClose = false,
 }: ModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
+  const requestClose = () => {
+    if (preventClose) return;
+    onClose();
+  };
 
   useEffect(() => {
     if (!isOpen) return;
@@ -60,11 +67,11 @@ export function Modal({
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && isOpen) onClose();
+      if (e.key === 'Escape' && isOpen) requestClose();
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
+  }, [isOpen, preventClose, onClose]);
 
   useEffect(() => {
     if (isOpen) {
@@ -83,7 +90,7 @@ export function Modal({
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 animate-fade-in">
       <div
         className="absolute inset-0 bg-ark-navy-950/70 backdrop-blur-md"
-        onClick={onClose}
+        onClick={requestClose}
         aria-hidden="true"
       />
 
@@ -100,7 +107,7 @@ export function Modal({
           <div className="flex items-center gap-3 px-5 py-4 border-b border-surface-border shrink-0">
             <button
               type="button"
-              onClick={onClose}
+              onClick={requestClose}
               className="w-8 h-8 rounded-full border border-surface-border bg-surface-hover/60 hover:bg-surface-hover flex items-center justify-center text-content-secondary hover:text-content-primary transition-colors"
               aria-label="Back"
               title="Back"

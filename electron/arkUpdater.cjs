@@ -544,6 +544,7 @@ function splashRobotSvg() {
         <stop offset="100%" stop-color="rgb(52 211 153)" stop-opacity="0.14"/>
       </linearGradient>
     </defs>
+    <rect x="14" y="14" width="52" height="52" rx="16" fill="none" stroke="#f4f4f5" stroke-width="2.2"/>
     <g clip-path="url(#splash-inner-clip)">
       <rect x="6" y="6" width="68" height="68" fill="url(#splash-shimmer-grad)" class="splash-shimmer"/>
     </g>
@@ -557,34 +558,34 @@ function splashIconMarkup() {
   return splashRobotSvg();
 }
 
-/** One solid panel: logo + progress. Electron uses flex+SVG; HTA uses absolute+PNG (IE). */
+/** One solid panel: logo + progress. Electron uses flex+SVG; HTA uses table+PNG (IE). */
 function splashShellCss(opts = {}) {
   const hta = Boolean(opts.hta);
   if (hta) {
-    // mshta = IE engine: no flex, weak SVG. Absolute + PNG only.
+    // mshta = IE engine: no flex, weak SVG. Table rows for reliable vertical layout.
     return `
   html,body{margin:0;width:100%;height:100%;background:${SPLASH_BG};overflow:hidden;user-select:none;}
-  .card{position:relative;width:100%;height:100%;background:${SPLASH_BG};}
-  .logo-wrap{position:absolute;left:50%;top:42%;width:${SPLASH_ICON_PX}px;height:${SPLASH_ICON_PX}px;margin-left:-${Math.round(SPLASH_ICON_PX / 2)}px;margin-top:-${Math.round(SPLASH_ICON_PX / 2)}px;}
-  .logo-wrap img{width:${SPLASH_ICON_PX}px;height:${SPLASH_ICON_PX}px;display:block;border:0;background:transparent;}
-  .spacer{display:none;}
-  .track{position:absolute;left:50%;bottom:48px;width:${SPLASH_TRACK_W}px;height:${SPLASH_TRACK_H}px;margin-left:-${Math.round(SPLASH_TRACK_W / 2)}px;border:1px solid #a1a1aa;background:transparent;overflow:hidden;}
+  table.layout{width:100%;height:100%;border-collapse:collapse;background:${SPLASH_BG};}
+  td.pad{height:18%;padding:0;font-size:0;line-height:0;}
+  td.mid{height:52%;padding:0;text-align:center;vertical-align:middle;}
+  td.bot{height:30%;padding:0 0 48px 0;text-align:center;vertical-align:bottom;}
+  .logo-wrap{width:${SPLASH_ICON_PX}px;height:${SPLASH_ICON_PX}px;margin:0 auto;}
+  .logo-wrap img{width:${SPLASH_ICON_PX}px;height:${SPLASH_ICON_PX}px;display:block;border:0;background:transparent;margin:0 auto;}
+  .track{width:${SPLASH_TRACK_W}px;height:${SPLASH_TRACK_H}px;margin:0 auto;border:1px solid #a1a1aa;background:transparent;overflow:hidden;}
   #fill{height:100%;width:0;background:#f4f4f5;}
-  table.layout{width:100%;height:100%;border-collapse:collapse;}
-  td.cell{padding:0;vertical-align:top;}
 `;
   }
   return `
   html,body{margin:0;width:100%;height:100%;background:${SPLASH_BG};color:#f4f4f5;font-family:"Segoe UI",system-ui,sans-serif;overflow:hidden;user-select:none;}
-  .card{box-sizing:border-box;width:100%;height:100%;background:${SPLASH_BG};border-radius:0;box-shadow:none;padding:40px 40px 48px;text-align:center;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:56px;}
-  .logo-wrap{margin:0 auto;width:${SPLASH_ICON_PX}px;height:${SPLASH_ICON_PX}px;display:block;flex-shrink:0;}
+  .wrap{box-sizing:border-box;width:100%;height:100%;margin:0;padding:0;display:flex;align-items:center;justify-content:center;background:${SPLASH_BG};}
+  .card{box-sizing:border-box;width:100%;height:100%;max-width:100%;background:${SPLASH_BG};padding:48px 40px 56px;text-align:center;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:48px;}
+  .logo-wrap{margin:0 auto;width:${SPLASH_ICON_PX}px;height:${SPLASH_ICON_PX}px;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
   .logo-wrap img,.logo-wrap svg{width:${SPLASH_ICON_PX}px;height:${SPLASH_ICON_PX}px;object-fit:contain;display:block;margin:0 auto;border:0;background:transparent;}
   @keyframes splashHeadShimmer{0%{transform:translate(0,0) rotate(0deg);}50%{transform:translate(6px,-4px) rotate(180deg);}100%{transform:translate(0,0) rotate(360deg);}}
   .splash-shimmer{transform-box:fill-box;transform-origin:center;animation:splashHeadShimmer 14s ease-in-out infinite;}
   .spacer{display:none;}
   .track{width:${SPLASH_TRACK_W}px;max-width:100%;height:${SPLASH_TRACK_H}px;margin:0 auto;border-radius:999px;border:1.5px solid #a1a1aa;background:transparent;overflow:hidden;box-sizing:border-box;flex-shrink:0;}
   #fill{height:100%;width:0%;min-width:0;border-radius:999px;background:#f4f4f5;transition:width 140ms ease;}
-  .wrap{box-sizing:border-box;width:100%;height:100%;margin:0;padding:0;display:block;background:${SPLASH_BG};}
 `;
 }
 
@@ -602,10 +603,12 @@ function splashMarkDataUri() {
 /** CSS pause-mark for HTA when no PNG is available (IE-safe, no SVG). */
 function splashHtaFallbackMark() {
   const half = Math.round(SPLASH_ICON_PX / 2);
+  const barH = Math.round(SPLASH_ICON_PX * 0.22);
+  const barW = Math.max(4, Math.round(SPLASH_ICON_PX * 0.045));
   return `<div style="position:relative;width:${SPLASH_ICON_PX}px;height:${SPLASH_ICON_PX}px;margin:0 auto;">
-    <div style="position:absolute;left:50%;top:50%;width:${SPLASH_ICON_PX}px;height:${SPLASH_ICON_PX}px;margin-left:-${half}px;margin-top:-${half}px;border-radius:20%;background:#2a2a2e;"></div>
-    <div style="position:absolute;left:39%;top:40%;width:4px;height:20%;margin-left:-2px;background:#f4f4f5;border-radius:2px;"></div>
-    <div style="position:absolute;left:61%;top:40%;width:4px;height:20%;margin-left:-2px;background:#f4f4f5;border-radius:2px;"></div>
+    <div style="position:absolute;left:18%;top:18%;width:64%;height:64%;border:2px solid #f4f4f5;border-radius:22%;box-sizing:border-box;"></div>
+    <div style="position:absolute;left:38%;top:39%;width:${barW}px;height:${barH}px;background:#f4f4f5;border-radius:2px;"></div>
+    <div style="position:absolute;left:58%;top:39%;width:${barW}px;height:${barH}px;background:#f4f4f5;border-radius:2px;"></div>
   </div>`;
 }
 
@@ -622,6 +625,14 @@ function splashBodyMarkup(opts = {}) {
     }
   } else {
     icon = splashIconMarkup();
+  }
+  if (hta) {
+    return `
+  <table class="layout" role="presentation">
+    <tr><td class="pad">&nbsp;</td></tr>
+    <tr><td class="mid"><div class="logo-wrap">${icon}</div></td></tr>
+    <tr><td class="bot"><div class="track"><div id="fill"></div></div></td></tr>
+  </table>`;
   }
   return `
   <div class="card">
@@ -753,9 +764,7 @@ ${splashShellCss({ hta: true })}
 </style>
 </head>
 <body>
-  <table class="layout" role="presentation"><tr><td class="cell">
-    ${splashBodyMarkup({ hta: true, pngDataUri: markData, pngName })}
-  </td></tr></table>
+  ${splashBodyMarkup({ hta: true, pngDataUri: markData, pngName })}
   <script language="JScript">
     var STATUS = ${jsStr(statusPath)};
     var SHOWN = ${jsStr(shownPath)};
@@ -1330,7 +1339,7 @@ async function checkForUpdate() {
       latestName: bestNewerRelease.name || tag,
       setupAssetUrl: setupUrl,
       differential: Boolean(hasLatestYml || hasBlockmap),
-      message: `Update available: ${bestNewerRelease.name || tag}${hasLatestYml ? ' (delta-ready)' : ''}`,
+      message: `Update available: ARK ${normalizeVersion(tag) || tag}`,
     };
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Check failed';

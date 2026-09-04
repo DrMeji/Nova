@@ -1,5 +1,22 @@
 ﻿# ARK changelog
 
+## 0.1.177 — 2026-09-03
+
+Update UX cleanup, splash layout fix, Brain centering, warmer planning chat.
+
+**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.177/ARK-Setup.exe) · [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.177)
+
+### Updates
+- One update indicator (green download in the sidebar header) — no duplicate spinning “Update available” strip
+- Check for update becomes the Update button when a build is ready
+- Removed confusing “delta-ready” and unsigned “Code signing: NotSigned” noise
+- Required update keeps Settings on the Update page until you install
+- Update splash logo + progress bar centered again (HTA layout rewrite)
+
+### Brain & chat
+- Brain tab content vertically centered
+- Planning replies open with what you’re building + how to start, then natural clarifying questions
+
 ## 0.1.176 — 2026-09-03
 
 Chat mic (voice-to-text), ARK Projects home, Brain under Tools, chat polish.

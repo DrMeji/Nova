@@ -234,12 +234,12 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
       .catch(() => {});
     void window.arkDesktop?.signingStatus?.()
       .then((row) => {
-        if (!row?.packaged) {
-          setSigningStatus('Dev build. signing not checked');
+        // Only surface signing when it helps (valid signature). Hide unsigned / NotSigned noise.
+        if (row?.packaged && row.signed) {
+          setSigningStatus('Windows Authenticode signature valid');
           return;
         }
-        if (row.signed) setSigningStatus('Windows Authenticode signature valid');
-        else setSigningStatus(row.status || 'Unsigned. SmartScreen may warn on first run');
+        setSigningStatus(null);
       })
       .catch(() => setSigningStatus(null));
   }, []);
@@ -400,10 +400,14 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
       try {
         const { checkArkGitHubUpdate } = await import('@/lib/arkUpdates');
         const info = await checkArkGitHubUpdate();
+        const cleanMsg = String(info.message || '')
+          .replace(/\s*\(delta-ready\)/ig, '')
+          .replace(/\s*delta-ready/ig, '')
+          .trim();
         setUpdateMsg(
           info.newerAvailable && !info.setupAssetUrl
-            ? `${info.message} (installer file not published yet. try again later)`
-            : info.message,
+            ? `${cleanMsg} (installer file not published yet. try again later)`
+            : cleanMsg || (info.newerAvailable ? `Update available: ARK ${info.latestTag || ''}`.trim() : 'You’re up to date.'),
         );
         setUpdateInfo(
           info.newerAvailable
@@ -2059,28 +2063,18 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                       >
                         <Github className="w-5 h-5" />
                       </button>
-                      <button
-                        type="button"
-                        onClick={checkForUpdates}
-                        disabled={checkingUpdates || downloadingUpdate}
-                        className="ark-btn-secondary !rounded-full"
-                      >
-                        {checkingUpdates ? <RefreshCw className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-                        {checkingUpdates ? 'Checking…' : 'Check for update'}
-                      </button>
-                      {!isArkDevSession() && updateInfo?.newerAvailable && (
+                      {updateInfo?.newerAvailable && updateInfo.setupAssetUrl && !isArkDevSession() ? (
                         <button
                           type="button"
                           onClick={downloadUpdate}
-                          disabled={downloadingUpdate || !updateInfo.setupAssetUrl}
-                          title={!updateInfo.setupAssetUrl ? 'Update is disabled until GitHub publishes an installer file for this build' : 'Download and install with the ARK update splash'}
+                          disabled={downloadingUpdate}
+                          title="Download and install the latest ARK"
                           className="ark-btn-primary !rounded-full"
                         >
                           {downloadingUpdate ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
                           {downloadingUpdate ? 'Updating…' : 'Update'}
                         </button>
-                      )}
-                      {isArkDevSession() && (
+                      ) : isArkDevSession() ? (
                         <button
                           type="button"
                           onClick={previewUpdateSplash}
@@ -2091,12 +2085,27 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                           {downloadingUpdate ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
                           {downloadingUpdate ? 'Preview…' : 'Preview splash'}
                         </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={checkForUpdates}
+                          disabled={checkingUpdates || downloadingUpdate}
+                          className="ark-btn-secondary !rounded-full"
+                        >
+                          {checkingUpdates ? <RefreshCw className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                          {checkingUpdates ? 'Checking…' : 'Check for update'}
+                        </button>
                       )}
                     </div>
                   </div>
+                  {updateInfo?.newerAvailable && updateInfo.setupAssetUrl && !downloadingUpdate ? (
+                    <p className="text-[11px] text-amber-200/90 leading-relaxed">
+                      A newer ARK is ready. Install it now for the latest fixes and features.
+                    </p>
+                  ) : null}
                   {signingStatus ? (
                     <p className="text-[11px] text-content-tertiary leading-relaxed">
-                      Code signing: {signingStatus}
+                      {signingStatus}
                     </p>
                   ) : null}
                 </div>

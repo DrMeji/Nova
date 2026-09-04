@@ -70,7 +70,8 @@ export function JobsStrip({ variant = 'footer' }: { variant?: 'footer' | 'sideba
         window.setTimeout(() => setUpdateJob(null), 10_000);
         return;
       }
-      if (status === 'idle' || percent >= 100) {
+      if (status === 'idle' || status === 'available' || percent >= 100) {
+        // “available” is shown once via the green download indicator — don’t duplicate it here.
         setUpdateJob(null);
         return;
       }
@@ -79,11 +80,10 @@ export function JobsStrip({ variant = 'footer' }: { variant?: 'footer' | 'sideba
         || status === 'downloading'
         || status === 'handoff'
         || status === 'installing'
-        || status === 'available'
       ) {
         setUpdateJob({
           percent,
-          message: message || (status === 'checking' ? 'Checking for updates…' : 'Updating…'),
+          message: message || (status === 'checking' ? 'Checking for updates…' : 'Downloading update…'),
         });
       }
     });

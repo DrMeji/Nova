@@ -576,14 +576,16 @@ export function extractBriefBullets(text: string): string[] {
 /** Vague planning opener. questions only, no scaffold, no action chips. */
 export function buildPlanningStarterReply(): string {
   return [
-    'Happy to help you plan. no files or folders until you clearly ask to **build** or **create** the project.',
+    'I can help you shape this before we touch any files.',
     '',
-    '**Quick questions:**',
-    '1. Who is this for, and what should they accomplish in one session?',
-    '2. Web app in the browser, desktop-style utility, or marketing site?',
-    '3. Must it work offline, or is online-only OK?',
+    'Best way to start is to lock the *job* of the first version: who opens it, what they do in one sitting, and what “done for today” looks like. Once that’s clear, the UI and stack fall into place.',
     '',
-    'Reply in plain language and we can keep talking it through.',
+    'A few things that help me steer:',
+    '- Who is this for, and what’s the one outcome they should get in a session?',
+    '- Browser web app, desktop-style utility, or more of a marketing page?',
+    '- Does it need to work offline, or is online-only fine for v1?',
+    '',
+    'Tell me whatever you already know — even rough notes — and we’ll keep talking it through until you’re ready to build.',
   ].join('\n');
 }
 

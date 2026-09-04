@@ -25,8 +25,8 @@ export function BrainView() {
   }, []);
 
   return (
-    <div className="flex-1 min-h-0 overflow-y-auto px-4 sm:px-6 py-6">
-      <div className="w-full max-w-xl mx-auto space-y-4">
+    <div className="flex-1 min-h-0 overflow-y-auto px-4 sm:px-6 py-6 flex flex-col">
+      <div className="w-full max-w-xl mx-auto my-auto space-y-4 py-8">
         <div className="flex items-center gap-3 mb-2">
           <ArkMark className="w-9 h-9" title="ARK Brain" />
           <div>

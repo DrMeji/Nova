@@ -333,6 +333,19 @@ export function AppShell({ children }: { children: ReactNode }) {
     setSettingsOpen(true);
   };
 
+  const updateRequired = Boolean(
+    updateInfo?.newerAvailable && updateInfo.setupAssetUrl && !updateBusy,
+  );
+
+  const closeSettings = () => {
+    if (updateRequired) {
+      setSettingsSection('updates');
+      setSettingsOpen(true);
+      return;
+    }
+    setSettingsOpen(false);
+  };
+
   const setPresenceStatus = (next: PresenceStatus) => {
     setPresence(next);
     setLocalPrefs({ presenceStatus: next });
@@ -413,6 +426,10 @@ export function AppShell({ children }: { children: ReactNode }) {
       if (!alive || !info) return;
       setUpdateInfo(info);
       writeCache(info);
+      if (info.newerAvailable && info.setupAssetUrl) {
+        setSettingsSection('updates');
+        setSettingsOpen(true);
+      }
     };
 
     void maybeCheck();
@@ -968,12 +985,13 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       <Modal
         isOpen={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
+        onClose={closeSettings}
         title="Settings"
         size="settings"
+        preventClose={updateRequired}
       >
         <SettingsContent
-          onClose={() => setSettingsOpen(false)}
+          onClose={closeSettings}
           initialSection={settingsSection}
         />
       </Modal>
