@@ -582,7 +582,7 @@ export function buildPlanningStarterReply(): string {
     '',
     'A few things that help me steer:',
     '- Who is this for, and what’s the one outcome they should get in a session?',
-    '- Web app in the browser, or more of a phone-style experience?',
+    '- Browser web app, or a phone-style app (overall iOS, overall Android, or a specific device like iPhone 16 / Galaxy S24)?',
     '- Calm and simple, or a little more playful?',
     '',
     'Tell me whatever you already know — even rough notes — and we’ll keep talking it through until you’re ready to build.',

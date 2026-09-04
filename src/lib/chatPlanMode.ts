@@ -1,7 +1,7 @@
 /** Plan → implement gating for Chat (Step 6). */
 
 const IMPLEMENT_GO_RE =
-  /\b(go build|go implement|implement it|build it now|make it happen|do it now|yes build|yes implement|ship it|let'?s\s+build\s+(?:this|that|it)|lets\s+build\s+(?:this|that|it)|build\s+this|build\s+that|create\s+(?:the\s+)?(?:files|project)\s+now|stop\s+planning.{0,40}(?:build|create|implement)|done\s+planning.{0,40}(?:build|create|implement)|lets?\s+go(?:\s+ahead)?\s+and\s+(?:start\s+)?build|okay[,.]?\s+lets?\s+go(?:\s+ahead)?\s+and\s+(?:start\s+)?build|ready\s+to\s+build(?:\s+this)?)\b/i;
+  /\b(go build|go implement|implement it|build it now|make it happen|do it now|yes build|yes implement|ship it|let'?s\s+build\s+(?:this|that|it)|lets\s+build\s+(?:this|that|it)|build\s+this|build\s+that|create\s+(?:the\s+)?(?:files|project)\s+now|create\s+(?:the\s+)?[A-Za-z][\w\s-]{0,40}\s+project\s+on\s+disk|go ahead and create|stop\s+planning.{0,40}(?:build|create|implement)|done\s+planning.{0,40}(?:build|create|implement)|lets?\s+go(?:\s+ahead)?\s+and\s+(?:start\s+)?build|okay[,.]?\s+lets?\s+go(?:\s+ahead)?\s+and\s+(?:start\s+)?build|ready\s+to\s+build(?:\s+this)?)\b/i;
 
 const GO_AHEAD_BUILD_RE =
   /\bgo ahead(?:\s+and)?\s+(?:start\s+)?(?:building|build|implement|create|scaffold|write|code)\b/i;
@@ -43,6 +43,7 @@ export function planningConversationHint(topicHint?: string): string {
     'Open by mirroring what they want to build in one natural sentence (“I see you’re aiming at…”), then give a short best-way-to-start take (2–4 sentences).',
     'After that, ask 1–3 product questions in plain language. Prefer flowing prose or light bullets over a stiff numbered exam.',
     'Good questions: web vs phone app, who it is for, the one must-have for v1, calm vs playful feel, offline or online.',
+    'If they want a phone/mobile app, ask whether it is for overall iOS, overall Android, or a specific device (e.g. iPhone 16, Galaxy S23) — never quiz them on tech stacks.',
     'HARD BAN — never ask: tech-stack experience, “want recommendations?”, coding skill, frameworks/languages they know, how they will handle auth, login, privacy, encryption, databases, hosting, or compliance. ARK users are not engineers; ARK chooses defaults (private by default, sensible auth when needed) without interviewing them.',
     'Never ask them to pick a stack or “how to handle user authentication and data privacy.”',
     'Invite them to add more detail when ready (“Anything else you already know you want?”).',

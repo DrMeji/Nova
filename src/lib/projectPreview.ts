@@ -12,6 +12,8 @@ export type PreviewOpenOpts = {
   projectId?: string | null;
   title?: string;
   forceNavigate?: boolean;
+  /** Phone / tablet chrome around the preview URL. */
+  device?: { label: string; width: number; height: number; family?: string } | null;
 };
 
 /** Open localhost / preview in an ARK-owned closable window (never a system browser). */
@@ -22,11 +24,13 @@ export async function openInAppPreview(
   if (!url) return false;
   const projectId = opts?.projectId || 'chat-preview';
   if (window.arkDesktop?.previewOpenWindow) {
+    const device = opts?.device || null;
     await window.arkDesktop.previewOpenWindow({
       projectId,
       url,
-      title: opts?.title || 'Preview',
-      kind: 'web',
+      title: opts?.title || (device ? `${device.label} · Preview` : 'Preview'),
+      kind: device ? 'device' : 'web',
+      device: device || undefined,
       // Always navigate when opening — never leave another project's page visible.
       forceNavigate: opts?.forceNavigate !== false,
     });
@@ -206,6 +210,7 @@ export async function ensureBoundFolderPreview(opts: {
   projectId: string;
   title?: string;
   files?: Record<string, string>;
+  device?: PreviewOpenOpts['device'];
 }): Promise<{ ok: true; url: string } | { ok: false; error: string }> {
   const root = String(opts.root || '').trim();
   if (!root) return { ok: false, error: 'No folder path bound.' };
@@ -224,6 +229,7 @@ export async function ensureBoundFolderPreview(opts: {
         projectId: opts.projectId,
         title: opts.title,
         forceNavigate: true,
+        device: opts.device,
       });
       return { ok: true, url: live.url };
     }
@@ -241,6 +247,7 @@ export async function ensureBoundFolderPreview(opts: {
         projectId: opts.projectId,
         title: opts.title,
         forceNavigate: true,
+        device: opts.device,
       });
       return { ok: true, url: dev.url };
     }
@@ -262,7 +269,17 @@ export async function ensureBoundFolderPreview(opts: {
       files,
       preferUrl: null,
     });
-    if (url) return { ok: true, url };
+    if (url) {
+      if (opts.device) {
+        await openInAppPreview(url, {
+          projectId: opts.projectId,
+          title: opts.title,
+          forceNavigate: true,
+          device: opts.device,
+        });
+      }
+      return { ok: true, url };
+    }
   }
 
   return {

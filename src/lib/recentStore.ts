@@ -121,6 +121,17 @@ export function removeRecentProject(id: string): RecentProject[] {
   return list;
 }
 
+/** Wipe legacy Code-project Recent rows (Chat + Code pill replaced that UI). */
+export function clearRecentProjects(): RecentProject[] {
+  saveRecentProjects([]);
+  try {
+    window.dispatchEvent(new Event('ark:projects-changed'));
+  } catch {
+    /* ignore */
+  }
+  return [];
+}
+
 /** Put a project in Recent only when the user actually works in it (chat / files). */
 export function ensureRecentProject(id: string, name?: string): RecentProject[] {
   if (!id || id.startsWith('demo-')) return loadRecentProjects();

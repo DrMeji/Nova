@@ -348,6 +348,18 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.180',
+    channel: 'stable' as const,
+    date: 'Sep 3, 2026',
+    title: 'No duplicate Code Recent rows; phone preview frame',
+    notes: [
+      'Creating a project no longer adds a second Code filing-system row in Recent — stay on the chat; use the Code pill for files',
+      'Legacy Code-project Recent entries are cleared; clicking them no longer opens an empty overlay + blank chat',
+      'Mobile / phone builds can open Localhost in an iPhone or Android-sized preview frame',
+      'Planning asks overall iOS / Android vs a specific device when relevant',
+    ],
+  },
+  {
     version: '0.1.179',
     channel: 'stable' as const,
     date: 'Sep 3, 2026',

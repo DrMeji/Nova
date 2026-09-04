@@ -9,6 +9,7 @@ import {
   renameRecentChatTitle,
   renameRecentProject,
   removeRecentProject,
+  clearRecentProjects,
   ensureRecentProject,
   saveRecentChats,
   saveRecentProjects,
@@ -49,7 +50,19 @@ interface RecentProjectsContextValue {
 const RecentProjectsContext = createContext<RecentProjectsContextValue | undefined>(undefined);
 
 export function RecentProjectsProvider({ children }: { children: ReactNode }) {
-  const [recent, setRecent] = useState<RecentProject[]>(() => loadRecentProjects());
+  const [recent, setRecent] = useState<RecentProject[]>(() => {
+    // One-time: drop legacy Code-project Recent rows (duplicate filing-system UI).
+    try {
+      if (localStorage.getItem('ark:cleared-code-recent-v1') !== '1') {
+        clearRecentProjects();
+        localStorage.setItem('ark:cleared-code-recent-v1', '1');
+        return [];
+      }
+    } catch {
+      /* ignore */
+    }
+    return loadRecentProjects();
+  });
   const [creations, setCreations] = useState<RecentCreation[]>(() => loadRecentCreations());
   const [chats, setChats] = useState<RecentChat[]>(() => loadRecentChats());
 

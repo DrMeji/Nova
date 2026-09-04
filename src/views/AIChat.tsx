@@ -275,6 +275,8 @@ import {
 import { engineGenerateCancel, getEngineStatus, setEngineModel } from '@/lib/arkEngine';
 import { ensureViteDevServer, isViteProject, openInAppPreview, ensureInAppPreview, refreshLivePreview, ensureBoundFolderPreview, loadPreviewFilesFromDisk } from '@/lib/projectPreview';
 import { cleanProductTitle } from '@/lib/freshSpaFromBrief';
+import { classifyMobileTarget } from '@/lib/mobileTarget';
+import { classifyNamedDevice, defaultDeviceForTarget } from '@/lib/mobileDevices';
 
 const COMPOSER_MODE_PREFIX: Record<'plan' | 'ask' | 'agent' | 'debug' | 'multitask', string> = {
   plan: 'Plan this out step by step, then we can build:\n\n',
@@ -2194,8 +2196,31 @@ export function AIChat() {
     const snap = loadChatStudio(chatId);
     const folderName = studioPathBasename(root) || 'Preview';
     const title = folderName;
+    const recentUserBrief = messagesRef.current
+      .filter(m => m.role === 'user')
+      .slice(-6)
+      .map(m => m.content)
+      .join('\n');
+    const namedDevice = classifyNamedDevice(recentUserBrief);
+    const mobileTarget = classifyMobileTarget(recentUserBrief);
+    const wantsPhoneFrame = Boolean(
+      namedDevice
+      || mobileTarget
+      || /\b(mobile\s+app|phone\s+app|for\s+(?:ios|android)|iphone|galaxy|pixel)\b/i.test(recentUserBrief),
+    );
+    const previewDevice = wantsPhoneFrame
+      ? (namedDevice || defaultDeviceForTarget(mobileTarget || 'ios'))
+      : null;
+    const devicePayload = previewDevice
+      ? {
+        label: previewDevice.label,
+        width: previewDevice.width,
+        height: previewDevice.height,
+        family: previewDevice.family,
+      }
+      : undefined;
 
-    setDropHint('Opening preview…');
+    setDropHint(previewDevice ? `Opening ${previewDevice.label} preview…` : 'Opening preview…');
     try {
       const result = await ensureBoundFolderPreview({
         root,
@@ -2204,6 +2229,7 @@ export function AIChat() {
         files: snap?.files && Object.keys(snap.files).length
           ? snap.files
           : (studioBoundChatIdRef.current === chatId ? chatStudioFilesRef.current : {}),
+        device: devicePayload,
       });
       if (!result.ok) {
         // One more try with a fresh disk hydrate (static/, index.html, run.bat).
@@ -2216,6 +2242,7 @@ export function AIChat() {
             projectId: pid,
             title,
             files: hydrated,
+            device: devicePayload,
           });
           if (retry.ok) {
             setPreviewUrl(retry.url);
@@ -4158,9 +4185,7 @@ export function AIChat() {
       setChatCodePill(activeChatId, true);
       setCodePillSticky(true);
       renameChat(activeChatId, cleanProductTitle(buildIntent.name));
-      try {
-        addRecent(cleanProductTitle(buildIntent.name));
-      } catch { /* ignore */ }
+      // Do NOT addRecent() — that spawned a duplicate Code filing-system row in Recent.
       addChat({
         id: activeChatId,
         mode,

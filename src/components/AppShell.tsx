@@ -12,7 +12,6 @@ import { SearchPanel } from './SearchPanel';
 import { useRecentProjects } from '@/context/RecentProjectsContext';
 import { useAuth } from '@/context/AuthContext';
 import { isSocialParked, isRevealed, isCodeTabEnabled, isVideoTabEnabled, isImageTabEnabled } from '@/lib/featurePark';
-import { requestOpenChatCode } from '@/lib/openChatCode';
 import { useSocial } from '@/context/SocialContext';
 import { SidebarCallDock } from '@/components/CallRingUI';
 import { getLocalPrefs, setLocalPrefs } from '@/lib/localPrefs';
@@ -290,6 +289,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const activeChatId = route.name === 'chat' ? route.chatId ?? null : null;
 
   const recentFeed = useMemo(() => {
+    // Recent is chats only — never a separate “Code project” filing-system row.
+    // Code files open from the Code pill on the chat that built them.
     const chats = activeChats.map(c => ({
       key: `chat:${c.id}`,
       kind: 'chat' as const,
@@ -300,26 +301,18 @@ export function AppShell({ children }: { children: ReactNode }) {
       mode: c.mode,
       updatedAt: c.updatedAt || '',
     }));
-    const projects = recent.map(p => ({
-      key: `project:${p.id}`,
-      kind: 'project' as const,
-      id: p.id,
-      title: p.name,
-      preview: undefined as string | undefined,
-      pinned: Boolean(p.pinnedAt),
-      updatedAt: p.updatedAt || '',
-    }));
     const byPin = (a: { pinned: boolean; updatedAt: string }, b: { pinned: boolean; updatedAt: string }) =>
       comparePinnedThenRecent(
         { pinnedAt: a.pinned ? '1' : undefined, updatedAt: a.updatedAt },
         { pinnedAt: b.pinned ? '1' : undefined, updatedAt: b.updatedAt },
       );
+    const sorted = [...chats].sort(byPin).slice(0, 20);
     return {
-      chats: [...chats].sort(byPin).slice(0, 16),
-      projects: [...projects].sort(byPin).slice(0, 12),
-      mixed: [...chats, ...projects].sort(byPin).slice(0, 20),
+      chats: sorted,
+      projects: [] as typeof sorted,
+      mixed: sorted,
     };
-  }, [activeChats, recent]);
+  }, [activeChats]);
 
   const commitRename = () => {
     if (!renamingId) return;
@@ -484,12 +477,10 @@ export function AppShell({ children }: { children: ReactNode }) {
         mode: item.mode === 'general' ? undefined : (item.mode as 'image' | 'video' | 'code' | undefined),
         chatId: item.id,
       });
-    } else if (!isCodeTabEnabled()) {
-      navigate({ name: 'chat' });
-      requestOpenChatCode({ projectId: item.id, name: item.title });
-    } else {
-      navigate({ name: 'project', id: item.id });
+      return;
     }
+    // Legacy Code-project Recent rows are retired — jump to Chat; use the Code pill for files.
+    navigate({ name: 'chat' });
   };
 
   const renderRecentRow = (item: RecentRow) => {
