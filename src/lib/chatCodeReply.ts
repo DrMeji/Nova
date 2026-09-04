@@ -111,20 +111,19 @@ export function finalizeCodingChatBubble(opts: {
     return formatCodeChatReply(opts.userMessage, opts.changedPaths, '', { surface: 'chat' });
   }
   if (/```|@@@FILE/i.test(opts.rawReply) || looksLikeCodeDump(stripped)) {
-    // Only show full code when the user asked for copy-paste source in chat.
+    // Build / edit turns: never replace work with a “chat shouldn’t show code” lecture.
+    // Caller should apply to disk; this is the fallback bubble only.
     if (opts.editMode === true) {
-      return 'I drafted changes but could not save them to disk. Try the ask again in one short sentence.';
+      return 'Updating your project files on disk… If nothing changes in a moment, say the edit again in one short sentence.';
     }
-    // Default: never dump source into chat.
+    // Planning: keep prose only — never paste Swift/source into chat, never the old stub.
     const body = stripped
       .replace(/```[\w]*\n[\s\S]*?```/g, '')
-      .replace(/^\s*(?:const|let|var|function|export|import|return)\b[\s\S]{0,200}$/gm, '')
+      .replace(/@@@FILE[^\n]*\n?/gi, '')
+      .replace(/^\s*(?:const|let|var|function|export|import|return|struct|import\s+SwiftUI)\b[\s\S]{0,200}$/gm, '')
       .trim();
-    if (body && body.length > 20 && body.length < 500 && !looksLikeCodeDump(body)) return body;
-    if (opts.editMode === true) {
-      return 'I drafted changes but could not save them to disk. Try the ask again in one short sentence.';
-    }
-    return 'I prepared code for this, but chat stays summary-only unless you ask me to **show the code**. If a folder is already bound, say **apply the edits on disk** again.';
+    if (body && body.length > 20) return body.slice(0, 4000);
+    return 'Got it — still planning. When you want files on disk, say **create it on disk** or **lets build this**.';
   }
   // Never show “I will modify App.jsx…” as if the work finished.
   if (/\b(i will|i'll|going to)\b[\s\S]{0,80}\b(modify|update|edit|change|add)\b/i.test(stripped)) {

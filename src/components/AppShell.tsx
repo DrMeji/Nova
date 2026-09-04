@@ -766,24 +766,27 @@ export function AppShell({ children }: { children: ReactNode }) {
             </div>
           </div>
 
-          <nav className={`flex-1 min-h-0 flex flex-col gap-1 overflow-y-auto ${collapsed ? 'px-2 pt-3' : 'px-3 pt-4'}`}>
-            {NAV_GROUPS.map(group => (
-              <div key={group.id} className={group.label ? (collapsed ? 'mt-2 first:mt-0' : 'mt-3 first:mt-0') : ''}>
-                {group.label && !collapsed ? (
-                  <p className="px-2 pb-1 text-[10px] uppercase tracking-wider text-content-tertiary">{group.label}</p>
-                ) : null}
-                {group.items.map(renderNavItem)}
-              </div>
-            ))}
+          <nav className={`flex-1 min-h-0 flex flex-col gap-1 ${collapsed ? 'px-2 pt-3' : 'px-3 pt-4'}`}>
+            {/* Locked primary nav — Chat / Work / Tools / Connect never scroll away */}
+            <div className="flex-none shrink-0 flex flex-col gap-1">
+              {NAV_GROUPS.map(group => (
+                <div key={group.id} className={group.label ? (collapsed ? 'mt-2 first:mt-0' : 'mt-3 first:mt-0') : ''}>
+                  {group.label && !collapsed ? (
+                    <p className="px-2 pb-1 text-[10px] uppercase tracking-wider text-content-tertiary">{group.label}</p>
+                  ) : null}
+                  {group.items.map(renderNavItem)}
+                </div>
+              ))}
+            </div>
 
-            {/* Recent. chats and projects stay separate */}
-            <div className={`mt-4 ${collapsed ? '' : 'pt-2 border-t border-surface-border'}`}>
+            {/* Recent only scrolls */}
+            <div className={`mt-4 min-h-0 flex-1 flex flex-col ${collapsed ? '' : 'pt-2 border-t border-surface-border'}`}>
               <button
                 type="button"
                 onClick={() => setRecentOpen(o => !o)}
                 title={collapsed ? 'Recent' : undefined}
                 aria-label="Recent"
-                className={`ark-nav-item w-full ${collapsed ? 'ark-nav-item-rail' : ''}`}
+                className={`ark-nav-item w-full flex-none ${collapsed ? 'ark-nav-item-rail' : ''}`}
               >
                 <Clock3 className="w-4 h-4 shrink-0" />
                 {!collapsed && (
@@ -797,7 +800,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               </button>
 
               {recentOpen && !collapsed && (
-                <div className="mt-1 flex flex-col gap-0.5 pl-1">
+                <div className="mt-1 min-h-0 flex-1 overflow-y-auto overscroll-contain flex flex-col gap-0.5 pl-1 pr-0.5">
                   {recentFeed.mixed.length === 0 ? (
                     <p className="px-3 py-2 text-[11px] text-content-tertiary leading-snug">
                       Chats you start will show up here.
@@ -809,7 +812,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               )}
 
               {collapsed && recentOpen && (
-                <div className="mt-1 flex flex-col gap-0.5">
+                <div className="mt-1 min-h-0 flex-1 overflow-y-auto overscroll-contain flex flex-col gap-0.5">
                   {recentFeed.mixed.slice(0, 12).map(item => {
                     const active = item.kind === 'chat'
                       ? activeChatId === item.id

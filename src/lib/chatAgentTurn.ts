@@ -59,7 +59,14 @@ export function isChatAgentTurn(content: string, composerMode: ComposerAgentMode
 
 export function modeBlocksFileWrites(mode: 'ask' | 'plan' | 'agent', content: string): boolean {
   if (mode === 'ask') return true;
-  if (mode === 'plan') return !looksLikeImplementGo(content);
+  // Plan mode still allows concrete UI/copy edits on an already-bound project.
+  if (mode === 'plan') {
+    if (looksLikeImplementGo(content)) return false;
+    if (/\b(?:change|update|set|rename|edit|make)\b[\s\S]{0,100}\b(?:hero|headline|heading|title|h1|button|text|label|copy|wording|background|color)\b/i.test(content)) {
+      return false;
+    }
+    return true;
+  }
   return false;
 }
 
@@ -98,7 +105,7 @@ export function looksLikeCodeEditAsk(text: string): boolean {
     return true;
   }
   if (
-    /\b(change|update|set|make|edit|fix|rename|restyle)\b[\s\S]{0,100}\b(background|color|colour|font|title|text|layout|style|css|button|icon|logo|header|copy|wording|theme|column|label|hint|gradient|teal|notes?)\b/i.test(t)
+    /\b(change|update|set|make|edit|fix|rename|restyle)\b[\s\S]{0,100}\b(background|color|colour|font|title|text|layout|style|css|button|icon|logo|header|hero|headline|heading|h1|copy|wording|theme|column|label|hint|gradient|teal|notes?)\b/i.test(t)
   ) {
     // Casual science / Q&A ("how do octopuses change color?"). not a UI edit.
     if (
@@ -134,13 +141,15 @@ export function looksLikeCodeEditAsk(text: string): boolean {
 
 export function chatTurnAllowsFileEdits(content: string, composerMode: ComposerAgentMode): boolean {
   const mode = normalizeComposerMode(composerMode);
+  if (mode === 'ask') return false;
+  // Explicit UI/code edits win over planning heuristics (plan chip, pending brief, etc.).
+  if (looksLikeImplementGo(content) || looksLikeBuildStart(content) || looksLikeCodeEditAsk(content)) {
+    return true;
+  }
   if (modeBlocksFileWrites(mode, content)) return false;
   if (looksLikePromptEcho(content)) return false;
   if (wantsPlanningOnly(content) || looksLikeConversationalPlanningAsk(content)) return false;
   if (looksLikeProjectDebugAsk(content)) return true;
-  if (looksLikeImplementGo(content) || looksLikeBuildStart(content) || looksLikeCodeEditAsk(content)) {
-    return true;
-  }
   if (mode === 'agent') {
     const t = String(content || '').trim();
     // Casual Q&A like "what can you help me build?" must hit the model. not the no-workspace wall.

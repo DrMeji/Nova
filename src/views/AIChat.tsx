@@ -649,15 +649,16 @@ async function resolveStudioFiles(opts: {
   memoryDiskRoot?: string | null;
   messages: { content?: string }[];
 }): Promise<{ files: Record<string, string>; projectId: string | null; name?: string; diskRoot?: string | null }> {
+  const fromChat = loadChatStudio(opts.chatId);
   if (Object.keys(opts.memoryFiles).length) {
     return {
       files: opts.memoryFiles,
-      projectId: opts.memoryProjectId,
-      name: folderNameFromThread(opts.messages) || undefined,
-      diskRoot: opts.memoryDiskRoot || null,
+      projectId: opts.memoryProjectId || fromChat?.projectId || null,
+      name: fromChat?.name || folderNameFromThread(opts.messages) || undefined,
+      // Always prefer the persisted root for THIS chat when memory root is empty/stale.
+      diskRoot: opts.memoryDiskRoot || fromChat?.diskRoot || null,
     };
   }
-  const fromChat = loadChatStudio(opts.chatId);
   if (fromChat && Object.keys(fromChat.files || {}).length) {
     return {
       files: fromChat.files,
@@ -1618,107 +1619,164 @@ export function AIChat() {
           if (!liveGenSkip) {
             const hadPreview = Boolean(previewUrlRef.current);
             const switchChatId = route.chatId;
-            window.setTimeout(() => {
-              if (routeChatIdRef.current !== switchChatId) return;
+            void (async () => {
               if (hadPreview) {
                 void window.arkDesktop?.previewCloseLive?.().catch(() => undefined);
               }
-              void rebindStudioForChat(switchChatId);
-            }, 0);
+              await rebindStudioForChat(switchChatId);
+              const root = chatStudioDiskRootRef.current;
+              let filesForPreview = { ...chatStudioFilesRef.current };
+              if (root && window.arkDesktop?.readTextFile) {
+                try {
+                  const hydrated = await loadPreviewFilesFromDisk(root);
+                  if (Object.keys(hydrated).length) {
+                    filesForPreview = hydrated;
+                    setChatStudioFiles(hydrated);
+                    chatStudioFilesRef.current = hydrated;
+                  }
+                } catch {
+                  /* ignore */
+                }
+              }
+              if (Object.keys(filesForPreview).length) {
+                try {
+                  await pushLivePreview(filesForPreview, true);
+                } catch {
+                  /* ignore */
+                }
+              }
+            })();
           }
           return;
         }
         skipChatLoadIdsRef.current.delete(route.chatId);
         // Fall through and load from disk if state was emptied by a re-render race.
       }
-      try {
-        const raw = localStorage.getItem(chatThreadKey(route.chatId));
-        const loaded = raw ? JSON.parse(raw) as ChatMessage[] : [];
-        const nextMsgs = Array.isArray(loaded) ? loaded : [];
-        // Paint the thread ASAP; defer studio/preview IPC so chat switches stay snappy in bat/dev.
-        messagesRef.current = nextMsgs;
-        startTransition(() => {
+
+      // Switch loading: clear previous thread immediately so the old chat never paints over this one.
+      const switchChatId = route.chatId;
+      const hadPreview = Boolean(previewUrlRef.current);
+      setLoading(true);
+      messagesRef.current = [];
+      setMessages([]);
+      studioBoundChatIdRef.current = null;
+      setChatStudioFiles({});
+      chatStudioFilesRef.current = {};
+      setChatStudioProjectId(null);
+      chatStudioProjectIdRef.current = null;
+      setChatStudioDiskRoot(null);
+      chatStudioDiskRootRef.current = null;
+      setPreviewUrl(null);
+      previewUrlRef.current = null;
+      setPendingAttaches([]);
+      setCodePillSticky(false);
+
+      void (async () => {
+        try {
+          const raw = localStorage.getItem(chatThreadKey(switchChatId));
+          const loaded = raw ? JSON.parse(raw) as ChatMessage[] : [];
+          const nextMsgs = Array.isArray(loaded) ? loaded : [];
+          if (routeChatIdRef.current && routeChatIdRef.current !== switchChatId) return;
+          messagesRef.current = nextMsgs;
           setMessages(nextMsgs);
-          setThreadBrain(loadThreadBrain(route.chatId, kind));
-        });
-      } catch {
-        messagesRef.current = [];
-        startTransition(() => {
+          setThreadBrain(loadThreadBrain(switchChatId, kind));
+        } catch {
+          if (routeChatIdRef.current && routeChatIdRef.current !== switchChatId) return;
+          messagesRef.current = [];
           setMessages([]);
           setThreadBrain(null);
-        });
-      }
-      // Don't carry a folder / localhost from another chat into this thread.
-      // Always rebind from THIS chat (heal poisoned diskRoot via chat title).
-      const liveGenHere = Boolean(
-        generatingRef.current && activeGenChatIdRef.current === route.chatId,
-      );
-      if (!liveGenHere) {
-        const hadPreview = Boolean(previewUrlRef.current);
-        // Sync clear first so the folder pill never keeps the previous chat's name.
-        studioBoundChatIdRef.current = null;
-        setChatStudioDiskRoot(null);
-        chatStudioDiskRootRef.current = null;
-        setPreviewUrl(null);
-        previewUrlRef.current = null;
-        setPendingAttaches([]);
-        const switchChatId = route.chatId;
-        // Defer heavy preview/studio work until after the new messages paint.
-        window.setTimeout(() => {
-          if (routeChatIdRef.current !== switchChatId) return;
+        }
+
+        const liveGenHere = Boolean(
+          generatingRef.current && activeGenChatIdRef.current === switchChatId,
+        );
+        if (!liveGenHere) {
           if (hadPreview) {
             void window.arkDesktop?.previewCloseLive?.().catch(() => undefined);
           }
-          void rebindStudioForChat(switchChatId);
-        }, 0);
-      }
-      setCodePillSticky(hasChatCodePill(route.chatId));
-      setGenerating(Boolean(generatingRef.current && activeGenChatIdRef.current === route.chatId));
-      setLoading(false);
-      // Remount / tab return: if this thread is still marked in-flight and the last
-      // assistant bubble is still generating, keep Stop + placeholder visible.
-      // Stale inflight (app closed mid-gen) must not lock Thinking forever.
-      try {
-        const raw = sessionStorage.getItem('ark:inflight-media');
-        const inflight = raw ? JSON.parse(raw) as { chatId?: string; mode?: string; startedAt?: number } : null;
-        const stale = Boolean(inflight?.startedAt && Date.now() - inflight.startedAt > 180_000);
-        const liveHere = Boolean(
-          generatingRef.current && activeGenChatIdRef.current === route.chatId,
-        );
-        // Leftover "__generating__:chat:Thinking…" from a crashed turn — clear unless live.
-        if (!liveHere) {
-          const stuckChat = messagesRef.current.some(
-            m => m.role === 'assistant' && String(m.content || '').startsWith('__generating__:chat:'),
-          );
-          if (stuckChat || stale || (inflight?.chatId && inflight.chatId !== route.chatId)) {
-            if (stale || (inflight?.chatId && inflight.chatId !== route.chatId)) {
-              sessionStorage.removeItem('ark:inflight-media');
+          await rebindStudioForChat(switchChatId);
+          // Warm Localhost/Code binding from disk so Preview isn't a blank shell.
+          const root = chatStudioDiskRootRef.current;
+          let filesForPreview = { ...chatStudioFilesRef.current };
+          if (root && window.arkDesktop?.readTextFile) {
+            try {
+              const hydrated = await loadPreviewFilesFromDisk(root);
+              if (Object.keys(hydrated).length && (!routeChatIdRef.current || routeChatIdRef.current === switchChatId)) {
+                filesForPreview = hydrated;
+                setChatStudioFiles(hydrated);
+                chatStudioFilesRef.current = hydrated;
+                persistStudioSnapshot(switchChatId, {
+                  files: hydrated,
+                  projectId: chatStudioProjectIdRef.current,
+                  name: studioPathBasename(root) || undefined,
+                  diskRoot: root,
+                  previewUrl: previewUrlRef.current,
+                });
+              }
+            } catch {
+              /* ignore */
             }
-            setMessages(prev => {
-              const next = prev.map(m => (
-                m.role === 'assistant' && String(m.content || '').startsWith('__generating__:')
-                  ? { ...m, content: '(interrupted. send again)' }
-                  : m
-              ));
-              messagesRef.current = next;
-              persistModeThread(mode, next, { chatId: route.chatId });
-              return next;
-            });
-            generatingRef.current = false;
-            setGenerating(false);
           }
-        } else if (inflight?.chatId === route.chatId) {
-          const last = messagesRef.current[messagesRef.current.length - 1];
-          if (last?.role === 'assistant' && String(last.content || '').startsWith('__generating__:')) {
-            activeGenChatIdRef.current = route.chatId;
-            generatingRef.current = true;
-            setGenerating(true);
+          // Always re-push this chat's files into Localhost — never leave a blank or prior-chat shell.
+          if (
+            Object.keys(filesForPreview).length
+            && (!routeChatIdRef.current || routeChatIdRef.current === switchChatId)
+          ) {
+            try {
+              await pushLivePreview(filesForPreview, true);
+            } catch {
+              /* ignore */
+            }
           }
         }
-      } catch {
-        /* ignore */
-      }
-      requestAnimationFrame(() => textareaRef.current?.focus());
+        if (routeChatIdRef.current && routeChatIdRef.current !== switchChatId) return;
+        setCodePillSticky(hasChatCodePill(switchChatId));
+        // Clear stale generating placeholders from a crashed prior turn.
+        try {
+          const rawInflight = sessionStorage.getItem('ark:inflight-media');
+          const inflight = rawInflight
+            ? JSON.parse(rawInflight) as { chatId?: string; mode?: string; startedAt?: number }
+            : null;
+          const stale = Boolean(inflight?.startedAt && Date.now() - inflight.startedAt > 180_000);
+          const liveHere = Boolean(
+            generatingRef.current && activeGenChatIdRef.current === switchChatId,
+          );
+          if (!liveHere) {
+            const stuckChat = messagesRef.current.some(
+              m => m.role === 'assistant' && String(m.content || '').startsWith('__generating__:chat:'),
+            );
+            if (stuckChat || stale || (inflight?.chatId && inflight.chatId !== switchChatId)) {
+              if (stale || (inflight?.chatId && inflight.chatId !== switchChatId)) {
+                sessionStorage.removeItem('ark:inflight-media');
+              }
+              setMessages(prev => {
+                const next = prev.map(m => (
+                  m.role === 'assistant' && String(m.content || '').startsWith('__generating__:')
+                    ? { ...m, content: '(interrupted. send again)' }
+                    : m
+                ));
+                messagesRef.current = next;
+                persistModeThread(mode, next, { chatId: switchChatId });
+                return next;
+              });
+              generatingRef.current = false;
+              setGenerating(false);
+            }
+          } else if (inflight?.chatId === switchChatId) {
+            const last = messagesRef.current[messagesRef.current.length - 1];
+            if (last?.role === 'assistant' && String(last.content || '').startsWith('__generating__:')) {
+              activeGenChatIdRef.current = switchChatId;
+              generatingRef.current = true;
+              setGenerating(true);
+            }
+          }
+        } catch {
+          /* ignore */
+        }
+        setGenerating(Boolean(generatingRef.current && activeGenChatIdRef.current === switchChatId));
+        setLoading(false);
+        requestAnimationFrame(() => textareaRef.current?.focus());
+      })();
       return;
     }
 
@@ -4875,9 +4933,17 @@ export function AIChat() {
     }
     const stickyFiles = resolvedStudio.files;
     let stickyCount = Object.keys(stickyFiles).length;
-    const diskBound = Boolean(chatStudioDiskRootRef.current || resolvedStudio.projectId || chatStudioProjectIdRef.current);
+    let diskBound = Boolean(chatStudioDiskRootRef.current || resolvedStudio.projectId || chatStudioProjectIdRef.current);
     let wantsCodeEdit = chatTurnAllowsFileEdits(content, turnComposerMode);
     if (!wantsCodeEdit && diskBound && parseAddCommentAsk(content)) {
+      wantsCodeEdit = true;
+    }
+    // Hero / title / button micro-edits on a bound project always write disk.
+    if (
+      !wantsCodeEdit
+      && diskBound
+      && /\b(?:change|update|set|rename|edit|make)\b[\s\S]{0,100}\b(?:hero|headline|heading|title|h1|button|text|label|copy|wording)\b/i.test(content)
+    ) {
       wantsCodeEdit = true;
     }
     // Bound folder + explicit apply/polish asks must always write disk (never chat-only).
@@ -4891,6 +4957,49 @@ export function AIChat() {
       )
     ) {
       wantsCodeEdit = true;
+    }
+
+    // Heal disk binding before the studio gate — Recent reopen often shows pills with empty refs.
+    if (
+      wantsCodeEdit
+      && !chatStudioDiskRootRef.current
+      && activeChatId
+    ) {
+      try {
+        const chatTitle = (
+          chats.find(c => c.id === activeChatId)?.title
+          || resolvedStudio.name
+          || ''
+        ).trim();
+        const healed = await resolveChatProjectRoot({ chatId: activeChatId, chatTitle });
+        if (healed.diskRoot) {
+          setChatStudioDiskRoot(healed.diskRoot);
+          chatStudioDiskRootRef.current = healed.diskRoot;
+          resolvedStudio.diskRoot = healed.diskRoot;
+          if (healed.name) resolvedStudio.name = healed.name;
+          if (healed.projectId) {
+            resolvedStudio.projectId = healed.projectId;
+            setChatStudioProjectId(healed.projectId);
+            chatStudioProjectIdRef.current = healed.projectId;
+          }
+          if (Object.keys(healed.files || {}).length) {
+            Object.assign(stickyFiles, healed.files);
+            stickyCount = Object.keys(stickyFiles).length;
+            setChatStudioFiles({ ...stickyFiles });
+            chatStudioFilesRef.current = { ...stickyFiles };
+            resolvedStudio.files = stickyFiles;
+          }
+          diskBound = true;
+          persistStudioSnapshot(activeChatId, {
+            files: stickyFiles,
+            projectId: healed.projectId || resolvedStudio.projectId,
+            name: healed.name || chatTitle || undefined,
+            diskRoot: healed.diskRoot,
+          });
+        }
+      } catch {
+        /* keep going */
+      }
     }
 
     // Reload files from disk/project if sticky is empty but a workspace is bound.
@@ -5020,6 +5129,39 @@ export function AIChat() {
 
       const planTurn = isChatPlanTurn(content) && !looksLikeImplementGo(content);
       const allowEdits = wantsCodeEdit;
+
+      // Heal missing diskRoot from this chat's title (Recent reopen often has pills but empty refs).
+      if (allowEdits && !chatStudioDiskRootRef.current && activeChatId) {
+        try {
+          const chatTitle = (
+            chats.find(c => c.id === activeChatId)?.title
+            || projectLabel
+            || ''
+          ).trim();
+          const healed = await resolveChatProjectRoot({ chatId: activeChatId, chatTitle });
+          if (healed.diskRoot) {
+            setChatStudioDiskRoot(healed.diskRoot);
+            chatStudioDiskRootRef.current = healed.diskRoot;
+            resolvedStudio.diskRoot = healed.diskRoot;
+            if (healed.name) resolvedStudio.name = healed.name;
+            if (Object.keys(healed.files || {}).length) {
+              Object.assign(stickyFiles, healed.files);
+              stickyCount = Object.keys(stickyFiles).length;
+              setChatStudioFiles({ ...stickyFiles });
+              chatStudioFilesRef.current = { ...stickyFiles };
+              resolvedStudio.files = stickyFiles;
+            }
+            persistStudioSnapshot(activeChatId, {
+              files: stickyFiles,
+              projectId: workspaceProjectId || healed.projectId,
+              name: healed.name || projectLabel,
+              diskRoot: healed.diskRoot,
+            });
+          }
+        } catch {
+          /* keep going */
+        }
+      }
 
       // Deterministic comment edits with Cursor-style live progress (no full-repo pack).
       if (allowEdits && (workspaceProjectId || chatStudioDiskRootRef.current)) {
@@ -5189,6 +5331,145 @@ export function AIChat() {
             );
             return;
           }
+        }
+      }
+
+      // Fast path: deterministic UI patches. run BEFORE agent loop so title/button asks apply on disk.
+      // diskRoot alone is enough — projectId may be missing after Recent reopen.
+      if (allowEdits && (workspaceProjectId || chatStudioDiskRootRef.current || stickyCount > 0)) {
+        if (!chatStudioDiskRootRef.current && activeChatId) {
+          try {
+            const chatTitle = (
+              chats.find(c => c.id === activeChatId)?.title
+              || projectLabel
+              || ''
+            ).trim();
+            const healed = await resolveChatProjectRoot({ chatId: activeChatId, chatTitle });
+            if (healed.diskRoot) {
+              setChatStudioDiskRoot(healed.diskRoot);
+              chatStudioDiskRootRef.current = healed.diskRoot;
+            }
+          } catch {
+            /* ignore */
+          }
+        }
+        if (chatStudioDiskRootRef.current && window.arkDesktop?.readTextFile) {
+          const diskRoot = chatStudioDiskRootRef.current;
+          const rels = [
+            'src/App.jsx', 'src/App.tsx', 'src/App.css', 'src/index.css',
+            'index.html', 'css/styles.css', 'js/app.js', 'package.json',
+          ];
+          const sep = diskRoot.includes('\\') ? '\\' : '/';
+          const loaded: Record<string, string> = {};
+          for (const rel of rels) {
+            try {
+              const abs = `${diskRoot.replace(/[/\\]+$/, '')}${sep}${rel.replace(/\//g, sep)}`;
+              const read = await window.arkDesktop.readTextFile({ path: abs });
+              if (read?.ok && typeof read.text === 'string') loaded[rel] = read.text;
+            } catch { /* missing */ }
+          }
+          if (Object.keys(loaded).length) {
+            Object.assign(stickyFiles, loaded);
+            stickyCount = Object.keys(stickyFiles).length;
+            setChatStudioFiles({ ...stickyFiles });
+            chatStudioFilesRef.current = { ...stickyFiles };
+            resolvedStudio.files = stickyFiles;
+          }
+        }
+        const { finalizeWebEdits } = await import('@/lib/webProjectCanon');
+        const micro = finalizeWebEdits(stickyFiles, editUserMessage, [], { projectName: projectLabel });
+        if (micro.length || /\b(?:change|rename|set|make|update)\b[\s\S]{0,80}\b(?:title|headline|heading|hero|button|label|text)\b/i.test(editUserMessage)) {
+          setMessages(prev => prev.map(m => (
+            m.id === assistantId
+              ? { ...m, content: '__generating__:chat:Updating project files…' }
+              : m
+          )));
+          const applied = await applyChatReplyEdits({
+            reply: '',
+            projectId: workspaceProjectId,
+            projectName: projectLabel,
+            files: stickyFiles,
+            userMessage: editUserMessage,
+            diskRoot: chatStudioDiskRootRef.current,
+          });
+          const elapsedMs = Date.now() - replyStartedAt;
+          if (applied.ok) {
+            setChatStudioFiles(applied.files);
+            chatStudioFilesRef.current = applied.files;
+            resolvedStudio.files = applied.files;
+            setChatCodePill(activeChatId, true);
+            setCodePillSticky(true);
+            persistStudioSnapshot(activeChatId, {
+              files: applied.files,
+              projectId: workspaceProjectId,
+              name: projectLabel,
+              diskRoot: chatStudioDiskRootRef.current,
+            });
+            void pushLivePreview(applied.files, false);
+            const answer = finalizeCodingChatBubble({
+              userMessage: content,
+              rawReply: '',
+              changedPaths: applied.updated,
+              applied: true,
+            });
+            const reply = buildStudioTraceMessage({
+              startedAt: replyStartedAt,
+              elapsedMs,
+              userMessage: content,
+              answer,
+              wrotePaths: applied.updated,
+              projectName: projectLabel,
+            });
+            const next = messagesRef.current.map(m => (
+              m.id === assistantId
+                ? {
+                  ...m,
+                  content: reply,
+                  provider_used: visionHopMeta ? `ARK · vision → patch` : 'ARK · local patch',
+                  elapsed_ms: elapsedMs,
+                }
+                : m
+            ));
+            messagesRef.current = next;
+            persistModeThread(mode, next, { chatId: activeChatId });
+            setMessages(next);
+            clearGeneratingIfMineEarly();
+            lastInspectReplyRef.current = reply;
+            window.setTimeout(() => {
+              if (mySeq === genSeqRef.current) flushQueuedSend();
+            }, 0);
+            return;
+          }
+          // Micro-edit detected but write failed — never fall through to “still planning”.
+          const failAnswer = finalizeCodingChatBubble({
+            userMessage: content,
+            rawReply: '',
+            applyError: applied.error || 'write_failed',
+            editMode: true,
+          });
+          const failReply = buildStudioTraceMessage({
+            startedAt: replyStartedAt,
+            elapsedMs,
+            userMessage: content,
+            answer: failAnswer || applied.reply || 'Could not save that UI change to disk.',
+            wrotePaths: [],
+            projectName: projectLabel,
+          });
+          const failNext = messagesRef.current.map(m => (
+            m.id === assistantId
+              ? {
+                ...m,
+                content: failReply,
+                provider_used: 'ARK · local patch',
+                elapsed_ms: elapsedMs,
+              }
+              : m
+          ));
+          messagesRef.current = failNext;
+          persistModeThread(mode, failNext, { chatId: activeChatId });
+          setMessages(failNext);
+          clearGeneratingIfMineEarly();
+          return;
         }
       }
 
@@ -5436,9 +5717,10 @@ export function AIChat() {
           const text = String(live || '').trim();
           if (text.length < 2) return;
           const dump = /@@@FILE|```[\w]*\n|<!DOCTYPE\b|<html[\s>]|export\s+default\s+function/i.test(text);
-          const bubble = (allowEdits || dump)
+          // Never show "Building…" during planning just because the model streamed a fence.
+          const bubble = allowEdits
             ? `__generating__:chat:${liveCodingStatusText(text)}`
-            : text;
+            : (dump ? 'Thinking through your idea…' : text);
           setMessages(prev => {
             const next = prev.map(m => (
               m.id === assistantId ? { ...m, content: bubble } : m
@@ -5828,6 +6110,72 @@ export function AIChat() {
         chatStudioFilesRef.current = studioFiles;
       }
 
+      // Bound micro UI edits before inspect/planning — never “still planning” after create.
+      if (
+        !usedPlugin
+        && (mode === 'general' || mode === 'code')
+        && looksLikeCodeEditAsk(content)
+        && (chatStudioDiskRootRef.current || hasStudioFiles || chatStudioProjectIdRef.current)
+      ) {
+        try {
+          const { applyChatReplyEdits } = await import('@/lib/chatAgentApply');
+          if (!chatStudioDiskRootRef.current && activeChatId) {
+            const title = chats.find(c => c.id === activeChatId)?.title || null;
+            const healed = await resolveChatProjectRoot({ chatId: activeChatId, chatTitle: title });
+            if (healed.diskRoot) {
+              setChatStudioDiskRoot(healed.diskRoot);
+              chatStudioDiskRootRef.current = healed.diskRoot;
+              if (Object.keys(healed.files || {}).length) {
+                setChatStudioFiles(healed.files);
+                chatStudioFilesRef.current = healed.files;
+              }
+            }
+          }
+          let filesForPatch = { ...chatStudioFilesRef.current };
+          const root = chatStudioDiskRootRef.current;
+          if (root) {
+            const hydrated = await loadPreviewFilesFromDisk(root);
+            if (Object.keys(hydrated).length) {
+              filesForPatch = { ...filesForPatch, ...hydrated };
+              setChatStudioFiles(filesForPatch);
+              chatStudioFilesRef.current = filesForPatch;
+            }
+          }
+          const applied = await applyChatReplyEdits({
+            reply: '',
+            projectId: chatStudioProjectIdRef.current,
+            projectName: studioPathBasename(root || '') || undefined,
+            files: filesForPatch,
+            userMessage: content,
+            diskRoot: root,
+          });
+          if (applied.ok && applied.updated.length) {
+            setChatStudioFiles(applied.files);
+            chatStudioFilesRef.current = applied.files;
+            setChatCodePill(activeChatId, true);
+            setCodePillSticky(true);
+            persistStudioSnapshot(activeChatId, {
+              files: applied.files,
+              projectId: chatStudioProjectIdRef.current,
+              name: studioPathBasename(root || '') || undefined,
+              diskRoot: root,
+              previewUrl: previewUrlRef.current,
+            });
+            void pushLivePreview(applied.files, false);
+            response = finalizeCodingChatBubble({
+              userMessage: content,
+              rawReply: '',
+              changedPaths: applied.updated,
+              applied: true,
+              editMode: true,
+            });
+            usedPlugin = true;
+          }
+        } catch {
+          /* fall through */
+        }
+      }
+
       if ((mode === 'general' || mode === 'code') && isGithubPullAsk(content)) {
         const runtime = getPluginRuntime('github', loadPluginState());
         const token = runtime.token?.trim();
@@ -5929,17 +6277,87 @@ export function AIChat() {
       if (!usedPlugin && (mode === 'general' || mode === 'code') && shouldInspectInChat(content, hasStudioFiles, content.startsWith(COMPOSER_MODE_PREFIX.debug))) {
         // Planning follow-ups (“more details”) must stay in normal chat. never the empty-attach wall.
         const pendingPlan = getLastPendingGreenfield(activeChatId);
-        const planningFollowUp = Boolean(
+        const isBoundUiEdit = looksLikeCodeEditAsk(content)
+          && Boolean(chatStudioDiskRootRef.current || Object.keys(chatStudioFilesRef.current).length > 0 || hasStudioFiles);
+        const planningFollowUp = !isBoundUiEdit && Boolean(
           looksLikeConversationalPlanningAsk(content)
           || wantsPlanningOnly(content)
           || (pendingPlan && !looksLikeImplementGo(content) && !content.includes('<!--ark-attach:')),
         );
         const editOnBoundPath = Boolean(
-          chatStudioDiskRootRef.current
+          (chatStudioDiskRootRef.current || Object.keys(chatStudioFilesRef.current).length > 0 || hasStudioFiles)
           && chatTurnAllowsFileEdits(content, composerModeFromContent(content) || composerMode),
         );
-        // Path-bound edits are handled by the agent loop above — never re-pack the whole folder here.
-        if (editOnBoundPath) {
+        // Bound UI edits: patch on disk first — never dump “edit App.jsx manually” from the model.
+        if (editOnBoundPath && looksLikeCodeEditAsk(content)) {
+          try {
+            const { finalizeWebEdits } = await import('@/lib/webProjectCanon');
+            const { applyChatReplyEdits } = await import('@/lib/chatAgentApply');
+            // Heal missing diskRoot from this chat before writing.
+            if (!chatStudioDiskRootRef.current && activeChatId) {
+              const title = chats.find(c => c.id === activeChatId)?.title || null;
+              const healed = await resolveChatProjectRoot({ chatId: activeChatId, chatTitle: title });
+              if (healed.diskRoot) {
+                setChatStudioDiskRoot(healed.diskRoot);
+                chatStudioDiskRootRef.current = healed.diskRoot;
+                if (Object.keys(healed.files || {}).length) {
+                  setChatStudioFiles(healed.files);
+                  chatStudioFilesRef.current = healed.files;
+                }
+              }
+            }
+            let filesForPatch = { ...chatStudioFilesRef.current };
+            const root = chatStudioDiskRootRef.current;
+            if (root) {
+              const hydrated = await loadPreviewFilesFromDisk(root);
+              if (Object.keys(hydrated).length) {
+                filesForPatch = { ...filesForPatch, ...hydrated };
+                setChatStudioFiles(filesForPatch);
+                chatStudioFilesRef.current = filesForPatch;
+              }
+            }
+            const micro = finalizeWebEdits(filesForPatch, content, [], {
+              projectName: studioPathBasename(root || '') || undefined,
+            });
+            if (micro.length || /\b(?:change|rename|set|make|update)\b/i.test(content)) {
+              const applied = await applyChatReplyEdits({
+                reply: '',
+                projectId: chatStudioProjectIdRef.current,
+                projectName: studioPathBasename(root || '') || undefined,
+                files: filesForPatch,
+                userMessage: content,
+                diskRoot: root,
+              });
+              if (applied.ok && applied.updated.length) {
+                setChatStudioFiles(applied.files);
+                chatStudioFilesRef.current = applied.files;
+                setChatCodePill(activeChatId, true);
+                setCodePillSticky(true);
+                persistStudioSnapshot(activeChatId, {
+                  files: applied.files,
+                  projectId: chatStudioProjectIdRef.current,
+                  name: studioPathBasename(root || '') || undefined,
+                  diskRoot: root,
+                  previewUrl: previewUrlRef.current,
+                });
+                void pushLivePreview(applied.files, false);
+                response = finalizeCodingChatBubble({
+                  userMessage: content,
+                  rawReply: '',
+                  changedPaths: applied.updated,
+                  applied: true,
+                  editMode: true,
+                });
+                usedPlugin = true;
+              }
+            }
+          } catch {
+            /* fall through */
+          }
+        }
+        if (usedPlugin) {
+          /* already patched */
+        } else if (editOnBoundPath) {
           // fall through to model chat only if agent loop did not already reply
         } else if (planningFollowUp && !content.includes('<!--ark-attach:') && !content.includes('<!--ark-auto-read-->')) {
           // fall through to model chat below
@@ -6049,9 +6467,9 @@ export function AIChat() {
                 const text = String(live || '').trim();
                 if (text.length < 2) return;
                 const dump = /@@@FILE|```[\w]*\n|<!DOCTYPE\b|<html[\s>]|export\s+default\s+function/i.test(text);
-                const bubble = (allowEdits || dump)
+                const bubble = allowEdits
                   ? `__generating__:chat:${liveCodingStatusText(text)}`
-                  : text;
+                  : (dump ? 'Thinking through your idea…' : text);
                 setMessages(prev => {
                   const next = prev.map(m => (
                     m.id === assistantId ? { ...m, content: bubble } : m
@@ -6702,16 +7120,78 @@ export function AIChat() {
         const cleaned = usableAssistantText(response, content, previousAssistant);
         const candidate = String(cleaned || response || '').trim();
         response = looksLikePromptEcho(candidate) ? '' : (cleaned || candidate);
-        // Never dump source into chat unless the user asked to see/copy code.
+        // Prefer applying UI/build patches on disk instead of lecturing about code-in-chat.
         const diskBoundNow = Boolean(chatStudioDiskRootRef.current || chatStudioProjectIdRef.current);
+        const pendingIdeaNow = getLastPendingGreenfield(activeChatId);
+        const isUiEditAsk = looksLikeCodeEditAsk(content)
+          || looksLikeImplementGo(content)
+          || looksLikeGreenfieldStartWorkGo(content);
+        const planningTurn = !isUiEditAsk && (
+          shouldInjectPlanningConversation(content, {
+            pendingIdea: Boolean(pendingIdeaNow),
+          }) || wantsPlanningOnly(content) || looksLikeConversationalPlanningAsk(content)
+        );
+        const wantsDiskPatch = isUiEditAsk && !planningTurn;
+        if (wantsDiskPatch && (diskBoundNow || chatStudioDiskRootRef.current)) {
+          try {
+            const { applyChatReplyEdits } = await import('@/lib/chatAgentApply');
+            let filesForPatch = { ...chatStudioFilesRef.current };
+            const root = chatStudioDiskRootRef.current;
+            if (root) {
+              const hydrated = await loadPreviewFilesFromDisk(root);
+              if (Object.keys(hydrated).length) {
+                filesForPatch = { ...filesForPatch, ...hydrated };
+                setChatStudioFiles(filesForPatch);
+                chatStudioFilesRef.current = filesForPatch;
+              }
+            }
+            const applied = await applyChatReplyEdits({
+              reply: response,
+              projectId: chatStudioProjectIdRef.current,
+              projectName: studioPathBasename(root || '') || undefined,
+              files: filesForPatch,
+              userMessage: content,
+              diskRoot: root,
+            });
+            if (applied.ok && applied.updated.length) {
+              setChatStudioFiles(applied.files);
+              chatStudioFilesRef.current = applied.files;
+              setChatCodePill(activeChatId, true);
+              setCodePillSticky(true);
+              persistStudioSnapshot(activeChatId, {
+                files: applied.files,
+                projectId: chatStudioProjectIdRef.current,
+                name: studioPathBasename(root || '') || undefined,
+                diskRoot: root,
+                previewUrl: previewUrlRef.current,
+              });
+              void pushLivePreview(applied.files, false);
+              response = finalizeCodingChatBubble({
+                userMessage: content,
+                rawReply: '',
+                changedPaths: applied.updated,
+                applied: true,
+                editMode: true,
+              });
+            }
+          } catch {
+            /* fall through to sanitize */
+          }
+        }
         const looksLikeDump = /@@@FILE|<!DOCTYPE\b|<html[\s>]|```|export\s+default\s+function|className=|^\s*return\s*\(/im.test(response)
-          || ((response.match(/[{};]/g) || []).length >= 10);
+          || ((response.match(/[{};]/g) || []).length >= 10)
+          || /\bstruct\s+ContentView\b|\bimport\s+SwiftUI\b/i.test(response);
         if (looksLikeDump && !looksLikeCopyPasteCodeAsk(content)) {
           response = finalizeCodingChatBubble({
             userMessage: content,
             rawReply: response,
-            editMode: diskBoundNow || looksLikeCodeAsk(content),
+            // Build/edit: keep work-oriented copy. Planning: prose only.
+            editMode: Boolean(isUiEditAsk || (!planningTurn && (diskBoundNow || looksLikeCodeAsk(content) || wantsDiskPatch))),
           });
+        }
+        if (planningTurn) {
+          const { scrubPlanningReply } = await import('@/lib/chatPlanMode');
+          response = scrubPlanningReply(response);
         }
       }
       if (
@@ -7740,8 +8220,9 @@ export function AIChat() {
       ) : null}
       {(mode === 'general' || mode === 'voice') ? <ChatModeTabs /> : null}
       {loading ? (
-        <div className="flex-1 flex items-center justify-center text-content-tertiary">
-          <Loader2 className="w-5 h-5 animate-spin" />
+        <div className="flex-1 flex flex-col items-center justify-center gap-3 text-content-tertiary">
+          <Loader2 className="w-5 h-5 animate-spin text-content-secondary" />
+          <p className="text-xs text-content-tertiary">Loading chat…</p>
         </div>
       ) : mode === 'voice' ? (
         <VoiceModeLayout

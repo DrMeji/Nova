@@ -41,10 +41,23 @@ function detectProjectKind(text: string): ProjectKind {
   return 'vite-react';
 }
 
+function looksLikeUiLabelRenameAsk(text: string): boolean {
+  const t = String(text || '').trim();
+  // "Rename the top title to …" / "rename the heading / button / label" = UI edit, not a file rename.
+  return /\brename\b[\s\S]{0,48}\b(?:title|heading|headline|header|label|button|text|copy|caption|name\s+on\s+(?:the\s+)?(?:screen|page|ui))\b/i.test(t)
+    || /\brename\b[\s\S]{0,24}\b(?:top|main|hero|page|app|screen)\s+(?:title|heading|headline|header|name)\b/i.test(t);
+}
+
 function looksLikeRenameFileAsk(text: string): boolean {
   const t = String(text || '').trim();
   if (!t) return false;
-  if (/\b(?:rename|re-name)\b/i.test(t)) return true;
+  if (looksLikeUiLabelRenameAsk(t)) return false;
+  if (/\b(?:rename|re-name)\b/i.test(t)) {
+    // Bare "rename … to …" without a filename / "file" noun is usually UI copy, not disk rename.
+    if (/\b(?:file|image|photo|png|jpe?g|folder|\.[a-z0-9]{1,12})\b/i.test(t)) return true;
+    if (/\brename\b\s+(?:the\s+)?(?:file|image|photo)\b/i.test(t)) return true;
+    return false;
+  }
   if (/\bchange\s+(?:the\s+)?(?:file\s+)?name\b/i.test(t)) return true;
   if (/\b(?:call|name)\s+(?:the\s+)?(?:file|image|photo|png|jpe?g)\b/i.test(t) && /\b(?:to|as)\b/i.test(t)) {
     return true;

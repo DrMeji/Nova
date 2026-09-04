@@ -662,6 +662,12 @@ export function shouldInjectPlanningConversation(
 ): boolean {
   if (looksLikeImplementGo(content)) return false;
   if (looksLikeDirectJudgmentAsk(content)) return false;
+  // Bound UI / copy edits are never “planning only” — apply on disk.
+  if (
+    /\b(?:change|update|set|rename|edit|make)\b[\s\S]{0,100}\b(?:hero|headline|heading|title|h1|button|text|label|copy|wording|background|color)\b/i.test(content)
+  ) {
+    return false;
+  }
   const pending = Boolean(opts?.pendingIdea);
   const bare = isBarePlanningFollowUp(content);
   if (looksLikeGreenfieldIdea(content) || wantsPlanningOnly(content)) return true;

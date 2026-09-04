@@ -143,19 +143,26 @@ export async function resolveChatProjectRoot(opts: {
   try {
     const roots = await window.arkDesktop?.browseRoots?.();
     const desktop = roots?.roots?.find(r => r.id === 'desktop')?.path;
-    if (desktop && wantName && buildIntent) {
-      const projectsDir = studioPathJoin(desktop, 'Projects');
-      const listing = await window.arkDesktop?.listDir?.(projectsDir);
-      if (listing?.ok) {
-        for (const item of listing.items || []) {
-          if (item.kind !== 'dir') continue;
-          if (String(item.name || '').toLowerCase() === wantKey && item.path) {
-            candidates.unshift(item.path);
+    const documents = roots?.roots?.find(r => r.id === 'documents')?.path;
+    if (wantName && buildIntent) {
+      const arkHomes: string[] = [];
+      if (documents) arkHomes.push(studioPathJoin(documents, 'ARK Projects'));
+      if (desktop) {
+        arkHomes.push(studioPathJoin(desktop, 'ARK Projects'));
+        arkHomes.push(studioPathJoin(desktop, 'Projects'));
+      }
+      for (const projectsDir of arkHomes) {
+        const listing = await window.arkDesktop?.listDir?.(projectsDir);
+        if (listing?.ok) {
+          for (const item of listing.items || []) {
+            if (item.kind !== 'dir') continue;
+            if (String(item.name || '').toLowerCase() === wantKey && item.path) {
+              candidates.unshift(item.path);
+            }
           }
         }
+        candidates.push(studioPathJoin(projectsDir, wantName));
       }
-      // Only invent Desktop\Projects\{name} when that folder actually exists (checked below).
-      candidates.push(studioPathJoin(projectsDir, wantName));
     }
   } catch {
     /* ignore */

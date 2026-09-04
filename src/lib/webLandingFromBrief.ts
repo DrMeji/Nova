@@ -1131,9 +1131,447 @@ body {
   ];
 }
 
+/** Apple / Cursor-grade product marketing page — hero, features, specs, legal pages. */
+export function wantsPremiumProductLanding(brief: string): boolean {
+  const t = String(brief || '');
+  return /\b(?:apple\.com|premium|professional|atelier|product\s+(?:story|marketing)|full[- ]?bleed|feature\s+grid|terms\s+of\s+service|privacy\s+(?:policy|footer)|design[- ]conscious)\b/i.test(t)
+    || (/\b(?:unsplash|hero\s+photograph)\b/i.test(t) && /\b(?:buy\s+now|cta|newsletter|specs?)\b/i.test(t));
+}
+
+function buildPremiumProductLandingFiles(name: string, brief: string): LandingFile[] {
+  const title = String(name || 'Product').trim() || 'Product';
+  let urls = pickUrls(brief);
+  if (urls.length < 3) {
+    urls = [
+      'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=2000&q=80',
+      'https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=1200&q=80',
+      'https://images.unsplash.com/photo-1614850523459-c2f4e1463bc0?w=1200&q=80',
+      'https://images.unsplash.com/photo-1633356122544-f134324a6cee?w=1200&q=80',
+      ...urls,
+    ];
+  }
+  const hero = urls[0];
+  const headline = pickHeadline(brief, title);
+  const subtitle = pickSubtitle(brief)
+    || 'Designed with quiet precision. Photography, typography, and motion in one considered surface.';
+  const primaryCta = pickButtons(brief)[0] || 'Buy Now';
+  const secondaryCta = pickButtons(brief)[1] || 'Explore';
+  const year = new Date().getFullYear();
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>${escapeHtml(title)}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/styles.css" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230a0a0a'/%3E%3Ccircle cx='16' cy='16' r='7' fill='%23f5f5f7'/%3E%3C/svg%3E" />
+</head>
+<body>
+  <nav class="topnav" aria-label="Primary">
+    <a class="logo" href="#top" aria-label="${escapeHtml(title)} home">
+      <span class="logo-mark" aria-hidden="true"></span>
+      <span>${escapeHtml(title)}</span>
+    </a>
+    <div class="topnav-links">
+      <a href="#story">Story</a>
+      <a href="#features">Features</a>
+      <a href="#specs">Specs</a>
+      <a href="#about">About</a>
+      <a class="nav-cta" href="#buy">${escapeHtml(primaryCta)}</a>
+    </div>
+  </nav>
+
+  <header id="top" class="hero" style="--hero:url('${escapeHtml(hero)}')">
+    <div class="hero-veil"></div>
+    <div class="hero-inner">
+      <p class="eyebrow">${escapeHtml(title)}</p>
+      <h1>${escapeHtml(headline)}</h1>
+      <p class="sub">${escapeHtml(subtitle)}</p>
+      <div class="actions">
+        <a class="btn btn-primary" href="#buy">${escapeHtml(primaryCta)}</a>
+        <a class="btn btn-ghost" href="#story">${escapeHtml(secondaryCta)}</a>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section id="story" class="story">
+      <div class="story-copy">
+        <p class="section-label">Product story</p>
+        <h2>Crafted for people who notice the details.</h2>
+        <p>Every surface is intentional — from the full-bleed photography to the quiet type hierarchy. ${escapeHtml(title)} is a complete first page you can ship, polish, and extend.</p>
+      </div>
+      <figure class="story-media">
+        <img src="${escapeHtml(urls[1])}" alt="Product atmosphere" loading="lazy" />
+      </figure>
+    </section>
+
+    <section id="features" class="features" aria-label="Features">
+      <p class="section-label">Capabilities</p>
+      <h2>Everything in its place.</h2>
+      <div class="feature-grid">
+        <article class="feature">
+          <div class="feature-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 7h16M4 12h10M4 17h14"/></svg>
+          </div>
+          <h3>Quiet typography</h3>
+          <p>Serif display with system-clean body copy. Hierarchy you feel before you measure it.</p>
+        </article>
+        <article class="feature">
+          <div class="feature-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="12" r="1.5"/><path d="M21 15l-4.5-4.5L9 18"/></svg>
+          </div>
+          <h3>Real photography</h3>
+          <p>Full-bleed Unsplash hero and gallery frames — not gradients pretending to be product shots.</p>
+        </article>
+        <article class="feature">
+          <div class="feature-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 3v18M3 12h18"/><circle cx="12" cy="12" r="9"/></svg>
+          </div>
+          <h3>Subtle motion</h3>
+          <p>Soft fades on scroll. Presence without noise — the way a flagship site should feel.</p>
+        </article>
+        <article class="feature">
+          <div class="feature-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          </div>
+          <h3>Legal-ready footer</h3>
+          <p>Terms, Privacy, and Contact — real pages linked from a polished site footer.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="gallery" aria-label="Gallery">
+      <img src="${escapeHtml(urls[2])}" alt="Detail one" loading="lazy" />
+      <img src="${escapeHtml(urls[3] || urls[1])}" alt="Detail two" loading="lazy" />
+    </section>
+
+    <section id="specs" class="specs">
+      <p class="section-label">Specifications</p>
+      <h2>Built to feel finished.</h2>
+      <dl class="spec-strip">
+        <div><dt>Display</dt><dd>Edge-to-edge hero · 16:9 photography</dd></div>
+        <div><dt>Type</dt><dd>Instrument Serif + Inter</dd></div>
+        <div><dt>Theme</dt><dd>Near-black · aluminum accents</dd></div>
+        <div><dt>Motion</dt><dd>Intersection fade · 400ms ease</dd></div>
+        <div><dt>Pages</dt><dd>Home · Terms · Privacy · Contact</dd></div>
+        <div><dt>CTA</dt><dd>${escapeHtml(primaryCta)} · ${escapeHtml(secondaryCta)}</dd></div>
+      </dl>
+    </section>
+
+    <section id="about" class="about">
+      <p class="section-label">About</p>
+      <h2>A studio mindset, not a template.</h2>
+      <p>${escapeHtml(title)} ships as a professional marketing surface — navigable sections, iconography, newsletter capture, and legal pages — so the first impression matches the product ambition.</p>
+    </section>
+
+    <section id="buy" class="newsletter">
+      <div class="newsletter-inner">
+        <h2>Stay in the loop.</h2>
+        <p>Product notes, launch windows, and design drops. No spam.</p>
+        <form id="newsletter-form" class="newsletter-form" novalidate>
+          <label class="sr-only" for="email">Email</label>
+          <input id="email" name="email" type="email" placeholder="you@studio.com" required autocomplete="email" />
+          <button type="submit">${escapeHtml(primaryCta)}</button>
+        </form>
+        <p class="form-note" id="form-note" hidden>Thanks — you’re on the list.</p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="footer-brand">
+      <span class="logo-mark" aria-hidden="true"></span>
+      <strong>${escapeHtml(title)}</strong>
+      <p>&copy; ${year} ${escapeHtml(title)}. All rights reserved.</p>
+    </div>
+    <div class="footer-links">
+      <a href="terms.html">Terms of Service</a>
+      <a href="privacy.html">Privacy Policy</a>
+      <a href="contact.html">Contact</a>
+    </div>
+  </footer>
+  <script src="js/app.js"></script>
+</body>
+</html>
+`;
+
+  const css = `:root {
+  --bg: #050505;
+  --fg: #f5f5f7;
+  --muted: rgba(245,245,247,0.64);
+  --line: rgba(255,255,255,0.08);
+  --accent: #f5f5f7;
+  --accent-ink: #0a0a0a;
+  --serif: "Instrument Serif", Georgia, serif;
+  --sans: Inter, system-ui, sans-serif;
+}
+* { box-sizing: border-box; margin: 0; }
+html { scroll-behavior: smooth; }
+body {
+  font-family: var(--sans);
+  color: var(--fg);
+  background: var(--bg);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); border: 0; }
+.logo-mark {
+  width: 1.1rem; height: 1.1rem; border-radius: 999px;
+  background: radial-gradient(circle at 30% 30%, #fff, #a1a1a6 55%, #3a3a3c);
+  display: inline-block;
+}
+.topnav {
+  position: sticky; top: 0; z-index: 20;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0.85rem 1.5rem;
+  background: rgba(5,5,5,0.72);
+  backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--line);
+}
+.logo { display: inline-flex; align-items: center; gap: 0.55rem; color: var(--fg); text-decoration: none; font-weight: 600; letter-spacing: -0.02em; }
+.topnav-links { display: flex; align-items: center; gap: 1.1rem; font-size: 0.86rem; }
+.topnav-links a { color: var(--muted); text-decoration: none; }
+.topnav-links a:hover { color: var(--fg); }
+.nav-cta {
+  padding: 0.4rem 0.85rem !important;
+  border-radius: 999px;
+  background: var(--accent) !important;
+  color: var(--accent-ink) !important;
+  font-weight: 600;
+}
+.hero {
+  position: relative;
+  min-height: 92vh;
+  display: grid;
+  place-items: end start;
+  padding: 5rem 1.5rem 4rem;
+  background: var(--hero) center/cover no-repeat;
+}
+.hero-veil {
+  position: absolute; inset: 0;
+  background:
+    linear-gradient(180deg, rgba(5,5,5,0.25), rgba(5,5,5,0.82) 70%, var(--bg)),
+    linear-gradient(90deg, rgba(5,5,5,0.55), transparent 55%);
+}
+.hero-inner { position: relative; max-width: 40rem; }
+.eyebrow {
+  font-size: 0.72rem; letter-spacing: 0.22em; text-transform: uppercase;
+  color: var(--muted); margin-bottom: 1rem;
+}
+.hero h1 {
+  font-family: var(--serif);
+  font-size: clamp(2.8rem, 7vw, 5.2rem);
+  font-weight: 400;
+  letter-spacing: -0.03em;
+  line-height: 1.02;
+  margin-bottom: 1rem;
+}
+.sub { color: var(--muted); max-width: 28rem; margin-bottom: 1.75rem; font-size: 1.05rem; }
+.actions { display: flex; flex-wrap: wrap; gap: 0.75rem; }
+.btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 0.85rem 1.35rem; border-radius: 999px; text-decoration: none;
+  font-size: 0.92rem; font-weight: 600; border: 1px solid transparent;
+  transition: transform 0.2s ease, background 0.2s ease, color 0.2s ease;
+}
+.btn:hover { transform: translateY(-1px); }
+.btn-primary { background: var(--accent); color: var(--accent-ink); }
+.btn-ghost { border-color: rgba(255,255,255,0.28); color: var(--fg); background: rgba(255,255,255,0.04); }
+.section-label {
+  font-size: 0.72rem; letter-spacing: 0.18em; text-transform: uppercase;
+  color: var(--muted); margin-bottom: 0.75rem;
+}
+.story, .features, .specs, .about, .newsletter {
+  padding: 5rem 1.5rem;
+  max-width: 1120px;
+  margin: 0 auto;
+}
+.story {
+  display: grid; gap: 2.5rem; align-items: center;
+  grid-template-columns: 1.05fr 0.95fr;
+}
+.story h2, .features h2, .specs h2, .about h2, .newsletter h2 {
+  font-family: var(--serif);
+  font-size: clamp(2rem, 4vw, 3rem);
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  margin-bottom: 1rem;
+}
+.story-copy p, .about p, .newsletter p { color: var(--muted); max-width: 34rem; }
+.story-media img, .gallery img {
+  width: 100%; display: block; border-radius: 1.25rem;
+  border: 1px solid var(--line); object-fit: cover;
+}
+.story-media img { min-height: 22rem; }
+.feature-grid {
+  display: grid; gap: 1rem;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-top: 2rem;
+}
+.feature {
+  padding: 1.25rem;
+  border: 1px solid var(--line);
+  border-radius: 1.1rem;
+  background: linear-gradient(180deg, rgba(255,255,255,0.03), transparent);
+}
+.feature-icon {
+  width: 2.4rem; height: 2.4rem; margin-bottom: 1rem;
+  color: var(--fg); opacity: 0.9;
+}
+.feature-icon svg { width: 100%; height: 100%; }
+.feature h3 { font-size: 1rem; margin-bottom: 0.4rem; letter-spacing: -0.01em; }
+.feature p { color: var(--muted); font-size: 0.9rem; }
+.gallery {
+  display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 1rem;
+  max-width: 1120px; margin: 0 auto; padding: 0 1.5rem 2rem;
+}
+.gallery img { min-height: 18rem; }
+.spec-strip {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px; margin-top: 2rem;
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: 1.1rem;
+  overflow: hidden;
+}
+.spec-strip > div { background: #0b0b0b; padding: 1.15rem 1.2rem; }
+.spec-strip dt { font-size: 0.72rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); margin-bottom: 0.35rem; }
+.spec-strip dd { font-size: 0.95rem; }
+.newsletter {
+  margin: 2rem auto 4rem;
+  border: 1px solid var(--line);
+  border-radius: 1.5rem;
+  background:
+    radial-gradient(circle at 20% 0%, rgba(255,255,255,0.08), transparent 45%),
+    #0a0a0a;
+}
+.newsletter-inner { max-width: 36rem; }
+.newsletter-form { display: flex; gap: 0.6rem; margin-top: 1.4rem; flex-wrap: wrap; }
+.newsletter-form input {
+  flex: 1; min-width: 14rem;
+  padding: 0.85rem 1rem; border-radius: 999px;
+  border: 1px solid var(--line); background: rgba(255,255,255,0.03); color: var(--fg);
+  outline: none;
+}
+.newsletter-form button {
+  padding: 0.85rem 1.25rem; border-radius: 999px; border: 0;
+  background: var(--accent); color: var(--accent-ink); font-weight: 600; cursor: pointer;
+}
+.form-note { margin-top: 0.85rem; color: #9ae6b4; font-size: 0.9rem; }
+.site-footer {
+  display: flex; justify-content: space-between; gap: 1.5rem; flex-wrap: wrap;
+  padding: 2.5rem 1.5rem 3rem; border-top: 1px solid var(--line);
+  max-width: 1120px; margin: 0 auto; color: var(--muted); font-size: 0.88rem;
+}
+.footer-brand { display: grid; gap: 0.55rem; }
+.footer-brand strong { color: var(--fg); }
+.footer-links { display: flex; gap: 1.25rem; align-items: flex-start; }
+.footer-links a { color: var(--muted); text-decoration: none; }
+.footer-links a:hover { color: var(--fg); }
+.reveal { opacity: 0; transform: translateY(14px); transition: opacity 0.55s ease, transform 0.55s ease; }
+.reveal.is-in { opacity: 1; transform: none; }
+@media (max-width: 900px) {
+  .topnav-links a:not(.nav-cta) { display: none; }
+  .story, .feature-grid, .gallery, .spec-strip { grid-template-columns: 1fr; }
+  .gallery img, .story-media img { min-height: 14rem; }
+}
+`;
+
+  const js = `(() => {
+  const reveal = () => {
+    document.querySelectorAll('.story, .features, .specs, .about, .newsletter, .gallery').forEach((el) => {
+      el.classList.add('reveal');
+    });
+    const io = new IntersectionObserver((entries) => {
+      entries.forEach((e) => { if (e.isIntersecting) e.target.classList.add('is-in'); });
+    }, { threshold: 0.12 });
+    document.querySelectorAll('.reveal').forEach((el) => io.observe(el));
+  };
+  reveal();
+  document.querySelectorAll('a[href^="#"]').forEach((a) => {
+    a.addEventListener('click', (e) => {
+      const id = a.getAttribute('href');
+      if (!id || id === '#') return;
+      const el = document.querySelector(id);
+      if (!el) return;
+      e.preventDefault();
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  });
+  const form = document.getElementById('newsletter-form');
+  const note = document.getElementById('form-note');
+  form?.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const email = form.querySelector('input[type="email"]');
+    if (email && !email.value.includes('@')) {
+      email.focus();
+      return;
+    }
+    if (note) note.hidden = false;
+    form.reset();
+  });
+})();
+`;
+
+  const legalShell = (pageTitle: string, bodyHtml: string) => `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>${escapeHtml(pageTitle)} · ${escapeHtml(title)}</title>
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <nav class="topnav"><a class="logo" href="index.html"><span class="logo-mark"></span><span>${escapeHtml(title)}</span></a></nav>
+  <main class="about" style="max-width:42rem">
+    <p class="section-label">Legal</p>
+    <h2>${escapeHtml(pageTitle)}</h2>
+    ${bodyHtml}
+    <p style="margin-top:2rem"><a class="btn btn-ghost" href="index.html">Back home</a></p>
+  </main>
+  <footer class="site-footer">
+    <p>&copy; ${year} ${escapeHtml(title)}</p>
+    <div class="footer-links">
+      <a href="terms.html">Terms</a>
+      <a href="privacy.html">Privacy</a>
+      <a href="contact.html">Contact</a>
+    </div>
+  </footer>
+</body>
+</html>`;
+
+  return [
+    { path: 'index.html', content: html },
+    { path: 'css/styles.css', content: css },
+    { path: 'js/app.js', content: js },
+    {
+      path: 'terms.html',
+      content: legalShell('Terms of Service', `<p style="color:var(--muted);margin-top:1rem">By using ${escapeHtml(title)} you agree to these demonstration terms. This site is a product marketing preview. No purchase is processed here. Content is provided as-is for evaluation.</p><p style="color:var(--muted);margin-top:1rem">You may not scrape, resell, or misrepresent ${escapeHtml(title)} branding. We may update these terms; continued use means acceptance.</p>`),
+    },
+    {
+      path: 'privacy.html',
+      content: legalShell('Privacy Policy', `<p style="color:var(--muted);margin-top:1rem">Newsletter emails entered on this demo stay in your browser session only — nothing is sent to a server. We do not sell personal data. Analytics are not embedded in this scaffold.</p><p style="color:var(--muted);margin-top:1rem">Photography is sourced from Unsplash under their license. Replace assets before production launch.</p>`),
+    },
+    {
+      path: 'contact.html',
+      content: legalShell('Contact', `<p style="color:var(--muted);margin-top:1rem">Press and partnerships: hello@${escapeHtml(title).toLowerCase().replace(/\s+/g, '')}.studio</p><p style="color:var(--muted);margin-top:1rem">For product support, reply through your ARK project chat or the in-page newsletter capture on the home page.</p>`),
+    },
+    { path: '.gitignore', content: '.DS_Store\nThumbs.db\n*.log\n.env\n.env.*\n' },
+  ];
+}
+
 export function buildLandingPageFiles(name: string, brief: string): LandingFile[] {
   const title = String(name || 'Site').trim() || 'Site';
   let urls = pickUrls(brief);
+
+  if (wantsPremiumProductLanding(brief)) {
+    return buildPremiumProductLandingFiles(title, brief);
+  }
 
   if (/\b(gallery|masonry|portfolio|photographer|photo\s+grid|framelab)\b/i.test(brief)
     || (urls.length >= 4 && /\b(black|nav|work|about)\b/i.test(brief))) {

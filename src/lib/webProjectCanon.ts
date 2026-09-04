@@ -257,12 +257,18 @@ export function webMicroAskEdits(files: WebFileMap, message: string): WebFileEdi
     || /\b(toggle\s*theme)\b/i.test(t) && /\b(remove|delete)\b/i.test(t);
   const wantsBadgeText = /\bbadge\b/i.test(t) && /\b(text|label|say|to|into)\b/i.test(t);
   const wantsEqualsBigger = /\bequals?\s+button\b/i.test(t) && /\b(larger|bigger|bigger|bigger|bigger|increase|grow)\b/i.test(t);
-  const renameTo = (!wantsBadgeText && !/\bbutton\b/i.test(t))
+  const buttonLabelTo = (
+    t.match(/\b(?:make|change|set|update)\b[\s\S]{0,48}\bbutton\b[\s\S]{0,48}\b(?:say|to|into|label)\s+["']?([A-Za-z0-9][A-Za-z0-9 ,.+'-]{1,60})/i)?.[1]
+    || t.match(/\bbutton\b[\s\S]{0,24}\blabel\b[\s\S]{0,24}\b(?:say|to|into)\s+["']?([A-Za-z0-9][A-Za-z0-9 ,.+'-]{1,60})/i)?.[1]
+    || null
+  )?.trim()?.replace(/[.,;:]+$/, '') || null;
+  const renameTo = (!wantsBadgeText && !buttonLabelTo && !/\bbutton\b/i.test(t))
     ? (
-      t.match(/(?:change|rename|set|into).{0,48}(?:to|into)\s+["']?([A-Za-z0-9][A-Za-z0-9 .+-]{1,40})/i)?.[1]?.trim()
-      || t.match(/(?:saying|say)\s+["']?([A-Za-z0-9][A-Za-z0-9 .+-]{1,40})/i)?.[1]?.trim()
+      t.match(/(?:change|rename|set|into).{0,48}(?:hero|headline|heading|title|h1).{0,32}(?:to|into)\s+["']?([A-Za-z0-9][A-Za-z0-9 ,.+'-]{1,60})/i)?.[1]?.trim()
+      || t.match(/(?:change|rename|set|into).{0,48}(?:to|into)\s+["']?([A-Za-z0-9][A-Za-z0-9 ,.+'-]{1,60})/i)?.[1]?.trim()
+      || t.match(/(?:saying|say)\s+["']?([A-Za-z0-9][A-Za-z0-9 ,.+'-]{1,60})/i)?.[1]?.trim()
       || (/\bpizza\b/i.test(t) ? 'I like pizza' : null)
-    )
+    )?.replace(/[.,;:]+$/, '') || null
     : null;
 
   if (wantsBg && colorWord) {
@@ -325,11 +331,27 @@ h1 {
     const safe = escapeHtml(renameTo.replace(/</g, ''));
     if (/<h1[\s>]/i.test(html)) {
       html = html.replace(/(<h1[^>]*>)([\s\S]*?)(<\/h1>)/i, `$1${safe}$3`);
+    } else if (/<h2[\s>]/i.test(html)) {
+      html = html.replace(/(<h2[^>]*>)([\s\S]*?)(<\/h2>)/i, `$1${safe}$3`);
+    } else if (/class=["'][^"']*(?:hero|headline|brand)[^"']*["'][^>]*>/i.test(html)) {
+      html = html.replace(/(class=["'][^"']*(?:hero|headline|brand)[^"']*["'][^>]*>)([^<]{1,80})/i, `$1${safe}`);
     } else {
       html = html.replace(/<main[^>]*>/i, `$&\n    <h1>${safe}</h1>`);
     }
     html = html.replace(/<title>[^<]*<\/title>/i, `<title>${safe}</title>`);
     touched = true;
+  }
+
+  if (buttonLabelTo) {
+    const safe = escapeHtml(buttonLabelTo.replace(/</g, ''));
+    const fromHint = t.match(/\b(?:start|begin|submit|save|continue|next|login|sign\s*up)\b/i)?.[0];
+    if (fromHint && new RegExp(`>(\\s*)${fromHint}(\\s*)<`, 'i').test(html)) {
+      html = html.replace(new RegExp(`>(\\s*)${fromHint}(\\s*)<`, 'i'), `>${safe}<`);
+      touched = true;
+    } else if (/<button\b[^>]*>[\s\S]*?<\/button>/i.test(html)) {
+      html = html.replace(/(<button\b[^>]*>)([\s\S]*?)(<\/button>)/i, `$1${safe}$3`);
+      touched = true;
+    }
   }
 
   if (wantsBadgeText) {
@@ -627,6 +649,8 @@ export function isWebMicroAsk(message: string): boolean {
   if (/\bsearch\s*bar\b/i.test(t) || (/\bsearch\b/i.test(t) && /\b(top|corner|right|header|bar)\b/i.test(t))) return true;
   if (/\b(remove|delete)\b.{0,40}\b(toggle|theme)\b/i.test(t)) return true;
   if (/(?:change|rename|set|into).{0,48}(?:to|into)\s+["']?[A-Za-z0-9]/i.test(t)) return true;
+  if (/\b(?:make|change|set|update)\b[\s\S]{0,48}\bbutton\b[\s\S]{0,40}\b(?:say|to|into|label)\b/i.test(t)) return true;
+  if (/\b(?:hero|headline|heading|title)\b[\s\S]{0,40}\b(?:to|into|say)\b/i.test(t)) return true;
   if (/\bpizza\b/i.test(t) && /\b(change|saying|say|text|title|hello)\b/i.test(t)) return true;
   if (/\b(text|hello\s*world)\b.{0,40}\b(white|black|color)\b/i.test(t)) return true;
   if (/\b(logo|icon)\b/i.test(t) && /\b(add|put|place|center|middle|screen)\b/i.test(t)) return true;
@@ -683,6 +707,41 @@ export function reactSurgicalMicroAskEdits(
     }
     if (app.includes(`>${from}<`)) {
       app = app.replace(new RegExp(`(>)${from}(<)`, 'g'), `$1${to}$2`);
+      touchedApp = true;
+    }
+  }
+
+  const buttonLabelTo = (
+    t.match(/\b(?:make|change|set|update)\b[\s\S]{0,48}\bbutton\b[\s\S]{0,48}\b(?:say|to|into|label)\s+["']?([A-Za-z0-9][A-Za-z0-9 ,.+'-]{1,60})/i)?.[1]
+    || t.match(/\bbutton\b[\s\S]{0,24}\blabel\b[\s\S]{0,24}\b(?:say|to|into)\s+["']?([A-Za-z0-9][A-Za-z0-9 ,.+'-]{1,60})/i)?.[1]
+    || null
+  )?.trim()?.replace(/[.,;:]+$/, '');
+  if (buttonLabelTo) {
+    const safe = buttonLabelTo.replace(/[`$'"]/g, '');
+    const fromHint = t.match(/\b(?:start|begin|submit|save|continue|next|login|sign\s*up|pause|reset|primary)\b/i)?.[0];
+    if (fromHint && new RegExp(`>(\\s*)${fromHint}(?:\\s+action)?(\\s*)<`, 'i').test(app)) {
+      app = app.replace(new RegExp(`>(\\s*)${fromHint}(?:\\s+action)?(\\s*)<`, 'i'), `>${safe}<`);
+      touchedApp = true;
+    } else if (/>Primary action</i.test(app)) {
+      app = app.replace(/>Primary action</i, `>${safe}<`);
+      touchedApp = true;
+    } else if (/<button\b[^>]*>[\s\S]*?<\/button>/i.test(app)) {
+      app = app.replace(/(<button\b[^>]*>)([\s\S]*?)(<\/button>)/i, `$1${safe}$3`);
+      touchedApp = true;
+    }
+  }
+
+  const titleTo = (
+    t.match(/(?:change|rename|set).{0,48}(?:top\s+title|hero|headline|heading|title|h1).{0,32}(?:to|into)\s+["']?([A-Za-z0-9][A-Za-z0-9 ,.+'-]{1,60})/i)?.[1]
+    || null
+  )?.trim()?.replace(/[.,;:]+$/, '');
+  if (titleTo && !buttonLabelTo) {
+    const safe = titleTo.replace(/[`$'"]/g, '');
+    if (/<h1[\s>]/i.test(app)) {
+      app = app.replace(/(<h1[^>]*>)([\s\S]*?)(<\/h1>)/i, `$1${safe}$3`);
+      touchedApp = true;
+    } else if (/className=["'][^"']*(?:title|hero|brand|heading)[^"']*["'][^>]*>/i.test(app)) {
+      app = app.replace(/(className=["'][^"']*(?:title|hero|brand|heading)[^"']*["'][^>]*>)([^<]{1,80})/i, `$1${safe}`);
       touchedApp = true;
     }
   }

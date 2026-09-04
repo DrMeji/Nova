@@ -40,10 +40,13 @@ export function planningConversationHint(topicHint?: string): string {
   return [
     'Planning conversation only. Do not create files, folders, or projects.',
     'Write like a sharp human collaborator — warm, clear, specific — not a quiz bot or template.',
-    'Open by mirroring what they want to build in one natural sentence (“I see you’re aiming at…”), then give a short best-way-to-start take (2–4 sentences).',
-    'After that, ask 1–3 product questions in plain language. Prefer flowing prose or light bullets over a stiff numbered exam.',
+    'This is a real back-and-forth. Do NOT rush them to build. Do NOT end by saying “say go and I’ll create files” unless they already asked to build.',
+    'Reply in complete sentences. Never stop mid-phrase. Aim for about 80–160 words each planning turn.',
+    'Open by restating their idea in your own words (one full sentence), then give a concrete best-way-to-start take (2–4 sentences).',
+    'Then ask 1–3 product questions in plain language. Prefer flowing prose or light bullets over a stiff numbered exam.',
     'Good questions: web vs phone app, who it is for, the one must-have for v1, calm vs playful feel, offline or online.',
     'If they want a phone/mobile app, ask whether it is for overall iOS, overall Android, or a specific device (e.g. iPhone 16, Galaxy S23) — never quiz them on tech stacks.',
+    'On follow-up turns, react to what they just said, refine the plan, and keep asking only what is still missing. Stay conversational until they clearly ask to create/build on disk.',
     'HARD BAN — never ask: tech-stack experience, “want recommendations?”, coding skill, frameworks/languages they know, how they will handle auth, login, privacy, encryption, databases, hosting, or compliance. ARK users are not engineers; ARK chooses defaults (private by default, sensible auth when needed) without interviewing them.',
     'Never ask them to pick a stack or “how to handle user authentication and data privacy.”',
     'Invite them to add more detail when ready (“Anything else you already know you want?”).',
@@ -53,4 +56,33 @@ export function planningConversationHint(topicHint?: string): string {
     'Do not dump a multi-week plan unless they asked for timeline/scope.',
     topic,
   ].filter(Boolean).join(' ');
+}
+
+/** Strip banned planning quiz lines the local model still emits. */
+export function scrubPlanningReply(text: string): string {
+  let out = String(text || '');
+  if (!out.trim()) return out;
+  const banned = [
+    /[^.!?\n]*\b(?:what|which)\s+programming\s+language[^.!?\n]*[.!?]*/gi,
+    /[^.!?\n]*\b(?:what|which)\s+framework[^.!?\n]*[.!?]*/gi,
+    /[^.!?\n]*\btech(?:nology)?\s+stack[^.!?\n]*[.!?]*/gi,
+    /[^.!?\n]*\b(?:React|Vue|Angular|Svelte)\s+or\s+(?:React|Vue|Angular|Svelte|plain)[^.!?\n]*[.!?]*/gi,
+    /[^.!?\n]*\b(?:Netlify|Vercel|GitHub Pages|hosting\s+platform)[^.!?\n]*[.!?]*/gi,
+    /[^.!?\n]*\b(?:Node\.js|Express)\b[^.!?\n]*(?:backend|server)[^.!?\n]*[.!?]*/gi,
+    /[^.!?\n]*\b(?:authentication|data privacy|encryption|compliance)\b[^.!?\n]*[.!?]*/gi,
+    /[^.!?\n]*\bwant recommendations\??\b[^.!?\n]*[.!?]*/gi,
+  ];
+  for (const re of banned) out = out.replace(re, '');
+  out = out
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n[ \t]+/g, '\n')
+    .trim();
+  if (out.length < 40 && String(text || '').trim().length > 80) {
+    // Scrub wiped too much — fall back to original with a soft note stripped of fences only.
+    return String(text || '')
+      .replace(/```[\w]*\n[\s\S]*?```/g, '')
+      .trim();
+  }
+  return out;
 }

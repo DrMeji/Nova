@@ -113,7 +113,8 @@ export async function applyChatReplyEdits(opts: {
     isEdit: Object.keys(opts.files || {}).length > 0,
     hasReferenceImage: /unsplash|https?:\/\/\S+\.(?:png|jpe?g|webp)|ark-media:/i.test(rawUser),
   });
-  const userMessage = appendix && !rawUser.includes('ARK design skills')
+  // Keep the original ask for micro-patches. the skills appendix is only for model scaffolding.
+  const userMessageForParse = appendix && !rawUser.includes('ARK design skills')
     ? `${rawUser}\n\n${appendix}`
     : rawUser;
   let baseFiles = normalizeStudioFileKeys(opts.files, opts.diskRoot);
@@ -122,17 +123,17 @@ export async function applyChatReplyEdits(opts: {
   }
   let edits = parseFileEdits(opts.reply);
   if (!edits.length) {
-    edits = extractChatStyleFileEdits(opts.reply, userMessage, baseFiles);
+    edits = extractChatStyleFileEdits(opts.reply, userMessageForParse, baseFiles);
   }
 
   // Prefer deterministic React/web patches for common UI asks. models often describe without writing.
-  const finalized = finalizeWebEdits(baseFiles, userMessage, edits, { projectName: opts.projectName });
+  const finalized = finalizeWebEdits(baseFiles, rawUser, edits, { projectName: opts.projectName });
   if (finalized.length) {
     edits = finalized;
   } else if (!edits.length) {
-    const react = reactUiMicroAskEdits(baseFiles, userMessage, { projectName: opts.projectName });
+    const react = reactUiMicroAskEdits(baseFiles, rawUser, { projectName: opts.projectName });
     if (react.length) edits = react;
-    else edits = scaffoldFallbackEdits(userMessage, baseFiles, { projectName: opts.projectName });
+    else edits = scaffoldFallbackEdits(userMessageForParse, baseFiles, { projectName: opts.projectName });
   }
 
   if (!edits.length) {
@@ -210,7 +211,7 @@ export async function applyChatReplyEdits(opts: {
   }
 
   const spoken = formatCodeChatReply(
-    userMessage,
+    rawUser,
     changed,
     stripFileBlocks(opts.reply),
     { surface: 'chat' },
