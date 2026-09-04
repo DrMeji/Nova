@@ -14,7 +14,12 @@ const sessions = new Map();
 const previewWindows = new Map();
 
 function previewRoot(projectId) {
-  const root = path.join(app.getPath('userData'), 'ark-previews', String(projectId || 'default'));
+  // Windows paths cannot contain ":" — chat ids used to be "chat:uuid".
+  const safe = String(projectId || 'default')
+    .replace(/[^a-zA-Z0-9._-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 120) || 'default';
+  const root = path.join(app.getPath('userData'), 'ark-previews', safe);
   fs.mkdirSync(root, { recursive: true });
   return root;
 }
@@ -38,6 +43,18 @@ function ensureIndex(root, projectName) {
     return;
   }
   if (fs.existsSync(indexPath)) return;
+  const staticIndex = path.join(root, 'static', 'index.html');
+  if (fs.existsSync(staticIndex)) {
+    fs.writeFileSync(
+      indexPath,
+      '<!DOCTYPE html><html><head><meta charset="utf-8" />'
+      + '<meta http-equiv="refresh" content="0;url=/static/index.html" />'
+      + '<title>Preview</title></head><body>'
+      + '<p><a href="/static/index.html">Open preview</a></p></body></html>',
+      'utf8',
+    );
+    return;
+  }
   const appTsx = path.join(root, 'src', 'App.tsx');
   const snippet = fs.existsSync(appTsx)
     ? fs.readFileSync(appTsx, 'utf8').slice(0, 2000)
@@ -227,6 +244,19 @@ function deviceWindowSize(device) {
   };
 }
 
+/** Scale web dashboards down in small Preview windows so cards don't overflow/collide. */
+function fitPreviewZoom(win) {
+  if (!win || win.isDestroyed()) return;
+  try {
+    const [cw] = win.getContentSize();
+    const designWidth = 1280;
+    const factor = Math.max(0.55, Math.min(1, (Number(cw) || designWidth) / designWidth));
+    win.webContents.setZoomFactor(factor);
+  } catch {
+    /* ignore */
+  }
+}
+
 async function loadDeviceIntoWindow(win, id, url, device, title) {
   try {
     win.setTitle(String(title || `${device.label} · ARK Preview`));
@@ -333,10 +363,23 @@ async function openPreviewWindow(payload) {
   });
   win.webContents.on('did-finish-load', () => {
     win.webContents.insertCSS(`
-      html { scrollbar-width: none; }
-      ::-webkit-scrollbar { width: 0 !important; height: 0 !important; }
+      html { scrollbar-width: thin; }
+      ::-webkit-scrollbar { width: 8px; height: 8px; }
+      ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.18); border-radius: 8px; }
+      html, body { max-width: 100%; overflow-x: auto; }
+      img, video, canvas, svg { max-width: 100%; height: auto; }
     `).catch(() => {});
+    try {
+      fitPreviewZoom(win);
+    } catch {
+      /* ignore */
+    }
   });
+  if (kind !== 'device') {
+    win.on('resize', () => {
+      try { fitPreviewZoom(win); } catch { /* ignore */ }
+    });
+  }
   if (kind === 'device' && device) {
     enableDeviceZoom(win);
     await loadDeviceIntoWindow(win, id, url, device, title);

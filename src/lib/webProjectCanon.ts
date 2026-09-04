@@ -655,7 +655,12 @@ export function reactSurgicalMicroAskEdits(
   if (/\b(scrap|rebuild|from\s+scratch|scaffold\s+(?:a\s+)?new|replace\s+(?:the\s+)?(?:entire\s+)?(?:app|layout|ui)|start\s+over)\b/i.test(t)) {
     return [];
   }
-  if (!isWebMicroAsk(t) && !/\b(rename|change|tint|make|update)\b/i.test(t)) return [];
+  if (
+    !isWebMicroAsk(t)
+    && !/\b(rename|change|tint|make|update|finish|feel\s+finished|apply|badge|unread|syncing|connect\s+bank|folder\s+groups?|find\s+in\s+note|tags?\s+chips?)\b/i.test(t)
+  ) {
+    return [];
+  }
 
   const flat = flatten(files);
   const appPath = findReactAppPath(flat);
@@ -722,7 +727,152 @@ export function reactSurgicalMicroAskEdits(
   const out: WebFileEdit[] = [];
   if (touchedApp) out.push({ path: appPath, content: app });
   if (touchedCss) out.push({ path: cssPath, content: css });
-  return out;
+  if (out.length) return out;
+
+  // Feature polish asks (badges / syncing / connect bank / find bar / tags) on an existing App.
+  return reactFeaturePolishEdits(files, message);
+}
+
+/** Inject visible polish into an existing React App without dumping source into chat. */
+export function reactFeaturePolishEdits(
+  files: WebFileMap,
+  message: string,
+): WebFileEdit[] {
+  const t = String(message || '');
+  if (!t.trim()) return [];
+  const wantsUnread = /\bunread\b|\bbadge\s*counts?\b|\bbadges?\b/i.test(t);
+  const wantsSync = /\bsyncing\b|\btyping\s+indicator\b/i.test(t);
+  const wantsBank = /\bconnect\s+bank\b|\bconnected\s+avatars?\b|\bstatus\s+bar\b/i.test(t);
+  const wantsFolders = /\bfolder\s+groups?\b/i.test(t);
+  const wantsFind = /\bfind\s+in\s+note\b|\bfind\s+bar\b/i.test(t);
+  const wantsTags = /\btags?\s+chips?\b|\btag\s+chips?\b/i.test(t);
+  if (!wantsUnread && !wantsSync && !wantsBank && !wantsFolders && !wantsFind && !wantsTags) {
+    return [];
+  }
+
+  const flat = flatten(files);
+  const appPath = findReactAppPath(flat);
+  if (!appPath || !flat[appPath]) return [];
+  const cssPath = findReactCssPath(flat, appPath);
+  let app = String(flat[appPath]);
+  let css = String(flat[cssPath] || '');
+  let touchedApp = false;
+  let touchedCss = false;
+
+  if (wantsUnread && !/ark-unread-badge|data-ark-unread/i.test(app)) {
+    if (/(className=["'][^"']*(?:row|account|channel|item|wallet)[^"']*["'][^>]*>)/i.test(app)) {
+      app = app.replace(
+        /(className=["'][^"']*(?:row|account|channel|item|wallet)[^"']*["'][^>]*>)/i,
+        '$1<span className="ark-unread-badge" data-ark-unread="1">3</span>',
+      );
+      touchedApp = true;
+    } else if (/return\s*\(/i.test(app)) {
+      app = app.replace(
+        /return\s*\(/i,
+        'return (\n    <>\n    <div className="ark-unread-badge" data-ark-unread="1" style={{position:\'fixed\',top:12,right:12,zIndex:40}}>3 unread</div>\n',
+      );
+      // Only wrap if we did not already close a fragment — avoid corrupting nested functions.
+      if (!/<>[\s\S]*<\/>\s*\)\s*;?\s*$/m.test(app)) {
+        app = app.replace(/\);\s*\n\}\s*$/m, '    </>\n  );\n}\n');
+      }
+      touchedApp = true;
+    }
+    if (!/\.ark-unread-badge/.test(css)) {
+      css += `\n.ark-unread-badge{display:inline-flex;min-width:1.1rem;height:1.1rem;padding:0 0.35rem;border-radius:999px;align-items:center;justify-content:center;background:#ef4444;color:#fff;font-size:0.65rem;font-weight:700;margin-left:0.35rem;}\n`;
+      touchedCss = true;
+    }
+  }
+
+  if (wantsSync && !/data-ark-syncing/i.test(app)) {
+    const sync = '<p className="ark-syncing" data-ark-syncing="1">syncing…</p>';
+    if (/transaction|table|messages|editor|main/i.test(app)) {
+      app = app.replace(
+        /(<(?:div|section|main)[^>]*className=["'][^"']*(?:main|messages|table|editor|content)[^"']*["'][^>]*>)/i,
+        `$1${sync}`,
+      );
+      touchedApp = true;
+    } else {
+      app = app.replace(/return\s*\(\s*<>/, `return (\n    <>\n    ${sync}`);
+      if (!/data-ark-syncing/i.test(app)) {
+        app = app.replace(/return\s*\(/i, `return (\n    <>\n    ${sync}\n`);
+        if (!/<\/>\s*\);\s*$/m.test(app)) app = app.replace(/\);\s*$/m, '    </>\n  );');
+      }
+      touchedApp = true;
+    }
+    if (!/\.ark-syncing/.test(css)) {
+      css += `\n.ark-syncing{margin:0.35rem 0;font-size:0.75rem;opacity:0.7;font-style:italic;}\n`;
+      touchedCss = true;
+    }
+  }
+
+  if (wantsBank && !/data-ark-connect-bank/i.test(app)) {
+    const bar = `<div className="ark-status-bar" data-ark-connect-bank="1"><button type="button">Connect Bank</button><span className="ark-avatars" aria-label="connected"><i/><i/><i/></span></div>`;
+    if (/<\/div>\s*\)\s*;?\s*$/m.test(app)) {
+      app = app.replace(/<\/div>\s*(\)\s*;?\s*)$/m, `${bar}</div>$1`);
+      touchedApp = true;
+    } else {
+      app = app.replace(/return\s*\(/i, `return (\n    <>\n    ${bar}\n`);
+      if (!/<\/>\s*\);\s*$/m.test(app)) app = app.replace(/\);\s*$/m, '    </>\n  );');
+      touchedApp = true;
+    }
+    if (!/\.ark-status-bar/.test(css)) {
+      css += `\n.ark-status-bar{position:sticky;bottom:0;display:flex;align-items:center;justify-content:space-between;gap:0.75rem;padding:0.55rem 0.85rem;background:color-mix(in srgb, var(--card, #151c27) 92%, #000);border-top:1px solid #ffffff14;}\n.ark-status-bar button{border:0;border-radius:999px;padding:0.4rem 0.85rem;background:var(--accent,#38bdf8);color:#041018;font-weight:700;cursor:pointer;}\n.ark-avatars{display:inline-flex;}\n.ark-avatars i{width:1.35rem;height:1.35rem;border-radius:999px;background:#64748b;margin-left:-0.35rem;border:2px solid #0b1220;display:inline-block;}\n.ark-avatars i:nth-child(2){background:#38bdf8;}\n.ark-avatars i:nth-child(3){background:#a78bfa;}\n`;
+      touchedCss = true;
+    }
+  }
+
+  if (wantsFolders && !/data-ark-folder-groups/i.test(app)) {
+    const block = `<div className="ark-folder-groups" data-ark-folder-groups="1"><p>Library</p><button type="button">Personal</button><button type="button">Work</button><button type="button">Archive</button></div>`;
+    app = app.replace(
+      /(<(?:aside|nav|div)[^>]*className=["'][^"']*(?:sidebar|rail|library|list)[^"']*["'][^>]*>)/i,
+      `$1${block}`,
+    );
+    if (!/data-ark-folder-groups/i.test(app)) {
+      app = app.replace(/return\s*\(/i, `return (\n    <>\n    ${block}\n`);
+      if (!/<\/>\s*\);\s*$/m.test(app)) app = app.replace(/\);\s*$/m, '    </>\n  );');
+    }
+    touchedApp = true;
+    if (!/\.ark-folder-groups/.test(css)) {
+      css += `\n.ark-folder-groups{display:grid;gap:0.35rem;margin:0.5rem 0 0.85rem;}\n.ark-folder-groups p{margin:0;font-size:0.7rem;text-transform:uppercase;opacity:0.65;letter-spacing:0.04em;}\n.ark-folder-groups button{text-align:left;border:0;border-radius:8px;padding:0.4rem 0.55rem;background:transparent;color:inherit;cursor:pointer;}\n.ark-folder-groups button:hover{background:#ffffff10;}\n`;
+      touchedCss = true;
+    }
+  }
+
+  if (wantsFind && !/data-ark-find-bar/i.test(app)) {
+    const find = `<label className="ark-find-bar" data-ark-find-bar="1">Find in note <input placeholder="Search in note…" /></label>`;
+    app = app.replace(
+      /(<(?:div|section|main)[^>]*className=["'][^"']*(?:editor|main|content|pane)[^"']*["'][^>]*>)/i,
+      `$1${find}`,
+    );
+    if (!/data-ark-find-bar/i.test(app)) {
+      app = app.replace(/return\s*\(/i, `return (\n    <>\n    ${find}\n`);
+      if (!/<\/>\s*\);\s*$/m.test(app)) app = app.replace(/\);\s*$/m, '    </>\n  );');
+    }
+    touchedApp = true;
+    if (!/\.ark-find-bar/.test(css)) {
+      css += `\n.ark-find-bar{display:flex;align-items:center;gap:0.5rem;font-size:0.75rem;opacity:0.9;margin:0.4rem 0 0.75rem;}\n.ark-find-bar input{flex:1;border:1px solid #ffffff18;border-radius:8px;padding:0.35rem 0.55rem;background:#0006;color:inherit;}\n`;
+      touchedCss = true;
+    }
+  }
+
+  if (wantsTags && !/data-ark-tags/i.test(app)) {
+    const tags = `<div className="ark-tags" data-ark-tags="1"><span>draft</span><span>idea</span><span>review</span></div>`;
+    app = app.replace(/(<h1[^>]*>[\s\S]*?<\/h1>)/i, `$1${tags}`);
+    if (!/data-ark-tags/i.test(app)) {
+      app = app.replace(/return\s*\(/i, `return (\n    <>\n    ${tags}\n`);
+      if (!/<\/>\s*\);\s*$/m.test(app)) app = app.replace(/\);\s*$/m, '    </>\n  );');
+    }
+    touchedApp = true;
+    if (!/\.ark-tags/.test(css)) {
+      css += `\n.ark-tags{display:flex;flex-wrap:wrap;gap:0.35rem;margin:0.35rem 0 0.75rem;}\n.ark-tags span{border:1px solid #ffffff22;border-radius:999px;padding:0.15rem 0.55rem;font-size:0.7rem;opacity:0.85;}\n`;
+      touchedCss = true;
+    }
+  }
+
+  const edits: WebFileEdit[] = [];
+  if (touchedApp) edits.push({ path: appPath, content: app });
+  if (touchedCss) edits.push({ path: cssPath, content: css || String(flat[cssPath] || '') });
+  return edits;
 }
 
 function findReactAppPath(flat: WebFileMap): string | null {

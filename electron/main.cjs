@@ -789,7 +789,7 @@ ipcMain.handle('ark:open-path', async (_event, targetPath) => {
   const allowed = arkProjects.isPathUnderRoot(resolved, userData)
     || arkProjects.isAllowedExternalPath(resolved);
   if (!allowed) {
-    return { ok: false, error: 'Path is not in an allowed folder' };
+    return { ok: false, error: 'Path is not in an allowed folder. Re-open it with + → Open folder first.' };
   }
   if (!require('fs').existsSync(resolved)) {
     return { ok: false, error: 'Path does not exist' };
@@ -1201,6 +1201,15 @@ ipcMain.handle('ark:agent-start-dev-server', async (_e, payload) => {
     return await arkAgentExec.agentStartDevServer(payload || {});
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'dev server failed' };
+  }
+});
+
+ipcMain.handle('ark:agent-start-folder-preview', async (_e, payload) => {
+  try {
+    const arkAgentExec = require('./arkAgentExec.cjs');
+    return await arkAgentExec.agentStartFolderPreview(payload || {});
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'folder preview failed' };
   }
 });
 

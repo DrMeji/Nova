@@ -6,6 +6,7 @@ import {
   encodeTraceMessage,
   nextTraceStepId,
   traceThoughtFromAsk,
+  type AgentFileChange,
   type AgentTracePayload,
   type AgentTraceStep,
 } from '@/lib/agentTrace';
@@ -22,9 +23,11 @@ export function buildStudioTraceMessage(opts: {
   answer: string;
   readPaths?: string[];
   wrotePaths?: string[];
+  fileChanges?: AgentFileChange[];
   projectName?: string;
   extraSteps?: AgentTraceStep[];
 }): string {
+  const wrote = (opts.wrotePaths || []).filter(Boolean);
   const steps: AgentTraceStep[] = [
     {
       id: nextTraceStepId([]),
@@ -46,22 +49,29 @@ export function buildStudioTraceMessage(opts: {
     });
   }
 
-  for (const path of (opts.wrotePaths || []).slice(0, 12)) {
+  for (const path of wrote.slice(0, 12)) {
     steps.push({
       id: nextTraceStepId(steps),
-      kind: 'run',
-      label: `Wrote ${path}`,
+      kind: 'write',
+      label: path,
       detail: opts.projectName,
     });
   }
 
   if (opts.extraSteps?.length) steps.push(...opts.extraSteps);
 
+  const fileChanges = opts.fileChanges?.length
+    ? opts.fileChanges
+    : wrote.map(path => ({ path, added: 1, removed: 0 }));
+
   const payload: AgentTracePayload = {
     startedAt: opts.startedAt,
     done: true,
     steps,
     answer: opts.answer,
+    elapsedMs: opts.elapsedMs,
+    changedPaths: wrote,
+    fileChanges,
   };
   return encodeTraceMessage(payload);
 }
@@ -88,6 +98,9 @@ export function finalizeCodingChatBubble(opts: {
   if (opts.applyError === 'no_edits' || opts.applyError === 'no_changes') {
     return 'I understood the ask, but nothing was saved to your project files yet. Try again. I will patch the files on disk this time.';
   }
+  if (opts.editMode && /\b(?:here'?s the updated|updated codebase|full (?:source|code) below|copy[- ]paste)\b/i.test(stripped)) {
+    return 'I almost pasted source into chat. Ask once more and I will apply the edits on disk only, then show Files Changed.';
+  }
   if (opts.applyError === 'no_project') {
     return 'No project folder is bound to this chat. Say **Create project …** or open the folder with +, then ask again.';
   }
@@ -97,14 +110,21 @@ export function finalizeCodingChatBubble(opts: {
   if (opts.changedPaths?.length) {
     return formatCodeChatReply(opts.userMessage, opts.changedPaths, '', { surface: 'chat' });
   }
-  if (/```|@@@FILE/i.test(opts.rawReply)) {
-    // Only claim a failed save when this turn was meant to write files.
-    // Plain chat often includes sample HTML/code — keep that text.
+  if (/```|@@@FILE/i.test(opts.rawReply) || looksLikeCodeDump(stripped)) {
+    // Only show full code when the user asked for copy-paste source in chat.
     if (opts.editMode === true) {
       return 'I drafted changes but could not save them to disk. Try the ask again in one short sentence.';
     }
-    const body = stripped && stripped.length > 20 ? stripped : stripFileBlocks(opts.rawReply);
-    return body || 'Done.';
+    // Default: never dump source into chat.
+    const body = stripped
+      .replace(/```[\w]*\n[\s\S]*?```/g, '')
+      .replace(/^\s*(?:const|let|var|function|export|import|return)\b[\s\S]{0,200}$/gm, '')
+      .trim();
+    if (body && body.length > 20 && body.length < 500 && !looksLikeCodeDump(body)) return body;
+    if (opts.editMode === true) {
+      return 'I drafted changes but could not save them to disk. Try the ask again in one short sentence.';
+    }
+    return 'I prepared code for this, but chat stays summary-only unless you ask me to **show the code**. If a folder is already bound, say **apply the edits on disk** again.';
   }
   // Never show “I will modify App.jsx…” as if the work finished.
   if (/\b(i will|i'll|going to)\b[\s\S]{0,80}\b(modify|update|edit|change|add)\b/i.test(stripped)) {
@@ -114,6 +134,15 @@ export function finalizeCodingChatBubble(opts: {
     return stripped;
   }
   return stripped || 'Done.';
+}
+
+function looksLikeCodeDump(text: string): boolean {
+  const t = String(text || '');
+  if ((t.match(/[{};]/g) || []).length >= 8) return true;
+  if (/background-color\s*:|font-family\s*:|display\s*:\s*flex/i.test(t)) return true;
+  if (/<\/?[A-Z][A-Za-z]+\b/.test(t) && /className=/.test(t)) return true;
+  if (/export\s+default\s+function|=>\s*\(|^\s*return\s*\(/m.test(t)) return true;
+  return false;
 }
 
 export function liveCodingStatusText(partial: string): string {

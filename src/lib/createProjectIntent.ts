@@ -65,17 +65,21 @@ export function looksLikeCreateProjectBrief(message: string): boolean {
 
 export { slugifyProjectName } from '@/lib/projectNames';
 
-function extractProjectName(text: string): string | null {
+export function extractProjectName(text: string): string | null {
   const t = String(text || '').trim();
   const patterns = [
+    // "Create the Ledger Bay project on disk"
+    /\bcreate\s+(?:the\s+)?([A-Za-z][A-Za-z0-9][A-Za-z0-9 _-]{1,40}?)\s+project(?:\s+on\s+disk)?\b/i,
+    /\bcreate\s+(?:the\s+)?([A-Za-z][A-Za-z0-9][A-Za-z0-9 _-]{1,40}?)\s+on\s+disk\b/i,
     /\bcreate\s+(?:a\s+)?(?:new\s+)?project\s+["“']?([A-Za-z][A-Za-z0-9 _-]{1,40})/i,
-    /\bcreate\s+([A-Z][A-Za-z0-9]{1,40})\s*[—–\-:]/ ,
+    /\bcreate\s+([A-Z][A-Za-z0-9]{1,40})\s*[—–\-:]/,
     /\bcreate\s+([A-Z][A-Za-z0-9]{1,40})\s+as\b/i,
     /\b(?:app|application)\s+named\s+["“']?([A-Za-z][A-Za-z0-9 _-]{1,40})/i,
     /\b(?:called|named|name(?:d)?\s+it|call\s+it)\s+["“']([^"”']{2,48})["”']/i,
     /\b(?:called|named|name(?:d)?\s+it|call\s+it)\s+([A-Za-z][A-Za-z0-9 _-]{1,40})/i,
     /\b(?:app|project|website|site)\s+["“']([^"”']{2,48})["”']/i,
     /\bnew\s+(?:web\s+)?(?:app|project|website|site)\s+([A-Za-z][A-Za-z0-9_-]{1,40})/i,
+    /\bkeep\s+the\s+folder\s+name\s+([A-Za-z][A-Za-z0-9 _-]{1,40})/i,
   ];
   for (const re of patterns) {
     const m = t.match(re);
@@ -84,6 +88,8 @@ function extractProjectName(text: string): string | null {
       // "ReefLog and build a reef…" → ReefLog (never the whole sentence as the product name).
       raw = raw.replace(/\s+(?:and|with|that|which|where|when|so|for|but|featuring|including|—|–|-)\b.*$/i, '').trim();
       raw = raw.replace(/\s+(?:app|project|website|site|on|for|with)\b.*$/i, '').trim();
+      // Reject ultra-generic leftovers from older chats ("My", "New", "App").
+      if (/^(my|new|app|project|the|this|that)$/i.test(raw)) continue;
       if (raw.length >= 2 && raw.length <= 48) return raw;
     }
   }

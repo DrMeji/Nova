@@ -19,11 +19,14 @@ export function shouldPreferCloudForCoding(opts: {
   fileCount: number;
   message: string;
   allowFileEdits?: boolean;
+  /** Agent tool loop — prefer cloud even on small repos when keyed. */
+  agentLoop?: boolean;
 }): boolean {
-  if (!opts.allowFileEdits && !looksLikeProjectDebugAsk(opts.message)) return false;
+  if (!opts.allowFileEdits && !looksLikeProjectDebugAsk(opts.message) && !opts.agentLoop) return false;
   if (!hasAnyCloudChatKey()) return false;
   const mode = getLocalPrefs().aiMode;
   if (mode === 'local_only') return false;
+  if (opts.agentLoop) return true;
   if (opts.fileCount < LARGE_REPO_FILES) return false;
   return /\b(fix|patch|edit|debug|stop|generating|@@@FILE|change|update)\b/i.test(opts.message)
     || looksLikeProjectDebugAsk(opts.message);

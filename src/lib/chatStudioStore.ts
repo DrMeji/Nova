@@ -27,8 +27,36 @@ export function chatHasBuildWorkspace(chatId: string, snap?: ChatStudioSnapshot 
   if (hasChatCodePill(chatId)) return true;
   if (getLastPendingGreenfield(chatId)) return true;
   if (studio?.projectId) return true;
+  // Path-only binds (catalog) still count — Preview / Explorer need the root.
+  if (studio?.diskRoot) return true;
   if (studio && Object.keys(studio.files || {}).length > 0) return true;
   return false;
+}
+
+/** Sidebar titles from the first user prompt must never become folder names. */
+function looksLikePromptTitle(title: string): boolean {
+  const t = String(title || '').trim();
+  if (!t) return true;
+  if (t.length > 40) return true;
+  if (/[,!?]/.test(t)) return true;
+  if (/\s{2,}/.test(t)) return true;
+  if (/^(add|fix|update|change|edit|insert|remove|delete|please|can|how|what|why|make|create|build|write|help|implement|open|bind|read|show|tell)\b/i.test(t)) {
+    return true;
+  }
+  if (/\b(comment|near the top|app\/|src\/|\.py|\.tsx?|\.jsx?)\b/i.test(t)) return true;
+  return false;
+}
+
+async function pathLooksReal(absPath: string | null | undefined): Promise<boolean> {
+  const p = String(absPath || '').trim();
+  if (!p) return false;
+  try {
+    const stat = await window.arkDesktop?.workspaceStatPath?.(p)
+      || await window.arkDesktop?.pathStat?.(p);
+    return Boolean(stat?.ok && (stat.isDirectory !== false));
+  } catch {
+    return false;
+  }
 }
 
 function studioPathJoin(root: string, name: string): string {
@@ -38,7 +66,7 @@ function studioPathJoin(root: string, name: string): string {
 
 /**
  * Resolve THIS chat's project folder.
- * Never return another thread's in-memory root. Prefer Desktop\\Projects\\{chatTitle}
+ * Never return another thread's in-memory root. Prefer ARK Projects\{chatTitle}
  * when the stored studio diskRoot basename does not match the chat's product name
  * (fixes cross-chat Localhost bleed after a wrong persist).
  */
@@ -55,18 +83,11 @@ export async function resolveChatProjectRoot(opts: {
 }> {
   const chatId = String(opts.chatId || '').trim();
   const snap = chatId ? loadChatStudio(chatId) : null;
+  const last = chatId ? getLastDiskTarget(chatId) : null;
   const buildIntent = chatId ? chatHasBuildWorkspace(chatId, snap) : false;
 
-  // Plain conversations must never bind to a folder just because the title matches
-  // Desktop\Projects\{title} after restart.
-  if (!buildIntent) {
-    if (snap?.diskRoot && !Object.keys(snap.files || {}).length && !snap.projectId) {
-      try {
-        localStorage.removeItem(chatStudioKey(chatId));
-      } catch {
-        /* ignore */
-      }
-    }
+  // Plain conversations (no bind, no files) must never invent a folder from the chat title.
+  if (!buildIntent && !snap?.diskRoot && !last?.path) {
     return {
       diskRoot: null,
       name: undefined,
@@ -77,15 +98,42 @@ export async function resolveChatProjectRoot(opts: {
     };
   }
 
-  const last = chatId ? getLastDiskTarget(chatId) : null;
-  const rawTitle = String(opts.chatTitle || snap?.name || last?.name || '').trim();
-  // Sidebar titles are short product names after create; ignore long prompt titles.
+  // Prefer a real on-disk root already bound to this chat — never replace with a prompt title.
+  const trustedRoots = [snap?.diskRoot, last?.path].filter(Boolean) as string[];
+  for (const root of trustedRoots) {
+    if (await pathLooksReal(root)) {
+      const folderName = studioPathBasename(root) || String(snap?.name || '').trim() || undefined;
+      const namePoisoned = Boolean(snap?.name && looksLikePromptTitle(snap.name));
+      const healedName = namePoisoned && folderName
+        ? folderName !== snap?.name
+        : false;
+      if (healedName && chatId) {
+        saveChatStudio(chatId, {
+          files: snap?.files || {},
+          projectId: snap?.projectId || null,
+          name: folderName,
+          diskRoot: root,
+          previewUrl: snap?.previewUrl || null,
+        });
+      }
+      return {
+        diskRoot: root,
+        name: folderName || snap?.name,
+        files: snap?.files || {},
+        projectId: snap?.projectId || null,
+        previewUrl: snap?.previewUrl || null,
+        healed: healedName,
+      };
+    }
+  }
+
+  const rawTitle = String(opts.chatTitle || '').trim();
+  const snapName = String(snap?.name || last?.name || '').trim();
   const productName = (
-    rawTitle
-    && rawTitle.length <= 48
-    && !/^(create|build|make|write|help)\b/i.test(rawTitle)
-  ) ? rawTitle.replace(/\s+and\s+build\b[\s\S]*$/i, '').trim() : '';
-  const wantName = productName || String(snap?.name || '').trim();
+    !looksLikePromptTitle(snapName) ? snapName
+      : (!looksLikePromptTitle(rawTitle) ? rawTitle.replace(/\s+and\s+build\b[\s\S]*$/i, '').trim() : '')
+  );
+  const wantName = productName;
   const wantKey = wantName.toLowerCase();
 
   const candidates: string[] = [];
@@ -97,7 +145,6 @@ export async function resolveChatProjectRoot(opts: {
     const desktop = roots?.roots?.find(r => r.id === 'desktop')?.path;
     if (desktop && wantName && buildIntent) {
       const projectsDir = studioPathJoin(desktop, 'Projects');
-      candidates.unshift(studioPathJoin(projectsDir, wantName));
       const listing = await window.arkDesktop?.listDir?.(projectsDir);
       if (listing?.ok) {
         for (const item of listing.items || []) {
@@ -107,57 +154,55 @@ export async function resolveChatProjectRoot(opts: {
           }
         }
       }
+      // Only invent Desktop\Projects\{name} when that folder actually exists (checked below).
+      candidates.push(studioPathJoin(projectsDir, wantName));
     }
   } catch {
     /* ignore */
   }
 
   let chosen: string | null = null;
-  if (wantKey) {
-    for (const c of candidates) {
-      if (studioPathBasename(c).toLowerCase() === wantKey) {
-        chosen = c;
-        break;
-      }
+  for (const c of candidates) {
+    if (!(await pathLooksReal(c))) continue;
+    if (wantKey && studioPathBasename(c).toLowerCase() === wantKey) {
+      chosen = c;
+      break;
     }
+    if (!chosen) chosen = c;
   }
-  // Mismatched stored root (e.g. ReefLog chat pointing at LumenLoom) → do not keep it.
   if (!chosen) {
-    const snapBase = studioPathBasename(snap?.diskRoot).toLowerCase();
-    if (wantKey && snap?.diskRoot && snapBase && snapBase !== wantKey) {
-      chosen = null;
-    } else {
-      chosen = snap?.diskRoot || last?.path || null;
-    }
+    // Last resort: keep stored root even if stat failed (offline / grant race) — never invent title path.
+    chosen = (snap?.diskRoot && !looksLikePromptTitle(studioPathBasename(snap.diskRoot)))
+      ? snap.diskRoot
+      : (last?.path || null);
   }
 
+  const folderLabel = studioPathBasename(chosen) || wantName || snap?.name;
   const healed = Boolean(
     chosen
-    && (
-      (snap?.diskRoot && chosen.replace(/[/\\]+$/, '').toLowerCase()
-        !== String(snap.diskRoot).replace(/[/\\]+$/, '').toLowerCase())
-      || (wantName && snap?.name && snap.name.toLowerCase() !== wantName.toLowerCase())
-    ),
+    && snap?.diskRoot
+    && chosen.replace(/[/\\]+$/, '').toLowerCase()
+      !== String(snap.diskRoot).replace(/[/\\]+$/, '').toLowerCase(),
   );
 
   if (healed && chatId && chosen) {
     saveChatStudio(chatId, {
       files: snap?.files || {},
       projectId: snap?.projectId || null,
-      name: wantName || snap?.name,
+      name: folderLabel,
       diskRoot: chosen,
       previewUrl: null,
     });
     setLastDiskTarget(chatId, {
       path: chosen,
-      name: wantName || studioPathBasename(chosen),
+      name: folderLabel || studioPathBasename(chosen),
       kind: 'folder',
     });
   }
 
   return {
     diskRoot: chosen,
-    name: wantName || snap?.name,
+    name: folderLabel || undefined,
     files: snap?.files || {},
     projectId: snap?.projectId || null,
     previewUrl: healed ? null : (snap?.previewUrl || null),

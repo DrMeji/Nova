@@ -84,8 +84,10 @@ export function looksLikeCodeEditAsk(text: string): boolean {
   if (/\bturn\s+(?:this|it)\s+into\b/i.test(t)) return true;
   if (/\b(title\s*bar|sidebar|note\s*list|main\s+editor|dark\s+theme)\b/i.test(t)) return true;
   if (/\blocalStorage\b/i.test(t) && /\b(add|change|update|persist|save|use|wire|hook)\b/i.test(t)) return true;
-  if (
-    /\b(add|put|place|move|insert|create|drop|fold)\b[\s\S]{0,100}\b(button|icon|logo|header|footer|nav|navbar|search|settings|sidebar|menu|title|page|tab|modal|form|input|link|preference|note|about|section|hero)\b/i.test(t)
+  // Explicit disk-apply asks always count as edits (even when phrasing is feature-heavy).
+  if (/\bapply\b[\s\S]{0,80}\b(?:edits?|changes?|this|them|it)\b[\s\S]{0,40}\bon\s+disk\b/i.test(t)) return true;
+  if (/\b(?:edits?|changes?)\s+on\s+disk\b/i.test(t) && /\b(?:apply|save|write|patch)\b/i.test(t)) return true;
+  if (/\b(add|put|place|move|insert|create|drop|fold)\b[\s\S]{0,100}\b(button|icon|logo|header|footer|nav|navbar|search|settings|sidebar|menu|title|page|tab|modal|form|input|link|preference|note|about|section|hero|badge|avatar|chip|bar|indicator)\b/i.test(t)
   ) {
     return true;
   }
@@ -117,6 +119,14 @@ export function looksLikeCodeEditAsk(text: string): boolean {
   if (/\b(refactor|extract|wire(?:\s+up)?|hook up)\b/i.test(t)) return true;
   if (/\b(top right|top left|bottom right|bottom left|center|middle)\b/i.test(t)
     && /\b(add|put|place|move|put)\b/i.test(t)) {
+    return true;
+  }
+  // "Add a comment near the top of app/main.py"
+  if (/\b(add|insert|put|write)\b[\s\S]{0,100}\bcomments?\b/i.test(t)) return true;
+  if (
+    /\b(?:[\w.-]+\/)+[\w.-]+\.[a-z0-9]{1,8}\b/i.test(t)
+    && /\b(add|edit|change|update|fix|insert|comment|patch|write)\b/i.test(t)
+  ) {
     return true;
   }
   return false;

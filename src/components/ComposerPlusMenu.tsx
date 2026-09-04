@@ -14,6 +14,7 @@ export type ComposerPlusAction =
   | 'folder'
   | 'import-folder'
   | 'enter-path'
+  | 'bind-path'
   | 'image';
 
 type Props = {
@@ -36,12 +37,11 @@ const ITEMS: {
 }[] = [
   { id: 'plan', label: 'Plan', hint: 'Steps only. no file writes until Go implement', icon: ListTree },
   { id: 'ask', label: 'Ask', hint: 'Answer only. no disk writes or commands', icon: MessageCircleQuestion },
-  { id: 'agent', label: 'Agent', hint: 'Edit files and run approved tools in workspace', icon: Zap },
+  { id: 'agent', label: 'Agent', hint: 'Optional. tool loop for multi-step edits', icon: Zap },
   { id: 'debug', label: 'Debug', hint: 'Find bugs and propose fixes', icon: Bug },
   { id: 'multitask', label: 'Multi-agent', hint: 'Design → Code → Verify on this project together', icon: Users },
-  { id: 'folder', label: 'Open folder', hint: 'Attach a project folder to edit in this chat', icon: FolderOpen },
+  { id: 'bind-path', label: 'Bind project…', hint: 'Pick a folder or paste its path (reads on demand)', icon: FolderOpen },
   { id: 'import-folder', label: 'Import copy', hint: 'Copy folder into ARK storage (sandbox)', icon: FolderOpen },
-  { id: 'enter-path', label: 'Enter path…', hint: 'Type a folder path and approve access', icon: FolderOpen },
 ];
 
 const MODE_IDS = new Set<ComposerPlusAction>(['plan', 'ask', 'agent', 'debug', 'multitask']);
@@ -54,12 +54,13 @@ function itemsForScope(scope: 'chat' | 'image' | 'code') {
   }
   if (scope === 'code') {
     return ITEMS.filter(m =>
-      m.id === 'folder'
-      || m.id === 'import-folder' || m.id === 'enter-path' || MODE_IDS.has(m.id));
+      m.id === 'bind-path'
+      || m.id === 'import-folder'
+      || MODE_IDS.has(m.id));
   }
-  // Chat: modes + open folder only
+  // Chat: modes + single path bind (no separate Open folder / Enter path).
   return ITEMS.filter(m =>
-    m.id === 'folder'
+    m.id === 'bind-path'
     || m.id === 'plan' || m.id === 'ask' || m.id === 'agent' || m.id === 'multitask' || m.id === 'debug');
 }
 
@@ -126,7 +127,7 @@ export function ComposerPlusMenu({
     ? createPortal(
       <div
         ref={menuRef}
-        className="w-52 rounded-lg border border-surface-border bg-ark-navy-900 shadow-xl overflow-hidden"
+        className="w-56 rounded-lg border border-surface-border bg-ark-navy-900 shadow-xl overflow-hidden"
         style={{
           position: 'fixed',
           left: pos.left,
@@ -137,7 +138,7 @@ export function ComposerPlusMenu({
         {modes.length > 0 && (
           <>
             <p className="px-2.5 pt-2 pb-1 text-[10px] text-content-tertiary">
-              Message modes add a prefix to your next send
+              Optional modes for the next message
             </p>
             <div className="pb-1">
               {modes.map(m => (
@@ -161,7 +162,7 @@ export function ComposerPlusMenu({
         {attach.length > 0 && (
           <>
             <p className="px-2.5 pt-2 pb-1 text-[10px] text-content-tertiary">
-              {scope === 'image' ? 'Photos only' : 'Attach'}
+              {scope === 'image' ? 'Photos only' : 'Project'}
             </p>
             <div className="pb-1">
               {attach.map(m => (
@@ -197,8 +198,8 @@ export function ComposerPlusMenu({
         }}
         disabled={busy}
         className={`relative ${buttonClassName || 'w-9 h-9 rounded-full flex items-center justify-center text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors shrink-0'} ${busy ? 'opacity-90 cursor-wait' : ''}`}
-        title={busy ? 'Uploading…' : scope === 'image' ? 'Add photo' : 'Add mode or file'}
-        aria-label={busy ? 'Uploading' : scope === 'image' ? 'Add photo' : 'Add mode or file'}
+        title={busy ? 'Uploading…' : scope === 'image' ? 'Add photo' : 'Add mode or bind a project'}
+        aria-label={busy ? 'Uploading' : scope === 'image' ? 'Add photo' : 'Add mode or bind a project'}
         aria-expanded={open}
         aria-busy={busy}
       >

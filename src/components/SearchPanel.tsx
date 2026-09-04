@@ -36,6 +36,7 @@ const CATALOG: SearchItem[] = [
   { id: 'models', label: 'Models', group: 'Navigate', description: 'Local, cloud, and engine', icon: Database, route: { name: 'models' } },
   { id: 'local-ai', label: 'Engine', group: 'Navigate', description: 'ARK Engine start, stop, and storage', icon: Bot, route: { name: 'local-ai' } },
   { id: 'mcp', label: 'MCP', group: 'Navigate', description: 'Register external MCP tool servers', icon: Cable, route: { name: 'mcp' } },
+  { id: 'brain', label: 'Brain', group: 'Navigate', description: 'ARK Brain API for any local app', icon: Bot, route: { name: 'brain' } },
   { id: 'settings', label: 'Settings', group: 'Settings', description: 'Account, appearance, AI preferences', icon: Settings, action: 'settings', settingsSection: 'account' },
   { id: 'appearance', label: 'Appearance', group: 'Settings', description: 'Theme and display options', icon: Settings, action: 'settings', settingsSection: 'appearance' },
   { id: 'ai', label: 'AI', group: 'Settings', description: 'Routing and failover', icon: Settings, action: 'settings', settingsSection: 'ai' },

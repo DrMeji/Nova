@@ -27,6 +27,7 @@ export function encodeChatAttach(meta: ChatAttachMeta): string {
   if (meta.projectId) payload.projectId = String(meta.projectId).slice(0, 64);
   if (meta.id) payload.id = String(meta.id).slice(0, 64);
   if (meta.mediaId) payload.mediaId = String(meta.mediaId).slice(0, 80);
+  if (meta.catalogOnly) payload.catalogOnly = true;
   return `<!--ark-attach:${JSON.stringify(payload)}-->`;
 }
 
@@ -66,7 +67,7 @@ export function attachSubtitle(meta: ChatAttachMeta): string {
   const n = meta.count ?? 0;
   if (meta.kind === 'folder') {
     if (meta.catalogOnly) {
-      return n === 1 ? '1 item at top level' : `${n} items at top level`;
+      return 'Path bound · reads on demand';
     }
     return n === 1 ? '1 file inside' : `${n} files inside`;
   }

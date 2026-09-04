@@ -27,7 +27,8 @@ export function BrainApiCard({ compact }: { compact?: boolean } = {}) {
       <div>
         <p className="text-sm font-medium text-content-primary">Brain API</p>
         <p className="text-[11px] text-content-tertiary mt-0.5 leading-relaxed">
-          Loopback only. for Lindsay and other apps on this PC. Packaged ARK requires a bearer token on chat routes.
+          Loopback only on this PC. Any local app can connect to ARK as its brain over HTTP.
+          Packaged ARK requires a bearer token on chat routes.
         </p>
         {brainPackaged === false && !brainToken ? (
           <p className="text-[11px] font-medium text-amber-400 mt-1.5">
@@ -71,7 +72,7 @@ export function BrainApiCard({ compact }: { compact?: boolean } = {}) {
           type="button"
           className="ark-btn-secondary text-xs"
           onClick={() => {
-            const curl = `curl "${brainUrl}/v1/chat" -H "Authorization: Bearer ${brainToken}" -H "Content-Type: application/json" -d "{\\"message\\":\\"Hello from Lindsay\\"}"`;
+            const curl = `curl "${brainUrl}/v1/chat" -H "Authorization: Bearer ${brainToken}" -H "Content-Type: application/json" -d "{\\"message\\":\\"Hello from my app\\"}"`;
             void navigator.clipboard.writeText(curl).then(() => {
               setFlash('Sample curl copied');
               window.setTimeout(() => setFlash(''), 1600);

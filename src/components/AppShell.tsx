@@ -28,6 +28,7 @@ import { probeAiModeLabel, type AiModeLabel } from '@/lib/aiModeStatus';
 import { JobsStrip } from '@/components/JobsStrip';
 import { PostLoginSafetyTip } from '@/components/PostLoginSafetyTip';
 import { AuthAmbientOrbs } from '@/components/auth/AuthAmbientOrbs';
+import { ArkMark } from '@/components/ArkMark';
 import { comparePinnedThenRecent } from '@/lib/recentStore';
 import { formatArkId } from '@/lib/arkUserId';
 import { isArkDevEmail } from '@/lib/arkDevAccount';
@@ -43,6 +44,10 @@ import {
 import { reattachEngineDownloads } from '@/lib/engineDownloads';
 import { countUnreadLocalNotifications } from '@/lib/localNotifications';
 import { ARK_UPDATE_INDICATOR_CACHE_KEY, checkArkGitHubUpdate, clearUpdateIndicatorCache, downloadAndInstallArkUpdate, type ArkUpdateInfo } from '@/lib/arkUpdates';
+
+function BrainNavIcon({ className }: { className?: string }) {
+  return <ArkMark className={className || 'w-4 h-4'} title="ARK Brain" />;
+}
 
 function getNavGroups(): {
   id: string;
@@ -85,6 +90,7 @@ function getNavGroups(): {
         { label: 'Models', icon: Database, route: { name: 'models' }, activity: 'models' },
         { label: 'Local AI', icon: Brain, route: { name: 'local-ai' } },
         { label: 'MCP', icon: Cable, route: { name: 'mcp' } },
+        { label: 'Brain', icon: BrainNavIcon, route: { name: 'brain' } },
       ],
     },
     {
@@ -267,6 +273,9 @@ export function AppShell({ children }: { children: ReactNode }) {
     }
     if (item.label === 'MCP') {
       return route.name === 'mcp';
+    }
+    if (item.label === 'Brain') {
+      return route.name === 'brain';
     }
     return route.name === item.route.name;
   };

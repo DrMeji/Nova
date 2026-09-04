@@ -966,7 +966,7 @@ function deleteWorkspaceRelPath(projectId, relPath) {
 }
 
 function pathStat(targetPath) {
-  let p = path.resolve(String(targetPath || ''));
+  let p = path.resolve(String(targetPath || '').trim().replace(/^["']|["']$/g, ''));
   if (!p || !fs.existsSync(p)) return { ok: false, error: 'Path not found' };
   if (!isAllowedExternalPath(p)) {
     return { ok: false, error: 'Path is outside ARK access. Enable Desktop, Documents, or Full PC in Settings → Security.' };

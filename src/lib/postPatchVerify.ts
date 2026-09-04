@@ -1,5 +1,6 @@
 /**
  * After @@@FILE writes, run a quick project check so chat can report pass/fail.
+ * If verify fails due to missing modules, auto npm install once and retry.
  */
 
 import { isViteProject } from '@/lib/projectPreview';
@@ -10,12 +11,32 @@ export type PatchVerifyResult = {
   command?: string;
   output?: string;
   summary: string;
+  installedDeps?: boolean;
 };
+
+function looksLikeMissingModules(out: string): boolean {
+  return /cannot find module|module not found|err_module_not_found|could not resolve|enoent.*node_modules/i.test(out);
+}
+
+async function runCmd(command: string, cwd: string): Promise<{ ok: boolean; output: string }> {
+  const ran = await window.arkDesktop!.agentRun!({
+    command,
+    cwd,
+    userConfirmed: true,
+    skipConfirm: true,
+  });
+  return {
+    ok: Boolean(ran.ok),
+    output: String(ran.output || ran.error || '').trim(),
+  };
+}
 
 export async function verifyProjectAfterPatch(opts: {
   diskRoot?: string | null;
   files: Record<string, string>;
   changedPaths: string[];
+  /** When true (default), npm install once if verify fails on missing modules. */
+  autoInstall?: boolean;
 }): Promise<PatchVerifyResult> {
   const { diskRoot, files, changedPaths } = opts;
   if (!diskRoot || !changedPaths.length) {
@@ -43,18 +64,43 @@ export async function verifyProjectAfterPatch(opts: {
   }
 
   try {
-    const ran = await window.arkDesktop.agentRun({
+    let ran = await runCmd(command, diskRoot);
+    let installedDeps = false;
+
+    if (
+      !ran.ok
+      && opts.autoInstall !== false
+      && pkg
+      && looksLikeMissingModules(ran.output)
+    ) {
+      const install = await runCmd('npm install', diskRoot);
+      installedDeps = true;
+      if (install.ok) {
+        ran = await runCmd(command, diskRoot);
+      } else {
+        const summary = `\n\n**Verify:** missing modules; \`npm install\` failed.\n\`\`\`\n${install.output.slice(0, 1200)}\n\`\`\``;
+        return {
+          ran: true,
+          ok: false,
+          command: 'npm install',
+          output: install.output,
+          summary,
+          installedDeps: true,
+        };
+      }
+    }
+
+    const summary = ran.ok
+      ? `\n\n**Verify:** \`${command}\` passed.${installedDeps ? ' (after npm install)' : ''}`
+      : `\n\n**Verify:** \`${command}\` failed — check the output below.\n\`\`\`\n${ran.output.slice(0, 1200)}\n\`\`\``;
+    return {
+      ran: true,
+      ok: ran.ok,
       command,
-      cwd: diskRoot,
-      userConfirmed: true,
-      skipConfirm: true,
-    });
-    const out = String(ran.output || ran.error || '').trim();
-    const ok = Boolean(ran.ok);
-    const summary = ok
-      ? `\n\n**Verify:** \`${command}\` passed.`
-      : `\n\n**Verify:** \`${command}\` failed — check the output below.\n\`\`\`\n${out.slice(0, 1200)}\n\`\`\``;
-    return { ran: true, ok, command, output: out, summary };
+      output: ran.output,
+      summary,
+      installedDeps,
+    };
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'verify failed';
     return {

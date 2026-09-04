@@ -109,11 +109,27 @@ export function buildFreshSpaFromBrief(name: string, summary: string): { appJsx:
 export function cleanProductTitle(name: string): string {
   let s = String(name || '').trim();
   if (!s) return 'New App';
+  // Prefer an explicit product name inside a long prompt.
+  const called = s.match(/\b(?:called|named|name\s+it|call\s+it)\s+["“']?([A-Z][A-Za-z0-9][A-Za-z0-9 _-]{0,40})/i);
+  if (called?.[1]) s = called[1].trim();
+  const createProject = s.match(/\bcreate\s+(?:the\s+)?(?:project\s+)?["“']?([A-Z][A-Za-z0-9][A-Za-z0-9 _-]{1,40})(?:["”']|\s+on\s+disk|\s+project|\s*$)/i);
+  if (createProject?.[1] && !/^(the|a|an|new|this)$/i.test(createProject[1])) {
+    s = createProject[1].trim();
+  }
   // "ReefLog and build a reef…" → ReefLog
   s = s.replace(/\s+(?:and|with|that|which|where|when|so|for|but|featuring|including|—|–|-)\b.*$/i, '').trim();
   s = s.replace(/\s+(?:app|application|project|product|platform|website|site)\b.*$/i, '').trim();
+  // Reject sentence-like titles ("Bigger pass", "Make Harbor feel…", "Add a Create Channel…").
+  if (
+    /^(add|make|fix|update|bigger|please|help|create\s+the|scaffold|build\s+me)\b/i.test(s)
+    || s.split(/\s+/).length > 4
+    || /[,:!?]/.test(s)
+  ) {
+    const token = s.split(/\s+/).find(w => /^[A-Z][a-zA-Z0-9_-]{2,32}$/.test(w) && !/^(Add|Make|Fix|Update|Bigger|Please|Create|Build|Help)$/.test(w));
+    if (token) return token;
+  }
   if (s.length >= 2 && s.length <= 48) return s;
-  const first = String(name || '').trim().split(/\s+/)[0];
+  const first = String(name || '').trim().split(/\s+/).find(w => /^[A-Za-z][A-Za-z0-9_-]{1,40}$/.test(w));
   return first && first.length >= 2 ? first : 'New App';
 }
 

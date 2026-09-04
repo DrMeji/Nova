@@ -138,6 +138,7 @@ contextBridge.exposeInMainWorld('arkDesktop', {
   workspaceGetGrants: () => ipcRenderer.invoke('ark:workspace-get-grants'),
   agentRun: (payload) => ipcRenderer.invoke('ark:agent-run', payload),
   agentStartDevServer: (payload) => ipcRenderer.invoke('ark:agent-start-dev-server', payload),
+  agentStartFolderPreview: (payload) => ipcRenderer.invoke('ark:agent-start-folder-preview', payload),
   mcpListTools: (payload) => ipcRenderer.invoke('ark:mcp-list-tools', payload || {}),
   mcpCallTool: (payload) => ipcRenderer.invoke('ark:mcp-call-tool', payload || {}),
   mcpStop: (payload) => ipcRenderer.invoke('ark:mcp-stop', payload || {}),

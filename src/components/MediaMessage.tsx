@@ -399,12 +399,10 @@ function ArkMediaImage({ id, alt, preview }: { id: string; alt: string; preview?
 export function MessageContent({
   content,
   live,
-  traceExpanded,
   onPromptChipPick,
 }: {
   content: string;
   live?: boolean;
-  traceExpanded?: boolean;
   onPromptChipPick?: (prompt: string) => void;
 }) {
   if (!content) {
@@ -434,17 +432,14 @@ export function MessageContent({
     if (payload) {
       const shown = (answer || payload.answer || '').trim() || 'Done.';
       return (
-        <div className="space-y-2">
-          <ChatMarkdown text={shown} />
-          {traceExpanded ? (
-            <AgentTracePanel
-              payload={payload}
-              answer={shown}
-              live={live ?? (!payload.done && !answer)}
-              stepsOnly
-            />
-          ) : null}
-        </div>
+        <AgentTracePanel
+          payload={payload}
+          answer={shown}
+          live={live ?? (!payload.done && !answer)}
+          onContinue={payload.canContinue ? () => {
+            window.dispatchEvent(new CustomEvent('ark:agent-continue'));
+          } : undefined}
+        />
       );
     }
   }
@@ -500,7 +495,7 @@ export function MessageContent({
   if (chunks.length === 0) chunks.push({ type: 'text', value: content });
 
   const onlyMedia = chunks.every(c => c.type === 'media' || !c.value.trim());
-  const previewHint = /preview|not a finished|motion still|offline fallback|real:\s*false|demo|placeholder/i.test(content);
+  const previewHint = /not a finished|motion still|offline fallback|real:\s*false|demo placeholder/i.test(content);
 
   return (
     <div className={onlyMedia ? 'space-y-2' : 'space-y-3'}>
@@ -531,7 +526,7 @@ export function MessageContent({
         if (/^Source:\s/i.test(text)) {
           return null;
         }
-        if (/preview|not a finished|motion still|offline fallback/i.test(text) && text.length < 200) {
+        if (/not a finished|motion still|offline fallback|real:\s*false/i.test(text) && text.length < 200) {
           return (
             <p key={i} className="text-xs text-amber-400/90 whitespace-pre-wrap">
               {text}

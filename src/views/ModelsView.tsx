@@ -9,9 +9,8 @@ import {
   LOCAL_CATEGORY_ORDER,
   sortModelsByCategoryThenSizeDesc,
 } from '@/lib/modelSort';
-import { engineDiskSpace, getEngineStatus, deleteEngineModel, type ArkEngineStatus } from '@/lib/arkEngine';
+import { engineDiskSpace, getEngineStatus, deleteEngineModel } from '@/lib/arkEngine';
 import { BrandMark, StatusCheck } from '@/components/BrandMark';
-import { BrainApiCard } from '@/components/BrainApiCard';
 import { ModelDownloadConfirm } from '@/components/ModelDownloadConfirm';
 import { useRouter } from '@/context/RouterContext';
 import {
@@ -51,7 +50,7 @@ import { probeLiveCapacity, type LiveCapacity } from '@/lib/arkCapacity';
 import { openInSystemBrowser } from '@/lib/openExternal';
 import { providerKeyUrl } from '@/lib/providerKeyUrls';
 
-type TabId = 'for-pc' | 'local' | 'cloud' | 'engine';
+type TabId = 'for-pc' | 'local' | 'cloud';
 type Tier = 'free' | 'pro';
 type FitKind = 'quality' | 'balanced' | 'performance';
 
@@ -478,11 +477,12 @@ function TierBadges({ tiers }: { tiers: Tier[] }) {
 
 export function ModelsView() {
   const { route, navigate } = useRouter();
-  const [tab, setTab] = useState<TabId>(() => route.name === 'models' ? route.tab || 'for-pc' : 'for-pc');
-  const [engineSnap, setEngineSnap] = useState<Pick<
-    ArkEngineStatus,
-    'phase' | 'activeModelName' | 'modelsDir' | 'note' | 'ggufBinary' | 'models'
-  > | null>(null);
+  const [tab, setTab] = useState<TabId>(() => {
+    if (route.name !== 'models') return 'for-pc';
+    const t = route.tab;
+    if (t === 'local' || t === 'cloud' || t === 'for-pc') return t;
+    return 'for-pc';
+  });
   const [query, setQuery] = useState('');
   const [installed, setInstalled] = useState<Set<string>>(() => new Set());
   const [installing, setInstalling] = useState<Set<string>>(() => new Set(
@@ -521,7 +521,10 @@ export function ModelsView() {
   const fitLists = useMemo(() => buildFitLists(pcClass, ramGb), [pcClass, ramGb]);
 
   useEffect(() => {
-    if (route.name === 'models') setTab(route.tab || 'for-pc');
+    if (route.name !== 'models') return;
+    const t = route.tab;
+    if (t === 'local' || t === 'cloud' || t === 'for-pc') setTab(t);
+    else setTab('for-pc');
   }, [route]);
 
   useEffect(() => {
@@ -544,20 +547,6 @@ export function ModelsView() {
   useEffect(() => {
     void probeLiveCapacity().then(setLiveCapacity);
   }, [keyedProviders, ollamaOn, installed]);
-
-  useEffect(() => {
-    if (tab !== 'engine') return;
-    void getEngineStatus().then(status => {
-      setEngineSnap({
-        phase: status.phase,
-        activeModelName: status.activeModelName,
-        modelsDir: status.modelsDir,
-        note: status.note,
-        ggufBinary: status.ggufBinary,
-        models: status.models,
-      });
-    }).catch(() => setEngineSnap(null));
-  }, [tab]);
 
   useEffect(() => {
     const sync = () => {
@@ -1075,7 +1064,6 @@ export function ModelsView() {
               { id: 'for-pc' as const, label: 'For your PC', icon: Monitor },
               { id: 'local' as const, label: 'Local AI', icon: Cpu },
               { id: 'cloud' as const, label: 'Cloud AI', icon: Cloud },
-              { id: 'engine' as const, label: 'Brain', icon: Gauge },
             ]).map(t => (
               <button
                 key={t.id}
@@ -1304,54 +1292,6 @@ export function ModelsView() {
                 {localCategories.length === 0 && <EmptySearch />}
               </div>
             </>
-          ) : tab === 'engine' ? (
-            <div className="py-6 max-w-xl space-y-4">
-              <div>
-                <h2 className="text-lg font-semibold text-content-primary mb-2">ARK Brain</h2>
-                <div className="rounded-xl border border-surface-border p-4 space-y-2 text-sm">
-                  <p className="text-content-secondary">
-                    Status:{' '}
-                    <span className="text-content-primary">
-                      {engineSnap?.phase === 'online'
-                        ? 'Running'
-                        : engineSnap?.phase === 'starting'
-                          ? 'Starting'
-                          : engineSnap?.phase === 'offline'
-                            ? 'Offline'
-                            : engineSnap?.phase === 'degraded'
-                              ? 'Needs attention'
-                              : 'Checking…'}
-                    </span>
-                  </p>
-                  <p className="text-content-secondary">
-                    Active:{' '}
-                    <span className="text-content-primary">
-                      {(() => {
-                        if (!engineSnap) return '—';
-                        if (engineSnap.activeModelName !== 'ARK Core') return engineSnap.activeModelName;
-                        return engineSnap.models.find(model =>
-                          model.status === 'ready'
-                          && !['ark-core', 'ark-image-core', 'ark-video-core'].includes(model.id)
-                        )?.name || engineSnap.activeModelName;
-                      })()}
-                    </span>
-                  </p>
-                  <p className="text-content-secondary">
-                    Local runtime:{' '}
-                    <span className="text-content-primary">
-                      {engineSnap ? (engineSnap.ggufBinary ? 'Ready' : 'Not installed') : 'Checking…'}
-                    </span>
-                  </p>
-                  {engineSnap?.modelsDir ? (
-                    <p className="text-[11px] text-content-tertiary font-mono break-all">{engineSnap.modelsDir}</p>
-                  ) : null}
-                  {engineSnap?.note ? (
-                    <p className="text-xs text-content-tertiary">{engineSnap.note}</p>
-                  ) : null}
-                </div>
-              </div>
-              <BrainApiCard />
-            </div>
           ) : (
             <>
               {!q && (

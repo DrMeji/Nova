@@ -1,7 +1,7 @@
 {
   "name": "ark",
   "private": true,
-  "version": "0.1.175",
+  "version": "0.1.176",
   "type": "module",
   "main": "electron/main.cjs",
   "description": "ARK — AI Creation Studio desktop app",
@@ -28,6 +28,8 @@
     "smoke:brain": "node scripts/smoke-brain-check.cjs",
     "smoke:delete": "npx tsx --tsconfig tsconfig.app.json scripts/smoke-delete-flow.mjs",
     "smoke:routes": "npx tsx --tsconfig tsconfig.app.json scripts/smoke-chat-routes.mjs",
+    "smoke:agent-loop": "npx tsx --tsconfig tsconfig.app.json scripts/smoke-agent-loop.mjs",
+    "smoke:agent-eval": "npx tsx --tsconfig tsconfig.app.json scripts/smoke-agent-loop-eval.mjs",
     "smoke:catalog": "node scripts/smoke-catalog-ssot.cjs",
     "smoke:secrets": "node scripts/smoke-secrets-check.cjs",
     "smoke:parked": "tsx --tsconfig tsconfig.app.json scripts/smoke-parked-features.mjs",

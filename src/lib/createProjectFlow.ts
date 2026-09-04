@@ -48,16 +48,17 @@ export async function resolveNewProjectParent(
   const desktop = roots?.roots?.find(r => r.id === 'desktop')?.path;
   const documents = roots?.roots?.find(r => r.id === 'documents')?.path;
 
-  if (grants.desktop && desktop) {
-    const projectsDir = joinPath(desktop, 'Projects');
-    await window.arkDesktop?.workspaceMkdir?.({ targetPath: projectsDir });
-    return { parentPath: joinPath(projectsDir, intent.slug), source: 'Desktop\\Projects' };
-  }
-
+  // Prefer ARK's own projects folder (not Desktop\Projects).
   if (grants.documents && documents) {
     const arkDir = joinPath(documents, 'ARK Projects');
     await window.arkDesktop?.workspaceMkdir?.({ targetPath: arkDir });
     return { parentPath: joinPath(arkDir, intent.slug), source: 'Documents\\ARK Projects' };
+  }
+
+  if (grants.desktop && desktop) {
+    const arkDir = joinPath(desktop, 'ARK Projects');
+    await window.arkDesktop?.workspaceMkdir?.({ targetPath: arkDir });
+    return { parentPath: joinPath(arkDir, intent.slug), source: 'Desktop\\ARK Projects' };
   }
 
   const sandbox = await window.arkDesktop?.workspaceSandboxRoot?.();
@@ -66,7 +67,7 @@ export async function resolveNewProjectParent(
       parentPath: joinPath(sandbox.path, intent.slug),
       source: 'ARK projects folder',
       grantHint: !hasFolderAccessGrant()
-        ? 'Desktop access is off. created inside ARK storage. Enable **Settings → Security → Desktop** to use Desktop\\Projects next time.'
+        ? 'Folder access is off. created inside ARK storage. Enable **Settings → Security → Documents** (or Desktop) to use **ARK Projects** next time.'
         : undefined,
     };
   }
@@ -74,7 +75,7 @@ export async function resolveNewProjectParent(
   return {
     parentPath: '',
     source: '',
-    grantHint: 'Turn on **Desktop folder access** in Settings → Security to create projects on your Desktop.',
+    grantHint: 'Turn on **Documents** or **Desktop** folder access in Settings → Security so ARK can create projects in **ARK Projects**.',
   };
 }
 

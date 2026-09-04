@@ -3,6 +3,7 @@ import { useRouter } from '@/context/RouterContext';
 import { useRecentProjects } from '@/context/RecentProjectsContext';
 import { fetchProjects, createProject } from '@/lib/api';
 import { getLocalPrefs } from '@/lib/localPrefs';
+import { listArkProjectFolders } from '@/lib/arkProjectsHome';
 import type { Project } from '@/types';
 import { Search, Folder, Loader2, Plus, FolderOpen, Pencil, Trash2, MoreHorizontal } from 'lucide-react';
 
@@ -14,6 +15,7 @@ type ListItem = {
   modified: Date;
   source: 'local' | 'remote';
   typeLabel: string;
+  diskPath?: string;
 };
 
 type ProjectRow = Project & { id: string; project_type?: string };
@@ -32,6 +34,13 @@ export function ProjectsView() {
   const { navigate } = useRouter();
   const { recent, addRecent, renameRecent, removeRecent } = useRecentProjects();
   const [remote, setRemote] = useState<ProjectRow[]>([]);
+  const [arkFolders, setArkFolders] = useState<Array<{
+    id: string;
+    name: string;
+    path: string;
+    sourceLabel: string;
+    modified: Date;
+  }>>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
   const [tab, setTab] = useState<TabId>('all');
@@ -47,10 +56,10 @@ export function ProjectsView() {
 
   useEffect(() => {
     setLoading(true);
-    fetchProjects()
-      .then(data => setRemote(data as ProjectRow[]))
-      .catch(() => {})
-      .finally(() => setLoading(false));
+    Promise.all([
+      fetchProjects().then(data => setRemote(data as ProjectRow[])).catch(() => {}),
+      listArkProjectFolders().then(setArkFolders).catch(() => setArkFolders([])),
+    ]).finally(() => setLoading(false));
   }, []);
 
   const items = useMemo<ListItem[]>(() => {
@@ -73,8 +82,20 @@ export function ProjectsView() {
         typeLabel: 'this PC',
       }));
 
-    return [...fromRemote, ...fromRecent].sort((a, b) => b.modified.getTime() - a.modified.getTime());
-  }, [remote, recent]);
+    const recentNames = new Set(fromRecent.map(p => p.name.toLowerCase()));
+    const fromArk: ListItem[] = arkFolders
+      .filter(f => !recentNames.has(f.name.toLowerCase()))
+      .map(f => ({
+        id: f.id,
+        name: f.name,
+        modified: f.modified,
+        source: 'local' as const,
+        typeLabel: 'ARK Projects',
+        diskPath: f.path,
+      }));
+
+    return [...fromRemote, ...fromRecent, ...fromArk].sort((a, b) => b.modified.getTime() - a.modified.getTime());
+  }, [remote, recent, arkFolders]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -139,6 +160,30 @@ export function ProjectsView() {
     } finally {
       setOpeningFolder(false);
     }
+  };
+
+  const openListItem = async (item: ListItem) => {
+    if (item.diskPath && window.arkDesktop?.workspaceOpenRoot) {
+      setOpeningFolder(true);
+      try {
+        const project = addRecent(item.name);
+        const res = await window.arkDesktop.workspaceOpenRoot({
+          projectId: project.id,
+          projectName: item.name,
+          sourceDir: item.diskPath,
+        });
+        if (!res?.ok) {
+          setNotice(res?.error || 'Could not open that ARK project folder.');
+          window.setTimeout(() => setNotice(null), 4000);
+          return;
+        }
+        navigate({ name: 'project', id: project.id });
+      } finally {
+        setOpeningFolder(false);
+      }
+      return;
+    }
+    navigate({ name: 'project', id: item.id });
   };
 
   const commitRename = (id: string) => {
@@ -236,7 +281,7 @@ export function ProjectsView() {
               </div>
               <p className="text-base font-semibold text-content-primary mb-1">No projects here</p>
               <p className="text-sm text-content-tertiary max-w-sm">
-                Open a folder on this PC, or create a blank project. Templates live in Code after you open one.
+                New builds land in <span className="text-content-secondary">Documents\ARK Projects</span>. Open a folder, or create a blank project.
               </p>
             </div>
           ) : (
@@ -249,7 +294,7 @@ export function ProjectsView() {
                   <span className="flex items-center gap-3 min-w-0">
                     <button
                       type="button"
-                      onClick={() => navigate({ name: 'project', id: item.id })}
+                      onClick={() => void openListItem(item)}
                       className="flex items-center gap-3 min-w-0 flex-1 text-left"
                     >
                       <span className="w-9 h-9 rounded-lg bg-surface-hover flex items-center justify-center shrink-0">

@@ -39,6 +39,115 @@ export function voiceSupported(): boolean {
   return Boolean(getRecognition()) && typeof window !== 'undefined' && 'speechSynthesis' in window;
 }
 
+/** Mic → text only (Chat composer). Does not require TTS. */
+export function speechRecognitionSupported(): boolean {
+  return Boolean(getRecognition());
+}
+
+export type LiveDictationHandle = {
+  stop: () => void;
+};
+
+type RecognitionResultList = {
+  length: number;
+  [i: number]: { isFinal?: boolean; [j: number]: { transcript: string } };
+};
+
+/**
+ * Live speech-to-text for the Chat composer.
+ * Click mic again (handle.stop) when done speaking.
+ */
+export function startLiveDictation(opts: {
+  lang?: string;
+  onInterim?: (text: string) => void;
+  onFinal?: (text: string) => void;
+  onError?: (error: string) => void;
+  onEnd?: () => void;
+}): LiveDictationHandle {
+  const rec = getRecognition();
+  if (!rec) {
+    queueMicrotask(() => {
+      opts.onError?.('Speech recognition is not available here.');
+      opts.onEnd?.();
+    });
+    return { stop: () => undefined };
+  }
+
+  let closed = false;
+  let finalText = '';
+  let interimText = '';
+  let inputStream: MediaStream | null = null;
+
+  const releaseMic = () => {
+    try { inputStream?.getTracks().forEach(t => t.stop()); } catch { /* ignore */ }
+    inputStream = null;
+  };
+
+  const close = (error?: string) => {
+    if (closed) return;
+    closed = true;
+    releaseMic();
+    try { rec.stop(); } catch { /* ignore */ }
+    try { rec.abort(); } catch { /* ignore */ }
+    const text = (finalText || interimText).trim();
+    if (error) opts.onError?.(error);
+    else if (text) opts.onFinal?.(text);
+    opts.onEnd?.();
+  };
+
+  const stop = () => close();
+
+  void (async () => {
+    inputStream = await openVoiceInputStream();
+    if (!inputStream) {
+      close('Microphone access denied. Check Windows privacy settings or Settings → Voice.');
+      return;
+    }
+    if (closed) {
+      releaseMic();
+      return;
+    }
+
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.lang = opts.lang || 'en-US';
+    rec.onresult = (ev) => {
+      const results = ev.results as RecognitionResultList;
+      let rebuiltFinal = '';
+      let interim = '';
+      for (let i = 0; i < results.length; i++) {
+        const piece = results[i][0]?.transcript || '';
+        if (results[i].isFinal) rebuiltFinal += `${piece} `;
+        else interim += piece;
+      }
+      finalText = rebuiltFinal.replace(/\s+/g, ' ').trim();
+      interimText = interim;
+      const live = `${finalText} ${interim}`.replace(/\s+/g, ' ').trim();
+      if (live) opts.onInterim?.(live);
+    };
+    rec.onerror = (ev) => {
+      const err = String(ev.error || 'listen failed');
+      if (err === 'aborted' || err === 'no-speech') {
+        close();
+        return;
+      }
+      close(err);
+    };
+    rec.onend = () => {
+      // Engine often ends after a pause — treat as done.
+      close();
+    };
+
+    try {
+      rec.start();
+    } catch (err) {
+      close(err instanceof Error ? err.message : 'mic start failed');
+    }
+  })();
+
+  return { stop };
+}
+
 type SinkCapable = AudioContext & { setSinkId?: (id: string) => Promise<void> };
 
 async function primeOutputSink(): Promise<void> {

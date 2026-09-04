@@ -480,6 +480,12 @@ declare global {
         url?: string;
         error?: string;
       }>;
+      agentStartFolderPreview?: (payload: { cwd?: string }) => Promise<{
+        ok: boolean;
+        cwd?: string;
+        url?: string;
+        error?: string;
+      }>;
       mcpListTools?: (payload: {
         id: string;
         transport: 'stdio' | 'sse';

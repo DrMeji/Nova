@@ -33,6 +33,15 @@ export function classifyPcExploreMode(text: string): PcExploreMode | null {
 
   if (looksLikeInstalledAppsAsk(t)) return 'installed_apps';
 
+  // App / product ideas that mention "gaming" (news, mobile app, etc.) are NOT PC game inventory.
+  if (
+    /\b(?:news|article|curat|mobile\s+app|web\s+app|website|build(?:ing)?|creat(?:e|ing)|scaffold|mvp|feature|dashboard|product)\b/i.test(t)
+    || /\bthinking\s+about\s+building\b/i.test(t)
+    || /\bi(?:'m| am)\s+(?:thinking|building|making|creating)\b/i.test(t)
+  ) {
+    return null;
+  }
+
   // Inventory only. soft “hobby project / tell me more” must NOT match.
   if (
     /\b(?:what|which)\s+projects?\b/i.test(t)
@@ -46,11 +55,11 @@ export function classifyPcExploreMode(text: string): PcExploreMode | null {
     return 'desktop_subfolder';
   }
 
-  // "gaming PC build / CPU GPU recommend" is advice. not inventory of Desktop\Games.
+  // Explicit game *inventory* asks only ("what games do I have", "list my Steam games").
   if (
     /\b(games?|gaming|steam)\b/i.test(t)
-    && /\b(desktop|pc|computer|downloaded|installed|have|found|find|any|whole|my)\b/i.test(t)
-    && !/\b(?:build|cpu|gpu|recommend|pair|budget|dollars?|mid-?range|what\s+(?:cpu|gpu))\b/i.test(t)
+    && /\b(?:list|show|find|have|installed|downloaded|on\s+(?:my\s+)?(?:desktop|pc|computer)|steam\s+library)\b/i.test(t)
+    && !/\b(?:build|cpu|gpu|recommend|pair|budget|dollars?|mid-?range|what\s+(?:cpu|gpu)|news|app|mobile)\b/i.test(t)
   ) {
     return 'games';
   }
@@ -64,10 +73,19 @@ export function classifyPcExploreMode(text: string): PcExploreMode | null {
   if (/\b(find|list|show|tell me|did you find|do you see|any)\b/i.test(t)
     && /\b(on|in)\s+(?:my\s+)?(desktop|pc|computer|whole pc)\b/i.test(t)
     && !looksLikeInstalledAppsAsk(t)) {
-    if (/\b(games?|gaming)\b/i.test(t)) return 'games';
+    if (/\b(games?|gaming|steam)\b/i.test(t)
+      && /\b(?:list|show|have|installed|downloaded|library)\b/i.test(t)
+      && !/\b(?:news|app|build|mobile|website)\b/i.test(t)) {
+      return 'games';
+    }
     return 'desktop_top';
   }
-  if (/\b(?:my|the)\s+(?:whole|entire)\s+pc\b/i.test(t) && /\b(games?|gaming)\b/i.test(t)) return 'games';
+  if (/\b(?:my|the)\s+(?:whole|entire)\s+pc\b/i.test(t)
+    && /\b(games?|gaming)\b/i.test(t)
+    && /\b(?:list|show|have|installed)\b/i.test(t)
+    && !/\b(?:news|app|build|mobile)\b/i.test(t)) {
+    return 'games';
+  }
   if (/\b(?:my|the)\s+(?:whole|entire)\s+pc\b/i.test(t) && !looksLikeInstalledAppsAsk(t)) return 'desktop_top';
 
   if (/\b(?:inside|in)\s+(?:of\s+)?(?:my\s+)?(?:pc|computer)\b/i.test(t) && !looksLikeInstalledAppsAsk(t)) {

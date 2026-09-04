@@ -78,6 +78,15 @@ export type LocalPrefs = {
   allowFullPcAccess: boolean;
   /** Agent shell command policy. allowlist, auto-review, or run everything. */
   agentExecutionMode: 'allowlist' | 'auto_review' | 'run_all';
+  /**
+   * Level-B agent tool loop (search → read → edit → run → verify).
+   * When false, Agent mode falls back to one-shot coding.
+   */
+  agentLoopEnabled: boolean;
+  /** Max tool steps per Agent loop (4–60). */
+  agentLoopMaxSteps: number;
+  /** After a green verify, auto `git commit` changed files (allowlist/confirm still apply). */
+  agentLoopCommitOnSuccess: boolean;
   /** Chat-first shell. hide Code tab from sidebar (Code still works via handoff). */
   chatFirst: boolean;
   // Voice (Chat → Voice tab)
@@ -141,6 +150,9 @@ const DEFAULT_PREFS: LocalPrefs = {
   allowDocumentsFolderAccess: false,
   allowFullPcAccess: false,
   agentExecutionMode: 'allowlist',
+  agentLoopEnabled: true,
+  agentLoopMaxSteps: 24,
+  agentLoopCommitOnSuccess: false,
   chatFirst: true,
   voiceChatEnabled: false,
   voiceInputAuto: true,
@@ -336,6 +348,20 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.176',
+    channel: 'stable' as const,
+    date: 'Sep 3, 2026',
+    title: 'Chat mic, ARK Projects, Brain under Tools',
+    notes: [
+      'Microphone on the Chat box — click to speak, voice-to-text fills the composer',
+      'Queued message bar matches the chat box width',
+      'Thought dropdown shows background work; Files Changed card on disk edits; More details removed',
+      'New projects land in Documents\\ARK Projects; Projects view lists them',
+      'ARK Brain moved to Tools (under MCP) for any local app — not Lindsay-only',
+      'Gaming news app ideas no longer trigger a desktop game inventory scan',
+    ],
+  },
+  {
     version: '0.1.175',
     channel: 'stable' as const,
     date: 'Sep 3, 2026',
@@ -344,6 +370,7 @@ export const ARK_CHANGELOG = [
       'Update button no longer pops the splash while download / verify still runs in Settings',
       'Install splash is the official logo + progress screen only — old blank WinForms path removed',
       'HTA splash embeds the ARK mark so the logo cannot go missing mid-update',
+      'Agent / Debug on a bound project can run a Level-B tool loop (list → read → grep → write → run → verify)',
     ],
   },
   {

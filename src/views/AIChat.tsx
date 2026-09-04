@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, useLayoutEffect, useCallback, startTransition, type ClipboardEvent as ReactClipboardEvent } from 'react';
+import { useState, useEffect, useRef, useMemo, useLayoutEffect, useCallback, startTransition, type ClipboardEvent as ReactClipboardEvent, type WheelEvent as ReactWheelEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { useAuth } from '@/context/AuthContext';
 import { useRouter, type ChatMode } from '@/context/RouterContext';
@@ -103,12 +103,25 @@ import {
   looksLikePcExploreAsk,
   pcExploreStatusStages,
 } from '@/lib/pcExplore';
-import { isTraceMessage } from '@/lib/agentTrace';
+import { isTraceMessage, encodeTraceMessage, nextTraceStepId, traceThoughtFromAsk, countLineDiff, wrapReplyWithFileChanges, type AgentFileChange, type AgentTracePayload, type AgentTraceStep } from '@/lib/agentTrace';
 import { hasFolderAccessGrant, resolveScopedFolderPath, formatFolderLocatedMessage, syncWorkspaceGrantsFromPrefs, resolveWorkFolderPath } from '@/lib/workspaceGrants';
 import { saveChatStudio, loadChatStudio, clearChatStudio, setLastListedFolder, getLastListedFolder, clearLastListedFolder, setLastDiskTarget, getLastDiskTarget, clearLastDiskTarget, setLastPendingAddFile, getLastPendingAddFile, clearLastPendingAddFile, setLastPendingGreenfield, getLastPendingGreenfield, clearLastPendingGreenfield, setChatCodePill, hasChatCodePill, chatHasBuildWorkspace, resolveChatProjectRoot, studioPathBasename } from '@/lib/chatStudioStore';
 import { runCodeStudioCommand } from '@/lib/studioCommands';
 import { applyChatReplyEdits } from '@/lib/chatAgentApply';
 import { runProjectMultiAgent, wantsMultiAgentTurn } from '@/lib/arkMultiAgent';
+import {
+  runArkAgentLoop,
+  shouldRunAgentLoop,
+  agentLoopPreferCloud,
+  agentLoopStepsToTrace,
+} from '@/lib/arkAgentLoop';
+import { parseAddCommentAsk, applyLineComment, applyVisibleHtmlMarker, wantsVisiblePreviewMarker } from '@/lib/arkQuickEdit';
+import {
+  saveAgentContinue,
+  loadAgentContinue,
+  clearAgentContinue,
+  looksLikeAgentContinueAsk,
+} from '@/lib/arkAgentContinue';
 import { beginChatInflight, endChatInflight, hasChatInflight } from '@/lib/chatInflight';
 import { looksLikeNsfwAsk, nsfwBlockedReply } from '@/lib/nsfwGate';
 import {
@@ -121,7 +134,7 @@ import {
   looksLikeHarmfulContentAsk,
 } from '@/lib/arkContentSafety';
 import { redactArkSelfLeak } from '@/lib/replySanitizer';
-import { listenOnce, speakText, stopSpeaking, voiceSupported, scrubVoiceConstraintEcho } from '@/lib/voiceSession';
+import { listenOnce, speakText, stopSpeaking, voiceSupported, scrubVoiceConstraintEcho, speechRecognitionSupported, startLiveDictation, type LiveDictationHandle } from '@/lib/voiceSession';
 import { voiceChatRoute } from '@/lib/voiceRoute';
 import { syncAutoVoiceDevices } from '@/lib/voiceAudio';
 import type { VoiceSessionPhase } from '@/lib/voiceMode';
@@ -160,6 +173,7 @@ import {
 } from '@/lib/chatAgentExec';
 import {
   detectProjectKind,
+  extractProjectName,
   findBestProductBrief,
   parseNewProjectIntent,
   recoverOriginalUserBrief,
@@ -256,10 +270,10 @@ import type { ChatMessage } from '@/types';
 import {
   Loader2, ImageIcon, Video, Code2,
   Upload, Cpu, Cloud, ChevronDown, Check, Blocks, Folder, Square, X, ImagePlus,
-  Puzzle, Briefcase, Github, Globe, Copy, Plus,
+  Puzzle, Briefcase, Github, Globe, Copy, Plus, Mic, MicOff,
 } from 'lucide-react';
 import { engineGenerateCancel, getEngineStatus, setEngineModel } from '@/lib/arkEngine';
-import { ensureViteDevServer, isViteProject, openInAppPreview, ensureInAppPreview, refreshLivePreview } from '@/lib/projectPreview';
+import { ensureViteDevServer, isViteProject, openInAppPreview, ensureInAppPreview, refreshLivePreview, ensureBoundFolderPreview, loadPreviewFilesFromDisk } from '@/lib/projectPreview';
 import { cleanProductTitle } from '@/lib/freshSpaFromBrief';
 
 const COMPOSER_MODE_PREFIX: Record<'plan' | 'ask' | 'agent' | 'debug' | 'multitask', string> = {
@@ -641,23 +655,37 @@ async function resolveStudioFiles(opts: {
     };
   }
   const fromChat = loadChatStudio(opts.chatId);
-  if (fromChat) {
+  if (fromChat && Object.keys(fromChat.files || {}).length) {
     return {
       files: fromChat.files,
       projectId: fromChat.projectId,
       name: fromChat.name,
-      diskRoot: fromChat.diskRoot || null,
+      diskRoot: fromChat.diskRoot || opts.memoryDiskRoot || null,
     };
   }
 
-  const pid = opts.memoryProjectId || projectIdFromThread(opts.messages);
+  const pid = opts.memoryProjectId || fromChat?.projectId || projectIdFromThread(opts.messages);
+  const diskRoot = opts.memoryDiskRoot || fromChat?.diskRoot || null;
+
+  // Path-bound workspaces: keep an empty map here. Later steps hydrate only
+  // the files this turn needs (keeps Turn context low).
+  if (diskRoot) {
+    return {
+      files: {},
+      projectId: pid,
+      // Folder basename is the source of truth — never let chat titles rewrite it.
+      name: studioPathBasename(diskRoot) || fromChat?.name || folderNameFromThread(opts.messages) || undefined,
+      diskRoot,
+    };
+  }
+
   if (pid) {
     try {
       const raw = localStorage.getItem(`ark:chat-studio-files:${pid}`);
       if (raw) {
         const parsed = JSON.parse(raw) as { files?: Record<string, string>; name?: string };
         if (parsed?.files && Object.keys(parsed.files).length) {
-          return { files: parsed.files, projectId: pid, name: parsed.name };
+          return { files: parsed.files, projectId: pid, name: parsed.name, diskRoot };
         }
       }
     } catch {
@@ -673,7 +701,8 @@ async function resolveStudioFiles(opts: {
           return {
             files: read.files as Record<string, string>,
             projectId: pid,
-            name: folderNameFromThread(opts.messages) || undefined,
+            name: folderNameFromThread(opts.messages) || fromChat?.name || undefined,
+            diskRoot: (read as { root?: string }).root || diskRoot,
           };
         }
       } catch {
@@ -681,7 +710,12 @@ async function resolveStudioFiles(opts: {
       }
     }
   }
-  return { files: {}, projectId: pid, name: folderNameFromThread(opts.messages) || undefined };
+  return {
+    files: {},
+    projectId: pid,
+    name: folderNameFromThread(opts.messages) || fromChat?.name || undefined,
+    diskRoot,
+  };
 }
 
 function persistModeThread(
@@ -801,6 +835,10 @@ export function AIChat() {
   const [capacity, setCapacity] = useState<LiveCapacity | null>(null);
   const [generating, setGenerating] = useState(false);
   const [voicePhase, setVoicePhase] = useState<VoiceSessionPhase>('idle');
+  const [dictating, setDictating] = useState(false);
+  const [dictationHint, setDictationHint] = useState<string | null>(null);
+  const dictationRef = useRef<LiveDictationHandle | null>(null);
+  const dictationBaseRef = useRef('');
   const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
   const [queueLen, setQueueLen] = useState(0);
   const [pendingImages, setPendingImages] = useState<{ id: string; name: string; dataUrl: string }[]>([]);
@@ -811,6 +849,9 @@ export function AIChat() {
   const [pendingAttaches, setPendingAttaches] = useState<ChatAttachMeta[]>([]);
   const [dragOverChat, setDragOverChat] = useState(false);
   const [dropHint, setDropHint] = useState<string | null>(null);
+  const [pathBindOpen, setPathBindOpen] = useState(false);
+  const [pathBindDraft, setPathBindDraft] = useState('');
+  const pathBindInputRef = useRef<HTMLInputElement>(null);
   const [attachUploading, setAttachUploading] = useState<string | null>(null);
   const [githubPickerOpen, setGithubPickerOpen] = useState(false);
   const [deleteProjectPrompt, setDeleteProjectPrompt] = useState<{ projectName: string; folderPath: string } | null>(null);
@@ -850,12 +891,9 @@ export function AIChat() {
     mySeq: number;
   } | null>(null);
   const [inspectOfferId, setInspectOfferId] = useState<string | null>(null);
-  /** actions = what next; handoff = after inspect; details = coding trace expand */
-  const [studioOfferKind, setStudioOfferKind] = useState<'actions' | 'handoff' | 'details' | null>(null);
-  const [traceDetailsId, setTraceDetailsId] = useState<string | null>(null);
+  /** actions = what next; handoff = after inspect */
+  const [studioOfferKind, setStudioOfferKind] = useState<'actions' | 'handoff' | null>(null);
   const [githubOfferId, setGithubOfferId] = useState<string | null>(null);
-  /** Pill = one row; expanded = textarea grows up, + / ARK pinned on bottom row. */
-  const [composerExpanded, setComposerExpanded] = useState(false);
   const [composerMode, setComposerMode] = useState<'plan' | 'ask' | 'agent' | 'debug' | 'multitask' | null>(null);
   const [videoDurationSec, setVideoDurationSec] = useState<10 | 20 | 30>(10);
   const [tokenRatio, setTokenRatio] = useState(0);
@@ -919,6 +957,8 @@ export function AIChat() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesScrollRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
+  /** Once the user scrolls up during a turn, stay detached until they jump/send. */
+  const userDetachScrollRef = useRef(false);
   const [showJumpToBottom, setShowJumpToBottom] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const modelMenuRef = useRef<HTMLDivElement>(null);
@@ -1020,8 +1060,11 @@ export function AIChat() {
 
   /** Preview window id is always this chat — never another thread's localhost. */
   const previewWindowIdForChat = (chatId?: string | null) => {
-    const id = String(chatId || persistChatIdRef.current || '').trim();
-    return id ? `chat:${id}` : 'chat-preview';
+    const id = String(chatId || persistChatIdRef.current || '').trim()
+      .replace(/[^a-zA-Z0-9._-]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 80);
+    return id ? `chat-${id}` : 'chat-preview';
   };
 
   const clearWorkspaceBinding = useCallback((chatId: string) => {
@@ -1343,28 +1386,16 @@ export function AIChat() {
   }, [mode]);
 
   const workspaceBadgeLabel = useMemo(() => {
+    // Bound disk path always wins — never use chat title (that became "Add a one-line…").
+    if (chatStudioDiskRoot) {
+      return studioPathBasename(chatStudioDiskRoot) || chatStudioDiskRoot;
+    }
     if (pendingAttaches[0]?.name) return pendingAttaches[0].name;
     const chatId = route.name === 'chat' ? route.chatId : undefined;
-    const recentTitle = chatId
-      ? (loadRecentChats().find(c => c.id === chatId)?.title || '').trim()
-      : '';
-    const productTitle = (
-      recentTitle
-      && recentTitle.length <= 48
-      && !/^(create|build|make|write|help)\b/i.test(recentTitle)
-    ) ? cleanProductTitle(recentTitle) : '';
-    if (chatStudioDiskRoot) {
-      const base = studioPathBasename(chatStudioDiskRoot);
-      // Bound folder from another project must not label this chat.
-      if (productTitle && base && base.toLowerCase() !== productTitle.toLowerCase()) {
-        return productTitle;
-      }
-      return base || chatStudioDiskRoot;
-    }
-    if (productTitle) return productTitle;
     if (chatId) {
       const snap = loadChatStudio(chatId);
-      if (snap?.name) return snap.name;
+      if (snap?.diskRoot) return studioPathBasename(snap.diskRoot) || snap.diskRoot;
+      // No disk bind yet — do not show a fake folder pill from chat title / snap.name.
     }
     if (Object.keys(chatStudioFiles).length) return 'Attached project';
     return null;
@@ -1880,7 +1911,7 @@ export function AIChat() {
 
   useEffect(() => {
     // Only pin to bottom when the user is already near the end. never yank scroll while reading history.
-    if (!stickToBottomRef.current) return;
+    if (!stickToBottomRef.current || userDetachScrollRef.current) return;
     const el = messagesScrollRef.current;
     if (el) {
       el.scrollTop = el.scrollHeight;
@@ -1893,14 +1924,35 @@ export function AIChat() {
     const el = messagesScrollRef.current;
     if (!el) return;
     const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    if (userDetachScrollRef.current) {
+      // Re-attach only when the user clearly returns to the bottom.
+      if (distFromBottom < 48) {
+        userDetachScrollRef.current = false;
+        stickToBottomRef.current = true;
+        setShowJumpToBottom(false);
+      } else {
+        stickToBottomRef.current = false;
+        setShowJumpToBottom(true);
+      }
+      return;
+    }
     // Hysteresis: leave stick early when scrolling up; re-stick only when clearly at bottom.
-    if (distFromBottom > 180) stickToBottomRef.current = false;
-    else if (distFromBottom < 80) stickToBottomRef.current = true;
-    setShowJumpToBottom(distFromBottom > 220);
+    if (distFromBottom > 100) stickToBottomRef.current = false;
+    else if (distFromBottom < 48) stickToBottomRef.current = true;
+    setShowJumpToBottom(distFromBottom > 160);
+  };
+
+  const onMessagesWheel = (e: ReactWheelEvent<HTMLDivElement>) => {
+    if (e.deltaY < 0) {
+      userDetachScrollRef.current = true;
+      stickToBottomRef.current = false;
+      setShowJumpToBottom(true);
+    }
   };
 
   const jumpToBottom = () => {
     const el = messagesScrollRef.current;
+    userDetachScrollRef.current = false;
     stickToBottomRef.current = true;
     setShowJumpToBottom(false);
     if (el) {
@@ -2028,122 +2080,123 @@ export function AIChat() {
 
   const openProjectFolder = async () => {
     const root = chatStudioDiskRootRef.current;
-    if (!root) return;
+    if (!root) {
+      setDropHint('No folder path bound on this chat yet. Use + → Open folder.');
+      return;
+    }
     try {
       const res = await window.arkDesktop?.openPath?.(root);
-      if (res === true || (res && typeof res === 'object' && res.ok)) return;
-    } catch {
-      /* ignore */
+      if (res === true || (res && typeof res === 'object' && res.ok)) {
+        setDropHint(null);
+        return;
+      }
+      const err = res && typeof res === 'object' && 'error' in res ? String(res.error || '') : '';
+      setDropHint(err || `Could not open folder:\n${root}`);
+    } catch (err) {
+      setDropHint(err instanceof Error ? err.message : 'Could not open folder.');
     }
   };
 
   const openProjectPreview = async (): Promise<string | null> => {
     const chatId = routeChatIdRef.current || persistChatIdRef.current;
-    if (!chatId) return null;
-
-    // Always resolve from THIS chat id + sidebar title — never another thread's refs.
-    if (studioBoundChatIdRef.current !== chatId) {
-      await rebindStudioForChat(chatId);
-    } else {
-      // Re-heal in case studio was poisoned while still "bound".
-      const title = loadRecentChats().find(c => c.id === chatId)?.title || null;
-      const resolved = await resolveChatProjectRoot({ chatId, chatTitle: title });
-      if (resolved.healed || resolved.diskRoot !== chatStudioDiskRootRef.current) {
-        applyStudioBinding(chatId, {
-          files: resolved.files,
-          projectId: resolved.projectId,
-          name: resolved.name,
-          diskRoot: resolved.diskRoot,
-          previewUrl: resolved.previewUrl,
-        });
-      }
+    if (!chatId) {
+      setDropHint('Open or send a message in this chat first, then try Preview.');
+      return null;
     }
 
-    const snap = loadChatStudio(chatId);
-    const root = String(
+    // Trust the in-memory bind for this chat. Only re-resolve when unbound.
+    let root = String(
       (studioBoundChatIdRef.current === chatId ? chatStudioDiskRootRef.current : null)
-      || snap?.diskRoot
+      || loadChatStudio(chatId)?.diskRoot
       || '',
     ).trim() || null;
-    if (!root) return null;
+
+    if (!root) {
+      await rebindStudioForChat(chatId);
+      root = chatStudioDiskRootRef.current;
+    } else if (studioBoundChatIdRef.current !== chatId) {
+      await rebindStudioForChat(chatId);
+      root = chatStudioDiskRootRef.current || root;
+    }
+
+    // Never let a "heal" replace a good folder with a prompt-title path.
+    if (root) {
+      chatStudioDiskRootRef.current = root;
+      setChatStudioDiskRoot(root);
+      studioBoundChatIdRef.current = chatId;
+    }
+
+    if (!root) {
+      setDropHint('No folder path on this chat. Use + → Bind project…, then Preview.');
+      return null;
+    }
 
     const pid = previewWindowIdForChat(chatId);
-    let files = (snap?.files && Object.keys(snap.files).length)
-      ? snap.files
-      : (studioBoundChatIdRef.current === chatId ? chatStudioFilesRef.current : {});
-    const title = (snap?.name || workspaceBadgeLabel || 'Preview').toString();
+    const snap = loadChatStudio(chatId);
+    const folderName = studioPathBasename(root) || 'Preview';
+    const title = folderName;
 
-    chatStudioDiskRootRef.current = root;
-    setChatStudioDiskRoot(root);
-    studioBoundChatIdRef.current = chatId;
-    if (snap?.projectId) {
-      chatStudioProjectIdRef.current = snap.projectId;
-      setChatStudioProjectId(snap.projectId);
-    }
-    if (files && Object.keys(files).length) {
-      chatStudioFilesRef.current = files;
-      setChatStudioFiles(files);
-    }
-
-    // Prefer freshest on-disk files when a project folder is bound.
-    if (chatStudioProjectIdRef.current && window.arkDesktop?.projectRead) {
-      try {
-        const read = await window.arkDesktop.projectRead(chatStudioProjectIdRef.current);
-        if (read?.ok && read.files && Object.keys(read.files).length) {
-          files = read.files as Record<string, string>;
-          setChatStudioFiles(files);
-          chatStudioFilesRef.current = files;
-        }
-      } catch {
-        /* keep in-memory */
-      }
-    }
-
-    // Vite/React → always start/reuse THIS folder's server (cwd-keyed), never another chat's URL.
-    if (root) {
-      const looksVite = isViteProject(files);
-      // Even if in-memory files are empty/stale, try the disk folder (create always writes package.json).
-      const dev = await ensureViteDevServer(root);
-      if (dev.ok && dev.url) {
-        const url = dev.url;
-        setPreviewUrl(url);
-        previewUrlRef.current = url;
-        persistStudioSnapshot(chatId, {
-          files,
-          projectId: chatStudioProjectIdRef.current,
-          name: title,
-          diskRoot: root,
-          previewUrl: url,
-        });
-        await openInAppPreview(url, { projectId: pid, title, forceNavigate: true });
-        return url;
-      }
-      if (looksVite) return null;
-    }
-
-    // Static HTML/CSS/JS (and anything else) → local ARK preview server + closable window.
-    if (Object.keys(files).length) {
-      const url = await ensureInAppPreview({
+    setDropHint('Opening preview…');
+    try {
+      const result = await ensureBoundFolderPreview({
+        root,
         projectId: pid,
         title,
-        files,
-        preferUrl: null,
+        files: snap?.files && Object.keys(snap.files).length
+          ? snap.files
+          : (studioBoundChatIdRef.current === chatId ? chatStudioFilesRef.current : {}),
       });
-      if (url) {
-        setPreviewUrl(url);
-        previewUrlRef.current = url;
-        persistStudioSnapshot(chatId, {
-          files,
-          projectId: chatStudioProjectIdRef.current,
-          name: title,
-          diskRoot: root,
-          previewUrl: url,
-        });
+      if (!result.ok) {
+        // One more try with a fresh disk hydrate (static/, index.html, run.bat).
+        const hydrated = await loadPreviewFilesFromDisk(root);
+        if (Object.keys(hydrated).length) {
+          setChatStudioFiles(hydrated);
+          chatStudioFilesRef.current = hydrated;
+          const retry = await ensureBoundFolderPreview({
+            root,
+            projectId: pid,
+            title,
+            files: hydrated,
+          });
+          if (retry.ok) {
+            setPreviewUrl(retry.url);
+            previewUrlRef.current = retry.url;
+            persistStudioSnapshot(chatId, {
+              files: hydrated,
+              projectId: chatStudioProjectIdRef.current,
+              name: folderName,
+              diskRoot: root,
+              previewUrl: retry.url,
+            });
+            setDropHint(null);
+            return retry.url;
+          }
+        }
+        setDropHint(result.error);
+        window.setTimeout(() => {
+          setDropHint(prev => (prev === result.error ? null : prev));
+        }, 8000);
+        return null;
       }
-      return url;
+      setPreviewUrl(result.url);
+      previewUrlRef.current = result.url;
+      persistStudioSnapshot(chatId, {
+        files: chatStudioFilesRef.current,
+        projectId: chatStudioProjectIdRef.current,
+        name: folderName,
+        diskRoot: root,
+        previewUrl: result.url,
+      });
+      setDropHint(null);
+      return result.url;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Preview failed to open.';
+      setDropHint(msg);
+      window.setTimeout(() => {
+        setDropHint(prev => (prev === msg ? null : prev));
+      }, 8000);
+      return null;
     }
-
-    return null;
   };
 
   const pushLivePreview = async (files: Record<string, string>, openIfClosed = false) => {
@@ -2405,20 +2458,26 @@ export function AIChat() {
     };
   }, [mode]);
 
-  const openFolderInChat = async (sourceDir?: string): Promise<{
+  const openFolderInChat = async (sourceDir?: string, opts?: {
+    mode?: 'path' | 'import';
+  }): Promise<{
     ok: boolean;
     files?: Record<string, string>;
     projectId?: string;
     name?: string;
     root?: string;
     error?: string;
+    catalogOnly?: boolean;
   }> => {
     if (!window.arkDesktop?.projectImportFolder && !window.arkDesktop?.workspaceOpenRoot) {
       attachInputRef.current?.click();
       return { ok: false, error: 'Folder open is only available in the desktop app.' };
     }
     const pid = `proj-${crypto.randomUUID().slice(0, 8)}`;
-    setAttachUploading('Opening folder…');
+    const wantImport = opts?.mode === 'import';
+    // Prefer path bind: keep context light until Agent/tools need a file.
+    const useInPlace = !wantImport && Boolean(window.arkDesktop?.workspaceOpenRoot);
+    setAttachUploading(useInPlace ? 'Binding folder path…' : 'Opening folder…');
     setAttachBusy(true);
     setDropHint(null);
     const onProg = (ev: Event) => {
@@ -2428,11 +2487,11 @@ export function AIChat() {
     };
     window.addEventListener('ark:project-import-progress', onProg);
     try {
-      const useInPlace = Boolean(sourceDir || hasFolderAccessGrant()) && window.arkDesktop?.workspaceOpenRoot;
       const res = useInPlace
         ? await window.arkDesktop?.workspaceOpenRoot?.({
           projectId: pid,
           ...(sourceDir ? { sourceDir } : {}),
+          catalogOnly: true,
         })
         : await window.arkDesktop?.projectImportFolder?.({
           projectId: pid,
@@ -2448,72 +2507,105 @@ export function AIChat() {
             if (data?.ok && data.dataUrl) {
               const id = `attach-${crypto.randomUUID().slice(0, 10)}`;
               rememberThumb(id, data.dataUrl);
-              setPendingImages(prev => [...prev, { id, name: base, dataUrl: data.dataUrl! }].slice(0, 4));
+              setPendingImages([{ id, name: base, dataUrl: data.dataUrl! }]);
               return { ok: true };
             }
           }
           const read = await window.arkDesktop.readTextFile?.({ path: filePath });
           const text = read?.ok && read.text != null ? read.text : `[Attached file: ${base}]`;
-          setChatStudioFiles(prev => ({ ...prev, [base]: text }));
-          setPendingAttaches(prev => [...prev, { kind: 'file' as const, name: base, count: 1, id: `file-${pid}` }].slice(0, 12));
+          setChatStudioFiles({ [base]: text });
+          chatStudioFilesRef.current = { [base]: text };
+          setPendingAttaches([{ kind: 'file' as const, name: base, count: 1, id: `file-${pid}` }]);
           return { ok: true };
         }
         const err = res?.error || 'Could not open that folder.';
         setDropHint(err);
         return { ok: false, error: err };
       }
-      const rawFiles = res.files || {};
+      const catalogOnly = Boolean((res as { catalogOnly?: boolean }).catalogOnly) || useInPlace;
       const folderName = res.name || 'folder';
       const files: Record<string, string> = {};
-      // In-place disk roots must keep paths relative to the folder (src/App.jsx).
-      // Prefixing with folderName made writes land in Folder\\Folder\\src (nested clone).
       const inPlaceRoot = Boolean(res.root && res.inPlace !== false);
-      for (const [rel, text] of Object.entries(rawFiles)) {
-        const pathKey = String(rel).replace(/\\/g, '/').replace(/^\/+/, '');
-        if (!pathKey) continue;
-        if (inPlaceRoot) {
-          const stripped = pathKey.startsWith(`${folderName}/`)
-            ? pathKey.slice(folderName.length + 1)
-            : pathKey;
-          files[stripped || pathKey] = text;
-        } else {
-          files[pathKey.startsWith(`${folderName}/`) ? pathKey : `${folderName}/${pathKey}`] = text;
+      if (!catalogOnly) {
+        const rawFiles = res.files || {};
+        for (const [rel, text] of Object.entries(rawFiles)) {
+          const pathKey = String(rel).replace(/\\/g, '/').replace(/^\/+/, '');
+          if (!pathKey) continue;
+          if (inPlaceRoot) {
+            const stripped = pathKey.startsWith(`${folderName}/`)
+              ? pathKey.slice(folderName.length + 1)
+              : pathKey;
+            files[stripped || pathKey] = text;
+          } else {
+            files[pathKey.startsWith(`${folderName}/`) ? pathKey : `${folderName}/${pathKey}`] = text;
+          }
         }
       }
-      const count = Object.keys(files).length;
-      if (!count) {
+      const listed = Number((res as { listed?: number }).listed || 0);
+      const count = catalogOnly ? listed : Object.keys(files).length;
+      if (!catalogOnly && !count) {
         setDropHint(`Opened “${folderName}” but it looks empty.`);
         return { ok: false, error: 'empty folder' };
       }
-      setChatStudioFiles(prev => ({ ...prev, ...files }));
-      chatStudioFilesRef.current = { ...chatStudioFilesRef.current, ...files };
+      if (catalogOnly && !res.root) {
+        setDropHint('Could not bind that folder path.');
+        return { ok: false, error: 'no root' };
+      }
+      setChatStudioFiles(catalogOnly ? {} : files);
+      chatStudioFilesRef.current = catalogOnly ? {} : files;
       setChatStudioProjectId(pid);
       chatStudioProjectIdRef.current = pid;
       if (res.root) {
         setChatStudioDiskRoot(res.root);
-      }
-      setPendingAttaches(prev => [
-        ...prev,
-        { kind: 'folder' as const, name: folderName, count, projectId: pid, id: pid },
-      ].slice(0, 12));
-      setDropHint(null);
-      try {
-        localStorage.setItem(`ark:chat-studio-files:${pid}`, JSON.stringify({ name: folderName, files }));
-      } catch {
-        /* ignore */
+        chatStudioDiskRootRef.current = res.root;
       }
       const scopeChat = routeChatIdRef.current || persistChatIdRef.current;
+      if (scopeChat) studioBoundChatIdRef.current = scopeChat;
+      // Path binds stay in the composer pill — never as chat attachment cards.
+      setPendingAttaches([]);
+      setPathBindOpen(false);
+      setPathBindDraft('');
+      setDropHint(null);
+      if (!catalogOnly) {
+        try {
+          localStorage.setItem(`ark:chat-studio-files:${pid}`, JSON.stringify({ name: folderName, files }));
+        } catch { /* ignore */ }
+      }
       if (scopeChat) {
         persistStudioSnapshot(scopeChat, {
-          files,
+          files: catalogOnly ? {} : files,
           projectId: pid,
           name: folderName,
           diskRoot: res.root || null,
         });
+        if (res.root) {
+          setLastDiskTarget(scopeChat, {
+            path: res.root,
+            name: folderName,
+            kind: 'folder',
+          });
+        }
+      } else {
+        // New chat not id'd yet — keep disk root in memory until first send persists it.
+        try {
+          sessionStorage.setItem('ark:pending-studio-bind', JSON.stringify({
+            files: catalogOnly ? {} : files,
+            projectId: pid,
+            name: folderName,
+            diskRoot: res.root || null,
+          }));
+        } catch { /* ignore */ }
       }
       ignoreEnterUntilRef.current = Date.now() + 600;
       requestAnimationFrame(() => textareaRef.current?.focus());
-      return { ok: true, files, projectId: pid, name: folderName, root: res.root };
+      return {
+        ok: true,
+        files: catalogOnly ? {} : files,
+        projectId: pid,
+        name: folderName,
+        root: res.root,
+        catalogOnly,
+      };
     } finally {
       window.removeEventListener('ark:project-import-progress', onProg);
       setAttachUploading(null);
@@ -2522,15 +2614,46 @@ export function AIChat() {
   };
 
   const enterPathInChat = async () => {
-    const typed = window.prompt('Folder path on this PC:', chatStudioDiskRoot || '')?.trim();
-    if (!typed) return;
-    const stat = await window.arkDesktop?.workspaceStatPath?.(typed);
-    if (!stat?.ok || !stat.isDirectory || !stat.path) {
-      setDropHint(stat?.error || 'That path is not a folder.');
+    setPathBindOpen(true);
+    setPathBindDraft(chatStudioDiskRootRef.current || '');
+    setDropHint(null);
+    requestAnimationFrame(() => pathBindInputRef.current?.focus());
+  };
+
+  const bindTypedPath = async () => {
+    const typed = pathBindDraft.trim().replace(/^["']|["']$/g, '');
+    if (!typed) {
+      setDropHint('Paste a folder path, or choose Browse…');
       return;
     }
-    if (!window.confirm(`Allow ARK to read and use this folder?\n\n${stat.path}`)) return;
-    await openFolderInChat(stat.path);
+    const stat = await window.arkDesktop?.workspaceStatPath?.(typed);
+    if (!stat?.ok || !stat.path) {
+      setDropHint(stat?.error || 'That path was not found.');
+      return;
+    }
+    if (!stat.isDirectory) {
+      // Single file: bind its parent folder, keep the file as a light attach.
+      const parent = typed.replace(/[/\\][^/\\]+$/, '');
+      const parentStat = await window.arkDesktop?.workspaceStatPath?.(parent);
+      if (parentStat?.ok && parentStat.isDirectory && parentStat.path) {
+        await openFolderInChat(parentStat.path, { mode: 'path' });
+        setPathBindOpen(false);
+        setPathBindDraft('');
+        setDropHint(null);
+        return;
+      }
+      setDropHint('Pick a folder path (or a file inside a project folder).');
+      return;
+    }
+    await openFolderInChat(stat.path, { mode: 'path' });
+    setPathBindOpen(false);
+    setPathBindDraft('');
+    setDropHint(null);
+  };
+
+  const browseBindFolder = async () => {
+    setPathBindOpen(false);
+    await openFolderInChat(undefined, { mode: 'path' });
   };
 
   useEffect(() => {
@@ -2558,25 +2681,27 @@ export function AIChat() {
   };
 
   const attachFilesFromPaths = async (paths: string[]) => {
-    for (const abs of paths) {
-      const base = abs.split(/[/\\]/).pop() || 'file';
-      if (/\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(base)) {
-        await attachImagesFromPaths([abs]);
-        continue;
-      }
-      const read = await window.arkDesktop?.readTextFile?.({ path: abs });
-      const text = read?.ok && read.text != null ? read.text : `[Attached file: ${base}]`;
-      setChatStudioFiles(prev => ({ ...prev, [base]: text }));
-      setPendingAttaches(prev => {
-        if (prev.some(a => a.name === base && a.kind === 'file')) return prev;
-        return [...prev, {
-          kind: 'file' as const,
-          name: base,
-          count: 1,
-          id: `file-${crypto.randomUUID().slice(0, 8)}`,
-        }].slice(0, 12);
-      });
+    const first = paths[0];
+    if (!first) return;
+    if (paths.length > 1) {
+      setDropHint('Only one file can be uploaded into chat. Prefer Open folder (path bind) for projects.');
     }
+    const abs = first;
+    const base = abs.split(/[/\\]/).pop() || 'file';
+    if (/\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(base)) {
+      await attachImagesFromPaths([abs]);
+      return;
+    }
+    const read = await window.arkDesktop?.readTextFile?.({ path: abs });
+    const text = read?.ok && read.text != null ? read.text : `[Attached file: ${base}]`;
+    setChatStudioFiles({ [base]: text });
+    chatStudioFilesRef.current = { [base]: text };
+    setPendingAttaches([{
+      kind: 'file' as const,
+      name: base,
+      count: 1,
+      id: `file-${crypto.randomUUID().slice(0, 8)}`,
+    }]);
     setDropHint(null);
     ignoreEnterUntilRef.current = Date.now() + 600;
   };
@@ -2596,16 +2721,15 @@ export function AIChat() {
       void pickFilesIntoChat();
       return;
     }
-    if (action === 'folder') {
-      void openFolderInChat();
+    if (action === 'bind-path' || action === 'folder' || action === 'enter-path') {
+      setPathBindOpen(true);
+      setPathBindDraft(chatStudioDiskRootRef.current || '');
+      setDropHint(null);
+      requestAnimationFrame(() => pathBindInputRef.current?.focus());
       return;
     }
     if (action === 'import-folder') {
-      void openFolderInChat();
-      return;
-    }
-    if (action === 'enter-path') {
-      void enterPathInChat();
+      void openFolderInChat(undefined, { mode: 'import' });
       return;
     }
     if (action === 'plan' || action === 'ask' || action === 'agent' || action === 'debug' || action === 'multitask') {
@@ -2736,6 +2860,11 @@ export function AIChat() {
   }, [user, mode, generating, voicePhase]);
 
   const handleSend = () => {
+    if (dictating || dictationRef.current) {
+      dictationRef.current?.stop();
+      dictationRef.current = null;
+      setDictating(false);
+    }
     if (mode === 'voice') {
       if (!user) return;
       const busy = generating
@@ -2751,7 +2880,9 @@ export function AIChat() {
     let content = input.trim();
     const images = pendingImages;
     const attaches = pendingAttaches;
-    const hasStudio = Object.keys(chatStudioFilesRef.current).length > 0;
+    const hasStudio = Object.keys(chatStudioFilesRef.current).length > 0
+      || Boolean(chatStudioDiskRootRef.current)
+      || Boolean(chatStudioProjectIdRef.current);
     if ((!content && !images.length && !attaches.length && !hasStudio) || !user) return;
     if (composerMode && COMPOSER_MODE_PREFIX[composerMode]) {
       content = `${COMPOSER_MODE_PREFIX[composerMode]}${content}`;
@@ -2774,14 +2905,19 @@ export function AIChat() {
     }
     const userTyped = Boolean(content.trim());
     const parts: string[] = [];
-    if (attaches.length) {
-      parts.push(encodeChatAttaches(attaches));
+    // Folder binds stay as composer pills only — never dump into the chat transcript.
+    const chatAttaches = attaches.filter(a => a.kind === 'file' || a.kind === 'image' || a.kind === 'files');
+    if (chatAttaches.length) {
+      parts.push(encodeChatAttaches(chatAttaches));
     }
     if (userTyped) {
       parts.push(content);
-    } else if (attaches.length || hasStudio) {
-      // Enter with only a folder/file. read it. Marker is hidden in the bubble.
+    } else if (chatAttaches.length) {
       parts.push('<!--ark-auto-read-->');
+    } else if (hasStudio && !userTyped && !images.length) {
+      // Bound path with Enter and no text — nudge them to type an ask.
+      setDropHint('Path is bound. Type what you want changed, then press Enter.');
+      return;
     } else if (images.length) {
       const hasStudio = Object.keys(chatStudioFilesRef.current).length > 0
         || Boolean(chatStudioDiskRootRef.current);
@@ -2829,6 +2965,7 @@ export function AIChat() {
     if (!content.trim()) return;
     // New send → follow the reply; history scroll stays free until the user scrolls up again.
     stickToBottomRef.current = true;
+    userDetachScrollRef.current = false;
     // Free a stuck prior GGUF job (timed-out inspect was locking “More details”).
     void engineGenerateCancel();
     if (generatingRef.current) {
@@ -2850,16 +2987,23 @@ export function AIChat() {
       activeChatId = `chat-${crypto.randomUUID().slice(0, 10)}`;
       skipChatLoadIdsRef.current.add(activeChatId);
       messagesRef.current = [];
-      // Fresh chat must not inherit the previous thread's workspace / preview.
-      studioBoundChatIdRef.current = null;
-      chatStudioFilesRef.current = {};
-      chatStudioProjectIdRef.current = null;
-      chatStudioDiskRootRef.current = null;
-      setPreviewUrl(null);
-      setChatStudioFiles({});
-      setChatStudioProjectId(null);
-      setChatStudioDiskRoot(null);
+      // Keep a path bind the user just set on this blank composer — do not wipe it.
+      const keepFiles = { ...chatStudioFilesRef.current };
+      const keepPid = chatStudioProjectIdRef.current;
+      const keepRoot = chatStudioDiskRootRef.current;
+      const keepName = keepRoot ? studioPathBasename(keepRoot) : undefined;
+      studioBoundChatIdRef.current = activeChatId;
       lastStudioIntentRef.current = null;
+      if (keepRoot || Object.keys(keepFiles).length) {
+        persistStudioSnapshot(activeChatId, {
+          files: keepFiles,
+          projectId: keepPid,
+          name: keepName,
+          diskRoot: keepRoot,
+        });
+      } else {
+        setPreviewUrl(null);
+      }
     } else {
       const existing = chats.find(c => c.id === activeChatId);
       addChat({
@@ -2874,13 +3018,18 @@ export function AIChat() {
     persistChatIdRef.current = activeChatId;
     routeChatIdRef.current = activeChatId;
     activeGenChatIdRef.current = activeChatId;
-    // Bind any pending folder attach to this chat id for follow-ups. never on a brand-new chat.
-    if (!isNewChat && Object.keys(chatStudioFilesRef.current).length) {
+    // Bind any pending folder attach to this chat id for follow-ups.
+    if (chatStudioDiskRootRef.current || Object.keys(chatStudioFilesRef.current).length) {
       const meta = parseChatAttach(content) || parseChatAttaches(content)[0];
       persistStudioSnapshot(activeChatId, {
-        name: meta?.name,
+        name: meta?.name || (chatStudioDiskRootRef.current
+          ? studioPathBasename(chatStudioDiskRootRef.current)
+          : undefined),
         projectId: chatStudioProjectIdRef.current || meta?.projectId || null,
+        diskRoot: chatStudioDiskRootRef.current,
+        files: chatStudioFilesRef.current,
       });
+      studioBoundChatIdRef.current = activeChatId;
     }
     setTokenRatio(
       Object.keys(chatStudioFilesRef.current).length
@@ -3863,7 +4012,7 @@ export function AIChat() {
           summary: createIntent.summary,
           problemLine: `Build ${createIntent.name} from your brief.`,
         });
-        renameChat(activeChatId, createIntent.name);
+        renameChat(activeChatId, cleanProductTitle(createIntent.name));
         // Prefer talking it through in the model. do not dump a canned plan + create chips.
       } else {
 
@@ -3876,10 +4025,21 @@ export function AIChat() {
       const richestBrief = [pending?.summary, userBrief, bestBrief, createIntent.summary]
         .filter((s): s is string => Boolean(s && String(s).trim()))
         .sort((a, b) => b.length - a.length)[0] || createIntent.summary;
+      const lockedFromAsk = extractProjectName(content)
+        || content.match(/\b(?:called|named|name\s+it|call\s+it)\s+["“']?([A-Z][A-Za-z0-9][A-Za-z0-9 _-]{1,40})/i)?.[1]
+        || content.match(/\bkeep\s+the\s+folder\s+name\s+([A-Za-z][A-Za-z0-9 _-]{1,40})/i)?.[1]
+        || null;
+      const lockedProductName = cleanProductTitle(
+        lockedFromAsk || createIntent.name || pending?.name || createIntent.name || 'New App',
+      );
+      // Never inherit a one-word leftover like "My" when this ask already names the product.
+      const safeName = (/^(my|new|app|project)$/i.test(lockedProductName) && lockedFromAsk)
+        ? cleanProductTitle(lockedFromAsk)
+        : lockedProductName;
       const buildIntent = {
         ...createIntent,
-        name: createIntent.name || pending?.name || createIntent.name,
-        slug: createIntent.slug || pending?.slug || createIntent.slug,
+        name: safeName,
+        slug: slugifyProjectName(safeName) || createIntent.slug || pending?.slug || createIntent.slug,
         kind: resolveProjectKindForCreate(
           richestBrief,
           (pending?.kind as ProjectKind) || createIntent.kind,
@@ -3909,7 +4069,7 @@ export function AIChat() {
       await new Promise<void>(r => { window.setTimeout(r, Math.max(800, briefReadDelayMs(buildIntent.summary) / 2)); });
       if (mySeq !== genSeqRef.current) return;
 
-      pushAssistantStatus(`Creating folder Desktop\\Projects\\${buildIntent.slug}…`);
+      pushAssistantStatus(`Creating folder in ARK Projects (${buildIntent.slug})…`);
       try {
       await syncWorkspaceGrantsFromPrefs();
       await new Promise<void>(r => { window.setTimeout(r, 200); });
@@ -3939,6 +4099,9 @@ export function AIChat() {
       setChatCodePill(activeChatId, true);
       setCodePillSticky(true);
       renameChat(activeChatId, cleanProductTitle(buildIntent.name));
+      try {
+        addRecent(cleanProductTitle(buildIntent.name));
+      } catch { /* ignore */ }
       addChat({
         id: activeChatId,
         mode,
@@ -3949,13 +4112,13 @@ export function AIChat() {
       persistStudioSnapshot(activeChatId, {
         files: created.files,
         projectId: created.projectId || newProjectId,
-        name: buildIntent.name,
+        name: lockedProductName,
         diskRoot: created.projectPath || null,
       });
       if (created.projectPath) {
         setLastDiskTarget(activeChatId, {
           path: created.projectPath,
-          name: buildIntent.name,
+          name: lockedProductName,
           kind: 'folder',
         });
       }
@@ -4044,7 +4207,24 @@ export function AIChat() {
       }
 
       pushAssistantStatus('Preparing answer…');
-      await finishPlainReply(`${formatCreateProjectReply({ ...buildIntent, kind: scaffoldKind }, created, bootstrap)}${followNote}`);
+      const createdPaths = Object.keys(created.files || {});
+      const createAnswer = `${formatCreateProjectReply({ ...buildIntent, kind: scaffoldKind }, created, bootstrap)}${followNote}`;
+      const createTrace = wrapReplyWithFileChanges({
+        startedAt: replyStartedAt,
+        userMessage: content,
+        answer: createAnswer,
+        changedPaths: createdPaths,
+        fileChanges: createdPaths.map(path => ({
+          path,
+          added: Math.max(1, String(created.files?.[path] || '').split('\n').length),
+          removed: 0,
+        })),
+        statusLabels: [
+          `Created ${cleanProductTitle(buildIntent.name)} on disk`,
+          `Wrote ${createdPaths.length} starter file${createdPaths.length === 1 ? '' : 's'}`,
+        ],
+      });
+      await finishPlainReply(createTrace);
       return;
       } catch (createErr) {
         const msg = createErr instanceof Error ? createErr.message : String(createErr || 'unknown error');
@@ -4355,7 +4535,7 @@ export function AIChat() {
         setChatStudioDiskRoot(opened.root);
         chatStudioDiskRootRef.current = opened.root;
       }
-      if (opened.name) renameChat(activeChatId, opened.name);
+      if (opened.name && !chatStudioDiskRootRef.current) renameChat(activeChatId, opened.name);
       // Warm dev server for Vite projects so Preview is one tap away after fixes.
       if (opened.root && isViteProject(opened.files)) {
         void ensureViteDevServer(opened.root).then(async (dev) => {
@@ -4609,31 +4789,41 @@ export function AIChat() {
     const stickyFiles = resolvedStudio.files;
     let stickyCount = Object.keys(stickyFiles).length;
     const diskBound = Boolean(chatStudioDiskRootRef.current || resolvedStudio.projectId || chatStudioProjectIdRef.current);
-    const wantsCodeEdit = chatTurnAllowsFileEdits(content, turnComposerMode);
+    let wantsCodeEdit = chatTurnAllowsFileEdits(content, turnComposerMode);
+    if (!wantsCodeEdit && diskBound && parseAddCommentAsk(content)) {
+      wantsCodeEdit = true;
+    }
+    // Bound folder + explicit apply/polish asks must always write disk (never chat-only).
+    if (
+      !wantsCodeEdit
+      && diskBound
+      && (
+        /\bapply\b[\s\S]{0,80}\bon\s+disk\b/i.test(content)
+        || /\b(?:edits?|changes?)\s+on\s+disk\b/i.test(content)
+        || /\b(?:unread|badge|syncing|connect\s+bank|folder\s+groups?|find\s+in\s+note|tags?\s+chips?|feel\s+finished)\b/i.test(content)
+      )
+    ) {
+      wantsCodeEdit = true;
+    }
 
     // Reload files from disk/project if sticky is empty but a workspace is bound.
-    if (stickyCount === 0 && diskBound && wantsCodeEdit) {
-      const pid = resolvedStudio.projectId || chatStudioProjectIdRef.current;
-      if (pid && window.arkDesktop?.projectRead) {
-        try {
-          const read = await window.arkDesktop.projectRead(pid);
-          if (read?.ok && read.files && Object.keys(read.files).length) {
-            Object.assign(stickyFiles, read.files as Record<string, string>);
-            stickyCount = Object.keys(stickyFiles).length;
-            setChatStudioFiles({ ...stickyFiles });
-            chatStudioFilesRef.current = { ...stickyFiles };
-            resolvedStudio.files = stickyFiles;
-          }
-        } catch {
-          /* ignore */
-        }
-      }
+    // Path-bound folders start empty on purpose — hydrate only what this turn needs.
+    if (stickyCount === 0 && diskBound && (wantsCodeEdit || turnComposerMode === 'agent' || turnComposerMode === 'debug'
+      || shouldRunAgentLoop({ composerMode: turnComposerMode, hasWorkspace: true, message: content }))) {
       const diskRoot = chatStudioDiskRootRef.current;
-      if (stickyCount === 0 && diskRoot && window.arkDesktop?.readTextFile) {
+      if (diskRoot && window.arkDesktop?.readTextFile) {
         const rels = [
           'src/App.jsx', 'src/App.tsx', 'src/App.css', 'src/index.css',
-          'index.html', 'css/styles.css', 'js/app.js', 'package.json',
+          'index.html', 'static/index.html', 'public/index.html',
+          'css/styles.css', 'js/app.js', 'package.json',
+          'app/main.py', 'main.py', 'README.md',
         ];
+        const mentioned = String(content || '')
+          .match(/\b(?:[\w.-]+\/)+[\w.-]+\.[a-z0-9]{1,8}\b/gi) || [];
+        for (const m of mentioned) {
+          const norm = m.replace(/\\/g, '/');
+          if (!rels.includes(norm)) rels.push(norm);
+        }
         const sep = diskRoot.includes('\\') ? '\\' : '/';
         const loaded: Record<string, string> = {};
         for (const rel of rels) {
@@ -4651,6 +4841,24 @@ export function AIChat() {
           setChatStudioFiles({ ...stickyFiles });
           chatStudioFilesRef.current = { ...stickyFiles };
           resolvedStudio.files = stickyFiles;
+        }
+      }
+      // Full projectRead only when light hydrate found nothing (avoid dumping 28+ files into context).
+      if (stickyCount === 0) {
+        const pid = resolvedStudio.projectId || chatStudioProjectIdRef.current;
+        if (pid && window.arkDesktop?.projectRead) {
+          try {
+            const read = await window.arkDesktop.projectRead(pid);
+            if (read?.ok && read.files && Object.keys(read.files).length) {
+              Object.assign(stickyFiles, read.files as Record<string, string>);
+              stickyCount = Object.keys(stickyFiles).length;
+              setChatStudioFiles({ ...stickyFiles });
+              chatStudioFilesRef.current = { ...stickyFiles };
+              resolvedStudio.files = stickyFiles;
+            }
+          } catch {
+            /* ignore */
+          }
         }
       }
     }
@@ -4698,8 +4906,16 @@ export function AIChat() {
 
     if (
       (mode === 'general' || mode === 'code')
-      && (stickyCount > 0 || (diskBound && wantsCodeEdit))
-      && shouldInspectInChat(content, stickyCount > 0 || diskBound, content.startsWith(COMPOSER_MODE_PREFIX.debug))
+      && (stickyCount > 0 || diskBound)
+      && (
+        wantsCodeEdit
+        || shouldRunAgentLoop({
+          composerMode: turnComposerMode,
+          hasWorkspace: diskBound || stickyCount > 0,
+          message: content,
+        })
+        || shouldInspectInChat(content, stickyCount > 0 || diskBound, content.startsWith(COMPOSER_MODE_PREFIX.debug))
+      )
     ) {
       setMessages(prev => prev.map(m => (
         m.id === assistantId
@@ -4709,14 +4925,185 @@ export function AIChat() {
       await new Promise<void>(r => { window.setTimeout(r, 40); });
       if (mySeq !== genSeqRef.current) return;
 
-      const projectLabel = resolvedStudio.name
+      const projectLabel = studioPathBasename(chatStudioDiskRootRef.current || '')
+        || resolvedStudio.name
         || loadRecentProjects().find(p => p.id === resolvedStudio.projectId)?.name
-        || loadChatStudio(activeChatId)?.name
-        || 'Attached project';
+        || 'Project';
       const sticky = pinnedModel.source === 'auto' ? threadBrainRef.current : null;
 
       const planTurn = isChatPlanTurn(content) && !looksLikeImplementGo(content);
       const allowEdits = wantsCodeEdit;
+
+      // Deterministic comment edits with Cursor-style live progress (no full-repo pack).
+      if (allowEdits && (workspaceProjectId || chatStudioDiskRootRef.current)) {
+        const quick = parseAddCommentAsk(editUserMessage);
+        if (quick && chatStudioDiskRootRef.current && window.arkDesktop?.readTextFile && window.arkDesktop?.workspaceWriteFile) {
+          const root = chatStudioDiskRootRef.current;
+          const sep = root.includes('\\') ? '\\' : '/';
+          const absOf = (rel: string) => `${root.replace(/[/\\]+$/, '')}${sep}${rel.replace(/\//g, sep)}`;
+          const startedAt = replyStartedAt;
+          const steps: AgentTraceStep[] = [{
+            id: nextTraceStepId([]),
+            kind: 'thought',
+            label: traceThoughtFromAsk(editUserMessage),
+          }];
+          const pushTrace = (patch: Partial<AgentTracePayload>) => {
+            const payload: AgentTracePayload = {
+              startedAt,
+              done: Boolean(patch.done),
+              steps: patch.steps || steps,
+              answer: patch.answer || '',
+              changedPaths: patch.changedPaths,
+              fileChanges: patch.fileChanges,
+              canContinue: patch.canContinue,
+            };
+            const encoded = encodeTraceMessage(payload);
+            setMessages(prev => prev.map(m => (m.id === assistantId ? { ...m, content: encoded } : m)));
+          };
+          const wait = (ms: number) => new Promise<void>(r => window.setTimeout(r, ms));
+
+          try {
+            // Let the Thought line tick for a beat before file work (Cursor-style pacing).
+            pushTrace({ steps: [...steps] });
+            await wait(1600);
+            steps.push({ id: nextTraceStepId(steps), kind: 'status', label: 'Reading the bound project…' });
+            pushTrace({ steps: [...steps] });
+            await wait(500);
+
+            const targets: string[] = [quick.path];
+            const wantUi = wantsVisiblePreviewMarker(editUserMessage)
+              || /\btell me which file\b/i.test(editUserMessage);
+            if (wantUi && !/^static\/index\.html$/i.test(quick.path)) {
+              const uiProbe = await window.arkDesktop.readTextFile({ path: absOf('static/index.html') });
+              if (uiProbe?.ok && typeof uiProbe.text === 'string') targets.push('static/index.html');
+            }
+
+            const fileChanges: AgentFileChange[] = [];
+            const wrotePaths: string[] = [];
+            const nextFiles = { ...stickyFiles };
+
+            for (const rel of targets) {
+              steps.push({ id: nextTraceStepId(steps), kind: 'read', label: rel });
+              pushTrace({ steps: [...steps] });
+              await wait(350);
+
+              const read = await window.arkDesktop.readTextFile({ path: absOf(rel) });
+              if (!read?.ok || typeof read.text !== 'string') {
+                if (rel === quick.path) {
+                  finishAgentReply(`Could not read **${rel}**.`, 'ARK · edit');
+                  return;
+                }
+                continue;
+              }
+
+              const before = read.text;
+              const after = rel === quick.path
+                ? applyLineComment(before, quick.comment, rel)
+                : applyVisibleHtmlMarker(before, quick.comment);
+
+              if (after === before) {
+                steps.push({
+                  id: nextTraceStepId(steps),
+                  kind: 'status',
+                  label: `${rel} already has that marker`,
+                });
+                pushTrace({ steps: [...steps] });
+                continue;
+              }
+
+              steps.push({ id: nextTraceStepId(steps), kind: 'write', label: rel });
+              pushTrace({ steps: [...steps] });
+              await wait(400);
+
+              const written = await window.arkDesktop.workspaceWriteFile({
+                targetPath: absOf(rel),
+                content: after,
+              });
+              if (!written?.ok) {
+                finishAgentReply(
+                  `Could not write **${rel}**: ${written?.error || 'write failed'}.`,
+                  'ARK · edit',
+                );
+                return;
+              }
+
+              const diff = countLineDiff(before, after);
+              fileChanges.push({ path: rel, added: diff.added, removed: diff.removed });
+              wrotePaths.push(rel);
+              nextFiles[rel] = after;
+            }
+
+            if (!wrotePaths.length) {
+              const payload: AgentTracePayload = {
+                startedAt,
+                done: true,
+                steps: [
+                  ...steps,
+                  { id: nextTraceStepId(steps), kind: 'status', label: 'No file changes needed' },
+                ],
+                answer: `**${quick.path}** already has that comment.`,
+                changedPaths: [],
+                fileChanges: [],
+              };
+              setTokenRatio(syncTokenUsage(activeChatId, estimateTokens(editUserMessage) + 40));
+              finishAgentReply(encodeTraceMessage(payload), 'ARK · edit');
+              return;
+            }
+
+            setChatStudioFiles(nextFiles);
+            chatStudioFilesRef.current = nextFiles;
+            resolvedStudio.files = nextFiles;
+            setChatCodePill(activeChatId, true);
+            setCodePillSticky(true);
+            persistStudioSnapshot(activeChatId, {
+              files: nextFiles,
+              projectId: workspaceProjectId,
+              name: projectLabel,
+              diskRoot: root,
+            });
+            if (wrotePaths.includes('static/index.html')) {
+              void pushLivePreview(nextFiles, false);
+            }
+
+            const addSum = fileChanges.reduce((n, f) => n + f.added, 0);
+            const delSum = fileChanges.reduce((n, f) => n + f.removed, 0);
+            const elapsedMs = Date.now() - startedAt;
+            steps.push({
+              id: nextTraceStepId(steps),
+              kind: 'status',
+              label: `Edited ${wrotePaths.length} file${wrotePaths.length === 1 ? '' : 's'} · +${addSum} −${delSum}`,
+            });
+            steps.push({
+              id: nextTraceStepId(steps),
+              kind: 'status',
+              label: `Worked for ${Math.max(1, Math.round(elapsedMs / 1000))}s`,
+            });
+            const uiTouched = wrotePaths.includes('static/index.html');
+            const answer = uiTouched
+              ? `I added \`${quick.comment}\` in **${quick.path}** and surfaced the same marker on the dashboard so **Localhost / Preview** shows it.`
+              : `I added \`${quick.comment}\` at the top of **${quick.path}**. Open **Code** to inspect the source — Localhost shows the running UI, not Python comments.`;
+
+            const payload: AgentTracePayload = {
+              startedAt,
+              done: true,
+              steps: [...steps],
+              answer,
+              changedPaths: wrotePaths,
+              fileChanges,
+            };
+            setTokenRatio(syncTokenUsage(activeChatId, estimateTokens(editUserMessage) + 80 + addSum * 4));
+            await wait(250);
+            finishAgentReply(encodeTraceMessage(payload), 'ARK · edit');
+            return;
+          } catch (err) {
+            finishAgentReply(
+              `Could not edit **${quick.path}**: ${err instanceof Error ? err.message : 'read/write failed'}.`,
+              'ARK · edit',
+            );
+            return;
+          }
+        }
+      }
 
       // Multi-agent: Design → Code → Verify (+ → Multi-agent, or explicit ask).
       if (
@@ -4756,6 +5143,119 @@ export function AIChat() {
           return;
         }
         // If multi-agent produced nothing useful, fall through to normal edit path.
+      }
+
+      // Level-B agent tool loop (search → read → edit → run → verify).
+      if (
+        allowEdits
+        && (workspaceProjectId || chatStudioDiskRootRef.current)
+        && shouldRunAgentLoop({
+          composerMode: turnComposerMode,
+          hasWorkspace: true,
+          message: content,
+        })
+      ) {
+        if (stickyCount === 0) {
+          finishAgentReply(
+            'Bound folder path is set, but ARK could not load files from disk yet. Use **+ → Open folder** again on this chat, then retry.',
+            'ARK · agent',
+          );
+          return;
+        }
+        setMessages(prev => prev.map(m => (
+          m.id === assistantId
+            ? { ...m, content: '__generating__:chat:Agent · planning…' }
+            : m
+        )));
+        const loopPreferCloud = agentLoopPreferCloud(stickyFiles, editUserMessage);
+        const continueKey = activeChatId || 'chat';
+        const prior = looksLikeAgentContinueAsk(content)
+          ? loadAgentContinue(continueKey)
+          : null;
+        const loopBrief = prior?.brief || editUserMessage;
+        const loop = await runArkAgentLoop({
+          brief: loopBrief,
+          files: stickyFiles,
+          projectId: workspaceProjectId || resolvedStudio.projectId || activeChatId || 'chat-project',
+          projectName: projectLabel,
+          diskRoot: chatStudioDiskRootRef.current,
+          priorObservations: prior?.observations,
+          shouldAbort: () => mySeq !== genSeqRef.current || stopRequestedRef.current,
+          onStep: (step) => {
+            if (mySeq !== genSeqRef.current) return;
+            setMessages(prev => prev.map(m => (
+              m.id === assistantId
+                ? { ...m, content: `__generating__:chat:Agent · ${step.label}` }
+                : m
+            )));
+          },
+          callModel: async ({ prompt }) => {
+            const routed = await arkRoute({
+              message: prompt,
+              kind: 'coding',
+              preferCloudCoding: loopPreferCloud,
+              history: [],
+            });
+            return {
+              reply: routed.reply || '',
+              modelName: routed.modelName,
+              providerLabel: routerProviderLabel(routed, 'ARK · agent'),
+            };
+          },
+        });
+        if (mySeq !== genSeqRef.current) return;
+        if (loop.updated.length || loop.ok || loop.steps.some(s => s.tool === 'write' || s.tool === 'patch' || s.tool === 'done')) {
+          setChatStudioFiles(loop.files);
+          chatStudioFilesRef.current = loop.files;
+          resolvedStudio.files = loop.files;
+          setChatCodePill(activeChatId, true);
+          setCodePillSticky(true);
+          persistStudioSnapshot(activeChatId, {
+            files: loop.files,
+            projectId: workspaceProjectId,
+            name: projectLabel,
+          });
+          void pushLivePreview(loop.files, false);
+          const traced = encodeTraceMessage({
+            startedAt: replyStartedAt,
+            done: true,
+            steps: agentLoopStepsToTrace(loop.steps),
+            answer: loop.reply,
+            changedPaths: loop.updated,
+            fileChanges: (loop.updated || []).map(path => {
+            const before = String(stickyFiles?.[path] || '');
+            const after = String(loop.files?.[path] || '');
+            if (before || after) {
+              const diff = countLineDiff(before, after);
+              return { path, added: Math.max(0, diff.added), removed: Math.max(0, diff.removed) };
+            }
+            return { path, added: 1, removed: 0 };
+          }),
+            canContinue: loop.hitStepCap,
+          });
+          const provider = loop.providerLabel
+            || (loop.hitStepCap ? 'ARK · agent (continue)' : 'ARK · agent');
+          finishAgentReply(
+            visionHopMeta ? `${traced}\n\n_Vision hop: ${visionHopMeta}_` : traced,
+            visionHopMeta ? `${provider} · vision` : provider,
+          );
+          if (loop.hitStepCap) {
+            saveAgentContinue({
+              chatKey: continueKey,
+              brief: loopBrief,
+              observations: loop.observations,
+              updated: loop.updated,
+              projectId: workspaceProjectId || resolvedStudio.projectId || activeChatId || 'chat-project',
+              projectName: projectLabel,
+              diskRoot: chatStudioDiskRootRef.current,
+              at: Date.now(),
+            });
+          } else {
+            clearAgentContinue(continueKey);
+          }
+          return;
+        }
+        // Empty loop → fall through to one-shot coding
       }
 
       // Fast path: deterministic UI patches. surgical tweaks + layout rebuilds.
@@ -4816,9 +5316,6 @@ export function AIChat() {
             messagesRef.current = next;
             persistModeThread(mode, next, { chatId: activeChatId });
             setMessages(next);
-            setInspectOfferId(assistantId);
-            setStudioOfferKind('details');
-            setTraceDetailsId(null);
             clearGeneratingIfMineEarly();
             lastInspectReplyRef.current = reply;
             window.setTimeout(() => {
@@ -4950,11 +5447,7 @@ export function AIChat() {
       messagesRef.current = next;
       persistModeThread(mode, next, { chatId: activeChatId });
       setMessages(next);
-      if (allowEdits) {
-        setInspectOfferId(assistantId);
-        setStudioOfferKind('details');
-        setTraceDetailsId(null);
-      } else {
+      if (!allowEdits) {
         setInspectOfferId(null);
         setStudioOfferKind(null);
       }
@@ -5327,7 +5820,14 @@ export function AIChat() {
           || wantsPlanningOnly(content)
           || (pendingPlan && !looksLikeImplementGo(content) && !content.includes('<!--ark-attach:')),
         );
-        if (planningFollowUp && !content.includes('<!--ark-attach:') && !content.includes('<!--ark-auto-read-->')) {
+        const editOnBoundPath = Boolean(
+          chatStudioDiskRootRef.current
+          && chatTurnAllowsFileEdits(content, composerModeFromContent(content) || composerMode),
+        );
+        // Path-bound edits are handled by the agent loop above — never re-pack the whole folder here.
+        if (editOnBoundPath) {
+          // fall through to model chat only if agent loop did not already reply
+        } else if (planningFollowUp && !content.includes('<!--ark-attach:') && !content.includes('<!--ark-auto-read-->')) {
           // fall through to model chat below
         } else {
         skipReplySanitize = true;
@@ -5336,7 +5836,27 @@ export function AIChat() {
           let filesForInspect = studioFiles;
           if (Object.keys(filesForInspect).length === 0) {
             const pid = attachMeta?.projectId || chatStudioProjectIdRef.current;
-            if (pid && window.arkDesktop?.projectRead) {
+            // Prefer light on-demand reads from the bound path — never dump the whole tree into context.
+            const diskRoot = chatStudioDiskRootRef.current;
+            if (diskRoot && window.arkDesktop?.readTextFile) {
+              const rels = ['package.json', 'README.md', 'app/main.py', 'src/App.tsx', 'src/App.jsx', 'index.html'];
+              const mentioned = String(content || '').match(/\b(?:[\w.-]+\/)+[\w.-]+\.[a-z0-9]{1,8}\b/gi) || [];
+              for (const m of mentioned) {
+                const norm = m.replace(/\\/g, '/');
+                if (!rels.includes(norm)) rels.push(norm);
+              }
+              const sep = diskRoot.includes('\\') ? '\\' : '/';
+              const loaded: Record<string, string> = {};
+              for (const rel of rels.slice(0, 8)) {
+                try {
+                  const abs = `${diskRoot.replace(/[/\\]+$/, '')}${sep}${rel.replace(/\//g, sep)}`;
+                  const read = await window.arkDesktop.readTextFile({ path: abs });
+                  if (read?.ok && typeof read.text === 'string') loaded[rel] = read.text;
+                } catch { /* missing */ }
+              }
+              if (Object.keys(loaded).length) filesForInspect = loaded;
+            }
+            if (Object.keys(filesForInspect).length === 0 && pid && window.arkDesktop?.projectRead) {
               try {
                 const read = await Promise.race([
                   window.arkDesktop.projectRead(pid),
@@ -5491,11 +6011,7 @@ export function AIChat() {
             lastInspectReplyRef.current = response;
             resolvedProvider = engineResult.meta || `${providerLabel} · files`;
             usedPlugin = true;
-            if (allowEdits) {
-              setInspectOfferId(assistantId);
-              setStudioOfferKind('details');
-              setTraceDetailsId(null);
-            } else {
+            if (!allowEdits) {
               setInspectOfferId(null);
               setStudioOfferKind(null);
             }
@@ -6072,13 +6588,15 @@ export function AIChat() {
         const cleaned = usableAssistantText(response, content, previousAssistant);
         const candidate = String(cleaned || response || '').trim();
         response = looksLikePromptEcho(candidate) ? '' : (cleaned || candidate);
-        // Never dump raw @@@FILE markers as a "failed save". Plain chat may include
-        // sample HTML/code — keep the answer text (editMode false).
-        if (/@@@FILE|<!DOCTYPE\b|<html[\s>]/i.test(response)) {
+        // Never dump source into chat unless the user asked to see/copy code.
+        const diskBoundNow = Boolean(chatStudioDiskRootRef.current || chatStudioProjectIdRef.current);
+        const looksLikeDump = /@@@FILE|<!DOCTYPE\b|<html[\s>]|```|export\s+default\s+function|className=|^\s*return\s*\(/im.test(response)
+          || ((response.match(/[{};]/g) || []).length >= 10);
+        if (looksLikeDump && !looksLikeCopyPasteCodeAsk(content)) {
           response = finalizeCodingChatBubble({
             userMessage: content,
             rawReply: response,
-            editMode: false,
+            editMode: diskBoundNow || looksLikeCodeAsk(content),
           });
         }
       }
@@ -6123,37 +6641,28 @@ export function AIChat() {
 
   sendMessageRef.current = sendMessage;
 
-  const resizeComposer = () => {
+  useEffect(() => {
+    const onContinue = () => {
+      setComposerMode('agent');
+      setInput('Continue');
+      void sendMessageRef.current('Continue');
+    };
+    window.addEventListener('ark:agent-continue', onContinue);
+    return () => window.removeEventListener('ark:agent-continue', onContinue);
+  }, []);
+
+  /** Grow textarea only — never remount + / ARK (that remount caused flicker + clipped text). */
+  const resizeComposer = useCallback(() => {
     const el = textareaRef.current;
     if (!el) return;
-    const value = el.value || '';
-    if (!value) {
-      el.style.height = '';
-      el.style.maxHeight = '';
-      el.style.overflowY = 'hidden';
-      setComposerExpanded(false);
-      return;
-    }
-
-    const applyHeight = () => {
-      const box = textareaRef.current;
-      if (!box) return;
-      box.style.height = 'auto';
-      void box.offsetHeight;
-      const raw = box.scrollHeight;
-      const max = Math.round(window.innerHeight * 0.4);
-      const minPx = 22;
-      const next = Math.max(minPx, Math.min(raw, max));
-      box.style.height = `${next}px`;
-      box.style.overflowY = raw > max ? 'auto' : 'hidden';
-      // Pill until text wraps or user adds a real new line; then grow upward with fixed footer.
-      const multiLine = /\n\S/.test(value) || raw > 34;
-      setComposerExpanded(multiLine);
-    };
-
-    applyHeight();
-    requestAnimationFrame(applyHeight);
-  };
+    const max = Math.round(window.innerHeight * 0.4);
+    const minPx = 22;
+    el.style.height = 'auto';
+    const raw = el.scrollHeight;
+    const next = Math.max(minPx, Math.min(raw, max));
+    el.style.height = `${next}px`;
+    el.style.overflowY = raw > max ? 'auto' : 'hidden';
+  }, []);
 
   const onComposerPaste = (e: ReactClipboardEvent<HTMLTextAreaElement>) => {
     const dt = e.clipboardData;
@@ -6161,11 +6670,7 @@ export function AIChat() {
     // Prefer image paste (Snipping Tool / screenshot). let plain text use default.
     const hasImage = [...(dt.items || [])].some(it => /^image\//i.test(it.type))
       || [...(dt.files || [])].some(f => /^image\//i.test(f.type) || /\.(png|jpe?g|gif|webp|bmp)$/i.test(f.name));
-    if (!hasImage) {
-      // After text paste, remeasure so a single-line paste does not stay tall.
-      requestAnimationFrame(resizeComposer);
-      return;
-    }
+    if (!hasImage) return;
     e.preventDefault();
     void (async () => {
       const imgs = await imagesFromClipboardData(dt);
@@ -6182,13 +6687,71 @@ export function AIChat() {
 
   const onInput = (value: string) => {
     setInput(value);
+    if (dictationHint) setDictationHint(null);
     if (imageSwitchDismissed && !looksLikeImageAsk(value)) setImageSwitchDismissed(false);
-    requestAnimationFrame(resizeComposer);
   };
 
-  useEffect(() => {
-    requestAnimationFrame(resizeComposer);
-  }, [input]);
+  const stopComposerDictation = useCallback(() => {
+    dictationRef.current?.stop();
+    dictationRef.current = null;
+    setDictating(false);
+  }, []);
+
+  const toggleComposerDictation = useCallback(() => {
+    if (dictating) {
+      stopComposerDictation();
+      return;
+    }
+    if (mode === 'voice') {
+      setDictationHint('Use the Voice tab to talk. This mic fills the chat box with text.');
+      return;
+    }
+    if (!speechRecognitionSupported()) {
+      setDictationHint('Speech-to-text is not available in this build.');
+      return;
+    }
+    if (generating) return;
+
+    dictationBaseRef.current = inputRef.current.trim();
+    setDictationHint(null);
+    setDictating(true);
+    dictationRef.current = startLiveDictation({
+      onInterim: (text) => {
+        const base = dictationBaseRef.current;
+        const next = base ? `${base} ${text}`.trim() : text;
+        setInput(next);
+        inputRef.current = next;
+        requestAnimationFrame(() => resizeComposer());
+      },
+      onFinal: (text) => {
+        const base = dictationBaseRef.current;
+        const next = base ? `${base} ${text}`.trim() : text;
+        setInput(next);
+        inputRef.current = next;
+        dictationBaseRef.current = next;
+        requestAnimationFrame(() => {
+          resizeComposer();
+          textareaRef.current?.focus();
+        });
+      },
+      onError: (error) => {
+        setDictationHint(error);
+      },
+      onEnd: () => {
+        dictationRef.current = null;
+        setDictating(false);
+      },
+    });
+  }, [dictating, generating, mode, resizeComposer, stopComposerDictation]);
+
+  useEffect(() => () => {
+    dictationRef.current?.stop();
+    dictationRef.current = null;
+  }, []);
+
+  useLayoutEffect(() => {
+    resizeComposer();
+  }, [input, resizeComposer]);
 
   const applyIdea = (label: string) => {
     setInput(label);
@@ -6485,49 +7048,15 @@ export function AIChat() {
   ) : null;
 
   const composer = (
-    <div className="w-full max-w-3xl mx-auto">
+    <div className="w-full max-w-3xl mx-auto min-w-0">
       {failoverChip}
-      {composerMode && (
-        <div className="mb-2 flex items-center gap-2 px-1">
-          <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-medium ${COMPOSER_MODE_PILL[composerMode]}`}>
-            {COMPOSER_MODE_LABEL[composerMode]}
-            <button
-              type="button"
-              onClick={() => setComposerMode(null)}
-              className="opacity-70 hover:opacity-100"
-              aria-label="Clear mode"
-            >
-              <X className="w-3 h-3" />
-            </button>
-          </span>
-        </div>
-      )}
-      <div className="flex flex-col">
-        <div className="min-w-0 flex flex-col">
-          {queueLen > 0 && (
-            <div className="mb-2 flex items-center justify-between gap-2 rounded-full border border-amber-500/25 bg-amber-500/10 px-3.5 py-2 text-[11px] text-amber-100/90">
-              <span className="min-w-0 truncate">
-                {queueLen === 1
-                  ? '1 message queued. sends as soon as this reply finishes'
-                  : `${queueLen} messages queued. send next when this reply finishes`}
-              </span>
-              <button
-                type="button"
-                className="shrink-0 rounded-md px-2 py-0.5 text-amber-200/90 hover:bg-amber-500/20 transition-colors"
-                onClick={() => {
-                  pendingQueueRef.current = [];
-                  setQueueLen(0);
-                }}
-              >
-                Clear
-              </button>
-            </div>
-          )}
+      <div className="flex flex-col min-w-0 w-full">
+        <div className="min-w-0 flex flex-col w-full">
           {attachUploading && (
-            <p className="mb-2 px-1 text-[11px] text-sky-300/90 animate-pulse">{attachUploading}</p>
+            <p className="mb-2 px-1 text-[11px] text-sky-300/90 animate-pulse truncate">{attachUploading}</p>
           )}
           {pendingAttaches.length > 0 && (
-            <div className="mb-2 flex flex-wrap items-center gap-1.5 px-1">
+            <div className="mb-2 flex flex-wrap items-center gap-1.5 px-1 max-w-full overflow-hidden">
               {pendingAttaches.map(meta => (
                 <span key={attachKey(meta)} className="inline-flex items-center gap-1">
                   <AttachCard meta={meta} />
@@ -6557,8 +7086,69 @@ export function AIChat() {
               )}
             </div>
           )}
-          {dropHint && !pendingAttaches.length && !attachUploading && (
-            <p className="mb-2 px-1 text-[11px] text-amber-300/90">{dropHint}</p>
+          {dropHint && !attachUploading && (
+            <p
+              className="mb-2 w-full max-w-full min-w-0 overflow-hidden px-1 text-[11px] text-amber-300/90 break-words [overflow-wrap:anywhere] line-clamp-2"
+              title={dropHint}
+            >
+              {dropHint}
+            </p>
+          )}
+          {dictating ? (
+            <p className="mb-2 px-1 text-[11px] text-rose-300/90 animate-pulse">
+              Listening… speak now, then click the mic again when you’re done.
+            </p>
+          ) : dictationHint ? (
+            <p className="mb-2 px-1 text-[11px] text-amber-300/90 break-words [overflow-wrap:anywhere] line-clamp-2">
+              {dictationHint}
+            </p>
+          ) : null}
+          {pathBindOpen && (
+            <div className="mb-2 max-w-full rounded-xl border border-surface-border bg-ark-navy-900/90 px-2 py-1.5">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <Folder className="w-3.5 h-3.5 shrink-0 text-amber-300/90" />
+                <input
+                  ref={pathBindInputRef}
+                  type="text"
+                  value={pathBindDraft}
+                  onChange={(e) => setPathBindDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      void bindTypedPath();
+                    }
+                    if (e.key === 'Escape') {
+                      setPathBindOpen(false);
+                      setPathBindDraft('');
+                    }
+                  }}
+                  placeholder="Folder path…"
+                  className="min-w-0 flex-1 bg-transparent border-none px-1 py-1 text-xs text-content-primary placeholder:text-content-tertiary focus:outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => void browseBindFolder()}
+                  className="shrink-0 rounded-md px-2 py-1 text-[11px] text-content-secondary hover:bg-surface-hover hover:text-content-primary"
+                >
+                  Browse
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void bindTypedPath()}
+                  className="shrink-0 rounded-md bg-amber-500/90 px-2.5 py-1 text-[11px] font-medium text-ark-navy-950 hover:bg-amber-400"
+                >
+                  Bind
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setPathBindOpen(false); setPathBindDraft(''); }}
+                  className="shrink-0 rounded-md p-1 text-content-tertiary hover:text-content-secondary hover:bg-surface-hover"
+                  aria-label="Close"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
           )}
           {pendingImages.length > 0 && (
             <div className="mb-2 flex flex-wrap items-center gap-1.5 px-1">
@@ -6627,16 +7217,31 @@ export function AIChat() {
               <span className="text-[10px] text-content-tertiary">Max 30s · quality render may take up to ~30s</span>
             </div>
           )}
-          <div className={`flex gap-2 min-w-0 ${composerExpanded ? 'items-end' : 'items-center'}`}>
+          <div className="flex gap-2 min-w-0 items-end">
           <div
-            className={`flex-1 min-w-0 border border-surface-border bg-ark-navy-900/90 shadow-lg shadow-black/20 ${
-              composerExpanded
-                ? 'flex flex-col rounded-xl overflow-hidden'
-                : mode === 'voice'
-                  ? 'flex items-center gap-1.5 rounded-2xl min-h-[3.25rem] pl-1.5 pr-2 py-2 overflow-hidden'
-                  : 'flex items-center gap-1 rounded-xl min-h-11 pl-1 pr-1.5 py-1.5 overflow-hidden'
+            className={`flex-1 min-w-0 flex flex-col border border-surface-border bg-ark-navy-900/90 shadow-lg shadow-black/20 overflow-hidden ${
+              mode === 'voice' ? 'rounded-2xl' : 'rounded-xl'
             }`}
           >
+          {queueLen > 0 && (
+            <div className="w-full min-w-0 box-border flex items-center justify-between gap-2 border-b border-amber-500/20 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-100/90">
+              <span className="min-w-0 flex-1 truncate">
+                {queueLen === 1
+                  ? '1 message queued. sends as soon as this reply finishes'
+                  : `${queueLen} messages queued. send next when this reply finishes`}
+              </span>
+              <button
+                type="button"
+                className="shrink-0 rounded-md px-2 py-0.5 text-amber-200/90 hover:bg-amber-500/20 transition-colors"
+                onClick={() => {
+                  pendingQueueRef.current = [];
+                  setQueueLen(0);
+                }}
+              >
+                Clear
+              </button>
+            </div>
+          )}
           <input
             ref={attachInputRef}
             type="file"
@@ -6659,27 +7264,6 @@ export function AIChat() {
               e.target.value = '';
             }}
           />
-
-          {!composerExpanded && mode === 'image' && (
-            <button
-              type="button"
-              onClick={() => void pickPhotosIntoChat()}
-              className="w-8 h-8 rounded-full flex items-center justify-center text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors shrink-0"
-              title="Upload a reference photo to recreate or improve"
-              aria-label="Upload reference photo"
-            >
-              <ImagePlus className="w-4 h-4" />
-            </button>
-          )}
-
-          {!composerExpanded && (
-            <ComposerPlusMenu
-              scope={mode === 'image' ? 'image' : 'chat'}
-              busy={attachBusy || Boolean(attachUploading)}
-              onAction={handlePlusAction}
-              buttonClassName="w-8 h-8 rounded-full flex items-center justify-center text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors shrink-0"
-            />
-          )}
 
           <textarea
             ref={textareaRef}
@@ -6708,87 +7292,140 @@ export function AIChat() {
             rows={1}
             title="Enter to send · Shift+Enter for a new line · Ctrl+V pastes screenshots"
             aria-label="Message. Enter to send, Shift+Enter for a new line"
-            className={`bg-transparent border-none resize-none text-sm text-content-primary placeholder:text-content-tertiary focus:outline-none leading-5 ${
-              composerExpanded
-                ? 'w-full min-h-[1.25rem] px-3 pt-2.5 pb-1'
-                : 'flex-1 min-w-0 min-h-[1.25rem] px-1 py-0 self-center'
-            }`}
+            className="w-full bg-transparent border-none resize-none text-sm text-content-primary placeholder:text-content-tertiary focus:outline-none leading-5 min-h-[1.25rem] px-3 pt-2.5 pb-1"
             style={{ overflowY: 'hidden' }}
           />
 
-          <div
-            className={
-              composerExpanded
-                ? 'flex items-center justify-between gap-2 px-2 pb-1.5 pt-0.5 shrink-0'
-                : 'flex items-center shrink-0'
-            }
-          >
-          {composerExpanded && (
-            <div className="flex items-center gap-1">
-              {mode === 'image' && (
+          <div className="flex items-center gap-1.5 px-2 pb-1.5 pt-0.5 shrink-0">
+            {mode === 'image' && (
+              <button
+                type="button"
+                onClick={() => void pickPhotosIntoChat()}
+                className="w-8 h-8 rounded-full flex items-center justify-center text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors shrink-0"
+                title="Upload a reference photo to recreate or improve"
+                aria-label="Upload reference photo"
+              >
+                <ImagePlus className="w-4 h-4" />
+              </button>
+            )}
+            <ComposerPlusMenu
+              scope={mode === 'image' ? 'image' : 'chat'}
+              busy={attachBusy || Boolean(attachUploading)}
+              onAction={handlePlusAction}
+              buttonClassName="w-8 h-8 rounded-full flex items-center justify-center text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors shrink-0"
+            />
+            {composerMode ? (
+              <span
+                className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium shrink-0 ${COMPOSER_MODE_PILL[composerMode]}`}
+              >
+                {COMPOSER_MODE_LABEL[composerMode]}
                 <button
                   type="button"
-                  onClick={() => void pickPhotosIntoChat()}
-                  className="w-8 h-8 rounded-full flex items-center justify-center text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors shrink-0"
-                  title="Upload a reference photo to recreate or improve"
-                  aria-label="Upload reference photo"
+                  onClick={() => setComposerMode(null)}
+                  className="opacity-60 hover:opacity-100 -mr-0.5 rounded-full p-0.5 hover:bg-black/10 dark:hover:bg-white/10"
+                  aria-label="Clear mode"
                 >
-                  <ImagePlus className="w-4 h-4" />
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </span>
+            ) : null}
+            {(mode === 'general' || mode === 'code') && chatStudioDiskRoot ? (
+              <button
+                type="button"
+                onClick={() => void openProjectFolder()}
+                className="inline-flex items-center gap-1 max-w-[11rem] rounded-full border border-amber-500/40 bg-amber-500/15 px-2.5 py-1 text-xs font-medium text-amber-100 hover:bg-amber-500/25 transition-colors shrink-0"
+                title={`Open in Explorer:\n${chatStudioDiskRoot}`}
+              >
+                <Folder className="w-3.5 h-3.5 shrink-0 text-amber-300" />
+                <span className="truncate">
+                  {workspaceBadgeLabel || chatStudioDiskRoot.split(/[/\\]/).pop()}
+                </span>
+              </button>
+            ) : null}
+            {(mode === 'general' || mode === 'code') && chatStudioDiskRoot ? (
+              <button
+                type="button"
+                onClick={() => void openProjectPreview()}
+                className="inline-flex items-center gap-1 rounded-full border border-sky-500/40 bg-sky-500/15 px-2.5 py-1 text-xs font-medium text-sky-100 hover:bg-sky-500/25 transition-colors shrink-0"
+                title={previewUrl ? `Open live preview (${previewUrl})` : 'Open live preview window'}
+              >
+                <Globe className="w-3.5 h-3.5 text-sky-300" />
+                {previewUrl && /localhost|127\.0\.0\.1/.test(previewUrl) ? 'Localhost' : 'Preview'}
+              </button>
+            ) : null}
+            {(mode === 'general' || mode === 'code') && showStudioPills && isCodeTabEnabled() && codePillSticky ? (
+              <button
+                type="button"
+                onClick={() => openCodeWorkspace()}
+                className="inline-flex items-center gap-1 rounded-full border border-violet-500/45 bg-violet-500/20 px-2.5 py-1 text-xs font-medium text-violet-100 hover:bg-violet-500/30 transition-colors shrink-0"
+                title="Open Code. files on the left, editor on the right"
+              >
+                <Code2 className="w-3.5 h-3.5 text-violet-300" />
+                Code
+              </button>
+            ) : null}
+            <div className="flex-1 min-w-0" aria-hidden />
+            <div className="flex items-center gap-1.5 shrink-0">
+              {mode !== 'voice' ? (
+                <button
+                  type="button"
+                  onClick={() => toggleComposerDictation()}
+                  disabled={generating && !dictating}
+                  className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors shrink-0 ${
+                    dictating
+                      ? 'bg-rose-500/20 text-rose-300 ring-1 ring-rose-400/50 animate-pulse'
+                      : 'text-content-secondary hover:text-content-primary hover:bg-surface-hover'
+                  } disabled:opacity-40`}
+                  title={dictating ? 'Stop listening' : 'Speak — fill the chat box with voice-to-text'}
+                  aria-label={dictating ? 'Stop listening' : 'Start voice to text'}
+                  aria-pressed={dictating}
+                >
+                  {dictating ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                </button>
+              ) : null}
+              <button
+                ref={modelButtonRef}
+                type="button"
+                onClick={() => setModelMenuOpen(o => !o)}
+                className="inline-flex items-center gap-1 rounded-full border border-surface-border/80 bg-surface-hover/60 hover:bg-surface-hover px-2.5 py-1 text-xs text-content-primary transition-colors max-w-[9rem]"
+                title={`Active model · ${
+                  activeModel.source === 'auto'
+                    ? (threadBrain ? autoEquippedCaption(threadBrain) : 'ARK Auto · picks best brain')
+                    : activeModel.name
+                }`}
+                aria-label="Select model"
+                aria-expanded={modelMenuOpen}
+              >
+                {mode === 'image' ? (
+                  <ImageIcon className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                ) : mode === 'video' ? (
+                  <Video className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                ) : activeModel.source !== 'auto' ? (
+                  <ModelSourceIcon className={`w-3.5 h-3.5 shrink-0 ${
+                    activeModel.source === 'local' ? 'text-emerald-400' : 'text-sky-400'
+                  }`} />
+                ) : null}
+                <span className="font-medium truncate">
+                  {activeModel.source === 'auto'
+                    ? autoModelLabel
+                    : activeModel.name}
+                </span>
+                <ChevronDown className={`w-3.5 h-3.5 text-content-tertiary transition-transform shrink-0 ${modelMenuOpen ? 'rotate-180' : ''}`} />
+              </button>
+              {modelMenu}
+
+              {generating && (
+                <button
+                  type="button"
+                  onClick={handleStop}
+                  className="flex items-center justify-center shrink-0 p-0.5 text-rose-500 hover:text-rose-400 transition-colors"
+                  title="Stop generating"
+                  aria-label="Stop generating"
+                >
+                  <Square className="w-4 h-4 fill-current" />
                 </button>
               )}
-              <ComposerPlusMenu
-                scope={mode === 'image' ? 'image' : 'chat'}
-                busy={attachBusy || Boolean(attachUploading)}
-                onAction={handlePlusAction}
-                buttonClassName="w-8 h-8 rounded-full flex items-center justify-center text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors shrink-0"
-              />
             </div>
-          )}
-
-          <div className="flex items-center gap-1.5 shrink-0">
-          <button
-            ref={modelButtonRef}
-            type="button"
-            onClick={() => setModelMenuOpen(o => !o)}
-            className="inline-flex items-center gap-1 rounded-full border border-surface-border/80 bg-surface-hover/60 hover:bg-surface-hover px-2.5 py-1 text-xs text-content-primary transition-colors max-w-[9rem]"
-            title={`Active model · ${
-              activeModel.source === 'auto'
-                ? (threadBrain ? autoEquippedCaption(threadBrain) : 'ARK Auto · picks best brain')
-                : activeModel.name
-            }`}
-            aria-label="Select model"
-            aria-expanded={modelMenuOpen}
-          >
-            {mode === 'image' ? (
-              <ImageIcon className="w-3.5 h-3.5 text-sky-400 shrink-0" />
-            ) : mode === 'video' ? (
-              <Video className="w-3.5 h-3.5 text-sky-400 shrink-0" />
-            ) : activeModel.source !== 'auto' ? (
-              <ModelSourceIcon className={`w-3.5 h-3.5 shrink-0 ${
-                activeModel.source === 'local' ? 'text-emerald-400' : 'text-sky-400'
-              }`} />
-            ) : null}
-            <span className="font-medium truncate">
-              {activeModel.source === 'auto'
-                ? autoModelLabel
-                : activeModel.name}
-            </span>
-            <ChevronDown className={`w-3.5 h-3.5 text-content-tertiary transition-transform shrink-0 ${modelMenuOpen ? 'rotate-180' : ''}`} />
-          </button>
-          {modelMenu}
-
-          {generating && (
-            <button
-              type="button"
-              onClick={handleStop}
-              className="flex items-center justify-center shrink-0 p-0.5 text-rose-500 hover:text-rose-400 transition-colors"
-              title="Stop generating"
-              aria-label="Stop generating"
-            >
-              <Square className="w-4 h-4 fill-current" />
-            </button>
-          )}
-          </div>
           </div>
           </div>
 
@@ -6796,7 +7433,7 @@ export function AIChat() {
             contextRatio={tokenRatio}
             modelRatio={modelRatio}
             size={20}
-            className={`text-content-primary shrink-0 ${composerExpanded ? 'mb-2' : 'self-center'}`}
+            className="text-content-primary shrink-0 mb-2 self-end"
             modelName={
               activeModel.source === 'auto'
                 ? autoModelLabel
@@ -6915,45 +7552,6 @@ export function AIChat() {
               </button>
             ))}
       </div>
-      {(mode === 'general' || mode === 'code') && showStudioPills && (
-        <div className="mt-2 flex flex-wrap items-center justify-start gap-1.5 px-1">
-          {isCodeTabEnabled() && codePillSticky ? (
-            <button
-              type="button"
-              onClick={() => openCodeWorkspace()}
-              className="inline-flex items-center gap-1.5 rounded-full border border-violet-500/45 bg-violet-500/20 px-2.5 py-1 text-[11px] font-medium text-violet-100 hover:bg-violet-500/30 transition-colors"
-              title="Open Code. files on the left, editor on the right"
-            >
-              <Code2 className="w-3.5 h-3.5 text-violet-300" />
-              Code
-            </button>
-          ) : null}
-          {chatStudioDiskRoot ? (
-            <button
-              type="button"
-              onClick={() => void openProjectFolder()}
-              className="inline-flex items-center gap-1.5 max-w-[min(100%,14rem)] rounded-full border border-amber-500/45 bg-amber-500/15 px-2.5 py-1 text-[11px] font-medium text-amber-200 hover:bg-amber-500/25 transition-colors"
-              title={`Open folder: ${chatStudioDiskRoot}`}
-            >
-              <Folder className="w-3.5 h-3.5 shrink-0 text-amber-300" />
-              <span className="truncate">
-                {workspaceBadgeLabel || chatStudioDiskRoot.split(/[/\\]/).pop()}
-              </span>
-            </button>
-          ) : null}
-          {(chatStudioDiskRoot || previewUrl || Object.keys(chatStudioFiles).length > 0) ? (
-            <button
-              type="button"
-              onClick={() => void openProjectPreview()}
-              className="inline-flex items-center gap-1.5 rounded-full border border-sky-500/45 bg-sky-500/15 px-2.5 py-1 text-[11px] font-medium text-sky-100 hover:bg-sky-500/25 transition-colors"
-              title={previewUrl ? `Open live preview (${previewUrl})` : 'Open live preview window'}
-            >
-              <Globe className="w-3.5 h-3.5 text-sky-300" />
-              {previewUrl && /localhost|127\.0\.0\.1/.test(previewUrl) ? 'Localhost' : 'Preview'}
-            </button>
-          ) : null}
-        </div>
-      )}
     </div>
   );
 
@@ -7060,7 +7658,7 @@ export function AIChat() {
         />
       ) : showEmpty ? (
         mode === 'general' ? (
-          <div className="flex-1 flex flex-col items-center justify-center px-4 sm:px-8 pb-16 w-full">
+          <div className="flex-1 flex flex-col items-center justify-center px-4 sm:px-8 pb-16 w-full min-h-0">
             <h1 className="text-2xl sm:text-3xl font-semibold text-content-primary tracking-tight mb-3 text-center">
               {greeting}
             </h1>
@@ -7150,6 +7748,7 @@ export function AIChat() {
             <div
               ref={messagesScrollRef}
               onScroll={onMessagesScroll}
+              onWheel={onMessagesWheel}
               className="flex-1 min-h-0 overflow-auto px-4 sm:px-8 py-6 ark-scroll-quiet"
             >
             <div className="max-w-5xl mx-auto w-full space-y-5">
@@ -7171,7 +7770,7 @@ export function AIChat() {
                     </div>
                   )}
                   <div
-                    className={`text-sm text-content-primary ${
+                    className={`text-sm text-content-primary overflow-hidden ${
                       msg.role === 'user'
                         ? 'max-w-[min(42rem,78%)] min-w-0 flex flex-col items-end gap-1'
                         : isMediaOnlyContent(msg.content)
@@ -7182,12 +7781,12 @@ export function AIChat() {
                             && (mode === 'image' || mode === 'video')
                           )
                           ? 'shrink-0'
-                          : 'max-w-[min(44rem,92%)] min-w-0'
+                          : 'max-w-[min(44rem,92%)] min-w-0 break-words [overflow-wrap:anywhere]'
                     }`}
                   >
                     {msg.role === 'user' ? (
                       <>
-                        <div className="min-w-0 max-w-full rounded-xl px-3.5 py-2.5 bg-surface-hover">
+                        <div className="min-w-0 max-w-full rounded-xl px-3.5 py-2.5 bg-surface-hover text-[13px] leading-5 text-content-primary">
                           <MessageContent
                             content={msg.content}
                             live={false}
@@ -7257,14 +7856,12 @@ export function AIChat() {
                         <MessageContent
                           content={msg.content}
                           live={Boolean(generating && isLast && isAssistant && isTraceMessage(raw))}
-                          traceExpanded={traceDetailsId === msg.id}
                           onPromptChipPick={(prompt) => void sendMessageRef.current(prompt)}
                         />
                       );
                     })()}
                     {msg.role === 'assistant'
                       && !String(msg.content || '').startsWith('__generating__:')
-                      && !isTraceMessage(msg.content)
                       && String(msg.content || '').trim() ? (
                         <div className="mt-2 flex items-center gap-2 text-[11px] text-content-tertiary tabular-nums">
                           {(() => {
@@ -7334,17 +7931,6 @@ export function AIChat() {
                           onClick={() => setImageOfferId(null)}
                         >
                           Stay in Chat
-                        </button>
-                      </div>
-                    )}
-                    {msg.role === 'assistant' && inspectOfferId === msg.id && studioOfferKind === 'details' && (
-                      <div className="flex flex-wrap gap-1 mt-2">
-                        <button
-                          type="button"
-                          className="text-[10px] rounded-full bg-sky-600 text-white px-2.5 py-1"
-                          onClick={() => setTraceDetailsId(traceDetailsId === msg.id ? null : msg.id)}
-                        >
-                          {traceDetailsId === msg.id ? 'Hide details' : 'More details'}
                         </button>
                       </div>
                     )}

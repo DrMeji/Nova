@@ -128,3 +128,131 @@ export async function ensureViteDevServer(cwd: string): Promise<{ ok: boolean; u
   }
   return window.arkDesktop.agentStartDevServer({ cwd });
 }
+
+function joinRoot(root: string, rel: string): string {
+  const sep = root.includes('\\') ? '\\' : '/';
+  return `${root.replace(/[/\\]+$/, '')}${sep}${rel.replace(/\//g, sep)}`;
+}
+
+async function readTextRel(root: string, rel: string): Promise<string | null> {
+  try {
+    const read = await window.arkDesktop?.readTextFile?.({ path: joinRoot(root, rel) });
+    if (read?.ok && typeof read.text === 'string') return read.text;
+  } catch {
+    /* missing */
+  }
+  return null;
+}
+
+/** Pull previewable HTML/CSS/JS (and launchers) from a bound folder without dumping the whole tree. */
+export async function loadPreviewFilesFromDisk(root: string): Promise<Record<string, string>> {
+  const files: Record<string, string> = {};
+  const textRels = [
+    'index.html',
+    'static/index.html',
+    'public/index.html',
+    'dist/index.html',
+    'package.json',
+    'vite.config.js',
+    'vite.config.ts',
+    'run.bat',
+    'start.bat',
+    'preview.bat',
+    'dev.bat',
+    'requirements.txt',
+    'app/main.py',
+  ];
+  for (const rel of textRels) {
+    const text = await readTextRel(root, rel);
+    if (text != null) files[rel] = text;
+  }
+
+  // Static asset siblings next to static/index.html (text only — images stay on live server).
+  for (const dir of ['static', 'public', 'dist']) {
+    try {
+      const listing = await window.arkDesktop?.listDir?.(joinRoot(root, dir));
+      if (!listing?.ok) continue;
+      for (const item of listing.items || []) {
+        if (item.kind !== 'file' || !item.name) continue;
+        if (!/\.(html?|css|js|mjs|svg|json)$/i.test(item.name)) continue;
+        const rel = `${dir}/${item.name}`;
+        if (files[rel]) continue;
+        const text = await readTextRel(root, rel);
+        if (text != null) files[rel] = text;
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  // If only static/index.html exists, mirror it at / so ARK's preview server can open it,
+  // keeping /static/* links working for CSS/JS.
+  if (!files['index.html'] && files['static/index.html']) {
+    files['index.html'] = '<!DOCTYPE html><html><head><meta charset="utf-8" />'
+      + '<meta http-equiv="refresh" content="0;url=/static/index.html" />'
+      + '<title>Preview</title></head><body>'
+      + '<p><a href="/static/index.html">Open preview</a></p></body></html>';
+  }
+
+  return files;
+}
+
+/**
+ * Open the right preview for a bound folder:
+ * Vite → npm run dev; FastAPI/run.bat → localhost; else static HTML in ARK's preview window.
+ */
+export async function ensureBoundFolderPreview(opts: {
+  root: string;
+  projectId: string;
+  title?: string;
+  files?: Record<string, string>;
+}): Promise<{ ok: true; url: string } | { ok: false; error: string }> {
+  const root = String(opts.root || '').trim();
+  if (!root) return { ok: false, error: 'No folder path bound.' };
+
+  let files = opts.files && Object.keys(opts.files).length
+    ? { ...opts.files }
+    : await loadPreviewFilesFromDisk(root);
+
+  // Prefer a live project server when the folder has one (Vite / run.bat / FastAPI).
+  if (window.arkDesktop?.agentStartFolderPreview) {
+    const live = await window.arkDesktop.agentStartFolderPreview({ cwd: root });
+    if (live?.ok && live.url) {
+      await openInAppPreview(live.url, {
+        projectId: opts.projectId,
+        title: opts.title,
+        forceNavigate: true,
+      });
+      return { ok: true, url: live.url };
+    }
+  } else if (isViteProject(files) || files['package.json']) {
+    const dev = await ensureViteDevServer(root);
+    if (dev.ok && dev.url) {
+      await openInAppPreview(dev.url, {
+        projectId: opts.projectId,
+        title: opts.title,
+        forceNavigate: true,
+      });
+      return { ok: true, url: dev.url };
+    }
+  }
+
+  if (!Object.keys(files).length) {
+    files = await loadPreviewFilesFromDisk(root);
+  }
+
+  if (files['index.html'] || files['static/index.html'] || files['public/index.html']) {
+    const url = await ensureInAppPreview({
+      projectId: opts.projectId,
+      title: opts.title,
+      files,
+      preferUrl: null,
+    });
+    if (url) return { ok: true, url };
+  }
+
+  return {
+    ok: false,
+    error: 'No previewable page found (index.html, static/, Vite, or run.bat localhost). Folder pill still opens Explorer.',
+  };
+}

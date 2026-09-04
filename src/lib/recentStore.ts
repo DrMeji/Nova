@@ -466,7 +466,15 @@ export function deleteCreationPermanently(creationId: string) {
 }
 
 export function titleFromPrompt(prompt: string): string {
-  const cleaned = prompt.trim().replace(/\s+/g, ' ');
+  let cleaned = String(prompt || '')
+    .replace(/<!--ark-attach:[\s\S]*?-->/g, '')
+    .replace(/<!--ark-auto-read-->/g, '')
+    .replace(/^Agent mode\.[^\n]*\n+/i, '')
+    .replace(/^Plan this out step by step[^\n]*\n+/i, '')
+    .replace(/^Debug this\.[^\n]*\n+/i, '')
+    .replace(/^\[Multi-agent\]\s*/i, '')
+    .trim()
+    .replace(/\s+/g, ' ');
   if (!cleaned) return 'New chat';
   if (cleaned.length <= 42) return cleaned;
   return `${cleaned.slice(0, 38).trim()}…`;

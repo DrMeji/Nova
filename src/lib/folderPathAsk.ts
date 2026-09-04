@@ -21,7 +21,9 @@ const FOLDER_CALLED_RE = /\b(?:folder|project|directory|dir)\b[\s\S]{0,24}?\b(?:
 const WHAT_ON_DESKTOP_RE = /\b(?:what(?:'s| is)|tell me (?:about )?|describe|explain)\s+([A-Za-z0-9_.-]+)\s+(?:on|in)\s+(?:my\s+)?desktop\b/i;
 const TELL_ABOUT_ON_DESKTOP_RE = /\btell me about\s+([A-Za-z0-9_.-]+)\s+(?:on|in)\s+(?:my\s+)?desktop\b/i;
 const OPEN_ON_DESKTOP_RE = /\b(?:open|show|find|locate|look at)\s+([A-Za-z0-9_.-]+)\s+(?:on|in)\s+(?:my\s+)?desktop\b/i;
-const ABS_WIN_PATH_RE = /\b([A-Za-z]:\\(?:[^\s"'<>|]+\\)*[^\s"'<>|]+)\b/;
+const ABS_WIN_PATH_RE = /\b([A-Za-z]:\\(?:[^"'<>|\r\n]+\\)*[^"'<>|\r\n]+)\b/;
+const ABS_WIN_QUOTED_RE = /["']([A-Za-z]:\\[^"']+)["']/;
+const ABS_UNIX_PATH_RE = /(\/(?:Users|home|var|tmp|opt)\/[^\s"'<>|]+)/;
 const INSTALLED_APPS_ASK_RE =
   /\b(?:apps?|applications?|programs?|software)\b[\s\S]{0,40}\b(?:installed|install(?:ed|ation)?s?|do\s+i\s+have)\b/i;
 
@@ -113,9 +115,23 @@ export function parseFolderPathAsk(message: string): FolderPathRef | null {
   const sub = parseDesktopSubfolderAsk(message);
   if (sub) return sub;
 
+  const quoted = t.match(ABS_WIN_QUOTED_RE);
+  if (quoted?.[1] && !/\.(exe|dll|lnk|bat|cmd|msi)$/i.test(quoted[1])) {
+    const rawPath = quoted[1].trim();
+    return { scope: 'absolute', name: rawPath.split(/[/\\]/).pop() || rawPath, rawPath };
+  }
+
   const abs = t.match(ABS_WIN_PATH_RE);
   if (abs?.[1] && !/\.(exe|dll|lnk|bat|cmd|msi)$/i.test(abs[1])) {
-    return { scope: 'absolute', name: abs[1].split(/[/\\]/).pop() || abs[1], rawPath: abs[1] };
+    // Keep spaces inside Windows paths (e.g. ...\Auto Trade).
+    const rawPath = abs[1].replace(/[.,;:!?)]+$/g, '').trim();
+    return { scope: 'absolute', name: rawPath.split(/[/\\]/).pop() || rawPath, rawPath };
+  }
+
+  const unix = t.match(ABS_UNIX_PATH_RE);
+  if (unix?.[1]) {
+    const rawPath = unix[1].replace(/[.,;:!?)]+$/g, '').trim();
+    return { scope: 'absolute', name: rawPath.split(/[/\\]/).pop() || rawPath, rawPath };
   }
 
   const onDesktop = /\b(?:on|in)\s+(?:my\s+)?desktop\b/i.test(t) || /\bdesktop\b/i.test(t);

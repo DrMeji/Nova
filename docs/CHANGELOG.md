@@ -1,5 +1,21 @@
 ﻿# ARK changelog
 
+## 0.1.176 — 2026-09-03
+
+Chat mic (voice-to-text), ARK Projects home, Brain under Tools, chat polish.
+
+**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.176/ARK-Setup.exe) · [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.176)
+
+### Chat
+- Microphone on the composer — click to dictate into the chat box (voice-to-text)
+- Queue bar matches the chat box width
+- Thought expands to background steps; Files Changed on disk edits; More details removed
+- “Gaming news” / build-app asks no longer scan the Desktop for games
+
+### Projects & Tools
+- New projects prefer `Documents\ARK Projects`; Projects lists that folder
+- ARK Brain lives under Tools (below MCP) with the ARK icon; API open to any local app
+
 ## 0.1.174 — 2026-09-03
 
 Transparent shell icon (no black taskbar tile) + Start menu icon cache refresh.

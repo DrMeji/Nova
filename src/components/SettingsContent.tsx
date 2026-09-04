@@ -963,7 +963,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                     className="ark-btn-secondary text-xs shrink-0 self-start sm:self-center"
                     onClick={() => {
                       onClose?.();
-                      navigate({ name: 'models', tab: 'engine' });
+                      navigate({ name: 'brain' });
                     }}
                   >
                     Open ARK Brain
@@ -1928,6 +1928,23 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                   value={prefs.sandboxAgent}
                   onChange={v => patchPrefs({ sandboxAgent: v })}
                 />
+
+                <ToggleRow
+                  label="Agent tool loop (Level B)"
+                  value={prefs.agentLoopEnabled !== false}
+                  onChange={v => patchPrefs({ agentLoopEnabled: v })}
+                />
+                <p className="text-[11px] text-content-tertiary -mt-2 px-0.5">
+                  When on, Agent / Debug on a bound project search, read, edit, run, and verify in a loop (Stop anytime).
+                </p>
+                <ToggleRow
+                  label="Commit after green verify"
+                  value={Boolean(prefs.agentLoopCommitOnSuccess)}
+                  onChange={v => patchPrefs({ agentLoopCommitOnSuccess: v })}
+                />
+                <p className="text-[11px] text-content-tertiary -mt-2 px-0.5">
+                  Optional. after a successful verify, run allowlisted git commit on the bound folder.
+                </p>
 
                 <ToggleRow
                   label="Allow Desktop folder access"

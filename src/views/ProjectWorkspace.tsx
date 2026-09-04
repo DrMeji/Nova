@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter } from '@/context/RouterContext';
 import { useAuth } from '@/context/AuthContext';
@@ -26,6 +26,11 @@ import {
   runPluginAction,
 } from '@/lib/plugins';
 import { arkRoute, routerProviderLabel } from '@/lib/arkRouter';
+import {
+  runArkAgentLoop,
+  shouldRunAgentLoop,
+  agentLoopPreferCloud,
+} from '@/lib/arkAgentLoop';
 import { buildRouterHistory, looksLikePromptEcho, looksLikeUserAskEcho } from '@/lib/chatHistory';
 import {
   autoEquippedCaption,
@@ -373,7 +378,6 @@ export function ProjectWorkspace() {
   const [chatPlugins, setChatPlugins] = useState(() => getChatEnabledPlugins(loadPluginState()));
   const [chatInput, setChatInput] = useState('');
   const [composerMode, setComposerMode] = useState<'plan' | 'ask' | 'agent' | 'debug' | 'multitask' | null>(null);
-  const [composerTall, setComposerTall] = useState(false);
   const [tokenRatio, setTokenRatio] = useState(0);
   const [modelRatio, setModelRatio] = useState(0);
   const [attachBusy, setAttachBusy] = useState(false);
@@ -1897,6 +1901,7 @@ export function ProjectWorkspace() {
     };
 
     const composerWasDebug = composerMode === 'debug';
+    const turnComposerMode = composerMode;
     const improveAsk = isImproveAsk(rawContent);
     const explainOnly = isExplainAsk(rawContent) && !improveAsk;
     const hasFilesNow = Object.values(fileContentsRef.current)
@@ -1930,7 +1935,6 @@ export function ProjectWorkspace() {
     setReviseUserMsgId(null);
     setEditingUserId(null);
     setChatInput('');
-    setComposerTall(false);
     setAttachedImages([]);
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
 
@@ -2358,6 +2362,64 @@ export function ProjectWorkspace() {
               replyText = formatCodeChatReply(rawContent, changedPaths, '', { previewTouched });
               bumpStep('done');
             }
+          }
+        }
+
+        // Level-B agent tool loop for Agent/Debug (and clear implement asks).
+        if (
+          !replyText
+          && canEdit
+          && !inspectOnly
+          && Object.keys(fileContentsRef.current).length > 0
+          && shouldRunAgentLoop({
+            composerMode: turnComposerMode || (composerWasDebug ? 'debug' : null),
+            hasWorkspace: true,
+            message: rawContent,
+          })
+        ) {
+          bumpStep('generate');
+          const loopPreferCloud = agentLoopPreferCloud(fileContentsRef.current, rawContent);
+          const loop = await runArkAgentLoop({
+            brief: content,
+            files: fileContentsRef.current,
+            projectId: pid,
+            projectName: buildLabel,
+            diskRoot,
+            shouldAbort: () => aborted,
+            onStep: (step) => {
+              if (aborted) return;
+              setBuildLive(prev => prev ? {
+                ...prev,
+                label: `Agent · ${step.label}`,
+              } : prev);
+            },
+            callModel: async ({ prompt }) => {
+              const routed = await arkRoute({
+                message: prompt,
+                kind: 'coding',
+                preferCloudCoding: loopPreferCloud,
+                history: [],
+              });
+              return {
+                reply: routed.reply || '',
+                modelName: routed.modelName,
+                providerLabel: routerProviderLabel(routed, 'ARK · agent'),
+              };
+            },
+          });
+          if (aborted) return;
+          if (loop.updated.length || loop.ok) {
+            fileContentsRef.current = loop.files;
+            setFileContents(loop.files);
+            changedPaths = loop.updated;
+            replyText = loop.reply;
+            provider = loop.providerLabel || 'ARK · agent';
+            if (loop.updated.length) {
+              bumpStep('apply');
+              void refreshLivePreview(loop.files);
+              previewTouched = true;
+            }
+            bumpStep('done');
           }
         }
 
@@ -2901,49 +2963,25 @@ export function ProjectWorkspace() {
     });
   };
 
-  const resizeComposer = () => {
+  const resizeComposer = useCallback(() => {
     const el = textareaRef.current;
     if (!el) return;
-    const value = el.value || '';
-    if (!value) {
-      el.style.height = '';
-      el.style.maxHeight = '';
-      el.style.overflowY = 'hidden';
-      setComposerTall(attachedImages.length > 0);
-      return;
-    }
-    // Leave pill layout immediately so wrapped lines are never clipped.
-    const wantsTall = value.includes('\n') || value.length > 24 || attachedImages.length > 0;
-    setComposerTall(wantsTall);
-
-    const applyHeight = () => {
-      const box = textareaRef.current;
-      if (!box) return;
-      box.style.height = 'auto';
-      box.style.maxHeight = '';
-      // Force layout so scrollHeight reflects full wrapped text.
-      void box.offsetHeight;
-      const raw = box.scrollHeight;
-      const max = Math.round(window.innerHeight * 0.4);
-      const minPx = wantsTall ? 56 : 22;
-      const next = Math.max(minPx, Math.min(Math.max(raw, minPx), max));
-      box.style.height = `${next}px`;
-      box.style.overflowY = raw > max ? 'auto' : 'hidden';
-    };
-
-    applyHeight();
-    // Second pass after tall chrome reflows (full width).
-    requestAnimationFrame(applyHeight);
-  };
+    const max = Math.round(window.innerHeight * 0.4);
+    const minPx = 22;
+    el.style.height = 'auto';
+    const raw = el.scrollHeight;
+    const next = Math.max(minPx, Math.min(raw, max));
+    el.style.height = `${next}px`;
+    el.style.overflowY = raw > max ? 'auto' : 'hidden';
+  }, []);
 
   const onChatInput = (value: string) => {
     setChatInput(value);
-    requestAnimationFrame(resizeComposer);
   };
 
-  useEffect(() => {
-    requestAnimationFrame(resizeComposer);
-  }, [chatInput, attachedImages.length]);
+  useLayoutEffect(() => {
+    resizeComposer();
+  }, [chatInput, attachedImages.length, resizeComposer]);
 
   const stopBuild = () => {
     void engineGenerateCancel();
@@ -3907,34 +3945,13 @@ export function ProjectWorkspace() {
                 e.target.value = '';
               }}
             />
-            {composerMode && (
-              <div className="flex items-center gap-2 px-1">
-                <span className="inline-flex items-center gap-1.5 rounded-full border border-surface-border bg-surface-hover/60 px-2.5 py-0.5 text-[11px] leading-none text-content-secondary capitalize">
-                  {composerMode}
-                  <button
-                    type="button"
-                    onClick={() => setComposerMode(null)}
-                    className="text-content-tertiary hover:text-content-primary"
-                    aria-label="Clear mode"
-                  >
-                    <X className="w-3 h-3" />
-                  </button>
-                </span>
-              </div>
-            )}
             {Object.keys(fileContents).length > 0 && (
               <div className="px-1 text-[10px] text-content-tertiary">
                 {Object.keys(fileContents).length} file{Object.keys(fileContents).length === 1 ? '' : 's'} in Explorer. ask in chat to debug or explain
               </div>
             )}
-            <div className={`flex gap-2 min-w-0 ${composerTall ? 'items-end' : 'items-center'}`}>
-            <div
-              className={`flex-1 min-w-0 border border-surface-border bg-ark-navy-900/90 overflow-visible ${
-                composerTall
-                  ? 'flex flex-col rounded-2xl'
-                  : 'flex items-center gap-1 rounded-full min-h-11 pl-1 pr-1.5 py-1.5'
-              }`}
-            >
+            <div className="flex gap-2 min-w-0 items-end">
+            <div className="flex-1 min-w-0 flex flex-col rounded-2xl border border-surface-border bg-ark-navy-900/90 overflow-hidden">
               {attachedImages.length > 0 && (
                 <div className="px-3 pt-2 text-[10px] text-content-tertiary">
                   {attachedImages.length} image{attachedImages.length === 1 ? '' : 's'} in chat. send a message to ask about {attachedImages.length === 1 ? 'it' : 'them'}
@@ -4069,7 +4086,27 @@ export function ProjectWorkspace() {
                   );
                 }}
               />
-              {!composerTall && (
+              <textarea
+                ref={textareaRef}
+                value={chatInput}
+                onChange={e => onChatInput(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    if (Date.now() < ignoreEnterUntilRef.current) {
+                      e.preventDefault();
+                      return;
+                    }
+                    e.preventDefault();
+                    if (buildLive) stopBuild();
+                    else void handleSendChat();
+                  }
+                }}
+                placeholder="Build, add, remove, upgrade, or fix files in this project…"
+                rows={1}
+                className="w-full bg-transparent border-none resize-none text-sm text-content-primary placeholder:text-content-tertiary focus:outline-none leading-5 min-h-[1.25rem] px-3.5 pt-3 pb-1 block"
+                style={{ overflowY: 'hidden' }}
+              />
+              <div className="flex items-center gap-1.5 px-2 pb-2 pt-1 shrink-0">
                 <ComposerPlusMenu
                   scope="code"
                   busy={attachBusy}
@@ -4101,69 +4138,20 @@ export function ProjectWorkspace() {
                     requestAnimationFrame(() => textareaRef.current?.focus());
                   }}
                 />
-              )}
-              <textarea
-                ref={textareaRef}
-                value={chatInput}
-                onChange={e => onChatInput(e.target.value)}
-                onKeyDown={e => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    if (Date.now() < ignoreEnterUntilRef.current) {
-                      e.preventDefault();
-                      return;
-                    }
-                    e.preventDefault();
-                    if (buildLive) stopBuild();
-                    else void handleSendChat();
-                  }
-                }}
-                placeholder="Build, add, remove, upgrade, or fix files in this project…"
-                rows={1}
-                className={`bg-transparent border-none resize-none text-sm text-content-primary placeholder:text-content-tertiary focus:outline-none leading-5 block w-full ${
-                  composerTall ? 'min-h-[3.5rem] px-3.5 pt-3.5 pb-2' : 'flex-1 min-w-0 min-h-[1.25rem] px-1 py-0 self-center'
-                }`}
-                style={{ overflowY: 'hidden', height: 'auto' }}
-              />
-              <div
-                className={
-                  composerTall
-                    ? 'flex items-center justify-between gap-2 px-2 pb-2 pt-1'
-                    : 'flex items-center shrink-0 gap-1'
-                }
-              >
-                {composerTall && (
-                  <ComposerPlusMenu
-                    scope="code"
-                    busy={attachBusy}
-                    buttonClassName="w-8 h-8 rounded-full flex items-center justify-center text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors shrink-0"
-                    onAction={(action: ComposerPlusAction) => {
-                      if (action === 'image') {
-                        void pickCodePhotos();
-                        return;
-                      }
-                      if (action === 'file') {
-                        void pickCodeFiles();
-                        return;
-                      }
-                      if (action === 'folder') {
-                        pickCodeFolder();
-                        return;
-                      }
-                      if (action === 'import-folder') {
-                        void importProjectFolderCopy();
-                        return;
-                      }
-                      if (action === 'enter-path') {
-                        void enterPathAndOpen();
-                        return;
-                      }
-                      if (action === 'plan' || action === 'ask' || action === 'agent' || action === 'debug' || action === 'multitask') {
-                        setComposerMode(action);
-                      }
-                      requestAnimationFrame(() => textareaRef.current?.focus());
-                    }}
-                  />
-                )}
+                {composerMode ? (
+                  <span className="inline-flex items-center gap-1 rounded-full border border-violet-500/40 bg-violet-500/15 px-2.5 py-1 text-xs font-medium text-violet-200 capitalize shrink-0">
+                    {composerMode === 'multitask' ? 'Multi-agent' : composerMode}
+                    <button
+                      type="button"
+                      onClick={() => setComposerMode(null)}
+                      className="opacity-60 hover:opacity-100 -mr-0.5 rounded-full p-0.5 hover:bg-white/10"
+                      aria-label="Clear mode"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </span>
+                ) : null}
+                <div className="flex-1 min-w-0" aria-hidden />
                 <div className="flex items-center gap-1.5 shrink-0">
                   <button
                     ref={modelButtonRef}
@@ -4263,7 +4251,7 @@ export function ProjectWorkspace() {
               contextRatio={tokenRatio}
               modelRatio={modelRatio}
               size={20}
-              className={`text-content-primary shrink-0 ${composerTall ? 'mb-2' : 'self-center'}`}
+              className="text-content-primary shrink-0 mb-2 self-end"
               modelName={activeModel.source === 'auto' ? autoPillLabel(threadBrain) : activeModel.name}
               modelDetail={
                 activeModel.source === 'auto'

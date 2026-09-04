@@ -283,9 +283,100 @@ async function agentStartDevServer(payload) {
   }
 }
 
+function readBatUrls(cwd) {
+  const urls = [];
+  for (const name of ['run.bat', 'start.bat', 'preview.bat', 'dev.bat', 'serve.bat']) {
+    const full = path.join(cwd, name);
+    if (!fs.existsSync(full)) continue;
+    let text = '';
+    try { text = fs.readFileSync(full, 'utf8'); } catch { continue; }
+    const matches = text.match(/https?:\/\/(?:127\.0\.0\.1|localhost):\d+/gi) || [];
+    for (const m of matches) {
+      try {
+        const u = new URL(m.replace(/localhost/i, '127.0.0.1'));
+        const port = Number(u.port);
+        if (port > 0) urls.push({ url: `http://127.0.0.1:${port}/`, port, from: name });
+      } catch { /* ignore */ }
+    }
+  }
+  return urls;
+}
+
+function spawnHiddenUvicorn(cwd, port) {
+  const { spawn } = require('child_process');
+  const venvPy = process.platform === 'win32'
+    ? path.join(cwd, '.venv', 'Scripts', 'python.exe')
+    : path.join(cwd, '.venv', 'bin', 'python');
+  const py = fs.existsSync(venvPy) ? venvPy : (process.platform === 'win32' ? 'python' : 'python3');
+  const args = ['-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', String(port)];
+  return spawn(py, args, {
+    cwd,
+    stdio: 'ignore',
+    windowsHide: true,
+    env: { ...process.env, BROWSER: 'none' },
+  });
+}
+
+/**
+ * Start (or reuse) whatever this folder already uses for Preview:
+ * Vite npm run dev, an already-running bat localhost, or FastAPI/uvicorn.
+ */
+async function agentStartFolderPreview(payload) {
+  const cwdRes = resolveCwd(payload?.cwd);
+  if (!cwdRes.ok) return cwdRes;
+  const cwd = cwdRes.path;
+  const cwdKey = cwd.toLowerCase();
+
+  const existing = devServersByCwd.get(cwdKey);
+  if (existing?.url) {
+    const port = portFromUrl(existing.url);
+    if (await httpProbePortAny(port)) {
+      return { ok: true, cwd, url: existing.url };
+    }
+    try { existing.child?.kill?.(); } catch { /* ignore */ }
+    devServersByCwd.delete(cwdKey);
+  }
+
+  // Reuse a server the user (or run.bat) already started.
+  for (const hit of readBatUrls(cwd)) {
+    if (await httpProbePortAny(hit.port, 500)) {
+      const url = `http://127.0.0.1:${hit.port}/`;
+      devServersByCwd.set(cwdKey, { url });
+      return { ok: true, cwd, url };
+    }
+  }
+
+  const pkgPath = path.join(cwd, 'package.json');
+  if (fs.existsSync(pkgPath)) {
+    return agentStartDevServer({ cwd });
+  }
+
+  const fastapi = fs.existsSync(path.join(cwd, 'app', 'main.py'))
+    || fs.existsSync(path.join(cwd, 'requirements.txt'));
+  if (fastapi) {
+    const preferred = readBatUrls(cwd)[0]?.port || 8000;
+    if (await httpProbePortAny(preferred, 400)) {
+      const url = `http://127.0.0.1:${preferred}/`;
+      devServersByCwd.set(cwdKey, { url });
+      return { ok: true, cwd, url };
+    }
+    try {
+      const child = spawnHiddenUvicorn(cwd, preferred);
+      const url = await waitForDevServerUrl(preferred, 20_000);
+      devServersByCwd.set(cwdKey, { url, pid: child.pid, child });
+      return { ok: true, cwd, url };
+    } catch (err) {
+      return { ok: false, error: err?.message || 'Could not start the Python preview server.' };
+    }
+  }
+
+  return { ok: false, error: 'No live preview server for this folder.' };
+}
+
 module.exports = {
   agentRun,
   agentStartDevServer,
+  agentStartFolderPreview,
   commandAllowed,
   loadExecutionMode,
 };

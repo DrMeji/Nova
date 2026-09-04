@@ -14,6 +14,7 @@ import { ModelsView } from '@/views/ModelsView';
 import { BuildRun } from '@/views/BuildRun';
 import { LocalAI } from '@/views/LocalAI';
 import { McpView } from '@/views/McpView';
+import { BrainView } from '@/views/BrainView';
 import { CreationViewer } from '@/views/CreationViewer';
 import { Settings } from '@/views/Settings';
 import { NetworkingView } from '@/views/NetworkingView';
@@ -72,6 +73,7 @@ function AppRoutes() {
       case 'build': other = <BuildRun />; break;
       case 'local-ai': other = <LocalAI />; break;
       case 'mcp': other = <McpView />; break;
+      case 'brain': other = <BrainView />; break;
       case 'networking':
         other = isSocialParked('networking') ? <ParkedNotice feature="networking" /> : <NetworkingView />;
         break;
