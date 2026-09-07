@@ -348,6 +348,29 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.190',
+    channel: 'stable' as const,
+    date: 'Sep 6, 2026',
+    title: 'Update splash: rounded box, bar under icon',
+    notes: [
+      'Update splash is a rounded box on all four corners',
+      'ARK icon stays centered with the progress bar directly underneath (not stuck to the bottom edge)',
+      'Same layout for the install HTA splash and the Electron preview splash',
+    ],
+  },
+  {
+    version: '0.1.189',
+    channel: 'stable' as const,
+    date: 'Sep 3, 2026',
+    title: 'Chat edits on disk, sticky Recent, premium scaffolds',
+    notes: [
+      'Hero/title edits apply on disk instead of planning stubs',
+      'Sidebar Work/Tools/Connect stay fixed; only Recent scrolls',
+      'Chat switch briefly loads then restores Localhost/Code for that chat',
+      'Premium Apple-style landing scaffolds with Terms/Privacy/Contact',
+    ],
+  },
+  {
     version: '0.1.180',
     channel: 'stable' as const,
     date: 'Sep 3, 2026',
