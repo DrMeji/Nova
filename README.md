@@ -8,7 +8,8 @@ Chat with local or cloud models, generate images and video, build and edit proje
 
 Get the Windows installer from **[Releases](https://github.com/DrMeji/Nova/releases)**:
 
-- **ARK-Setup.exe** — install NOVA on your PC (installer filename kept for compatibility with existing updaters)
+- **NOVA-Setup.exe** — install NOVA on your PC
+- Older releases may still list **ARK-Setup.exe** as the download filename (same app); prefer the newest **NOVA** release
 - After install: **Settings → Updates → Check → Download** for newer builds
 
 ## Important: "Source code (zip / tar.gz)" on Releases
@@ -22,7 +23,7 @@ Those are **not** the NOVA application. GitHub generates them from *this* public
 
 NOVA's real source code is **private** and is not published on GitHub for download.
 
-If you want NOVA, download **ARK-Setup.exe** only.
+If you want NOVA, download **NOVA-Setup.exe** (or the latest Setup.exe on the release page) only.
 
 ## What this public repo contains
 
