@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { Session, User } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import type { Profile, UserSettings } from '@/types';
@@ -86,6 +86,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [bypass, setBypass] = useState(false);
   const [loading, setLoading] = useState(true);
   const [packaged, setPackaged] = useState(false);
+  const bypassRef = useRef(false);
+  bypassRef.current = bypass;
 
   const loadProfileAndSettings = async (userId: string) => {
     await ensureFirstRunGate();
@@ -199,9 +201,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       // Packaged releases never auto-enter as guest.
-      if (isPackaged) {
-        localStorage.removeItem(BYPASS_KEY);
-      }
+      // Unpackaged / bat builds: clear leftover bypass so Auth is first every launch.
+      // Bypass buttons only apply for the current Electron session.
+      localStorage.removeItem(BYPASS_KEY);
 
       // Fresh / reinstalled desktop: wipe leftover sessions so AuthScreen is first.
       if (isPackaged && isFreshInstallGate()) {
@@ -227,17 +229,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      if (!isPackaged && isBypassEnabled()) {
-        setBypass(true);
-        setUser(GUEST_USER);
-        setProfile(guestProfile());
-        setSettings(null);
-        setLoading(false);
-        void ensureArkId('guest-local').then(id => {
-          if (!cancelled) setProfile(prev => prev ? { ...prev, ark_id: id } : prev);
-        });
-        return;
-      }
+      // Do not restore guest bypass from a previous session.
 
       const { data } = await supabase.auth.getSession();
       if (cancelled) return;
@@ -252,6 +244,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     })();
 
     const { data: authListener } = supabase.auth.onAuthStateChange((_event, newSession) => {
+      // Guest bypass is in-memory only; ignore sign-out events that clear the real token.
+      if (!newSession?.user && bypassRef.current) {
+        setLoading(false);
+        return;
+      }
       setSession(newSession);
       setUser(newSession?.user ?? null);
       if (newSession?.user) {
@@ -276,7 +273,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signIn = async (email: string, password: string) => {
     await ensureFirstRunGate();
-    const wasGuest = isBypassEnabled();
+    const wasGuest = bypass;
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (!error) {
       localStorage.setItem('ark:last-auth', JSON.stringify({
@@ -308,7 +305,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signUp = async (email: string, password: string, displayName?: string) => {
     await ensureFirstRunGate();
-    const wasGuest = isBypassEnabled();
+    const wasGuest = bypass;
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
@@ -391,7 +388,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const bypassLogin = (options?: { skipSetup?: boolean }) => {
     if (packaged) return;
-    localStorage.setItem(BYPASS_KEY, '1');
+    // Session-only — do not persist across bat / Electron restarts.
+    localStorage.removeItem(BYPASS_KEY);
     localStorage.setItem('ark:last-auth', JSON.stringify({
       method: 'bypass',
       at: new Date().toISOString(),
@@ -401,12 +399,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } else {
       clearSetupCompleted();
     }
+    bypassRef.current = true;
     setBypass(true);
     setSession(null);
     setUser(GUEST_USER);
     setProfile(guestProfile());
     setSettings(null);
     setLoading(false);
+    // Drop any real auth token so the next cold start lands on Auth, not a restored session.
+    void supabase.auth.signOut({ scope: 'local' }).catch(() => undefined);
     void ensureArkId('guest-local').then(id => {
       setProfile(prev => prev ? { ...prev, ark_id: id } : prev);
     });

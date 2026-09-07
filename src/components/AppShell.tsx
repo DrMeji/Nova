@@ -46,7 +46,7 @@ import { countUnreadLocalNotifications } from '@/lib/localNotifications';
 import { ARK_UPDATE_INDICATOR_CACHE_KEY, checkArkGitHubUpdate, clearUpdateIndicatorCache, downloadAndInstallArkUpdate, type ArkUpdateInfo } from '@/lib/arkUpdates';
 
 function BrainNavIcon({ className }: { className?: string }) {
-  return <Bot className={className || 'w-4 h-4'} />;
+  return <Brain className={className || 'w-4 h-4'} />;
 }
 
 function getNavGroups(): {
@@ -93,7 +93,7 @@ function getNavGroups(): {
       items: [
         { label: 'Plugins', icon: Blocks, route: { name: 'build' }, activity: 'plugins' },
         { label: 'Models', icon: Database, route: { name: 'models' }, activity: 'models' },
-        { label: 'Local AI', icon: Brain, route: { name: 'local-ai' } },
+        { label: 'Local AI', icon: Bot, route: { name: 'local-ai' } },
         { label: 'MCP', icon: Cable, route: { name: 'mcp' } },
         { label: 'Brain', icon: BrainNavIcon, route: { name: 'brain' } },
       ],
@@ -689,7 +689,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     <div className="h-full min-w-0 flex overflow-hidden relative bg-ark-navy-950">
       <AuthAmbientOrbs variant="app" />
       <aside
-        className={`relative z-10 shrink-0 m-2 mr-0 flex flex-col min-w-0 rounded-2xl border border-surface-border bg-ark-navy-900/70 shadow-[0_8px_32px_rgba(0,0,0,0.35)] ${
+        className={`relative z-10 shrink-0 m-2 mr-0 flex flex-col min-w-0 rounded-2xl border border-surface-border bg-ark-navy-900 shadow-[0_8px_32px_rgba(0,0,0,0.35)] ${
           collapsed ? 'w-16' : 'w-64'
         }`}
       >
@@ -928,7 +928,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                   </button>
                 ) : null}
                 <SidebarCallDock />
-                <div className="flex items-center gap-2 rounded-xl border border-surface-border bg-ark-navy-950/80 px-2.5 py-2">
+                <div className="flex items-center gap-2 rounded-xl border border-surface-border bg-ark-navy-900 px-2.5 py-2">
                   <button
                     type="button"
                     onClick={() => setStatusMenuOpen(v => !v)}

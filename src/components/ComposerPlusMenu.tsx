@@ -59,6 +59,10 @@ function itemsForScope(scope: 'chat' | 'image' | 'code'): MenuItem[] {
   ];
 }
 
+type MenuPos =
+  | { left: number; top: number; bottom?: undefined }
+  | { left: number; bottom: number; top?: undefined };
+
 export function ComposerPlusMenu({
   onAction,
   scope = 'chat',
@@ -67,7 +71,7 @@ export function ComposerPlusMenu({
   buttonClassName = '',
 }: Props) {
   const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState<{ left: number; bottom: number } | null>(null);
+  const [pos, setPos] = useState<MenuPos | null>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const visible = itemsForScope(scope);
@@ -78,10 +82,23 @@ export function ComposerPlusMenu({
       const btn = btnRef.current;
       if (!btn) return;
       const r = btn.getBoundingClientRect();
-      // Sit fully above the chat composer box (not mid-overlap with its top edge).
       const shell = btn.closest('[data-ark-composer]') as HTMLElement | null;
-      const topEdge = shell?.getBoundingClientRect().top ?? r.top;
-      setPos({ left: r.left, bottom: window.innerHeight - topEdge + 10 });
+      const shellRect = shell?.getBoundingClientRect();
+      // Flush with the chat box left edge (not the inset + button).
+      const left = Math.max(12, Math.min(window.innerWidth - 24, shellRect?.left ?? r.left));
+      const gap = 10;
+      const estimatedMenuH = 48;
+      const spaceBelow = window.innerHeight - (shellRect?.bottom ?? r.bottom) - gap;
+      const spaceAbove = (shellRect?.top ?? r.top) - gap;
+      // Prefer below the composer; only flip above when the thread/viewport is cramped below.
+      const openAbove = spaceBelow < estimatedMenuH + 12 && spaceAbove > spaceBelow;
+      if (openAbove) {
+        const topEdge = shellRect?.top ?? r.top;
+        setPos({ left, bottom: window.innerHeight - topEdge + gap });
+      } else {
+        const bottomEdge = shellRect?.bottom ?? r.bottom;
+        setPos({ left, top: bottomEdge + gap });
+      }
     };
     place();
     window.addEventListener('resize', place);
@@ -123,11 +140,11 @@ export function ComposerPlusMenu({
     ? createPortal(
       <div
         ref={menuRef}
-        className="rounded-xl border border-white/10 bg-[#141416] shadow-2xl px-1.5 py-1.5"
+        className="rounded-xl border border-surface-border bg-ark-navy-900 shadow-2xl shadow-black/50 px-1.5 py-1.5"
         style={{
           position: 'fixed',
           left: pos.left,
-          bottom: pos.bottom,
+          ...(pos.top != null ? { top: pos.top } : { bottom: pos.bottom }),
           zIndex: 99999,
           maxWidth: 'min(92vw, 560px)',
         }}
@@ -138,12 +155,12 @@ export function ComposerPlusMenu({
             return (
               <span key={m.id} className="contents">
                 {showSep ? (
-                  <span className="mx-1 h-4 w-px bg-white/10 shrink-0" aria-hidden />
+                  <span className="mx-1 h-4 w-px bg-surface-border shrink-0" aria-hidden />
                 ) : null}
                 <button
                   type="button"
                   onClick={() => pick(m.id)}
-                  className="px-2.5 py-1.5 rounded-lg text-[13px] font-medium text-zinc-200 hover:text-white hover:bg-white/[0.08] transition-colors whitespace-nowrap"
+                  className="px-2.5 py-1.5 rounded-lg text-[13px] font-medium text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors whitespace-nowrap"
                 >
                   {m.label}
                 </button>
@@ -178,7 +195,7 @@ export function ComposerPlusMenu({
             aria-hidden
           />
         )}
-        <Plus className={`w-4 h-4 relative z-[1] ${busy ? 'opacity-70' : ''}`} />
+        <Plus className={`w-4 h-4 relative z-[1] ${busy ? 'opacity-70' : ''}`} strokeWidth={2.25} />
       </button>
       {menu}
     </div>

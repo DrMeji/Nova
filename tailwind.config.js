@@ -5,7 +5,7 @@ export default {
   theme: {
     extend: {
       colors: {
-        NOVA: {
+        ark: {
           // Theme-aware neutrals (were navy/blue). Values flip via :root / .light CSS vars.
           navy: {
             950: 'rgb(var(--ark-navy-950) / <alpha-value>)',

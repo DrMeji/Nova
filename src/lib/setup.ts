@@ -48,11 +48,9 @@ export function clearSetupCompleted() {
 export async function ensureFirstRunGate(): Promise<void> {
   if (!gatePromise) {
     gatePromise = (async () => {
+      // Never carry guest bypass across launches (dev bat or packaged).
       try {
-        const meta = await window.arkDesktop?.appMeta?.();
-        if (meta?.isPackaged) {
-          localStorage.removeItem(BYPASS_KEY);
-        }
+        localStorage.removeItem(BYPASS_KEY);
       } catch {
         /* ignore */
       }

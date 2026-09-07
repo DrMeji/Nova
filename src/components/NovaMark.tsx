@@ -18,7 +18,7 @@ export function NovaMark({
       <title>{title}</title>
       <g
         stroke="currentColor"
-        strokeWidth="3.4"
+        strokeWidth="4.2"
         strokeLinecap="round"
         strokeLinejoin="round"
         fill="none"
@@ -40,18 +40,18 @@ export function NovaMark({
         <path d="M57.8 70.2 L50 78 L50 96" />
       </g>
       <g fill="currentColor">
-        <circle cx="64" cy="24" r="3.6" fill="none" stroke="currentColor" strokeWidth="2.6" />
-        <circle cx="64" cy="104" r="3.6" fill="none" stroke="currentColor" strokeWidth="2.6" />
-        <circle cx="104" cy="64" r="3.6" fill="none" stroke="currentColor" strokeWidth="2.6" />
-        <circle cx="24" cy="64" r="3.6" fill="none" stroke="currentColor" strokeWidth="2.6" />
-        <circle cx="96" cy="50" r="3.4" />
-        <circle cx="78" cy="32" r="3.4" />
-        <circle cx="32" cy="50" r="3.4" />
-        <circle cx="50" cy="32" r="3.4" />
-        <circle cx="96" cy="78" r="3.4" />
-        <circle cx="78" cy="96" r="3.4" />
-        <circle cx="32" cy="78" r="3.4" />
-        <circle cx="50" cy="96" r="3.4" />
+        <circle cx="64" cy="24" r="3.6" fill="none" stroke="currentColor" strokeWidth="3.2" />
+        <circle cx="64" cy="104" r="3.6" fill="none" stroke="currentColor" strokeWidth="3.2" />
+        <circle cx="104" cy="64" r="3.6" fill="none" stroke="currentColor" strokeWidth="3.2" />
+        <circle cx="24" cy="64" r="3.6" fill="none" stroke="currentColor" strokeWidth="3.2" />
+        <circle cx="96" cy="50" r="3.6" />
+        <circle cx="78" cy="32" r="3.6" />
+        <circle cx="32" cy="50" r="3.6" />
+        <circle cx="50" cy="32" r="3.6" />
+        <circle cx="96" cy="78" r="3.6" />
+        <circle cx="78" cy="96" r="3.6" />
+        <circle cx="32" cy="78" r="3.6" />
+        <circle cx="50" cy="96" r="3.6" />
       </g>
     </svg>
   );

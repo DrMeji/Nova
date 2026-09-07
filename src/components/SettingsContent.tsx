@@ -543,7 +543,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
 
   return (
     <div ref={settingsRootRef} className="flex h-full min-h-0 min-w-0 animate-fade-in bg-ark-navy-900">
-      <div className={`${navCompact ? 'w-14' : 'w-56'} shrink-0 border-r border-surface-border flex flex-col min-h-0 min-w-0 bg-ark-navy-950/40`}>
+      <div className={`${navCompact ? 'w-14' : 'w-56'} shrink-0 border-r border-surface-border flex flex-col min-h-0 min-w-0 bg-ark-navy-900`}>
         <nav className={`flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-2 sm:p-3 flex flex-col gap-0.5 ${navCompact ? 'items-center' : ''}`}>
           {navSections.map(section => (
             <button
@@ -2014,7 +2014,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
           {activeSection === 'updates' && (
             <SettingsSection title="Update">
               <div className="space-y-5">
-                <div className="rounded-3xl border border-surface-border bg-ark-navy-900/55 p-5 sm:p-6 flex flex-col gap-4 shadow-[0_8px_28px_rgba(0,0,0,0.28)]">
+                <div className="rounded-3xl border border-surface-border bg-ark-navy-900 p-5 sm:p-6 flex flex-col gap-4 shadow-[0_8px_28px_rgba(0,0,0,0.28)]">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <div className="min-w-0">
                       <p className="text-sm font-medium text-content-primary">NOVA v{appVersion}</p>

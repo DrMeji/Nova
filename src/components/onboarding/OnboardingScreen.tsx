@@ -193,6 +193,7 @@ export function OnboardingScreen() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
   const [finishError, setFinishError] = useState<string | null>(null);
+  const [finishReady, setFinishReady] = useState(false);
   const [playOpen, setPlayOpen] = useState(false);
   const [expandedProvider, setExpandedProvider] = useState<string | null>(null);
   const [keyDrafts, setKeyDrafts] = useState<Record<string, string>>({});
@@ -263,10 +264,21 @@ export function OnboardingScreen() {
     }
   };
 
+  const enterApp = async () => {
+    markSetupCompleted();
+    try {
+      await completeOnboarding();
+    } catch {
+      // Guest / offline is fine; local setup flag is enough for now.
+    }
+    await refreshProfile();
+  };
+
   const finish = async () => {
     setPhase('finishing');
     setProgress(0);
     setFinishError(null);
+    setFinishReady(false);
 
     const rec = hw ? getRecommendedChatModel(hw) : { id: 'qwen25-15b' };
     const allowed = ['qwen25-15b', 'llama32-3b', 'qwen25-7b', 'qwen25-coder-7b', 'qwen25-coder-14b'];
@@ -303,48 +315,51 @@ export function OnboardingScreen() {
       );
 
       if (haveBrain || haveWeightsOnDisk) {
+        // Stay on this screen so Play game / Enter NOVA are usable (dev bat often already has weights).
         setProgress(100);
+        setFinishReady(true);
         downloadStarted = true;
-      } else {
-        await downloadEngineModel(brainId);
-        downloadStarted = true;
-        const coder = hw ? getRecommendedCoderModel(hw) : null;
-        if (coder && coder.id !== brainId) {
-          void downloadEngineModel(coder.id).catch(() => undefined);
-        }
+        return;
+      }
 
-        await new Promise<void>((resolve) => {
-          const tick = window.setInterval(async () => {
-            try {
-              const p = await engineDownloadProgress(brainId);
-              setProgress(Math.max(5, Math.min(99, p)));
-              const err = await engineDownloadError(brainId);
-              if (err) {
-                downloadError = err;
-                setFinishError(err);
-                window.clearInterval(tick);
-                setProgress(100);
-                resolve();
-                return;
-              }
-              if (p >= 100) {
-                window.clearInterval(tick);
-                setProgress(100);
-                resolve();
-              }
-            } catch {
+      await downloadEngineModel(brainId);
+      downloadStarted = true;
+      const coder = hw ? getRecommendedCoderModel(hw) : null;
+      if (coder && coder.id !== brainId) {
+        void downloadEngineModel(coder.id).catch(() => undefined);
+      }
+
+      await new Promise<void>((resolve) => {
+        const tick = window.setInterval(async () => {
+          try {
+            const p = await engineDownloadProgress(brainId);
+            setProgress(Math.max(5, Math.min(99, p)));
+            const err = await engineDownloadError(brainId);
+            if (err) {
+              downloadError = err;
+              setFinishError(err);
+              window.clearInterval(tick);
+              setProgress(100);
+              resolve();
+              return;
+            }
+            if (p >= 100) {
               window.clearInterval(tick);
               setProgress(100);
               resolve();
             }
-          }, 400);
-          window.setTimeout(() => {
+          } catch {
             window.clearInterval(tick);
             setProgress(100);
             resolve();
-          }, 20 * 60 * 1000);
-        });
-      }
+          }
+        }, 400);
+        window.setTimeout(() => {
+          window.clearInterval(tick);
+          setProgress(100);
+          resolve();
+        }, 20 * 60 * 1000);
+      });
     } catch (err) {
       downloadError = err instanceof Error ? err.message : 'Could not start local brain download';
       setFinishError(downloadError);
@@ -361,13 +376,7 @@ export function OnboardingScreen() {
       }
       // Cloud keys → Chat still works. No keys → stay here until they retry/skip (avoid empty chat dead-end).
       if (connectedCount > 0) {
-        markSetupCompleted();
-        try {
-          await completeOnboarding();
-        } catch {
-          /* Guest / offline is fine */
-        }
-        await refreshProfile();
+        await enterApp();
       }
       return;
     }
@@ -378,13 +387,8 @@ export function OnboardingScreen() {
       /* ignore */
     }
 
-    markSetupCompleted();
-    try {
-      await completeOnboarding();
-    } catch {
-      // Guest / offline is fine; local setup flag is enough for now.
-    }
-    await refreshProfile();
+    setProgress(100);
+    setFinishReady(true);
   };
 
   const saveProviderKey = (providerId: string) => {
@@ -932,7 +936,9 @@ export function OnboardingScreen() {
           {phase === 'finishing' && (
             <div className="space-y-5">
               <div className="text-center">
-                <p className="text-sm font-medium text-content-primary mb-1">Installing your local brain</p>
+                <p className="text-sm font-medium text-content-primary mb-1">
+                  {finishReady ? 'Local brain ready' : 'Installing your local brain'}
+                </p>
                 <p className="text-xs text-content-tertiary">
                   {selected?.name || 'Qwen2.5 1.5B'} · llama-cli + GGUF into NOVA Engine
                   {connectedCount > 0 ? ` · ${connectedCount} cloud provider${connectedCount === 1 ? '' : 's'}` : ''}
@@ -940,7 +946,15 @@ export function OnboardingScreen() {
               </div>
               <div className="space-y-2">
                 <div className="flex justify-between text-xs text-content-secondary">
-                  <span>{progress < 25 ? 'Installing runtime…' : progress < 100 ? 'Downloading model weights…' : 'Finishing…'}</span>
+                  <span>
+                    {finishReady
+                      ? 'Ready to enter NOVA'
+                      : progress < 25
+                        ? 'Installing runtime…'
+                        : progress < 100
+                          ? 'Downloading model weights…'
+                          : 'Finishing…'}
+                  </span>
                   <span>{Math.min(100, Math.round(progress))}%</span>
                 </div>
                 <div className="h-2 bg-surface-hover rounded-full overflow-hidden">
@@ -951,15 +965,28 @@ export function OnboardingScreen() {
                 </div>
               </div>
               <p className="text-[11px] text-content-tertiary text-center leading-relaxed">
-                This is a one-time download (~1 GB for the default brain). Stay here until it finishes so Chat has something real to talk to.
+                {finishReady
+                  ? 'Your local brain is already on this PC. You can play a quick game, then enter NOVA when you’re ready.'
+                  : 'This is a one-time download (~1 GB for the default brain). Stay here until it finishes so Chat has something real to talk to.'}
               </p>
-              {progress < 100 && !finishError ? (
+              {!finishError ? (
                 <div className="flex flex-col items-center gap-2">
-                  <p className="text-[11px] text-content-tertiary">Slow connection? Pass the time.</p>
+                  {!finishReady ? (
+                    <p className="text-[11px] text-content-tertiary">Slow connection? Pass the time.</p>
+                  ) : null}
                   <PlayGameButton onClick={() => setPlayOpen(true)} />
                 </div>
               ) : null}
               <RotatingTip className="text-[11px] text-content-tertiary/90 text-center leading-relaxed min-h-[2.5rem] px-2" />
+              {finishReady && !finishError ? (
+                <button
+                  type="button"
+                  onClick={() => void enterApp()}
+                  className="ark-btn-primary w-full h-11 rounded-xl"
+                >
+                  Enter NOVA
+                </button>
+              ) : null}
               {finishError && (
                 <div className="space-y-2">
                   <p className="text-xs text-rose-300/90 text-center leading-relaxed">{finishError}</p>
@@ -975,9 +1002,7 @@ export function OnboardingScreen() {
                   <button
                     type="button"
                     onClick={() => {
-                      markSetupCompleted();
-                      void completeOnboarding().catch(() => undefined);
-                      void refreshProfile();
+                      void enterApp();
                     }}
                     className="ark-btn-secondary w-full h-11 rounded-xl"
                   >
@@ -993,6 +1018,8 @@ export function OnboardingScreen() {
         open={playOpen}
         onClose={() => setPlayOpen(false)}
         contextLabel={selected?.name || 'local brain'}
+        contextSize={selected?.size}
+        contextDetail={selected?.detail}
         externalProgress={progress}
         externalComplete={progress >= 100 && !finishError}
       />

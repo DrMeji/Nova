@@ -3,14 +3,17 @@ import { useEffect, useRef, useState } from 'react';
 type Props = {
   active: boolean;
   onScore?: (score: number) => void;
+  /** Compact panel mode: status on top, canvas fills remaining space. */
+  compact?: boolean;
 };
 
 /**
- * Lightweight endless runner (Chrome dino vibe) — canvas only, no downloads.
- * Space / click / tap to jump.
+ * Lightweight endless runner — canvas only, no downloads.
+ * Starts slow and ramps up. Space / click / tap to jump.
  */
-export function ArkRunnerGame({ active, onScore }: Props) {
+export function ArkRunnerGame({ active, onScore, compact = false }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
   const [score, setScore] = useState(0);
   const [best, setBest] = useState(() => {
     try {
@@ -24,34 +27,54 @@ export function ArkRunnerGame({ active, onScore }: Props) {
   useEffect(() => {
     if (!active) return;
     const canvas = canvasRef.current;
+    const wrap = wrapRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const W = 640;
-    const H = 220;
-    canvas.width = W;
-    canvas.height = H;
+    let W = 640;
+    let H = compact ? 300 : 220;
+    const syncSize = () => {
+      if (compact && wrap) {
+        const r = wrap.getBoundingClientRect();
+        W = Math.max(320, Math.floor(r.width));
+        H = Math.max(200, Math.floor(r.height));
+      } else {
+        W = 640;
+        H = 220;
+      }
+      canvas.width = W;
+      canvas.height = H;
+    };
+    syncSize();
 
     let raf = 0;
     let running = true;
     let dead = false;
     let sc = 0;
-    let speed = 5.2;
-    const groundY = H - 36;
-    let player = { x: 56, y: groundY, vy: 0, w: 28, h: 32, onGround: true };
+    /** Start slow — ramps toward max as score grows. */
+    const SPEED_START = 2.15;
+    const SPEED_MAX = 9.2;
+    let speed = SPEED_START;
+    let groundY = H - 40;
+    let player = { x: 56, y: groundY, vy: 0, w: 22, h: 36, onGround: true };
     let obstacles: { x: number; w: number; h: number }[] = [];
-    let spawnAt = 90;
+    let spawnAt = 110;
     let frame = 0;
+
+    const resetPlayer = () => {
+      groundY = H - 40;
+      player = { x: Math.min(64, W * 0.1), y: groundY, vy: 0, w: 22, h: 36, onGround: true };
+    };
 
     const reset = () => {
       dead = false;
       sc = 0;
-      speed = 5.2;
-      player = { x: 56, y: groundY, vy: 0, w: 28, h: 32, onGround: true };
+      speed = SPEED_START;
       obstacles = [];
-      spawnAt = 90;
+      spawnAt = 110;
       frame = 0;
+      resetPlayer();
       setAlive(true);
       setScore(0);
     };
@@ -62,7 +85,8 @@ export function ArkRunnerGame({ active, onScore }: Props) {
         return;
       }
       if (player.onGround) {
-        player.vy = -11.2;
+        // Softer jump so slow start feels controllable
+        player.vy = -9.4;
         player.onGround = false;
       }
     };
@@ -78,30 +102,75 @@ export function ArkRunnerGame({ active, onScore }: Props) {
     window.addEventListener('keydown', onKey);
     canvas.addEventListener('pointerdown', onPointer);
 
-    const drawBot = (x: number, y: number) => {
-      ctx.strokeStyle = '#e8eef7';
-      ctx.lineWidth = 2.4;
+    const ro =
+      compact && wrap && typeof ResizeObserver !== 'undefined'
+        ? new ResizeObserver(() => {
+            const prevW = W;
+            const prevH = H;
+            syncSize();
+            if (W !== prevW || H !== prevH) {
+              const dy = groundY;
+              groundY = H - 40;
+              player.y += groundY - dy;
+              if (player.y > groundY) player.y = groundY;
+            }
+          })
+        : null;
+    if (ro && wrap) ro.observe(wrap);
+
+    const drawPerson = (x: number, y: number, jumping: boolean) => {
+      const cx = x + player.w / 2;
+      const top = y;
+      const headR = 5.5;
+      const torsoTop = top + headR * 2 + 1;
+      const hipY = top + player.h - 14;
+      const footY = top + player.h;
+
+      ctx.strokeStyle = '#f0f3f8';
+      ctx.fillStyle = '#f0f3f8';
+      ctx.lineWidth = 2.2;
       ctx.lineCap = 'round';
-      // body (voice mark — rounded head, no ears/antenna)
+      ctx.lineJoin = 'round';
+
       ctx.beginPath();
-      const r = 5;
-      const bx = x + 4;
-      const by = y + 4;
-      const bw = 20;
-      const bh = 20;
-      ctx.moveTo(bx + r, by);
-      ctx.arcTo(bx + bw, by, bx + bw, by + bh, r);
-      ctx.arcTo(bx + bw, by + bh, bx, by + bh, r);
-      ctx.arcTo(bx, by + bh, bx, by, r);
-      ctx.arcTo(bx, by, bx + bw, by, r);
-      ctx.closePath();
+      ctx.arc(cx, top + headR, headR, 0, Math.PI * 2);
       ctx.stroke();
-      // eyes
+
       ctx.beginPath();
-      ctx.moveTo(x + 10, y + 10);
-      ctx.lineTo(x + 10, y + 18);
-      ctx.moveTo(x + 18, y + 10);
-      ctx.lineTo(x + 18, y + 18);
+      ctx.moveTo(cx, torsoTop);
+      ctx.lineTo(cx, hipY);
+      ctx.stroke();
+
+      const swing = jumping ? 0 : Math.sin(frame * 0.22) * 0.55;
+
+      ctx.beginPath();
+      if (jumping) {
+        ctx.moveTo(cx, torsoTop + 4);
+        ctx.lineTo(cx - 10, torsoTop - 2);
+        ctx.moveTo(cx, torsoTop + 4);
+        ctx.lineTo(cx + 10, torsoTop - 2);
+      } else {
+        ctx.moveTo(cx, torsoTop + 4);
+        ctx.lineTo(cx - 9, torsoTop + 10 + swing * 6);
+        ctx.moveTo(cx, torsoTop + 4);
+        ctx.lineTo(cx + 9, torsoTop + 10 - swing * 6);
+      }
+      ctx.stroke();
+
+      ctx.beginPath();
+      if (jumping) {
+        ctx.moveTo(cx, hipY);
+        ctx.lineTo(cx - 7, hipY + 8);
+        ctx.lineTo(cx - 4, footY - 2);
+        ctx.moveTo(cx, hipY);
+        ctx.lineTo(cx + 8, hipY + 6);
+        ctx.lineTo(cx + 11, footY - 4);
+      } else {
+        ctx.moveTo(cx, hipY);
+        ctx.lineTo(cx - 6 - swing * 5, footY);
+        ctx.moveTo(cx, hipY);
+        ctx.lineTo(cx + 6 + swing * 5, footY);
+      }
       ctx.stroke();
     };
 
@@ -111,13 +180,11 @@ export function ArkRunnerGame({ active, onScore }: Props) {
       ctx.fillStyle = '#0a0c12';
       ctx.fillRect(0, 0, W, H);
 
-      // ground
       ctx.strokeStyle = 'rgba(232,238,247,0.22)';
       ctx.beginPath();
       ctx.moveTo(0, groundY + 1);
       ctx.lineTo(W, groundY + 1);
       ctx.stroke();
-      // dashed ground motion
       const dash = (frame * speed) % 28;
       ctx.setLineDash([10, 14]);
       ctx.beginPath();
@@ -127,7 +194,7 @@ export function ArkRunnerGame({ active, onScore }: Props) {
       ctx.setLineDash([]);
 
       if (!dead) {
-        player.vy += 0.55;
+        player.vy += 0.48;
         player.y += player.vy;
         if (player.y >= groundY) {
           player.y = groundY;
@@ -137,9 +204,11 @@ export function ArkRunnerGame({ active, onScore }: Props) {
 
         spawnAt -= 1;
         if (spawnAt <= 0) {
-          const h = 18 + Math.random() * 22;
-          obstacles.push({ x: W + 10, w: 14 + Math.random() * 10, h });
-          spawnAt = 55 + Math.random() * 70 - Math.min(30, speed * 2);
+          const h = 16 + Math.random() * 20;
+          obstacles.push({ x: W + 10, w: 12 + Math.random() * 10, h });
+          // More gap early; tighter as speed climbs
+          const baseGap = 95 - Math.min(40, speed * 4);
+          spawnAt = baseGap + Math.random() * 55;
         }
 
         for (const o of obstacles) o.x -= speed;
@@ -148,8 +217,8 @@ export function ArkRunnerGame({ active, onScore }: Props) {
         for (const o of obstacles) {
           const px = player.x + 4;
           const py = player.y - player.h + 6;
-          const pw = player.w - 8;
-          const ph = player.h - 6;
+          const pw = player.w - 6;
+          const ph = player.h - 8;
           const ox = o.x;
           const oy = groundY - o.h;
           if (px < ox + o.w && px + pw > ox && py < oy + o.h && py + ph > oy) {
@@ -167,8 +236,9 @@ export function ArkRunnerGame({ active, onScore }: Props) {
           }
         }
 
-        sc += speed * 0.08;
-        speed = Math.min(11, 5.2 + sc / 180);
+        sc += speed * 0.055;
+        // Slow → fast curve (gentle early, steeper later)
+        speed = Math.min(SPEED_MAX, SPEED_START + (sc / 420) * (SPEED_MAX - SPEED_START) + sc / 900);
         const rounded = Math.floor(sc);
         setScore(rounded);
         onScore?.(rounded);
@@ -179,22 +249,18 @@ export function ArkRunnerGame({ active, onScore }: Props) {
         ctx.fillRect(o.x, groundY - o.h, o.w, o.h);
       }
 
-      drawBot(player.x, player.y - player.h);
-
-      ctx.fillStyle = 'rgba(232,238,247,0.7)';
-      ctx.font = '600 13px Sora, system-ui, sans-serif';
-      ctx.fillText(`Score ${Math.floor(sc)}`, 16, 24);
+      drawPerson(player.x, player.y - player.h, !player.onGround || player.vy < -1);
 
       if (dead) {
-        ctx.fillStyle = 'rgba(10,12,18,0.55)';
+        ctx.fillStyle = 'rgba(10,12,18,0.5)';
         ctx.fillRect(0, 0, W, H);
         ctx.fillStyle = '#e8eef7';
-        ctx.font = '600 18px Fraunces, Georgia, serif';
+        ctx.font = '600 16px system-ui, sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillText('Ouch!', W / 2, H / 2 - 10);
-        ctx.font = '500 12px Sora, system-ui, sans-serif';
-        ctx.fillStyle = 'rgba(232,238,247,0.7)';
-        ctx.fillText('Space or click to try again', W / 2, H / 2 + 16);
+        ctx.fillText('Try again', W / 2, H / 2 - 4);
+        ctx.font = '500 11px system-ui, sans-serif';
+        ctx.fillStyle = 'rgba(232,238,247,0.65)';
+        ctx.fillText('Space or click', W / 2, H / 2 + 16);
         ctx.textAlign = 'left';
       }
 
@@ -208,23 +274,46 @@ export function ArkRunnerGame({ active, onScore }: Props) {
       cancelAnimationFrame(raf);
       window.removeEventListener('keydown', onKey);
       canvas.removeEventListener('pointerdown', onPointer);
+      ro?.disconnect();
     };
-  }, [active, onScore]);
+  }, [active, onScore, compact]);
+
+  const statusRight = !alive
+    ? 'Space to retry'
+    : score > 0
+      ? `Score ${score}`
+      : 'Space to jump';
+
+  if (compact) {
+    return (
+      <div className="flex flex-col h-full min-h-0 w-full gap-2">
+        <div className="flex items-center justify-between text-[11px] text-content-tertiary shrink-0 px-0.5">
+          <span className="tabular-nums">Best {best}</span>
+          <span className="tabular-nums">{statusRight}</span>
+        </div>
+        <div ref={wrapRef} className="flex-1 min-h-0 w-full">
+          <canvas
+            ref={canvasRef}
+            className="w-full h-full rounded-xl border border-white/[0.06] bg-[#0a0c12] touch-none block"
+          />
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-2">
+    <div className="w-full space-y-2">
       <div className="flex items-center justify-between text-[11px] text-content-tertiary px-0.5">
-        <span>Space / click to jump</span>
-        <span>
-          Best {best}
-          {!alive ? ' · tap to retry' : ` · ${score}`}
-        </span>
+        <span className="tabular-nums">Best {best}</span>
+        <span className="tabular-nums">{statusRight}</span>
       </div>
-      <canvas
-        ref={canvasRef}
-        className="w-full max-w-full rounded-xl border border-surface-border bg-[#0a0c12] touch-none"
-        style={{ aspectRatio: '640 / 220' }}
-      />
+      <div ref={wrapRef}>
+        <canvas
+          ref={canvasRef}
+          className="w-full max-w-full rounded-xl border border-white/[0.06] bg-[#0a0c12] touch-none"
+          style={{ aspectRatio: '640 / 220' }}
+        />
+      </div>
     </div>
   );
 }

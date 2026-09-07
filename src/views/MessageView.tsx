@@ -557,7 +557,7 @@ export function MessageView() {
   if (people.length === 0) {
     return (
       <div className="h-full box-border p-4 animate-fade-in bg-transparent">
-        <div className="h-full flex flex-col rounded-2xl border border-surface-border bg-ark-navy-900/55 overflow-hidden">
+        <div className="h-full flex flex-col rounded-2xl border border-surface-border bg-ark-navy-900 overflow-hidden">
           <div className="px-6 pt-5 max-w-md mx-auto w-full">
             <GuestSocialBanner feature="message" />
           </div>

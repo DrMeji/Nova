@@ -32,7 +32,8 @@ function isTrustedSetupUrl(url) {
     if (u.protocol !== 'https:') return false;
     const host = u.hostname.toLowerCase();
     if (host !== 'github.com') return false;
-    return /^\/DrMeji\/Ark\/releases\/download\/v[\w.-]+\/(?:ARK|NOVA)-Setup[^/]*\.exe$/i.test(u.pathname);
+    // Prefer Nova; keep Ark path for older published URLs during the rename window.
+    return /^\/DrMeji\/(?:Nova|Ark)\/releases\/download\/v[\w.-]+\/(?:NOVA|ARK)-Setup[^/]*\.exe$/i.test(u.pathname);
   } catch {
     return false;
   }
@@ -529,30 +530,33 @@ const SPLASH_TRACK_H = 10;
 /** One panel color only — no nested outer/inner boxes. */
 const SPLASH_BG = '#161618';
 
-function splashRobotSvg() {
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80" width="${SPLASH_ICON_PX}" height="${SPLASH_ICON_PX}" aria-hidden="true" class="splash-ark-icon" style="display:block;margin:0 auto;">
-    <defs>
-      <clipPath id="splash-inner-clip">
-        <rect x="14" y="14" width="52" height="52" rx="16"/>
-      </clipPath>
-      <linearGradient id="splash-shimmer-grad" gradientUnits="userSpaceOnUse" x1="12" y1="12" x2="68" y2="68">
-        <stop offset="0%" stop-color="rgb(56 189 248)" stop-opacity="0.22"/>
-        <stop offset="45%" stop-color="rgb(129 140 248)" stop-opacity="0.16"/>
-        <stop offset="100%" stop-color="rgb(52 211 153)" stop-opacity="0.14"/>
-      </linearGradient>
-    </defs>
-    <rect x="14" y="14" width="52" height="52" rx="16" fill="none" stroke="#f4f4f5" stroke-width="2.2"/>
-    <g clip-path="url(#splash-inner-clip)">
-      <rect x="6" y="6" width="68" height="68" fill="url(#splash-shimmer-grad)" class="splash-shimmer"/>
+function splashNovaMarkSvg() {
+  // Same radial mark as NovaMark / nova-mark.svg — scaled into the splash icon box.
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="${SPLASH_ICON_PX}" height="${SPLASH_ICON_PX}" aria-hidden="true" class="splash-nova-icon" style="display:block;margin:0 auto;">
+    <g stroke="#f4f4f5" stroke-width="4.2" stroke-linecap="round" stroke-linejoin="round" fill="none">
+      <circle cx="64" cy="64" r="8.5"/>
+      <path d="M64 55.5 V24"/><path d="M64 72.5 V104"/><path d="M72.5 64 H104"/><path d="M55.5 64 H24"/>
+      <path d="M70.2 57.8 L78 50 L96 50"/><path d="M70.2 57.8 L78 50 L78 32"/>
+      <path d="M57.8 57.8 L50 50 L32 50"/><path d="M57.8 57.8 L50 50 L50 32"/>
+      <path d="M70.2 70.2 L78 78 L96 78"/><path d="M70.2 70.2 L78 78 L78 96"/>
+      <path d="M57.8 70.2 L50 78 L32 78"/><path d="M57.8 70.2 L50 78 L50 96"/>
     </g>
-    <line x1="31" y1="32" x2="31" y2="48" stroke="#f4f4f5" stroke-width="3.4" stroke-linecap="round"/>
-    <line x1="49" y1="32" x2="49" y2="48" stroke="#f4f4f5" stroke-width="3.4" stroke-linecap="round"/>
+    <g fill="#f4f4f5">
+      <circle cx="64" cy="24" r="3.6" fill="none" stroke="#f4f4f5" stroke-width="3.2"/>
+      <circle cx="64" cy="104" r="3.6" fill="none" stroke="#f4f4f5" stroke-width="3.2"/>
+      <circle cx="104" cy="64" r="3.6" fill="none" stroke="#f4f4f5" stroke-width="3.2"/>
+      <circle cx="24" cy="64" r="3.6" fill="none" stroke="#f4f4f5" stroke-width="3.2"/>
+      <circle cx="96" cy="50" r="3.6"/><circle cx="78" cy="32" r="3.6"/>
+      <circle cx="32" cy="50" r="3.6"/><circle cx="50" cy="32" r="3.6"/>
+      <circle cx="96" cy="78" r="3.6"/><circle cx="78" cy="96" r="3.6"/>
+      <circle cx="32" cy="78" r="3.6"/><circle cx="50" cy="96" r="3.6"/>
+    </g>
   </svg>`;
 }
 
-/** Updating splash always uses inline SVG. build/icon.png still has legacy ears/antenna art. */
+/** Updating splash uses the NOVA mark (not the legacy pause/robot art). */
 function splashIconMarkup() {
-  return splashRobotSvg();
+  return splashNovaMarkSvg();
 }
 
 /** One solid box: icon centered, progress bar a bit below it. No nested panels. */
@@ -595,31 +599,14 @@ function splashMarkDataUri() {
   }
 }
 
-/** CSS pause-mark for HTA when SVG is unavailable. Soft gradient fill. */
+/** HTA fallback: same NOVA mark (no legacy pause bars). */
 function splashHtaFallbackMark() {
-  const barH = Math.round(SPLASH_ICON_PX * 0.22);
-  const barW = Math.max(4, Math.round(SPLASH_ICON_PX * 0.045));
-  return `<div style="position:relative;width:${SPLASH_ICON_PX}px;height:${SPLASH_ICON_PX}px;margin:0 auto;">
-    <div style="position:absolute;left:18%;top:18%;width:64%;height:64%;box-sizing:border-box;border:2px solid #f4f4f5;border-radius:22%;background:linear-gradient(135deg,rgba(56,189,248,0.30) 0%,rgba(129,140,248,0.22) 45%,rgba(52,211,153,0.18) 100%);"></div>
-    <div style="position:absolute;left:38%;top:39%;width:${barW}px;height:${barH}px;background:#f4f4f5;border-radius:2px;"></div>
-    <div style="position:absolute;left:58%;top:39%;width:${barW}px;height:${barH}px;background:#f4f4f5;border-radius:2px;"></div>
-  </div>`;
+  return splashNovaMarkSvg();
 }
 
-/** IE11/mshta (with IE=edge): colored SVG mark aligned with Electron preview (static, no CSS anim). */
+/** IE11/mshta (with IE=edge): NOVA mark aligned with Electron splash. */
 function splashHtaSvgMark() {
-  return `<svg xmlns="http://www.w3.org/2000/svg" version="1.1" viewBox="0 0 80 80" width="${SPLASH_ICON_PX}" height="${SPLASH_ICON_PX}" aria-hidden="true" style="display:block;margin:0 auto;">
-    <defs>
-      <linearGradient id="splash-hta-grad" x1="12" y1="12" x2="68" y2="68" gradientUnits="userSpaceOnUse">
-        <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.30"/>
-        <stop offset="45%" stop-color="#818cf8" stop-opacity="0.22"/>
-        <stop offset="100%" stop-color="#34d399" stop-opacity="0.18"/>
-      </linearGradient>
-    </defs>
-    <rect x="14" y="14" width="52" height="52" rx="16" ry="16" fill="url(#splash-hta-grad)" stroke="#f4f4f5" stroke-width="2.2"/>
-    <line x1="31" y1="32" x2="31" y2="48" stroke="#f4f4f5" stroke-width="3.4" stroke-linecap="round"/>
-    <line x1="49" y1="32" x2="49" y2="48" stroke="#f4f4f5" stroke-width="3.4" stroke-linecap="round"/>
-  </svg>`;
+  return splashNovaMarkSvg();
 }
 
 /** Rounded progress track as SVG — border-radius is unreliable in mshta. */

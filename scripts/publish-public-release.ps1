@@ -11,13 +11,14 @@ if ($Tag -notmatch '^v\d+\.\d+\.\d+$') {
 }
 
 $releaseDir = Join-Path (Join-Path $PSScriptRoot '..') 'release'
+# Prefer NOVA-Setup. Still accept legacy ARK-* if an older local build left those names.
 $assets = @(
   'NOVA-Setup.exe',
   'NOVA-Setup.exe.blockmap',
-  'ARK-Setup.exe',
-  'ARK-Setup.exe.blockmap',
   'latest.yml',
   'NOVA-Portable.exe',
+  'ARK-Setup.exe',
+  'ARK-Setup.exe.blockmap',
   'ARK-Portable.exe'
 )
 
@@ -52,7 +53,7 @@ foreach ($repo in $Repos) {
   $notes = @(
     "NOVA $Tag",
     '',
-    'Download NOVA-Setup.exe (installer) for Windows.',
+    'Download NOVA-Setup.exe for Windows.',
     'Source code zip attachments on this public repo are README-only - not the app.'
   ) -join "`n"
 

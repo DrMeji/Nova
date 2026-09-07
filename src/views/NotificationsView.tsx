@@ -145,7 +145,7 @@ export function NotificationsView() {
 
   return (
     <div className="h-full box-border p-4 animate-fade-in bg-transparent">
-      <div className="h-full min-h-0 flex flex-col rounded-2xl border border-surface-border bg-ark-navy-900/55 shadow-[0_8px_32px_rgba(0,0,0,0.35)] overflow-hidden">
+      <div className="h-full min-h-0 flex flex-col rounded-2xl border border-surface-border bg-ark-navy-900 shadow-[0_8px_32px_rgba(0,0,0,0.35)] overflow-hidden">
         <div className="shrink-0 px-5 sm:px-8 pt-5 pb-3">
           <div className="mt-3 flex items-center justify-center">
             <div className="h-10 w-56 flex items-center gap-2 rounded-full bg-ark-navy-950/70 border border-white/10 px-3">

@@ -1,15 +1,12 @@
 import { useEffect, useState, useRef } from 'react';
 import { useAuth } from '@/context/AuthContext';
-import { Loader2, Mail, Lock, AlertCircle, Zap, Eye, EyeOff, User, FolderOpen, RefreshCw, Github } from 'lucide-react';
+import { Loader2, Mail, Lock, AlertCircle, Eye, EyeOff, User, Zap } from 'lucide-react';
 import { AuthAmbientOrbs } from '@/components/auth/AuthAmbientOrbs';
 import {
   formatForgotPasswordHelp,
   getLocalLoginRecoveryInfo,
-  markLocalRecoveryNoticeShown,
   revealLocalLoginRecovery,
-  shouldShowLocalRecoveryNotice,
 } from '@/lib/localAuthRecovery';
-import { checkArkGitHubUpdate, downloadAndInstallArkUpdate } from '@/lib/arkUpdates';
 import { accountForgotPageUrl } from '@/lib/accountWeb';
 import { NovaMark } from '@/components/NovaMark';
 
@@ -89,15 +86,12 @@ export function AuthScreen() {
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [recoveryNotice, setRecoveryNotice] = useState(() => shouldShowLocalRecoveryNotice());
-  const [updateBusy, setUpdateBusy] = useState(false);
-  const [updateHint, setUpdateHint] = useState<string | null>(null);
   const passwordRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     void window.arkDesktop?.appMeta?.()
       .then(meta => {
-        // Guest continue is unpackaged/dev only. never on Setup.exe installs.
+        // Dev / Open-NOVA-Build.bat only — never on packaged Setup.exe installs.
         setShowBypass(!meta?.isPackaged);
       })
       .catch(() => setShowBypass(false));
@@ -134,39 +128,10 @@ export function AuthScreen() {
       setInfo('Opened the NOVA account site. Use Forgot password there if email reset is not configured in this build.');
       return;
     }
-    const info = await getLocalLoginRecoveryInfo();
-    setInfo(formatForgotPasswordHelp(info));
-    if (info.exists || info.folder) {
+    const recovery = await getLocalLoginRecoveryInfo();
+    setInfo(formatForgotPasswordHelp(recovery));
+    if (recovery.exists || recovery.folder) {
       void revealLocalLoginRecovery();
-    }
-  };
-
-  const handleSignedOutUpdateCheck = async () => {
-    if (updateBusy) return;
-    setUpdateBusy(true);
-    setUpdateHint('Checking for updates…');
-    try {
-      const info = await checkArkGitHubUpdate();
-      if (!info.ok) {
-        setUpdateHint(info.message || 'Could not check for updates.');
-        return;
-      }
-      if (!info.newerAvailable || !info.setupAssetUrl) {
-        setUpdateHint(info.message || 'You are on the latest published build.');
-        return;
-      }
-      setUpdateHint(`${info.message} Downloading…`);
-      const result = await downloadAndInstallArkUpdate({
-        setupAssetUrl: info.setupAssetUrl,
-        latestTag: info.latestTag,
-      });
-      if (!result?.ok) {
-        setUpdateHint(result?.message || 'Update failed.');
-      }
-    } catch (err) {
-      setUpdateHint(err instanceof Error ? err.message : 'Update check failed');
-    } finally {
-      setUpdateBusy(false);
     }
   };
 
@@ -196,8 +161,6 @@ export function AuthScreen() {
       return;
     }
 
-    // Users do not pick their own handle/username. We assign a 7-digit NOVA ID automatically.
-    // Display name is their real name from this form (not a unique username).
     const created = await signUp(email.trim(), password, fullName.trim());
     if (created.error) {
       setLoading(false);
@@ -216,7 +179,6 @@ export function AuthScreen() {
   return (
     <div className="h-full min-h-0 bg-ark-navy-950 flex relative overflow-hidden">
       <AuthAmbientOrbs />
-
       <TypewriterHero />
 
       <div className="relative z-10 flex-1 flex items-center justify-center px-4 py-10">
@@ -225,9 +187,9 @@ export function AuthScreen() {
             <NovaMark className="w-10 h-10 text-content-primary mx-auto" title="NOVA" />
           </div>
 
-          <div className="rounded-2xl border border-surface-border bg-ark-navy-900/90 p-7 sm:p-8 shadow-2xl animate-slide-up backdrop-blur-sm">
+          <div className="rounded-2xl border border-surface-border bg-ark-navy-900 p-7 sm:p-8 shadow-2xl animate-slide-up">
             <div className="mb-6">
-              <div className="grid grid-cols-2 gap-1 rounded-xl border border-surface-border bg-ark-navy-950/80 p-1">
+              <div className="grid grid-cols-2 gap-1 rounded-xl border border-surface-border bg-ark-navy-950 p-1">
                 <button
                   type="button"
                   onClick={() => switchMode('signin')}
@@ -251,13 +213,38 @@ export function AuthScreen() {
                   Sign up
                 </button>
               </div>
-              <p className="text-center text-sm text-content-secondary mt-4">
-                {mode === 'signin' ? 'Welcome back to NOVA' : 'Create your NOVA account'}
-              </p>
             </div>
 
-            <form onSubmit={handleSubmit} className="space-y-3">
-              <div className="relative">
+            <form onSubmit={handleSubmit} className="flex flex-col">
+              <div
+                className={`grid transition-[grid-template-rows,opacity,margin] duration-200 ease-out ${
+                  mode === 'signup'
+                    ? 'grid-rows-[1fr] opacity-100 mb-3'
+                    : 'grid-rows-[0fr] opacity-0 mb-0'
+                }`}
+                aria-hidden={mode !== 'signup'}
+              >
+                <div className="min-h-0 overflow-hidden">
+                  <div className={`relative ${mode === 'signup' ? '' : 'pointer-events-none'}`}>
+                    <User className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-content-tertiary" />
+                    <input
+                      type="text"
+                      required={mode === 'signup'}
+                      tabIndex={mode === 'signup' ? 0 : -1}
+                      minLength={2}
+                      maxLength={80}
+                      value={fullName}
+                      onChange={e => setFullName(e.target.value)}
+                      placeholder="Your name"
+                      className="ark-input pl-10 h-12 rounded-xl"
+                      autoComplete="name"
+                      disabled={mode !== 'signup'}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="relative mb-3">
                 <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-content-tertiary" />
                 <input
                   type="email"
@@ -270,30 +257,7 @@ export function AuthScreen() {
                 />
               </div>
 
-              {mode === 'signup' && (
-                <div className="relative animate-fade-in">
-                  <User className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-content-tertiary" />
-                  <input
-                    type="text"
-                    required
-                    minLength={2}
-                    maxLength={80}
-                    value={fullName}
-                    onChange={e => setFullName(e.target.value)}
-                    placeholder="Your name"
-                    className="ark-input pl-10 h-12 rounded-xl"
-                    autoComplete="name"
-                  />
-                </div>
-              )}
-
-              {mode === 'signup' && (
-                <div className="text-[11px] text-content-tertiary px-1 animate-fade-in">
-                  Your 7-digit NOVA ID is assigned automatically. Profile photo can be added later in Settings.
-                </div>
-              )}
-
-              <div className="relative">
+              <div className="relative mb-3">
                 <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-content-tertiary" />
                 <input
                   ref={passwordRef}
@@ -316,46 +280,38 @@ export function AuthScreen() {
                 </button>
               </div>
 
-              {mode === 'signin' && (
-                <div className="flex justify-end -mt-1">
-                  <button
-                    type="button"
-                    onClick={() => void handleForgotPassword()}
-                    disabled={loading}
-                    className="text-xs text-content-tertiary hover:text-content-secondary"
-                  >
-                    Forgot password?
-                  </button>
+              <div
+                className={`grid transition-[grid-template-rows,opacity,margin] duration-200 ease-out ${
+                  mode === 'signin'
+                    ? 'grid-rows-[1fr] opacity-100 mb-3'
+                    : 'grid-rows-[0fr] opacity-0 mb-0'
+                }`}
+                aria-hidden={mode !== 'signin'}
+              >
+                <div className="min-h-0 overflow-hidden">
+                  <div className="flex justify-end -mt-1">
+                    <button
+                      type="button"
+                      onClick={() => void handleForgotPassword()}
+                      disabled={loading || mode !== 'signin'}
+                      tabIndex={mode === 'signin' ? 0 : -1}
+                      className="text-xs text-content-tertiary hover:text-content-secondary"
+                    >
+                      Forgot password?
+                    </button>
+                  </div>
                 </div>
-              )}
-
-              {recoveryNotice && (
-                <div className="rounded-xl border border-sky-500/25 bg-sky-500/10 px-3 py-2.5 text-[11px] text-sky-100/90 leading-relaxed space-y-2">
-                  <p>
-                    Temporary: NOVA can also save a private login note on this PC (see folder after forgot-password). Real email reset works when the account website is configured for this build.
-                  </p>
-                  <button
-                    type="button"
-                    className="text-sky-300 hover:text-sky-200 underline"
-                    onClick={() => {
-                      markLocalRecoveryNoticeShown();
-                      setRecoveryNotice(false);
-                    }}
-                  >
-                    Got it
-                  </button>
-                </div>
-              )}
+              </div>
 
               {error && (
-                <div className="flex items-start gap-2 text-sm text-ark-accent-red bg-ark-accent-red/10 border border-ark-accent-red/20 rounded-xl px-3 py-2.5 animate-fade-in">
+                <div className="flex items-start gap-2 text-sm text-ark-accent-red bg-ark-accent-red/10 border border-ark-accent-red/20 rounded-xl px-3 py-2.5 mb-3">
                   <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
                   <span>{error}</span>
                 </div>
               )}
 
               {info && (
-                <div className="flex items-start gap-2 text-sm text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-3 py-2.5 animate-fade-in">
+                <div className="flex items-start gap-2 text-sm text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-3 py-2.5 mb-3">
                   <span>{info}</span>
                 </div>
               )}
@@ -366,82 +322,7 @@ export function AuthScreen() {
               </button>
             </form>
 
-            {showBypass && (
-              <>
-                <div className="flex items-center gap-3 my-5">
-                  <div className="flex-1 h-px bg-surface-border" />
-                  <span className="text-[10px] uppercase tracking-[0.16em] text-content-tertiary">or</span>
-                  <div className="flex-1 h-px bg-surface-border" />
-                </div>
-
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => bypassLogin({ skipSetup: false })}
-                    disabled={loading}
-                    className="ark-btn-secondary h-11 rounded-xl px-2"
-                    title="Sign in as guest, then run hardware setup"
-                  >
-                    <Zap className="w-3.5 h-3.5 text-ark-accent-amber shrink-0" />
-                    <span className="text-xs leading-tight text-left">Bypass + Setup</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => bypassLogin({ skipSetup: true })}
-                    disabled={loading}
-                    className="ark-btn-secondary h-11 rounded-xl px-2"
-                    title="Skip setup and go straight to the main app"
-                  >
-                    <Zap className="w-3.5 h-3.5 text-sky-400 shrink-0" />
-                    <span className="text-xs leading-tight text-left">Bypass to App</span>
-                  </button>
-                </div>
-              </>
-            )}
-
-            <div className="mt-4 space-y-2">
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  title="Open NOVA on GitHub"
-                  aria-label="Open NOVA on GitHub"
-                  className="h-11 w-11 shrink-0 rounded-xl border border-white/15 bg-white/[0.04] text-content-secondary hover:text-content-primary hover:bg-white/[0.08] flex items-center justify-center"
-                  onClick={() =>
-                    void window.arkDesktop?.openExternal?.('https://github.com/DrMeji/Nova/releases')
-                  }
-                >
-                  <Github className="w-5 h-5" />
-                </button>
-                <button
-                  type="button"
-                  className="ark-btn-ghost flex-1 h-11 rounded-full text-xs"
-                  disabled={updateBusy}
-                  onClick={() => void handleSignedOutUpdateCheck()}
-                >
-                  {updateBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
-                  Check for update (no sign-in)
-                </button>
-              </div>
-              {updateHint ? (
-                <p className="text-center text-[11px] text-content-tertiary leading-relaxed whitespace-pre-wrap">
-                  {updateHint}
-                </p>
-              ) : (
-                <p className="text-center text-[11px] text-content-tertiary leading-relaxed">
-                  Check for an in-app update without signing in, or open public GitHub releases with the icon.
-                </p>
-              )}
-              <button
-                type="button"
-                className="ark-btn-ghost w-full h-9 rounded-xl text-xs text-content-tertiary"
-                onClick={() => void revealLocalLoginRecovery()}
-              >
-                <FolderOpen className="w-3.5 h-3.5" />
-                Open local password note folder
-              </button>
-            </div>
-
-            <p className="text-center text-[11px] text-content-tertiary mt-3 leading-relaxed">
+            <p className="text-center text-[11px] text-content-tertiary mt-4 leading-relaxed">
               By continuing, you agree to our{' '}
               <button
                 type="button"
@@ -461,6 +342,32 @@ export function AuthScreen() {
               .
             </p>
           </div>
+
+          {/* Temporary: Open-NOVA-Build.bat / unpackaged only — remove before retail. */}
+          {showBypass && (
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => bypassLogin({ skipSetup: false })}
+                disabled={loading}
+                className="ark-btn-secondary h-11 rounded-xl px-2"
+                title="Dev only — sign in as guest, then run hardware setup"
+              >
+                <Zap className="w-3.5 h-3.5 text-ark-accent-amber shrink-0" />
+                <span className="text-xs leading-tight text-left">Bypass + Setup</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => bypassLogin({ skipSetup: true })}
+                disabled={loading}
+                className="ark-btn-secondary h-11 rounded-xl px-2"
+                title="Dev only — skip setup and go straight to the main app"
+              >
+                <Zap className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                <span className="text-xs leading-tight text-left">Bypass to App</span>
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>

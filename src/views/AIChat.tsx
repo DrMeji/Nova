@@ -2077,21 +2077,29 @@ export function AIChat() {
       const btn = modelButtonRef.current;
       if (!btn) return;
       const r = btn.getBoundingClientRect();
-      const left = r.left + r.width / 2;
-      const spaceAbove = r.top;
-      const spaceBelow = window.innerHeight - r.bottom;
-      // Prefer opening toward the side with more room (top of screen → down, bottom → up).
+      const shell = btn.closest('[data-ark-composer]') as HTMLElement | null;
+      const shellRect = shell?.getBoundingClientRect();
+      const menuW = 288; // w-72
+      const gap = 12;
+      // Right edge of menu lines up with the chat box right edge.
+      const anchorRight = shellRect?.right ?? r.right;
+      const left = Math.min(
+        Math.max(12, anchorRight - menuW),
+        window.innerWidth - menuW - 12,
+      );
+      const spaceAbove = (shellRect?.top ?? r.top);
+      const spaceBelow = window.innerHeight - (shellRect?.bottom ?? r.bottom);
       const openUp = spaceBelow < 300 && spaceAbove > spaceBelow;
       if (openUp) {
         setMenuPos({
           left,
-          bottom: Math.max(12, window.innerHeight - r.top + 8),
+          bottom: Math.max(12, window.innerHeight - (shellRect?.top ?? r.top) + gap),
           top: undefined,
         });
       } else {
         setMenuPos({
           left,
-          top: Math.min(window.innerHeight - 24, r.bottom + 8),
+          top: Math.min(window.innerHeight - 24, (shellRect?.bottom ?? r.bottom) + gap),
           bottom: undefined,
         });
       }
@@ -7707,12 +7715,11 @@ export function AIChat() {
     ? createPortal(
       <div
         ref={modelMenuRef}
-        className="w-72 max-h-[min(22rem,calc(100vh-6rem))] overflow-y-auto rounded-xl border border-surface-border bg-ark-navy-900 shadow-2xl py-1.5"
+        className="w-72 max-h-[min(22rem,calc(100vh-6rem))] overflow-y-auto rounded-xl border border-surface-border bg-ark-navy-900 shadow-2xl shadow-black/50 py-1.5"
         style={{
           position: 'fixed',
           left: menuPos.left,
           ...(menuPos.top != null ? { top: menuPos.top } : { bottom: menuPos.bottom }),
-          transform: 'translateX(-50%)',
           zIndex: 99999,
         }}
       >
@@ -8132,7 +8139,7 @@ export function AIChat() {
           <div className="flex gap-2 min-w-0 items-end">
           <div
             data-ark-composer="1"
-            className={`flex-1 min-w-0 flex flex-col border border-surface-border bg-ark-navy-900/90 shadow-lg shadow-black/20 overflow-hidden ${
+            className={`flex-1 min-w-0 flex flex-col border border-surface-border bg-ark-navy-900 shadow-lg shadow-black/20 overflow-hidden ${
               mode === 'voice' ? 'rounded-2xl' : 'rounded-xl'
             }`}
           >
@@ -8373,7 +8380,7 @@ export function AIChat() {
                 ref={modelButtonRef}
                 type="button"
                 onClick={() => setModelMenuOpen(o => !o)}
-                className="inline-flex items-center gap-1 rounded-full border border-surface-border/80 bg-surface-hover/60 hover:bg-surface-hover px-2.5 py-1 text-xs text-content-primary transition-colors max-w-[9rem]"
+                className="inline-flex items-center gap-1 rounded-full border border-surface-border bg-ark-navy-800 hover:bg-surface-hover px-2.5 py-1 text-xs text-content-primary transition-colors max-w-[9rem]"
                 title={`Active model · ${
                   activeModel.source === 'auto'
                     ? (threadBrain ? autoEquippedCaption(threadBrain) : 'NOVA Auto · picks best brain')

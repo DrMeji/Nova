@@ -4,7 +4,7 @@
 
 Rebrand to **NOVA**, softer updates UI, and the build/create accuracy work from recent live testing.
 
-**Windows installer:** [NOVA-Setup.exe](https://github.com/DrMeji/Nova/releases/download/v0.1.197/ARK-Setup.exe) · [Release notes](https://github.com/DrMeji/Nova/releases/tag/v0.1.197)
+**Windows installer:** [NOVA-Setup.exe](https://github.com/DrMeji/Nova/releases/download/v0.1.197/NOVA-Setup.exe) · [Release notes](https://github.com/DrMeji/Nova/releases/tag/v0.1.197)
 
 ### Brand
 - Product name is **NOVA** across app, website, and chat identity

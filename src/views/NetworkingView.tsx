@@ -381,7 +381,7 @@ export function NetworkingView() {
   return (
     <>
       <div className="h-full box-border p-4 animate-fade-in bg-transparent">
-        <div className="h-full min-h-0 flex flex-col rounded-2xl border border-surface-border bg-ark-navy-900/55 shadow-[0_8px_32px_rgba(0,0,0,0.35)] overflow-hidden">
+        <div className="h-full min-h-0 flex flex-col rounded-2xl border border-surface-border bg-ark-navy-900 shadow-[0_8px_32px_rgba(0,0,0,0.35)] overflow-hidden">
           <div className="shrink-0 px-5 sm:px-8 pt-5 pb-3">
             <GuestSocialBanner feature="networking" />
             <p className="text-[10px] text-content-tertiary mt-2 text-center">

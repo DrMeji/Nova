@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Gamepad2, X } from 'lucide-react';
+import { X } from 'lucide-react';
 import { ArkRunnerGame } from '@/components/fun/ArkRunnerGame';
 import {
   getEngineDownloadJobs,
@@ -10,21 +10,25 @@ import { pushSidebarToast } from '@/lib/sidebarToast';
 type Props = {
   open: boolean;
   onClose: () => void;
-  /** Optional label shown under the title (e.g. model name). */
   contextLabel?: string;
-  /** When the host tracks download itself (setup wizard). */
+  /** e.g. "4.7 GB" */
+  contextSize?: string;
+  /** Short line under the model name */
+  contextDetail?: string;
   externalProgress?: number;
   externalComplete?: boolean;
 };
 
 /**
- * Lightweight play overlay while a download runs in the background.
- * Shows a clear banner when the download finishes so the user can exit.
+ * Two separate panels on a blurred backdrop:
+ * left = runner, right = download — with clear space between.
  */
 export function PlayWhileDownloading({
   open,
   onClose,
   contextLabel,
+  contextSize,
+  contextDetail,
   externalProgress,
   externalComplete,
 }: Props) {
@@ -95,79 +99,130 @@ export function PlayWhileDownloading({
 
   if (!open) return null;
 
+  const pct = Math.min(100, Math.round(complete ? 100 : progress));
+  const label = jobName || contextLabel || 'Local brain';
+  const phaseLabel = complete
+    ? 'Installed on this PC'
+    : pct < 25
+      ? 'Preparing runtime'
+      : pct < 100
+        ? 'Downloading model weights'
+        : 'Finalizing install';
+
   return (
-    <div className="fixed inset-0 z-[80] flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 sm:p-8">
+      {/* Blurred backdrop */}
       <button
         type="button"
-        className="absolute inset-0 bg-black/65 border-0 cursor-default"
-        aria-label="Close game"
+        className="absolute inset-0 border-0 cursor-default bg-black/55 backdrop-blur-md"
+        aria-label="Close"
         onClick={onClose}
       />
+
+      {/* Two separate panels — left / gap / right */}
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby="NOVA-play-title"
-        className="relative z-10 w-full max-w-2xl rounded-2xl border border-surface-border bg-ark-navy-900 shadow-2xl overflow-hidden"
+        className="relative z-10 w-full max-w-6xl grid grid-cols-1 md:grid-cols-[minmax(0,1.25fr)_minmax(0,0.95fr)] gap-4 sm:gap-6 items-stretch"
       >
-        <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-surface-border">
-          <div className="min-w-0 flex items-center gap-2">
-            <Gamepad2 className="w-4 h-4 text-sky-300 shrink-0" />
-            <div className="min-w-0">
-              <h2 id="NOVA-play-title" className="text-sm font-semibold text-content-primary truncate">
-                NOVA Runner
-              </h2>
-              <p className="text-[11px] text-content-tertiary truncate">
-                {complete
-                  ? 'Download finished'
-                  : jobName
-                    ? `Downloading ${jobName}${progress > 0 ? ` · ${Math.round(progress)}%` : ''}`
-                    : 'Play while things install in the background'}
-              </p>
-            </div>
+        {/* LEFT — runner */}
+        <section className="rounded-2xl border border-surface-border bg-ark-navy-900 shadow-2xl overflow-hidden flex flex-col min-h-[24rem] h-[min(30rem,calc(100vh-4rem))]">
+          <div className="flex items-center px-4 h-11 border-b border-white/[0.06] shrink-0">
+            <h2 id="NOVA-play-title" className="text-[13px] font-medium text-content-primary">
+              NOVA Runner
+            </h2>
           </div>
-          <button
-            type="button"
-            className="h-8 w-8 rounded-lg border border-surface-border text-content-tertiary hover:text-content-primary flex items-center justify-center"
-            onClick={onClose}
-            aria-label="Close"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
+          <div className="flex-1 min-h-0 px-3 pb-3 pt-2">
+            <ArkRunnerGame active={open} compact />
+          </div>
+        </section>
 
-        {complete ? (
-          <div className="mx-4 mt-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2.5">
-            <p className="text-sm font-medium text-emerald-200">Download complete</p>
-            <p className="text-[11px] text-emerald-100/80 mt-0.5 leading-relaxed">
-              You can close this game and continue in NOVA whenever you’re ready.
+        {/* RIGHT — download */}
+        <section className="rounded-2xl border border-surface-border bg-ark-navy-900 shadow-2xl overflow-hidden flex flex-col min-h-[24rem] h-[min(30rem,calc(100vh-4rem))]">
+          <div className="flex items-center justify-between px-4 h-11 border-b border-white/[0.06] shrink-0">
+            <p className="text-[13px] font-medium text-content-primary">
+              {complete ? 'Install complete' : 'Background install'}
             </p>
-            <button type="button" className="ark-btn-primary text-xs mt-2.5" onClick={onClose}>
-              Back to NOVA
+            <button
+              type="button"
+              className="h-7 w-7 rounded-md text-content-tertiary hover:text-content-primary flex items-center justify-center"
+              onClick={onClose}
+              aria-label="Close"
+            >
+              <X className="w-4 h-4" />
             </button>
           </div>
-        ) : progress > 0 ? (
-          <div className="mx-4 mt-3">
-            <div className="h-1.5 rounded-full bg-surface-hover overflow-hidden">
-              <div
-                className="h-full bg-sky-500/80 transition-all"
-                style={{ width: `${Math.min(100, progress)}%` }}
-              />
-            </div>
-          </div>
-        ) : null}
 
-        <div className="p-4 pt-3">
-          <ArkRunnerGame active={open} />
-          <p className="mt-3 text-[11px] text-content-tertiary leading-relaxed text-center">
-            Nothing extra downloads for this game. It’s built into NOVA so slow installs feel less idle.
-          </p>
-        </div>
+          <div className="flex-1 flex flex-col justify-center px-5 sm:px-6 py-6 gap-5">
+            <div className="space-y-1.5">
+              <p className={`text-[11px] font-medium ${complete ? 'text-emerald-300/90' : 'text-sky-300/90'}`}>
+                {phaseLabel}
+              </p>
+              <p className="text-xl font-semibold text-content-primary tracking-tight leading-snug">
+                {label}
+              </p>
+              {(contextDetail || contextSize) && (
+                <p className="text-[12px] text-content-secondary leading-relaxed">
+                  {[contextDetail, contextSize].filter(Boolean).join(' · ')}
+                </p>
+              )}
+            </div>
+
+            <div className="space-y-2.5">
+              <div className="flex items-baseline justify-between gap-3">
+                <span className="text-xs text-content-secondary">
+                  {complete ? 'Ready for chat' : 'Download progress'}
+                </span>
+                <span className="text-sm font-medium tabular-nums text-content-primary">{pct}%</span>
+              </div>
+              <div className="h-2 rounded-full bg-white/[0.08] overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all duration-300 ${
+                    complete ? 'bg-emerald-400/90' : 'bg-sky-400/90'
+                  }`}
+                  style={{ width: `${pct}%` }}
+                />
+              </div>
+            </div>
+
+            <ul className="space-y-2 text-[12px] text-content-tertiary leading-relaxed">
+              <li className="flex gap-2">
+                <span className="text-content-secondary shrink-0">·</span>
+                <span>
+                  {complete
+                    ? 'Weights are on this PC — Chat can use this brain without waiting.'
+                    : 'NOVA Engine is pulling GGUF weights in the background while you play.'}
+                </span>
+              </li>
+              <li className="flex gap-2">
+                <span className="text-content-secondary shrink-0">·</span>
+                <span>This mini-game is built into NOVA — it does not add to the download.</span>
+              </li>
+              <li className="flex gap-2">
+                <span className="text-content-secondary shrink-0">·</span>
+                <span>
+                  {complete
+                    ? 'Close when you’re done, then continue setup with Enter NOVA.'
+                    : 'You can close this anytime — the install keeps going.'}
+                </span>
+              </li>
+            </ul>
+
+            <button
+              type="button"
+              className="ark-btn-primary h-10 px-5 rounded-xl text-sm w-full mt-1"
+              onClick={onClose}
+            >
+              {complete ? 'Back to setup' : 'Close game'}
+            </button>
+          </div>
+        </section>
       </div>
     </div>
   );
 }
 
-/** Small CTA used next to download progress. */
 export function PlayGameButton({ onClick, className = '' }: { onClick: () => void; className?: string }) {
   return (
     <button
@@ -175,7 +230,6 @@ export function PlayGameButton({ onClick, className = '' }: { onClick: () => voi
       onClick={onClick}
       className={`inline-flex items-center gap-1.5 rounded-full border border-sky-500/35 bg-sky-500/10 px-2.5 py-1 text-[11px] font-medium text-sky-200 hover:bg-sky-500/15 transition-colors ${className}`}
     >
-      <Gamepad2 className="w-3.5 h-3.5" />
       Play game
     </button>
   );

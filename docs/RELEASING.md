@@ -32,8 +32,7 @@ GitHub **always** attaches Source code (zip) and Source code (tar.gz) to every r
 
 On **DrMeji/Nova** those archives only contain the public README (and guard workflow) — **not** the NOVA app. Real source stays in **Nova-Source**.
 
-When writing public release notes, remind downloaders to use **NOVA-Setup.exe** only. (Older releases may still list `ARK-Setup.exe` as the asset filename.)
-
+When writing public release notes, remind downloaders to use **NOVA-Setup.exe** only.
 
 ## CI note
 
