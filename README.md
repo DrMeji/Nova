@@ -7,7 +7,7 @@ Private **source** repository for the ARK desktop app.
 | **[DrMeji/Ark](https://github.com/DrMeji/Ark)** | **Public** | README + Windows installers / Releases only |
 | **DrMeji/Ark-Source** (this repo) | **Private** | Full application source |
 
-Current source: **v0.1.194** · Private changelog: [docs/CHANGELOG.md](docs/CHANGELOG.md) · Public downloads: [Ark Releases](https://github.com/DrMeji/Ark/releases)
+Current source: **v0.1.195** · Private changelog: [docs/CHANGELOG.md](docs/CHANGELOG.md) · Public downloads: [Ark Releases](https://github.com/DrMeji/Ark/releases)
 
 ## Releasing (do not leak source)
 

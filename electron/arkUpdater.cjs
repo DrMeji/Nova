@@ -560,15 +560,15 @@ function splashShellCss(opts = {}) {
   const hta = Boolean(opts.hta);
   if (hta) {
     // mshta = IE engine: no flex. Single fill color (no inset card).
+    // IE=edge (set in HTA head) is required for border-radius / linear-gradient.
     return `
   html,body{margin:0;width:100%;height:100%;background:${SPLASH_BG};overflow:hidden;user-select:none;}
   table.layout{width:100%;height:100%;border-collapse:collapse;background:${SPLASH_BG};}
   td.center{padding:0;text-align:center;vertical-align:middle;background:${SPLASH_BG};}
   .stack{width:100%;text-align:center;}
   .logo-wrap{width:${SPLASH_ICON_PX}px;height:${SPLASH_ICON_PX}px;margin:0 auto ${SPLASH_ICON_GAP}px auto;}
-  .logo-wrap img{width:${SPLASH_ICON_PX}px;height:${SPLASH_ICON_PX}px;display:block;border:0;background:transparent;margin:0 auto;}
-  .track{position:relative;width:${SPLASH_TRACK_W}px;height:${SPLASH_TRACK_H}px;margin:0 auto;border:1px solid #a1a1aa;background:transparent;overflow:hidden;text-align:left;border-radius:999px;}
-  #fill{position:absolute;left:0;top:0;bottom:0;width:0;height:100%;background:#f4f4f5;font-size:0;line-height:0;border-radius:999px;}
+  .logo-wrap img,.logo-wrap svg{width:${SPLASH_ICON_PX}px;height:${SPLASH_ICON_PX}px;display:block;border:0;background:transparent;margin:0 auto;}
+  .track-svg{display:block;margin:0 auto;overflow:visible;}
 `;
   }
   // Opaque single fill — no transparent host + inset card (that read as two boxes).
@@ -595,29 +595,50 @@ function splashMarkDataUri() {
   }
 }
 
-/** CSS pause-mark for HTA when no PNG is available (IE-safe, no SVG). */
+/** CSS pause-mark for HTA when SVG is unavailable. Soft gradient fill. */
 function splashHtaFallbackMark() {
-  const half = Math.round(SPLASH_ICON_PX / 2);
   const barH = Math.round(SPLASH_ICON_PX * 0.22);
   const barW = Math.max(4, Math.round(SPLASH_ICON_PX * 0.045));
   return `<div style="position:relative;width:${SPLASH_ICON_PX}px;height:${SPLASH_ICON_PX}px;margin:0 auto;">
-    <div style="position:absolute;left:18%;top:18%;width:64%;height:64%;border:2px solid #f4f4f5;border-radius:22%;box-sizing:border-box;"></div>
+    <div style="position:absolute;left:18%;top:18%;width:64%;height:64%;box-sizing:border-box;border:2px solid #f4f4f5;border-radius:22%;background:linear-gradient(135deg,rgba(56,189,248,0.30) 0%,rgba(129,140,248,0.22) 45%,rgba(52,211,153,0.18) 100%);"></div>
     <div style="position:absolute;left:38%;top:39%;width:${barW}px;height:${barH}px;background:#f4f4f5;border-radius:2px;"></div>
     <div style="position:absolute;left:58%;top:39%;width:${barW}px;height:${barH}px;background:#f4f4f5;border-radius:2px;"></div>
   </div>`;
+}
+
+/** IE11/mshta (with IE=edge): colored SVG mark aligned with Electron preview (static, no CSS anim). */
+function splashHtaSvgMark() {
+  return `<svg xmlns="http://www.w3.org/2000/svg" version="1.1" viewBox="0 0 80 80" width="${SPLASH_ICON_PX}" height="${SPLASH_ICON_PX}" aria-hidden="true" style="display:block;margin:0 auto;">
+    <defs>
+      <linearGradient id="splash-hta-grad" x1="12" y1="12" x2="68" y2="68" gradientUnits="userSpaceOnUse">
+        <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.30"/>
+        <stop offset="45%" stop-color="#818cf8" stop-opacity="0.22"/>
+        <stop offset="100%" stop-color="#34d399" stop-opacity="0.18"/>
+      </linearGradient>
+    </defs>
+    <rect x="14" y="14" width="52" height="52" rx="16" ry="16" fill="url(#splash-hta-grad)" stroke="#f4f4f5" stroke-width="2.2"/>
+    <line x1="31" y1="32" x2="31" y2="48" stroke="#f4f4f5" stroke-width="3.4" stroke-linecap="round"/>
+    <line x1="49" y1="32" x2="49" y2="48" stroke="#f4f4f5" stroke-width="3.4" stroke-linecap="round"/>
+  </svg>`;
+}
+
+/** Rounded progress track as SVG — border-radius is unreliable in mshta. */
+function splashHtaTrackMarkup() {
+  const w = SPLASH_TRACK_W;
+  const h = SPLASH_TRACK_H;
+  const r = Math.round(h / 2);
+  return `<svg class="track-svg" xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true" style="display:block;margin:0 auto;">
+  <rect x="0.75" y="0.75" width="${w - 1.5}" height="${h - 1.5}" rx="${r}" ry="${r}" fill="none" stroke="#a1a1aa" stroke-width="1.5"/>
+  <rect id="fill" x="0.75" y="0.75" width="0" height="${h - 1.5}" rx="${r}" ry="${r}" fill="#f4f4f5"/>
+</svg>`;
 }
 
 function splashBodyMarkup(opts = {}) {
   const hta = Boolean(opts.hta);
   let icon;
   if (hta) {
-    if (opts.pngDataUri) {
-      icon = `<img src="${opts.pngDataUri}" width="${SPLASH_ICON_PX}" height="${SPLASH_ICON_PX}" alt="" />`;
-    } else if (opts.pngName) {
-      icon = `<img src="${opts.pngName}" width="${SPLASH_ICON_PX}" height="${SPLASH_ICON_PX}" alt="" />`;
-    } else {
-      icon = splashHtaFallbackMark();
-    }
+    // Colored SVG mark (same art as Electron preview). CSS fallback if SVG fails to paint.
+    icon = splashHtaSvgMark() || splashHtaFallbackMark();
   } else {
     icon = splashIconMarkup();
   }
@@ -626,7 +647,7 @@ function splashBodyMarkup(opts = {}) {
   <table class="layout" role="presentation"><tr><td class="center">
     <div class="stack">
       <div class="logo-wrap">${icon}</div>
-      <div class="track"><div id="fill"></div></div>
+      ${splashHtaTrackMarkup()}
     </div>
   </td></tr></table>`;
   }
@@ -731,13 +752,13 @@ ${splashShellCss()}
  * Independent HTML splash via mshta — not ARK.exe, so NSIS can replace the install
  * without killing this window. Stays up until main.cjs writes ark-ui-shown.flag.
  */
-function splashHtaHtml({ statusPath, shownPath, alivePath, icoName, pngDataUri, pngName }) {
+function splashHtaHtml({ statusPath, shownPath, alivePath, icoName }) {
   const jsStr = (s) => JSON.stringify(String(s || ''));
   const icoAttr = icoName ? `\n  icon="${icoName}"` : '';
-  const markData = pngDataUri || splashMarkDataUri();
   return `<!DOCTYPE html>
 <html>
 <head>
+<meta http-equiv="X-UA-Compatible" content="IE=edge" />
 <meta charset="utf-8" />
 <hta:application
   id="ArkUpdateSplash"
@@ -757,7 +778,7 @@ ${splashShellCss({ hta: true })}
 </style>
 </head>
 <body>
-  ${splashBodyMarkup({ hta: true, pngDataUri: markData, pngName })}
+  ${splashBodyMarkup({ hta: true })}
   <script language="JScript">
     var STATUS = ${jsStr(statusPath)};
     var SHOWN = ${jsStr(shownPath)};
@@ -785,7 +806,14 @@ ${splashShellCss({ hta: true })}
     function setUi(n) {
       n = Math.max(0, Math.min(100, Math.round(n || 0)));
       var fill = document.getElementById("fill");
-      if (fill) fill.style.width = n + "%";
+      if (!fill) return;
+      // SVG rect uses width in user units; CSS div uses %.
+      if (fill.tagName && String(fill.tagName).toLowerCase() === "rect") {
+        var maxW = ${SPLASH_TRACK_W - 1.5};
+        fill.setAttribute("width", String(Math.max(0, (maxW * n) / 100)));
+      } else {
+        fill.style.width = n + "%";
+      }
     }
     function parseStatus(raw) {
       var map = {};
@@ -850,7 +878,6 @@ function launchHtaSplash({ statusPath, shownPath }) {
   const htaPath = path.join(temp, `${base}.hta`);
   const alivePath = splashAliveFlagPath();
   const icoPath = copySplashIcoToTemp(temp, `${base}.ico`);
-  const pngDataUri = splashMarkDataUri();
   try {
     fs.writeFileSync(
       htaPath,
@@ -859,7 +886,6 @@ function launchHtaSplash({ statusPath, shownPath }) {
         shownPath,
         alivePath,
         icoName: icoPath ? `${base}.ico` : '',
-        pngDataUri,
       }),
       'utf8',
     );

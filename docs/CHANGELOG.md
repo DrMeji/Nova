@@ -1,5 +1,15 @@
 # ARK changelog
 
+## 0.1.195 — 2026-09-07
+
+Upgrade the real install splash toward the Preview look: colored icon + rounded progress bar.
+
+**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.195/ARK-Setup.exe) · [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.195)
+
+### Update splash
+- Install (HTA) splash uses the colored ARK mark instead of flat white line-art
+- Progress bar is a rounded SVG pill (mshta ignored CSS border-radius before)
+
 ## 0.1.194 — 2026-09-07
 
 Remove Settings Preview splash so real update splash can be compared.
