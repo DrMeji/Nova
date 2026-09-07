@@ -30,8 +30,6 @@ contextBridge.exposeInMainWorld('arkDesktop', {
   updateCheck: () => ipcRenderer.invoke('ark:update-check'),
   updateDownload: (payload) => ipcRenderer.invoke('ark:update-download', payload || {}),
   updateState: () => ipcRenderer.invoke('ark:update-state'),
-  // Allowed in packaged builds while we QA the official update splash layout.
-  updateSplashPreview: (payload) => ipcRenderer.invoke('ark:update-splash-preview', payload || {}),
   postUpdateConsume: () => ipcRenderer.invoke('ark:post-update-consume'),
   authRecoverySave: (payload) => ipcRenderer.invoke('ark:auth-recovery-save', payload || {}),
   authRecoveryInfo: () => ipcRenderer.invoke('ark:auth-recovery-info'),

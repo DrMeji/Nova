@@ -1,5 +1,14 @@
 # ARK changelog
 
+## 0.1.194 — 2026-09-07
+
+Remove Settings Preview splash so real update splash can be compared.
+
+**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.194/ARK-Setup.exe) · [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.194)
+
+### Updates
+- Removed the Preview splash button from Settings ? Updates
+
 ## 0.1.193 — 2026-09-07
 
 Restore Notifications; fix packaged Preview splash IPC so the update splash can be checked.
