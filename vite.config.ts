@@ -26,4 +26,10 @@ export default defineConfig({
   optimizeDeps: {
     exclude: ['lucide-react'],
   },
+  server: {
+    watch: {
+      // Installer binaries in release/ are often locked during publish and crash Vite's watcher.
+      ignored: ['**/release/**', '**/.tmp*/**'],
+    },
+  },
 });

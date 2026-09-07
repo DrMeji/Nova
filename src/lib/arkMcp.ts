@@ -205,7 +205,7 @@ export function formatArkCapabilitiesHelp(opts?: {
       '2. **What** you want done (read it, rename it, change text inside, create a new file, etc.)',
       '3. **Any details** that matter (new name, what to put inside, what to keep)',
       '',
-      '**One-shot example:** *In `C:\\Users\\you\\Desktop\\Projects\\ARK-GitHub`, read `.cursorrules` and tell me what is in it.*',
+      '**One-shot example:** *In `C:\\Users\\you\\Desktop\\Projects\\Nova`, read `.cursorrules` and tell me what is in it.*',
       '',
       '**Rename example:** *Rename `draft.md` to `notes.md` in Desktop\\Projects\\MyApp.*',
       '',

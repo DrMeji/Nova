@@ -332,7 +332,7 @@ export async function resolveChatDrop(
   if (!attaches.length && !images.length && diskPaths.length === 0 && files.length > 0 && window.arkDesktop?.isElectron) {
     return {
       ...empty,
-      note: 'Could not read that drop. Close NOVA and run Open-ARK-Build.bat again.',
+      note: 'Could not read that drop. Close NOVA and run Open-NOVA-Build.bat again.',
     };
   }
 

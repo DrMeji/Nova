@@ -5,7 +5,7 @@ Minimal Node client for NOVA’s localhost brain API.
 ```bash
 # Start NOVA desktop first, then:
 set ARK_BRAIN_URL=http://127.0.0.1:8787
-set ARK_BRAIN_TOKEN=copy-from-ARK-Settings-AI
+set ARK_BRAIN_TOKEN=copy-from-NOVA-Settings-AI
 node chat.mjs "Hello"
 node chat.mjs --stream "Count to five"
 node chat.mjs --ollama "Hello via Ollama-shaped routes"

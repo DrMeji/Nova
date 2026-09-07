@@ -1,6 +1,6 @@
 /**
  * Runtime profile: bat / source Electron vs installed Setup.exe.
- * Open-ARK-Build.bat uses an unpackaged Electron + production Vite bundle —
+ * Open-NOVA-Build.bat uses an unpackaged Electron + production Vite bundle —
  * that is NOT import.meta.env.DEV, but it IS a dev session (isPackaged === false).
  */
 
@@ -10,7 +10,7 @@ export function isArkPackagedApp(): boolean {
   return window.arkDesktop?.isPackaged === true;
 }
 
-/** True for Open-ARK-Build.bat, electron:dev, and Vite dev. not retail installs. */
+/** True for Open-NOVA-Build.bat, electron:dev, and Vite dev. not retail installs. */
 export function isArkDevSession(): boolean {
   if (import.meta.env.DEV) return true;
   if (typeof window !== 'undefined' && window.arkDesktop?.isPackaged === false) return true;

@@ -1,6 +1,6 @@
 /**
  * Block chat / disk access to NOVA's own install tree (app.asar, resources, exe dir).
- * Dev sessions (Open-ARK-Build.bat with ARK_DEV=1) may access the source tree for testing.
+ * Dev sessions (Open-NOVA-Build.bat with ARK_DEV=1) may access the source tree for testing.
  */
 
 const path = require('path');

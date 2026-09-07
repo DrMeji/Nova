@@ -8,9 +8,9 @@
   "author": "DrMeji",
   "repository": {
     "type": "git",
-    "url": "https://github.com/DrMeji/Ark-Source.git"
+    "url": "https://github.com/DrMeji/Nova-Source.git"
   },
-  "homepage": "https://github.com/DrMeji/Ark/releases",
+  "homepage": "https://github.com/DrMeji/Nova/releases",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
@@ -112,7 +112,7 @@
       "differentialPackage": true,
       "shortcutName": "NOVA",
       "uninstallDisplayName": "NOVA",
-      "artifactName": "ARK-Setup.${ext}",
+      "artifactName": "NOVA-Setup.${ext}",
       "installerIcon": "build/icon.ico",
       "uninstallerIcon": "build/icon.ico",
       "installerHeaderIcon": "build/icon.ico",
@@ -122,7 +122,7 @@
       {
         "provider": "github",
         "owner": "DrMeji",
-        "repo": "Ark",
+        "repo": "Nova",
         "releaseType": "release"
       }
     ]

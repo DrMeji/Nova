@@ -37,3 +37,9 @@ ARK-Grok-*.txt
 
 supabase/.temp/
 
+
+# Local agent / live-test junk
+.tmp*
+.tmp-*/
+tmp-media/
+

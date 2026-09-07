@@ -6,11 +6,16 @@
   ; Fresh install (not an in-place upgrade): drop setup completion + saved
   ; sign-in so the user always sees Auth → then Hardware → Models → Connect.
   ; Keeps models/keys unless uninstall already removed AppData.
+  ; Profile folder stays %APPDATA%\ARK for upgrade continuity (NOVA product name).
   ${ifNot} ${isUpdated}
     CreateDirectory "$APPDATA\ARK"
     Delete "$APPDATA\ARK\ark-setup.json"
     Delete "$APPDATA\ARK\ark-install-id"
     Delete "$APPDATA\ARK\ark-auth-storage.dat"
+    ; If a short-lived NOVA AppData profile was created by mistake, clear setup flags there too.
+    Delete "$APPDATA\NOVA\ark-setup.json"
+    Delete "$APPDATA\NOVA\ark-install-id"
+    Delete "$APPDATA\NOVA\ark-auth-storage.dat"
   ${endIf}
 
   ; Force Windows to re-read NOVA.exe / shortcut icons after upgrades
@@ -22,5 +27,7 @@
   ${ifNot} ${isUpdated}
     RMDir /r "$APPDATA\ARK"
     RMDir /r "$LOCALAPPDATA\ARK"
+    RMDir /r "$APPDATA\NOVA"
+    RMDir /r "$LOCALAPPDATA\NOVA"
   ${endIf}
 !macroend

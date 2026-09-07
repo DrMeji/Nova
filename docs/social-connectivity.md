@@ -2,7 +2,7 @@
 
 NOVA’s **Message** tab works over the internet when both people use the desktop app, are **signed in** with an NOVA account, and have a normal internet connection.
 
-**Call UI is parked on retail Setup.exe builds** (hidden / non-functional for public testers). Dev/`Open-ARK-Build.bat` can still reveal call demo controls. Do not treat Call as a shipped feature on installers until it is un-parked.
+**Call UI is parked on retail Setup.exe builds** (hidden / non-functional for public testers). Dev/`Open-NOVA-Build.bat` can still reveal call demo controls. Do not treat Call as a shipped feature on installers until it is un-parked.
 
 ## What runs where
 
@@ -77,7 +77,7 @@ CLI (if linked): `npx supabase db push`
 5. Open Message thread → send text both ways.
 6. Call is parked on Setup.exe — skip call testing on public installers; use bat/dev only if testing Call UI.
 
-Dev builds (`Open-ARK-Build.bat`) also show **demo contacts** for UI testing; **production installers** start with an empty social graph until real friends are added. Demo friends / demo ring buttons never appear on Setup.exe.
+Dev builds (`Open-NOVA-Build.bat`) also show **demo contacts** for UI testing; **production installers** start with an empty social graph until real friends are added. Demo friends / demo ring buttons never appear on Setup.exe.
 
 ## Database one-time fix (friend requests)
 

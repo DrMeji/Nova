@@ -11,6 +11,7 @@ import {
 } from '@/lib/localAuthRecovery';
 import { checkArkGitHubUpdate, downloadAndInstallArkUpdate } from '@/lib/arkUpdates';
 import { accountForgotPageUrl } from '@/lib/accountWeb';
+import { NovaMark } from '@/components/NovaMark';
 
 const TYPE_PHRASES = [
   'NOVA',
@@ -221,11 +222,7 @@ export function AuthScreen() {
       <div className="relative z-10 flex-1 flex items-center justify-center px-4 py-10">
         <div className="w-full max-w-[420px] animate-fade-in">
           <div className="lg:hidden text-center mb-8">
-            <img
-              src={`${import.meta.env.BASE_URL}ark-icon.png`}
-              alt="NOVA"
-              className="w-10 h-10 object-contain mx-auto"
-            />
+            <NovaMark className="w-10 h-10 text-content-primary mx-auto" title="NOVA" />
           </div>
 
           <div className="rounded-2xl border border-surface-border bg-ark-navy-900/90 p-7 sm:p-8 shadow-2xl animate-slide-up backdrop-blur-sm">
@@ -335,7 +332,7 @@ export function AuthScreen() {
               {recoveryNotice && (
                 <div className="rounded-xl border border-sky-500/25 bg-sky-500/10 px-3 py-2.5 text-[11px] text-sky-100/90 leading-relaxed space-y-2">
                   <p>
-                    Temporary: NOVA can also save a private login note on this PC (see folder after forgot-password). Real email reset works when VITE_ARK_WEBSITE_ORIGIN is set at build time.
+                    Temporary: NOVA can also save a private login note on this PC (see folder after forgot-password). Real email reset works when the account website is configured for this build.
                   </p>
                   <button
                     type="button"
@@ -410,7 +407,7 @@ export function AuthScreen() {
                   aria-label="Open NOVA on GitHub"
                   className="h-11 w-11 shrink-0 rounded-xl border border-white/15 bg-white/[0.04] text-content-secondary hover:text-content-primary hover:bg-white/[0.08] flex items-center justify-center"
                   onClick={() =>
-                    void window.arkDesktop?.openExternal?.('https://github.com/DrMeji/Ark/releases')
+                    void window.arkDesktop?.openExternal?.('https://github.com/DrMeji/Nova/releases')
                   }
                 >
                   <Github className="w-5 h-5" />
@@ -449,7 +446,7 @@ export function AuthScreen() {
               <button
                 type="button"
                 className="underline hover:text-content-secondary"
-                onClick={() => void window.arkDesktop?.openExternal?.('https://github.com/DrMeji/Ark/blob/main/README.md')}
+                onClick={() => void window.arkDesktop?.openExternal?.('https://github.com/DrMeji/Nova/blob/main/README.md')}
               >
                 Terms of Service
               </button>
@@ -457,7 +454,7 @@ export function AuthScreen() {
               <button
                 type="button"
                 className="underline hover:text-content-secondary"
-                onClick={() => void window.arkDesktop?.openExternal?.('https://github.com/DrMeji/Ark/blob/main/README.md')}
+                onClick={() => void window.arkDesktop?.openExternal?.('https://github.com/DrMeji/Nova/blob/main/README.md')}
               >
                 Privacy Policy
               </button>

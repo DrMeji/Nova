@@ -287,48 +287,64 @@ export function OnboardingScreen() {
     void syncWorkspaceGrantsFromPrefs();
 
     // Install default local brain (llama-cli + GGUF) so zero-key chat works.
+    // Skip network download when weights are already on this PC (upgrade / re-setup).
     let downloadStarted = false;
     let downloadError: string | null = null;
     try {
-      const { downloadEngineModel, engineDownloadProgress, engineDownloadError } = await import('@/lib/arkEngine');
-      await downloadEngineModel(brainId);
-      downloadStarted = true;
-      const coder = hw ? getRecommendedCoderModel(hw) : null;
-      if (coder && coder.id !== brainId) {
-        void downloadEngineModel(coder.id).catch(() => undefined);
-      }
+      const { downloadEngineModel, engineDownloadProgress, engineDownloadError, getEngineStatus } = await import('@/lib/arkEngine');
+      const status = await getEngineStatus().catch(() => null);
+      const listed = status?.models || [];
+      const haveBrain = listed.some((m) => m.id === brainId && m.status === 'ready');
+      const haveWeightsOnDisk = Boolean(
+        status?.modelFiles?.some((f) => f.sizeMb > 50 && (
+          f.file.toLowerCase().includes(brainId.toLowerCase())
+          || f.file.toLowerCase().includes('qwen')
+        )),
+      );
 
-      await new Promise<void>((resolve) => {
-        const tick = window.setInterval(async () => {
-          try {
-            const p = await engineDownloadProgress(brainId);
-            setProgress(Math.max(5, Math.min(99, p)));
-            const err = await engineDownloadError(brainId);
-            if (err) {
-              downloadError = err;
-              setFinishError(err);
+      if (haveBrain || haveWeightsOnDisk) {
+        setProgress(100);
+        downloadStarted = true;
+      } else {
+        await downloadEngineModel(brainId);
+        downloadStarted = true;
+        const coder = hw ? getRecommendedCoderModel(hw) : null;
+        if (coder && coder.id !== brainId) {
+          void downloadEngineModel(coder.id).catch(() => undefined);
+        }
+
+        await new Promise<void>((resolve) => {
+          const tick = window.setInterval(async () => {
+            try {
+              const p = await engineDownloadProgress(brainId);
+              setProgress(Math.max(5, Math.min(99, p)));
+              const err = await engineDownloadError(brainId);
+              if (err) {
+                downloadError = err;
+                setFinishError(err);
+                window.clearInterval(tick);
+                setProgress(100);
+                resolve();
+                return;
+              }
+              if (p >= 100) {
+                window.clearInterval(tick);
+                setProgress(100);
+                resolve();
+              }
+            } catch {
               window.clearInterval(tick);
               setProgress(100);
               resolve();
-              return;
             }
-            if (p >= 100) {
-              window.clearInterval(tick);
-              setProgress(100);
-              resolve();
-            }
-          } catch {
+          }, 400);
+          window.setTimeout(() => {
             window.clearInterval(tick);
             setProgress(100);
             resolve();
-          }
-        }, 400);
-        window.setTimeout(() => {
-          window.clearInterval(tick);
-          setProgress(100);
-          resolve();
-        }, 20 * 60 * 1000);
-      });
+          }, 20 * 60 * 1000);
+        });
+      }
     } catch (err) {
       downloadError = err instanceof Error ? err.message : 'Could not start local brain download';
       setFinishError(downloadError);

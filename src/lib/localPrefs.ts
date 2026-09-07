@@ -1384,7 +1384,7 @@ export const ARK_CHANGELOG = [
       'Short Settings tabs no longer phantom-scroll; Updates drops GitHub URL and signing/reports',
       'Locked Beta tab reserved for advanced tooling',
       'Follow-up messages stay in the same Recent chat; queue/stop clear correctly',
-      'Local replies no longer echo “> hello” or User:/ARK: transcripts',
+      'Local replies no longer echo “> hello” or User:/NOVA: transcripts',
     ],
   },
   {
@@ -1463,7 +1463,7 @@ export const ARK_CHANGELOG = [
     notes: [
       'FLUX.1 Schnell (Local) installable from Local AI (~13 GB sd.cpp bundle)',
       'Clearer Authenticode + OAuth setup links in Settings',
-      'Stronger HF video routes; update feed remains DrMeji/Ark only',
+      'Stronger HF video routes; update feed remains DrMeji/Nova only',
     ],
   },
   {
@@ -1472,7 +1472,7 @@ export const ARK_CHANGELOG = [
     date: 'Aug 16, 2026',
     title: 'One public repo · SDXL Turbo local',
     notes: [
-      'Installers and in-app updates use DrMeji/Ark only (NOVA-dist retired)',
+      'Installers and in-app updates use DrMeji/Nova only (NOVA-dist retired)',
       'SDXL Turbo (Local) downloadable from Local AI alongside SD 1.5',
       'OAuth setup guide: docs/oauth-setup.md; Authenticode via CSC_* on NOVA CI',
     ],

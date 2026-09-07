@@ -1,6 +1,6 @@
 /**
- * In-app updates via public DrMeji/Ark (installer feed only).
- * Source stays private in DrMeji/Ark-Source — never publish app source to the public repo.
+ * In-app updates via public DrMeji/Nova (installer feed only).
+ * Source stays private in DrMeji/Nova-Source — never publish app source to the public repo.
  *
  * 1) Download installer inside the main NOVA app
  * 2) Breakaway-launch NOVA.exe --ark-updater (survives parent quit; no PowerShell UI)
@@ -15,7 +15,7 @@ const { spawn, execFileSync } = require('child_process');
 const { app, BrowserWindow } = require('electron');
 
 /** Public installer feed (no source). */
-const UPDATE_REPO = 'DrMeji/Ark';
+const UPDATE_REPO = 'DrMeji/Nova';
 /** Private source — never use as anonymous download target in production. */
 const UPDATE_REPO_FALLBACK = '';
 
@@ -25,7 +25,7 @@ const TRUSTED_SETUP_HOSTS = new Set([
   'release-assets.githubusercontent.com',
 ]);
 
-/** Only NOVA installers from the public DrMeji/Ark Releases feed (canonical GitHub download URL). */
+/** Only NOVA installers from the public DrMeji/Nova Releases feed (canonical GitHub download URL). */
 function isTrustedSetupUrl(url) {
   try {
     const u = new URL(String(url || ''));
@@ -1249,7 +1249,7 @@ async function checkForUpdate() {
   // Silent check — indicator lives in the sidebar near Search, not the bottom strip.
 
   try {
-    // Prefer the public installer feed. Private DrMeji/Ark returns 404 without a GitHub login.
+    // Prefer the public installer feed. Private DrMeji/Nova-Source returns 404 without a GitHub login.
     let res = await fetchReleases(UPDATE_REPO);
     let usedRepo = UPDATE_REPO;
     if ((res.status !== 200 || !Array.isArray(res.data)) && UPDATE_REPO_FALLBACK) {

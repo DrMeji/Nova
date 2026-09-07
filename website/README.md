@@ -33,6 +33,6 @@ Deploy the `website/` folder to Vercel/Netlify. Then add that `*.vercel.app` ori
 
 Buttons point at the **public** installer feed only:
 
-https://github.com/DrMeji/Ark/releases/latest
+https://github.com/DrMeji/Nova/releases/latest
 
 Do not link the private NOVA-Source repo from this site.

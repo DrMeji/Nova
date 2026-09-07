@@ -1,7 +1,7 @@
 name: Release
 
-# Build on private Ark-Source. Default: publish installer to Ark-Source only (test first).
-# Public DrMeji/Ark is opt-in after you smoke-test the private release (or local bat/dev build).
+# Build on private Nova-Source. Default: publish installer to Nova-Source only (test first).
+# Public DrMeji/Nova is opt-in after you smoke-test the private release (or local bat/dev build).
 on:
   push:
     tags:
@@ -13,7 +13,7 @@ on:
         required: true
         type: string
       publish_public:
-        description: "Also publish to public DrMeji/Ark (only after private/test build looks good)"
+        description: "Also publish to public DrMeji/Nova (only after private/test build looks good)"
         required: false
         type: boolean
         default: false
@@ -52,12 +52,12 @@ jobs:
       - name: Upload installer artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ark-windows-installer
+          name: nova-windows-installer
           path: |
-            release/ARK-Setup.exe
-            release/ARK-Setup.exe.blockmap
+            release/NOVA-Setup.exe
+            release/NOVA-Setup.exe.blockmap
             release/latest.yml
-            release/ARK-Portable.exe
+            release/NOVA-Portable.exe
           if-no-files-found: error
 
       - name: Resolve release tag
@@ -74,24 +74,24 @@ jobs:
           if ($tag -notmatch '^v\d+\.\d+\.\d+$') { throw "Bad tag: $tag" }
           "tag=$tag" >> $env:GITHUB_OUTPUT
 
-      # Always land on private Ark-Source first so you can download + smoke-test.
-      - name: Publish to Ark-Source (private / test)
+      # Always land on private Nova-Source first so you can download + smoke-test.
+      - name: Publish to Nova-Source (private / test)
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          pwsh scripts/publish-public-release.ps1 -Tag "${{ steps.tag.outputs.tag }}" -Repos @('DrMeji/Ark-Source')
+          pwsh scripts/publish-public-release.ps1 -Tag "${{ steps.tag.outputs.tag }}" -Repos @('DrMeji/Nova-Source')
 
       # Opt-in only. Tag pushes never auto-ship public; use Actions → Release → Run workflow
-      # with publish_public checked after you verified the Ark-Source (or bat/dev) build.
-      - name: Publish to public DrMeji/Ark
+      # with publish_public checked after you verified the Nova-Source (or bat/dev) build.
+      - name: Publish to public DrMeji/Nova
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_public == true }}
         shell: pwsh
         env:
-          # Cross-repo publish requires a PAT with repo scope on DrMeji/Ark.
+          # Cross-repo publish requires a PAT with repo scope on DrMeji/Nova.
           GH_TOKEN: ${{ secrets.ARK_PUBLIC_RELEASE_TOKEN }}
         run: |
           if (-not $env:GH_TOKEN) {
-            throw "Missing secret ARK_PUBLIC_RELEASE_TOKEN (PAT that can create releases on DrMeji/Ark)."
+            throw "Missing secret ARK_PUBLIC_RELEASE_TOKEN (PAT that can create releases on DrMeji/Nova)."
           }
-          pwsh scripts/publish-public-release.ps1 -Tag "${{ steps.tag.outputs.tag }}" -Repos @('DrMeji/Ark')
+          pwsh scripts/publish-public-release.ps1 -Tag "${{ steps.tag.outputs.tag }}" -Repos @('DrMeji/Nova')

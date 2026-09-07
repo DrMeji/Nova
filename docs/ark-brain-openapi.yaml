@@ -1,9 +1,9 @@
 openapi: 3.0.3
 info:
-  title: ARK Brain API
+  title: NOVA Brain API
   description: |
-    External clients talk to ARK Engine on localhost — never to a third-party local runtime.
-    Packaged ARK requires Bearer token on chat routes. Bound port may differ from 8787 — read /v1/contract baseUrl.
+    External clients talk to NOVA Engine on localhost — never to a third-party local runtime.
+    Packaged NOVA requires Bearer token on chat routes. Bound port may differ from 8787 — read /v1/contract baseUrl.
     Cookbook: docs/ark-brain-api.md · sample: examples/external-brain-client/
     Compat: Ollama /api/* and OpenAI /v1/chat/completions on the same port.
   version: 0.4.0
@@ -25,7 +25,7 @@ paths:
           description: Contract document
   /v1/models:
     get:
-      summary: Ready ARK Engine models
+      summary: Ready NOVA Engine models
       responses:
         '200':
           description: Models

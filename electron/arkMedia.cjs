@@ -529,7 +529,7 @@ async function fetchHordeImage(prompt, opts = {}) {
   const headers = {
     'Content-Type': 'application/json',
     apikey: '0000000000',
-    'Client-Agent': 'NOVA-Desktop:0.2:https://github.com/DrMeji/Ark',
+    'Client-Agent': 'NOVA-Desktop:0.2:https://github.com/DrMeji/Nova',
   };
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), 38_000);

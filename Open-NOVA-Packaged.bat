@@ -7,10 +7,10 @@ echo  ========================================
 echo   NOVA - packaged installer build
 echo  ========================================
 echo.
-echo  Builds release\ARK-Setup.exe from your
+echo  Builds release\NOVA-Setup.exe from your
 echo  current code. No menu — just builds.
 echo.
-echo  Day-to-day UI: Open-ARK-Build.bat
+echo  Day-to-day UI: Open-NOVA-Build.bat
 echo.
 echo  Code signing: if CSC_LINK and
 echo  CSC_KEY_PASSWORD are set, electron-builder
@@ -49,14 +49,14 @@ if errorlevel 1 (
 )
 
 echo.
-echo  Done. Installer: release\ARK-Setup.exe
+echo  Done. Installer: release\NOVA-Setup.exe
 echo  1^) Install that build
 echo  2^) Open Settings - Check for updates
-echo  3^) Confirm black Updating splash, then reopen
+echo  3^) Confirm update splash, then reopen
 echo.
 echo  To publish + generate delta ^(latest.yml^):
 echo    npm run electron:publish
-echo  ^(needs GitHub auth for DrMeji/Ark^)
+echo  ^(needs GitHub auth for DrMeji/Nova^)
 echo.
 pause
 exit /b 0

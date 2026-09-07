@@ -1,7 +1,7 @@
 param(
   [Parameter(Mandatory = $true)]
   [string]$Tag,
-  [string[]]$Repos = @('DrMeji/Ark-Source', 'DrMeji/Ark')
+  [string[]]$Repos = @('DrMeji/Nova-Source', 'DrMeji/Nova')
 )
 
 $ErrorActionPreference = 'Stop'
@@ -35,8 +35,12 @@ foreach ($repo in $Repos) {
   $version = if ($Tag.StartsWith('v')) { $Tag.Substring(1) } else { $Tag }
   $title = "NOVA $version"
 
+  $prevEap = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
   gh release view $Tag --repo $repo 2>$null | Out-Null
-  if ($LASTEXITCODE -eq 0) {
+  $exists = ($LASTEXITCODE -eq 0)
+  $ErrorActionPreference = $prevEap
+  if ($exists) {
     Write-Host "  Release $Tag already exists on $repo - uploading assets if any."
     $files = Get-ReleaseAssets
     if ($files.Count -gt 0) {
@@ -48,12 +52,12 @@ foreach ($repo in $Repos) {
   $notes = @(
     "NOVA $Tag",
     '',
-    'Download ARK-Setup.exe (installer) for Windows. The app name is NOVA.',
+    'Download NOVA-Setup.exe (installer) for Windows.',
     'Source code zip attachments on this public repo are README-only - not the app.'
   ) -join "`n"
 
   $files = Get-ReleaseAssets
-  if ($repo -eq 'DrMeji/Ark' -and $files.Count -eq 0) {
+  if ($repo -eq 'DrMeji/Nova' -and $files.Count -eq 0) {
     Write-Warning '  No installer files in release/ - creating release without assets (CI may upload later).'
     gh release create $Tag --repo $repo --title $title --notes $notes
   } elseif ($files.Count -gt 0) {

@@ -65,7 +65,7 @@ Last updated: 2026-08-26 (v0.1.162 hardening pass)
 ## Smoke tests
 
 ```bat
-Open-ARK-Build.bat
+Open-NOVA-Build.bat
 node scripts/smoke-self-guard.mjs
 node scripts/smoke-chat-routes.mjs
 node scripts/smoke-file-ops.mjs

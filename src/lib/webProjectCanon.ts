@@ -946,7 +946,7 @@ export function reactFeaturePolishEdits(
   }
 
   if (wantsFind && !/data-ark-find-bar/i.test(app)) {
-    const find = `<label className="NOVA-find-bar" data-ark-find-bar="1">Find in note <input placeholder="Search in note…" /></label>`;
+    const find = `<label className="ark-find-bar" data-ark-find-bar="1">Find in note <input placeholder="Search in note…" /></label>`;
     app = app.replace(
       /(<(?:div|section|main)[^>]*className=["'][^"']*(?:editor|main|content|pane)[^"']*["'][^>]*>)/i,
       `$1${find}`,
@@ -963,7 +963,7 @@ export function reactFeaturePolishEdits(
   }
 
   if (wantsTags && !/data-ark-tags/i.test(app)) {
-    const tags = `<div className="NOVA-tags" data-ark-tags="1"><span>draft</span><span>idea</span><span>review</span></div>`;
+    const tags = `<div className="ark-tags" data-ark-tags="1"><span>draft</span><span>idea</span><span>review</span></div>`;
     app = app.replace(/(<h1[^>]*>[\s\S]*?<\/h1>)/i, `$1${tags}`);
     if (!/data-ark-tags/i.test(app)) {
       app = app.replace(/return\s*\(/i, `return (\n    <>\n    ${tags}\n`);

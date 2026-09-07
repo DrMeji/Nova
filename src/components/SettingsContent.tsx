@@ -542,8 +542,8 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
   }), []);
 
   return (
-    <div ref={settingsRootRef} className="flex h-full min-h-0 min-w-0 animate-fade-in">
-      <div className={`${navCompact ? 'w-14' : 'w-56'} shrink-0 border-r border-surface-border flex flex-col min-h-0 min-w-0`}>
+    <div ref={settingsRootRef} className="flex h-full min-h-0 min-w-0 animate-fade-in bg-ark-navy-900">
+      <div className={`${navCompact ? 'w-14' : 'w-56'} shrink-0 border-r border-surface-border flex flex-col min-h-0 min-w-0 bg-ark-navy-950/40`}>
         <nav className={`flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-2 sm:p-3 flex flex-col gap-0.5 ${navCompact ? 'items-center' : ''}`}>
           {navSections.map(section => (
             <button
@@ -554,7 +554,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                 if (section.disabled || section.comingSoon) return;
                 setActiveSection(section.id);
               }}
-              className={`NOVA-nav-item ${navCompact ? '!px-2 !gap-0 !justify-center w-10' : ''} ${activeSection === section.id ? 'active' : ''} ${
+              className={`ark-nav-item w-full ${navCompact ? '!px-2 !gap-0 !justify-center w-10' : ''} ${activeSection === section.id ? 'active' : ''} ${
                 section.disabled || section.comingSoon ? 'opacity-45 cursor-not-allowed pointer-events-none' : ''
               }`}
               title={section.comingSoon ? `${section.label} · coming soon` : section.disabled ? 'Locked' : section.label}
@@ -588,7 +588,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
         </div>
       </div>
 
-      <div className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden p-4 sm:p-6 lg:p-8">
+      <div className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden p-4 sm:p-6 lg:p-8 bg-ark-navy-900">
         <div className={`min-w-0 mx-auto ${activeSection === 'providers' || activeSection === 'models' ? 'max-w-4xl' : 'max-w-2xl'}`}>
           {activeSection === 'account' && (
             <SettingsSection title="Account">
@@ -924,7 +924,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
             <SettingsSection title="AI">
               <div className="space-y-6 max-w-3xl">
                 {/* Status */}
-                <div className="NOVA-card p-4 flex items-center gap-3">
+                <div className="ark-card p-4 flex items-center gap-3">
                   <div className="w-10 h-10 rounded-lg bg-ark-accent-green/10 flex items-center justify-center shrink-0">
                     <Cpu className="w-5 h-5 text-ark-accent-green" />
                   </div>
@@ -989,7 +989,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
 
                 {/* Content safety. NSFW in one self-contained card */}
                 <SettingsGroup title="Content safety (Image)">
-                  <div className="NOVA-card p-4 space-y-3">
+                  <div className="ark-card p-4 space-y-3">
                     <ToggleRow
                       label="Allow NSFW content"
                       value={prefs.allowNsfw}
@@ -1156,7 +1156,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                     </p>
                   </div>
                 ) : null}
-                <div className="NOVA-card p-3.5 flex items-center gap-3">
+                <div className="ark-card p-3.5 flex items-center gap-3">
                   <div className="w-9 h-9 rounded-lg bg-ark-blue-500/10 flex items-center justify-center shrink-0">
                     <Cloud className="w-4 h-4 text-ark-blue-400" />
                   </div>
@@ -1326,7 +1326,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                     <button
                       type="button"
                       className="text-[11px] text-sky-400 hover:text-sky-300 shrink-0"
-                      onClick={() => void window.arkDesktop?.openExternal?.('https://github.com/DrMeji/Ark/releases')}
+                      onClick={() => void window.arkDesktop?.openExternal?.('https://github.com/DrMeji/Nova/releases')}
                       title="Public download page (setup guide docs are not on the public repo)"
                     >
                       Releases
@@ -1998,7 +1998,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                   onChange={v => patchPrefs({ chatFirst: v })}
                 />
 
-                <div className="flex items-center gap-3 p-4 NOVA-card min-w-0">
+                <div className="flex items-center gap-3 p-4 ark-card min-w-0">
                   <div className="w-9 h-9 rounded-lg bg-ark-accent-green/10 flex items-center justify-center shrink-0">
                     <Lock className="w-4 h-4 text-ark-accent-green" />
                   </div>
@@ -2034,7 +2034,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                         title="Open NOVA on GitHub"
                         aria-label="Open NOVA on GitHub"
                         onClick={() =>
-                          void window.arkDesktop?.openExternal?.('https://github.com/DrMeji/Ark/releases')
+                          void window.arkDesktop?.openExternal?.('https://github.com/DrMeji/Nova/releases')
                         }
                         className="h-10 w-10 rounded-xl border border-white/15 bg-white/[0.04] text-content-secondary hover:text-content-primary hover:bg-white/[0.08] flex items-center justify-center transition-colors"
                       >
@@ -2193,7 +2193,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                   <button
                     type="button"
                     className="ark-btn-secondary text-xs"
-                    onClick={() => void window.arkDesktop?.openExternal?.('https://github.com/DrMeji/Ark/issues/new')}
+                    onClick={() => void window.arkDesktop?.openExternal?.('https://github.com/DrMeji/Nova/issues/new')}
                   >
                     Open feedback issue
                   </button>
@@ -2416,7 +2416,7 @@ function ToggleRow({
   bare?: boolean;
 }) {
   return (
-    <div className={`flex items-center justify-between gap-4 min-w-0 ${bare ? '' : 'p-4 NOVA-card'} ${disabled ? 'opacity-70' : ''}`}>
+    <div className={`flex items-center justify-between gap-4 min-w-0 ${bare ? '' : 'p-4 ark-card'} ${disabled ? 'opacity-70' : ''}`}>
       <div className="flex-1 min-w-0 pr-2">
         <p className="text-sm font-medium text-content-primary">{label}</p>
       </div>
@@ -2454,7 +2454,7 @@ function ThemeCard({ label, active, onClick }: { label: string; active: boolean;
 
 function InfoCard({ title, value }: { title: string; value: string }) {
   return (
-    <div className="NOVA-card p-4">
+    <div className="ark-card p-4">
       <p className="text-xs text-content-tertiary">{title}</p>
       <p className="text-sm font-medium text-content-primary mt-1">{value}</p>
     </div>
@@ -2475,7 +2475,7 @@ function StorageBar({
   tone: string;
 }) {
   return (
-    <div className="NOVA-card p-4 min-w-0">
+    <div className="ark-card p-4 min-w-0">
       <div className="flex justify-between gap-3 mb-2 min-w-0">
         <span className="text-sm text-content-primary truncate">{label}</span>
         <span className="text-xs text-content-tertiary shrink-0">{used} / {total}</span>

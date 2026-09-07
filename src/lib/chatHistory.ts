@@ -590,7 +590,7 @@ export function latestUserMessage(history: RouterChatTurn[], fallback: string): 
 
 /**
  * Strip GGUF / packed-prompt echoes so the bubble never shows “> hello” or
- * a full User:/ARK: transcript before the real answer.
+ * a full User:/NOVA: transcript before the real answer.
  */
 export function sanitizeAssistantReply(
   raw: string,

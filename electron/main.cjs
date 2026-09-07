@@ -41,10 +41,51 @@ const isUpdaterMode = process.argv.includes('--ark-updater');
 const BRAIN_PORT = arkConfig.BRAIN_PORT_BASE;
 let brainPort = BRAIN_PORT;
 
-// Source builds (Open-ARK-Build.bat) keep their own profile so models/keys never clash with Setup.exe.
-if (!app.isPackaged) {
-  app.setPath('userData', path.join(app.getPath('appData'), 'ARK-Dev'));
-}
+/**
+ * Keep a stable AppData folder across the ARK → NOVA rename.
+ * electron-builder productName "NOVA" would otherwise create %APPDATA%\NOVA and
+ * look like a fresh install (logout + setup + model re-download).
+ * Installer hooks still manage %APPDATA%\ARK.
+ */
+(function pinStableUserData() {
+  const fs = require('fs');
+  const appData = app.getPath('appData');
+  if (!app.isPackaged) {
+    app.setPath('userData', path.join(appData, 'ARK-Dev'));
+    return;
+  }
+  const legacyArk = path.join(appData, 'ARK');
+  const novaFolder = path.join(appData, 'NOVA');
+  try {
+    // Prefer the long-lived ARK profile (models, auth, setup).
+    if (fs.existsSync(legacyArk)) {
+      app.setPath('userData', legacyArk);
+      return;
+    }
+    // One-time: if an empty/new NOVA profile was created first, still use ARK going forward
+    // so installer.nsh and future upgrades stay aligned. Copy NOVA → ARK when NOVA has data.
+    if (fs.existsSync(novaFolder)) {
+      try {
+        fs.mkdirSync(legacyArk, { recursive: true });
+        for (const name of fs.readdirSync(novaFolder)) {
+          const from = path.join(novaFolder, name);
+          const to = path.join(legacyArk, name);
+          if (!fs.existsSync(to)) {
+            fs.cpSync(from, to, { recursive: true, force: false });
+          }
+        }
+      } catch {
+        /* best-effort migrate */
+      }
+      app.setPath('userData', legacyArk);
+      return;
+    }
+    app.setPath('userData', legacyArk);
+  } catch {
+    app.setPath('userData', legacyArk);
+  }
+})();
+
 
 const ALLOWED_HOSTS = new Set([
   'api.github.com',
@@ -413,7 +454,7 @@ function createWindow() {
       if (typeof rootLen === 'number' && rootLen < 40) {
         await win.webContents.executeJavaScript(`(() => {
           const root = document.getElementById('root') || document.body;
-          root.innerHTML = '<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0a0a0b;color:#f5f5f5;font-family:Segoe UI,system-ui,sans-serif;padding:32px;text-align:center"><div><p style="font-size:18px;font-weight:600;margin:0 0 8px">NOVA UI failed to load</p><p style="opacity:.7;font-size:13px;margin:0">The window stayed blank. Quit NOVA fully from the tray, reinstall the latest release, or run Open-ARK-Build.bat after a successful npm run build.</p></div></div>';
+          root.innerHTML = '<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0a0a0b;color:#f5f5f5;font-family:Segoe UI,system-ui,sans-serif;padding:32px;text-align:center"><div><p style="font-size:18px;font-weight:600;margin:0 0 8px">NOVA UI failed to load</p><p style="opacity:.7;font-size:13px;margin:0">The window stayed blank. Quit NOVA fully from the tray, reinstall the latest release, or run Open-NOVA-Build.bat after a successful npm run build.</p></div></div>';
         })()`);
         reveal();
       }

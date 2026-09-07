@@ -4,7 +4,7 @@ import {
   SquarePen, Briefcase, Blocks, Database,
   Settings, Search, PanelLeft, ChevronDown, History, Clock3,
   ImageIcon, Video, MessageSquare, Trash2, Code2, Pencil, Mic,
-  Globe, Bell, Copy, Star, Download, Brain, Cable,
+  Globe, Bell, Copy, Star, Download, Brain, Cable, Bot,
 } from 'lucide-react';
 import { Modal } from './Modal';
 import { SettingsContent } from './SettingsContent';
@@ -28,7 +28,7 @@ import { probeAiModeLabel, type AiModeLabel } from '@/lib/aiModeStatus';
 import { JobsStrip } from '@/components/JobsStrip';
 import { PostLoginSafetyTip } from '@/components/PostLoginSafetyTip';
 import { AuthAmbientOrbs } from '@/components/auth/AuthAmbientOrbs';
-import { ArkMark } from '@/components/ArkMark';
+import { NovaMark } from '@/components/NovaMark';
 import { comparePinnedThenRecent } from '@/lib/recentStore';
 import { formatArkId } from '@/lib/arkUserId';
 import { isArkDevEmail } from '@/lib/arkDevAccount';
@@ -46,7 +46,7 @@ import { countUnreadLocalNotifications } from '@/lib/localNotifications';
 import { ARK_UPDATE_INDICATOR_CACHE_KEY, checkArkGitHubUpdate, clearUpdateIndicatorCache, downloadAndInstallArkUpdate, type ArkUpdateInfo } from '@/lib/arkUpdates';
 
 function BrainNavIcon({ className }: { className?: string }) {
-  return <ArkMark className={className || 'w-4 h-4'} title="NOVA Brain" />;
+  return <Bot className={className || 'w-4 h-4'} />;
 }
 
 function getNavGroups(): {
@@ -697,14 +697,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <div className={`flex items-center gap-2 ${collapsed ? 'flex-col w-full' : 'justify-between'}`}>
               {!collapsed && (
                 <div className="flex items-center gap-2 min-w-0 pl-0.5">
-                  <img
-                    src={`${import.meta.env.BASE_URL}ark-icon.png`}
-                    alt=""
-                    className="w-7 h-7 object-contain shrink-0"
-                    onError={e => {
-                      (e.currentTarget as HTMLImageElement).style.display = 'none';
-                    }}
-                  />
+                  <NovaMark className="w-7 h-7 text-content-primary" title="NOVA" />
                 </div>
               )}
               {collapsed ? (
