@@ -1,10 +1,27 @@
-# ARK changelog
+# NOVA changelog
 
-## 0.1.196 — 2026-09-07
+## 0.1.197 â€” 2026-09-07
+
+Rebrand to **NOVA**, softer updates UI, and the build/create accuracy work from recent live testing.
+
+**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.197/ARK-Setup.exe) Â· [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.197)
+
+### Brand
+- Product name is **NOVA** across app, website, and chat identity (never introduces itself as ARK)
+- New radial circuit mark + wordmark; website hero uses a draw-in / pulse animation
+
+### Updates
+- No more forced Settings lock when an update is available â€” chat and the rest of the app stay usable
+- Soft prompt above your profile: **New update available Â· Update now**
+
+### Builds / create
+- Stronger create/edit routing for web, React, games, and 3D-style projects from recent live QA
+
+## 0.1.196 â€” 2026-09-07
 
 Cursor-style + menu, agent quality upgrades, and chat/build behavior fixes from live testing.
 
-**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.196/ARK-Setup.exe) · [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.196)
+**Windows installer:** [NOVA-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.196/ARK-Setup.exe) ï¿½ [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.196)
 
 ### Composer
 - + menu is name-only in one row (Plan, Ask, Agent, Debug, Multi-agent, Bind project)
@@ -17,30 +34,30 @@ Cursor-style + menu, agent quality upgrades, and chat/build behavior fixes from 
 - Casual opinions answer first (no bounce-back questions)
 - Book-club builds get a real tracker page; product names like ShelfCircle stick
 
-## 0.1.195 — 2026-09-07
+## 0.1.195 ï¿½ 2026-09-07
 
 Upgrade the real install splash toward the Preview look: colored icon + rounded progress bar.
 
-**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.195/ARK-Setup.exe) · [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.195)
+**Windows installer:** [NOVA-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.195/ARK-Setup.exe) ï¿½ [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.195)
 
 ### Update splash
-- Install (HTA) splash uses the colored ARK mark instead of flat white line-art
+- Install (HTA) splash uses the colored NOVA mark instead of flat white line-art
 - Progress bar is a rounded SVG pill (mshta ignored CSS border-radius before)
 
-## 0.1.194 — 2026-09-07
+## 0.1.194 ï¿½ 2026-09-07
 
 Remove Settings Preview splash so real update splash can be compared.
 
-**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.194/ARK-Setup.exe) · [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.194)
+**Windows installer:** [NOVA-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.194/ARK-Setup.exe) ï¿½ [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.194)
 
 ### Updates
 - Removed the Preview splash button from Settings ? Updates
 
-## 0.1.193 — 2026-09-07
+## 0.1.193 ï¿½ 2026-09-07
 
 Restore Notifications; fix packaged Preview splash IPC so the update splash can be checked.
 
-**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.193/ARK-Setup.exe) · [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.193)
+**Windows installer:** [NOVA-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.193/ARK-Setup.exe) ï¿½ [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.193)
 
 ### Connect
 - Notifications tab restored in the sidebar and Search
@@ -48,24 +65,24 @@ Restore Notifications; fix packaged Preview splash IPC so the update splash can 
 ### Update splash
 - Preview splash works again in installed builds (preload had blocked the API)
 
-## 0.1.192 — 2026-09-07
+## 0.1.192 ï¿½ 2026-09-07
 
 Update splash: remove nested inset panel; slightly more space between icon and progress bar.
 
-**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.192/ARK-Setup.exe) · [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.192)
+**Windows installer:** [NOVA-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.192/ARK-Setup.exe) ï¿½ [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.192)
 
 ### Update splash
 - One solid panel only (no darker outer + lighter inner box)
 - Icon and progress bar spaced a bit farther apart
 
-## 0.1.180 — 2026-09-03
+## 0.1.180 ï¿½ 2026-09-03
 
 No duplicate Code Recent rows; phone-sized Localhost preview.
 
-**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.180/ARK-Setup.exe)
+**Windows installer:** [NOVA-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.180/ARK-Setup.exe)
 
 ### Recent / Code
-- Create stays on the same chat — no second Code filing-system row in Recent
+- Create stays on the same chat ï¿½ no second Code filing-system row in Recent
 - Code pill is the only VS-style file UI
 - Legacy Code-project Recent entries cleared
 
@@ -73,15 +90,15 @@ No duplicate Code Recent rows; phone-sized Localhost preview.
 - Planning asks overall iOS / Android vs a specific device
 - Localhost can open in an iPhone / Galaxy-sized frame for phone apps
 
-## 0.1.179 — 2026-09-03
+## 0.1.179 ï¿½ 2026-09-03
 
 Splash progress polish, Projects ghost cleanup, Image SOON for retail.
 
-**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.179/ARK-Setup.exe) · [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.179)
+**Windows installer:** [NOVA-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.179/ARK-Setup.exe) ï¿½ [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.179)
 
 ### Update splash
 - Progress bar lifted and fills left?right
-- Electron splash uses rounded corners (HTA install splash stays square — Windows limitation)
+- Electron splash uses rounded corners (HTA install splash stays square ï¿½ Windows limitation)
 
 ### Projects & create
 - Ghost `code` / `uploads` internal folders no longer appear in Projects
@@ -91,70 +108,70 @@ Splash progress polish, Projects ghost cleanup, Image SOON for retail.
 ### Image
 - Image tab is SOON on packaged installs (same idea as Video); bat/DEV still has Image
 
-## 0.1.178 — 2026-09-03
+## 0.1.178 ï¿½ 2026-09-03
 
 Smarter planning questions, Brain true center, Code pill only, Localhost blank-screen fix.
 
-**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.178/ARK-Setup.exe) · [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.178)
+**Windows installer:** [NOVA-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.178/ARK-Setup.exe) ï¿½ [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.178)
 
 ### Planning
-- Asks product questions (web vs phone, who it’s for) — never tech experience, auth, or privacy quizzes
-- ARK assumes privacy-minded defaults instead of interviewing users
+- Asks product questions (web vs phone, who itï¿½s for) ï¿½ never tech experience, auth, or privacy quizzes
+- NOVA assumes privacy-minded defaults instead of interviewing users
 
 ### Code & preview
 - Old empty Code / Project workspace screen removed; Code pill is the only code UI
 - Recent / Projects open Chat + Code overlay (folders left, editor right)
-- Localhost installs npm deps when needed and starts Vite — no more blank black preview for React apps
+- Localhost installs npm deps when needed and starts Vite ï¿½ no more blank black preview for React apps
 - Brain tab content truly vertically centered
 
-## 0.1.177 — 2026-09-03
+## 0.1.177 ï¿½ 2026-09-03
 
 Update UX cleanup, splash layout fix, Brain centering, warmer planning chat.
 
-**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.177/ARK-Setup.exe) · [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.177)
+**Windows installer:** [NOVA-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.177/ARK-Setup.exe) ï¿½ [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.177)
 
 ### Updates
-- One update indicator (green download in the sidebar header) — no duplicate spinning “Update available” strip
+- One update indicator (green download in the sidebar header) ï¿½ no duplicate spinning ï¿½Update availableï¿½ strip
 - Check for update becomes the Update button when a build is ready
-- Removed confusing “delta-ready” and unsigned “Code signing: NotSigned” noise
+- Removed confusing ï¿½delta-readyï¿½ and unsigned ï¿½Code signing: NotSignedï¿½ noise
 - Required update keeps Settings on the Update page until you install
 - Update splash logo + progress bar centered again (HTA layout rewrite)
 
 ### Brain & chat
 - Brain tab content vertically centered
-- Planning replies open with what you’re building + how to start, then natural clarifying questions
+- Planning replies open with what youï¿½re building + how to start, then natural clarifying questions
 
-## 0.1.176 — 2026-09-03
+## 0.1.176 ï¿½ 2026-09-03
 
-Chat mic (voice-to-text), ARK Projects home, Brain under Tools, chat polish.
+Chat mic (voice-to-text), NOVA Projects home, Brain under Tools, chat polish.
 
-**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.176/ARK-Setup.exe) · [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.176)
+**Windows installer:** [NOVA-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.176/ARK-Setup.exe) ï¿½ [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.176)
 
 ### Chat
-- Microphone on the composer — click to dictate into the chat box (voice-to-text)
+- Microphone on the composer ï¿½ click to dictate into the chat box (voice-to-text)
 - Queue bar matches the chat box width
 - Thought expands to background steps; Files Changed on disk edits; More details removed
-- “Gaming news” / build-app asks no longer scan the Desktop for games
+- ï¿½Gaming newsï¿½ / build-app asks no longer scan the Desktop for games
 
 ### Projects & Tools
-- New projects prefer `Documents\ARK Projects`; Projects lists that folder
-- ARK Brain lives under Tools (below MCP) with the ARK icon; API open to any local app
+- New projects prefer `Documents\NOVA Projects`; Projects lists that folder
+- NOVA Brain lives under Tools (below MCP) with the NOVA icon; API open to any local app
 
-## 0.1.174 — 2026-09-03
+## 0.1.174 ï¿½ 2026-09-03
 
 Transparent shell icon (no black taskbar tile) + Start menu icon cache refresh.
 
-**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.174/ARK-Setup.exe) · [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.174)
+**Windows installer:** [NOVA-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.174/ARK-Setup.exe) ï¿½ [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.174)
 
 ### Icons
 - Taskbar / Start mark is transparent (no black square behind the glyph)
 - Installer asks Windows to refresh icon cache after update
 
-## 0.1.173 — 2026-09-03
+## 0.1.173 ï¿½ 2026-09-03
 
-Larger ARK mark, official update splash, safer chat follow-ups.
+Larger NOVA mark, official update splash, safer chat follow-ups.
 
-**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.173/ARK-Setup.exe) · [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.173)
+**Windows installer:** [NOVA-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.173/ARK-Setup.exe) ï¿½ [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.173)
 
 ### Icons & updates
 - Taskbar / tray mark is larger and clearer
@@ -165,50 +182,50 @@ Larger ARK mark, official update splash, safer chat follow-ups.
 - Yes / overall follow-ups deepen instead of repeating
 - Snappier chat switching in bat builds
 
-## 0.1.152 — 2026-08-24
+## 0.1.152 ï¿½ 2026-08-24
 
 Permanent Delete account in Settings (immediate, no waiting period).
 
-**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.152/ARK-Setup.exe) · [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.152)
+**Windows installer:** [NOVA-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.152/ARK-Setup.exe) ï¿½ [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.152)
 
 ### Account
-- Settings ? Account ? Permanently delete account removes the user on Supabase right away so the same email can sign up again with a new ARK ID.
-## 0.1.151 — 2026-08-24
+- Settings ? Account ? Permanently delete account removes the user on Supabase right away so the same email can sign up again with a new NOVA ID.
+## 0.1.151 ï¿½ 2026-08-24
 
-Clean auth restart on the new Supabase project. Developer email shows as DEV; everyone else keeps a 7-digit ARK ID.
+Clean auth restart on the new Supabase project. Developer email shows as DEV; everyone else keeps a 7-digit NOVA ID.
 
-**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.151/ARK-Setup.exe) · [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.151)
+**Windows installer:** [NOVA-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.151/ARK-Setup.exe) ï¿½ [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.151)
 
 ### Social
-- Fresh backend has no leftover accounts — sign up again with your email.
+- Fresh backend has no leftover accounts ï¿½ sign up again with your email.
 - `thomaskrishnan0107@gmail.com` displays as **DEV**; friends can add `DEV` or the underlying 7-digit ID.
-- Other accounts always use their own 7-digit ARK ID.
-## 0.1.150 — 2026-08-24
+- Other accounts always use their own 7-digit NOVA ID.
+## 0.1.150 ï¿½ 2026-08-24
 
-Point ARK at the new Supabase project and ship friend-request schema for public testers.
+Point NOVA at the new Supabase project and ship friend-request schema for public testers.
 
-**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.150/ARK-Setup.exe) · [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.150)
+**Windows installer:** [NOVA-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.150/ARK-Setup.exe) ï¿½ [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.150)
 
 ### Social / backend
 - Desktop app now uses Supabase project `mjheezjqwqbhkcmwredq`.
 - Friend requests, profiles, contacts, DMs, and networking tables are live on that project.
 - Sign in again on each PC (accounts from the old project do not carry over).
-## 0.1.149 — 2026-08-24
+## 0.1.149 ï¿½ 2026-08-24
 
 Friend requests / Networking add-by-ARK-ID. Requires applying supabase/apply-friend-requests.sql once on the hosted project.
 
-**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.149/ARK-Setup.exe) · [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.149)
+**Windows installer:** [NOVA-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.149/ARK-Setup.exe) ï¿½ [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.149)
 
 ### Social
 - Clearer errors when friend-request table is missing on Supabase.
-- Lookup ARK IDs reliably before sending requests (both accounts must have signed in once).
-- Networking search accepts a 7-digit ARK ID and shows Add friend.
+- Lookup NOVA IDs reliably before sending requests (both accounts must have signed in once).
+- Networking search accepts a 7-digit NOVA ID and shows Add friend.
 - Message / Networking add paths send a friend request (not a fake instant contact).
-## 0.1.148 — 2026-08-24
+## 0.1.148 ï¿½ 2026-08-24
 
 Security / public-beta hardening for testers. Video stays Soon. Forgot password goes to contact developer.
 
-**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.148/ARK-Setup.exe) · [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.148)
+**Windows installer:** [NOVA-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.148/ARK-Setup.exe) ï¿½ [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.148)
 
 ### Security / public beta
 - Updates re-resolve the installer from DrMeji/Ark Releases and reject non-trusted URLs before download/silent install.
@@ -218,27 +235,27 @@ Security / public-beta hardening for testers. Video stays Soon. Forgot password 
 - Full PC grant limited to the Windows user profile (not whole-disk).
 - pathStat / browse honor the same workspace grants as file read.
 - Forgot password ? contact developer (@DrMeji) instead of broken email reset.
-- Public docs link goes to Releases (no oauth-setup.md on public Ark).
+- Public docs link goes to Releases (no oauth-setup.md on public NOVA).
 - Skip-setup chat honesty no longer treats engine IPC as a live brain.
 - Video models always "coming soon" in catalog; video capacity never advertised as free/live.
 - openExternal allowlists known Connect/docs hosts (HTTPS only).
 - Localhost HTTP proxy limited to brain / Ollama / Vite ports.
 - Image offline/SVG fallbacks show an honesty label; DM attachments labeled "this PC only".
-## 0.1.147 — 2026-08-24
+## 0.1.147 ï¿½ 2026-08-24
 
 Public downloads without public source.
 
-**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.147/ARK-Setup.exe) · [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.147)
+**Windows installer:** [NOVA-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.147/ARK-Setup.exe) ï¿½ [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.147)
 
 ### Distribution
 - Public **DrMeji/Ark** is README + Releases (installers) only.
 - Full source lives in private **DrMeji/Ark-Source**.
-- In-app updates check the public Ark feed.
-## 0.1.146 — 2026-08-24
+- In-app updates check the public NOVA feed.
+## 0.1.146 ï¿½ 2026-08-24
 
 In-app updates work while source stays private.
 
-**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.146/ARK-Setup.exe) · [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.146)
+**Windows installer:** [NOVA-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.146/ARK-Setup.exe) ï¿½ [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.146)
 
 ### Updates
 - Check/Download now reads the public **DrMeji/Ark** feed (installers only).
@@ -247,7 +264,7 @@ In-app updates work while source stays private.
 
 Chat continuity, setup Connect links, and image download / enlarge fixes.
 
-**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.145/ARK-Setup.exe) ? [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.145)
+**Windows installer:** [NOVA-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.145/ARK-Setup.exe) ? [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.145)
 
 ### Chat
 - Soft follow-ups (?more details?, ?dive deeper?, ?recommended area?) keep history and a thread topic so local models stay on coding instead of inventing EcoBuddy or movies/TV.
@@ -264,7 +281,7 @@ Chat continuity, setup Connect links, and image download / enlarge fixes.
 
 Setup access toggles apply instantly (no OK popups). Decorative em dashes cleaned from UI copy.
 
-**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.144/ARK-Setup.exe) -+ [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.144)
+**Windows installer:** [NOVA-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.144/ARK-Setup.exe) -+ [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.144)
 
 ### Setup / Security
 - Desktop, Documents, Full PC, and Run everything toggles no longer show a second confirm dialog.
@@ -277,7 +294,7 @@ Setup access toggles apply instantly (no OK popups). Decorative em dashes cleane
 
 Fresh installs always open on Sign in / Sign up before first-run setup.
 
-**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.143/ARK-Setup.exe) -+ [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.143)
+**Windows installer:** [NOVA-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.143/ARK-Setup.exe) -+ [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.143)
 
 ### Auth
 - New installs clear leftover saved sessions so setup cannot skip Sign in / Sign up.
@@ -287,24 +304,24 @@ Fresh installs always open on Sign in / Sign up before first-run setup.
 
 Plugins Soon locks, profile photos across Connect, and presence-colored sidebar ring.
 
-**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.142/ARK-Setup.exe) -+ [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.142)
+**Windows installer:** [NOVA-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.142/ARK-Setup.exe) -+ [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.142)
 
 ### Plugins
 - Unwired catalog plugins (Neon, Shopify, HubSpot, QuickBooks, etc.) show **Soon**, are dimmed, and are not clickable.
 
 ### Profile & presence
 - Uploaded profile photo syncs to your account and shows on Network, Message, and Notifications.
-- Sidebar profile avatar ring + ARK ID color follow Online / Idle / Do Not Disturb / Inactive.
+- Sidebar profile avatar ring + NOVA ID color follow Online / Idle / Do Not Disturb / Inactive.
 
 ## 0.1.141 G?? 2026-08-24
 
 Live social: cloud friend requests, real-time DMs, and internet voice calls.
 
-**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.141/ARK-Setup.exe) -+ [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.141)
+**Windows installer:** [NOVA-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.141/ARK-Setup.exe) -+ [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.141)
 
 ### Social (production)
 
-- **Friend requests** sync through Supabase (`ark_friend_requests`) G?? add by ARK ID, accept in Notifications on the other device.
+- **Friend requests** sync through Supabase (`ark_friend_requests`) G?? add by NOVA ID, accept in Notifications on the other device.
 - **Direct messages** already use Supabase Realtime; friend flow is now wired for cross-user use when signed in.
 - **Voice calls** use Supabase signaling + WebRTC audio; offer/answer/ICE persist for reconnect catch-up.
 - **Call tab** enabled by default (no Testers toggle required).
@@ -319,7 +336,7 @@ Apply `supabase/migrations/20260824100000_ark_friend_requests.sql` on the hosted
 
 Image quality, chat keep-alive, NSFW gate, and static-project fixes.
 
-**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.140/ARK-Setup.exe) -+ [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.140)
+**Windows installer:** [NOVA-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.140/ARK-Setup.exe) -+ [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.140)
 
 ### Image generation
 
@@ -345,7 +362,7 @@ Download: [Releases](https://github.com/DrMeji/Ark/releases)
 
 Chat coding, new-product routing, and delete targeting.
 
-**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.138/ARK-Setup.exe) -+ [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.138)
+**Windows installer:** [NOVA-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.138/ARK-Setup.exe) -+ [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.138)
 
 Remaining product request: [issue #1](https://github.com/DrMeji/Ark/issues/1).
 

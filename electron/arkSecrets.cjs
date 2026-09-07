@@ -5,7 +5,7 @@ const fs = require('fs');
 const path = require('path');
 
 function secretsPath() {
-  return path.join(app.getPath('userData'), 'ark-provider-keys.enc');
+  return path.join(app.getPath('userData'), 'NOVA-provider-keys.enc');
 }
 
 function loadMap() {

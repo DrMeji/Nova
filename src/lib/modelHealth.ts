@@ -1,6 +1,6 @@
 /** Model wear / freshness for the dual usage ring (separate from turn context budget). */
 
-const KEY = 'ark:model-health';
+const KEY = 'NOVA:model-health';
 
 /** ~45 minutes of continuous heavy use → ring near full (image waits are long). */
 const WEAR_MS_FULL = 50 * 60_000;

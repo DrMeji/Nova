@@ -4,7 +4,7 @@ import { isArkDevSession } from '@/lib/arkRuntime';
 
 export type ParkId = 'networking' | 'message' | 'call' | 'testers';
 
-const KEY = 'ark:revealed-features';
+const KEY = 'NOVA:revealed-features';
 
 /** Always on for signed-in users (Message / Networking). Call is opt-in via Testers on bat/dev. */
 const ALWAYS_LIVE: ParkId[] = ['networking', 'message'];
@@ -29,7 +29,7 @@ function readList(): ParkId[] {
 
 function writeList(ids: ParkId[]) {
   localStorage.setItem(KEY, JSON.stringify(ids));
-  window.dispatchEvent(new Event('ark:features-changed'));
+  window.dispatchEvent(new Event('NOVA:features-changed'));
 }
 
 export function listRevealed(): ParkId[] {

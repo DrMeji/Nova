@@ -1,5 +1,5 @@
 /**
- * Smoke checks for brain API honesty (run with ARK desktop open).
+ * Smoke checks for brain API honesty (run with NOVA desktop open).
  * node scripts/smoke-brain-check.cjs
  *
  * Set ARK_BRAIN_SMOKE_OPTIONAL=1 to skip (exit 0) when brain is offline — used in CI.

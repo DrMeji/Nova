@@ -1,5 +1,5 @@
 /**
- * ARK's own projects folder (Documents\ARK Projects preferred).
+ * NOVA projects folders (Documents\NOVA Projects preferred; still lists legacy ARK Projects).
  * Used by create flow + Projects view listing.
  */
 
@@ -13,18 +13,34 @@ function joinPath(root: string, name: string): string {
 
 export async function resolveArkProjectsHomes(): Promise<Array<{ label: string; path: string }>> {
   const out: Array<{ label: string; path: string }> = [];
+  const seen = new Set<string>();
   const roots = await window.arkDesktop?.browseRoots?.();
   const desktop = roots?.roots?.find(r => r.id === 'desktop')?.path;
   const documents = roots?.roots?.find(r => r.id === 'documents')?.path;
 
+  const push = (label: string, folderPath: string) => {
+    const key = folderPath.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push({ label, path: folderPath });
+  };
+
   if (documents) {
-    out.push({ label: 'Documents\\ARK Projects', path: joinPath(documents, 'ARK Projects') });
+    push('Documents\\NOVA Projects', joinPath(documents, 'NOVA Projects'));
+    push('Documents\\ARK Projects', joinPath(documents, 'ARK Projects'));
   }
   if (desktop) {
-    out.push({ label: 'Desktop\\ARK Projects', path: joinPath(desktop, 'ARK Projects') });
+    push('Desktop\\NOVA Projects', joinPath(desktop, 'NOVA Projects'));
+    push('Desktop\\ARK Projects', joinPath(desktop, 'ARK Projects'));
   }
 
   return out;
+}
+
+/** Preferred root for new projects (create NOVA Projects; legacy ARK still listed). */
+export async function preferredArkProjectsHome(): Promise<{ label: string; path: string } | null> {
+  const homes = await resolveArkProjectsHomes();
+  return homes.find((h) => /NOVA Projects$/i.test(h.path)) || homes[0] || null;
 }
 
 export async function listArkProjectFolders(): Promise<Array<{

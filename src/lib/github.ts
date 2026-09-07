@@ -1,4 +1,4 @@
-/** Live GitHub API helpers for the ARK GitHub plugin. */
+/** Live GitHub API helpers for the NOVA GitHub plugin. */
 
 export type GitHubUser = {
   login: string;
@@ -143,7 +143,7 @@ export async function createGitHubRepo(
   }>(token, '/user/repos', 'POST', {
     name: name.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-|-$/g, '').slice(0, 100) || 'ark-project',
     private: opts?.private !== false,
-    description: opts?.description?.slice(0, 350) || 'Created from ARK',
+    description: opts?.description?.slice(0, 350) || 'Created from NOVA',
     auto_init: false,
   });
 }
@@ -357,7 +357,7 @@ export async function runGitHubLive(
     const named = createRepoMatch?.[2] || userText.match(/repo(?:sitory)?\s+(?:named|called)\s+([\w.-]+)/i)?.[1];
     const name = (named || 'ark-project').replace(/[^A-Za-z0-9._-]+/g, '-');
     const user = await verifyGitHubToken(token);
-    const created = await createGitHubRepo(token, name, { private: vis, description: 'Created from ARK' });
+    const created = await createGitHubRepo(token, name, { private: vis, description: 'Created from NOVA' });
     return [
       `GitHub · created ${vis ? 'private' : 'public'} repo (@${user.login})`,
       '',
@@ -375,7 +375,7 @@ export async function runGitHubLive(
     return [
       'GitHub · pull request',
       '',
-      'Open this project in Code, then say “create a pull request” so ARK can use the local branch and diff.',
+      'Open this project in Code, then say “create a pull request” so NOVA can use the local branch and diff.',
       `Repo: ${createPrMatch[1]}/${createPrMatch[2]}`,
     ].join('\n');
   }
@@ -416,7 +416,7 @@ export async function runGitHubLive(
     const [, owner, repo, rest] = createIssueMatch;
     const titleBody = rest.trim();
     const split = titleBody.split(/\n+/);
-    const title = (split[0] || 'New issue from ARK').slice(0, 256);
+    const title = (split[0] || 'New issue from NOVA').slice(0, 256);
     const body = split.slice(1).join('\n').trim() || undefined;
     const user = await verifyGitHubToken(token);
     const created = await createGitHubIssue(token, owner, repo, title, body);

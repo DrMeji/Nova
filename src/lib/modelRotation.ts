@@ -30,7 +30,7 @@ import { resetModelHealth } from '@/lib/modelHealth';
 
 export type RotationKind = 'chat' | 'coding' | 'image' | 'video';
 
-export const ROTATION_NOTE_EVENT = 'ark-rotation-note';
+export const ROTATION_NOTE_EVENT = 'NOVA-rotation-note';
 
 function kindToEngine(kind: ThreadBrainKind): RotationKind {
   if (kind === 'coding' || kind === 'image' || kind === 'video') return kind;

@@ -56,7 +56,7 @@ export function GitHubRepoPicker({ open, onClose, onPick }: Props) {
                   className="text-xs text-sky-400 hover:text-sky-300"
                   onClick={() => {
                     onClose();
-                    window.dispatchEvent(new CustomEvent('ark:open-settings', { detail: { section: 'plugins' } }));
+                    window.dispatchEvent(new CustomEvent('NOVA:open-settings', { detail: { section: 'plugins' } }));
                   }}
                 >
                   Open Plugins → Connect GitHub

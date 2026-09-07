@@ -68,7 +68,7 @@ const LAYOUT_RULES = `Layout rules for simple pages:
 - Do not float the title left. Do not leave Hello World stuck top-left unless the user asked for that.
 - Keep HTML, CSS, and JS in sync (if you add .top-bar icons, include CSS for them).`;
 
-const CODING_INSTRUCTIONS = `You are ARK inside a developer project workspace. not a generic chatbot and not a local-engine toy.
+const CODING_INSTRUCTIONS = `You are NOVA inside a developer project workspace. not a generic chatbot and not a local-engine toy.
 Your job is to help the user build and change real software in this project.
 Answer the user’s latest request directly (build / edit / fix / explain). Do not substitute a different feature, dump unrelated files, or “improve” something they did not ask for. If they only asked a question, answer it. do not invent file edits.
 Interpret typos and misspellings generously (infer the intended words) and do not lecture about spelling unless they ask.
@@ -117,7 +117,7 @@ Rules:
 
 ${LAYOUT_RULES}`;
 
-const CODING_INSTRUCTIONS_LITE = `You are ARK Code. Edit ONLY what the user asked.
+const CODING_INSTRUCTIONS_LITE = `You are NOVA Code. Edit ONLY what the user asked.
 Interpret typos generously; do not lecture about spelling unless asked.
 
 Prefer SEARCH/REPLACE for edits to existing files. Use @@@FILE with COMPLETE file content for new files or large rewrites.
@@ -354,7 +354,7 @@ export function buildProjectCodingPrompt(
 
   return `${codingInstructionsFor(userMessage, flat, size)}
 
-Project: ${projectName || 'ARK project'}
+Project: ${projectName || 'NOVA project'}
 Turn size: ${size}. edit only what was asked; keep context small.
 
 Current files:
@@ -391,7 +391,7 @@ export function buildProjectCodingPromptLite(userMessage: string, projectName?: 
       : '';
   return `${CODING_INSTRUCTIONS_LITE}${extra}
 
-Project: ${projectName || 'ARK project'}
+Project: ${projectName || 'NOVA project'}
 
 User request:
 ${userMessage.trim()}`;
@@ -801,7 +801,7 @@ function titleFromAsk(message: string) {
 function pythonFallback(userMessage: string): string {
   const title = escapeHtml(titleFromAsk(userMessage)).replace(/&quot;/g, '"');
   return `# ${title}
-# Local ARK project. run with: python main.py
+# Local NOVA project. run with: python main.py
 
 def main():
     print(${JSON.stringify(titleFromAsk(userMessage))})
@@ -845,7 +845,7 @@ button { border: 0; border-radius: 10px; padding: 10px 16px; background: #6366f1
   return (
     <div className="card">
       <h1>${title.replace(/\\/g, '\\\\').replace(/`/g, '\\`')}</h1>
-      <p>Ask ARK to change this React app.</p>
+      <p>Ask NOVA to change this React app.</p>
     </div>
   );
 }
@@ -904,13 +904,8 @@ export function scaffoldFallbackEdits(
     if (visual.length) return visual;
   }
 
-  // Empty / new web build: always create real HTML/CSS/JS so Start works.
-  if (!hasHtml && wantsProjectFileEdits(userMessage)) {
-    return webScaffoldFallbackEdits(userMessage);
-  }
-  if (!hasHtml && (looksLikeWebsiteBuild(userMessage) || /\bhello\s*world\b|\bblank\s+page\b/i.test(userMessage))) {
-    return webScaffoldFallbackEdits(userMessage);
-  }
+  // Never inject canned landings / stock heroes when the model wrote nothing.
+  // Empty shells come from create; fresh UI must come from a real model reply.
   return [];
 }
 
@@ -1071,7 +1066,7 @@ export function webScaffoldFallbackEdits(userMessage: string): ParsedFileEdit[] 
 <body>
   <main class="page">
     <h1>${safeHeading}</h1>
-    <p class="tagline">Built in ARK Code. press Start to preview, then ask for changes.</p>
+    <p class="tagline">Built in NOVA Code. press Start to preview, then ask for changes.</p>
   </main>
   <script src="js/app.js"></script>
 </body>
@@ -1365,11 +1360,6 @@ export function sanitizeAppliedWebContent(path: string, content: string): string
   return body;
 }
 
-function countLines(s: string) {
-  if (!s) return 0;
-  return s.split('\n').length;
-}
-
 function ensurePathInTree(tree: ProjectFileNode[], path: string): ProjectFileNode[] {
   const parts = normalizePath(path).split('/').filter(Boolean);
   if (!parts.length) return tree;
@@ -1431,8 +1421,21 @@ export function applyFileEdits(
       ?? '';
     const next = sanitizeAppliedWebContent(path, edit.content);
 
-    const added = Math.max(0, countLines(next) - countLines(prev));
-    const removed = Math.max(0, countLines(prev) - countLines(next));
+    // Multiset line diff so replace/edit shows both + and − (not net line count only).
+    const beforeLines = String(prev || '').split('\n');
+    const afterLines = String(next || '').split('\n');
+    const beforeCounts = new Map<string, number>();
+    for (const line of beforeLines) beforeCounts.set(line, (beforeCounts.get(line) || 0) + 1);
+    const afterCounts = new Map<string, number>();
+    for (const line of afterLines) afterCounts.set(line, (afterCounts.get(line) || 0) + 1);
+    let added = 0;
+    let removed = 0;
+    for (const key of new Set([...beforeCounts.keys(), ...afterCounts.keys()])) {
+      const left = beforeCounts.get(key) || 0;
+      const right = afterCounts.get(key) || 0;
+      if (right > left) added += right - left;
+      if (left > right) removed += left - right;
+    }
     addedLines += added;
     removedLines += removed;
     fileDiffs.push({ path, added, removed });

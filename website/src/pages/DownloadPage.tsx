@@ -12,10 +12,10 @@ export function DownloadPage() {
         <section className="download-hero px-5 sm:px-8">
           <div className="mx-auto max-w-3xl text-center">
             <h1 className="display text-[clamp(2.2rem,6vw,3.6rem)] font-semibold tracking-tight text-[var(--fg)] leading-[1.08]">
-              Download ARK wherever you create
+              Download NOVA wherever you create
             </h1>
             <p className="mt-5 text-base sm:text-lg text-[var(--fg-muted)] leading-relaxed max-w-xl mx-auto">
-              The desktop AI studio for Windows. Install once, then chat, build projects, and run models on your PC.
+              The Desktop AI studio for Windows. Install once, then chat, build projects, and run models on your PC.
             </p>
             <div className="mt-9 flex justify-center">
               <a href={RELEASES_URL} className="btn btn-download" target="_blank" rel="noreferrer">

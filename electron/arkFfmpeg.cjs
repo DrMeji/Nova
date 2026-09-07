@@ -1,5 +1,5 @@
 /**
- * Optional ffmpeg bootstrap for ARK — turns stills into short real MP4 clips
+ * Optional ffmpeg bootstrap for NOVA — turns stills into short real MP4 clips
  * when generative video hosts fail.
  */
 

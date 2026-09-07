@@ -98,7 +98,7 @@ export function looksLikeCodeEditAsk(text: string): boolean {
   ) {
     return true;
   }
-  if (/\b(drop|remove|delete|get rid of)\b[\s\S]{0,80}\b(page|section|about|button|nav|tab)\b/i.test(t)) {
+  if (/\b(drop|remove|delete|get rid of)\b[\s\S]{0,80}\b(page|section|about|button|nav|tab|footer|copyright|line|text|link|icon)\b/i.test(t)) {
     return true;
   }
   if (/\bwaitlist\b/i.test(t) || (/\bcontact\b/i.test(t) && /\b(email|form|button)\b/i.test(t) && /\b(keep|only|just|add|change)\b/i.test(t))) {
@@ -141,11 +141,11 @@ export function looksLikeCodeEditAsk(text: string): boolean {
 
 export function chatTurnAllowsFileEdits(content: string, composerMode: ComposerAgentMode): boolean {
   const mode = normalizeComposerMode(composerMode);
-  if (mode === 'ask') return false;
-  // Explicit UI/code edits win over planning heuristics (plan chip, pending brief, etc.).
+  // Explicit UI/code edits always write — even if the composer chip is Ask.
   if (looksLikeImplementGo(content) || looksLikeBuildStart(content) || looksLikeCodeEditAsk(content)) {
     return true;
   }
+  if (mode === 'ask') return false;
   if (modeBlocksFileWrites(mode, content)) return false;
   if (looksLikePromptEcho(content)) return false;
   if (wantsPlanningOnly(content) || looksLikeConversationalPlanningAsk(content)) return false;

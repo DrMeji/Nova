@@ -43,11 +43,11 @@ export async function workflowCreateGitHubRepo(opts: {
   commitMessage?: string;
 }): Promise<{ ok: boolean; reply: string }> {
   const { projectId, projectName, token, repoName, isPrivate } = opts;
-  const commitMessage = opts.commitMessage?.trim() || 'Initial commit from ARK';
+  const commitMessage = opts.commitMessage?.trim() || 'Initial commit from NOVA';
 
   const created = await createGitHubRepo(token, repoName, {
     private: isPrivate,
-    description: `${projectName} from ARK`,
+    description: `${projectName} from NOVA`,
   });
   const remote = created.clone_url || (created.html_url ? `${created.html_url}.git` : '');
   if (!remote) {
@@ -102,7 +102,7 @@ export async function workflowOpenPullRequest(opts: {
 
   if (pushFirst) {
     if (st.git && st.dirty) {
-      const committed = await gitCommit(projectId, 'Update from ARK');
+      const committed = await gitCommit(projectId, 'Update from NOVA');
       if (!committed.ok && !/nothing to commit|no changes/i.test(committed.error || '')) {
         return { ok: false, reply: committed.error || 'Commit failed before push.' };
       }
@@ -113,7 +113,7 @@ export async function workflowOpenPullRequest(opts: {
     }
   }
 
-  const body = (await gitDiff(projectId)).text || 'Opened from ARK Code.';
+  const body = (await gitDiff(projectId)).text || 'Opened from NOVA Code.';
   const preferredBases = ['main', 'master'];
   let lastError = 'Could not open PR';
 

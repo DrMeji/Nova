@@ -30,14 +30,14 @@ const CATALOG: SearchItem[] = [
   { id: 'new-chat', label: 'Chat', group: 'Navigate', description: 'Start a conversation', icon: SquarePen, route: { name: 'chat' } },
   { id: 'image', label: 'Image', group: 'Navigate', description: 'Generate a picture', icon: ImageIcon, route: { name: 'chat', mode: 'image' } },
   { id: 'video', label: 'Video', group: 'Navigate', description: 'Generate a short clip', icon: Video, route: { name: 'chat', mode: 'video' } },
-  { id: 'voice', label: 'Voice', group: 'Navigate', description: 'Talk with ARK — conversation only', icon: Mic, route: { name: 'chat', mode: 'voice' } },
+  { id: 'voice', label: 'Voice', group: 'Navigate', description: 'Talk with NOVA — conversation only', icon: Mic, route: { name: 'chat', mode: 'voice' } },
   { id: 'projects', label: 'Projects', group: 'Navigate', description: 'Browse your projects', icon: Briefcase, route: { name: 'projects' } },
   { id: 'history', label: 'History', group: 'Navigate', description: 'Recent chats and creations', icon: Clock3, route: { name: 'dashboard' } },
   { id: 'plugins', label: 'Plugins', group: 'Navigate', description: 'Integrations and tools', icon: Blocks, route: { name: 'build' } },
   { id: 'models', label: 'Models', group: 'Navigate', description: 'Local, cloud, and engine', icon: Database, route: { name: 'models' } },
-  { id: 'local-ai', label: 'Engine', group: 'Navigate', description: 'ARK Engine start, stop, and storage', icon: Bot, route: { name: 'local-ai' } },
+  { id: 'local-ai', label: 'Engine', group: 'Navigate', description: 'NOVA Engine start, stop, and storage', icon: Bot, route: { name: 'local-ai' } },
   { id: 'mcp', label: 'MCP', group: 'Navigate', description: 'Register external MCP tool servers', icon: Cable, route: { name: 'mcp' } },
-  { id: 'brain', label: 'Brain', group: 'Navigate', description: 'ARK Brain API for any local app', icon: Bot, route: { name: 'brain' } },
+  { id: 'brain', label: 'Brain', group: 'Navigate', description: 'NOVA Brain API for any local app', icon: Bot, route: { name: 'brain' } },
   { id: 'settings', label: 'Settings', group: 'Settings', description: 'Account, appearance, AI preferences', icon: Settings, action: 'settings', settingsSection: 'account' },
   { id: 'appearance', label: 'Appearance', group: 'Settings', description: 'Theme and display options', icon: Settings, action: 'settings', settingsSection: 'appearance' },
   { id: 'ai', label: 'AI', group: 'Settings', description: 'Routing and failover', icon: Settings, action: 'settings', settingsSection: 'ai' },
@@ -45,7 +45,7 @@ const CATALOG: SearchItem[] = [
   { id: 'providers', label: 'Providers', group: 'Settings', description: 'Cloud AI connections', icon: Settings, action: 'settings', settingsSection: 'providers' },
   { id: 'privacy', label: 'Privacy', group: 'Settings', description: 'What stays on this PC', icon: Settings, action: 'settings', settingsSection: 'privacy' },
   { id: 'security', label: 'Security', group: 'Settings', description: 'PIN, auto-lock, sandbox', icon: Settings, action: 'settings', settingsSection: 'security' },
-  { id: 'updates', label: 'Updates', group: 'Settings', description: 'Check for new ARK builds', icon: Settings, action: 'settings', settingsSection: 'updates' },
+  { id: 'updates', label: 'Updates', group: 'Settings', description: 'Check for new NOVA builds', icon: Settings, action: 'settings', settingsSection: 'updates' },
   { id: 'testers', label: 'Testers', group: 'Settings', description: 'Reveal parked features, feedback', icon: Settings, action: 'settings', settingsSection: 'testers' },
 ];
 
@@ -88,8 +88,8 @@ export function SearchPanel({ onClose, onOpenSettings }: SearchPanelProps) {
 
   useEffect(() => {
     const onFeat = () => setFeatureTick(t => t + 1);
-    window.addEventListener('ark:features-changed', onFeat);
-    return () => window.removeEventListener('ark:features-changed', onFeat);
+    window.addEventListener('NOVA:features-changed', onFeat);
+    return () => window.removeEventListener('NOVA:features-changed', onFeat);
   }, []);
 
   useEffect(() => {

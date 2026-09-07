@@ -1,10 +1,10 @@
 /**
- * ARK Brain HTTP API — loopback brain for ARK Chat and external apps
- * (Lindsay, custom assistants, etc.). Powered by ARK Engine only.
+ * NOVA Brain HTTP API — loopback brain for NOVA Chat and external apps
+ * (Lindsay, custom assistants, etc.). Powered by NOVA Engine only.
  *
  * Native:   /health /v1/* @ 8787
  * Compat:   Ollama-shaped /api/* and OpenAI-shaped /v1/chat/completions
- *           so apps that currently speak Ollama can point at ARK instead.
+ *           so apps that currently speak Ollama can point at NOVA instead.
  *
  * Capacity rotation (speed-aware preload + pending swap) lives in the
  * renderer (`src/lib/modelRotation.ts`). This API generates on the active
@@ -83,7 +83,7 @@ function packMessages(parsed) {
 function resolveModelId(raw, arkEngine) {
   if (!raw || typeof raw !== 'string') return undefined;
   const id = raw.trim();
-  if (!id || id === 'ark-auto') return undefined;
+  if (!id || id === 'NOVA-auto') return undefined;
   const aliased = MODEL_ALIASES[id.toLowerCase()] || MODEL_ALIASES[id.toLowerCase().replace(/:latest$/, '')];
   const want = aliased || id;
   const status = arkEngine.getStatus();
@@ -101,22 +101,22 @@ function resolveModelId(raw, arkEngine) {
 function ollamaModelRows(arkEngine) {
   const status = arkEngine.getStatus();
   return status.models
-    .filter((m) => m.status === 'ready' && m.id !== 'ark-core')
+    .filter((m) => m.status === 'ready' && m.id !== 'NOVA-core')
     .map((m) => ({
       name: m.id,
       model: m.id,
       modified_at: new Date().toISOString(),
       size: Math.round((m.sizeGb || 0) * 1024 * 1024 * 1024),
-      digest: `ark-${m.id}`,
+      digest: `NOVA-${m.id}`,
       details: {
         parent_model: '',
-        format: m.gguf ? 'gguf' : 'ark',
+        format: m.gguf ? 'gguf' : 'NOVA',
         family: 'ark-engine',
         families: ['ark-engine'],
         parameter_size: m.detail || '',
         quantization_level: 'Q4_K_M',
       },
-      ark: { id: m.id, name: m.name, detail: m.detail },
+      NOVA: { id: m.id, name: m.name, detail: m.detail },
     }));
 }
 
@@ -224,7 +224,7 @@ function createBrainServer(opts) {
       if (result?.cancelled) return { ok: false, error: 'Generation canceled' };
       return { ok: false, error: 'Generation returned empty output' };
     }
-    if (/Local GGUF brain failed|No local GGUF brain|not ready in ARK Engine/i.test(reply)) {
+    if (/Local GGUF brain failed|No local GGUF brain|not ready in NOVA Engine/i.test(reply)) {
       return { ok: false, error: reply || 'Generation failed' };
     }
     return null;
@@ -279,7 +279,7 @@ function createBrainServer(opts) {
         const engine = arkEngine.getStatus();
         return json(res, 200, {
           ok: true,
-          service: 'ark-brain',
+          service: 'NOVA-brain',
           version: CONTRACT_VERSION,
           contractVersion: CONTRACT_VERSION,
           port: activePort,
@@ -309,7 +309,7 @@ function createBrainServer(opts) {
             ollama: ['GET /api/tags', 'POST /api/chat', 'POST /api/generate'],
             openai: ['POST /v1/chat/completions'],
           },
-          purpose: 'External apps (assistants, IDEs, agents) use ARK as their brain instead of a third-party local runtime.',
+          purpose: 'External apps (assistants, IDEs, agents) use NOVA as their brain instead of a third-party local runtime.',
         });
       }
 
@@ -419,7 +419,7 @@ function createBrainServer(opts) {
             try {
               const result = await runGenerateStream(parsed, (text) => {
                 const chunk = {
-                  id: `ark-${Date.now()}`,
+                  id: `NOVA-${Date.now()}`,
                   object: 'chat.completion.chunk',
                   created: Math.floor(Date.now() / 1000),
                   model: modelLabel,
@@ -435,7 +435,7 @@ function createBrainServer(opts) {
                 return;
               }
               res.write(`data: ${JSON.stringify({
-                id: `ark-${Date.now()}`,
+                id: `NOVA-${Date.now()}`,
                 object: 'chat.completion.chunk',
                 created: Math.floor(Date.now() / 1000),
                 model: result.modelId || modelLabel,
@@ -457,7 +457,7 @@ function createBrainServer(opts) {
           const errPayload = brainErrorPayload(result);
           if (errPayload) return json(res, 503, errPayload);
           return json(res, 200, {
-            id: `ark-${Date.now()}`,
+            id: `NOVA-${Date.now()}`,
             object: 'chat.completion',
             created: Math.floor(Date.now() / 1000),
             model: result.modelId || modelLabel,
@@ -467,7 +467,7 @@ function createBrainServer(opts) {
               finish_reason: 'stop',
             }],
             usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
-            ark: {
+            NOVA: {
               modelName: result.modelName,
               source: result.source || 'ark-engine',
             },
@@ -479,7 +479,7 @@ function createBrainServer(opts) {
 
       // ── Ollama-compatible (Lindsay & similar) ──────────────────────
       if (url === '/api/version' && req.method === 'GET') {
-        return json(res, 200, { version: `ark-brain-${CONTRACT_VERSION}` });
+        return json(res, 200, { version: `NOVA-brain-${CONTRACT_VERSION}` });
       }
 
       if (url === '/api/tags' && req.method === 'GET') {

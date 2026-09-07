@@ -17,12 +17,12 @@ import { cancelOwnAccountDeletion, deleteOwnAccountPermanently, finalizeSchedule
 import { accountResetRedirectUrl } from '@/lib/accountWeb';
 
 // Guest identity used when login is bypassed (dev / testing only).
-const BYPASS_KEY = 'ark:bypass-enabled';
+const BYPASS_KEY = 'NOVA:bypass-enabled';
 const GUEST_USER = {
   id: 'guest-local',
   aud: 'authenticated',
   role: 'authenticated',
-  email: 'guest@ark.local',
+  email: 'guest@NOVA.local',
   email_confirmed_at: undefined,
   phone: '',
   confirmed_at: undefined,
@@ -313,7 +313,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       email,
       password,
       // If the caller does not provide a displayName, we leave user_metadata empty.
-      // We'll assign the ARK ID display name after we generate/claim their 7-digit ARK ID.
+      // We'll assign the NOVA ID display name after we generate/claim their 7-digit NOVA ID.
       options: { data: { display_name: displayName?.trim() || undefined } },
     });
     if (error) {
@@ -342,7 +342,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const arkId = await ensureArkId(data.user.id, email);
 
         // Enforce: users do not choose their own username at signup.
-        // If no displayName was provided, set display_name to the 7-digit ARK ID.
+        // If no displayName was provided, set display_name to the 7-digit NOVA ID.
         if (!trimmed) {
           const auto = formatArkId(arkId);
           await supabase.from('profiles').update({ display_name: auto }).eq('id', data.user.id);
@@ -379,7 +379,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!redirectTo) {
       return {
         error:
-          'Email reset is not configured for this build (missing VITE_ARK_WEBSITE_ORIGIN). Use the local recovery note on this PC, or open your ARK account site → Forgot password.',
+          'Email reset is not configured for this build (missing VITE_ARK_WEBSITE_ORIGIN). Use the local recovery note on this PC, or open your NOVA account site → Forgot password.',
       };
     }
     const { error } = await supabase.auth.resetPasswordForEmail(trimmed, { redirectTo });

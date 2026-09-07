@@ -68,6 +68,8 @@ export { slugifyProjectName } from '@/lib/projectNames';
 export function extractProjectName(text: string): string | null {
   const t = String(text || '').trim();
   const patterns = [
+    // "Create the project Peach on disk" / "Create project Peach"
+    /\bcreate\s+(?:the\s+)?project\s+["“']?([A-Za-z][A-Za-z0-9][A-Za-z0-9 _-]{1,40})/i,
     // "Create the Ledger Bay project on disk"
     /\bcreate\s+(?:the\s+)?([A-Za-z][A-Za-z0-9][A-Za-z0-9 _-]{1,40}?)\s+project(?:\s+on\s+disk)?\b/i,
     /\bcreate\s+(?:the\s+)?([A-Za-z][A-Za-z0-9][A-Za-z0-9 _-]{1,40}?)\s+on\s+disk\b/i,
@@ -171,7 +173,15 @@ export function parseNewProjectIntent(message: string): NewProjectIntent | null 
   if (looksLikeFolderPathAsk(t) && !isCreate) return null;
   if (/\b(?:open|attach|import)\s+(?:folder|project)\b/i.test(t) && !/\bnew\b/i.test(t) && !/\bcreate\s+project\b/i.test(t)) return null;
   if (/\b(?:install|npm\s+i|pip\s+install)\b/i.test(t) && !/\bnew\b/i.test(t) && !looksLikeProjectBuildAsk(t)) return null;
-  if (/\b(delete|remove|trash|wipe)\b/i.test(t) && /\b(project|workspace|folder|directory)\b/i.test(t)) return null;
+  // “delete selected” UI feature must not cancel Create the project X on disk.
+  if (
+    /\b(delete|remove|trash|wipe)\b/i.test(t)
+    && /\b(project|workspace|folder|directory)\b/i.test(t)
+    && !/\bcreate\s+(?:the\s+)?project\b/i.test(t)
+    && !/\bon\s+disk\b/i.test(t)
+  ) {
+    return null;
+  }
 
   const name = extractProjectName(t);
   if (!name) return null;
@@ -180,8 +190,11 @@ export function parseNewProjectIntent(message: string): NewProjectIntent | null 
   // Rich briefs plan first (chips). Short "Create project X" builds now.
   // Explicit disk/preview asks must build immediately — never bounce to yellow "Bind a project".
   const shortChip = /^create\s+project\s+[A-Za-z]/i.test(t.trim()) && t.length < 80;
-  const wantsImmediateBuild = /\b(?:create\s+(?:the\s+)?(?:project\s+)?(?:on\s+)?disk|files?\s+on\s+disk|scaffold\s+now|build\s+it\s+now|open\s+preview|and\s+open\s+preview)\b/i.test(t)
-    || /\bcreate\s+(?:a\s+)?(?:brand[- ]?new\s+)?project\s+folder\b/i.test(t);
+  // "Create the project Peach on disk now" must build immediately — never plan-only.
+  const wantsImmediateBuild = /\bon\s+disk\b/i.test(t)
+    || /\b(?:files?\s+on\s+disk|scaffold\s+now|build\s+it\s+now|open\s+preview|and\s+open\s+preview)\b/i.test(t)
+    || /\bcreate\s+(?:a\s+)?(?:brand[- ]?new\s+)?project\s+folder\b/i.test(t)
+    || /\bcreate\s+(?:the\s+)?project\s+[A-Za-z]/i.test(t);
   const preferPlan = !shortChip
     && !looksLikeImplementGo(t)
     && !wantsImmediateBuild

@@ -1,5 +1,5 @@
 /**
- * Remote MCP transports for ARK: Streamable HTTP (2025+) and legacy HTTP+SSE (2024-11-05).
+ * Remote MCP transports for NOVA: Streamable HTTP (2025+) and legacy HTTP+SSE (2024-11-05).
  */
 
 /** @type {Map<string, { kind: 'streamable' | 'legacy', url: string, postUrl?: string, initialized?: boolean }>} */
@@ -102,7 +102,7 @@ async function tryStreamable(url) {
   await postRpc(base, 'initialize', {
     protocolVersion: '2024-11-05',
     capabilities: {},
-    clientInfo: { name: 'ARK', version: '0.1' },
+    clientInfo: { name: 'NOVA', version: '0.1' },
   });
   await postRpc(base, 'notifications/initialized', {}, { expectResponse: false });
   return { kind: 'streamable', url: base, initialized: true };
@@ -131,7 +131,7 @@ async function tryLegacySse(url) {
   await postRpc(postUrl, 'initialize', {
     protocolVersion: '2024-11-05',
     capabilities: {},
-    clientInfo: { name: 'ARK', version: '0.1' },
+    clientInfo: { name: 'NOVA', version: '0.1' },
   });
   await postRpc(postUrl, 'notifications/initialized', {}, { expectResponse: false });
 

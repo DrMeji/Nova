@@ -31,12 +31,12 @@ export function PinLockGate({ children }: { children: ReactNode }) {
         setLocked(true);
       }
     };
-    window.addEventListener('ark:pin-lock', onLock);
+    window.addEventListener('NOVA:pin-lock', onLock);
     const unsubSleep = window.arkDesktop?.onSystemSuspend?.(() => {
       if (hasPinSet() && getLocalPrefs().lockOnSleep) lockPinSession();
     });
     return () => {
-      window.removeEventListener('ark:pin-lock', onLock);
+      window.removeEventListener('NOVA:pin-lock', onLock);
       unsubSleep?.();
     };
   }, []);
@@ -120,7 +120,7 @@ export function PinLockGate({ children }: { children: ReactNode }) {
       <div className="w-full max-w-xs rounded-2xl border border-surface-border bg-ark-navy-900 p-5 space-y-4">
         <div className="flex items-center gap-2 text-content-primary">
           {step === '2fa' ? <ShieldCheck className="w-4 h-4 text-sky-400" /> : <Lock className="w-4 h-4 text-sky-400" />}
-          <p className="text-sm font-medium">{step === '2fa' ? 'Second factor' : 'Unlock ARK'}</p>
+          <p className="text-sm font-medium">{step === '2fa' ? 'Second factor' : 'Unlock NOVA'}</p>
         </div>
         <p className="text-xs text-content-tertiary">
           {step === '2fa'

@@ -1,5 +1,5 @@
 /**
- * Persist project file trees under ARK userData (real disk paths).
+ * Persist project file trees under NOVA userData (real disk paths).
  */
 
 const fs = require('fs');
@@ -786,7 +786,7 @@ function readDataUrl(targetPath, maxBytes = 6_000_000, options = {}) {
   const selfBlock = blockArkSelfPath(p);
   if (selfBlock) return selfBlock;
   if (!options.allowUserSelectedImage && !isAllowedExternalPath(p)) {
-    return { ok: false, error: 'Path is outside an approved ARK workspace folder.' };
+    return { ok: false, error: 'Path is outside an approved NOVA workspace folder.' };
   }
   const st = safeStatFollow(p);
   if (!st || !st.isFile()) return { ok: false, error: 'Not a file' };
@@ -843,7 +843,7 @@ function deleteProjectFiles(projectId) {
   const dir = path.resolve(resolveProjectDir(projectId));
   const rel = path.relative(root, dir);
   if (!dir.startsWith(root) || rel.startsWith('..') || path.isAbsolute(rel)) {
-    return { ok: false, error: 'Refusing to delete a path outside ARK projects' };
+    return { ok: false, error: 'Refusing to delete a path outside NOVA Projects' };
   }
   if (!fs.existsSync(dir)) return { ok: true };
   fs.rmSync(dir, { recursive: true, force: true });
@@ -865,11 +865,11 @@ function deleteGrantedFolder(targetPath) {
   if (underSandbox) {
     const base = path.basename(full).toLowerCase();
     if (full.toLowerCase() === pr.toLowerCase() || base === 'code' || base === 'uploads') {
-      return { ok: false, error: 'That folder is reserved by ARK.' };
+      return { ok: false, error: 'That folder is reserved by NOVA.' };
     }
   }
   if (!isAllowedExternalPath(full) && !underSandbox) {
-    return { ok: false, error: 'Path is outside an approved ARK workspace.' };
+    return { ok: false, error: 'Path is outside an approved NOVA workspace.' };
   }
   try {
     const st = fs.statSync(full);
@@ -892,7 +892,7 @@ function writeGrantedFile(targetPath, content = '') {
   const full = path.resolve(String(targetPath || ''));
   if (!full) return { ok: false, error: 'Invalid path' };
   if (!isAllowedExternalPath(full)) {
-    return { ok: false, error: 'Path is outside an approved ARK workspace.' };
+    return { ok: false, error: 'Path is outside an approved NOVA workspace.' };
   }
   try {
     fs.mkdirSync(path.dirname(full), { recursive: true });
@@ -908,7 +908,7 @@ function renameGrantedPath(fromPath, toPath) {
   const to = path.resolve(String(toPath || ''));
   if (!from || !to) return { ok: false, error: 'Invalid path' };
   if (!isAllowedExternalPath(from) || !isAllowedExternalPath(to)) {
-    return { ok: false, error: 'Path is outside an approved ARK workspace.' };
+    return { ok: false, error: 'Path is outside an approved NOVA workspace.' };
   }
   if (!fs.existsSync(from)) return { ok: false, error: 'Source file not found.' };
   if (fs.existsSync(to)) return { ok: false, error: 'A file with that name already exists.' };
@@ -941,7 +941,7 @@ function deleteWorkspaceRoot(projectId) {
   const root = path.resolve(resolveProjectRoot(projectId));
   if (!fs.existsSync(root)) return { ok: false, error: 'Project folder not found' };
   if (!isAllowedExternalPath(root)) {
-    return { ok: false, error: 'Path is outside an approved ARK workspace.' };
+    return { ok: false, error: 'Path is outside an approved NOVA workspace.' };
   }
   try {
     fs.rmSync(root, { recursive: true, force: true });
@@ -961,7 +961,7 @@ function deleteWorkspaceRelPath(projectId, relPath) {
     return { ok: false, error: 'Path is outside the workspace folder.' };
   }
   if (!isAllowedExternalPath(full)) {
-    return { ok: false, error: 'Path is outside an approved ARK workspace.' };
+    return { ok: false, error: 'Path is outside an approved NOVA workspace.' };
   }
   if (!fs.existsSync(full)) return { ok: false, error: 'Path not found' };
   try {
@@ -978,7 +978,7 @@ function pathStat(targetPath) {
   let p = path.resolve(String(targetPath || '').trim().replace(/^["']|["']$/g, ''));
   if (!p || !fs.existsSync(p)) return { ok: false, error: 'Path not found' };
   if (!isAllowedExternalPath(p)) {
-    return { ok: false, error: 'Path is outside ARK access. Enable Desktop, Documents, or Full PC in Settings → Security.' };
+    return { ok: false, error: 'Path is outside NOVA access. Enable Desktop, Documents, or Full PC in Settings → Security.' };
   }
   if (/\.lnk$/i.test(p)) {
     const target = resolveWindowsShortcut(p);
@@ -990,7 +990,7 @@ function pathStat(targetPath) {
     /* keep */
   }
   if (!isAllowedExternalPath(p)) {
-    return { ok: false, error: 'Path is outside ARK access. Enable Desktop, Documents, or Full PC in Settings → Security.' };
+    return { ok: false, error: 'Path is outside NOVA access. Enable Desktop, Documents, or Full PC in Settings → Security.' };
   }
   const st = safeStatFollow(p);
   if (!st) return { ok: false, error: 'stat failed' };
@@ -1009,7 +1009,7 @@ function listDir(dirPath) {
   let p = path.resolve(String(dirPath || ''));
   if (!p || !fs.existsSync(p)) return { ok: false, error: 'Folder not found', items: [] };
   if (!isAllowedExternalPath(p)) {
-    return { ok: false, error: 'Folder is outside an approved ARK workspace.', items: [] };
+    return { ok: false, error: 'Folder is outside an approved NOVA workspace.', items: [] };
   }
   if (/\.lnk$/i.test(p)) {
     const target = resolveWindowsShortcut(p);
@@ -1112,7 +1112,7 @@ function readTextFile(targetPath, maxBytes = 2_000_000) {
   const selfBlock = blockArkSelfPath(p);
   if (selfBlock) return selfBlock;
   if (!isAllowedExternalPath(p)) {
-    return { ok: false, error: 'Path is outside an approved ARK workspace folder.' };
+    return { ok: false, error: 'Path is outside an approved NOVA workspace folder.' };
   }
   let st;
   try {
@@ -1149,7 +1149,7 @@ function readTextFile(targetPath, maxBytes = 2_000_000) {
   }
 }
 
-/** Create a directory under grants or ARK projects root. */
+/** Create a directory under grants or NOVA Projects root. */
 function workspaceMkdir(payload = {}) {
   try {
     const targetPath = path.resolve(String(payload.targetPath || ''));
@@ -1161,7 +1161,7 @@ function workspaceMkdir(payload = {}) {
     const selfAllowed = isAllowedExternalPath(targetPath) || isPathUnderRoot(targetPath, pr);
 
     if (!parentAllowed && !selfAllowed) {
-      return { ok: false, error: 'Path is outside an approved ARK workspace.' };
+      return { ok: false, error: 'Path is outside an approved NOVA workspace.' };
     }
 
     if (fs.existsSync(targetPath)) {

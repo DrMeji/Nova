@@ -48,26 +48,26 @@ export async function resolveNewProjectParent(
   const desktop = roots?.roots?.find(r => r.id === 'desktop')?.path;
   const documents = roots?.roots?.find(r => r.id === 'documents')?.path;
 
-  // Prefer ARK's own projects folder (not Desktop\Projects).
+  // Prefer NOVA's own projects folder (not Desktop\Projects).
   if (grants.documents && documents) {
-    const arkDir = joinPath(documents, 'ARK Projects');
+    const arkDir = joinPath(documents, 'NOVA Projects');
     await window.arkDesktop?.workspaceMkdir?.({ targetPath: arkDir });
-    return { parentPath: joinPath(arkDir, intent.slug), source: 'Documents\\ARK Projects' };
+    return { parentPath: joinPath(arkDir, intent.slug), source: 'Documents\\NOVA Projects' };
   }
 
   if (grants.desktop && desktop) {
-    const arkDir = joinPath(desktop, 'ARK Projects');
+    const arkDir = joinPath(desktop, 'NOVA Projects');
     await window.arkDesktop?.workspaceMkdir?.({ targetPath: arkDir });
-    return { parentPath: joinPath(arkDir, intent.slug), source: 'Desktop\\ARK Projects' };
+    return { parentPath: joinPath(arkDir, intent.slug), source: 'Desktop\\NOVA Projects' };
   }
 
   const sandbox = await window.arkDesktop?.workspaceSandboxRoot?.();
   if (sandbox?.ok && sandbox.path) {
     return {
       parentPath: joinPath(sandbox.path, intent.slug),
-      source: 'ARK projects folder',
+      source: 'NOVA Projects folder',
       grantHint: !hasFolderAccessGrant()
-        ? 'Folder access is off. created inside ARK storage. Enable **Settings → Security → Documents** (or Desktop) to use **ARK Projects** next time.'
+        ? 'Folder access is off. created inside NOVA storage. Enable **Settings → Security → Documents** (or Desktop) to use **NOVA Projects** next time.'
         : undefined,
     };
   }
@@ -75,7 +75,7 @@ export async function resolveNewProjectParent(
   return {
     parentPath: '',
     source: '',
-    grantHint: 'Turn on **Documents** or **Desktop** folder access in Settings → Security so ARK can create projects in **ARK Projects**.',
+    grantHint: 'Turn on **Documents** or **Desktop** folder access in Settings → Security so NOVA can create projects in **NOVA Projects**.',
   };
 }
 
@@ -157,7 +157,7 @@ export async function runCreateProjectFlow(
   cleaned.slug = finalSlug;
 
   const scaffoldKind = resolveProjectKindForCreate(cleaned.summary, cleaned.kind, cleaned.kind);
-  // Skills are for LLM prompts only — never bake "ARK design skills" copy into App.jsx.
+  // Skills are for LLM prompts only — never bake "NOVA design skills" copy into App.jsx.
   const scaffold = buildScaffoldFiles(scaffoldKind, { name: cleaned.name, summary: cleaned.summary });
   const fileMap = Object.fromEntries(scaffold.map(f => [f.path.replace(/\\/g, '/'), f.content]));
 

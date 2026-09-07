@@ -1,10 +1,10 @@
 {
-  "name": "ark",
+  "name": "nova",
   "private": true,
-  "version": "0.1.196",
+  "version": "0.1.197",
   "type": "module",
   "main": "electron/main.cjs",
-  "description": "ARK — AI Creation Studio desktop app",
+  "description": "NOVA — AI Creation Studio desktop app",
   "author": "DrMeji",
   "repository": {
     "type": "git",
@@ -73,9 +73,9 @@
     "ws": "^8.21.3"
   },
   "build": {
-    "appId": "com.ark.studio",
-    "productName": "ARK",
-    "executableName": "ARK",
+    "appId": "com.nova.studio",
+    "productName": "NOVA",
+    "executableName": "NOVA",
     "icon": "build/icon.ico",
     "directories": {
       "output": "release"
@@ -110,8 +110,8 @@
       "deleteAppDataOnUninstall": true,
       "runAfterFinish": true,
       "differentialPackage": true,
-      "shortcutName": "ARK",
-      "uninstallDisplayName": "ARK",
+      "shortcutName": "NOVA",
+      "uninstallDisplayName": "NOVA",
       "artifactName": "ARK-Setup.${ext}",
       "installerIcon": "build/icon.ico",
       "uninstallerIcon": "build/icon.ico",

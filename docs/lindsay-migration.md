@@ -1,28 +1,28 @@
-# Point Lindsay (or any Ollama client) at ARK
+# Point Lindsay (or any Ollama client) at NOVA
 
-ARK owns the local brain. External apps should talk to ARK Engine on this PC — not to Ollama.
+NOVA owns the local brain. External apps should talk to NOVA Engine on this PC — not to Ollama.
 
 ## Base URL
 
-Copy the current URL from **ARK Settings → AI → Brain API**. ARK commonly starts on `http://127.0.0.1:8787`, but it can choose another port when that port is occupied.
+Copy the current URL from **NOVA Settings → AI → Brain API**. NOVA commonly starts on `http://127.0.0.1:8787`, but it can choose another port when that port is occupied.
 
-Keep the **ARK desktop app running** (window can be minimized to the tray). Closing ARK stops the brain API.
+Keep the **NOVA desktop app running** (window can be minimized to the tray). Closing NOVA stops the brain API.
 
 ## Migration checklist
 
-1. Install / open ARK and finish first-run setup (Hardware → Models → Connect).
+1. Install / open NOVA and finish first-run setup (Hardware → Models → Connect).
 2. Install at least one local brain in **Local AI** (or connect a free cloud key).
 3. In **Settings → AI → Brain API**, use **Copy URL + token**.
 4. In Lindsay (or your client), set the API / Ollama base URL and bearer token to those copied values.
-5. Use ARK model ids (or common aliases) — see below.
+5. Use NOVA model ids (or common aliases) — see below.
 
-Packaged ARK requires the token on chat and model routes. `ARK_BRAIN_TOKEN` is optional only for an unpackaged localhost development build.
+Packaged NOVA requires the token on chat and model routes. `ARK_BRAIN_TOKEN` is optional only for an unpackaged localhost development build.
 
 ## Model names
 
-Clients may send Ollama-style names; ARK maps common aliases, for example:
+Clients may send Ollama-style names; NOVA maps common aliases, for example:
 
-| Client name | ARK Engine id |
+| Client name | NOVA Engine id |
 |-------------|----------------|
 | `llama3.2` / `llama3.2:3b` | `llama32-3b` |
 | `llama3.1` / `llama3.1:8b` | `llama31-8b` |
@@ -31,7 +31,7 @@ Clients may send Ollama-style names; ARK maps common aliases, for example:
 | `mistral` | `mistral-7b` |
 | `phi3` | `phi3-mini` |
 
-Prefer exact ARK ids from `GET /api/tags` or `GET /v1/models`. If the client omits `model` (or sends `ark-auto`), ARK picks the best **ready** Engine GGUF for that prompt — instruct for chat, Coder for build/code — so Lindsay can use every model you installed in ARK, not a single Ollama weight.
+Prefer exact NOVA ids from `GET /api/tags` or `GET /v1/models`. If the client omits `model` (or sends `NOVA-auto`), NOVA picks the best **ready** Engine GGUF for that prompt — instruct for chat, Coder for build/code — so Lindsay can use every model you installed in NOVA, not a single Ollama weight.
 
 ## Endpoints
 
@@ -39,4 +39,4 @@ Prefer exact ARK ids from `GET /api/tags` or `GET /v1/models`. If the client omi
 - OpenAI-shaped: `/v1/chat/completions`
 - Native: `/v1/chat`, `/v1/chat/stream`, `/v1/contract`, `/health`
 
-Full contract: [ark-brain-api.md](./ark-brain-api.md) · OpenAPI: [ark-brain-openapi.yaml](./ark-brain-openapi.yaml) · sample: `examples/external-brain-client/`
+Full contract: [NOVA-brain-api.md](./ark-brain-api.md) · OpenAPI: [NOVA-brain-openapi.yaml](./ark-brain-openapi.yaml) · sample: `examples/external-brain-client/`

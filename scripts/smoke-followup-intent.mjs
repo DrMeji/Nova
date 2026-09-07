@@ -88,7 +88,7 @@ if (/THIS specific product idea/i.test(hint)) {
 // --- Continuity / topic memory (movies-after-coding bug) ---
 const dive = 'i would like to dive deeper in recommended area';
 const teachThread = [
-  { role: 'user', content: 'Hello ARK' },
+  { role: 'user', content: 'Hello NOVA' },
   { role: 'assistant', content: 'Hello! How can I assist you today?' },
   { role: 'user', content: 'can you teach me how to code' },
   {

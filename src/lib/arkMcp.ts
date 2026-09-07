@@ -1,5 +1,5 @@
 /**
- * MCP-style tool catalog + invoke for ARK.
+ * MCP-style tool catalog + invoke for NOVA.
  *
  * Local tools mirror capabilities Chat already has. Registered external servers
  * (sidebar **MCP**) support stdio tools/list + tools/call. Full auto agent loop
@@ -24,35 +24,35 @@ export type ArkMcpTool = {
   serverName?: string;
 };
 
-/** Tools ARK can already perform locally (chat / project / media). */
+/** Tools NOVA can already perform locally (chat / project / media). */
 export function listLocalMcpTools(): ArkMcpTool[] {
   return [
     {
-      name: 'ark.project.read',
+      name: 'NOVA.project.read',
       description: 'Read files from a granted project folder',
       local: true,
       status: 'ready',
     },
     {
-      name: 'ark.project.write',
+      name: 'NOVA.project.write',
       description: 'Apply edits / scaffolds to a bound project',
       local: true,
       status: 'ready',
     },
     {
-      name: 'ark.media.image',
-      description: 'Generate or recreate an image via ARK Image Core',
+      name: 'NOVA.media.image',
+      description: 'Generate or recreate an image via NOVA Image Core',
       local: true,
       status: 'ready',
     },
     {
-      name: 'ark.brain.generate',
-      description: 'Run a chat/coding turn through ARK Engine / Auto',
+      name: 'NOVA.brain.generate',
+      description: 'Run a chat/coding turn through NOVA Engine / Auto',
       local: true,
       status: 'ready',
     },
     {
-      name: 'ark.mcp.connect',
+      name: 'NOVA.mcp.connect',
       description: 'Register / call external MCP servers in the MCP tab',
       local: true,
       status: 'ready',
@@ -103,7 +103,7 @@ export function formatMcpToolsHelp(): string {
   const registered = listRegisteredMcpTools().filter(t => !t.name.includes('(not probed)'));
 
   const lines = [
-    'ARK MCP tools',
+    'NOVA MCP tools',
     '',
     '**Local (built-in)**',
     ...local.map(t => `• **${t.name}** — ${t.description}`),
@@ -150,13 +150,13 @@ export function formatMcpToolsHelp(): string {
   return lines.join('\n');
 }
 
-/** Meta asks about what ARK can do — answer locally instead of the raw chat model. */
+/** Meta asks about what NOVA can do — answer locally instead of the raw chat model. */
 export function looksLikeArkCapabilityAsk(text: string): boolean {
   const t = String(text || '').trim();
   if (!t) return false;
   if (/\b(?:list|show)\s+mcp\b/i.test(t) || /\bmcp tools\b/i.test(t)) return true;
-  if (/\bwhat can you do\b/i.test(t) || /\bwhat(?:'s| is) ark\b/i.test(t)) return true;
-  if (/\b(?:break down|explain|describe)\b/i.test(t) && /\b(?:ark\.|mcp\b|tools?)\b/i.test(t)) {
+  if (/\bwhat can you do\b/i.test(t) || /\bwhat(?:'s| is) NOVA\b/i.test(t)) return true;
+  if (/\b(?:break down|explain|describe)\b/i.test(t) && /\b(?:NOVA\.|mcp\b|tools?)\b/i.test(t)) {
     return true;
   }
   if (/\bark\.[a-z0-9_-]+\.[a-z0-9_-]+\b/i.test(t) && /\b(?:what|how|explain|break|describe)\b/i.test(t)) {
@@ -170,7 +170,7 @@ export function looksLikeArkCapabilityAsk(text: string): boolean {
     }
     if (/\b(?:edit|read|write|rename)\s+files?\b/i.test(t)) return true;
   }
-  if (/\bi need you,?\s*ark\b/i.test(t)) return true;
+  if (/\bi need you,?\s*NOVA\b/i.test(t)) return true;
   if (/\bhow long is your memory\b/i.test(t)) return true;
   return false;
 }
@@ -217,7 +217,7 @@ export function formatArkCapabilitiesHelp(opts?: {
   }
 
   const lines = [
-    '**What ARK can do in Chat**',
+    '**What NOVA can do in Chat**',
     '',
     'I read your message and either run a built-in action (files, projects, MCP) or answer with your local / cloud brain.',
     '',
@@ -227,10 +227,10 @@ export function formatArkCapabilitiesHelp(opts?: {
     `• **Scaffold a project**: e.g. *build a landing page called MyApp* (writes under Desktop\\Projects).${hasProject ? ' This chat already has a project bound.' : ''}`,
     '',
     '**Built-in tools**',
-    '• **ark.project.read / write**: read and update granted folders',
-    '• **ark.media.image**: Image tab',
-    '• **ark.brain.generate**: your pinned local or cloud model',
-    '• **ark.mcp.connect**: external MCP servers in **MCP**',
+    '• **NOVA.project.read / write**: read and update granted folders',
+    '• **NOVA.media.image**: Image tab',
+    '• **NOVA.brain.generate**: your pinned local or cloud model',
+    '• **NOVA.mcp.connect**: external MCP servers in **MCP**',
     '',
     'Ask directly when you want disk work, for example *create a file…*, *rename this.png to…*, or *edit README*. The local model alone does not touch disk without those intents.',
     '',
@@ -344,7 +344,7 @@ export function parseMcpCallIntent(content: string): McpCallIntent | null {
   if (!m) return null;
 
   const toolName = m[1];
-  if (!toolName || toolName.toLowerCase().startsWith('ark.')) return null;
+  if (!toolName || toolName.toLowerCase().startsWith('NOVA.')) return null;
 
   const explicitMcp =
     /\bmcp\b/i.test(text) || /\b(?:run|call|invoke)\s+(?:the\s+)?tool\b/i.test(text);
@@ -456,6 +456,6 @@ export function mcpAutoToolSystemHint(): string {
     'Registered MCP tools (user enabled servers):',
     names,
     'To call one, emit a single line: ARK_MCP:tool_name {"optional":"json args"}',
-    'ARK will execute it and replace the line with results.',
+    'NOVA will execute it and replace the line with results.',
   ].join('\n');
 }

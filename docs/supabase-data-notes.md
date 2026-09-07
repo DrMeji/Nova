@@ -1,8 +1,8 @@
-# Supabase data notes (ARK hosted backend)
+# Supabase data notes (NOVA hosted backend)
 
 ## model_catalog
 
-Local ARK Engine catalog is authoritative for desktop inference. If `model_catalog` is empty on hosted Supabase, ARK desktop does not depend on it for GGUF picks — seed rows only if cloud sync of catalog metadata is needed.
+Local NOVA Engine catalog is authoritative for desktop inference. If `model_catalog` is empty on hosted Supabase, NOVA desktop does not depend on it for GGUF picks — seed rows only if cloud sync of catalog metadata is needed.
 
 ## chat_messages
 
@@ -18,7 +18,7 @@ Confirm `supabase_realtime` publication includes `dm_messages` and call signalin
 
 ## lookup_ark_user
 
-Client must throttle lookups (max ~1 req / 2s). Never request or display another user's email — ARK ID only.
+Client must throttle lookups (max ~1 req / 2s). Never request or display another user's email — NOVA ID only.
 
 ## provider_connections
 

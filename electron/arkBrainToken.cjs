@@ -1,4 +1,4 @@
-/** Persist ARK Brain API bearer token (packaged installs get one on first run). */
+/** Persist NOVA Brain API bearer token (packaged installs get one on first run). */
 
 const crypto = require('crypto');
 const fs = require('fs');
@@ -6,7 +6,7 @@ const path = require('path');
 const { app, safeStorage } = require('electron');
 
 function tokenPath() {
-  return path.join(app.getPath('userData'), 'ark-brain-token.dat');
+  return path.join(app.getPath('userData'), 'NOVA-brain-token.dat');
 }
 
 function encryptionAvailable() {

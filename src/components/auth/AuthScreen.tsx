@@ -13,7 +13,7 @@ import { checkArkGitHubUpdate, downloadAndInstallArkUpdate } from '@/lib/arkUpda
 import { accountForgotPageUrl } from '@/lib/accountWeb';
 
 const TYPE_PHRASES = [
-  'ARK',
+  'NOVA',
   'Free',
   'Local',
   'Build anything',
@@ -130,7 +130,7 @@ export function AuthScreen() {
     const forgotUrl = accountForgotPageUrl();
     if (forgotUrl && window.arkDesktop?.openExternal) {
       void window.arkDesktop.openExternal(forgotUrl);
-      setInfo('Opened the ARK account site. Use Forgot password there if email reset is not configured in this build.');
+      setInfo('Opened the NOVA account site. Use Forgot password there if email reset is not configured in this build.');
       return;
     }
     const info = await getLocalLoginRecoveryInfo();
@@ -195,7 +195,7 @@ export function AuthScreen() {
       return;
     }
 
-    // Users do not pick their own handle/username. We assign a 7-digit ARK ID automatically.
+    // Users do not pick their own handle/username. We assign a 7-digit NOVA ID automatically.
     // Display name is their real name from this form (not a unique username).
     const created = await signUp(email.trim(), password, fullName.trim());
     if (created.error) {
@@ -223,7 +223,7 @@ export function AuthScreen() {
           <div className="lg:hidden text-center mb-8">
             <img
               src={`${import.meta.env.BASE_URL}ark-icon.png`}
-              alt="ARK"
+              alt="NOVA"
               className="w-10 h-10 object-contain mx-auto"
             />
           </div>
@@ -255,7 +255,7 @@ export function AuthScreen() {
                 </button>
               </div>
               <p className="text-center text-sm text-content-secondary mt-4">
-                {mode === 'signin' ? 'Welcome back to ARK' : 'Create your ARK account'}
+                {mode === 'signin' ? 'Welcome back to NOVA' : 'Create your NOVA account'}
               </p>
             </div>
 
@@ -292,7 +292,7 @@ export function AuthScreen() {
 
               {mode === 'signup' && (
                 <div className="text-[11px] text-content-tertiary px-1 animate-fade-in">
-                  Your 7-digit ARK ID is assigned automatically. Profile photo can be added later in Settings.
+                  Your 7-digit NOVA ID is assigned automatically. Profile photo can be added later in Settings.
                 </div>
               )}
 
@@ -335,7 +335,7 @@ export function AuthScreen() {
               {recoveryNotice && (
                 <div className="rounded-xl border border-sky-500/25 bg-sky-500/10 px-3 py-2.5 text-[11px] text-sky-100/90 leading-relaxed space-y-2">
                   <p>
-                    Temporary: ARK can also save a private login note on this PC (see folder after forgot-password). Real email reset works when VITE_ARK_WEBSITE_ORIGIN is set at build time.
+                    Temporary: NOVA can also save a private login note on this PC (see folder after forgot-password). Real email reset works when VITE_ARK_WEBSITE_ORIGIN is set at build time.
                   </p>
                   <button
                     type="button"
@@ -406,8 +406,8 @@ export function AuthScreen() {
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  title="Open ARK on GitHub"
-                  aria-label="Open ARK on GitHub"
+                  title="Open NOVA on GitHub"
+                  aria-label="Open NOVA on GitHub"
                   className="h-11 w-11 shrink-0 rounded-xl border border-white/15 bg-white/[0.04] text-content-secondary hover:text-content-primary hover:bg-white/[0.08] flex items-center justify-center"
                   onClick={() =>
                     void window.arkDesktop?.openExternal?.('https://github.com/DrMeji/Ark/releases')

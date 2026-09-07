@@ -1,4 +1,4 @@
-/** ARK plugin catalog + local install/connect state.
+/** NOVA plugin catalog + local install/connect state.
  * Token plugins (GitHub, Notion, …) verify live and store secrets in the OS vault.
  */
 
@@ -11,7 +11,7 @@ import {
   runCatalogPluginLive,
 } from '@/lib/catalogPlugins';
 
-const STATE_KEY = 'ark:plugin-state';
+const STATE_KEY = 'NOVA:plugin-state';
 
 export type PluginPermission =
   | 'read'
@@ -37,7 +37,7 @@ export type PluginDef = {
   live?: boolean;
   authKind: PluginAuthKind;
   permissions: { id: PluginPermission; label: string; detail: string; required?: boolean }[];
-  /** Example prompts ARK can run once connected. */
+  /** Example prompts NOVA can run once connected. */
   actions: { id: string; label: string; prompt: string }[];
 };
 
@@ -98,7 +98,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
     name: 'GitHub',
     description: 'Triage PRs, issues, CI, and publish flows.',
     longDescription:
-      'Connect GitHub so ARK can list repos, summarize pull requests, and help with issues while you build in Projects or Chat.',
+      'Connect GitHub so NOVA can list repos, summarize pull requests, and help with issues while you build in Projects or Chat.',
     tone: 'from-zinc-600 to-zinc-900',
     initial: 'GH',
     category: 'featured',
@@ -116,7 +116,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
       { id: 'open-latest', label: 'Open latest in Code', prompt: 'Open my latest GitHub repo in Code' },
       { id: 'open-prs', label: 'Open PRs', prompt: 'Using GitHub, show my open pull requests.' },
       { id: 'recent-issues', label: 'Recent issues', prompt: 'Using GitHub, summarize recent issues.' },
-      { id: 'create-repo', label: 'Create a repo', prompt: 'Using GitHub, create a private repo named ark-studio.' },
+      { id: 'create-repo', label: 'Create a repo', prompt: 'Using GitHub, create a private repo named NOVA-studio.' },
     ],
   },
   {
@@ -124,7 +124,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
     name: 'Notion',
     description: 'Specs, research, and team workflows.',
     longDescription:
-      'Connect Notion so ARK can find pages, pull specs into a project, and keep research next to your builds.',
+      'Connect Notion so NOVA can find pages, pull specs into a project, and keep research next to your builds.',
     tone: 'from-neutral-700 to-black',
     initial: 'N',
     category: 'featured',
@@ -146,7 +146,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
     name: 'Gmail',
     description: 'Read inbox and send mail.',
     longDescription:
-      'Connect Gmail so ARK can summarize unread mail, draft replies, and send when you confirm.',
+      'Connect Gmail so NOVA can summarize unread mail, draft replies, and send when you confirm.',
     tone: 'from-red-500 to-red-700',
     initial: 'G',
     category: 'featured',
@@ -165,21 +165,21 @@ export const PLUGIN_CATALOG: PluginDef[] = [
   },
 
   // —— Rest of catalog (installable; connect later) ——
-  { id: 'gdrive', name: 'Google Drive', description: 'Browse Drive files.', longDescription: 'List and search recent Drive files from ARK.', tone: 'from-yellow-500 to-blue-600', initial: 'D', category: 'featured', hero: true, live: true, authKind: 'token', permissions: [{ id: 'read', label: 'Read files', detail: 'List and search Drive files', required: true }], actions: [{ id: 'recent', label: 'Recent files', prompt: 'Using Google Drive, list my recent files.' }] },
+  { id: 'gdrive', name: 'Google Drive', description: 'Browse Drive files.', longDescription: 'List and search recent Drive files from NOVA.', tone: 'from-yellow-500 to-blue-600', initial: 'D', category: 'featured', hero: true, live: true, authKind: 'token', permissions: [{ id: 'read', label: 'Read files', detail: 'List and search Drive files', required: true }], actions: [{ id: 'recent', label: 'Recent files', prompt: 'Using Google Drive, list my recent files.' }] },
   { id: 'gcal', name: 'Google Calendar', description: 'View and create events.', longDescription: 'See upcoming events and create calendar events.', tone: 'from-blue-500 to-blue-700', initial: 'C', category: 'featured', hero: true, live: true, authKind: 'token', permissions: [{ id: 'read', label: 'Read events', detail: 'View schedule', required: true }, { id: 'write', label: 'Create events', detail: 'Add calendar events', required: false }], actions: [{ id: 'upcoming', label: 'Upcoming', prompt: 'Using Google Calendar, list my upcoming events.' }] },
-  { id: 'slack', name: 'Slack', description: 'Read and post in Slack.', longDescription: 'Bring Slack threads into ARK chat.', tone: 'from-purple-500 to-pink-600', initial: 'S', category: 'featured', hero: true, live: true, authKind: 'token', permissions: [{ id: 'read', label: 'Read channels', detail: 'Read messages', required: true }, { id: 'search', label: 'Search', detail: 'Search messages', required: false }, { id: 'write', label: 'Post messages', detail: 'Post to channels the bot can see', required: false }], actions: [{ id: 'unread', label: 'Unread channels', prompt: 'Using Slack, summarize unread channels.' }, { id: 'post-fix', label: 'Post a summary', prompt: 'Summarize this fix to #dev' }] },
-  { id: 'outlook-mail', name: 'Outlook Email', description: 'Read and send Outlook mail.', longDescription: 'Outlook mail in ARK.', tone: 'from-sky-500 to-blue-700', initial: 'Oe', category: 'featured', authKind: 'oauth', permissions: [{ id: 'read', label: 'Read mail', detail: 'Open Outlook mail', required: true }], actions: [] },
-  { id: 'granola', name: 'Granola', description: 'Add your meeting context.', longDescription: 'Meeting notes context for ARK.', tone: 'from-emerald-500 to-teal-700', initial: 'Gr', category: 'featured', authKind: 'token', permissions: [{ id: 'read', label: 'Read notes', detail: 'Access meeting notes', required: true }], actions: [] },
+  { id: 'slack', name: 'Slack', description: 'Read and post in Slack.', longDescription: 'Bring Slack threads into NOVA chat.', tone: 'from-purple-500 to-pink-600', initial: 'S', category: 'featured', hero: true, live: true, authKind: 'token', permissions: [{ id: 'read', label: 'Read channels', detail: 'Read messages', required: true }, { id: 'search', label: 'Search', detail: 'Search messages', required: false }, { id: 'write', label: 'Post messages', detail: 'Post to channels the bot can see', required: false }], actions: [{ id: 'unread', label: 'Unread channels', prompt: 'Using Slack, summarize unread channels.' }, { id: 'post-fix', label: 'Post a summary', prompt: 'Summarize this fix to #dev' }] },
+  { id: 'outlook-mail', name: 'Outlook Email', description: 'Read and send Outlook mail.', longDescription: 'Outlook mail in NOVA.', tone: 'from-sky-500 to-blue-700', initial: 'Oe', category: 'featured', authKind: 'oauth', permissions: [{ id: 'read', label: 'Read mail', detail: 'Open Outlook mail', required: true }], actions: [] },
+  { id: 'granola', name: 'Granola', description: 'Add your meeting context.', longDescription: 'Meeting notes context for NOVA.', tone: 'from-emerald-500 to-teal-700', initial: 'Gr', category: 'featured', authKind: 'token', permissions: [{ id: 'read', label: 'Read notes', detail: 'Access meeting notes', required: true }], actions: [] },
 
   { id: 'fireflies', name: 'Fireflies', description: 'Search meeting transcripts.', longDescription: 'Search Fireflies transcripts.', tone: 'from-orange-500 to-amber-700', initial: 'F', category: 'productivity', authKind: 'token', permissions: [{ id: 'search', label: 'Search', detail: 'Search transcripts', required: true }], actions: [] },
   { id: 'outlook-cal', name: 'Outlook Calendar', description: 'Manage Microsoft Outlook schedules.', longDescription: 'Outlook calendar access.', tone: 'from-sky-500 to-blue-700', initial: 'O', category: 'productivity', authKind: 'oauth', permissions: [{ id: 'read', label: 'Read events', detail: 'View calendar', required: true }], actions: [] },
   { id: 'plaud', name: 'Plaud', description: 'Retrieve insights from Plaud.', longDescription: 'Plaud meeting insights.', tone: 'from-violet-500 to-indigo-700', initial: 'P', category: 'productivity', authKind: 'token', permissions: [{ id: 'read', label: 'Read', detail: 'Read insights', required: true }], actions: [] },
   { id: 'otter', name: 'Otter.ai', description: 'Search meetings from Otter.ai.', longDescription: 'Otter meeting search.', tone: 'from-cyan-500 to-teal-700', initial: 'Ot', category: 'productivity', authKind: 'oauth', permissions: [{ id: 'search', label: 'Search', detail: 'Search meetings', required: true }], actions: [] },
-  { id: 'atlassian', name: 'Atlassian Rovo', description: 'Manage Jira and Confluence fast.', longDescription: 'Jira and Confluence in ARK.', tone: 'from-blue-600 to-indigo-800', initial: 'A', category: 'productivity', authKind: 'oauth', permissions: [{ id: 'read', label: 'Read', detail: 'Read issues and pages', required: true }], actions: [] },
-  { id: 'linear', name: 'Linear', description: 'Track issues and product work.', longDescription: 'Linear issues in ARK.', tone: 'from-indigo-500 to-violet-800', initial: 'L', category: 'productivity', hero: true, live: true, authKind: 'token', permissions: [{ id: 'read', label: 'Read issues', detail: 'List and read issues', required: true }, { id: 'write', label: 'Create issues', detail: 'Create or update issues', required: false }], actions: [{ id: 'mine', label: 'My issues', prompt: 'Using Linear, list my open issues.' }] },
-  { id: 'monday', name: 'Monday.com', description: 'Plan projects and team workflows.', longDescription: 'Monday boards in ARK.', tone: 'from-rose-500 to-pink-700', initial: 'Mo', category: 'productivity', authKind: 'token', permissions: [{ id: 'read', label: 'Read boards', detail: 'View boards', required: true }], actions: [] },
+  { id: 'atlassian', name: 'Atlassian Rovo', description: 'Manage Jira and Confluence fast.', longDescription: 'Jira and Confluence in NOVA.', tone: 'from-blue-600 to-indigo-800', initial: 'A', category: 'productivity', authKind: 'oauth', permissions: [{ id: 'read', label: 'Read', detail: 'Read issues and pages', required: true }], actions: [] },
+  { id: 'linear', name: 'Linear', description: 'Track issues and product work.', longDescription: 'Linear issues in NOVA.', tone: 'from-indigo-500 to-violet-800', initial: 'L', category: 'productivity', hero: true, live: true, authKind: 'token', permissions: [{ id: 'read', label: 'Read issues', detail: 'List and read issues', required: true }, { id: 'write', label: 'Create issues', detail: 'Create or update issues', required: false }], actions: [{ id: 'mine', label: 'My issues', prompt: 'Using Linear, list my open issues.' }] },
+  { id: 'monday', name: 'Monday.com', description: 'Plan projects and team workflows.', longDescription: 'Monday boards in NOVA.', tone: 'from-rose-500 to-pink-700', initial: 'Mo', category: 'productivity', authKind: 'token', permissions: [{ id: 'read', label: 'Read boards', detail: 'View boards', required: true }], actions: [] },
 
-  { id: 'canva', name: 'Canva', description: 'Create, review, and edit designs.', longDescription: 'Canva designs in ARK.', tone: 'from-cyan-400 to-blue-600', initial: 'Ca', category: 'creativity', authKind: 'oauth', permissions: [{ id: 'read', label: 'Read designs', detail: 'Open designs', required: true }], actions: [] },
+  { id: 'canva', name: 'Canva', description: 'Create, review, and edit designs.', longDescription: 'Canva designs in NOVA.', tone: 'from-cyan-400 to-blue-600', initial: 'Ca', category: 'creativity', authKind: 'oauth', permissions: [{ id: 'read', label: 'Read designs', detail: 'Open designs', required: true }], actions: [] },
   { id: 'higgsfield', name: 'Higgsfield', description: 'Every image and video model.', longDescription: 'Image and video models.', tone: 'from-fuchsia-500 to-purple-700', initial: 'H', category: 'creativity', authKind: 'token', permissions: [{ id: 'write', label: 'Generate', detail: 'Create media', required: true }], actions: [] },
   { id: 'product-design', name: 'Product Design', description: 'Explore and prototype ideas.', longDescription: 'Product design tools.', tone: 'from-rose-500 to-pink-700', initial: 'PD', category: 'creativity', authKind: 'none', permissions: [{ id: 'read', label: 'Browse', detail: 'Browse patterns', required: true }], actions: [] },
   { id: 'figma', name: 'Figma', description: 'Design to code workflows.', longDescription: 'Open Figma files by link and post comments.', tone: 'from-orange-400 to-purple-600', initial: 'Fi', category: 'creativity', hero: true, live: true, authKind: 'token', permissions: [{ id: 'read', label: 'Read files', detail: 'Open Figma files by URL', required: true }, { id: 'write', label: 'Comment', detail: 'Post file comments', required: false }], actions: [{ id: 'frames', label: 'Open a file', prompt: 'Using Figma, open figma.com/file/YOUR_KEY and list pages.' }] },
@@ -188,9 +188,9 @@ export const PLUGIN_CATALOG: PluginDef[] = [
   { id: 'mobbin', name: 'Mobbin', description: 'Browse mobile and web UI patterns.', longDescription: 'UI pattern library.', tone: 'from-zinc-500 to-zinc-800', initial: 'Mb', category: 'creativity', authKind: 'token', permissions: [{ id: 'read', label: 'Browse', detail: 'Browse patterns', required: true }], actions: [] },
   { id: 'runway', name: 'Runway', description: 'Generate and edit video with AI.', longDescription: 'Runway video tools.', tone: 'from-emerald-400 to-teal-700', initial: 'Rw', category: 'creativity', authKind: 'token', permissions: [{ id: 'write', label: 'Generate', detail: 'Create video', required: true }], actions: [] },
 
-  { id: 'datadog', name: 'Datadog', description: 'Search and act on your data.', longDescription: 'Observability in ARK.', tone: 'from-violet-600 to-purple-900', initial: 'Dd', category: 'developer', authKind: 'token', permissions: [{ id: 'search', label: 'Search', detail: 'Search telemetry', required: true }], actions: [] },
-  { id: 'supabase', name: 'Supabase', description: 'Manage and query databases.', longDescription: 'Supabase projects in ARK.', tone: 'from-emerald-500 to-green-800', initial: 'Sb', category: 'developer', hero: true, live: true, authKind: 'token', permissions: [{ id: 'read', label: 'Query', detail: 'Run read queries', required: true }], actions: [{ id: 'projects', label: 'List projects', prompt: 'Using Supabase, list my projects.' }] },
-  { id: 'vercel', name: 'Vercel', description: 'Build and deploy web apps and agents.', longDescription: 'Deployments from ARK.', tone: 'from-zinc-500 to-black', initial: 'V', category: 'developer', hero: true, live: true, authKind: 'token', permissions: [{ id: 'read', label: 'Read deploys', detail: 'View deployments', required: true }, { id: 'write', label: 'Redeploy', detail: 'Trigger redeploys', required: false }], actions: [{ id: 'deploys', label: 'Recent deploys', prompt: 'Using Vercel, list my recent deployments.' }] },
+  { id: 'datadog', name: 'Datadog', description: 'Search and act on your data.', longDescription: 'Observability in NOVA.', tone: 'from-violet-600 to-purple-900', initial: 'Dd', category: 'developer', authKind: 'token', permissions: [{ id: 'search', label: 'Search', detail: 'Search telemetry', required: true }], actions: [] },
+  { id: 'supabase', name: 'Supabase', description: 'Manage and query databases.', longDescription: 'Supabase projects in NOVA.', tone: 'from-emerald-500 to-green-800', initial: 'Sb', category: 'developer', hero: true, live: true, authKind: 'token', permissions: [{ id: 'read', label: 'Query', detail: 'Run read queries', required: true }], actions: [{ id: 'projects', label: 'List projects', prompt: 'Using Supabase, list my projects.' }] },
+  { id: 'vercel', name: 'Vercel', description: 'Build and deploy web apps and agents.', longDescription: 'Deployments from NOVA.', tone: 'from-zinc-500 to-black', initial: 'V', category: 'developer', hero: true, live: true, authKind: 'token', permissions: [{ id: 'read', label: 'Read deploys', detail: 'View deployments', required: true }, { id: 'write', label: 'Redeploy', detail: 'Trigger redeploys', required: false }], actions: [{ id: 'deploys', label: 'Recent deploys', prompt: 'Using Vercel, list my recent deployments.' }] },
   { id: 'exa', name: 'Exa', description: 'Web search for AI agents.', longDescription: 'Web search tool.', tone: 'from-blue-500 to-indigo-700', initial: 'Ex', category: 'developer', hero: true, live: true, authKind: 'token', permissions: [{ id: 'search', label: 'Search web', detail: 'Run searches', required: true }], actions: [{ id: 'search', label: 'Search the web', prompt: 'Using Exa, search for the latest on this topic.' }] },
   { id: 'neon', name: 'Neon Postgres', description: 'Manage Neon Postgres databases.', longDescription: 'Neon database access.', tone: 'from-green-400 to-emerald-700', initial: 'Ne', category: 'developer', authKind: 'token', permissions: [{ id: 'read', label: 'Query', detail: 'Read data', required: true }], actions: [] },
   { id: 'devpost', name: 'Devpost Hackathons', description: 'Find and submit to hackathons.', longDescription: 'Hackathon discovery.', tone: 'from-sky-500 to-blue-700', initial: 'Dp', category: 'developer', authKind: 'none', permissions: [{ id: 'read', label: 'Browse', detail: 'Browse events', required: true }], actions: [] },
@@ -255,7 +255,7 @@ export function savePluginState(map: PluginStateMap) {
     scrubbed[id] = rest;
   }
   localStorage.setItem(STATE_KEY, JSON.stringify(scrubbed));
-  window.dispatchEvent(new Event('ark:plugins-changed'));
+  window.dispatchEvent(new Event('NOVA:plugins-changed'));
 }
 
 export function getPluginRuntime(id: string, map: PluginStateMap): PluginRuntimeState {

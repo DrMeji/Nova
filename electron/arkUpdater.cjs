@@ -2,9 +2,9 @@
  * In-app updates via public DrMeji/Ark (installer feed only).
  * Source stays private in DrMeji/Ark-Source — never publish app source to the public repo.
  *
- * 1) Download installer inside the main ARK app
- * 2) Breakaway-launch ARK.exe --ark-updater (survives parent quit; no PowerShell UI)
- * 3) Updater splash waits for parent → silent install → relaunch ARK
+ * 1) Download installer inside the main NOVA app
+ * 2) Breakaway-launch NOVA.exe --ark-updater (survives parent quit; no PowerShell UI)
+ * 3) Updater splash waits for parent → silent install → relaunch NOVA
  */
 
 const fs = require('fs');
@@ -25,14 +25,14 @@ const TRUSTED_SETUP_HOSTS = new Set([
   'release-assets.githubusercontent.com',
 ]);
 
-/** Only ARK installers from the public DrMeji/Ark Releases feed (canonical GitHub download URL). */
+/** Only NOVA installers from the public DrMeji/Ark Releases feed (canonical GitHub download URL). */
 function isTrustedSetupUrl(url) {
   try {
     const u = new URL(String(url || ''));
     if (u.protocol !== 'https:') return false;
     const host = u.hostname.toLowerCase();
     if (host !== 'github.com') return false;
-    return /^\/DrMeji\/Ark\/releases\/download\/v[\w.-]+\/ARK-Setup[^/]*\.exe$/i.test(u.pathname);
+    return /^\/DrMeji\/Ark\/releases\/download\/v[\w.-]+\/(?:ARK|NOVA)-Setup[^/]*\.exe$/i.test(u.pathname);
   } catch {
     return false;
   }
@@ -50,9 +50,9 @@ function isTrustedDownloadHost(url) {
     return false;
   }
 }
-const POST_UPDATE_FLAG = 'ark-post-update.json';
-const UI_SHOWN_FLAG = 'ark-ui-shown.flag';
-const SPLASH_ALIVE_FLAG = 'ark-update-splash-alive.flag';
+const POST_UPDATE_FLAG = 'NOVA-post-update.json';
+const UI_SHOWN_FLAG = 'NOVA-ui-shown.flag';
+const SPLASH_ALIVE_FLAG = 'NOVA-update-splash-alive.flag';
 
 function uiShownFlagPath() {
   return path.join(app.getPath('temp'), UI_SHOWN_FLAG);
@@ -123,7 +123,7 @@ function setForceExitHook(fn) {
   onBeforeForceExit = typeof fn === 'function' ? fn : null;
 }
 
-/** Hard exit so the Updating splash is not stuck on “Waiting for ARK to close”. */
+/** Hard exit so the Updating splash is not stuck on “Waiting for NOVA to close”. */
 function forceExitForUpdate() {
   try {
     onBeforeForceExit?.();
@@ -176,7 +176,7 @@ function sendProgress(payload) {
     try {
       // Don't push progress IPC into the splash window itself.
       if (updateSplashWin && !updateSplashWin.isDestroyed() && win.id === updateSplashWin.id) continue;
-      win.webContents.send('ark:update-progress', state);
+      win.webContents.send('NOVA:update-progress', state);
     } catch {
       /* ignore */
     }
@@ -244,7 +244,7 @@ function httpsJsonOnce(url) {
       url,
       {
         headers: {
-          'User-Agent': 'ARK-Desktop',
+          'User-Agent': 'NOVA-Desktop',
           Accept: 'application/vnd.github+json',
         },
       },
@@ -312,7 +312,7 @@ function isNewer(latest, current) {
 function downloadFileOnce(url, dest, onProgress) {
   return new Promise((resolve, reject) => {
     if (!isTrustedSetupUrl(url) && !isTrustedDownloadHost(url)) {
-      reject(new Error('Installer URL is not from the trusted ARK releases feed.'));
+      reject(new Error('Installer URL is not from the trusted NOVA releases feed.'));
       return;
     }
     const follow = (currentUrl, redirectsLeft) => {
@@ -322,7 +322,7 @@ function downloadFileOnce(url, dest, onProgress) {
       }
       const req = https.get(
         currentUrl,
-        { headers: { 'User-Agent': 'ARK-Desktop', Accept: '*/*' } },
+        { headers: { 'User-Agent': 'NOVA-Desktop', Accept: '*/*' } },
         (res) => {
           const code = res.statusCode || 0;
           if ([301, 302, 303, 307, 308].includes(code) && res.headers.location) {
@@ -427,7 +427,7 @@ function fetchTrustedText(url) {
       }
       const req = https.get(
         currentUrl,
-        { headers: { 'User-Agent': 'ARK-Desktop', Accept: '*/*' } },
+        { headers: { 'User-Agent': 'NOVA-Desktop', Accept: '*/*' } },
         (res) => {
           const code = res.statusCode || 0;
           if ([301, 302, 303, 307, 308].includes(code) && res.headers.location) {
@@ -676,14 +676,14 @@ async function waitForNoOtherArkExe(exceptPid, timeoutMs, writeLog) {
   const otherArkPids = () => {
     try {
       // CSV output: "Image Name","PID",...
-      const out = execFileSync('tasklist', ['/FI', 'IMAGENAME eq ARK.exe', '/FO', 'CSV', '/NH'], {
+      const out = execFileSync('tasklist', ['/FI', 'IMAGENAME eq NOVA.exe', '/FO', 'CSV', '/NH'], {
         encoding: 'utf8',
         windowsHide: true,
       });
       const lines = String(out || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean);
       const pids = [];
       for (const line of lines) {
-        const m = line.match(/"ARK\.exe"\s*,\s*"(\d+)"/i);
+        const m = line.match(/"NOVA\.exe"\s*,\s*"(\d+)"/i);
         if (m) pids.push(Number(m[1]));
       }
       return pids;
@@ -707,8 +707,8 @@ function sleep(ms) {
 }
 
 /**
- * NEVER mass-kill ARK.exe by image name.
- * Electron’s GPU/renderer helpers are also named ARK.exe — killing them blanks the
+ * NEVER mass-kill NOVA.exe by image name.
+ * Electron’s GPU/renderer helpers are also named NOVA.exe — killing them blanks the
  * Updating window and hangs forever on executeJavaScript (blank splash, 0% CPU).
  * Only kill the known parent PID tree.
  */
@@ -749,8 +749,8 @@ ${splashShellCss()}
 }
 
 /**
- * Independent HTML splash via mshta — not ARK.exe, so NSIS can replace the install
- * without killing this window. Stays up until main.cjs writes ark-ui-shown.flag.
+ * Independent HTML splash via mshta — not NOVA.exe, so NSIS can replace the install
+ * without killing this window. Stays up until main.cjs writes NOVA-ui-shown.flag.
  */
 function splashHtaHtml({ statusPath, shownPath, alivePath, icoName }) {
   const jsStr = (s) => JSON.stringify(String(s || ''));
@@ -762,7 +762,7 @@ function splashHtaHtml({ statusPath, shownPath, alivePath, icoName }) {
 <meta charset="utf-8" />
 <hta:application
   id="ArkUpdateSplash"
-  applicationname="ARK"
+  applicationname="NOVA"
   border="none"
   caption="no"
   showintaskbar="yes"
@@ -772,7 +772,7 @@ function splashHtaHtml({ statusPath, shownPath, alivePath, icoName }) {
   selection="no"
   contextmenu="no"${icoAttr}
 />
-<title>ARK</title>
+<title>NOVA</title>
 <style>
 ${splashShellCss({ hta: true })}
 </style>
@@ -850,7 +850,7 @@ ${splashShellCss({ hta: true })}
 </html>`;
 }
 
-function copySplashIcoToTemp(tempDir, destName = 'ark-update.ico') {
+function copySplashIcoToTemp(tempDir, destName = 'NOVA-update.ico') {
   const dest = path.join(tempDir, destName);
   const candidates = [
     resolveUpdateIco(),
@@ -874,7 +874,7 @@ function copySplashIcoToTemp(tempDir, destName = 'ark-update.ico') {
 function launchHtaSplash({ statusPath, shownPath }) {
   const temp = app.getPath('temp');
   const stamp = Date.now();
-  const base = `ark-update-splash-${stamp}`;
+  const base = `NOVA-update-splash-${stamp}`;
   const htaPath = path.join(temp, `${base}.hta`);
   const alivePath = splashAliveFlagPath();
   const icoPath = copySplashIcoToTemp(temp, `${base}.ico`);
@@ -978,10 +978,10 @@ function startArk(exePath) {
 }
 
 /**
- * Standalone updater: ARK.exe --ark-updater <setupPathOrUrl> <version> <parentPid>
+ * Standalone updater: NOVA.exe --ark-updater <setupPathOrUrl> <version> <parentPid>
  */
 async function runStandaloneSplash(argv) {
-  const logFile = path.join(app.getPath('temp'), `ark-updater-run-${Date.now()}.log`);
+  const logFile = path.join(app.getPath('temp'), `NOVA-updater-run-${Date.now()}.log`);
   const writeLog = (m) => {
     try {
       fs.appendFileSync(logFile, `[${new Date().toISOString()}] ${m}\n`, 'utf8');
@@ -1011,11 +1011,11 @@ async function runStandaloneSplash(argv) {
   const isUrl = /^https:\/\//i.test(payload);
   const localSetup = !isUrl
     ? payload
-    : path.join(app.getPath('temp'), `ARK-Setup-${expectedVersion || 'update'}.exe`);
+    : path.join(app.getPath('temp'), `NOVA-Setup-${expectedVersion || 'update'}.exe`);
 
   const iconPath = resolveUpdateIco() || resolveUpdateIcon();
 
-  const splashPath = path.join(app.getPath('temp'), `ark-update-splash-${process.pid}.html`);
+  const splashPath = path.join(app.getPath('temp'), `NOVA-update-splash-${process.pid}.html`);
   try {
     fs.writeFileSync(splashPath, splashHtml(), 'utf8');
   } catch (err) {
@@ -1026,7 +1026,7 @@ async function runStandaloneSplash(argv) {
   clearSplashAlive();
   const statusPath = path.join(
     app.getPath('temp'),
-    `ark-update-status-${process.pid}-${Date.now()}.txt`,
+    `NOVA-update-status-${process.pid}-${Date.now()}.txt`,
   );
   const shownPath = uiShownFlagPath();
   writeUpdateStatus(statusPath, 'waiting', 8, 'Installing update', 'Installing update');
@@ -1049,7 +1049,7 @@ async function runStandaloneSplash(argv) {
     alwaysOnTop: true,
     center: true,
     autoHideMenuBar: true,
-    title: 'ARK',
+    title: 'NOVA',
     icon: iconPath || undefined,
     webPreferences: {
       contextIsolation: true,
@@ -1082,7 +1082,7 @@ async function runStandaloneSplash(argv) {
     }
   };
 
-  // ONE splash only: official HTML (HTA survives NSIS replacing ARK.exe).
+  // ONE splash only: official HTML (HTA survives NSIS replacing NOVA.exe).
   const alivePath = splashAliveFlagPath();
   try {
     if (fs.existsSync(alivePath)) fs.unlinkSync(alivePath);
@@ -1103,7 +1103,7 @@ async function runStandaloneSplash(argv) {
 
   // Only then tell the parent it can quit — splash is already on screen.
   try {
-    const readyPath = path.join(app.getPath('temp'), `ark-update-helper-${parentPid || '0'}.ready`);
+    const readyPath = path.join(app.getPath('temp'), `NOVA-update-helper-${parentPid || '0'}.ready`);
     fs.writeFileSync(readyPath, `ok ${new Date().toISOString()}\n`, 'utf8');
     writeLog(`ready ${readyPath}`);
   } catch (err) {
@@ -1114,16 +1114,16 @@ async function runStandaloneSplash(argv) {
   const arkExeTarget = path.join(
     process.env.LOCALAPPDATA || '',
     'Programs',
-    'ARK',
-    'ARK.exe',
+    'NOVA',
+    'NOVA.exe',
   );
   const reopenExe = (arkExeTarget && fs.existsSync(arkExeTarget))
     ? arkExeTarget
-    : path.join(installDir, 'ARK.exe');
+    : path.join(installDir, 'NOVA.exe');
 
   try {
-    await setSplash(win, 8, 'Closing ARK');
-    writeUpdateStatus(statusPath, 'waiting', 12, 'Closing ARK', 'Closing ARK');
+    await setSplash(win, 8, 'Closing NOVA');
+    writeUpdateStatus(statusPath, 'waiting', 12, 'Closing NOVA', 'Closing NOVA');
     // Give the parent a few seconds to exit on its own, then force-kill that PID tree only.
     const softDeadline = Date.now() + 8_000;
     while (pidAlive(parentPid) && Date.now() < softDeadline) {
@@ -1136,8 +1136,8 @@ async function runStandaloneSplash(argv) {
     }
     writeLog(`parent exited alive=${pidAlive(parentPid)}`);
     // NSIS fails with: "Failed to uninstall old application files"
-    // when any lingering ARK.exe process still holds file locks.
-    // So wait until no ARK.exe remains besides this updater.
+    // when any lingering NOVA.exe process still holds file locks.
+    // So wait until no NOVA.exe remains besides this updater.
     const noOtherArk = await waitForNoOtherArkExe(process.pid, 8000, writeLog);
     writeLog(`noOtherArk exe except updater=${noOtherArk}`);
     await sleep(400);
@@ -1176,7 +1176,7 @@ async function runStandaloneSplash(argv) {
 
     const installCopy = path.join(
       app.getPath('temp'),
-      `ARK-Setup-install-${expectedVersion || 'update'}-${process.pid}.exe`,
+      `NOVA-Setup-install-${expectedVersion || 'update'}-${process.pid}.exe`,
     );
     try {
       fs.copyFileSync(localSetup, installCopy);
@@ -1187,8 +1187,8 @@ async function runStandaloneSplash(argv) {
     const setupToRun = fs.existsSync(installCopy) ? installCopy : localSetup;
 
     /**
-     * Do NOT run NSIS while this process still holds ARK.exe open.
-     * Independent HTA splash stays until the new ARK window is shown.
+     * Do NOT run NSIS while this process still holds NOVA.exe open.
+     * Independent HTA splash stays until the new NOVA window is shown.
      */
     writeUpdateStatus(statusPath, 'waiting', 40, 'Installing update', 'Installing update');
     await setSplash(win, 40, 'Installing update');
@@ -1205,14 +1205,14 @@ async function runStandaloneSplash(argv) {
     writeUpdateStatus(statusPath, 'waiting', 48, 'Installing update', 'Installing update');
     await setSplash(win, 48, 'Installing update');
 
-    // Independent splash already painted — close this ARK.exe window so NSIS can replace the binary.
+    // Independent splash already painted — close this NOVA.exe window so NSIS can replace the binary.
     try {
       if (!win.isDestroyed()) win.close();
     } catch {
       /* ignore */
     }
 
-    writeLog('electron splash closed; independent splash stays until ARK window opens');
+    writeLog('electron splash closed; independent splash stays until NOVA window opens');
     await sleep(400);
   } catch (err) {
     writeLog(`error ${err instanceof Error ? err.stack || err.message : err}`);
@@ -1322,7 +1322,7 @@ async function checkForUpdate() {
 
     const tag = bestNewerRelease.tag_name || '';
     const assets = Array.isArray(bestNewerRelease.assets) ? bestNewerRelease.assets : [];
-    const setup = assets.find((a) => /^ARK-Setup(\.|-).*\.exe$/i.test(a.name || ''))
+    const setup = assets.find((a) => /^NOVA-Setup(\.|-).*\.exe$/i.test(a.name || ''))
       || assets.find((a) => /ARK-Setup\.exe$/i.test(a.name || ''));
     const hasLatestYml = assets.some((a) => /^latest\.yml$/i.test(a.name || ''));
     const hasBlockmap = assets.some((a) => /\.blockmap$/i.test(a.name || ''));
@@ -1340,7 +1340,7 @@ async function checkForUpdate() {
         newerAvailable: true,
         currentVersion,
         latestTag: tag,
-        message: `Update ${tag} is listed on ${usedRepo} but ARK-Setup.exe was not found.`,
+        message: `Update ${tag} is listed on ${usedRepo} but NOVA-Setup.exe was not found.`,
       };
     }
 
@@ -1359,7 +1359,7 @@ async function checkForUpdate() {
       latestName: bestNewerRelease.name || tag,
       setupAssetUrl: setupUrl,
       differential: Boolean(hasLatestYml || hasBlockmap),
-      message: `Update available: ARK ${normalizeVersion(tag) || tag}`,
+      message: `Update available: NOVA ${normalizeVersion(tag) || tag}`,
     };
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Check failed';
@@ -1373,7 +1373,7 @@ async function checkForUpdate() {
   }
 }
 
-/** Status file the install CMD + handoff splash share (survives NSIS killing ARK.exe). */
+/** Status file the install CMD + handoff splash share (survives NSIS killing NOVA.exe). */
 function writeUpdateStatus(statusPath, stage, pct, label, sub) {
   try {
     fs.writeFileSync(
@@ -1399,11 +1399,11 @@ function writeUpdateStatus(statusPath, stage, pct, label, sub) {
 function launchCmdApplyUpdate({ setupPath, installDir, expectedVersion, parentPid, arkExe, statusPath }) {
   const temp = app.getPath('temp');
   const stamp = Date.now();
-  const cmdPath = path.join(temp, `ark-apply-update-${stamp}.cmd`);
-  const vbsPath = path.join(temp, `ark-apply-update-${stamp}.vbs`);
-  const logPath = path.join(temp, `ark-apply-update-${stamp}.log`);
-  const readyPath = path.join(temp, `ark-update-helper-${parentPid || process.pid}.ready`);
-  const statusFile = statusPath || path.join(temp, `ark-update-status-${stamp}.json`);
+  const cmdPath = path.join(temp, `NOVA-apply-update-${stamp}.cmd`);
+  const vbsPath = path.join(temp, `NOVA-apply-update-${stamp}.vbs`);
+  const logPath = path.join(temp, `NOVA-apply-update-${stamp}.log`);
+  const readyPath = path.join(temp, `NOVA-update-helper-${parentPid || process.pid}.ready`);
+  const statusFile = statusPath || path.join(temp, `NOVA-update-status-${stamp}.json`);
   const ver = normalizeVersion(expectedVersion);
   const q = (s) => String(s).replace(/"/g, '""');
 
@@ -1430,10 +1430,10 @@ function launchCmdApplyUpdate({ setupPath, installDir, expectedVersion, parentPi
   const cmdBody = [
     '@echo off',
     'setlocal',
-    `title Updating ARK ${ver}`,
+    `title Updating NOVA ${ver}`,
     `echo [%date% %time%] apply begin>> "${logPath}"`,
     `echo Waiting for updater pid ${parentPid} to exit...>> "${logPath}"`,
-    setStatus('waiting', 42, 'Closing ARK', 'Closing ARK'),
+    setStatus('waiting', 42, 'Closing NOVA', 'Closing NOVA'),
     'set /a waits=0',
     ':waitparent',
     `tasklist /FI "PID eq ${parentPid}" 2>nul | findstr /C:"${parentPid}" >nul`,
@@ -1463,15 +1463,15 @@ function launchCmdApplyUpdate({ setupPath, installDir, expectedVersion, parentPi
     setStatus('finishing', 85, 'Installing update', 'Installing update'),
     `del /f /q "${q(uiShownFlagPath())}" >nul 2>nul`,
     'timeout /t 1 /nobreak >nul',
-    setStatus('opening', 88, 'Opening ARK', 'Opening ARK'),
+    setStatus('opening', 88, 'Opening NOVA', 'Opening NOVA'),
     `if exist "${arkExe}" (`,
-    `  echo Starting ARK ${q(arkExe)}>> "${logPath}"`,
+    `  echo Starting NOVA ${q(arkExe)}>> "${logPath}"`,
     `  start "" "${arkExe}"`,
     ') else (',
     `  echo missing ${q(arkExe)}, trying install dir>> "${logPath}"`,
-    `  start "" "${installDir}\\ARK.exe"`,
+    `  start "" "${installDir}\\NOVA.exe"`,
     ')',
-    setStatus('waiting_reopen', 94, 'Opening ARK', 'Opening ARK'),
+    setStatus('waiting_reopen', 94, 'Opening NOVA', 'Opening NOVA'),
     `echo done>> "${logPath}"`,
     'endlocal',
     'exit /b 0',
@@ -1526,10 +1526,10 @@ function launchCmdApplyUpdate({ setupPath, installDir, expectedVersion, parentPi
 function launchUpdaterBreakaway({ payload, expectedVersion, parentPid }) {
   const temp = app.getPath('temp');
   const stamp = Date.now();
-  const vbsPath = path.join(temp, `ark-boot-updater-${stamp}.vbs`);
-  const cmdPath = path.join(temp, `ark-boot-updater-${stamp}.cmd`);
-  const logPath = path.join(temp, `ark-boot-updater-${stamp}.log`);
-  const readyPath = path.join(temp, `ark-update-helper-${parentPid || process.pid}.ready`);
+  const vbsPath = path.join(temp, `NOVA-boot-updater-${stamp}.vbs`);
+  const cmdPath = path.join(temp, `NOVA-boot-updater-${stamp}.cmd`);
+  const logPath = path.join(temp, `NOVA-boot-updater-${stamp}.log`);
+  const readyPath = path.join(temp, `NOVA-update-helper-${parentPid || process.pid}.ready`);
   const exe = process.execPath;
   const cwd = path.dirname(exe);
   const ver = normalizeVersion(expectedVersion);
@@ -1700,7 +1700,7 @@ async function downloadAndInstall(setupUrl, latestTag) {
   if (!app.isPackaged) {
     return {
       ok: false,
-      message: 'Updates install only in the packaged ARK app. Use a built installer to test updates.',
+      message: 'Updates install only in the packaged NOVA app. Use a built installer to test updates.',
     };
   }
 
@@ -1714,7 +1714,7 @@ async function downloadAndInstall(setupUrl, latestTag) {
   }
   const resolvedUrl = String(check.setupAssetUrl);
   if (!isTrustedSetupUrl(resolvedUrl)) {
-    return { ok: false, message: 'Installer URL is not from the trusted ARK releases feed.' };
+    return { ok: false, message: 'Installer URL is not from the trusted NOVA releases feed.' };
   }
   if (typeof setupUrl === 'string' && setupUrl && setupUrl !== resolvedUrl) {
     return { ok: false, message: 'Installer URL mismatch. Check for updates again.' };
@@ -1734,7 +1734,7 @@ async function downloadAndInstall(setupUrl, latestTag) {
     // that directory can be cleaned or locked when the main app dies.
     const stable = path.join(
       app.getPath('temp'),
-      `ARK-Setup-handoff-${expectedVersion || 'update'}.exe`,
+      `NOVA-Setup-handoff-${expectedVersion || 'update'}.exe`,
     );
     try {
       fs.copyFileSync(installerPath, stable);
@@ -1772,7 +1772,7 @@ async function downloadAndInstall(setupUrl, latestTag) {
       if (!electronReady) {
         const statusPath = path.join(
           app.getPath('temp'),
-          `ark-update-status-fallback-${process.pid}.txt`,
+          `NOVA-update-status-fallback-${process.pid}.txt`,
         );
         launchHtaSplash({ statusPath, shownPath: uiShownFlagPath() });
         const handoff = launchCmdApplyUpdate({
@@ -1788,14 +1788,14 @@ async function downloadAndInstall(setupUrl, latestTag) {
           sendProgress({
             status: 'error',
             percent: 100,
-            message: 'Updater did not start. Try Update again, or install ARK-Setup.exe from GitHub Releases.',
+            message: 'Updater did not start. Try Update again, or install NOVA-Setup.exe from GitHub Releases.',
             error: 'updater-ready-timeout',
           });
           return { ok: false, message: 'Updater did not start.' };
         }
       }
     } catch (err) {
-      console.error('[ark] failed to launch updater', err);
+      console.error('[NOVA] failed to launch updater', err);
       sendProgress({
         status: 'error',
         percent: 100,
@@ -1820,7 +1820,7 @@ async function downloadAndInstall(setupUrl, latestTag) {
     return { ok: false, message: 'Missing trusted installer download URL.' };
   }
 
-  const dest = path.join(app.getPath('temp'), `ARK-Setup-${expectedVersion || 'update'}.exe`);
+  const dest = path.join(app.getPath('temp'), `NOVA-Setup-${expectedVersion || 'update'}.exe`);
 
   sendProgress({
     status: 'downloading',
@@ -1924,7 +1924,7 @@ async function openUpdateSplash() {
     show: true,
     center: true,
     autoHideMenuBar: true,
-    title: 'ARK',
+    title: 'NOVA',
     icon: iconPath || undefined,
     webPreferences: {
       contextIsolation: true,

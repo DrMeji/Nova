@@ -50,12 +50,12 @@ export async function checkArkGitHubUpdate(): Promise<ArkUpdateInfo> {
     ok: false,
     currentVersion,
     newerAvailable: false,
-    message: 'Updates are available in the ARK desktop app.',
+    message: 'Updates are available in the NOVA desktop app.',
   };
 }
 
 /** Sidebar “update available” cache — clear on failed Update so green CTA can’t outlive a 504. */
-export const ARK_UPDATE_INDICATOR_CACHE_KEY = 'ark:update-indicator-cache-v1';
+export const ARK_UPDATE_INDICATOR_CACHE_KEY = 'NOVA:update-indicator-cache-v1';
 
 export function clearUpdateIndicatorCache() {
   try {

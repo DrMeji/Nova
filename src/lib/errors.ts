@@ -41,7 +41,7 @@ export function classifyErrorMessage(raw: string): ArkErrorInfo {
   if (/template[_ -]?only|template (?:preview|output)|placeholder (?:only|output)|preview only/i.test(lower)) {
     return { code: 'TEMPLATE_ONLY', message: msg, action: 'Choose a real generation model' };
   }
-  if (/no local gguf|not ready in ark engine|no model|install a local brain|install image weights|install video weights/i.test(lower)) {
+  if (/no local gguf|not ready in NOVA Engine|no model|install a local brain|install image weights|install video weights/i.test(lower)) {
     return { code: 'NO_MODEL', message: msg, action: 'Open Local AI', route: { name: 'local-ai' } };
   }
   if (/timed out|timeout|gguf.*fail/i.test(lower)) {
@@ -51,14 +51,14 @@ export function classifyErrorMessage(raw: string): ArkErrorInfo {
     return { code: 'DISK_FULL', message: msg, action: 'Free disk space' };
   }
   if (/\beaddrinuse\b|\bport (?:\d+ )?in use\b|\b8787\b|\b8788\b/i.test(lower)) {
-    return { code: 'PORT_IN_USE', message: msg, action: 'Quit other ARK copies' };
+    return { code: 'PORT_IN_USE', message: msg, action: 'Quit other NOVA copies' };
   }
   if (/api key|connect a free key|provider key|unauthorized|\b401\b|\b403\b/i.test(lower)) {
     return { code: 'KEY_MISSING', message: msg, action: 'Connect free key' };
   }
   // Require engine/connectivity failure — not product talk ("offline-first", "go offline").
   if (
-    /\b(?:engine is offline|ark (?:is )?offline|brain is offline|provider offline|you(?:'re| are) offline|network (?:is )?offline|appears offline)\b/i.test(lower)
+    /\b(?:engine is offline|NOVA (?:is )?offline|brain is offline|provider offline|you(?:'re| are) offline|network (?:is )?offline|appears offline)\b/i.test(lower)
     || (/\boffline\b/i.test(lower) && /\b(?:engine|brain|gguf|local ai|cannot connect|connection)\b/i.test(lower)
       && !/\boffline[- ]first\b/i.test(lower))
   ) {

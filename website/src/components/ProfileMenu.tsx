@@ -129,7 +129,7 @@ export function ProfileMenu() {
           </div>
 
           <div className="profile-section">
-            <p className="profile-label">ARK ID</p>
+            <p className="profile-label">NOVA ID</p>
             <div className="flex items-center gap-2">
               <p className="text-sm font-medium text-[var(--fg)] tracking-wide">
                 {formatArkId(profile?.ark_id)}
@@ -142,7 +142,7 @@ export function ProfileMenu() {
             </div>
             {!profile?.ark_id ? (
               <p className="text-xs text-[var(--fg-muted)] mt-1 leading-relaxed">
-                Your ARK ID is created when you open the desktop app and finish account setup there.
+                Your NOVA ID is created when you open the desktop app and finish account setup there.
               </p>
             ) : null}
           </div>

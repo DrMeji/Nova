@@ -22,10 +22,10 @@ export async function pushProjectToGitHub(opts: {
   });
   const status = await gitStatus(opts.projectId);
   if (!status?.git) {
-    return { ok: false, error: 'Git is not installed on this PC. Install Git for Windows, then try again in ARK.' };
+    return { ok: false, error: 'Git is not installed on this PC. Install Git for Windows, then try again in NOVA.' };
   }
   if (status.dirty) {
-    await gitCommit(opts.projectId, 'Update from ARK');
+    await gitCommit(opts.projectId, 'Update from NOVA');
   }
   return gitPush(opts.projectId, opts.token);
 }

@@ -12,7 +12,7 @@ export const ROTATION_PRESSURE = 0.9;
 
 export { getGgufCtx, getUsableTokens };
 
-const KEY = 'ark:token-usage';
+const KEY = 'NOVA:token-usage';
 
 type UsageMap = Record<string, number>;
 

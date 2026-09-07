@@ -61,7 +61,7 @@ async function task(name, fn) {
   }
 }
 
-console.log('ark-agent-loop eval (10 tasks)');
+console.log('NOVA-agent-loop eval (10 tasks)');
 
 await task('1. parse TOOL: patch SEARCH/REPLACE', () => {
   const a = parseAgentToolReply([

@@ -237,7 +237,7 @@ const FALLBACKS: Record<string, FallbackMark> = {
       </Svg>
     ),
   },
-  ark: {
+  nova: {
     bg: 'bg-transparent',
     node: (
       <img
@@ -309,10 +309,12 @@ function resolveBrand(id: string, name?: string): string | null {
     ['supabase', 'supabase'],
     ['datadog', 'datadog'],
     ['canva', 'canva'],
-    ['ark-', 'ark'],
-    ['ark engine', 'ark'],
-    ['ark image', 'ark'],
-    ['ark video', 'ark'],
+    ['nova-', 'nova'],
+    ['nova engine', 'nova'],
+    ['nova image', 'nova'],
+    ['nova video', 'nova'],
+    ['ark-', 'nova'],
+    ['ark engine', 'nova'],
     ['together', 'together'],
     ['fireworks', 'fireworks'],
     ['xai', 'xai'],

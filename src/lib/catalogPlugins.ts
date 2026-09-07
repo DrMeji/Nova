@@ -460,7 +460,7 @@ async function runWhatsappLive(token: string, userText: string) {
     'WhatsApp Business · connected',
     '',
     `Phone number ID: \`${phoneNumberId}\``,
-    'Outbound messaging is configured. Ask ARK to draft a template message — sending requires approved templates in Meta Business.',
+    'Outbound messaging is configured. Ask NOVA to draft a template message — sending requires approved templates in Meta Business.',
   ].join('\n');
 }
 
@@ -494,7 +494,7 @@ async function verifyCanvaToken(token: string) {
 
 async function runCanvaLive(token: string, userText: string) {
   await verifyCanvaToken(token);
-  return ['Canva · connected', '', 'Token verified. Paste a Canva design URL in chat for ARK to help review or export notes.'].join('\n');
+  return ['Canva · connected', '', 'Token verified. Paste a Canva design URL in chat for NOVA to help review or export notes.'].join('\n');
 }
 
 async function verifyHeygenToken(token: string) {
@@ -508,7 +508,7 @@ async function verifyHeygenToken(token: string) {
 
 async function runHeygenLive(token: string, userText: string) {
   await verifyHeygenToken(token);
-  return ['HeyGen · connected', '', 'API key verified. Ask ARK to draft a video script — generation runs in HeyGen.'].join('\n');
+  return ['HeyGen · connected', '', 'API key verified. Ask NOVA to draft a video script — generation runs in HeyGen.'].join('\n');
 }
 
 async function verifyRunwayToken(token: string) {
@@ -522,7 +522,7 @@ async function verifyRunwayToken(token: string) {
 
 async function runRunwayLive(token: string, userText: string) {
   await verifyRunwayToken(token);
-  return ['Runway · connected', '', 'API key verified. Describe a clip in chat and ARK can help craft a Runway prompt.'].join('\n');
+  return ['Runway · connected', '', 'API key verified. Describe a clip in chat and NOVA can help craft a Runway prompt.'].join('\n');
 }
 
 function passthroughVerify(name: string) {
@@ -553,10 +553,10 @@ async function runDevpostLive(_token: string, userText: string) {
 
 async function runProductDesignLive(_token: string, userText: string) {
   return [
-    'Product Design · ARK patterns',
+    'Product Design · NOVA patterns',
     '',
     '- Start from user job → screen → component',
-    '- Pair Figma links with ARK Code for design-to-build',
+    '- Pair Figma links with NOVA Code for design-to-build',
     '- Use Mobbin / Canva plugins for references when connected',
     userText ? `\nYou asked: ${userText.slice(0, 200)}` : '',
   ].filter(Boolean).join('\n');
@@ -604,7 +604,7 @@ export const CATALOG_PLUGIN_HANDLERS: Record<string, CatalogPluginEntry> = {
 
   granola: {
     verify: passthroughVerify('Granola'),
-    runLive: passthroughRun('Granola', 'Token stored. Export meeting notes from Granola and paste them in chat for ARK to summarize.'),
+    runLive: passthroughRun('Granola', 'Token stored. Export meeting notes from Granola and paste them in chat for NOVA to summarize.'),
     mention: /granola/i,
   },
   plaud: {
@@ -619,12 +619,12 @@ export const CATALOG_PLUGIN_HANDLERS: Record<string, CatalogPluginEntry> = {
   },
   higgsfield: {
     verify: passthroughVerify('Higgsfield'),
-    runLive: passthroughRun('Higgsfield', 'API key stored. Describe the image or video you want and ARK will help craft prompts.'),
+    runLive: passthroughRun('Higgsfield', 'API key stored. Describe the image or video you want and NOVA will help craft prompts.'),
     mention: /higgsfield/i,
   },
   magnific: {
     verify: passthroughVerify('Magnific'),
-    runLive: passthroughRun('Magnific', 'API key stored. Ask ARK to upscale or enhance an image prompt.'),
+    runLive: passthroughRun('Magnific', 'API key stored. Ask NOVA to upscale or enhance an image prompt.'),
     mention: /magnific/i,
   },
   mobbin: {

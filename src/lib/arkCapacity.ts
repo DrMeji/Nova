@@ -1,5 +1,5 @@
 /**
- * What ARK can actually answer with right now (not catalog placeholders).
+ * What NOVA can actually answer with right now (not catalog placeholders).
  */
 
 import { getEngineStatus } from '@/lib/arkEngine';
@@ -13,7 +13,7 @@ export type LiveCapacity = {
   cloudKeys: boolean;
   keyCount: number;
   ollama: boolean;
-  /** Real GGUF + llama binary ready in ARK Engine */
+  /** Real GGUF + llama binary ready in NOVA Engine */
   localGguf: boolean;
   /** Free image path (Pollinations via Engine) is available in desktop */
   imageFree: boolean;
@@ -99,15 +99,15 @@ export async function probeLiveCapacity(): Promise<LiveCapacity> {
   };
 }
 
-/** Honest reply when Router has no real LLM path (not ARK Core checklist). */
+/** Honest reply when Router has no real LLM path (not NOVA Core checklist). */
 export function honestNoLiveChatReply(): string {
   return [
-    'ARK doesn’t have a live model connected for this chat yet.',
+    'NOVA doesn’t have a live model connected for this chat yet.',
     '',
     'To start getting real answers:',
-    '1. Open Local AI and install the default local brain (Qwen2.5 1.5B). ARK downloads llama-cli + weights for you.',
+    '1. Open Local AI and install the default local brain (Qwen2.5 1.5B). NOVA downloads llama-cli + weights for you.',
     '2. Or connect free capacity. Groq, Google AI Studio, OpenRouter, Hugging Face, or Together (Settings → Providers / Models → Cloud).',
     '',
-    'Once something is connected, leave the picker on ARK Auto. it will fail over for you and keep this thread’s context.',
+    'Once something is connected, leave the picker on NOVA Auto. it will fail over for you and keep this thread’s context.',
   ].join('\n');
 }

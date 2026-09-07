@@ -25,7 +25,7 @@ const SIGNAL_DESK = `Create a React + Vite app named SignalDesk (original brand 
 * Command palette (Ctrl+K): search channels and users
 * Empty states for no channel selected and no DMs
 * Responsive: rail collapses to icons on narrow width
-* npm install + hidden dev server; Localhost opens in ARK
+* npm install + hidden dev server; Localhost opens in NOVA
 Create on Desktop\\Projects with real files — full component split (Rail, Sidebar, ChatPane, etc.)`;
 
 const CASES = [
@@ -281,8 +281,13 @@ for (const c of CASES) {
     }
     const files = buildScaffoldFiles('static-web', { name: 'BrassGate', summary: c.text });
     const html = files.find((f) => f.path === 'index.html')?.content || '';
-    if (!/Lineup|Get Your Tickets|Miles Davis/i.test(html) || /Built with ARK/i.test(html)) {
-      console.error('FAIL [BrassGate]: scaffold must be festival landing, not empty mountain template');
+    // Scaffolds are blank shells now — festival UI must come from the model, not a canned landing.
+    if (/Lineup|Get Your Tickets|Miles Davis|photo-150178|Built with NOVA/i.test(html)) {
+      console.error('FAIL [BrassGate]: scaffold must stay blank (no canned festival/landing template)');
+      failed += 1;
+    }
+    if (!html.includes('id="app"') && !html.includes("id='app'")) {
+      console.error('FAIL [BrassGate]: blank static scaffold should include #app');
       failed += 1;
     }
     if (!looksLikeImplementGo('lets build this')) {
@@ -295,8 +300,8 @@ for (const c of CASES) {
       failed += 1;
     }
     const landing = buildLandingPageFiles('BrassGate', c.text);
-    if (!landing.some((f) => f.path === 'index.html' && /Lineup/.test(f.content))) {
-      console.error('FAIL [BrassGate]: buildLandingPageFiles must emit lineup');
+    if (landing.some((f) => /Lineup|unsplash|photo-/i.test(f.content))) {
+      console.error('FAIL [BrassGate]: buildLandingPageFiles must not emit canned lineup/Unsplash');
       failed += 1;
     }
   }
@@ -352,11 +357,12 @@ for (const c of CASES) {
     }
     const files = buildScaffoldFiles('vite-react', { name: 'TaskRail', summary: c.text });
     const app = files.find((f) => f.path === 'src/App.jsx')?.content || '';
-    if (!/kanban-shell|Backlog|draggable|localStorage/.test(app)) {
-      console.error('FAIL [TaskRail]: scaffold App.jsx must be kanban board');
+    // Blank Vite shell only — product UI is model-written, not a canned kanban SPA.
+    if (!/className=["']app["']/.test(app) || /kanban-shell|Backlog|draggable|localStorage/.test(app)) {
+      console.error('FAIL [TaskRail]: scaffold App.jsx must be empty shell (no canned kanban)');
       failed += 1;
     }
-    if (/Direct Messages|hero-inner|Built with ARK/.test(app)) {
+    if (/Direct Messages|hero-inner|Built with NOVA/.test(app)) {
       console.error('FAIL [TaskRail]: App.jsx must not be discord or marketing landing');
       failed += 1;
     }
@@ -384,17 +390,22 @@ for (const c of CASES) {
     }
     const files = buildScaffoldFiles(detectProjectKind(c.text), { name: 'SaltPier', summary: c.text });
     const html = files.find((f) => f.path === 'index.html')?.content || '';
-    const js = files.find((f) => f.path === 'js/app.js')?.content || '';
-    if (!html.includes('href="#menu"') || !html.includes('href="#reserve"')) {
-      console.error('FAIL [SaltPier]: CTAs must scroll to #menu / #reserve');
+    const css = files.find((f) => f.path === 'css/styles.css')?.content || '';
+    // Blank static shell only — no restaurant Unsplash / Book CTA template.
+    if (/href="#menu"|href="#reserve"|unsplash|photo-150178|Book a table/i.test(html)) {
+      console.error('FAIL [SaltPier]: scaffold must not include canned restaurant CTAs/Unsplash');
       failed += 1;
     }
-    if (!/scrollIntoView/.test(js)) {
-      console.error('FAIL [SaltPier]: app.js must smooth-scroll, not dead preventDefault');
+    if (!html.includes('id="app"') && !/<div id="app">/.test(html)) {
+      console.error('FAIL [SaltPier]: blank static scaffold should include #app');
       failed += 1;
     }
     if (/id="root"|src\/main\.jsx/.test(html)) {
-      console.error('FAIL [SaltPier]: must not scaffold empty Vite shell');
+      console.error('FAIL [SaltPier]: must not scaffold empty Vite shell for restaurant brief');
+      failed += 1;
+    }
+    if (/photo-|unsplash/i.test(css)) {
+      console.error('FAIL [SaltPier]: css must not embed stock photo URLs');
       failed += 1;
     }
   }

@@ -16,7 +16,7 @@ export interface HardwareInfo {
   scannedAt?: string;
 }
 
-/** Models ARK Engine can actually download today (keep in sync with electron/arkEngine.cjs). */
+/** Models NOVA Engine can actually download today (keep in sync with electron/arkEngine.cjs). */
 export const ENGINE_DOWNLOADABLE_IDS = [
   'qwen25-15b',
   'llama32-3b',
@@ -147,7 +147,7 @@ export async function detectHardwareAsync(): Promise<HardwareInfo> {
   }
 }
 
-const HW_SNAPSHOT_KEY = 'ark:hardware-snapshot';
+const HW_SNAPSHOT_KEY = 'NOVA:hardware-snapshot';
 
 export function saveHardwareSnapshot(hw: HardwareInfo) {
   try {

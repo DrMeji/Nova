@@ -27,8 +27,8 @@ export function BrainApiCard({ compact }: { compact?: boolean } = {}) {
       <div>
         <p className="text-sm font-medium text-content-primary">Brain API</p>
         <p className="text-[11px] text-content-tertiary mt-0.5 leading-relaxed">
-          Loopback only on this PC. Any local app can connect to ARK as its brain over HTTP.
-          Packaged ARK requires a bearer token on chat routes.
+          Loopback only on this PC. Any local app can connect to NOVA as its brain over HTTP.
+          Packaged NOVA requires a bearer token on chat routes.
         </p>
         {brainPackaged === false && !brainToken ? (
           <p className="text-[11px] font-medium text-amber-400 mt-1.5">

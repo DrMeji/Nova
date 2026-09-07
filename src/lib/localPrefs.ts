@@ -1,7 +1,9 @@
 /** Local sticky prefs for guest / offline UI (no cloud required). */
 
 const PREFS_KEY = 'ark:local-prefs';
+const PREFS_KEY_LEGACY_NOVA = 'ark:local-prefs';
 const API_KEYS_KEY = 'ark:provider-api-keys';
+const API_KEYS_KEY_LEGACY_NOVA = 'NOVA:provider-api-keys';
 
 export type AiModePref = 'automatic' | 'local_only' | 'cloud_when_available' | 'local_fallback';
 export type DensityPref = 'comfortable' | 'compact';
@@ -100,7 +102,7 @@ export type LocalPrefs = {
   voiceInputDeviceId?: string;
   /** Preferred speaker/headphone deviceId for output test + routing when supported. */
   voiceOutputDeviceId?: string;
-  /** speechSynthesis voiceURI for ARK spoken replies. */
+  /** speechSynthesis voiceURI for NOVA spoken replies. */
   voiceTtsVoiceUri?: string;
   // Updates
   updateChannel: UpdateChannel;
@@ -112,15 +114,15 @@ export type LocalPrefs = {
 const DEFAULT_PREFS: LocalPrefs = {
   displayName: 'Guest',
   presenceStatus: 'online',
-  defaultModelId: 'ark-auto',
-  defaultCodeModelId: 'ark-auto',
+  defaultModelId: 'NOVA-auto',
+  defaultCodeModelId: 'NOVA-auto',
   fontSizePx: 16,
   aiMode: 'automatic',
   keepFilesLocal: true,
   allowCloudSync: false,
   sendDiagnostics: true,
   preferredLanguage: 'TypeScript',
-  projectLocation: '~/ARK/Projects',
+  projectLocation: '~/NOVA/Projects',
   density: 'comfortable',
   accent: 'sky',
   reduceMotion: false,
@@ -165,7 +167,8 @@ const DEFAULT_PREFS: LocalPrefs = {
 
 export function getLocalPrefs(): LocalPrefs {
   try {
-    const raw = localStorage.getItem(PREFS_KEY);
+    const raw = localStorage.getItem(PREFS_KEY)
+      || localStorage.getItem(PREFS_KEY_LEGACY_NOVA);
     if (!raw) return { ...DEFAULT_PREFS };
     const merged = { ...DEFAULT_PREFS, ...JSON.parse(raw) as Partial<LocalPrefs> };
     if (typeof merged.voiceInputAuto !== 'boolean') merged.voiceInputAuto = true;
@@ -173,6 +176,12 @@ export function getLocalPrefs(): LocalPrefs {
     if (typeof merged.ggufNPredict === 'number' && merged.ggufNPredict < 4096) {
       merged.ggufNPredict = 4096;
     }
+    // Brand rename: legacy ark-* model ids → NOVA-*
+    if (merged.defaultModelId === 'ark-auto') merged.defaultModelId = 'NOVA-auto';
+    if (merged.defaultCodeModelId === 'ark-auto') merged.defaultCodeModelId = 'NOVA-auto';
+    if (merged.defaultModelId === 'ark-image-core') merged.defaultModelId = 'NOVA-image-core';
+    if (merged.defaultModelId === 'ark-video-core') merged.defaultModelId = 'NOVA-video-core';
+    if (merged.defaultModelId === 'ark-core') merged.defaultModelId = 'NOVA-core';
     return merged;
   } catch {
     return { ...DEFAULT_PREFS };
@@ -187,6 +196,9 @@ export function setLocalPrefs(patch: Partial<LocalPrefs>): LocalPrefs {
     }
   }
   localStorage.setItem(PREFS_KEY, JSON.stringify(next));
+  try {
+    localStorage.removeItem(PREFS_KEY_LEGACY_NOVA);
+  } catch { /* ignore */ }
   try {
     window.dispatchEvent(new CustomEvent('ark:prefs-changed', { detail: next }));
   } catch {
@@ -204,7 +216,8 @@ let keysEncrypted = false;
 
 function readLegacyLocalKeys(): ProviderKeyMap {
   try {
-    const raw = localStorage.getItem(API_KEYS_KEY);
+    const raw = localStorage.getItem(API_KEYS_KEY)
+      || localStorage.getItem(API_KEYS_KEY_LEGACY_NOVA);
     if (!raw) return {};
     return JSON.parse(raw) as ProviderKeyMap;
   } catch {
@@ -261,7 +274,7 @@ export async function hydrateProviderApiKeys(): Promise<{
       await persistProviderKeys(merged);
     }
     try {
-      window.dispatchEvent(new Event('ark:provider-keys-changed'));
+      window.dispatchEvent(new Event('NOVA:provider-keys-changed'));
     } catch {
       /* ignore */
     }
@@ -272,7 +285,7 @@ export async function hydrateProviderApiKeys(): Promise<{
   keysEncrypted = false;
   keysHydrated = true;
   try {
-    window.dispatchEvent(new Event('ark:provider-keys-changed'));
+    window.dispatchEvent(new Event('NOVA:provider-keys-changed'));
   } catch {
     /* ignore */
   }
@@ -303,7 +316,7 @@ export async function setProviderApiKey(providerId: string, apiKey: string) {
   // Otherwise a failed secure-storage write looks connected until restart.
   providerKeyCache = map;
   try {
-    window.dispatchEvent(new Event('ark:provider-keys-changed'));
+    window.dispatchEvent(new Event('NOVA:provider-keys-changed'));
   } catch {
     /* ignore */
   }
@@ -318,7 +331,7 @@ export async function setProviderApiKeys(map: ProviderKeyMap) {
   await persistProviderKeys(clean);
   providerKeyCache = clean;
   try {
-    window.dispatchEvent(new Event('ark:provider-keys-changed'));
+    window.dispatchEvent(new Event('NOVA:provider-keys-changed'));
   } catch {
     /* ignore */
   }
@@ -364,7 +377,7 @@ export const ARK_CHANGELOG = [
     title: 'Update splash: rounded box, bar under icon',
     notes: [
       'Update splash is a rounded box on all four corners',
-      'ARK icon stays centered with the progress bar directly underneath (not stuck to the bottom edge)',
+      'NOVA icon stays centered with the progress bar directly underneath (not stuck to the bottom edge)',
       'Same layout for the install HTA splash and the Electron preview splash',
     ],
   },
@@ -435,13 +448,13 @@ export const ARK_CHANGELOG = [
     version: '0.1.176',
     channel: 'stable' as const,
     date: 'Sep 3, 2026',
-    title: 'Chat mic, ARK Projects, Brain under Tools',
+    title: 'Chat mic, NOVA Projects, Brain under Tools',
     notes: [
       'Microphone on the Chat box — click to speak, voice-to-text fills the composer',
       'Queued message bar matches the chat box width',
       'Thought dropdown shows background work; Files Changed card on disk edits; More details removed',
-      'New projects land in Documents\\ARK Projects; Projects view lists them',
-      'ARK Brain moved to Tools (under MCP) for any local app — not Lindsay-only',
+      'New projects land in Documents\\NOVA Projects; Projects view lists them',
+      'NOVA Brain moved to Tools (under MCP) for any local app — not Lindsay-only',
       'Gaming news app ideas no longer trigger a desktop game inventory scan',
     ],
   },
@@ -453,7 +466,7 @@ export const ARK_CHANGELOG = [
     notes: [
       'Update button no longer pops the splash while download / verify still runs in Settings',
       'Install splash is the official logo + progress screen only — old blank WinForms path removed',
-      'HTA splash embeds the ARK mark so the logo cannot go missing mid-update',
+      'HTA splash embeds the NOVA mark so the logo cannot go missing mid-update',
       'Agent / Debug on a bound project can run a Level-B tool loop (list → read → grep → write → run → verify)',
     ],
   },
@@ -463,7 +476,7 @@ export const ARK_CHANGELOG = [
     date: 'Sep 3, 2026',
     title: 'Transparent shell icon (no black tile)',
     notes: [
-      'Taskbar / Start ARK mark is transparent. no black square behind the glyph',
+      'Taskbar / Start NOVA mark is transparent. no black square behind the glyph',
       'Installer refreshes Windows icon cache after update so Start menu picks up the new mark',
       'Tray icon stays the clean transparent voice mark',
     ],
@@ -474,7 +487,7 @@ export const ARK_CHANGELOG = [
     date: 'Sep 3, 2026',
     title: 'Larger mark, real update splash, safer chat',
     notes: [
-      'Taskbar and tray ARK mark is larger and clearer',
+      'Taskbar and tray NOVA mark is larger and clearer',
       'Official update splash (logo + progress) on real installs. bat preview stays bat-only',
       'Harmful asks use a professional refusal without decline lecture wording',
       'Yes / overall follow-ups deepen with new detail instead of repeating',
@@ -514,7 +527,7 @@ export const ARK_CHANGELOG = [
     date: 'Sep 1, 2026',
     title: 'Fix update splash icon + working neural voice',
     notes: [
-      'Update splash uses the new ARK face (no ears/antenna, inner shimmer) instead of legacy icon.png',
+      'Update splash uses the new NOVA face (no ears/antenna, inner shimmer) instead of legacy icon.png',
       'Neural Female/Male TTS fixed — edge-tts-universal replaces broken edge-tts in Electron',
       'System voice fallback respects Female vs Male when neural path is unavailable',
     ],
@@ -534,11 +547,11 @@ export const ARK_CHANGELOG = [
     version: '0.1.168',
     channel: 'stable' as const,
     date: 'Sep 1, 2026',
-    title: 'Voice tab, neural speech, animated ARK face',
+    title: 'Voice tab, neural speech, animated NOVA face',
     notes: [
       'Voice chat tab — talk back and forth for questions and stories, no history saved',
       'Microsoft Edge neural TTS — Female or Male voice in Settings → Voice',
-      'Animated ARK face with inner shimmer and mouth bars while speaking',
+      'Animated NOVA face with inner shimmer and mouth bars while speaking',
       'Dedicated voice router — cloud-first, capped local tokens, no PC freeze on send',
       'Settings → Voice: mic, headphones, and spoken voice picker',
     ],
@@ -578,7 +591,7 @@ export const ARK_CHANGELOG = [
     title: 'Friend requests fix + solid update splash',
     notes: [
       'Inbound friend requests sync and show Accept/Decline even when Realtime is missed',
-      'One-time ARK ID rotation (DEV stays DEV); cloud ID is source of truth',
+      'One-time NOVA ID rotation (DEV stays DEV); cloud ID is source of truth',
       'Updating splash is a solid dark panel — no white outer frame or caption junk',
       'Chat answer quality, web lookup, and context compaction improvements',
     ],
@@ -610,9 +623,9 @@ export const ARK_CHANGELOG = [
     version: '0.1.154',
     channel: 'stable' as const,
     date: 'Aug 25, 2026',
-    title: 'DEV ARK ID + local recovery notes',
+    title: 'DEV NOVA ID + local recovery notes',
     notes: [
-      'Developer account public ARK ID is DEV for everyone (not digits)',
+      'Developer account public NOVA ID is DEV for everyone (not digits)',
       'Temp local recovery note saves email, password, and PIN on this PC only',
       'Forgot password / open folder points at that note until email reset ships',
       'Update check retries GitHub 504s; MCP tools can be called from Chat',
@@ -626,7 +639,7 @@ export const ARK_CHANGELOG = [
     notes: [
       'Friends list and chat refresh live display names and profile photos from Settings',
       'DEV account labels correctly on friend requests and contacts',
-      'Sign up includes a single Name field (ARK ID still auto-assigned)',
+      'Sign up includes a single Name field (NOVA ID still auto-assigned)',
       'Call stays parked until tomorrow; see docs/DEFERRED.md',
     ],
   },
@@ -725,7 +738,7 @@ export const ARK_CHANGELOG = [
     date: 'Aug 19, 2026',
     title: 'Quality-first image & video generation',
     notes: [
-      'Image mode no longer races fast turbo models. ARK tries flux-realism, flux, then openjourney sequentially (up to ~30s)',
+      'Image mode no longer races fast turbo models. NOVA tries flux-realism, flux, then openjourney sequentially (up to ~30s)',
       'Product prompts (iPhone, devices) get hero-shot hints: sharp studio render, no hands unless you ask',
       'Live generation animation with elapsed seconds and progress bar while images/videos render',
       'Video tab: pick 10 / 20 / 30 second clip length before send (max 30s)',
@@ -787,16 +800,16 @@ export const ARK_CHANGELOG = [
     date: 'Aug 19, 2026',
     title: 'Hide top-left TitleBar text',
     notes: [
-      'Top-left window chrome is now blank (no “ARK” label), leaving only sidebar icons/search visible.',
+      'Top-left window chrome is now blank (no “NOVA” label), leaving only sidebar icons/search visible.',
     ],
   },
   {
     version: '0.1.88',
     channel: 'stable' as const,
     date: 'Aug 19, 2026',
-    title: 'Dev ARK ID + UI chrome fixes',
+    title: 'Dev NOVA ID + UI chrome fixes',
     notes: [
-      'Dev account ARK ID now shows single `DEV` (and Copy copies `DEV`) instead of repeating it',
+      'Dev account NOVA ID now shows single `DEV` (and Copy copies `DEV`) instead of repeating it',
       'Title bar no longer renders route context text (removes “arc model engine” / random context noise)',
       'Local AI installed check/trash icons are always green/red (never grey)',
     ],
@@ -817,8 +830,8 @@ export const ARK_CHANGELOG = [
     date: 'Aug 19, 2026',
     title: 'Dev account labels + installed icon consistency',
     notes: [
-      'Dev account (designated email): ARK ID shows “Dev DEV” (no dev badge pill)',
-      'Copy ARK ID now copies the displayed “Dev DEV” text for the dev account',
+      'Dev account (designated email): NOVA ID shows “Dev DEV” (no dev badge pill)',
+      'Copy NOVA ID now copies the displayed “Dev DEV” text for the dev account',
       'Sidebar top-left icon no longer shows fallback alt text (“arc”)',
       'Installed model check/trash icons are consistent across Models and Local AI tabs',
     ],
@@ -833,9 +846,9 @@ export const ARK_CHANGELOG = [
       'Sidebar: Local AI and Models no longer both highlight at once',
       'Engine tab in Models stays in-view (no longer kicks to Local AI)',
       'Installed model checkmark is green; trash icon is red',
-      'ARK ID shows "deaf" for designated account instead of number',
+      'NOVA ID shows "deaf" for designated account instead of number',
       'Hardware scan buttons spaced apart in Settings',
-      '"ARK · Chat" removed from title bar (just shows "ARK")',
+      '"NOVA · Chat" removed from title bar (just shows "NOVA")',
     ],
   },
   {
@@ -882,7 +895,7 @@ export const ARK_CHANGELOG = [
     date: 'Aug 18, 2026',
     title: 'Harden auth & restore media/UI clarity',
     notes: [
-      'Signup no longer asks for a custom username (auto ARK ID display name)',
+      'Signup no longer asks for a custom username (auto NOVA ID display name)',
       'Parked Connect items no longer navigate (opens Settings → Testers)',
       'Title bar no longer shows confusing Hybrid pill; Capacity label clarifies local+cloud',
       'Models list returns to download/check/trash (Chat/Code pills are non-clickable)',
@@ -974,7 +987,7 @@ export const ARK_CHANGELOG = [
       'GGUF failures and brain API errors return real 503s instead of fake success replies',
       'Packaged installs get a brain bearer token; copy or rotate it in Settings → AI',
       'API keys refuse plaintext save when OS encryption is unavailable',
-      'Code review/debug shows a live work trace while ARK reads your project',
+      'Code review/debug shows a live work trace while NOVA reads your project',
       'External links use an allowlist with confirm for unknown hosts',
     ],
   },
@@ -985,7 +998,7 @@ export const ARK_CHANGELOG = [
     title: 'Code waits for Enter, reads your folder, and locks device size',
     notes: [
       'Yes from Chat opens Code with your prompt ready. nothing runs until you press Enter',
-      'If the brain does not finish, ARK says so instead of pasting an offline starter app',
+      'If the brain does not finish, NOVA says so instead of pasting an offline starter app',
       '“What is this project about?” reads the opened files, describes them, then offers Debug / Work on this',
       'While code is writing, the right editor follows the live file; device previews stay the real phone size (zoom only, no stretching)',
     ],
@@ -1032,7 +1045,7 @@ export const ARK_CHANGELOG = [
     title: 'Device-target apps + tighter Cloud AI',
     notes: [
       'Code chat asks which device after it notices iOS or Android: iPhone / iPad / Mac, or phone / tablet / laptop',
-      'Start opens a device-sized preview in ARK; Xcode and Android Studio still ship the real app',
+      'Start opens a device-sized preview in NOVA; Xcode and Android Studio still ship the real app',
       'Saved provider keys stay checked on Models, Cloud plus/check persists, and Image / Video / Networking / Message / Call / Testers are Coming soon',
       'PC specs stay on Local AI → Hardware only; Models has a Refresh hunt instead of the hardware banner',
     ],
@@ -1065,7 +1078,7 @@ export const ARK_CHANGELOG = [
     date: 'Aug 18, 2026',
     title: 'Fix Qwen prompt echo + balance update bar',
     notes: [
-      'Local Qwen/GGUF chat no longer gets a double ARK system instruction block',
+      'Local Qwen/GGUF chat no longer gets a double NOVA system instruction block',
       'Text chat keeps the neutral Thinking state until real text arrives',
       'Update splash progress bar is wider and centered in both HTML and fallback UI',
     ],
@@ -1077,7 +1090,7 @@ export const ARK_CHANGELOG = [
     title: 'Fix system-prompt echo in text chat (test)',
     notes: [
       'Chat now detects and rejects “system prompt echo” replies from models',
-      'Router will failover when a local model re-emits the ARK system instruction block',
+      'Router will failover when a local model re-emits the NOVA system instruction block',
     ],
   },
   {
@@ -1086,7 +1099,7 @@ export const ARK_CHANGELOG = [
     date: 'Aug 17, 2026',
     title: 'Fix installer uninstall locks during updates (test)',
     notes: [
-      'Updater now waits until no other ARK.exe processes remain before running NSIS',
+      'Updater now waits until no other NOVA.exe processes remain before running NSIS',
     ],
   },
   {
@@ -1113,7 +1126,7 @@ export const ARK_CHANGELOG = [
     date: 'Aug 17, 2026',
     title: 'Cleaner Updating screen + Message Coming soon',
     notes: [
-      'Update splash uses the ARK icon in the window and taskbar, one status line, and a clearer progress bar',
+      'Update splash uses the NOVA icon in the window and taskbar, one status line, and a clearer progress bar',
       'Message is disabled in the sidebar with Coming soon (Networking stays Coming soon)',
     ],
   },
@@ -1124,17 +1137,17 @@ export const ARK_CHANGELOG = [
     title: 'Networking marked Coming soon (update splash test)',
     notes: [
       'Networking is disabled in the sidebar with Coming soon. Message and Call stay available',
-      'Use this build to confirm the Updating screen stays until ARK reopens',
+      'Use this build to confirm the Updating screen stays until NOVA reopens',
     ],
   },
   {
     version: '0.1.59',
     channel: 'stable' as const,
     date: 'Aug 17, 2026',
-    title: 'Updating screen stays until ARK reopens',
+    title: 'Updating screen stays until NOVA reopens',
     notes: [
-      'The Updating splash no longer vanishes after install while ARK is still starting',
-      'Splash stays on screen until the real ARK window appears, then it closes',
+      'The Updating splash no longer vanishes after install while NOVA is still starting',
+      'Splash stays on screen until the real NOVA window appears, then it closes',
     ],
   },
   {
@@ -1198,9 +1211,9 @@ export const ARK_CHANGELOG = [
     date: 'Aug 17, 2026',
     title: 'Sticky Auto brain across chat, image, video, and code',
     notes: [
-      'Auto picks a brain once per thread and stays on it until failover. pill shows ARK · model name',
+      'Auto picks a brain once per thread and stays on it until failover. pill shows NOVA · model name',
       'Image and video chats remember their equipped path; code workspace uses the same sticky coder brain',
-      'Token ring and model pill reflect the active brain instead of generic ARK',
+      'Token ring and model pill reflect the active brain instead of generic NOVA',
       'Sidebar profile restored at the bottom (name + settings gear)',
     ],
   },
@@ -1211,17 +1224,17 @@ export const ARK_CHANGELOG = [
     title: 'Fix stray Electron window on PC restart',
     notes: [
       'Dev Electron builds no longer register Windows startup (that caused the raw Electron splash on boot)',
-      'Packaged ARK cleans up stale dev startup entries and re-registers the real ARK.exe when Launch on startup is on',
-      'Lindsay / brain API unchanged. ARK still starts from the installed app only',
+      'Packaged NOVA cleans up stale dev startup entries and re-registers the real NOVA.exe when Launch on startup is on',
+      'Lindsay / brain API unchanged. NOVA still starts from the installed app only',
     ],
   },
   {
     version: '0.1.51',
     channel: 'stable' as const,
     date: 'Aug 16, 2026',
-    title: 'ARK Engine is the brain. Auto picks the right local model',
+    title: 'NOVA Engine is the brain. Auto picks the right local model',
     notes: [
-      'Auto routes chat vs code vs media on the same ARK pill, and uses a ready Engine GGUF that fits this PC (7B / 3B when installed. not stuck on 1.5B)',
+      'Auto routes chat vs code vs media on the same NOVA pill, and uses a ready Engine GGUF that fits this PC (7B / 3B when installed. not stuck on 1.5B)',
       'Build asks load a Coder GGUF when you have one; Lindsay on :8787 gets the same pick instead of Ollama',
       'Local llama-cli now uses a real chat template and stop strings so answers stay on-topic',
       'Ollama stays optional last. never the default brain',
@@ -1234,7 +1247,7 @@ export const ARK_CHANGELOG = [
     title: 'New Chat answers the question you asked',
     notes: [
       'Local chat no longer pastes the previous reply into the next one (the “c. Is there anything…” leak)',
-      'ARK knows it is this app. not Ark: Survival Evolved. and won’t “correct” the name',
+      'NOVA knows it is this app. not Ark: Survival Evolved. and won’t “correct” the name',
       'Follow-ups like “tell me a story” start a fresh answer; build asks still keep useful context',
     ],
   },
@@ -1246,7 +1259,7 @@ export const ARK_CHANGELOG = [
     notes: [
       'Code / Image / Video no longer spawn a new Recent row on every sidebar click',
       'New Chat no longer reuses a stale thread id (fixes mixed follow-up replies)',
-      'Token ring centered with the ARK pill; Stop clears sooner when the reply is done',
+      'Token ring centered with the NOVA pill; Stop clears sooner when the reply is done',
     ],
   },
   {
@@ -1267,7 +1280,7 @@ export const ARK_CHANGELOG = [
     date: 'Aug 16, 2026',
     title: 'Update wait screen + UI polish',
     notes: [
-      'Updating screen stays until ARK reopens (“Waiting for ARK to reopen”)',
+      'Updating screen stays until NOVA reopens (“Waiting for NOVA to reopen”)',
       'Smaller plus menu; Recent shows chat vs Code icons with archive/delete',
       'Cleaner Code Start/Stop, chat footer, Settings grids without empty scroll',
     ],
@@ -1276,10 +1289,10 @@ export const ARK_CHANGELOG = [
     version: '0.1.45',
     channel: 'stable' as const,
     date: 'Aug 16, 2026',
-    title: 'Plus menu, ARK model pill, token ring',
+    title: 'Plus menu, NOVA model pill, token ring',
     notes: [
       'Plus button opens Plan / Ask / Debug / Multitask / Add file (Chat and Code)',
-      'Model pill shows ARK with a dropdown; Code chat has the same model picker + failover',
+      'Model pill shows NOVA with a dropdown; Code chat has the same model picker + failover',
       'Code button only appears when a build-style ask is detected; token ring shows budget use',
     ],
   },
@@ -1289,7 +1302,7 @@ export const ARK_CHANGELOG = [
     date: 'Aug 16, 2026',
     title: 'Code cleanup + update screen stays open',
     notes: [
-      'Updating window stays through install until ARK reopens (Installing → Opening ARK)',
+      'Updating window stays through install until NOVA reopens (Installing → Opening NOVA)',
       'Code starts empty. no fake files; Browser/Run chrome only when you build',
       'Chat asks before switching to Code; Recent is one list with rename',
     ],
@@ -1309,10 +1322,10 @@ export const ARK_CHANGELOG = [
     version: '0.1.42',
     channel: 'stable' as const,
     date: 'Aug 17, 2026',
-    title: 'Updater finishes and reopens ARK',
+    title: 'Updater finishes and reopens NOVA',
     notes: [
-      'Install no longer kills the Updating window mid-way by overwriting a locked ARK.exe',
-      'Hidden apply step runs after the splash exits, then ARK reopens',
+      'Install no longer kills the Updating window mid-way by overwriting a locked NOVA.exe',
+      'Hidden apply step runs after the splash exits, then NOVA reopens',
       'Updating window is a bit larger',
     ],
   },
@@ -1333,7 +1346,7 @@ export const ARK_CHANGELOG = [
     date: 'Aug 17, 2026',
     title: 'Updating splash instead of a terminal',
     notes: [
-      'Install shows a small Updating ARK window (logo, percent, progress bar)',
+      'Install shows a small Updating NOVA window (logo, percent, progress bar)',
       'No more command-prompt window during updates',
       'Hidden backup installer path if the splash cannot start',
     ],
@@ -1355,10 +1368,10 @@ export const ARK_CHANGELOG = [
     date: 'Aug 17, 2026',
     title: 'Updater install actually finishes',
     notes: [
-      'Fixed blank “Updating ARK” hang caused by killing Electron helper processes',
+      'Fixed blank “Updating NOVA” hang caused by killing Electron helper processes',
       'Install now runs via a standalone apply script after download (no stuck black window)',
       'Single download progress in Settings. no second overlay',
-      'Installer is staged to a stable temp path before ARK exits',
+      'Installer is staged to a stable temp path before NOVA exits',
     ],
   },
   {
@@ -1380,7 +1393,7 @@ export const ARK_CHANGELOG = [
     date: 'Aug 17, 2026',
     title: 'Updater actually closes and installs',
     notes: [
-      'After download, ARK force-exits so the Updating window is not stuck waiting',
+      'After download, NOVA force-exits so the Updating window is not stuck waiting',
       'No second “Closing…” overlay. download in-app, then only the Updating splash',
       'Updater force-kills a stuck parent process and continues install',
     ],
@@ -1404,7 +1417,7 @@ export const ARK_CHANGELOG = [
     date: 'Aug 17, 2026',
     title: 'In-app updater handoff fix',
     notes: [
-      'Updating ARK window can install while the main app closes (single-instance lock fix)',
+      'Updating NOVA window can install while the main app closes (single-instance lock fix)',
       'Updater waits until the splash is ready before quitting the old process',
     ],
   },
@@ -1428,8 +1441,8 @@ export const ARK_CHANGELOG = [
     title: 'Fix black screen and duplicate tray icons',
     notes: [
       'Packaged UI loads correctly (no blank black window from file:// module CORS)',
-      'Single-instance lock. reopening focuses ARK instead of spawning more trays',
-      'Tray shows the ARK icon with tooltip “ARK” (not brain port text)',
+      'Single-instance lock. reopening focuses NOVA instead of spawning more trays',
+      'Tray shows the NOVA icon with tooltip “NOVA” (not brain port text)',
     ],
   },
   {
@@ -1439,7 +1452,7 @@ export const ARK_CHANGELOG = [
     title: 'Fix installer launch crash',
     notes: [
       'Fix startup crash (invalid model alias syntax in brain API)',
-      'Installer now launches ARK after Setup finishes',
+      'Installer now launches NOVA after Setup finishes',
     ],
   },
   {
@@ -1459,9 +1472,9 @@ export const ARK_CHANGELOG = [
     date: 'Aug 16, 2026',
     title: 'One public repo · SDXL Turbo local',
     notes: [
-      'Installers and in-app updates use DrMeji/Ark only (ark-dist retired)',
+      'Installers and in-app updates use DrMeji/Ark only (NOVA-dist retired)',
       'SDXL Turbo (Local) downloadable from Local AI alongside SD 1.5',
-      'OAuth setup guide: docs/oauth-setup.md; Authenticode via CSC_* on Ark CI',
+      'OAuth setup guide: docs/oauth-setup.md; Authenticode via CSC_* on NOVA CI',
     ],
   },
   {
@@ -1470,7 +1483,7 @@ export const ARK_CHANGELOG = [
     date: 'Aug 16, 2026',
     title: 'Local image + real MP4 + brain polish',
     notes: [
-      'On-device Stable Diffusion 1.5 via ARK Engine (sd.cpp). install from Local AI',
+      'On-device Stable Diffusion 1.5 via NOVA Engine (sd.cpp). install from Local AI',
       'Video: stronger free MP4 hosts + Ken Burns real MP4 when generative video is offline',
       'Download cancel/disk checks, chat Ready/Installing/Cloud picker, tray keep-alive, Lindsay aliases',
       'Live plugin depth (GitHub issues, Linear close, Discord #channel, Drive upload); Creations delete',
@@ -1492,10 +1505,10 @@ export const ARK_CHANGELOG = [
     version: '0.1.25',
     channel: 'stable' as const,
     date: 'Aug 16, 2026',
-    title: 'Accurate hardware + ARK as external brain',
+    title: 'Accurate hardware + NOVA as external brain',
     notes: [
       'One PC scan saved everywhere. Models / Local AI / onboarding show real specs and fit lists',
-      'Brain API 0.4: Ollama-shaped /api/* + OpenAI chat completions so Lindsay (and any app) can use ARK instead of Ollama',
+      'Brain API 0.4: Ollama-shaped /api/* + OpenAI chat completions so Lindsay (and any app) can use NOVA instead of Ollama',
       'More Engine downloads (Coder 14B/32B, DeepSeek, StarCoder, Llama 8B, …), multi-download queue + disk check, Import/drop GGUF',
       'Chat failover “Switched to…” chip + capacity meter; Calendar create + Notion update; video catalog honesty',
     ],
@@ -1550,7 +1563,7 @@ export const ARK_CHANGELOG = [
     date: 'Aug 16, 2026',
     title: 'More free capacity plugged in',
     notes: [
-      'Hugging Face + NVIDIA NIM + Together / Fireworks / DeepSeek / Mistral in ARK Router',
+      'Hugging Face + NVIDIA NIM + Together / Fireworks / DeepSeek / Mistral in NOVA Router',
       'Video tries Pollinations + HF MP4 hosts; browser-assisted plugin connect; permission checks',
       'electron-updater delta path when latest.yml is published; code-signing via CSC_LINK',
     ],
@@ -1571,25 +1584,25 @@ export const ARK_CHANGELOG = [
     title: 'Fix update splash not opening',
     notes: [
       'Updater breakaway launch so the Updating window actually appears',
-      'Download finishes in ARK first, then splash installs and reopens',
+      'Download finishes in NOVA first, then splash installs and reopens',
     ],
   },
   {
     version: '0.1.17',
     channel: 'stable' as const,
     date: 'Aug 15, 2026',
-    title: 'Clean ARK splash update test',
+    title: 'Clean NOVA splash update test',
     notes: [
-      'Check → Update from 0.1.16: black ARK splash, no PowerShell taskbar entry',
+      'Check → Update from 0.1.16: black NOVA splash, no PowerShell taskbar entry',
     ],
   },
   {
     version: '0.1.16',
     channel: 'stable' as const,
     date: 'Aug 15, 2026',
-    title: 'ARK update splash + custom models folder',
+    title: 'NOVA update splash + custom models folder',
     notes: [
-      'Update splash is a real ARK window (no PowerShell in the taskbar)',
+      'Update splash is a real NOVA window (no PowerShell in the taskbar)',
       'Local AI → Advanced: change or reset the models folder path',
     ],
   },
@@ -1621,7 +1634,7 @@ export const ARK_CHANGELOG = [
     notes: [
       'Auto model picker sits inside the chat bar next to the mic',
       'Add plugins, capacity, and Open a project sit under the composer',
-      'Removed What can ARK do capability tiles',
+      'Removed What can NOVA do capability tiles',
     ],
   },
   {
@@ -1631,7 +1644,7 @@ export const ARK_CHANGELOG = [
     title: 'Discord-style updates that actually install',
     notes: [
       'Update helper survives app quit (was dying before install finished)',
-      'Small Updating box downloads + installs, then reopens ARK',
+      'Small Updating box downloads + installs, then reopens NOVA',
       'No fullscreen download overlay',
     ],
   },
@@ -1642,7 +1655,7 @@ export const ARK_CHANGELOG = [
     title: 'Discord-style update box + faster reopen',
     notes: [
       'Updating splash is a small centered box (not fullscreen)',
-      'ARK relaunches as soon as install finishes',
+      'NOVA relaunches as soon as install finishes',
     ],
   },
   {
@@ -1651,8 +1664,8 @@ export const ARK_CHANGELOG = [
     date: 'Aug 15, 2026',
     title: 'Separate Updating splash window',
     notes: [
-      'Download in ARK, then a small logo + percent window finishes the update',
-      'Main app closes during install; ARK reopens when done',
+      'Download in NOVA, then a small logo + percent window finishes the update',
+      'Main app closes during install; NOVA reopens when done',
       'No terminals during update',
     ],
   },
@@ -1673,9 +1686,9 @@ export const ARK_CHANGELOG = [
     date: 'Aug 15, 2026',
     title: 'Reliable update relaunch + stay signed in',
     notes: [
-      'Update helper survives app quit and reopens ARK automatically',
+      'Update helper survives app quit and reopens NOVA automatically',
       'Auth session stored in app data so upgrades keep you signed in',
-      'Launch ARK when Windows starts (Settings → Updates)',
+      'Launch NOVA when Windows starts (Settings → Updates)',
       'Removed page subtitle blurbs on Models, Local AI, Plugins',
     ],
   },
@@ -1686,7 +1699,7 @@ export const ARK_CHANGELOG = [
     title: 'Update flow that keeps your session',
     notes: [
       'Upgrades no longer wipe sign-in, setup, or models',
-      'Clear download → install overlay, then auto-reopen ARK',
+      'Clear download → install overlay, then auto-reopen NOVA',
       'Lands on New Chat still signed in',
     ],
   },
@@ -1696,7 +1709,7 @@ export const ARK_CHANGELOG = [
     date: 'Aug 15, 2026',
     title: 'Real project coding loop',
     notes: [
-      'Project chat calls ARK Router and writes real files',
+      'Project chat calls NOVA Router and writes real files',
       'Explorer and editor update from model file blocks',
       'Honest routing status. no fake install steps',
     ],
@@ -1707,10 +1720,10 @@ export const ARK_CHANGELOG = [
     date: 'Aug 15, 2026',
     title: 'In-app updates + cream light',
     notes: [
-      'Check → Download updates inside ARK (no GitHub browser hop)',
+      'Check → Download updates inside NOVA (no GitHub browser hop)',
       'Removed speed step from first-run setup',
       'Light appearance uses soft cream instead of pure white',
-      'Uninstall wipes ARK models and app data',
+      'Uninstall wipes NOVA models and app data',
     ],
   },
   {
@@ -1742,7 +1755,7 @@ export const ARK_CHANGELOG = [
     date: 'Aug 15, 2026',
     title: 'App icon',
     notes: [
-      'White robot app icon on Setup and ARK.exe',
+      'White robot app icon on Setup and NOVA.exe',
       'Proper Windows .ico for installer embedding',
     ],
   },

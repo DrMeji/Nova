@@ -39,11 +39,11 @@ export function brainKindForRouterKind(kind: RouterKind): ThreadBrainKind {
 }
 
 export function threadBrainKey(scopeId: string, kind: ThreadBrainKind = 'chat') {
-  return `ark:chat-thread:brain:${scopeId}:${kind}`;
+  return `NOVA:chat-thread:brain:${scopeId}:${kind}`;
 }
 
 function legacyThreadBrainKey(scopeId: string) {
-  return `ark:chat-thread:brain:${scopeId}`;
+  return `NOVA:chat-thread:brain:${scopeId}`;
 }
 
 export function loadThreadBrain(scopeId: string, kind: ThreadBrainKind = 'chat'): ThreadBrain | null {
@@ -128,9 +128,9 @@ export function threadBrainFromResult(
   };
 }
 
-/** Pill label when ARK Auto has a sticky brain for this thread. */
+/** Pill label when NOVA Auto has a sticky brain for this thread. */
 export function autoPillLabel(_brain?: ThreadBrain | null): string {
-  return 'ARK';
+  return 'NOVA';
 }
 
 /** Short line for the Auto menu row. Auto stays selected; this is the brain it picked. */

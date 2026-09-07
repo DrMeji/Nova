@@ -117,7 +117,7 @@ function paintOrbs(orbs: OrbSpec[], orbEls: (HTMLDivElement | null)[]) {
   }
 }
 
-/** Colorful drifting orbs — same vibe as ARK sign-in, fixed hues that only move. */
+/** Colorful drifting orbs — same vibe as NOVA sign-in, fixed hues that only move. */
 export function AmbientOrbs() {
   const layerRef = useRef<HTMLDivElement>(null);
   const orbRefs = useRef<(HTMLDivElement | null)[]>([]);

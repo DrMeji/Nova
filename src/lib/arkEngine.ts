@@ -39,19 +39,19 @@ export async function getEngineStatus(): Promise<ArkEngineStatus> {
     service: 'ark-engine',
     version: '0.4.0',
     phase: 'offline',
-    activeModelId: 'ark-core',
-    activeModelName: 'ARK Core',
+    activeModelId: 'NOVA-core',
+    activeModelName: 'NOVA Core',
     modelsDir: '(desktop only)',
     models: [
       {
-        id: 'ark-core',
-        name: 'ARK Core',
+        id: 'NOVA-core',
+        name: 'NOVA Core',
         detail: 'Built-in',
         sizeGb: 0,
         status: 'ready',
       },
     ],
-    note: 'ARK Engine runs inside the desktop app. Open ARK via Electron for full local power.',
+    note: 'NOVA Engine runs inside the desktop app. Open NOVA via Electron for full local power.',
     defaultBrainId: DEFAULT_LOCAL_BRAIN_ID,
   };
 }
@@ -68,7 +68,7 @@ export async function stopEngine() {
 
 export async function setEngineModel(id: string) {
   if (window.arkDesktop?.engineSetModel) return window.arkDesktop.engineSetModel(id);
-  throw new Error('ARK Engine model switching needs the desktop app');
+  throw new Error('NOVA Engine model switching needs the desktop app');
 }
 
 export async function downloadEngineModel(id: string) {
@@ -109,7 +109,7 @@ export async function deleteEngineModel(id: string): Promise<ArkEngineStatus & {
     throw new Error('Deleting models needs the desktop app');
   }
   const result = await window.arkDesktop.engineDeleteModel(id);
-  window.dispatchEvent(new Event('ark:engine-models-changed'));
+  window.dispatchEvent(new Event('NOVA:engine-models-changed'));
   return result;
 }
 
@@ -166,14 +166,14 @@ export async function engineGenerate(
   return {
     ok: true,
     reply: [
-      'ARK Engine · browser preview',
+      'NOVA Engine · browser preview',
       '',
       `I heard: “${message.slice(0, 200)}”`,
       '',
-      'Full local ARK Engine runs inside the desktop app.',
+      'Full local NOVA Engine runs inside the desktop app.',
     ].join('\n'),
-    modelId: modelId ?? 'ark-core',
-    modelName: 'ARK Core',
+    modelId: modelId ?? 'NOVA-core',
+    modelName: 'NOVA Core',
     source: 'ark-engine',
   };
 }

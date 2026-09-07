@@ -1,4 +1,4 @@
-# Apply core Supabase (make ARK social + avatars work)
+# Apply core Supabase (make NOVA social + avatars work)
 
 Do this on the **hosted** Supabase project before inviting testers.
 
@@ -8,7 +8,7 @@ Run each file in **SQL → New → paste → Run** (or `npx supabase db push` if
 
 | # | File | Why |
 |---|------|-----|
-| 1 | `migrations/20260818000000_profiles_ark_id.sql` | ARK IDs |
+| 1 | `migrations/20260818000000_profiles_ark_id.sql` | NOVA IDs |
 | 2 | `migrations/20260818010000_ark_social.sql` | Contacts, posts, DMs |
 | 3 | `migrations/20260824100000_ark_friend_requests.sql` | Add / accept friends |
 | 4 | `migrations/20260824120000_avatar_lookup.sql` | Friend avatar lookup |
@@ -31,7 +31,7 @@ Then **Database → Replication**: enable Realtime for `ark_direct_messages`, `a
 
 ## Quick verify
 
-1. Two signed-in accounts → Add friend by ARK ID → Accept in Notifications.  
+1. Two signed-in accounts → Add friend by NOVA ID → Accept in Notifications.  
 2. Message tab → send text both ways.  
 3. Settings → Account → set a photo → other friend’s contact list shows it (after Storage SQL).  
 4. Non-friends cannot DM each other (harden migration).  

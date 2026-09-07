@@ -20,7 +20,7 @@ export type FriendRequest = {
   status: 'pending' | 'accepted' | 'declined';
 };
 
-const KEY = 'ark:friend-requests';
+const KEY = 'NOVA:friend-requests';
 
 function sameArkId(a?: string, b?: string): boolean {
   if (!a || !b) return false;
@@ -40,7 +40,7 @@ function readLocal(): FriendRequest[] {
 function writeLocal(list: FriendRequest[]) {
   try {
     localStorage.setItem(KEY, JSON.stringify(list.slice(0, 80)));
-    window.dispatchEvent(new CustomEvent('ark:friend-requests'));
+    window.dispatchEvent(new CustomEvent('NOVA:friend-requests'));
   } catch {
     /* ignore */
   }
@@ -113,7 +113,7 @@ function notifyInbound(req: FriendRequest) {
     id: notifId,
     kind: 'friend',
     title: `${req.fromName} wants to be friends`,
-    body: `${req.fromName} · ARK ID ${req.fromArkId} sent you a friend request.`,
+    body: `${req.fromName} · NOVA ID ${req.fromArkId} sent you a friend request.`,
     forArkId: req.toArkId,
     friendRequestId: req.id,
     fromArkId: req.fromArkId,
@@ -144,7 +144,7 @@ function friendlyFriendError(raw: string | undefined): string {
     || lower.includes('schema cache')
     || lower.includes('could not find the table')
   ) {
-    return 'Friend requests are not set up on the server yet. Ask the ARK developer to apply the friend-requests SQL migration, then try again.';
+    return 'Friend requests are not set up on the server yet. Ask the NOVA developer to apply the friend-requests SQL migration, then try again.';
   }
   if (lower.includes('row-level security') || lower.includes('rls') || lower.includes('permission denied')) {
     return 'Could not send that request (permission). Sign out, sign back in, and try again.';
@@ -167,13 +167,13 @@ export async function sendFriendRequest(opts: {
   const toAlias = isDevArkAlias(rawTo);
   const to = toAlias ? '' : normalizeArkId(rawTo);
   if (!isArkUserId(from)) {
-    return { ok: false, error: 'Your ARK ID is missing. Sign out and sign back in.' };
+    return { ok: false, error: 'Your NOVA ID is missing. Sign out and sign back in.' };
   }
   if (!toAlias && !isArkUserId(to)) {
-    return { ok: false, error: 'Enter a valid 7-digit ARK ID (or DEV for the developer account)' };
+    return { ok: false, error: 'Enter a valid 7-digit NOVA ID (or DEV for the developer account)' };
   }
   if (!canUseCloud(opts.userId)) {
-    return { ok: false, error: 'Sign in to send friend requests to other ARK users.' };
+    return { ok: false, error: 'Sign in to send friend requests to other NOVA users.' };
   }
 
   if (isBlockedArkId(toAlias ? 'DEV' : to)) {
@@ -186,10 +186,10 @@ export async function sendFriendRequest(opts: {
       ok: false,
       error: toAlias
         ? 'DEV account is not registered yet. Sign in once with the developer email first.'
-        : `No ARK account found for ID ${to}. They must sign in once so their ID is registered.`,
+        : `No NOVA account found for ID ${to}. They must sign in once so their ID is registered.`,
     };
   }
-  if (found.arkId === from) return { ok: false, error: 'That’s your own ARK ID' };
+  if (found.arkId === from) return { ok: false, error: 'That’s your own NOVA ID' };
 
   if (await isBlockedFromAdding(found.arkId, opts.userId)) {
     return { ok: false, error: 'This user is not accepting friend requests from you.' };
@@ -204,7 +204,7 @@ export async function sendFriendRequest(opts: {
     const { data, error } = await supabase.from('ark_friend_requests').insert({
       from_ark_id: from,
       to_ark_id: found.arkId,
-      from_name: opts.fromName || 'ARK user',
+      from_name: opts.fromName || 'NOVA user',
       from_avatar_url: opts.fromAvatarUrl || null,
       status: 'pending',
     }).select('*').maybeSingle();
@@ -270,7 +270,7 @@ export async function respondFriendRequest(
     writeLocal([{ ...next, status: decision }, ...all]);
   }
   dismissFriendRequestNotification(requestId);
-  window.dispatchEvent(new CustomEvent('ark:friend-requests'));
+  window.dispatchEvent(new CustomEvent('NOVA:friend-requests'));
   return { ...next, status: decision };
 }
 
@@ -294,7 +294,7 @@ export function subscribeFriendRequests(
   void syncFriendRequests(myArkId, userId);
 
   const channel = supabase
-    .channel(`ark-fr-${myArkId}`)
+    .channel(`NOVA-fr-${myArkId}`)
     .on(
       'postgres_changes',
       { event: 'INSERT', schema: 'public', table: 'ark_friend_requests' },
@@ -326,7 +326,7 @@ export function subscribeFriendRequests(
         if (req.status !== 'pending') {
           dismissFriendRequestNotification(req.id);
         }
-        window.dispatchEvent(new CustomEvent('ark:friend-requests'));
+        window.dispatchEvent(new CustomEvent('NOVA:friend-requests'));
       },
     )
     .subscribe();

@@ -1,11 +1,11 @@
 /**
- * Optional Ollama bridge. never required for ARK.
+ * Optional Ollama bridge. never required for NOVA.
  * Only used when the user opts in from Models.
  */
 
 import { desktopRequest } from '@/lib/httpDesktop';
 
-const FLAG_KEY = 'ark:ollama-enabled';
+const FLAG_KEY = 'NOVA:ollama-enabled';
 const OLLAMA = 'http://127.0.0.1:11434';
 
 export type OllamaModel = { name: string; size?: number };
@@ -17,7 +17,7 @@ export function isOllamaEnabled() {
 export function setOllamaEnabled(on: boolean) {
   if (on) localStorage.setItem(FLAG_KEY, '1');
   else localStorage.removeItem(FLAG_KEY);
-  window.dispatchEvent(new Event('ark:ollama-changed'));
+  window.dispatchEvent(new Event('NOVA:ollama-changed'));
 }
 
 export async function probeOllamaOptional(): Promise<{

@@ -176,7 +176,7 @@ export async function resolveChatDrop(
         // Intentionally do NOT spill images into the preview strip —
         // everything stays inside the folder chip until the user sends.
         try {
-          localStorage.setItem(`ark:chat-studio-files:${pid}`, JSON.stringify({
+          localStorage.setItem(`NOVA:chat-studio-files:${pid}`, JSON.stringify({
             name: folderName,
             files: namespaced,
           }));
@@ -309,7 +309,7 @@ export async function resolveChatDrop(
       attach = { kind: 'folder', name: root, count, projectId: pid };
       attaches.push(attach);
       try {
-        localStorage.setItem(`ark:chat-studio-files:${pid}`, JSON.stringify({
+        localStorage.setItem(`NOVA:chat-studio-files:${pid}`, JSON.stringify({
           name: root,
           files: seedFiles,
         }));
@@ -332,7 +332,7 @@ export async function resolveChatDrop(
   if (!attaches.length && !images.length && diskPaths.length === 0 && files.length > 0 && window.arkDesktop?.isElectron) {
     return {
       ...empty,
-      note: 'Could not read that drop. Close ARK and run Open-ARK-Build.bat again.',
+      note: 'Could not read that drop. Close NOVA and run Open-ARK-Build.bat again.',
     };
   }
 

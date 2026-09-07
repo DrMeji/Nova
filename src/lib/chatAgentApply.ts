@@ -115,12 +115,20 @@ export async function applyChatReplyEdits(opts: {
     hasReferenceImage: /unsplash|https?:\/\/\S+\.(?:png|jpe?g|webp)|ark-media:/i.test(rawUser),
   });
   // Keep the original ask for micro-patches. the skills appendix is only for model scaffolding.
-  const userMessageForParse = appendix && !rawUser.includes('ARK design skills')
+  const userMessageForParse = appendix && !rawUser.includes('NOVA design skills')
     ? `${rawUser}\n\n${appendix}`
     : rawUser;
   let baseFiles = normalizeStudioFileKeys(opts.files, opts.diskRoot);
-  if (Object.keys(baseFiles).length === 0 && opts.diskRoot) {
-    baseFiles = await hydrateFilesFromDiskRoot(opts.diskRoot);
+  if (opts.diskRoot) {
+    const fromDisk = await hydrateFilesFromDiskRoot(opts.diskRoot);
+    if (Object.keys(fromDisk).length) {
+      const merged: ProjectFileMap = { ...fromDisk, ...baseFiles };
+      for (const [rel, text] of Object.entries(fromDisk)) {
+        const cur = merged[rel];
+        if (!cur || String(text).length > String(cur).length) merged[rel] = text;
+      }
+      baseFiles = normalizeStudioFileKeys(merged, opts.diskRoot);
+    }
   }
 
   // Patch-first: SEARCH/REPLACE on existing files before full @@@FILE dumps.
@@ -143,13 +151,16 @@ export async function applyChatReplyEdits(opts: {
   }
 
   // Prefer deterministic React/web patches for common UI asks. models often describe without writing.
+  // Never fall back to canned landings when the model reply is empty — that reused the same hero/CTA template.
   const finalized = finalizeWebEdits(baseFiles, rawUser, edits, { projectName: opts.projectName });
   if (finalized.length) {
     edits = finalized;
   } else if (!edits.length) {
     const react = reactUiMicroAskEdits(baseFiles, rawUser, { projectName: opts.projectName });
     if (react.length) edits = react;
-    else edits = scaffoldFallbackEdits(userMessageForParse, baseFiles, { projectName: opts.projectName });
+    else if (String(opts.reply || '').trim()) {
+      edits = scaffoldFallbackEdits(userMessageForParse, baseFiles, { projectName: opts.projectName });
+    }
   }
 
   if (!edits.length) {

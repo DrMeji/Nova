@@ -14,7 +14,7 @@ export function countSourceFiles(files: Record<string, string>): number {
   ).length;
 }
 
-/** True when ARK Auto should try free/paid cloud before local GGUF for coding. */
+/** True when NOVA Auto should try free/paid cloud before local GGUF for coding. */
 export function shouldPreferCloudForCoding(opts: {
   fileCount: number;
   message: string;

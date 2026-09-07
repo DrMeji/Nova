@@ -132,8 +132,8 @@ export async function runDiscordLive(
       return [
         'Discord · post',
         '',
-        'Try: post to #general Hello from ARK',
-        'Or: post to channel 123456789012345678 Hello from ARK',
+        'Try: post to #general Hello from NOVA',
+        'Or: post to channel 123456789012345678 Hello from NOVA',
       ].join('\n');
     }
     const channel = await resolveDiscordChannel(trimmed, channelRef);

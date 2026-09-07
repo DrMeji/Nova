@@ -20,7 +20,7 @@ export async function verifySlackToken(token: string): Promise<{ label: string }
 type SlackChannel = { id: string; name?: string; is_member?: boolean; num_members?: number };
 
 export async function searchSlack(token: string, query: string, limit = 8) {
-  const q = encodeURIComponent(query || 'ARK');
+  const q = encodeURIComponent(query || 'NOVA');
   const res = await desktopRequest(
     `https://api.slack.com/api/search.messages?query=${q}&count=${limit}`,
     {
@@ -90,7 +90,7 @@ export async function runSlackLive(
       return [
         'Slack · post',
         '',
-        'Try: post to #general Hello from ARK',
+        'Try: post to #general Hello from NOVA',
       ].join('\n');
     }
     const channels = await listChannels(token);
@@ -123,7 +123,7 @@ export async function runSlackLive(
       ].join('\n');
     }
     const qMatch = userText.match(/(?:search|find|look up)\s+(.+)$/i);
-    const query = (qMatch?.[1] || 'ARK').replace(/[?.!]+$/, '').trim();
+    const query = (qMatch?.[1] || 'NOVA').replace(/[?.!]+$/, '').trim();
     try {
       const matches = await searchSlack(token, query);
       if (matches.length === 0) {

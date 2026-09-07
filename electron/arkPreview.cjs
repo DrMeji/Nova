@@ -64,7 +64,7 @@ function ensureIndex(root, projectName) {
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>${String(projectName || 'ARK Preview').replace(/</g, '')}</title>
+  <title>${String(projectName || 'NOVA Preview').replace(/</g, '')}</title>
   <style>
     :root { color-scheme: dark; }
     body { margin:0; font-family: ui-sans-serif, system-ui, sans-serif; background:#0b1220; color:#e8eefc; }
@@ -76,11 +76,11 @@ function ensureIndex(root, projectName) {
 </head>
 <body>
   <header>
-    <div class="ok">ARK Build &amp; Run · live local preview</div>
+    <div class="ok">NOVA Build &amp; Run · live local preview</div>
     <h1 style="margin:6px 0 0;font-size:22px">${String(projectName || 'Project').replace(/</g, '')}</h1>
   </header>
   <main>
-    <p style="color:#9fb0cc">Served from ARK’s local preview server on this PC.</p>
+    <p style="color:#9fb0cc">Served from NOVA’s local preview server on this PC.</p>
     <pre>${snippet.replace(/</g, '&lt;')}</pre>
   </main>
 </body>
@@ -259,7 +259,7 @@ function fitPreviewZoom(win) {
 
 async function loadDeviceIntoWindow(win, id, url, device, title) {
   try {
-    win.setTitle(String(title || `${device.label} · ARK Preview`));
+    win.setTitle(String(title || `${device.label} · NOVA Preview`));
   } catch {
     /* ignore */
   }
@@ -280,15 +280,15 @@ async function openPreviewWindow(payload) {
 
   const kind = payload?.kind === 'device' ? 'device' : 'web';
   const device = payload?.device || null;
-  const rawTitle = String(payload?.title || (device ? `${device.label} · ARK Preview` : 'ARK Preview'));
-  const title = /ARK/i.test(rawTitle) ? rawTitle : `ARK Preview · ${rawTitle}`;
+  const rawTitle = String(payload?.title || (device ? `${device.label} · NOVA Preview` : 'NOVA Preview'));
+  const title = /ARK/i.test(rawTitle) ? rawTitle : `NOVA Preview · ${rawTitle}`;
   const size = kind === 'device' && device ? deviceWindowSize(device) : { width: 1100, height: 780 };
 
   // One live web preview window for the whole app — always navigate to the URL for the
   // active chat's project (never leave another chat's localhost visible).
   const id = kind === 'device'
     ? String(payload?.projectId || 'device-preview')
-    : 'ark-live-preview';
+    : 'NOVA-live-preview';
 
   if (kind === 'web') {
     for (const [key, win] of [...previewWindows.entries()]) {
@@ -393,7 +393,7 @@ async function openPreviewWindow(payload) {
 }
 
 function closeLivePreviewWindow() {
-  const id = 'ark-live-preview';
+  const id = 'NOVA-live-preview';
   const win = previewWindows.get(id);
   if (win && !win.isDestroyed()) {
     try { win.close(); } catch { /* ignore */ }
@@ -410,7 +410,7 @@ function closeLivePreviewWindow() {
   return { ok: true };
 }
 
-/** Push updated files into a running preview and reload the ARK preview window. */
+/** Push updated files into a running preview and reload the NOVA preview window. */
 async function updatePreview(payload) {
   const id = String(payload?.projectId || 'default');
   const files = payload?.files || {};

@@ -1,5 +1,5 @@
 /**
- * Hunted GGUF entries ARK Engine can download (internet finds, not the static catalog).
+ * Hunted GGUF entries NOVA Engine can download (internet finds, not the static catalog).
  */
 
 const fs = require('fs');
@@ -39,7 +39,7 @@ function register(meta) {
   const row = {
     id,
     name: String(meta.name || id).slice(0, 80),
-    detail: String(meta.detail || 'Found online · GGUF · ARK Engine'),
+    detail: String(meta.detail || 'Found online · GGUF · NOVA Engine'),
     sizeGb: Number(meta.sizeGb) > 0 ? Number(meta.sizeGb) : 1,
     status: 'missing',
     url,

@@ -101,7 +101,7 @@ export function ProjectsView() {
         name: f.name,
         modified: f.modified,
         source: 'local' as const,
-        typeLabel: 'ARK Projects',
+        typeLabel: 'NOVA Projects',
         diskPath: f.path,
       }));
 
@@ -189,7 +189,7 @@ export function ProjectsView() {
           sourceDir: item.diskPath,
         });
         if (!res?.ok) {
-          setNotice(res?.error || 'Could not open that ARK project folder.');
+          setNotice(res?.error || 'Could not open that NOVA project folder.');
           window.setTimeout(() => setNotice(null), 4000);
           return;
         }
@@ -301,7 +301,7 @@ export function ProjectsView() {
               </div>
               <p className="text-base font-semibold text-content-primary mb-1">No projects here</p>
               <p className="text-sm text-content-tertiary max-w-sm">
-                New builds land in <span className="text-content-secondary">Documents\ARK Projects</span>. Open a folder, or create a blank project.
+                New builds land in <span className="text-content-secondary">Documents\NOVA Projects</span>. Open a folder, or create a blank project.
               </p>
             </div>
           ) : (
@@ -397,7 +397,7 @@ export function ProjectsView() {
                     </div>
                   </span>
                   <span className="text-xs text-content-tertiary capitalize truncate">
-                    {item.source === 'remote' ? item.typeLabel : (item.diskPath ? 'ARK Projects' : 'This PC')}
+                    {item.source === 'remote' ? item.typeLabel : (item.diskPath ? 'NOVA Projects' : 'This PC')}
                   </span>
                   <span className="text-right text-sm text-content-secondary tabular-nums">
                     {formatModified(item.modified)}

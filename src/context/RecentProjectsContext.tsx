@@ -80,9 +80,9 @@ export function RecentProjectsProvider({ children }: { children: ReactNode }) {
     const syncCreations = () => refreshCreations();
     const syncChats = () => refreshChats();
     const syncProjects = () => setRecent(loadRecentProjects());
-    window.addEventListener('ark:creations-changed', syncCreations);
-    window.addEventListener('ark:chats-changed', syncChats);
-    window.addEventListener('ark:projects-changed', syncProjects);
+    window.addEventListener('NOVA:creations-changed', syncCreations);
+    window.addEventListener('NOVA:chats-changed', syncChats);
+    window.addEventListener('NOVA:projects-changed', syncProjects);
     window.addEventListener('focus', syncCreations);
     window.addEventListener('focus', syncChats);
 
@@ -110,7 +110,7 @@ export function RecentProjectsProvider({ children }: { children: ReactNode }) {
               kind: item.kind === 'video' ? 'video' : 'image',
               title: item.title || item.prompt || 'Creation',
               prompt: item.prompt || '',
-              modelName: item.modelName || 'ARK Engine',
+              modelName: item.modelName || 'NOVA Engine',
               dataUrl: item.dataUrl,
               createdAt: item.createdAt || new Date().toISOString(),
               real: item.real,
@@ -131,9 +131,9 @@ export function RecentProjectsProvider({ children }: { children: ReactNode }) {
 
     return () => {
       window.clearTimeout(t);
-      window.removeEventListener('ark:creations-changed', syncCreations);
-      window.removeEventListener('ark:chats-changed', syncChats);
-      window.removeEventListener('ark:projects-changed', syncProjects);
+      window.removeEventListener('NOVA:creations-changed', syncCreations);
+      window.removeEventListener('NOVA:chats-changed', syncChats);
+      window.removeEventListener('NOVA:projects-changed', syncProjects);
       window.removeEventListener('focus', syncCreations);
       window.removeEventListener('focus', syncChats);
     };

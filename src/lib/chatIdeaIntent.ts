@@ -119,8 +119,9 @@ function cleanIdeaName(raw: string): string | null {
   let s = String(raw || '').trim().replace(/[?.!,;:]+$/g, '');
   s = s.replace(/\s+(?:app|application|project|product|platform|website|site)\b.*$/i, '').trim();
   // Stop at clause joiners so "called BrassGate with a lineup…" → BrassGate.
-  s = s.replace(/\s+(?:with|that|which|where|when|so|for|but|and|featuring|including|—|–|-)\b.*$/i, '').trim();
+  s = s.replace(/\s+(?:with|that|which|where|when|so|for|but|and|if|featuring|including|—|–|-)\b.*$/i, '').trim();
   if (s.length < 2 || s.length > 48) return null;
+  if (/^(if|the|a|an)$/i.test(s)) return null;
   const lower = s.toLowerCase();
   if (BLOCKED_NAME_WORDS.has(lower)) return null;
   const first = lower.split(/\s+/)[0];
@@ -169,7 +170,8 @@ export function extractGreenfieldName(text: string): string | null {
   const t = String(text || '').trim();
   const patterns = [
     /\b(?:called|named|name(?:d)?\s+it|call\s+it)\s+["“']([^"”']{2,48})["”']/i,
-    /\b(?:called|named|name(?:d)?\s+it|call\s+it)\s+([A-Za-z][A-Za-z0-9 _-]{1,40})/i,
+    /\bname\s+it\s+([A-Za-z][A-Za-z0-9_-]{2,40})\b/i,
+    /\b(?:called|named|name(?:d)?\s+it|call\s+it)\s+([A-Za-z][A-Za-z0-9_-]{2,40})\b/i,
     /\bname\s+it\s+something\s+like\s+([A-Za-z][A-Za-z0-9_-]{2,40})/i,
     /\bok\s+([A-Z][A-Za-z0-9]{2,40})\s+(?:sounds\s+good|is\s+fine|works)\b/,
     /\b([A-Z][A-Za-z0-9]{2,40})\s+(?:sounds\s+good|is\s+fine)\b/,

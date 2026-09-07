@@ -1,10 +1,10 @@
 @echo off
-title ARK Packaged Installer
+title NOVA Packaged Installer
 cd /d "%~dp0"
 
 echo.
 echo  ========================================
-echo   ARK - packaged installer build
+echo   NOVA - packaged installer build
 echo  ========================================
 echo.
 echo  Builds release\ARK-Setup.exe from your

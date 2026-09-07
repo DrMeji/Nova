@@ -123,7 +123,7 @@ export function visionCapabilityGapReply(opts?: { localOnly?: boolean }): string
   return [
     'I can see you attached an image, but I **cannot read it yet**.',
     '',
-    '**On this PC:** Models → Vision → download **${RECOMMENDED_VISION_MODEL_NAME}** (both files in the bundle). ARK will run vision → your chat/coder brain as a **multi-model hop**.',
+    '**On this PC:** Models → Vision → download **${RECOMMENDED_VISION_MODEL_NAME}** (both files in the bundle). NOVA will run vision → your chat/coder brain as a **multi-model hop**.',
     '',
     '**Or use cloud vision:** Models → Cloud → connect **Google AI Studio** (free Gemini), OpenAI, or Anthropic.',
     '',
@@ -137,7 +137,7 @@ export function buildVisionDescribePrompt(userMessage: string): string {
     .replace(/<!--[\s\S]*?-->/g, ' ')
     .trim();
   return [
-    'You are ARK’s vision hop. Look carefully at the attached image(s).',
+    'You are NOVA’s vision hop. Look carefully at the attached image(s).',
     'Describe what you see in concrete UI/product terms: layout, text, colors, controls, and anything that looks wrong or highlighted.',
     'If the user asked for a fix or change, end with a short bullet list of exact edits to make.',
     'Do not invent file paths you cannot see. Keep it under 220 words.',
@@ -254,7 +254,7 @@ export function multiModelStatusLabel(phase: 'vision' | 'coder' | 'chat'): strin
 
 export function explainMultiModelVsMultiAgent(): string {
   return [
-    '**Multi-model** = ARK hops between brains for one turn (vision sees the screenshot, then your chat/coder brain answers or edits). Local Engine still loads **one** GGUF at a time, so hops are sequential.',
+    '**Multi-model** = NOVA hops between brains for one turn (vision sees the screenshot, then your chat/coder brain answers or edits). Local Engine still loads **one** GGUF at a time, so hops are sequential.',
     '',
     '**Multi-agent** = Design → Code → Verify workers on a **bound project** (skills + file edits). Same turn can use both: vision hop first, then multi-agent or normal code edit.',
   ].join('\n');

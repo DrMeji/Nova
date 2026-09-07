@@ -106,15 +106,15 @@ export function PlayWhileDownloading({
       <div
         role="dialog"
         aria-modal="true"
-        aria-labelledby="ark-play-title"
+        aria-labelledby="NOVA-play-title"
         className="relative z-10 w-full max-w-2xl rounded-2xl border border-surface-border bg-ark-navy-900 shadow-2xl overflow-hidden"
       >
         <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-surface-border">
           <div className="min-w-0 flex items-center gap-2">
             <Gamepad2 className="w-4 h-4 text-sky-300 shrink-0" />
             <div className="min-w-0">
-              <h2 id="ark-play-title" className="text-sm font-semibold text-content-primary truncate">
-                ARK Runner
+              <h2 id="NOVA-play-title" className="text-sm font-semibold text-content-primary truncate">
+                NOVA Runner
               </h2>
               <p className="text-[11px] text-content-tertiary truncate">
                 {complete
@@ -139,10 +139,10 @@ export function PlayWhileDownloading({
           <div className="mx-4 mt-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2.5">
             <p className="text-sm font-medium text-emerald-200">Download complete</p>
             <p className="text-[11px] text-emerald-100/80 mt-0.5 leading-relaxed">
-              You can close this game and continue in ARK whenever you’re ready.
+              You can close this game and continue in NOVA whenever you’re ready.
             </p>
             <button type="button" className="ark-btn-primary text-xs mt-2.5" onClick={onClose}>
-              Back to ARK
+              Back to NOVA
             </button>
           </div>
         ) : progress > 0 ? (
@@ -159,7 +159,7 @@ export function PlayWhileDownloading({
         <div className="p-4 pt-3">
           <ArkRunnerGame active={open} />
           <p className="mt-3 text-[11px] text-content-tertiary leading-relaxed text-center">
-            Nothing extra downloads for this game. It’s built into ARK so slow installs feel less idle.
+            Nothing extra downloads for this game. It’s built into NOVA so slow installs feel less idle.
           </p>
         </div>
       </div>

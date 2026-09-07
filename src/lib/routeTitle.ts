@@ -3,7 +3,7 @@ import type { Route } from '@/context/RouterContext';
 export function titleForRoute(route: Route, extras?: { projectName?: string; chatTitle?: string }): string {
   switch (route.name) {
     case 'chat': {
-      // Don't show "ARK · Chat" in the title bar. just "ARK" is cleaner.
+      // Don't show "NOVA · Chat" in the title bar. just "NOVA" is cleaner.
       const mode = route.mode === 'image' ? 'Image'
         : route.mode === 'video' ? 'Video'
         : route.mode === 'voice' ? 'Voice'
@@ -41,6 +41,6 @@ export function titleForRoute(route: Route, extras?: { projectName?: string; cha
     case 'settings':
       return 'Settings';
     default:
-      return 'ARK';
+      return 'NOVA';
   }
 }

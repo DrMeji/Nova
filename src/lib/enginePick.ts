@@ -1,5 +1,5 @@
 /**
- * Pick which ARK Engine GGUF Auto should run.
+ * Pick which NOVA Engine GGUF Auto should run.
  * Never selects Ollama. Engine ids only.
  * Keep ranking in sync with electron/arkModelRank.cjs (Lindsay / Engine).
  */
@@ -71,9 +71,9 @@ export function rankedReadyEngineIds(
       .filter(m =>
         m.status === 'ready'
         && m.id
-        && m.id !== 'ark-core'
-        && m.id !== 'ark-image-core'
-        && m.id !== 'ark-video-core'
+        && m.id !== 'NOVA-core'
+        && m.id !== 'NOVA-image-core'
+        && m.id !== 'NOVA-video-core'
         && !String(m.id).includes('image')
         && !String(m.id).includes('video')
         && !String(m.id).startsWith('sd')

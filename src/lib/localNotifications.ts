@@ -10,7 +10,7 @@ export type LocalNotification = {
   body: string;
   createdAt: string;
   unread?: boolean;
-  /** When set, only this ARK ID should see the notification. */
+  /** When set, only this NOVA ID should see the notification. */
   forArkId?: string;
   /** Friend request id for Accept / Decline actions. */
   friendRequestId?: string;
@@ -19,7 +19,7 @@ export type LocalNotification = {
   fromAvatarUrl?: string;
 };
 
-const KEY = 'ark:local-notifications';
+const KEY = 'NOVA:local-notifications';
 
 function sameArkId(a?: string, b?: string) {
   if (!a || !b) return false;
@@ -63,7 +63,7 @@ export function pushLocalNotification(n: Omit<LocalNotification, 'id' | 'created
   const next = [item, ...withoutDup].slice(0, 40);
   localStorage.setItem(KEY, JSON.stringify(next));
   try {
-    window.dispatchEvent(new CustomEvent('ark:local-notifications'));
+    window.dispatchEvent(new CustomEvent('NOVA:local-notifications'));
   } catch {
     /* ignore */
   }
@@ -92,7 +92,7 @@ export function markLocalNotificationsRead(forArkId?: string) {
     });
     if (!changed) return;
     localStorage.setItem(KEY, JSON.stringify(next));
-    window.dispatchEvent(new CustomEvent('ark:local-notifications'));
+    window.dispatchEvent(new CustomEvent('NOVA:local-notifications'));
   } catch {
     /* ignore */
   }
@@ -102,7 +102,7 @@ export function removeLocalNotification(id: string) {
   try {
     const next = loadLocalNotifications().filter(n => n.id !== id);
     localStorage.setItem(KEY, JSON.stringify(next));
-    window.dispatchEvent(new CustomEvent('ark:local-notifications'));
+    window.dispatchEvent(new CustomEvent('NOVA:local-notifications'));
   } catch {
     /* ignore */
   }

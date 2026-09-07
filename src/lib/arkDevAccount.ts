@@ -1,4 +1,4 @@
-/** Designated developer account — UI shows “DEV”; others keep a normal 7-digit ARK ID. */
+/** Designated developer account — UI shows “DEV”; others keep a normal 7-digit NOVA ID. */
 
 export const ARK_DEV_EMAIL = 'thomaskrishnan0107@gmail.com';
 

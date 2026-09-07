@@ -30,9 +30,9 @@ export function shouldRouteReadFile(text: string): boolean {
   if (/\b(?:summarize|summary)\b/i.test(t) && /\bfiles?\b/i.test(t) && !/[A-Za-z0-9_-]+\.[A-Za-z0-9]{1,12}\b/.test(t)) {
     return false;
   }
-  // MCP / tool catalog asks ("break down ark.project.read") — not disk read.
+  // MCP / tool catalog asks ("break down NOVA.project.read") — not disk read.
   if (/\bark\.[a-z0-9_-]+\.[a-z0-9_-]+\b/i.test(t)) return false;
-  if (/\b(?:break down|explain|describe)\b/i.test(t) && /\b(?:ark\.|mcp\b|tools?)\b/i.test(t)) return false;
+  if (/\b(?:break down|explain|describe)\b/i.test(t) && /\b(?:NOVA\.|mcp\b|tools?)\b/i.test(t)) return false;
 
   const readVerb = (
     /\b(?:read|show\s+me|display|what(?:'s| is)\s+in)\b/i.test(t)

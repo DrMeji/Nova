@@ -20,7 +20,7 @@ export const BACKUP_DOWNLOAD_EVENT = 'ark-backup-download';
 export type RunOutKind = 'chat' | 'coding' | 'image' | 'video';
 export type RunOutReason = 'quota' | 'timeout' | 'empty' | 'context' | 'media';
 
-const AUTO_KEY = 'ark:runout-hunt-install';
+const AUTO_KEY = 'NOVA:runout-hunt-install';
 const RETRY_MS = 6 * 60 * 60 * 1000;
 
 function alreadyTried(id: string) {

@@ -31,7 +31,7 @@ import {
 
 type FeedTab = 'public' | 'paid' | 'mine' | 'saved';
 
-const SAVED_KEY = 'ark:network-saved';
+const SAVED_KEY = 'NOVA:network-saved';
 
 function loadSavedIds(): string[] {
   try {
@@ -212,7 +212,7 @@ export function NetworkingView() {
         });
       } else {
         setIdSearchHit(null);
-        setIdSearchNote(wantDev ? 'DEV is not registered yet' : `No ARK account found for ${id}`);
+        setIdSearchNote(wantDev ? 'DEV is not registered yet' : `No NOVA account found for ${id}`);
       }
     });
     return () => {
@@ -263,7 +263,7 @@ export function NetworkingView() {
     await publishNetworkPost({
       userId: user?.id,
       ownerArkId: myArkId,
-      ownerName: profile?.display_name || 'ARK user',
+      ownerName: profile?.display_name || 'NOVA user',
       title,
       summary,
       details,
@@ -329,7 +329,7 @@ export function NetworkingView() {
   const submitReport = () => {
     if (!reportPost || !reportReason.trim()) return;
     setReportBusy(true);
-    const who = reportPost.ownerName || 'ARK user';
+    const who = reportPost.ownerName || 'NOVA user';
     const id = formatArkId(reportPost.ownerArkId);
     pushLocalNotification({
       kind: 'report',
@@ -394,7 +394,7 @@ export function NetworkingView() {
                 <input
                   value={query}
                   onChange={e => setQuery(e.target.value)}
-                  placeholder="Search posts or 7-digit ARK ID"
+                  placeholder="Search posts or 7-digit NOVA ID"
                   className="flex-1 min-w-0 bg-transparent text-sm text-content-primary outline-none placeholder:text-content-tertiary"
                 />
               </div>
@@ -437,7 +437,7 @@ export function NetworkingView() {
             </div>
             {user?.id === 'guest-local' && (
               <p className="text-[11px] text-amber-200/80 mt-3 text-center">
-                Sign in so other ARK installs can see your posts. Guest posts stay on this PC.
+                Sign in so other NOVA installs can see your posts. Guest posts stay on this PC.
               </p>
             )}
           </div>
@@ -523,16 +523,16 @@ export function NetworkingView() {
                 <div className="mb-3 rounded-2xl border border-sky-500/25 bg-sky-500/5 px-4 py-3 flex items-center gap-3 flex-wrap">
                   {idSearchBusy ? (
                     <p className="text-sm text-content-tertiary flex items-center gap-2">
-                      <Loader2 className="w-4 h-4 animate-spin" /> Looking up ARK ID…
+                      <Loader2 className="w-4 h-4 animate-spin" /> Looking up NOVA ID…
                     </p>
                   ) : idSearchHit ? (
                     <>
                       <ArkAvatar name={idSearchHit.displayName || idSearchHit.arkId} size="md" />
                       <div className="min-w-0 flex-1">
                         <p className="text-sm font-medium text-content-primary">
-                          {idSearchHit.displayName || 'ARK user'}
+                          {idSearchHit.displayName || 'NOVA user'}
                         </p>
-                        <p className="text-[11px] text-content-tertiary">ARK ID {formatArkId(idSearchHit.arkId)}</p>
+                        <p className="text-[11px] text-content-tertiary">NOVA ID {formatArkId(idSearchHit.arkId)}</p>
                         {idSearchNote ? <p className="text-[11px] text-amber-200/90 mt-1">{idSearchNote}</p> : null}
                       </div>
                       <button
@@ -546,7 +546,7 @@ export function NetworkingView() {
                       </button>
                     </>
                   ) : (
-                    <p className="text-sm text-amber-200/90">{idSearchNote || 'No match for that ARK ID.'}</p>
+                    <p className="text-sm text-amber-200/90">{idSearchNote || 'No match for that NOVA ID.'}</p>
                   )}
                 </div>
               )}
@@ -559,7 +559,7 @@ export function NetworkingView() {
                   <Globe className="w-6 h-6 mx-auto mb-2 opacity-70" />
                   <p className="text-sm">
                     {isArkUserId(normalizeArkId(query)) || isDevArkAlias(query)
-                      ? 'No posts from that ARK ID yet. Use Add friend above if they were found.'
+                      ? 'No posts from that NOVA ID yet. Use Add friend above if they were found.'
                       : tab === 'saved'
                         ? 'No saved projects yet. Bookmark a post to find it here.'
                         : tab === 'paid'
@@ -606,7 +606,7 @@ export function NetworkingView() {
                                     )}
                                   </div>
                                   <p className="text-[11px] text-content-tertiary mt-0.5 truncate">
-                                    by {post.ownerName || 'ARK user'}
+                                    by {post.ownerName || 'NOVA user'}
                                   </p>
                                 </div>
                                 <span
@@ -762,7 +762,7 @@ export function NetworkingView() {
                     )}
                   </div>
                   <p className="text-[11px] text-content-tertiary mt-1">
-                    {selected.ownerName || 'ARK user'} · {formatArkId(selected.ownerArkId)} · {timeAgo(selected.createdAt)}
+                    {selected.ownerName || 'NOVA user'} · {formatArkId(selected.ownerArkId)} · {timeAgo(selected.createdAt)}
                   </p>
                 </div>
               </div>
@@ -898,7 +898,7 @@ export function NetworkingView() {
         {reportPost && (
           <div className="px-5 py-4 space-y-3.5">
             <div className="rounded-xl bg-black/30 px-3.5 py-3 space-y-1">
-              <p className="text-sm text-content-primary">{reportPost.ownerName || 'ARK user'}</p>
+              <p className="text-sm text-content-primary">{reportPost.ownerName || 'NOVA user'}</p>
               <p className="text-[11px] font-mono text-content-tertiary tracking-wider">
                 {formatArkId(reportPost.ownerArkId)}
               </p>
@@ -1048,7 +1048,7 @@ export function NetworkingView() {
               className="text-[11px] text-sky-300/90 hover:text-sky-200"
               onClick={() => {
                 setTitle(recent[0].name);
-                setSummary(`Working on ${recent[0].name} in ARK Code.`);
+                setSummary(`Working on ${recent[0].name} in NOVA Code.`);
               }}
             >
               Fill from latest Code project · {recent[0].name}
@@ -1124,7 +1124,7 @@ export function NetworkingView() {
               onClick={() => {
                 if (busy) return;
                 if (!myArkId) {
-                  setNote('Sign in (or finish profile) so this post has an ARK ID.');
+                  setNote('Sign in (or finish profile) so this post has an NOVA ID.');
                   return;
                 }
                 if (!title.trim()) {
@@ -1170,7 +1170,7 @@ export function NetworkingView() {
               <input
                 value={allowed}
                 onChange={e => setAllowed(e.target.value)}
-                placeholder="Paste ARK IDs"
+                placeholder="Paste NOVA IDs"
                 className="w-full rounded-xl bg-black/40 border border-white/10 px-3 py-2 text-sm text-content-primary placeholder:text-content-tertiary/70 focus:outline-none focus:border-sky-500/40"
               />
             </div>

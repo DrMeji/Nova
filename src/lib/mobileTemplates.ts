@@ -1,6 +1,6 @@
 /**
  * Real Xcode (SwiftUI) and Android Studio (Kotlin/Compose) starters.
- * ARK authors the project; a Mac / Android Studio ships it.
+ * NOVA authors the project; a Mac / Android Studio ships it.
  */
 
 import { classifyMobileTarget, type MobileTarget } from '@/lib/mobileTarget';
@@ -69,7 +69,7 @@ function readme(opts: {
   const lines = [
     `# ${name}`,
     '',
-    'Native phone app authored in ARK. This repo is the source. ship it from Xcode (Apple) or Android Studio (Play).',
+    'Native phone app authored in NOVA. This repo is the source. ship it from Xcode (Apple) or Android Studio (Play).',
     '',
   ];
   if (ios) lines.push(`Designed for **${deviceLine(ios)}**.`, '');
@@ -80,7 +80,7 @@ function readme(opts: {
       '',
       'Needs a Mac with Xcode. This Windows PC cannot compile or sign iOS. that is Apple’s rule.',
       '',
-      '1. In ARK, tap **Push to GitHub**.',
+      '1. In NOVA, tap **Push to GitHub**.',
       '2. On the Mac: `git clone` this repo and open `ios/' + name + '.xcodeproj`.',
       '3. Pick the ' + (ios?.label || 'iPhone') + ' simulator (or your device), then Run.',
       '4. Product → Archive → Distribute App → App Store Connect.',
@@ -93,7 +93,7 @@ function readme(opts: {
     lines.push(
       '## Android (Play Store)',
       '',
-      '1. In ARK, tap **Push to GitHub**.',
+      '1. In NOVA, tap **Push to GitHub**.',
       '2. Clone on any PC. Open the `android` folder in Android Studio (File → Open). Let it generate the Gradle wrapper if asked.',
       '3. Run on a ' + (android?.label || 'phone') + ' emulator or a physical phone.',
       '4. Build → Generate Signed App Bundle / APK for Play Console.',
@@ -103,7 +103,7 @@ function readme(opts: {
     );
   }
   lines.push(
-    '## What ARK already did',
+    '## What NOVA already did',
     '',
     'Project structure, screens, and the device size above are in the source.',
     'Icons, signing, and store listings are yours after clone.',
@@ -412,7 +412,7 @@ struct ContentView: View {
       path: `${prefix}/Devices.swift`,
       content: `import CoreGraphics
 
-/// Design canvas locked in ARK. Change Devices.design or ask chat to lock another size.
+/// Design canvas locked in NOVA. Change Devices.design or ask chat to lock another size.
 enum Devices {
     static let design = CGSize(width: ${device.width}, height: ${device.height})
     static let iPhoneSE = CGSize(width: 375, height: 667)
@@ -952,7 +952,7 @@ export function formatNativeBuildReply(label: string, message: string, files: Re
   return [
     `I wrote a native **${label}**${size ? ` for ${size}` : ''}.`,
     '',
-    'This is not a website in a browser. Start shows a device-sized preview in ARK.',
+    'This is not a website in a browser. Start shows a device-sized preview in NOVA.',
     ios ? 'On a Mac: clone from GitHub and open `ios/*.xcodeproj` in Xcode, then Archive for the App Store.' : '',
     android ? 'Anywhere: open the `android` folder in Android Studio, then ship an AAB to Play Console.' : '',
     '',

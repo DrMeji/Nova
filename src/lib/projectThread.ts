@@ -4,7 +4,7 @@ import { safeProjectWrite } from '@/lib/projectWriteSafe';
 export const PROJECT_CHAT_FILE = 'ark-chat.json';
 
 function threadKey(projectId: string) {
-  return `ark:project-thread:${projectId}`;
+  return `NOVA:project-thread:${projectId}`;
 }
 
 function slim(messages: ChatMessage[]): ChatMessage[] {

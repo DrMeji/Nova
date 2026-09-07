@@ -53,8 +53,8 @@ export function CallView() {
 
   useEffect(() => {
     const compact = () => setRailCompact(true);
-    window.addEventListener('ark:compact-connect-rail', compact);
-    return () => window.removeEventListener('ark:compact-connect-rail', compact);
+    window.addEventListener('NOVA:compact-connect-rail', compact);
+    return () => window.removeEventListener('NOVA:compact-connect-rail', compact);
   }, []);
 
   useEffect(() => {
@@ -79,7 +79,7 @@ export function CallView() {
                   <input
                     value={addId}
                     onChange={e => setAddId(e.target.value)}
-                    placeholder="ARK ID"
+                    placeholder="NOVA ID"
                     className="flex-1 min-w-0 bg-transparent text-xs font-mono text-content-primary placeholder:text-content-tertiary outline-none py-1"
                   />
                   <button
@@ -140,7 +140,7 @@ export function CallView() {
       <div className="flex-1 min-w-0 flex flex-col items-center justify-center px-6 text-center">
         {!activePeer ? (
           <p className="text-sm text-content-tertiary max-w-sm">
-            Call another ARK user by their 7-digit ID. The call bar stays visible while you browse other tabs.
+            Call another NOVA user by their 7-digit ID. The call bar stays visible while you browse other tabs.
           </p>
         ) : (
           <>

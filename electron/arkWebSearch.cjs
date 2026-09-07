@@ -9,7 +9,7 @@ async function fetchJson(url, timeoutMs = 12_000) {
   try {
     const res = await fetch(url, {
       method: 'GET',
-      headers: { Accept: 'application/json', 'User-Agent': 'ARK-Desktop/1.0' },
+      headers: { Accept: 'application/json', 'User-Agent': 'NOVA-Desktop/1.0' },
       signal: ac.signal,
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);

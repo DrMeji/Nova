@@ -1,4 +1,4 @@
-/** Live Vercel API helpers for the ARK Vercel plugin. */
+/** Live Vercel API helpers for the NOVA Vercel plugin. */
 
 import { apiErrorMessage, desktopRequest } from '@/lib/httpDesktop';
 

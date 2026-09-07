@@ -256,7 +256,7 @@ function buildLoopSystemPrompt(opts: {
     ? opts.observations.slice(-10).join('\n\n---\n\n')
     : '(none yet — start with list or grep)';
   return [
-    'You are ARK Agent on a bound project. Use tools until the task is done.',
+    'You are NOVA Agent on a bound project. Use tools until the task is done.',
     'Prefer grep/read before editing. Prefer TOOL: patch over full-file write.',
     'One primary tool per reply (you may include a second read/grep only if needed).',
     'Never touch files outside this workspace. Never invent paths you have not listed or read.',
@@ -329,7 +329,7 @@ async function runShellCommand(opts: {
     return { ok: false, output: `Blocked by allowlist: ${command}` };
   }
   if (!window.arkDesktop?.agentRun) {
-    return { ok: false, output: 'Shell unavailable outside desktop ARK' };
+    return { ok: false, output: 'Shell unavailable outside desktop NOVA' };
   }
   const needsConfirm = agentCommandNeedsConfirm(command) && !opts.autoRunAllowlisted;
   if (needsConfirm) {
@@ -382,7 +382,7 @@ export function shouldRunAgentLoop(opts: {
   return /\b(fix|implement|refactor|add|wire|patch|debug|build|continue|change|update|edit|comment|insert|rename|remove|delete)\b/i.test(opts.message)
     && (
       /\b(file|code|bug|error|component|page|function|test|agent|task|app|index|main|comment|button|css|ui)\b/i.test(opts.message)
-      || /\b(ark\s+agent\s+was\s+here)\b/i.test(opts.message)
+      || /\b(NOVA\s+agent\s+was\s+here)\b/i.test(opts.message)
     );
 }
 
@@ -799,7 +799,7 @@ export async function runArkAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopRes
       // Optional git commit after green verify
       const wantCommit = opts.commitOnSuccess ?? agentLoopCommitOnSuccess();
       if (wantCommit && updated.size && opts.diskRoot && verifyOk !== false) {
-        const msg = (opts.commitMessage || `ARK agent: ${opts.brief.slice(0, 72)}`).replace(/"/g, '\\"');
+        const msg = (opts.commitMessage || `NOVA Agent: ${opts.brief.slice(0, 72)}`).replace(/"/g, '\\"');
         const status = await runShellCommand({
           command: 'git status --porcelain',
           cwd: opts.diskRoot,

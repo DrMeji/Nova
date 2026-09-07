@@ -1,5 +1,5 @@
 /**
- * Block chat / disk access to ARK's own install tree (app.asar, resources, exe dir).
+ * Block chat / disk access to NOVA's own install tree (app.asar, resources, exe dir).
  * Dev sessions (Open-ARK-Build.bat with ARK_DEV=1) may access the source tree for testing.
  */
 
@@ -53,7 +53,7 @@ function isArkProtectedPath(absPath) {
 }
 
 function protectedPathError() {
-  return 'That path is part of ARK itself. ARK cannot read or modify its own application files from chat.';
+  return 'That path is part of NOVA itself. NOVA cannot read or modify its own application files from chat.';
 }
 
 module.exports = {

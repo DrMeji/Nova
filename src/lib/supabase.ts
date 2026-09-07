@@ -9,14 +9,14 @@ const supabaseAnonKey = (typeof viteEnv?.VITE_SUPABASE_ANON_KEY === 'string' ? v
 /** Set when the production bundle was built without Vite env. UI should show this, not go blank. */
 export const supabaseConfigError =
   !supabaseUrl || !supabaseAnonKey
-    ? 'ARK was built without Supabase config (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY).'
+    ? 'NOVA was built without Supabase config (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY).'
     : null;
 
 /**
  * Prefer Electron userData for the auth session so upgrades keep you signed in.
  * Falls back to localStorage in the browser.
  */
-const LOCAL_FALLBACK_PREFIX = 'ark-auth-fallback:';
+const LOCAL_FALLBACK_PREFIX = 'NOVA-auth-fallback:';
 
 const arkAuthStorage: SupportedStorage = {
   getItem: (key) => {

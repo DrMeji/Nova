@@ -1,4 +1,4 @@
-/** Presence / online status for ARK Connect (Message list + sidebar). */
+/** Presence / online status for NOVA Connect (Message list + sidebar). */
 
 export type PresenceStatus = 'online' | 'idle' | 'dnd' | 'inactive';
 
@@ -37,7 +37,7 @@ export function presenceRingClass(status: PresenceStatus): string {
   return 'border-zinc-500/70 ring-1 ring-zinc-500/25';
 }
 
-/** ARK ID / DEV label under the name. matches presence. */
+/** NOVA ID / DEV label under the name. matches presence. */
 export function presenceIdClass(status: PresenceStatus): string {
   if (status === 'online') return 'text-emerald-400/90';
   if (status === 'idle') return 'text-amber-400/90';

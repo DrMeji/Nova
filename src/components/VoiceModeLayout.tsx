@@ -3,11 +3,11 @@ import type { VoiceSessionPhase } from '@/lib/voiceMode';
 import { VoiceArkFace } from '@/components/VoiceArkFace';
 
 const PHASE_LABEL: Record<VoiceSessionPhase, string> = {
-  idle: 'Tap ARK or type below',
+  idle: 'Tap NOVA or type below',
   listening: 'Listening…',
   thinking: 'Thinking…',
   speaking: 'Speaking…',
-  error: 'Tap ARK to try again',
+  error: 'Tap NOVA to try again',
 };
 
 type VoiceFaceProps = {

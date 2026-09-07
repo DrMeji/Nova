@@ -494,7 +494,7 @@ export function BuildRun() {
               {connectStep === 'idle' && (
                 <>
                   <div className="space-y-2">
-                    <StepRow done={selectedRuntime.installed} label="Add to ARK" />
+                    <StepRow done={selectedRuntime.installed} label="Add to NOVA" />
                     <StepRow done={selectedRuntime.connected} label="Connect account" />
                     <StepRow
                       done={selectedRuntime.connected && selectedRuntime.permissions.length > 0}
@@ -523,7 +523,7 @@ export function BuildRun() {
                     {!isPluginWired(selected.id) ? null : !selectedRuntime.installed ? (
                       <button type="button" className="ark-btn-primary w-full" onClick={() => install(selected.id)}>
                         <Plus className="w-4 h-4" />
-                        Add to ARK
+                        Add to NOVA
                       </button>
                     ) : !selectedRuntime.connected ? (
                       <button type="button" className="ark-btn-primary w-full" onClick={startConnect}>
@@ -582,7 +582,7 @@ export function BuildRun() {
                         className="ark-btn-secondary w-full !text-ark-accent-red"
                         onClick={() => uninstall(selected.id)}
                       >
-                        Remove from ARK
+                        Remove from NOVA
                       </button>
                     )}
                     {authError && connectStep === 'idle' && (

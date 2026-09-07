@@ -1,5 +1,5 @@
 /**
- * ARK social layer: contacts, Networking posts, and DMs.
+ * NOVA social layer: contacts, Networking posts, and DMs.
  * Cloud (Supabase) when signed in; local cache so the UI still works offline / guest.
  */
 
@@ -57,9 +57,9 @@ export type DirectMessage = {
   attachment?: MessageAttachment;
 };
 
-const CONTACTS_KEY = 'ark:contacts';
-const POSTS_KEY = 'ark:network-posts';
-const DMS_KEY = 'ark:direct-messages';
+const CONTACTS_KEY = 'NOVA:contacts';
+const POSTS_KEY = 'NOVA:network-posts';
+const DMS_KEY = 'NOVA:direct-messages';
 
 export function canUseCloud(userId?: string | null) {
   return Boolean(userId && userId !== 'guest-local' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId));
@@ -178,8 +178,8 @@ export async function areMutualFriends(
   }
 }
 
-const BLOCKED_KEY = 'ark:blocked-ark-ids';
-const HIDDEN_DEMOS_KEY = 'ark:hidden-demo-contacts';
+const BLOCKED_KEY = 'NOVA:blocked-ark-ids';
+const HIDDEN_DEMOS_KEY = 'NOVA:hidden-demo-contacts';
 
 export type BlockedUser = {
   arkId: string;
@@ -187,7 +187,7 @@ export type BlockedUser = {
   blockedAt: string;
 };
 
-const BLOCKED_META_KEY = 'ark:blocked-meta';
+const BLOCKED_META_KEY = 'NOVA:blocked-meta';
 
 function loadBlockedMeta(): Record<string, { displayName?: string; blockedAt?: string }> {
   const raw = readJson<Record<string, { displayName?: string; blockedAt?: string }>>(BLOCKED_META_KEY, {});
@@ -252,7 +252,7 @@ export async function blockArkId(
     }
   }
   try {
-    window.dispatchEvent(new CustomEvent('ark:blocks-changed'));
+    window.dispatchEvent(new CustomEvent('NOVA:blocks-changed'));
   } catch {
     /* ignore */
   }
@@ -279,7 +279,7 @@ export async function unblockArkId(arkIdRaw: string, userId?: string | null): Pr
     }
   }
   try {
-    window.dispatchEvent(new CustomEvent('ark:blocks-changed'));
+    window.dispatchEvent(new CustomEvent('NOVA:blocks-changed'));
   } catch {
     /* ignore */
   }
@@ -376,7 +376,7 @@ export async function listContacts(userId?: string | null): Promise<ArkContact[]
             ? liveName
             : (cached && cached.toUpperCase() !== ARK_DEV_ID && cached !== c.arkId)
               ? cached
-              : 'ARK user';
+              : 'NOVA user';
         return {
           ...c,
           arkId: ARK_DEV_ID,
@@ -677,7 +677,7 @@ export function subscribeMessages(
   if (!myArkId || !canUseCloud(userId)) return () => undefined;
   try {
   const channel = supabase
-    .channel(`ark-dm-${myArkId}`)
+    .channel(`NOVA-dm-${myArkId}`)
     .on(
       'postgres_changes',
       { event: 'INSERT', schema: 'public', table: 'ark_direct_messages' },

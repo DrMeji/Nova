@@ -137,7 +137,7 @@ export async function runAgentCommand(opts: {
 }): Promise<AgentRunOutcome> {
   const { command, cwd } = opts;
   if (!window.arkDesktop?.agentRun) {
-    return { handled: true, reply: 'Agent commands need the ARK desktop app.' };
+    return { handled: true, reply: 'Agent commands need the NOVA desktop app.' };
   }
   if (!agentCommandAllowed(command)) {
     return { handled: true, reply: agentExecutionBlockedMessage(command) };

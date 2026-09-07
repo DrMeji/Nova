@@ -50,7 +50,7 @@ const RING_W = HEAD_W + RING_PAD * 2;
 const RING_H = HEAD_H + RING_PAD * 2;
 const RING_RX = HEAD_RX + 6;
 
-/** ARK voice face — inner shimmer, thinking spinner ring, mouth bars synced to audio. */
+/** NOVA voice face — inner shimmer, thinking spinner ring, mouth bars synced to audio. */
 export function VoiceArkFace({ phase, className = '' }: VoiceArkFaceProps) {
   const [blink, setBlink] = useState(false);
   const speaking = phase === 'speaking';

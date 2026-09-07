@@ -1,5 +1,5 @@
 /**
- * Voice calls between ARK IDs. Signaling over Supabase Realtime + Postgres;
+ * Voice calls between NOVA IDs. Signaling over Supabase Realtime + Postgres;
  * media is peer-to-peer WebRTC (STUN + optional TURN from env).
  */
 
@@ -36,11 +36,11 @@ function buildIceConfig(): RTCConfiguration {
 const ICE = buildIceConfig();
 
 function pairChannel(a: string, b: string) {
-  return `ark-call-${[a, b].sort().join('-')}`;
+  return `NOVA-call-${[a, b].sort().join('-')}`;
 }
 
 function userChannel(arkId: string) {
-  return `ark-user-${arkId}`;
+  return `NOVA-user-${arkId}`;
 }
 
 function rowToSignal(row: Record<string, unknown>): CallSignal {
@@ -71,7 +71,7 @@ export async function sendCallSignal(signal: CallSignal, userId?: string | null)
     const ch = supabase.channel(name, { config: { broadcast: { self: false } } });
     ch.subscribe(status => {
       if (status !== 'SUBSCRIBED') return;
-      void ch.send({ type: 'broadcast', event: 'ark-call', payload: signal }).finally(() => {
+      void ch.send({ type: 'broadcast', event: 'NOVA-call', payload: signal }).finally(() => {
         void supabase.removeChannel(ch);
         resolve();
       });
@@ -124,13 +124,13 @@ export function subscribeUserSignals(myArkId: string, onSignal: (signal: CallSig
 
   const ch = supabase
     .channel(userChannel(myArkId))
-    .on('broadcast', { event: 'ark-call' }, ({ payload }) => {
+    .on('broadcast', { event: 'NOVA-call' }, ({ payload }) => {
       deliver(payload as CallSignal);
     })
     .subscribe();
 
   const table = supabase
-    .channel(`ark-call-table-${myArkId}`)
+    .channel(`NOVA-call-table-${myArkId}`)
     .on(
       'postgres_changes',
       { event: 'INSERT', schema: 'public', table: 'ark_call_signals' },
@@ -164,7 +164,7 @@ export function subscribeCallPair(myArkId: string, peerArkId: string, onSignal: 
 
   const ch = supabase
     .channel(pairChannel(myArkId, peerArkId))
-    .on('broadcast', { event: 'ark-call' }, ({ payload }) => {
+    .on('broadcast', { event: 'NOVA-call' }, ({ payload }) => {
       deliver(payload as CallSignal);
     })
     .subscribe();

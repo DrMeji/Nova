@@ -5,7 +5,7 @@
 const PREFS_KEY = 'ark:local-prefs';
 
 const DELETE_GRANT_OFF_MSG =
-  'I need permission to read folders on your PC.\n\nOn first setup, enable **Give ARK access to your PC** (or open **Settings → Security** → Allow Desktop folder access + Full PC access), confirm the dialog, then ask again.';
+  'I need permission to read folders on your PC.\n\nOn first setup, enable **Give NOVA access to your PC** (or open **Settings → Security** → Allow Desktop folder access + Full PC access), confirm the dialog, then ask again.';
 
 type PrefsSlice = {
   allowDesktopFolderAccess?: boolean;
@@ -79,16 +79,41 @@ function joinPath(root: string, name: string): string {
 export function looksLikeDeleteProjectAsk(text: string): boolean {
   const t = String(text || '').trim();
   if (!/\b(delete|remove|trash|wipe|get rid of)\b/i.test(t)) return false;
+  // Creating a project that also mentions "delete selected" (UI feature) is not a folder delete.
+  if (
+    /\bcreate\s+(?:the\s+)?project\b/i.test(t)
+    || /\bcreate\s+(?:the\s+)?[A-Za-z].{0,40}\bon\s+disk\b/i.test(t)
+    || /\bon\s+disk\s+now\b/i.test(t)
+  ) {
+    return false;
+  }
+  // Require the delete verb to be tied to a project/folder target — not a distant "project" word.
   return (
-    /\b(project|workspace|repo|repository)\b/i.test(t)
-    || (/\b(folder|directory)\b/i.test(t) && /\b(named|called|project)\b/i.test(t))
+    /\b(?:delete|remove|trash|wipe|get rid of)\b[\s\S]{0,48}\b(?:project|workspace|repo|repository|folder|directory)\b/i.test(t)
+    || /\b(?:project|workspace|repo|repository|folder|directory)\b[\s\S]{0,32}\b(?:delete|remove|trash|wipe|get rid of)\b/i.test(t)
   );
 }
 
 export function looksLikeDeleteFollowUp(text: string): boolean {
   const t = String(text || '').trim();
   if (!/\b(delete|remove|trash|wipe|get rid of)\b/i.test(t)) return false;
+  if (
+    /\bcreate\s+(?:the\s+)?project\b/i.test(t)
+    || /\bon\s+disk\s+now\b/i.test(t)
+  ) {
+    return false;
+  }
+  // UI edits: "remove the footer / that button" must never open Delete project.
+  if (
+    /\b(?:remove|delete)\b[\s\S]{0,60}\b(?:footer|header|button|line|icon|nav|menu|section|text|copyright|css|class|style|color|image|logo|padding|margin|link|title|selected|selection|mesh|cube|sphere|object|shape|node)\b/i.test(t)
+  ) {
+    return false;
+  }
   if (looksLikeDeleteProjectAsk(t)) return false;
+  // Prefer an explicit delete verb for bare "it/this/that" follow-ups.
+  if (/\bremove\b/i.test(t) && !/\b(?:delete|trash|wipe|get rid of)\b/i.test(t)) {
+    return false;
+  }
   return (
     /\b(it|this|that|that folder|that project|the folder|the project)\b/i.test(t)
     || /^(yes\s+)?delete\b/i.test(t)
@@ -256,7 +281,14 @@ async function resolveDeleteByFastPaths(wantName: string): Promise<{ path: strin
   }
   if (prefs.allowDocumentsFolderAccess && documents) {
     for (const variant of variants) {
+      candidates.push(joinPath(joinPath(documents, 'NOVA Projects'), variant));
       candidates.push(joinPath(joinPath(documents, 'ARK Projects'), variant));
+    }
+  }
+  if (prefs.allowDesktopFolderAccess && desktop) {
+    for (const variant of variants) {
+      candidates.push(joinPath(joinPath(desktop, 'NOVA Projects'), variant));
+      candidates.push(joinPath(joinPath(desktop, 'ARK Projects'), variant));
     }
   }
 
@@ -266,7 +298,8 @@ async function resolveDeleteByFastPaths(wantName: string): Promise<{ path: strin
 }
 
 function isProjectsContainerPath(folderPath: string): boolean {
-  return /[/\\]projects$/i.test(String(folderPath || '').trim());
+  const p = String(folderPath || '').trim();
+  return /[/\\](?:NOVA |ARK )?Projects$/i.test(p) || /[/\\]projects$/i.test(p);
 }
 
 export async function resolveDeleteProjectFolder(opts: {

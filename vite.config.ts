@@ -12,7 +12,7 @@ export default defineConfig({
     // Electron loads index.html via file:// — crossorigin on module/CSS
     // tags can leave a blank (black) window in packaged builds.
     {
-      name: 'ark-strip-crossorigin',
+      name: 'NOVA-strip-crossorigin',
       transformIndexHtml(html) {
         return html.replace(/\s+crossorigin(?:="[^"]*")?/gi, '');
       },

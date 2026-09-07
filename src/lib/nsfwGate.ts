@@ -17,6 +17,6 @@ export function nsfwBlockedReply(): string {
   return [
     'NSFW is **off** in Settings → AI.',
     '',
-    'Turn on **Allow NSFW content** if you want adult / nude generations. With it off, ARK will not create that kind of image.',
+    'Turn on **Allow NSFW content** if you want adult / nude generations. With it off, NOVA will not create that kind of image.',
   ].join('\n');
 }

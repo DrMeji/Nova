@@ -1,4 +1,4 @@
-/** ARK brain localhost API. backed by ARK Engine only. */
+/** NOVA Brain localhost API. backed by NOVA Engine only. */
 
 import { desktopRequest } from '@/lib/httpDesktop';
 import { engineGenerate } from '@/lib/arkEngine';
@@ -49,7 +49,7 @@ export type BrainMediaOpts = {
   referenceImageDataUrl?: string;
 };
 
-/** Prefer IPC engine when available; else brain HTTP; always ARK-owned. */
+/** Prefer IPC engine when available; else brain HTTP; always NOVA-owned. */
 export async function brainGenerate(
   message: string,
   modelId?: string,

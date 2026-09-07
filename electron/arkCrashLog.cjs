@@ -11,7 +11,7 @@ function logDir() {
 }
 
 function reportPath() {
-  return path.join(logDir(), 'ark-local-reports.jsonl');
+  return path.join(logDir(), 'NOVA-local-reports.jsonl');
 }
 
 function appendReport(kind, payload) {

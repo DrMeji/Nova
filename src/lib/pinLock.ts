@@ -1,10 +1,10 @@
 /** Local PIN lock. hash only, never store the PIN itself. */
 
-const HASH_KEY = 'ark:pin-hash';
-const SALT_KEY = 'ark:pin-salt';
-const SESSION_KEY = 'ark:pin-unlocked';
-const FAILURES_KEY = 'ark:pin-failures';
-const LOCKOUT_KEY = 'ark:pin-lockout-until';
+const HASH_KEY = 'NOVA:pin-hash';
+const SALT_KEY = 'NOVA:pin-salt';
+const SESSION_KEY = 'NOVA:pin-unlocked';
+const FAILURES_KEY = 'NOVA:pin-failures';
+const LOCKOUT_KEY = 'NOVA:pin-lockout-until';
 const MAX_FAILURES = 5;
 const LOCKOUT_MS = 60_000; // 1 minute after 5 wrong PINs
 
@@ -49,7 +49,7 @@ export function lockPinSession() {
   } catch {
     /* ignore */
   }
-  window.dispatchEvent(new Event('ark:pin-lock'));
+  window.dispatchEvent(new Event('NOVA:pin-lock'));
 }
 
 export async function setPin(pin: string) {

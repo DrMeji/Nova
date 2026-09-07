@@ -17,7 +17,7 @@ export function looksLikeRestorePointAsk(text: string): boolean {
 }
 
 export function buildRestorePointCommand(label?: string): string {
-  const desc = (label || `ARK ${new Date().toISOString().slice(0, 10)}`).replace(/'/g, "''");
+  const desc = (label || `NOVA ${new Date().toISOString().slice(0, 10)}`).replace(/'/g, "''");
   return `Checkpoint-Computer -Description '${desc}' -RestorePointType MODIFY_SETTINGS`;
 }
 

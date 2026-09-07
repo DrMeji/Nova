@@ -150,8 +150,8 @@ function AppContent() {
 
   useEffect(() => {
     const onSetup = () => setSetupTick(t => t + 1);
-    window.addEventListener('ark:setup-changed', onSetup);
-    return () => window.removeEventListener('ark:setup-changed', onSetup);
+    window.addEventListener('NOVA:setup-changed', onSetup);
+    return () => window.removeEventListener('NOVA:setup-changed', onSetup);
   }, []);
 
   if (loading) {
@@ -218,7 +218,7 @@ function App() {
     return (
       <div className="h-screen flex items-center justify-center bg-ark-navy-950 text-white p-8 text-center">
         <div className="max-w-md space-y-3">
-          <p className="text-lg font-semibold">ARK could not start</p>
+          <p className="text-lg font-semibold">NOVA could not start</p>
           <p className="text-sm text-white/70">{supabaseConfigError}</p>
           <p className="text-xs text-white/50">Rebuild with .env.production present, or set the Vite env vars.</p>
         </div>

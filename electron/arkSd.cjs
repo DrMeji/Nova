@@ -1,5 +1,5 @@
 /**
- * ARK local image runtime — stable-diffusion.cpp (sd.exe) + on-disk weights.
+ * NOVA local image runtime — stable-diffusion.cpp (sd.exe) + on-disk weights.
  * Opt-in: install “Stable Diffusion 1.5 (Local)” from Local AI / Models.
  */
 
@@ -415,7 +415,7 @@ async function generateLocalImage(prompt, opts = {}) {
   return {
     buf,
     ext: 'png',
-    source: isFlux ? 'ark-flux-schnell-local' : isTurbo ? 'ark-sdxl-turbo-local' : 'ark-sd-local',
+    source: isFlux ? 'NOVA-flux-schnell-local' : isTurbo ? 'NOVA-sdxl-turbo-local' : 'NOVA-sd-local',
     modelId: resolved.id,
   };
 }

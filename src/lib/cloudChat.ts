@@ -210,7 +210,7 @@ async function chatOpenRouter(
 ) {
   return openaiCompatible('https://openrouter.ai/api/v1/chat/completions', key, model, history, {
     'HTTP-Referer': 'https://ark.local',
-    'X-Title': 'ARK',
+    'X-Title': 'NOVA',
   }, onChunk, 'openrouter');
 }
 

@@ -132,7 +132,7 @@ function recommendationsFor(hw: HardwareInfo): RecModel[] {
   if (pc === 'strong') {
     return [
       { id: primary.id, name: primary.name, size: primary.size, detail: 'Best chat brain for this PC', recommended: true },
-      { id: 'qwen25-coder-7b', name: 'Qwen2.5-Coder 7B', size: '4.7 GB', detail: 'Coding · build apps in ARK' },
+      { id: 'qwen25-coder-7b', name: 'Qwen2.5-Coder 7B', size: '4.7 GB', detail: 'Coding · build apps in NOVA' },
       { id: 'llama32-3b', name: 'Llama 3.2 3B Instruct', size: '2.0 GB', detail: 'Lighter general use' },
     ];
   }
@@ -276,7 +276,7 @@ export function OnboardingScreen() {
         : rec.id;
 
     setLocalPrefs({
-      defaultModelId: 'ark-auto',
+      defaultModelId: 'NOVA-auto',
       aiMode: 'automatic',
       autoFailover: true,
       allowDesktopFolderAccess: desktopAccess,
@@ -428,17 +428,17 @@ export function OnboardingScreen() {
           <p className="text-xs uppercase tracking-[0.2em] text-content-tertiary mb-3">First run setup</p>
           <h1 className="text-3xl font-semibold text-content-primary tracking-tight">
             {phase === 'access'
-              ? 'Give ARK access'
+              ? 'Give NOVA access'
               : phase === 'connect'
                 ? 'Connect free capacity'
                 : "Let's optimize your computer"}
           </h1>
           <p className="text-sm text-content-secondary mt-2 max-w-md mx-auto">
             {phase === 'access'
-              ? 'Let ARK explore your Desktop, list projects, find games, and run installs when you ask. You can change this anytime in Settings → Security.'
+              ? 'Let NOVA explore your Desktop, list projects, find games, and run installs when you ask. You can change this anytime in Settings → Security.'
               : phase === 'connect'
-                ? 'Add free keys once (Groq, Google, OpenRouter). ARK Auto fails over between them and your local brain so chat keeps going.'
-                : 'ARK checks your hardware and download speed, installs a fitting local brain, then helps you connect free cloud capacity.'}
+                ? 'Add free keys once (Groq, Google, OpenRouter). NOVA Auto fails over between them and your local brain so chat keeps going.'
+                : 'NOVA checks your hardware and download speed, installs a fitting local brain, then helps you connect free cloud capacity.'}
           </p>
         </div>
 
@@ -479,7 +479,7 @@ export function OnboardingScreen() {
                 </p>
                 <p className="flex items-start gap-2.5">
                   <Wifi className="w-4 h-4 mt-0.5 shrink-0 text-content-tertiary" />
-                  Measure download speed so ARK knows when to preload the next brain.
+                  Measure download speed so NOVA knows when to preload the next brain.
                 </p>
                 <p className="flex items-start gap-2.5">
                   <KeyRound className="w-4 h-4 mt-0.5 shrink-0 text-content-tertiary" />
@@ -487,7 +487,7 @@ export function OnboardingScreen() {
                 </p>
                 <p className="flex items-start gap-2.5">
                   <FolderOpen className="w-4 h-4 mt-0.5 shrink-0 text-content-tertiary" />
-                  Choose Desktop or full PC access so ARK can explore folders and answer “what’s on my PC?” without templates.
+                  Choose Desktop or full PC access so NOVA can explore folders and answer “what’s on my PC?” without templates.
                 </p>
                 <p className="flex items-start gap-2.5">
                   <Shield className="w-4 h-4 mt-0.5 shrink-0 text-content-tertiary" />
@@ -576,7 +576,7 @@ export function OnboardingScreen() {
                       ? 'Hugging Face, HF Mirror, and ModelScope, plus any API keys already plugged in'
                       : speedPlan
                         ? speedPlan.ratingLabel
-                        : 'ARK uses this to start a backup brain earlier on slow Wi-Fi'}
+                        : 'NOVA uses this to start a backup brain earlier on slow Wi-Fi'}
                   </p>
                 </div>
               </div>
@@ -654,7 +654,7 @@ export function OnboardingScreen() {
                 <div>
                   <p className="text-sm font-medium text-content-primary">Recommended for this PC</p>
                   <p className="text-xs text-content-tertiary mt-0.5">
-                    Choose a local preference. Chat still defaults to ARK Auto for failover.
+                    Choose a local preference. Chat still defaults to NOVA Auto for failover.
                   </p>
                 </div>
               </div>
@@ -725,7 +725,7 @@ export function OnboardingScreen() {
                   <p className="text-sm font-medium text-content-primary">PC permissions</p>
                   <p className="text-xs text-content-tertiary mt-0.5">
                     {accessEnabledCount > 0
-                      ? `${accessEnabledCount} permission${accessEnabledCount === 1 ? '' : 's'} enabled. ARK can answer folder and project asks`
+                      ? `${accessEnabledCount} permission${accessEnabledCount === 1 ? '' : 's'} enabled. NOVA can answer folder and project asks`
                       : 'Skip for now if you prefer. Enable later in Settings → Security'}
                   </p>
                 </div>
@@ -908,7 +908,7 @@ export function OnboardingScreen() {
               </div>
 
               <button type="button" onClick={finish} className="ark-btn-primary w-full h-11 rounded-xl">
-                {connectedCount > 0 ? 'Enter ARK' : 'Continue without connecting'}
+                {connectedCount > 0 ? 'Enter NOVA' : 'Continue without connecting'}
               </button>
             </div>
           )}
@@ -918,7 +918,7 @@ export function OnboardingScreen() {
               <div className="text-center">
                 <p className="text-sm font-medium text-content-primary mb-1">Installing your local brain</p>
                 <p className="text-xs text-content-tertiary">
-                  {selected?.name || 'Qwen2.5 1.5B'} · llama-cli + GGUF into ARK Engine
+                  {selected?.name || 'Qwen2.5 1.5B'} · llama-cli + GGUF into NOVA Engine
                   {connectedCount > 0 ? ` · ${connectedCount} cloud provider${connectedCount === 1 ? '' : 's'}` : ''}
                 </p>
               </div>

@@ -22,126 +22,126 @@ contextBridge.exposeInMainWorld('arkDesktop', {
     }
   },
   windowControls: true,
-  openExternal: (url) => ipcRenderer.invoke('ark:open-external', url),
-  openPath: (targetPath) => ipcRenderer.invoke('ark:open-path', targetPath),
-  systemInfo: () => ipcRenderer.invoke('ark:system-info'),
-  speedTest: () => ipcRenderer.invoke('ark:speed-test'),
-  appMeta: () => ipcRenderer.invoke('ark:app-meta'),
-  updateCheck: () => ipcRenderer.invoke('ark:update-check'),
-  updateDownload: (payload) => ipcRenderer.invoke('ark:update-download', payload || {}),
-  updateState: () => ipcRenderer.invoke('ark:update-state'),
-  postUpdateConsume: () => ipcRenderer.invoke('ark:post-update-consume'),
-  authRecoverySave: (payload) => ipcRenderer.invoke('ark:auth-recovery-save', payload || {}),
-  authRecoveryInfo: () => ipcRenderer.invoke('ark:auth-recovery-info'),
-  authRecoveryReveal: () => ipcRenderer.invoke('ark:auth-recovery-reveal'),
+  openExternal: (url) => ipcRenderer.invoke('NOVA:open-external', url),
+  openPath: (targetPath) => ipcRenderer.invoke('NOVA:open-path', targetPath),
+  systemInfo: () => ipcRenderer.invoke('NOVA:system-info'),
+  speedTest: () => ipcRenderer.invoke('NOVA:speed-test'),
+  appMeta: () => ipcRenderer.invoke('NOVA:app-meta'),
+  updateCheck: () => ipcRenderer.invoke('NOVA:update-check'),
+  updateDownload: (payload) => ipcRenderer.invoke('NOVA:update-download', payload || {}),
+  updateState: () => ipcRenderer.invoke('NOVA:update-state'),
+  postUpdateConsume: () => ipcRenderer.invoke('NOVA:post-update-consume'),
+  authRecoverySave: (payload) => ipcRenderer.invoke('NOVA:auth-recovery-save', payload || {}),
+  authRecoveryInfo: () => ipcRenderer.invoke('NOVA:auth-recovery-info'),
+  authRecoveryReveal: () => ipcRenderer.invoke('NOVA:auth-recovery-reveal'),
   onUpdateProgress: (handler) => {
     const listener = (_event, payload) => handler?.(payload);
-    ipcRenderer.on('ark:update-progress', listener);
-    return () => ipcRenderer.removeListener('ark:update-progress', listener);
+    ipcRenderer.on('NOVA:update-progress', listener);
+    return () => ipcRenderer.removeListener('NOVA:update-progress', listener);
   },
-  authStorageGet: (key) => ipcRenderer.invoke('ark:auth-storage-get', key),
-  authStorageSet: (key, value) => ipcRenderer.invoke('ark:auth-storage-set', key, value),
-  authStorageRemove: (key) => ipcRenderer.invoke('ark:auth-storage-remove', key),
-  loginItemGet: () => ipcRenderer.invoke('ark:login-item-get'),
-  loginItemSet: (openAtLogin) => ipcRenderer.invoke('ark:login-item-set', { openAtLogin: Boolean(openAtLogin) }),
-  setupGet: () => ipcRenderer.invoke('ark:setup-get'),
-  setupSet: (completed) => ipcRenderer.invoke('ark:setup-set', { completed: Boolean(completed) }),
-  windowMinimize: () => ipcRenderer.invoke('ark:window-minimize'),
-  windowMaximizeToggle: () => ipcRenderer.invoke('ark:window-maximize-toggle'),
-  windowIsMaximized: () => ipcRenderer.invoke('ark:window-is-maximized'),
-  windowClose: () => ipcRenderer.invoke('ark:window-close'),
+  authStorageGet: (key) => ipcRenderer.invoke('NOVA:auth-storage-get', key),
+  authStorageSet: (key, value) => ipcRenderer.invoke('NOVA:auth-storage-set', key, value),
+  authStorageRemove: (key) => ipcRenderer.invoke('NOVA:auth-storage-remove', key),
+  loginItemGet: () => ipcRenderer.invoke('NOVA:login-item-get'),
+  loginItemSet: (openAtLogin) => ipcRenderer.invoke('NOVA:login-item-set', { openAtLogin: Boolean(openAtLogin) }),
+  setupGet: () => ipcRenderer.invoke('NOVA:setup-get'),
+  setupSet: (completed) => ipcRenderer.invoke('NOVA:setup-set', { completed: Boolean(completed) }),
+  windowMinimize: () => ipcRenderer.invoke('NOVA:window-minimize'),
+  windowMaximizeToggle: () => ipcRenderer.invoke('NOVA:window-maximize-toggle'),
+  windowIsMaximized: () => ipcRenderer.invoke('NOVA:window-is-maximized'),
+  windowClose: () => ipcRenderer.invoke('NOVA:window-close'),
   onWindowMaximized: (handler) => {
     const listener = (_event, payload) => handler?.(payload);
-    ipcRenderer.on('ark:window-maximized', listener);
-    return () => ipcRenderer.removeListener('ark:window-maximized', listener);
+    ipcRenderer.on('NOVA:window-maximized', listener);
+    return () => ipcRenderer.removeListener('NOVA:window-maximized', listener);
   },
   onSystemSuspend: (handler) => {
     const listener = () => handler?.();
-    ipcRenderer.on('ark:system-suspend', listener);
-    return () => ipcRenderer.removeListener('ark:system-suspend', listener);
+    ipcRenderer.on('NOVA:system-suspend', listener);
+    return () => ipcRenderer.removeListener('NOVA:system-suspend', listener);
   },
-  httpGet: (url, headers) => ipcRenderer.invoke('ark:http-get', { url, headers }),
-  httpRequest: (url, options) => ipcRenderer.invoke('ark:http-request', { url, ...(options || {}) }),
+  httpGet: (url, headers) => ipcRenderer.invoke('NOVA:http-get', { url, headers }),
+  httpRequest: (url, options) => ipcRenderer.invoke('NOVA:http-request', { url, ...(options || {}) }),
   httpStream: (url, options) =>
-    ipcRenderer.invoke('ark:http-stream', { url, ...(options || {}) }),
+    ipcRenderer.invoke('NOVA:http-stream', { url, ...(options || {}) }),
   onHttpStreamChunk: (handler) => {
     const listener = (_event, payload) => handler?.(payload);
-    ipcRenderer.on('ark:http-stream-chunk', listener);
-    return () => ipcRenderer.removeListener('ark:http-stream-chunk', listener);
+    ipcRenderer.on('NOVA:http-stream-chunk', listener);
+    return () => ipcRenderer.removeListener('NOVA:http-stream-chunk', listener);
   },
-  brainStatus: () => ipcRenderer.invoke('ark:brain-status'),
-  brainTokenGet: () => ipcRenderer.invoke('ark:brain-token-get'),
-  brainTokenRotate: () => ipcRenderer.invoke('ark:brain-token-rotate'),
+  brainStatus: () => ipcRenderer.invoke('NOVA:brain-status'),
+  brainTokenGet: () => ipcRenderer.invoke('NOVA:brain-token-get'),
+  brainTokenRotate: () => ipcRenderer.invoke('NOVA:brain-token-rotate'),
   engineGenerateStream: (message, modelId, kind, opts) =>
-    ipcRenderer.invoke('ark:engine-generate-stream', { message, modelId, kind, ...(opts || {}) }),
-  engineGenerateCancel: () => ipcRenderer.invoke('ark:engine-generate-cancel'),
-  webSearch: (query) => ipcRenderer.invoke('ark:web-search', { query }),
+    ipcRenderer.invoke('NOVA:engine-generate-stream', { message, modelId, kind, ...(opts || {}) }),
+  engineGenerateCancel: () => ipcRenderer.invoke('NOVA:engine-generate-cancel'),
+  webSearch: (query) => ipcRenderer.invoke('NOVA:web-search', { query }),
   onEngineChunk: (handler) => {
     const listener = (_event, payload) => handler?.(payload);
-    ipcRenderer.on('ark:engine-chunk', listener);
-    return () => ipcRenderer.removeListener('ark:engine-chunk', listener);
+    ipcRenderer.on('NOVA:engine-chunk', listener);
+    return () => ipcRenderer.removeListener('NOVA:engine-chunk', listener);
   },
-  pluginOAuthStart: (pluginId) => ipcRenderer.invoke('ark:plugin-oauth-start', pluginId),
-  pluginOAuthStatus: () => ipcRenderer.invoke('ark:plugin-oauth-status'),
+  pluginOAuthStart: (pluginId) => ipcRenderer.invoke('NOVA:plugin-oauth-start', pluginId),
+  pluginOAuthStatus: () => ipcRenderer.invoke('NOVA:plugin-oauth-status'),
   pluginOAuthSetClient: (pluginId, clientId) =>
-    ipcRenderer.invoke('ark:plugin-oauth-set-client', { pluginId, clientId }),
-  localReportsList: () => ipcRenderer.invoke('ark:local-reports-list'),
-  localReportsClear: () => ipcRenderer.invoke('ark:local-reports-clear'),
-  localReportsOpen: () => ipcRenderer.invoke('ark:local-reports-open'),
-  signingStatus: () => ipcRenderer.invoke('ark:signing-status'),
-  engineStatus: () => ipcRenderer.invoke('ark:engine-status'),
-  engineStart: () => ipcRenderer.invoke('ark:engine-start'),
-  engineStop: () => ipcRenderer.invoke('ark:engine-stop'),
-  engineSetModel: (id) => ipcRenderer.invoke('ark:engine-set-model', id),
-  engineDownload: (id) => ipcRenderer.invoke('ark:engine-download', id),
-  engineRegisterHunt: (meta) => ipcRenderer.invoke('ark:engine-register-hunt', meta),
-  engineDownloadProgress: (id) => ipcRenderer.invoke('ark:engine-download-progress', id),
-  engineDownloadError: (id) => ipcRenderer.invoke('ark:engine-download-error', id),
-  engineDownloadCancel: (id) => ipcRenderer.invoke('ark:engine-download-cancel', id),
-  engineImportGguf: (filePath) => ipcRenderer.invoke('ark:engine-import-gguf', filePath),
-  engineImportGgufPick: () => ipcRenderer.invoke('ark:engine-import-gguf-pick'),
-  engineDeleteModel: (id) => ipcRenderer.invoke('ark:engine-delete-model', id),
-  engineDiskSpace: () => ipcRenderer.invoke('ark:engine-disk-space'),
-  engineEnsureRuntime: () => ipcRenderer.invoke('ark:engine-ensure-runtime'),
+    ipcRenderer.invoke('NOVA:plugin-oauth-set-client', { pluginId, clientId }),
+  localReportsList: () => ipcRenderer.invoke('NOVA:local-reports-list'),
+  localReportsClear: () => ipcRenderer.invoke('NOVA:local-reports-clear'),
+  localReportsOpen: () => ipcRenderer.invoke('NOVA:local-reports-open'),
+  signingStatus: () => ipcRenderer.invoke('NOVA:signing-status'),
+  engineStatus: () => ipcRenderer.invoke('NOVA:engine-status'),
+  engineStart: () => ipcRenderer.invoke('NOVA:engine-start'),
+  engineStop: () => ipcRenderer.invoke('NOVA:engine-stop'),
+  engineSetModel: (id) => ipcRenderer.invoke('NOVA:engine-set-model', id),
+  engineDownload: (id) => ipcRenderer.invoke('NOVA:engine-download', id),
+  engineRegisterHunt: (meta) => ipcRenderer.invoke('NOVA:engine-register-hunt', meta),
+  engineDownloadProgress: (id) => ipcRenderer.invoke('NOVA:engine-download-progress', id),
+  engineDownloadError: (id) => ipcRenderer.invoke('NOVA:engine-download-error', id),
+  engineDownloadCancel: (id) => ipcRenderer.invoke('NOVA:engine-download-cancel', id),
+  engineImportGguf: (filePath) => ipcRenderer.invoke('NOVA:engine-import-gguf', filePath),
+  engineImportGgufPick: () => ipcRenderer.invoke('NOVA:engine-import-gguf-pick'),
+  engineDeleteModel: (id) => ipcRenderer.invoke('NOVA:engine-delete-model', id),
+  engineDiskSpace: () => ipcRenderer.invoke('NOVA:engine-disk-space'),
+  engineEnsureRuntime: () => ipcRenderer.invoke('NOVA:engine-ensure-runtime'),
   engineGenerate: (message, modelId, kind, opts) =>
-    ipcRenderer.invoke('ark:engine-generate', { message, modelId, kind, ...(opts || {}) }),
-  modelsDirInfo: () => ipcRenderer.invoke('ark:models-dir-info'),
-  modelsDirPick: () => ipcRenderer.invoke('ark:models-dir-pick'),
-  modelsDirSet: (folderPath) => ipcRenderer.invoke('ark:models-dir-set', folderPath),
-  modelsDirReset: () => ipcRenderer.invoke('ark:models-dir-reset'),
-  previewStart: (payload) => ipcRenderer.invoke('ark:preview-start', payload),
-  previewStop: (projectId) => ipcRenderer.invoke('ark:preview-stop', projectId),
-  previewStatus: (projectId) => ipcRenderer.invoke('ark:preview-status', projectId),
-  previewOpenWindow: (payload) => ipcRenderer.invoke('ark:preview-open-window', payload),
-  previewCloseLive: () => ipcRenderer.invoke('ark:preview-close-live'),
-  previewUpdate: (payload) => ipcRenderer.invoke('ark:preview-update', payload),
-  previewReload: (projectId) => ipcRenderer.invoke('ark:preview-reload', projectId),
-  mediaLibrary: () => ipcRenderer.invoke('ark:media-library'),
-  mediaClear: () => ipcRenderer.invoke('ark:media-clear'),
-  mediaGet: (id) => ipcRenderer.invoke('ark:media-get', id),
-  mediaRemove: (id) => ipcRenderer.invoke('ark:media-remove', id),
-  projectWrite: (payload) => ipcRenderer.invoke('ark:project-write', payload),
-  projectRead: (projectId) => ipcRenderer.invoke('ark:project-read', projectId),
-  projectPath: (projectId) => ipcRenderer.invoke('ark:project-path', projectId),
-  projectImportFolder: (payload) => ipcRenderer.invoke('ark:project-import-folder', payload),
-  workspaceOpenRoot: (payload) => ipcRenderer.invoke('ark:workspace-open-root', payload),
-  workspaceMkdir: (payload) => ipcRenderer.invoke('ark:workspace-mkdir', payload || {}),
-  workspaceSandboxRoot: () => ipcRenderer.invoke('ark:workspace-sandbox-root'),
-  workspaceStatPath: (targetPath) => ipcRenderer.invoke('ark:workspace-stat-path', targetPath),
-  workspaceSetGrants: (grants) => ipcRenderer.invoke('ark:workspace-set-grants', grants),
-  workspaceGetGrants: () => ipcRenderer.invoke('ark:workspace-get-grants'),
-  agentRun: (payload) => ipcRenderer.invoke('ark:agent-run', payload),
-  agentStartDevServer: (payload) => ipcRenderer.invoke('ark:agent-start-dev-server', payload),
-  agentStartFolderPreview: (payload) => ipcRenderer.invoke('ark:agent-start-folder-preview', payload),
-  mcpListTools: (payload) => ipcRenderer.invoke('ark:mcp-list-tools', payload || {}),
-  mcpCallTool: (payload) => ipcRenderer.invoke('ark:mcp-call-tool', payload || {}),
-  mcpStop: (payload) => ipcRenderer.invoke('ark:mcp-stop', payload || {}),
-  workspaceDeletePath: (payload) => ipcRenderer.invoke('ark:workspace-delete-path', payload),
-  workspaceDeleteRoot: (payload) => ipcRenderer.invoke('ark:workspace-delete-root', payload),
-  workspaceDeleteFolder: (payload) => ipcRenderer.invoke('ark:workspace-delete-folder', payload),
-  workspaceWriteFile: (payload) => ipcRenderer.invoke('ark:workspace-write-file', payload),
-  workspaceRenamePath: (payload) => ipcRenderer.invoke('ark:workspace-rename-path', payload),
-  gitCloneOpen: (payload) => ipcRenderer.invoke('ark:git-clone-open', payload),
+    ipcRenderer.invoke('NOVA:engine-generate', { message, modelId, kind, ...(opts || {}) }),
+  modelsDirInfo: () => ipcRenderer.invoke('NOVA:models-dir-info'),
+  modelsDirPick: () => ipcRenderer.invoke('NOVA:models-dir-pick'),
+  modelsDirSet: (folderPath) => ipcRenderer.invoke('NOVA:models-dir-set', folderPath),
+  modelsDirReset: () => ipcRenderer.invoke('NOVA:models-dir-reset'),
+  previewStart: (payload) => ipcRenderer.invoke('NOVA:preview-start', payload),
+  previewStop: (projectId) => ipcRenderer.invoke('NOVA:preview-stop', projectId),
+  previewStatus: (projectId) => ipcRenderer.invoke('NOVA:preview-status', projectId),
+  previewOpenWindow: (payload) => ipcRenderer.invoke('NOVA:preview-open-window', payload),
+  previewCloseLive: () => ipcRenderer.invoke('NOVA:preview-close-live'),
+  previewUpdate: (payload) => ipcRenderer.invoke('NOVA:preview-update', payload),
+  previewReload: (projectId) => ipcRenderer.invoke('NOVA:preview-reload', projectId),
+  mediaLibrary: () => ipcRenderer.invoke('NOVA:media-library'),
+  mediaClear: () => ipcRenderer.invoke('NOVA:media-clear'),
+  mediaGet: (id) => ipcRenderer.invoke('NOVA:media-get', id),
+  mediaRemove: (id) => ipcRenderer.invoke('NOVA:media-remove', id),
+  projectWrite: (payload) => ipcRenderer.invoke('NOVA:project-write', payload),
+  projectRead: (projectId) => ipcRenderer.invoke('NOVA:project-read', projectId),
+  projectPath: (projectId) => ipcRenderer.invoke('NOVA:project-path', projectId),
+  projectImportFolder: (payload) => ipcRenderer.invoke('NOVA:project-import-folder', payload),
+  workspaceOpenRoot: (payload) => ipcRenderer.invoke('NOVA:workspace-open-root', payload),
+  workspaceMkdir: (payload) => ipcRenderer.invoke('NOVA:workspace-mkdir', payload || {}),
+  workspaceSandboxRoot: () => ipcRenderer.invoke('NOVA:workspace-sandbox-root'),
+  workspaceStatPath: (targetPath) => ipcRenderer.invoke('NOVA:workspace-stat-path', targetPath),
+  workspaceSetGrants: (grants) => ipcRenderer.invoke('NOVA:workspace-set-grants', grants),
+  workspaceGetGrants: () => ipcRenderer.invoke('NOVA:workspace-get-grants'),
+  agentRun: (payload) => ipcRenderer.invoke('NOVA:agent-run', payload),
+  agentStartDevServer: (payload) => ipcRenderer.invoke('NOVA:agent-start-dev-server', payload),
+  agentStartFolderPreview: (payload) => ipcRenderer.invoke('NOVA:agent-start-folder-preview', payload),
+  mcpListTools: (payload) => ipcRenderer.invoke('NOVA:mcp-list-tools', payload || {}),
+  mcpCallTool: (payload) => ipcRenderer.invoke('NOVA:mcp-call-tool', payload || {}),
+  mcpStop: (payload) => ipcRenderer.invoke('NOVA:mcp-stop', payload || {}),
+  workspaceDeletePath: (payload) => ipcRenderer.invoke('NOVA:workspace-delete-path', payload),
+  workspaceDeleteRoot: (payload) => ipcRenderer.invoke('NOVA:workspace-delete-root', payload),
+  workspaceDeleteFolder: (payload) => ipcRenderer.invoke('NOVA:workspace-delete-folder', payload),
+  workspaceWriteFile: (payload) => ipcRenderer.invoke('NOVA:workspace-write-file', payload),
+  workspaceRenamePath: (payload) => ipcRenderer.invoke('NOVA:workspace-rename-path', payload),
+  gitCloneOpen: (payload) => ipcRenderer.invoke('NOVA:git-clone-open', payload),
   onProjectImportProgress: (handler) => {
     const fn = (_e, payload) => {
       try {
@@ -150,39 +150,39 @@ contextBridge.exposeInMainWorld('arkDesktop', {
         /* ignore */
       }
     };
-    ipcRenderer.on('ark:project-import-progress', fn);
-    return () => ipcRenderer.removeListener('ark:project-import-progress', fn);
+    ipcRenderer.on('NOVA:project-import-progress', fn);
+    return () => ipcRenderer.removeListener('NOVA:project-import-progress', fn);
   },
-  pickFiles: (payload) => ipcRenderer.invoke('ark:pick-files', payload || {}),
-  pickBrowseFolder: () => ipcRenderer.invoke('ark:pick-browse-folder'),
-  listDir: (dirPath) => ipcRenderer.invoke('ark:list-dir', dirPath),
-  browseRoots: () => ipcRenderer.invoke('ark:browse-roots'),
-  pcInstalledApps: (payload) => ipcRenderer.invoke('ark:pc-installed-apps', payload || {}),
-  pathStat: (targetPath) => ipcRenderer.invoke('ark:path-stat', targetPath),
-  readTextFile: (payload) => ipcRenderer.invoke('ark:read-text-file', payload),
-  isProtectedPath: (targetPath) => ipcRenderer.invoke('ark:is-protected-path', targetPath),
-  readDataUrl: (payload) => ipcRenderer.invoke('ark:read-data-url', payload),
-  projectSearch: (payload) => ipcRenderer.invoke('ark:project-search', payload),
-  projectDeleteFiles: (projectId) => ipcRenderer.invoke('ark:project-delete-files', projectId),
-  gitStatus: (projectId) => ipcRenderer.invoke('ark:git-status', projectId),
-  gitClone: (payload) => ipcRenderer.invoke('ark:git-clone', payload),
-  gitCommit: (payload) => ipcRenderer.invoke('ark:git-commit', payload),
-  gitPush: (payload) => ipcRenderer.invoke('ark:git-push', payload),
-  gitPull: (payload) => ipcRenderer.invoke('ark:git-pull', payload),
-  gitDiff: (projectId) => ipcRenderer.invoke('ark:git-diff', projectId),
-  gitSetOrigin: (payload) => ipcRenderer.invoke('ark:git-set-origin', payload),
-  secretsStatus: () => ipcRenderer.invoke('ark:secrets-status'),
-  secretsLoad: () => ipcRenderer.invoke('ark:secrets-load'),
-  secretsGetKey: (providerId) => ipcRenderer.invoke('ark:secrets-get-key', providerId),
-  secretsSave: (keys) => ipcRenderer.invoke('ark:secrets-save', { keys }),
-  voiceNeuralVoices: () => ipcRenderer.invoke('ark:voice-neural-voices'),
-  voiceNeuralSpeak: (payload) => ipcRenderer.invoke('ark:voice-neural-speak', payload || {}),
+  pickFiles: (payload) => ipcRenderer.invoke('NOVA:pick-files', payload || {}),
+  pickBrowseFolder: () => ipcRenderer.invoke('NOVA:pick-browse-folder'),
+  listDir: (dirPath) => ipcRenderer.invoke('NOVA:list-dir', dirPath),
+  browseRoots: () => ipcRenderer.invoke('NOVA:browse-roots'),
+  pcInstalledApps: (payload) => ipcRenderer.invoke('NOVA:pc-installed-apps', payload || {}),
+  pathStat: (targetPath) => ipcRenderer.invoke('NOVA:path-stat', targetPath),
+  readTextFile: (payload) => ipcRenderer.invoke('NOVA:read-text-file', payload),
+  isProtectedPath: (targetPath) => ipcRenderer.invoke('NOVA:is-protected-path', targetPath),
+  readDataUrl: (payload) => ipcRenderer.invoke('NOVA:read-data-url', payload),
+  projectSearch: (payload) => ipcRenderer.invoke('NOVA:project-search', payload),
+  projectDeleteFiles: (projectId) => ipcRenderer.invoke('NOVA:project-delete-files', projectId),
+  gitStatus: (projectId) => ipcRenderer.invoke('NOVA:git-status', projectId),
+  gitClone: (payload) => ipcRenderer.invoke('NOVA:git-clone', payload),
+  gitCommit: (payload) => ipcRenderer.invoke('NOVA:git-commit', payload),
+  gitPush: (payload) => ipcRenderer.invoke('NOVA:git-push', payload),
+  gitPull: (payload) => ipcRenderer.invoke('NOVA:git-pull', payload),
+  gitDiff: (projectId) => ipcRenderer.invoke('NOVA:git-diff', projectId),
+  gitSetOrigin: (payload) => ipcRenderer.invoke('NOVA:git-set-origin', payload),
+  secretsStatus: () => ipcRenderer.invoke('NOVA:secrets-status'),
+  secretsLoad: () => ipcRenderer.invoke('NOVA:secrets-load'),
+  secretsGetKey: (providerId) => ipcRenderer.invoke('NOVA:secrets-get-key', providerId),
+  secretsSave: (keys) => ipcRenderer.invoke('NOVA:secrets-save', { keys }),
+  voiceNeuralVoices: () => ipcRenderer.invoke('NOVA:voice-neural-voices'),
+  voiceNeuralSpeak: (payload) => ipcRenderer.invoke('NOVA:voice-neural-speak', payload || {}),
 });
 
 // Forward IPC push messages from main as DOM CustomEvents so the React app can listen.
-ipcRenderer.on('ark:open-settings', (_event, payload) => {
-  window.dispatchEvent(new CustomEvent('ark:open-settings', { detail: payload || {} }));
+ipcRenderer.on('NOVA:open-settings', (_event, payload) => {
+  window.dispatchEvent(new CustomEvent('NOVA:open-settings', { detail: payload || {} }));
 });
-ipcRenderer.on('ark:project-import-progress', (_event, payload) => {
-  window.dispatchEvent(new CustomEvent('ark:project-import-progress', { detail: payload || {} }));
+ipcRenderer.on('NOVA:project-import-progress', (_event, payload) => {
+  window.dispatchEvent(new CustomEvent('NOVA:project-import-progress', { detail: payload || {} }));
 });

@@ -187,7 +187,7 @@ import {
   runCreateProjectFlow,
   bootstrapProjectWorkspace,
 } from '@/lib/createProjectFlow';
-import { projectUsesNpm } from '@/lib/projectScaffolds';
+import { projectUsesNpm, mergeBriefNpmDependencies } from '@/lib/projectScaffolds';
 import { looksLikeImplementGo, shouldBlockChatFileWrites, planningConversationHint } from '@/lib/chatPlanMode';
 import { looksLikeInPlaceRebuildAsk, looksLikeProjectBuildAsk } from '@/lib/chatBuildIntent';
 import { isProjectCreateBrief } from '@/lib/chatCreateBrief';
@@ -237,6 +237,9 @@ import { prepareBrainRotation } from '@/lib/modelRotation';
 import {
   buildRouterHistory,
   looksLikePromptEcho,
+  looksLikeThreadSummaryAsk,
+  threadSummarySystemHint,
+  buildThreadSummaryFromMessages,
   sanitizeAssistantReply,
   usableAssistantText,
   historyWasCompacted,
@@ -274,7 +277,7 @@ import {
 } from 'lucide-react';
 import { engineGenerateCancel, getEngineStatus, setEngineModel } from '@/lib/arkEngine';
 import { ensureViteDevServer, isViteProject, openInAppPreview, ensureInAppPreview, refreshLivePreview, ensureBoundFolderPreview, loadPreviewFilesFromDisk } from '@/lib/projectPreview';
-import { cleanProductTitle } from '@/lib/freshSpaFromBrief';
+import { cleanProductTitle, looksLikeSpatialApp } from '@/lib/freshSpaFromBrief';
 import { classifyMobileTarget } from '@/lib/mobileTarget';
 import { classifyNamedDevice, defaultDeviceForTarget } from '@/lib/mobileDevices';
 
@@ -336,7 +339,7 @@ function ChatModeTabs() {
     if (route.name === 'chat' && route.mode === next) return;
     // If a generate is still running for this mode, return to that chat instead of a blank canvas.
     try {
-      const raw = sessionStorage.getItem('ark:inflight-media');
+      const raw = sessionStorage.getItem('NOVA:inflight-media');
       const inflight = raw ? JSON.parse(raw) as { chatId?: string; mode?: string } : null;
       if (inflight?.mode === next && inflight.chatId) {
         navigate({ name: 'chat', mode: next, chatId: inflight.chatId });
@@ -394,17 +397,17 @@ type ChatModelOption = {
 
 const CHAT_MODELS: ChatModelOption[] = [
   // Chat. only Auto by default; keyed clouds + Ollama added at runtime
-  { id: 'ark-auto', name: 'ARK', source: 'auto', detail: 'Best brain · stays on for this chat', kind: 'chat' },
+  { id: 'NOVA-auto', name: 'NOVA', source: 'auto', detail: 'Best brain · stays on for this chat', kind: 'chat' },
   // Image. paths that generate today
-  { id: 'ark-auto', name: 'ARK', source: 'auto', detail: 'Best path · stays on for this chat', kind: 'image' },
-  { id: 'ark-image-core', name: 'ARK Image Core', source: 'local', detail: 'Free · Pollinations · local SD when installed', kind: 'image' },
+  { id: 'NOVA-auto', name: 'NOVA', source: 'auto', detail: 'Best path · stays on for this chat', kind: 'image' },
+  { id: 'NOVA-image-core', name: 'NOVA Image Core', source: 'local', detail: 'Free · Pollinations · local SD when installed', kind: 'image' },
   { id: 'sd15-local', name: 'SD 1.5 Local', source: 'local', detail: 'On-device · install from Local AI', kind: 'image' },
   { id: 'sdxl-turbo-local', name: 'SDXL Turbo Local', source: 'local', detail: 'Fast on-device · install from Local AI', kind: 'image' },
   { id: 'flux-schnell-local', name: 'FLUX Schnell Local', source: 'local', detail: 'On-device FLUX · ~13 GB · Local AI', kind: 'image' },
   { id: 'dall-e-3', name: 'DALL·E 3', source: 'cloud', detail: 'Cloud image · OpenAI key', kind: 'image' },
-  // Video. ARK Engine only (Pollinations / HF / motion-still). Not Kling or Sora.
-  { id: 'ark-auto', name: 'ARK', source: 'auto', detail: 'Best path · stays on for this chat', kind: 'video' },
-  { id: 'ark-video-core', name: 'ARK Video Core', source: 'local', detail: 'Free MP4 when the host answers · motion still otherwise', kind: 'video' },
+  // Video. NOVA Engine only (Pollinations / HF / motion-still). Not Kling or Sora.
+  { id: 'NOVA-auto', name: 'NOVA', source: 'auto', detail: 'Best path · stays on for this chat', kind: 'video' },
+  { id: 'NOVA-video-core', name: 'NOVA Video Core', source: 'local', detail: 'Free MP4 when the host answers · motion still otherwise', kind: 'video' },
 ];
 
 /** Cloud chat options. only shown in the picker when that provider key exists. */
@@ -434,11 +437,11 @@ function defaultModelForKind(kind: ModelKind): ChatModelOption {
   const prefs = getLocalPrefs();
   // Prefer an explicit default; otherwise keep the last chat pick so cloud models stick.
   const prefId =
-    prefs.defaultModelId && prefs.defaultModelId !== 'ark-auto'
+    prefs.defaultModelId && prefs.defaultModelId !== 'NOVA-auto'
       ? prefs.defaultModelId
       : (prefs.lastChatModelId || prefs.defaultModelId);
 
-  if (kind === 'chat' && prefId && prefId !== 'ark-auto') {
+  if (kind === 'chat' && prefId && prefId !== 'NOVA-auto') {
     const cloud = CLOUD_CHAT_WHEN_KEYED.find(m => m.id === prefId);
     if (cloud && hasProviderApiKey(cloud.keyId) && isCloudProviderEnabled(cloud.keyId)) return cloud;
     const resolved = resolvePreferredCloudProvider(prefId, prefId);
@@ -459,7 +462,7 @@ function defaultModelForKind(kind: ModelKind): ChatModelOption {
       // A provider can be disconnected or its key can be removed between
       // sessions. Do not restore a pinned cloud model that is not usable:
       // it disappears from the picker and leaves Chat showing a dead model.
-      return CHAT_MODELS.find(m => m.id === 'ark-auto' && m.kind === 'chat') ?? {
+      return CHAT_MODELS.find(m => m.id === 'NOVA-auto' && m.kind === 'chat') ?? {
         id: prefId,
         name: prefId,
         source: 'cloud',
@@ -469,14 +472,14 @@ function defaultModelForKind(kind: ModelKind): ChatModelOption {
     }
     return { id: prefId, name: prefId, source: 'local', detail: 'Local · Settings default', kind: 'chat' };
   }
-  if (prefId && prefId !== 'ark-auto') {
+  if (prefId && prefId !== 'NOVA-auto') {
     const hit = CHAT_MODELS.find(m => m.id === prefId && m.kind === kind);
     if (hit) return hit;
   }
-  const auto = CHAT_MODELS.find(m => m.id === 'ark-auto' && m.kind === kind);
+  const auto = CHAT_MODELS.find(m => m.id === 'NOVA-auto' && m.kind === kind);
   if (auto) return auto;
   if (kind === 'chat') {
-    return CHAT_MODELS.find(m => m.id === 'ark-auto') ?? CHAT_MODELS[0];
+    return CHAT_MODELS.find(m => m.id === 'NOVA-auto') ?? CHAT_MODELS[0];
   }
   const local = CHAT_MODELS.find(m => m.kind === kind && m.source === 'local');
   return local ?? CHAT_MODELS.find(m => m.kind === kind) ?? CHAT_MODELS[0];
@@ -492,7 +495,7 @@ function failoverChipText(routed: ArkRouterResult, pinned: ChatModelOption): str
     return `Local failed → trying ${name}`;
   }
 
-  if (pinned.id === 'ark-auto' || pinned.source === 'auto') {
+  if (pinned.id === 'NOVA-auto' || pinned.source === 'auto') {
     return null;
   }
 
@@ -502,34 +505,34 @@ function failoverChipText(routed: ArkRouterResult, pinned: ChatModelOption): str
   const same =
     resolved.includes(pinnedName)
     || pinnedName.includes(resolved)
-    || (pinnedId && resolved.includes(pinnedId.replace(/^(ollama|ark)-?/, '')));
+    || (pinnedId && resolved.includes(pinnedId.replace(/^(ollama|NOVA)-?/, '')));
   if (!same) return `Switched to ${name}`;
   return null;
 }
 
 const PLACEHOLDERS: Record<ChatMode, string[]> = {
   general: [
-    'Ask ARK to build something...',
-    'Ask ARK anything...',
+    'Ask NOVA to build something...',
+    'Ask NOVA anything...',
     'Ask a question...',
   ],
   image: [
-    'Describe the image. ARK may ask a quick brief first…',
+    'Describe the image. NOVA may ask a quick brief first…',
     'Upload a photo (+) to recreate or improve it…',
     'Describe style, subject, and mood for best accuracy…',
   ],
   video: [
     'Describe the video you want to create...',
-    'Ask ARK to generate a short clip...',
+    'Ask NOVA to generate a short clip...',
   ],
   voice: [
-    'Tap send, then speak — ARK will listen and reply aloud.',
+    'Tap send, then speak — NOVA will listen and reply aloud.',
     'Ask a question or request a short story…',
   ],
   code: [
     'Describe the code you want to write...',
-    'Ask ARK to fix a bug...',
-    'Ask ARK to explain this function...',
+    'Ask NOVA to fix a bug...',
+    'Ask NOVA to explain this function...',
   ],
 };
 
@@ -685,7 +688,7 @@ async function resolveStudioFiles(opts: {
 
   if (pid) {
     try {
-      const raw = localStorage.getItem(`ark:chat-studio-files:${pid}`);
+      const raw = localStorage.getItem(`NOVA:chat-studio-files:${pid}`);
       if (raw) {
         const parsed = JSON.parse(raw) as { files?: Record<string, string>; name?: string };
         if (parsed?.files && Object.keys(parsed.files).length) {
@@ -739,10 +742,10 @@ function persistModeThread(
       localStorage.setItem(chatThreadKey(opts.chatId), JSON.stringify(slim));
     }
     if (mode !== 'general') {
-      localStorage.setItem(`ark:chat-thread:${mode}`, JSON.stringify(slim));
+      localStorage.setItem(`NOVA:chat-thread:${mode}`, JSON.stringify(slim));
     }
     if (opts?.creationId) {
-      localStorage.setItem(`ark:chat-thread:creation:${opts.creationId}`, JSON.stringify(slim));
+      localStorage.setItem(`NOVA:chat-thread:creation:${opts.creationId}`, JSON.stringify(slim));
     }
   } catch {
     /* ignore */
@@ -754,7 +757,7 @@ function deletePrepareErrorReply(err: unknown): string {
   const msg = err instanceof Error ? err.message : String(err || '');
   console.error('[delete] failed:', err);
   if (/before initialization/i.test(msg)) {
-    return 'Delete failed due to an internal app bug (module load). Please restart ARK after update. not a permissions issue.';
+    return 'Delete failed due to an internal app bug (module load). Please restart NOVA after update. not a permissions issue.';
   }
   return msg || 'Could not prepare delete. Try again.';
 }
@@ -769,7 +772,7 @@ export function AIChat() {
   // the user just created in this session (that race left them stuck on New Chat).
   const forceNewChatOnLaunch = useMemo(() => {
     try {
-      const key = 'ark:session-first-chat-launch';
+      const key = 'NOVA:session-first-chat-launch';
       const had = sessionStorage.getItem(key);
       if (had) return false;
       sessionStorage.setItem(key, '1');
@@ -845,6 +848,11 @@ export function AIChat() {
   const dictationBaseRef = useRef('');
   const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
   const [queueLen, setQueueLen] = useState(0);
+  /** Bumps when queue items are edited so the banner re-renders. */
+  const [queueTick, setQueueTick] = useState(0);
+  const [editingQueueId, setEditingQueueId] = useState<string | null>(null);
+  const [editingQueueText, setEditingQueueText] = useState('');
+  const editingQueueIdRef = useRef<string | null>(null);
   const [pendingImages, setPendingImages] = useState<{ id: string; name: string; dataUrl: string }[]>([]);
   const [chatStudioFiles, setChatStudioFiles] = useState<Record<string, string>>({});
   const [chatStudioProjectId, setChatStudioProjectId] = useState<string | null>(null);
@@ -926,7 +934,7 @@ export function AIChat() {
   });
   /** Which chat id currently owns the in-flight generation (queue only for that chat). */
   const activeGenChatIdRef = useRef<string | null>(null);
-  const pendingQueueRef = useRef<string[]>([]);
+  const pendingQueueRef = useRef<{ id: string; text: string; chatId: string }[]>([]);
   const persistChatIdRef = useRef<string | null>(null);
   /** Which chat owns the in-memory studio refs — never open Localhost from another thread's root. */
   const studioBoundChatIdRef = useRef<string | null>(null);
@@ -963,6 +971,8 @@ export function AIChat() {
   const stickToBottomRef = useRef(true);
   /** Once the user scrolls up during a turn, stay detached until they jump/send. */
   const userDetachScrollRef = useRef(false);
+  /** Ignore scroll events briefly after chat switch / thread load (layout can falsely detach). */
+  const ignoreScrollUntilRef = useRef(0);
   const [showJumpToBottom, setShowJumpToBottom] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const modelMenuRef = useRef<HTMLDivElement>(null);
@@ -970,6 +980,8 @@ export function AIChat() {
   const hydratedCreationRef = useRef<string | null>(null);
   /** Skip storage reload after we create a chat so Explore ideas doesn't flash back. */
   const skipChatLoadIdsRef = useRef<Set<string>>(new Set());
+  /** Which chatId the in-memory messagesRef currently belongs to (prevents skip-load leaking another thread). */
+  const messagesChatIdRef = useRef<string | null>(null);
   const messagesRef = useRef(messages);
   const imageBriefRef = useRef<{ chatId: string; original: string } | null>(null);
   const imageOfferPromptRef = useRef('');
@@ -1099,7 +1111,7 @@ export function AIChat() {
       project_id: null,
       role: 'assistant',
       content: replyText,
-      provider_used: 'ARK',
+      provider_used: 'NOVA',
       created_at: new Date().toISOString(),
       elapsed_ms: Date.now() - replyStartedAt,
     };
@@ -1444,10 +1456,10 @@ export function AIChat() {
       let nextDraft = composerDraftByModeRef.current[next] ?? '';
       if (next === 'image' || next === 'video') {
         try {
-          const handoff = localStorage.getItem(`ark:chat-draft:${next}`);
+          const handoff = localStorage.getItem(`NOVA:chat-draft:${next}`);
           if (handoff != null) {
             nextDraft = handoff;
-            localStorage.removeItem(`ark:chat-draft:${next}`);
+            localStorage.removeItem(`NOVA:chat-draft:${next}`);
           }
         } catch {
           /* ignore */
@@ -1487,10 +1499,10 @@ export function AIChat() {
     if (route.name !== 'chat' || mode !== 'image') return;
     let prompt: string | null = null;
     try {
-      if (sessionStorage.getItem('ark:image-handoff-send') === '1') {
-        prompt = sessionStorage.getItem('ark:image-handoff-prompt');
-        sessionStorage.removeItem('ark:image-handoff-send');
-        sessionStorage.removeItem('ark:image-handoff-prompt');
+      if (sessionStorage.getItem('NOVA:image-handoff-send') === '1') {
+        prompt = sessionStorage.getItem('NOVA:image-handoff-prompt');
+        sessionStorage.removeItem('NOVA:image-handoff-send');
+        sessionStorage.removeItem('NOVA:image-handoff-prompt');
       }
     } catch {
       /* ignore */
@@ -1552,7 +1564,7 @@ export function AIChat() {
         },
       ];
       try {
-        const raw = localStorage.getItem(`ark:chat-thread:creation:${creationId}`);
+        const raw = localStorage.getItem(`NOVA:chat-thread:creation:${creationId}`);
         if (raw) {
           const existing = JSON.parse(raw) as ChatMessage[];
           if (Array.isArray(existing) && existing.length > 0) {
@@ -1570,7 +1582,7 @@ export function AIChat() {
       }
       setMessages(seeded);
       try {
-        localStorage.setItem(`ark:chat-thread:creation:${creationId}`, JSON.stringify(seeded));
+        localStorage.setItem(`NOVA:chat-thread:creation:${creationId}`, JSON.stringify(seeded));
       } catch {
         /* ignore */
       }
@@ -1607,58 +1619,71 @@ export function AIChat() {
         return;
       }
       // We just created this chat and already have messages in state. don't wipe them.
-      if (skipChatLoadIdsRef.current.has(route.chatId)) {
-        if (messagesRef.current.length > 0) {
-          skipChatLoadIdsRef.current.delete(route.chatId);
-          setLoading(false);
-          setGenerating(Boolean(generatingRef.current && activeGenChatIdRef.current === route.chatId));
-          // Still rebind studio — skipping this left Localhost on the previous chat's app.
-          const liveGenSkip = Boolean(
-            generatingRef.current && activeGenChatIdRef.current === route.chatId,
-          );
-          if (!liveGenSkip) {
-            const hadPreview = Boolean(previewUrlRef.current);
-            const switchChatId = route.chatId;
-            void (async () => {
-              if (hadPreview) {
-                void window.arkDesktop?.previewCloseLive?.().catch(() => undefined);
-              }
-              await rebindStudioForChat(switchChatId);
-              const root = chatStudioDiskRootRef.current;
-              let filesForPreview = { ...chatStudioFilesRef.current };
-              if (root && window.arkDesktop?.readTextFile) {
-                try {
-                  const hydrated = await loadPreviewFilesFromDisk(root);
-                  if (Object.keys(hydrated).length) {
-                    filesForPreview = hydrated;
-                    setChatStudioFiles(hydrated);
-                    chatStudioFilesRef.current = hydrated;
-                  }
-                } catch {
-                  /* ignore */
-                }
-              }
-              if (Object.keys(filesForPreview).length) {
-                try {
-                  await pushLivePreview(filesForPreview, true);
-                } catch {
-                  /* ignore */
-                }
-              }
-            })();
-          }
-          return;
-        }
+      // Only skip when the in-memory thread actually belongs to this chatId — otherwise a
+      // Recent switch can keep the previous chat's bubbles and later overwrite storage.
+      if (
+        skipChatLoadIdsRef.current.has(route.chatId)
+        && messagesChatIdRef.current === route.chatId
+        && messagesRef.current.length > 0
+      ) {
         skipChatLoadIdsRef.current.delete(route.chatId);
-        // Fall through and load from disk if state was emptied by a re-render race.
+        setLoading(false);
+        setGenerating(Boolean(generatingRef.current && activeGenChatIdRef.current === route.chatId));
+        // Still rebind studio — skipping this left Localhost on the previous chat's app.
+        const liveGenSkip = Boolean(
+          generatingRef.current && activeGenChatIdRef.current === route.chatId,
+        );
+        if (!liveGenSkip) {
+          const hadPreview = Boolean(previewUrlRef.current);
+          const switchChatId = route.chatId;
+          void (async () => {
+            if (hadPreview) {
+              void window.arkDesktop?.previewCloseLive?.().catch(() => undefined);
+            }
+            await rebindStudioForChat(switchChatId);
+            const root = chatStudioDiskRootRef.current;
+            if (root && window.arkDesktop?.readTextFile) {
+              try {
+                const hydrated = await loadPreviewFilesFromDisk(root);
+                if (Object.keys(hydrated).length) {
+                  const merged = { ...chatStudioFilesRef.current, ...hydrated };
+                  setChatStudioFiles(merged);
+                  chatStudioFilesRef.current = merged;
+                }
+              } catch {
+                /* ignore */
+              }
+            }
+            // Never auto-open Localhost on Recent switch — user opens Preview when ready.
+          })();
+        }
+        return;
+      }
+      // Stale skip flag from another view — drop it and load this thread from storage.
+      if (skipChatLoadIdsRef.current.has(route.chatId)) {
+        skipChatLoadIdsRef.current.delete(route.chatId);
       }
 
       // Switch loading: clear previous thread immediately so the old chat never paints over this one.
       const switchChatId = route.chatId;
+      if (persistTimerRef.current) {
+        window.clearTimeout(persistTimerRef.current);
+        persistTimerRef.current = undefined;
+      }
+      // Queue is per-view: never show another chat's backlog here.
+      pendingQueueRef.current = pendingQueueRef.current.filter(q => q.chatId === switchChatId);
+      setQueueLen(pendingQueueRef.current.length);
+      setQueueTick(t => t + 1);
+      setEditingQueueId(null);
+      setEditingQueueText('');
       const hadPreview = Boolean(previewUrlRef.current);
       setLoading(true);
       messagesRef.current = [];
       setMessages([]);
+      stickToBottomRef.current = true;
+      userDetachScrollRef.current = false;
+      setShowJumpToBottom(false);
+      ignoreScrollUntilRef.current = Date.now() + 600;
       studioBoundChatIdRef.current = null;
       setChatStudioFiles({});
       chatStudioFilesRef.current = {};
@@ -1678,13 +1703,17 @@ export function AIChat() {
           const nextMsgs = Array.isArray(loaded) ? loaded : [];
           if (routeChatIdRef.current && routeChatIdRef.current !== switchChatId) return;
           messagesRef.current = nextMsgs;
+          messagesChatIdRef.current = switchChatId;
           setMessages(nextMsgs);
           setThreadBrain(loadThreadBrain(switchChatId, kind));
+          pinMessagesToBottom('auto');
         } catch {
           if (routeChatIdRef.current && routeChatIdRef.current !== switchChatId) return;
           messagesRef.current = [];
+          messagesChatIdRef.current = switchChatId;
           setMessages([]);
           setThreadBrain(null);
+          pinMessagesToBottom('auto');
         }
 
         const liveGenHere = Boolean(
@@ -1695,45 +1724,36 @@ export function AIChat() {
             void window.arkDesktop?.previewCloseLive?.().catch(() => undefined);
           }
           await rebindStudioForChat(switchChatId);
-          // Warm Localhost/Code binding from disk so Preview isn't a blank shell.
+          // Warm file binding from disk so Preview/Code are ready — do not open Localhost.
           const root = chatStudioDiskRootRef.current;
-          let filesForPreview = { ...chatStudioFilesRef.current };
           if (root && window.arkDesktop?.readTextFile) {
             try {
               const hydrated = await loadPreviewFilesFromDisk(root);
               if (Object.keys(hydrated).length && (!routeChatIdRef.current || routeChatIdRef.current === switchChatId)) {
-                filesForPreview = hydrated;
-                setChatStudioFiles(hydrated);
-                chatStudioFilesRef.current = hydrated;
+                // Merge with rebind snapshot — never wipe src/* with a thin hydrate.
+                const merged = { ...chatStudioFilesRef.current, ...hydrated };
+                setChatStudioFiles(merged);
+                chatStudioFilesRef.current = merged;
                 persistStudioSnapshot(switchChatId, {
-                  files: hydrated,
+                  files: merged,
                   projectId: chatStudioProjectIdRef.current,
                   name: studioPathBasename(root) || undefined,
                   diskRoot: root,
-                  previewUrl: previewUrlRef.current,
+                  previewUrl: null,
                 });
               }
             } catch {
               /* ignore */
             }
           }
-          // Always re-push this chat's files into Localhost — never leave a blank or prior-chat shell.
-          if (
-            Object.keys(filesForPreview).length
-            && (!routeChatIdRef.current || routeChatIdRef.current === switchChatId)
-          ) {
-            try {
-              await pushLivePreview(filesForPreview, true);
-            } catch {
-              /* ignore */
-            }
-          }
+          setPreviewUrl(null);
+          previewUrlRef.current = null;
         }
         if (routeChatIdRef.current && routeChatIdRef.current !== switchChatId) return;
         setCodePillSticky(hasChatCodePill(switchChatId));
         // Clear stale generating placeholders from a crashed prior turn.
         try {
-          const rawInflight = sessionStorage.getItem('ark:inflight-media');
+          const rawInflight = sessionStorage.getItem('NOVA:inflight-media');
           const inflight = rawInflight
             ? JSON.parse(rawInflight) as { chatId?: string; mode?: string; startedAt?: number }
             : null;
@@ -1747,7 +1767,7 @@ export function AIChat() {
             );
             if (stuckChat || stale || (inflight?.chatId && inflight.chatId !== switchChatId)) {
               if (stale || (inflight?.chatId && inflight.chatId !== switchChatId)) {
-                sessionStorage.removeItem('ark:inflight-media');
+                sessionStorage.removeItem('NOVA:inflight-media');
               }
               setMessages(prev => {
                 const next = prev.map(m => (
@@ -1785,7 +1805,7 @@ export function AIChat() {
     // Background generation for another chatId can keep running via keepChatAlive; this route
     // must still show a blank starter.
     try {
-      const raw = sessionStorage.getItem('ark:inflight-media');
+      const raw = sessionStorage.getItem('NOVA:inflight-media');
       const inflight = raw ? JSON.parse(raw) as { chatId?: string; mode?: string } : null;
       if (
         inflight?.chatId
@@ -1806,7 +1826,12 @@ export function AIChat() {
     }
     setMessages([]);
     messagesRef.current = [];
+    messagesChatIdRef.current = null;
     setThreadBrain(null);
+    if (persistTimerRef.current) {
+      window.clearTimeout(persistTimerRef.current);
+      persistTimerRef.current = undefined;
+    }
     studioBoundChatIdRef.current = null;
     setChatStudioFiles({});
     chatStudioFilesRef.current = {};
@@ -1828,15 +1853,25 @@ export function AIChat() {
       if (staleId) clearLastPendingGreenfield(staleId);
     } catch { /* ignore */ }
     persistChatIdRef.current = null;
-    // Blank starter must not keep another chat's Stop / queue UI.
-    // Bump genSeq so late idle/finalize from the previous thread cannot flip Stop back on.
-    genSeqRef.current += 1;
-    stopRequestedRef.current = true;
+    // Blank starter must not show another chat's Stop / queue UI.
+    // Do NOT bump genSeq or stopRequested — a prior thread may still be finishing in the
+    // background and must keep writing to its own chatId (see finalizeAssistant).
     pendingQueueRef.current = [];
     setQueueLen(0);
-    activeGenChatIdRef.current = null;
-    generatingRef.current = false;
-    setGenerating(false);
+    setQueueTick(t => t + 1);
+    setEditingQueueId(null);
+    setEditingQueueText('');
+    if (activeGenChatIdRef.current && routeChatIdRef.current
+      && activeGenChatIdRef.current === routeChatIdRef.current) {
+      // Only clear generating chrome when the abandoned view was that same in-flight chat.
+      activeGenChatIdRef.current = null;
+      generatingRef.current = false;
+      setGenerating(false);
+    } else if (!routeChatIdRef.current) {
+      // Blank New Chat: hide Stop even if another chat is still answering.
+      generatingRef.current = false;
+      setGenerating(false);
+    }
     setLoading(false);
   }, [route, mode, navigate]);
 
@@ -1855,15 +1890,15 @@ export function AIChat() {
     };
     refresh();
     window.addEventListener('focus', refresh);
-    window.addEventListener('ark:ollama-changed', refresh);
-    window.addEventListener('ark:provider-keys-changed', refresh);
-    window.addEventListener('ark:cloud-sources-changed', refresh);
+    window.addEventListener('NOVA:ollama-changed', refresh);
+    window.addEventListener('NOVA:provider-keys-changed', refresh);
+    window.addEventListener('NOVA:cloud-sources-changed', refresh);
     return () => {
       cancelled = true;
       window.removeEventListener('focus', refresh);
-      window.removeEventListener('ark:ollama-changed', refresh);
-      window.removeEventListener('ark:provider-keys-changed', refresh);
-      window.removeEventListener('ark:cloud-sources-changed', refresh);
+      window.removeEventListener('NOVA:ollama-changed', refresh);
+      window.removeEventListener('NOVA:provider-keys-changed', refresh);
+      window.removeEventListener('NOVA:cloud-sources-changed', refresh);
     };
   }, []);
 
@@ -1891,10 +1926,10 @@ export function AIChat() {
       });
     };
     loadOllama();
-    window.addEventListener('ark:ollama-changed', loadOllama);
+    window.addEventListener('NOVA:ollama-changed', loadOllama);
     window.addEventListener('focus', loadOllama);
     return () => {
-      window.removeEventListener('ark:ollama-changed', loadOllama);
+      window.removeEventListener('NOVA:ollama-changed', loadOllama);
       window.removeEventListener('focus', loadOllama);
     };
   }, []);
@@ -1906,9 +1941,9 @@ export function AIChat() {
           const ready = status.models
             .filter(m =>
               m.status === 'ready'
-              && m.id !== 'ark-core'
-              && m.id !== 'ark-image-core'
-              && m.id !== 'ark-video-core',
+              && m.id !== 'NOVA-core'
+              && m.id !== 'NOVA-image-core'
+              && m.id !== 'NOVA-video-core',
             )
             .map(m => ({
               id: m.id,
@@ -1938,7 +1973,7 @@ export function AIChat() {
             const installed = ready.find(m => m.id === prev.id);
             if (installed) return installed;
             if (!readyIds.has(prev.id)) {
-              return CHAT_MODELS.find(m => m.id === 'ark-auto' && m.kind === 'chat') || prev;
+              return CHAT_MODELS.find(m => m.id === 'NOVA-auto' && m.kind === 'chat') || prev;
             }
             return prev;
           });
@@ -1963,12 +1998,29 @@ export function AIChat() {
     const onFocus = () => refreshChatPlugins();
     const onPlugins = () => refreshChatPlugins();
     window.addEventListener('focus', onFocus);
-    window.addEventListener('ark:plugins-changed', onPlugins);
+    window.addEventListener('NOVA:plugins-changed', onPlugins);
     return () => {
       window.removeEventListener('focus', onFocus);
-      window.removeEventListener('ark:plugins-changed', onPlugins);
+      window.removeEventListener('NOVA:plugins-changed', onPlugins);
     };
   }, [route]);
+
+  const pinMessagesToBottom = (behavior: ScrollBehavior = 'auto') => {
+    stickToBottomRef.current = true;
+    userDetachScrollRef.current = false;
+    setShowJumpToBottom(false);
+    ignoreScrollUntilRef.current = Date.now() + 400;
+    const el = messagesScrollRef.current;
+    const run = () => {
+      if (el) el.scrollTop = el.scrollHeight;
+      else messagesEndRef.current?.scrollIntoView({ behavior });
+    };
+    run();
+    requestAnimationFrame(() => {
+      run();
+      requestAnimationFrame(run);
+    });
+  };
 
   useEffect(() => {
     // Only pin to bottom when the user is already near the end. never yank scroll while reading history.
@@ -1984,6 +2036,7 @@ export function AIChat() {
   const onMessagesScroll = () => {
     const el = messagesScrollRef.current;
     if (!el) return;
+    if (Date.now() < ignoreScrollUntilRef.current) return;
     const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
     if (userDetachScrollRef.current) {
       // Re-attach only when the user clearly returns to the bottom.
@@ -2004,6 +2057,7 @@ export function AIChat() {
   };
 
   const onMessagesWheel = (e: ReactWheelEvent<HTMLDivElement>) => {
+    if (Date.now() < ignoreScrollUntilRef.current) return;
     if (e.deltaY < 0) {
       userDetachScrollRef.current = true;
       stickToBottomRef.current = false;
@@ -2012,15 +2066,7 @@ export function AIChat() {
   };
 
   const jumpToBottom = () => {
-    const el = messagesScrollRef.current;
-    userDetachScrollRef.current = false;
-    stickToBottomRef.current = true;
-    setShowJumpToBottom(false);
-    if (el) {
-      el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
-      return;
-    }
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    pinMessagesToBottom('smooth');
   };
   useLayoutEffect(() => {
     if (!modelMenuOpen) {
@@ -2076,11 +2122,14 @@ export function AIChat() {
     stopRequestedRef.current = true;
     pendingQueueRef.current = [];
     setQueueLen(0);
+    setQueueTick(t => t + 1);
+    setEditingQueueId(null);
+    setEditingQueueText('');
     void engineGenerateCancel();
     generatingRef.current = false;
     activeGenChatIdRef.current = null;
     try {
-      sessionStorage.removeItem('ark:inflight-media');
+      sessionStorage.removeItem('NOVA:inflight-media');
     } catch {
       /* ignore */
     }
@@ -2101,11 +2150,27 @@ export function AIChat() {
 
   const flushQueuedSend = () => {
     if (generatingRef.current) return;
+    // Hold the queue while the user is editing a queued message.
+    if (editingQueueIdRef.current) return;
+    const viewingId = route.name === 'chat' ? (route.chatId || persistChatIdRef.current) : null;
+    // Drop queued items that belong to another chat (switch leftover).
+    if (viewingId) {
+      pendingQueueRef.current = pendingQueueRef.current.filter(q => q.chatId === viewingId);
+    }
     const next = pendingQueueRef.current.shift();
     setQueueLen(pendingQueueRef.current.length);
-    if (next) {
-      void sendMessageRef.current(next);
+    setQueueTick(t => t + 1);
+    if (next?.text) {
+      void sendMessageRef.current(next.text);
     }
+  };
+
+  const endTurnAndFlush = (mySeq: number) => {
+    window.setTimeout(() => {
+      if (mySeq !== genSeqRef.current) return;
+      if (generatingRef.current) return;
+      flushQueuedSend();
+    }, 0);
   };
 
   const openImageTab = (seedPrompt?: string) => {
@@ -2117,8 +2182,8 @@ export function AIChat() {
     try {
       if (seed) {
         localStorage.setItem('ark:chat-draft:image', seed);
-        sessionStorage.setItem('ark:image-handoff-send', '1');
-        sessionStorage.setItem('ark:image-handoff-prompt', seed);
+        sessionStorage.setItem('NOVA:image-handoff-send', '1');
+        sessionStorage.setItem('NOVA:image-handoff-prompt', seed);
       } else {
         // Explicit Image tab with no seed → blank Image composer (don't carry Chat letters).
         composerDraftByModeRef.current.image = '';
@@ -2193,8 +2258,8 @@ export function AIChat() {
         setCodePillSticky(true);
       })();
     };
-    window.addEventListener('ark:open-code-overlay', onOpenCode);
-    return () => window.removeEventListener('ark:open-code-overlay', onOpenCode);
+    window.addEventListener('NOVA:open-code-overlay', onOpenCode);
+    return () => window.removeEventListener('NOVA:open-code-overlay', onOpenCode);
   }, []);
 
   const openProjectFolder = async () => {
@@ -2293,13 +2358,14 @@ export function AIChat() {
         // One more try with a fresh disk hydrate (static/, index.html, run.bat).
         const hydrated = await loadPreviewFilesFromDisk(root);
         if (Object.keys(hydrated).length) {
-          setChatStudioFiles(hydrated);
-          chatStudioFilesRef.current = hydrated;
+          const merged = { ...chatStudioFilesRef.current, ...hydrated };
+          setChatStudioFiles(merged);
+          chatStudioFilesRef.current = merged;
           const retry = await ensureBoundFolderPreview({
             root,
             projectId: pid,
             title,
-            files: hydrated,
+            files: merged,
             device: devicePayload,
           });
           if (retry.ok) {
@@ -2629,7 +2695,7 @@ export function AIChat() {
       if (d?.label) setAttachUploading(d.label);
       else if (d?.total) setAttachUploading(`Reading ${d.done || 0}/${d.total}`);
     };
-    window.addEventListener('ark:project-import-progress', onProg);
+    window.addEventListener('NOVA:project-import-progress', onProg);
     try {
       const res = useInPlace
         ? await window.arkDesktop?.workspaceOpenRoot?.({
@@ -2712,7 +2778,7 @@ export function AIChat() {
       setDropHint(null);
       if (!catalogOnly) {
         try {
-          localStorage.setItem(`ark:chat-studio-files:${pid}`, JSON.stringify({ name: folderName, files }));
+          localStorage.setItem(`NOVA:chat-studio-files:${pid}`, JSON.stringify({ name: folderName, files }));
         } catch { /* ignore */ }
       }
       if (scopeChat) {
@@ -2732,7 +2798,7 @@ export function AIChat() {
       } else {
         // New chat not id'd yet — keep disk root in memory until first send persists it.
         try {
-          sessionStorage.setItem('ark:pending-studio-bind', JSON.stringify({
+          sessionStorage.setItem('NOVA:pending-studio-bind', JSON.stringify({
             files: catalogOnly ? {} : files,
             projectId: pid,
             name: folderName,
@@ -2751,7 +2817,7 @@ export function AIChat() {
         catalogOnly,
       };
     } finally {
-      window.removeEventListener('ark:project-import-progress', onProg);
+      window.removeEventListener('NOVA:project-import-progress', onProg);
       setAttachUploading(null);
       setAttachBusy(false);
     }
@@ -3087,8 +3153,14 @@ export function AIChat() {
       Boolean(viewingChatId) && viewingChatId === genId
     );
     if (busyOnThisChat) {
-      pendingQueueRef.current.push(content);
+      const qChat = viewingChatId || genId || persistChatIdRef.current || 'pending';
+      pendingQueueRef.current.push({
+        id: `q-${crypto.randomUUID().slice(0, 8)}`,
+        text: content,
+        chatId: qChat,
+      });
       setQueueLen(pendingQueueRef.current.length);
+      setQueueTick(t => t + 1);
       setInput('');
       if (textareaRef.current) textareaRef.current.style.height = 'auto';
       return;
@@ -3131,7 +3203,7 @@ export function AIChat() {
       activeChatId = `chat-${crypto.randomUUID().slice(0, 10)}`;
       skipChatLoadIdsRef.current.add(activeChatId);
       messagesRef.current = [];
-      // Keep a path bind the user just set on this blank composer — do not wipe it.
+      messagesChatIdRef.current = activeChatId;
       const keepFiles = { ...chatStudioFilesRef.current };
       const keepPid = chatStudioProjectIdRef.current;
       const keepRoot = chatStudioDiskRootRef.current;
@@ -3199,7 +3271,7 @@ export function AIChat() {
     const providerLabel = pluginId
       ? `${chatPlugins.find(p => p.id === pluginId)?.name ?? 'Plugin'}${pluginState?.accountLabel ? ` · @${pluginState.accountLabel}` : ' · live'}`
       : pinnedModel.source === 'auto'
-        ? 'ARK Auto'
+        ? 'NOVA Auto'
         : `${pinnedModel.source === 'local' ? 'Local' : 'Cloud'} · ${pinnedModel.name}`;
 
     const assistantId = crypto.randomUUID();
@@ -3240,6 +3312,7 @@ export function AIChat() {
     });
     const previousAssistant = [...priorForHistory].reverse().find(m => m.role === 'assistant')?.content || '';
     messagesRef.current = [...normalized, userMsg, assistantMsg];
+    messagesChatIdRef.current = activeChatId;
     persistModeThread(mode, messagesRef.current, { chatId: activeChatId });
     setMessages(messagesRef.current);
     generatingRef.current = true;
@@ -3254,7 +3327,7 @@ export function AIChat() {
     if (isMediaMode) {
       try {
         sessionStorage.setItem(
-          'ark:inflight-media',
+          'NOVA:inflight-media',
           JSON.stringify({ chatId: activeChatId, mode, startedAt: Date.now() }),
         );
       } catch {
@@ -3298,7 +3371,7 @@ export function AIChat() {
         project_id: null,
         role: 'assistant',
         content: safeText,
-        provider_used: 'ARK',
+        provider_used: 'NOVA',
         created_at: new Date().toISOString(),
         elapsed_ms: Date.now() - replyStartedAt,
       };
@@ -3313,6 +3386,7 @@ export function AIChat() {
       )));
       clearGeneratingIfMineEarly();
       notifyChatDone(activeChatId);
+      endTurnAndFlush(mySeq);
     };
 
     if (looksLikeHarmfulContentAsk(content)) {
@@ -3325,6 +3399,29 @@ export function AIChat() {
     if (looksLikeArkSelfHarmAsk(content)) {
       await new Promise<void>(r => window.setTimeout(r, 360 + Math.floor(Math.random() * 180)));
       await finishPlainReply(arkSelfHarmBlockedReply());
+      return;
+    }
+
+    // Summarize-this-chat must never fall into folder/debug/create routing.
+    if (looksLikeThreadSummaryAsk(content)) {
+      let threadMsgs = messagesRef.current.filter(m => m.id !== assistantId);
+      if (activeChatId) {
+        try {
+          const raw = localStorage.getItem(chatThreadKey(activeChatId));
+          if (raw) {
+            const parsed = JSON.parse(raw) as ChatMessage[];
+            if (Array.isArray(parsed) && parsed.length >= threadMsgs.length) {
+              threadMsgs = parsed.filter(m => m.id !== assistantId);
+            }
+          }
+        } catch { /* keep threadMsgs */ }
+      }
+      const localSummary = buildThreadSummaryFromMessages([
+        ...threadMsgs,
+        { role: 'user', content },
+      ]);
+      await new Promise<void>(r => window.setTimeout(r, 280 + Math.floor(Math.random() * 180)));
+      await finishPlainReply(localSummary);
       return;
     }
 
@@ -3450,11 +3547,10 @@ export function AIChat() {
       if (!mode) return;
 
       const stages = pcExploreStatusStages(mode);
-      for (let i = 0; i < stages.length - 1; i++) {
-        pushAssistantStatus(stages[i]);
-        await new Promise<void>(r => { window.setTimeout(r, i === 0 ? 100 : 85); });
-        if (mySeq !== genSeqRef.current) return;
-      }
+      // One status label only — cycling many labels mid-reply looked like flickering messages.
+      pushAssistantStatus(stages[0] || 'Looking around…');
+      await new Promise<void>(r => { window.setTimeout(r, 80); });
+      if (mySeq !== genSeqRef.current) return;
 
       if (mode === 'installed_apps' || mode === 'games') {
         await syncWorkspaceGrantsFromPrefs();
@@ -3736,7 +3832,7 @@ export function AIChat() {
         || undefined;
 
       if (looksLikeRestorePointAsk(content) && window.arkDesktop?.agentRun) {
-        const cmd = buildRestorePointCommand(`ARK ${new Date().toLocaleDateString()}`);
+        const cmd = buildRestorePointCommand(`NOVA ${new Date().toLocaleDateString()}`);
         const restoreOutcome = await runAgentCommand({
           command: cmd,
           cwd: homeCwd || 'C:\\Users',
@@ -3753,7 +3849,7 @@ export function AIChat() {
           )));
           const ran = await runAgentCommand({ command, cwd, skipConfirm: true });
           const text = ran.reply?.includes('Access is denied') || ran.reply?.toLowerCase().includes('elevated')
-            ? `${ran.reply}\n\nWindows restore points need **Run as administrator**. Approve the UAC prompt if it appears, or run ARK as admin once.`
+            ? `${ran.reply}\n\nWindows restore points need **Run as administrator**. Approve the UAC prompt if it appears, or run NOVA as admin once.`
             : (ran.reply || 'Restore point finished.');
           await finishPlainReply(text);
           return;
@@ -4113,8 +4209,14 @@ export function AIChat() {
     );
     const renameFromAsk = content.match(/\bcall(?:ed)?\s+it\s+([A-Za-z][A-Za-z0-9_-]{1,40})\b/i)?.[1]
       || content.match(/\bleaning\s+([A-Za-z][A-Za-z0-9_-]{1,40})\s+as\s+the\s+name\b/i)?.[1]
+      || extractGreenfieldName(content)
+      || messagesRef.current
+        .filter(m => m.role === 'user')
+        .map(m => extractGreenfieldName(String(m.content || '')))
+        .filter(Boolean)
+        .at(-1)
       || null;
-    const createIntent = createIntentRaw && renameFromAsk
+    const createIntent = createIntentRaw && renameFromAsk && !/^(My App|New App|App)$/i.test(renameFromAsk)
       ? {
           ...createIntentRaw,
           name: renameFromAsk,
@@ -4213,7 +4315,7 @@ export function AIChat() {
       await new Promise<void>(r => { window.setTimeout(r, Math.max(800, briefReadDelayMs(buildIntent.summary) / 2)); });
       if (mySeq !== genSeqRef.current) return;
 
-      pushAssistantStatus(`Creating folder in ARK Projects (${buildIntent.slug})…`);
+      pushAssistantStatus(`Creating folder in NOVA Projects (${buildIntent.slug})…`);
       try {
       await syncWorkspaceGrantsFromPrefs();
       await new Promise<void>(r => { window.setTimeout(r, 200); });
@@ -4265,35 +4367,137 @@ export function AIChat() {
         });
       }
 
-      pushAssistantStatus('Applying layout from your brief…');
+      pushAssistantStatus('Building a fresh UI from your brief…');
       let followNote = '';
       const pid = created.projectId || newProjectId;
       if (pid && created.files) {
-        const applied = await applyChatReplyEdits({
-          reply: '',
-          projectId: pid,
-          projectName: buildIntent.name,
-          files: created.files,
-          userMessage: buildIntent.summary || content,
-          diskRoot: created.projectPath || chatStudioDiskRootRef.current,
-        });
-        if (applied.ok) {
-          setChatStudioFiles(applied.files);
-          chatStudioFilesRef.current = applied.files;
-          persistStudioSnapshot(activeChatId, {
-            files: applied.files,
-            projectId: pid,
-            name: buildIntent.name,
-            diskRoot: created.projectPath || null,
-          });
-          const appSrc = applied.files['src/App.jsx'] || applied.files['src/App.tsx'] || '';
-          const { isEmptyReactAppShell } = await import('@/lib/freshSpaFromBrief');
-          if (isEmptyReactAppShell(appSrc)) {
-            followNote = '\n\nStarter files are on disk, but the UI shell was still empty — say **rebuild the UI from my brief** and I will fill App.jsx.';
-          } else {
-            followNote = `\n\nLayout applied (${applied.updated.join(', ')}). Click **Preview** under the chat box to open the live window.`;
-          }
+        const briefForBuild = [
+          String(buildIntent.summary || '').trim(),
+          String(content || '').trim(),
+          ...messagesRef.current
+            .filter(m => m.role === 'user')
+            .map(m => String(m.content || '').replace(/<!--[\s\S]*?-->/g, '').trim())
+            .filter(Boolean)
+            .slice(-8),
+        ].filter(Boolean).join('\n\n');
+        const spatialBrief = looksLikeSpatialApp(briefForBuild, buildIntent.name);
+        let seedFiles = mergeBriefNpmDependencies({ ...created.files }, briefForBuild);
+        const sticky = pinnedModel.source === 'auto' ? threadBrainRef.current : null;
+        let modelReply = '';
+        try {
+          const engineResult = await answerStudio(
+            {
+              userMessage: [
+                `Build the first real UI for "${buildIntent.name}" from this brief.`,
+                'Write complete project files with @@@FILE blocks (or SEARCH/REPLACE).',
+                'You MUST rewrite index.html (or App.jsx), css/styles.css (or App.css), and js/app.js together.',
+                'Give this product a unique visual design (colors, typography, layout) derived only from THIS brief.',
+                spatialBrief
+                  ? 'This is a spatial / 3D editor app: real WebGL viewport, grid, add cube/sphere, orbit with mouse, select and drag meshes. Use the three npm package (already in package.json). Do not build a marketing website.'
+                  : '',
+                '',
+                briefForBuild,
+              ].filter(Boolean).join('\n'),
+              files: seedFiles,
+              projectName: buildIntent.name,
+              mode: 'code',
+              preferredModelId: pinnedModel.id,
+              preferredModelName: pinnedModel.name,
+              preferredSource: pinnedModel.source,
+              stickyModelId: sticky?.modelId,
+              stickyModelName: sticky?.modelName,
+              stickyPinnedSource: sticky?.pinnedSource,
+              planOnly: false,
+              allowFileEdits: true,
+              shouldAbort: () => mySeq !== genSeqRef.current || stopRequestedRef.current,
+            },
+            (live) => {
+              if (mySeq !== genSeqRef.current || stopRequestedRef.current) return;
+              const text = String(live || '').trim();
+              if (text.length < 2) return;
+              pushAssistantStatus(liveCodingStatusText(text));
+            },
+          );
+          modelReply = String(engineResult?.text || '').trim();
+        } catch {
+          modelReply = '';
         }
+        if (mySeq !== genSeqRef.current) return;
+
+        const applied = modelReply
+          ? await applyChatReplyEdits({
+            reply: modelReply,
+            projectId: pid,
+            projectName: buildIntent.name,
+            files: seedFiles,
+            userMessage: briefForBuild,
+            diskRoot: created.projectPath || chatStudioDiskRootRef.current,
+          })
+          : { ok: false as const, updated: [] as string[], files: seedFiles };
+
+        let filesNow = (applied.ok && applied.updated.length) ? applied.files : seedFiles;
+        const appSrc = filesNow['src/App.jsx'] || filesNow['src/App.tsx'] || '';
+        const { buildFreshSpaFromBrief, isEmptyReactAppShell } = await import('@/lib/freshSpaFromBrief');
+        if (isEmptyReactAppShell(appSrc) && Object.keys(filesNow).some((p) => /(?:^|\/)App\.(jsx|tsx)$/i.test(p))) {
+          const fresh = buildFreshSpaFromBrief(buildIntent.name, briefForBuild);
+          filesNow = mergeBriefNpmDependencies({
+            ...filesNow,
+            'src/App.jsx': fresh.appJsx,
+            'src/App.css': fresh.appCss,
+            'src/index.css': fresh.indexCss,
+          }, briefForBuild);
+          const written = await applyChatReplyEdits({
+            reply: [
+              '@@@FILE src/App.jsx',
+              fresh.appJsx,
+              '@@@FILE src/App.css',
+              fresh.appCss,
+              '@@@FILE src/index.css',
+              fresh.indexCss,
+              filesNow['package.json'] ? `@@@FILE package.json\n${filesNow['package.json']}` : '',
+            ].filter(Boolean).join('\n'),
+            projectId: pid,
+            projectName: buildIntent.name,
+            files: seedFiles,
+            userMessage: briefForBuild,
+            diskRoot: created.projectPath || chatStudioDiskRootRef.current,
+          });
+          if (written.ok) {
+            filesNow = written.files;
+            followNote = `\n\nFresh UI written (${written.updated.join(', ')}). Click **Preview** under the chat box to open the live window.`;
+          } else {
+            followNote = '\n\nStarter UI is on disk from your brief. Click **Preview** under the chat box.';
+          }
+        } else if (applied.ok && applied.updated.length) {
+          filesNow = mergeBriefNpmDependencies(filesNow, briefForBuild);
+          followNote = `\n\nFresh UI written (${applied.updated.join(', ')}). Click **Preview** under the chat box to open the live window.`;
+        } else {
+          followNote = '\n\nFolder is ready with a blank starter. Say **rebuild the UI from my brief** and I will write a unique first screen.';
+        }
+
+        // Persist brief-driven deps (e.g. three) to disk before npm install.
+        filesNow = mergeBriefNpmDependencies(filesNow, briefForBuild);
+        const pkgKey = Object.keys(filesNow).find((p) => /(^|\/)package\.json$/i.test(p.replace(/\\/g, '/')));
+        if (pkgKey && /"three"\s*:/.test(filesNow[pkgKey] || '')) {
+          const pkgWrite = await applyChatReplyEdits({
+            reply: `@@@FILE ${pkgKey}\n${filesNow[pkgKey]}`,
+            projectId: pid,
+            projectName: buildIntent.name,
+            files: filesNow,
+            userMessage: briefForBuild,
+            diskRoot: created.projectPath || chatStudioDiskRootRef.current,
+          });
+          if (pkgWrite.ok) filesNow = pkgWrite.files;
+        }
+
+        setChatStudioFiles(filesNow);
+        chatStudioFilesRef.current = filesNow;
+        persistStudioSnapshot(activeChatId, {
+          files: filesNow,
+          projectId: pid,
+          name: buildIntent.name,
+          diskRoot: created.projectPath || null,
+        });
       }
 
       pushAssistantStatus('Finishing setup…');
@@ -4313,6 +4517,7 @@ export function AIChat() {
           files: bootstrapFiles,
         })
         : { npmInstalled: true };
+      // Bind preview URL for the Preview/Localhost button — never auto-open a window.
       if (bootstrap.devServerUrl) {
         setPreviewUrl(bootstrap.devServerUrl);
         persistStudioSnapshot(activeChatId, {
@@ -4322,33 +4527,6 @@ export function AIChat() {
           diskRoot: created.projectPath || null,
           previewUrl: bootstrap.devServerUrl,
         });
-        await openInAppPreview(bootstrap.devServerUrl, {
-          projectId: previewWindowIdForChat(activeChatId),
-          title: buildIntent.name,
-          forceNavigate: true,
-        });
-      } else if (!needsNpm || bootstrap.npmInstalled) {
-        // Static HTML only — never open a Vite/React tree as static (blank black window).
-        const liveFiles = chatStudioFilesRef.current;
-        const viteLike = isViteProject(liveFiles)
-          || Object.keys(liveFiles).some(p => /(^|\/)package\.json$/i.test(p.replace(/\\/g, '/')));
-        if (!viteLike && Object.keys(liveFiles).length) {
-          const url = await ensureInAppPreview({
-            projectId: previewWindowIdForChat(activeChatId),
-            title: buildIntent.name,
-            files: liveFiles,
-          });
-          if (url) {
-            setPreviewUrl(url);
-            persistStudioSnapshot(activeChatId, {
-              files: liveFiles,
-              projectId: pid,
-              name: buildIntent.name,
-              diskRoot: created.projectPath || null,
-              previewUrl: url,
-            });
-          }
-        }
       }
 
       pushAssistantStatus('Preparing answer…');
@@ -4418,7 +4596,7 @@ export function AIChat() {
       project_id: null,
           role: 'assistant',
           content: GRANT_OFF_FOLDER_MSG,
-          provider_used: 'ARK',
+          provider_used: 'NOVA',
           created_at: new Date().toISOString(),
         };
         const next = messagesRef.current.map(m => (m.id === assistantId ? errMsg : m));
@@ -4437,7 +4615,7 @@ export function AIChat() {
       project_id: null,
           role: 'assistant',
           content: 'Which folder on your Desktop? Say the name. for example: *“What is AutoTrade on my desktop?”* or *“On my desktop I have a folder called my-app.”*',
-          provider_used: 'ARK',
+          provider_used: 'NOVA',
           created_at: new Date().toISOString(),
         };
         const next = messagesRef.current.map(m => (m.id === assistantId ? errMsg : m));
@@ -4483,7 +4661,7 @@ export function AIChat() {
       project_id: null,
             role: 'assistant',
             content: errReply,
-            provider_used: 'ARK',
+            provider_used: 'NOVA',
             created_at: new Date().toISOString(),
           };
           const next = messagesRef.current.map(m => (m.id === assistantId ? errMsg : m));
@@ -4500,7 +4678,7 @@ export function AIChat() {
       project_id: null,
           role: 'assistant',
           content: located.error,
-          provider_used: 'ARK',
+          provider_used: 'NOVA',
           created_at: new Date().toISOString(),
         };
         const next = messagesRef.current.map(m => (m.id === assistantId ? errMsg : m));
@@ -4566,7 +4744,7 @@ export function AIChat() {
         ])
         : undefined);
 
-    const finishAgentReply = (reply: string, provider = 'ARK · agent') => {
+    const finishAgentReply = (reply: string, provider = 'NOVA · agent') => {
       const apply = (finalReply: string, finalProvider: string) => {
         const elapsedMs = Date.now() - replyStartedAt;
         const safeText = redactArkSelfLeak(finalReply);
@@ -4579,11 +4757,12 @@ export function AIChat() {
         persistModeThread(mode, next, { chatId: activeChatId });
         setMessages(next);
         clearGeneratingIfMineEarly();
+        endTurnAndFlush(mySeq);
       };
 
       if (/ARK_MCP:/i.test(reply)) {
         void runMcpAutoToolLoop(reply).then(loop => {
-          apply(loop.text, loop.ran.length ? 'ARK · mcp' : provider);
+          apply(loop.text, loop.ran.length ? 'NOVA · mcp' : provider);
         }).catch(() => apply(reply, provider));
         return;
       }
@@ -4602,9 +4781,9 @@ export function AIChat() {
       const url = await openProjectPreview();
       finishAgentReply(
         url
-          ? `Opened **Preview** in an ARK window (\`${url}\`).\n\nIt stays open while you edit. file changes reload the window automatically.`
+          ? `Opened **Preview** in an NOVA window (\`${url}\`).\n\nIt stays open while you edit. file changes reload the window automatically.`
           : 'Bind a project first (create one or say **Lets work on …**), then open Preview.',
-        'ARK · preview',
+        'NOVA · preview',
       );
       return;
     }
@@ -4612,6 +4791,7 @@ export function AIChat() {
     // Hands-free debug: problem + path → open project on disk, then inspect/fix (no separate "work on" step).
     if (
       (mode === 'general' || mode === 'code')
+      && !looksLikeThreadSummaryAsk(content)
       && looksLikeProjectDebugAsk(content)
       && !hasActiveWorkspace({
         files: resolvedStudio.files,
@@ -4700,7 +4880,7 @@ export function AIChat() {
       // Fall through to inspect / code-edit below with files bound.
     }
 
-    // Capability asks ("can you edit files?", "what can you do?") — answer as ARK, not a
+    // Capability asks ("can you edit files?", "what can you do?") — answer as NOVA, not a
     // generic programming tutorial from the local model.
     if (
       (mode === 'general' || mode === 'code')
@@ -4714,7 +4894,7 @@ export function AIChat() {
           hasProject: Boolean(chatStudioProjectIdRef.current || chatStudioDiskRootRef.current),
           hasFolderAccess: true,
         }),
-        'ARK',
+        'NOVA',
       );
       return;
     }
@@ -4727,7 +4907,7 @@ export function AIChat() {
       && /\b(what|how|list|show|tools|server|connect|setup|explain|register)\b/i.test(content)
       && !parseMcpCallIntent(content)
     ) {
-      finishAgentReply(formatMcpToolsHelp(), 'ARK · mcp');
+      finishAgentReply(formatMcpToolsHelp(), 'NOVA · mcp');
       return;
     }
 
@@ -4739,7 +4919,7 @@ export function AIChat() {
         if (!server) {
           finishAgentReply(
             `No enabled MCP server has tool **${mcpCall.toolName}**.\n\nAdd/enable a server in **Settings → MCP**, press **Test**, then try again.\n\n${formatMcpToolsHelp()}`,
-            'ARK · mcp',
+            'NOVA · mcp',
           );
           return;
         }
@@ -4750,12 +4930,12 @@ export function AIChat() {
         if (res.ok) {
           finishAgentReply(
             `**${mcpCall.toolName}** (${server.name})\n\n\`\`\`\n${res.content || '(empty)'}\n\`\`\``,
-            'ARK · mcp',
+            'NOVA · mcp',
           );
         } else {
           finishAgentReply(
             `**${mcpCall.toolName}** failed on **${server.name}**.\n\n${res.error || 'Unknown error'}`,
-            'ARK · mcp',
+            'NOVA · mcp',
           );
         }
         return;
@@ -4770,7 +4950,7 @@ export function AIChat() {
     ) {
       const ref = parseGithubRepoRef(content);
       if (!ref) {
-        finishAgentReply('Say: **clone owner/repo**. example: *clone vercel/next.js*', 'ARK');
+        finishAgentReply('Say: **clone owner/repo**. example: *clone vercel/next.js*', 'NOVA');
         return;
       }
       const token = githubToken() || getPluginRuntime('github', loadPluginState()).token?.trim();
@@ -4780,7 +4960,7 @@ export function AIChat() {
       )));
       const cloned = await gitClone(project.id, githubCloneUrl(ref.owner, ref.repo), token || undefined);
       if (!cloned.ok) {
-        finishAgentReply(cloned.error || 'Clone failed.', 'ARK · git');
+        finishAgentReply(cloned.error || 'Clone failed.', 'NOVA · git');
         return;
       }
       const read = await window.arkDesktop?.projectRead?.(project.id);
@@ -4805,7 +4985,7 @@ export function AIChat() {
       }
       finishAgentReply(
         `Cloned **${ref.owner}/${ref.repo}** into this chat.${read?.root ? `\n\nWorkspace: \`${read.root}\`` : ''}`,
-        'ARK · git',
+        'NOVA · git',
       );
       return;
     }
@@ -4820,7 +5000,7 @@ export function AIChat() {
       && !looksLikeBuildStart(content);
 
     if (turnNeedsWorkspace && !workspaceActive && (mode === 'general' || mode === 'code')) {
-      finishAgentReply(NO_WORKSPACE_MSG, 'ARK');
+      finishAgentReply(NO_WORKSPACE_MSG, 'NOVA');
       return;
     }
 
@@ -4855,7 +5035,7 @@ export function AIChat() {
             });
           }
         }
-        finishAgentReply(studioCmd.reply, 'ARK · git');
+        finishAgentReply(studioCmd.reply, 'NOVA · git');
         return;
       }
     }
@@ -4880,7 +5060,7 @@ export function AIChat() {
           if (!window.confirm(`Run on your PC?\n\n${label}\n\nFolder: ${cwd}\n\nMode: ${modeLabel}`)) {
             finishAgentReply(
               'Command canceled. Say it again when ready, or switch to Run everything in Settings → Security.',
-              'ARK',
+              'NOVA',
             );
             return;
           }
@@ -4890,11 +5070,11 @@ export function AIChat() {
               : m
           )));
           const ran = await runAgentCommand({ command, cwd, skipConfirm: true });
-          finishAgentReply(ran.reply || 'Command finished.', 'ARK · agent');
+          finishAgentReply(ran.reply || 'Command finished.', 'NOVA · agent');
           return;
         }
         if (agentOutcome.handled && agentOutcome.reply) {
-          finishAgentReply(agentOutcome.reply, 'ARK · agent');
+          finishAgentReply(agentOutcome.reply, 'NOVA · agent');
           return;
         }
       }
@@ -4913,19 +5093,19 @@ export function AIChat() {
             if (!window.confirm(`Install on your PC?\n\n${label}\n\nMode: ${modeLabel}`)) {
               finishAgentReply(
                 'Install canceled. Say it again when ready, or switch to Run everything in Settings → Security.',
-                'ARK',
+                'NOVA',
               );
               return;
             }
             const ran = await runAgentCommand({ command, cwd, skipConfirm: true });
             finishAgentReply(
               ran.reply || 'Install finished.',
-              'ARK · agent',
+              'NOVA · agent',
             );
             return;
           }
           if (runtimeOutcome.handled && runtimeOutcome.reply) {
-            finishAgentReply(runtimeOutcome.reply, 'ARK · agent');
+            finishAgentReply(runtimeOutcome.reply, 'NOVA · agent');
             return;
           }
         }
@@ -4935,6 +5115,9 @@ export function AIChat() {
     let stickyCount = Object.keys(stickyFiles).length;
     let diskBound = Boolean(chatStudioDiskRootRef.current || resolvedStudio.projectId || chatStudioProjectIdRef.current);
     let wantsCodeEdit = chatTurnAllowsFileEdits(content, turnComposerMode);
+    if (!wantsCodeEdit && diskBound && looksLikeCodeEditAsk(content)) {
+      wantsCodeEdit = true;
+    }
     if (!wantsCodeEdit && diskBound && parseAddCommentAsk(content)) {
       wantsCodeEdit = true;
     }
@@ -5219,7 +5402,7 @@ export function AIChat() {
               const read = await window.arkDesktop.readTextFile({ path: absOf(rel) });
               if (!read?.ok || typeof read.text !== 'string') {
                 if (rel === quick.path) {
-                  finishAgentReply(`Could not read **${rel}**.`, 'ARK · edit');
+                  finishAgentReply(`Could not read **${rel}**.`, 'NOVA · edit');
                   return;
                 }
                 continue;
@@ -5251,7 +5434,7 @@ export function AIChat() {
               if (!written?.ok) {
                 finishAgentReply(
                   `Could not write **${rel}**: ${written?.error || 'write failed'}.`,
-                  'ARK · edit',
+                  'NOVA · edit',
                 );
                 return;
               }
@@ -5275,7 +5458,7 @@ export function AIChat() {
                 fileChanges: [],
               };
               setTokenRatio(syncTokenUsage(activeChatId, estimateTokens(editUserMessage) + 40));
-              finishAgentReply(encodeTraceMessage(payload), 'ARK · edit');
+              finishAgentReply(encodeTraceMessage(payload), 'NOVA · edit');
               return;
             }
 
@@ -5322,12 +5505,12 @@ export function AIChat() {
             };
             setTokenRatio(syncTokenUsage(activeChatId, estimateTokens(editUserMessage) + 80 + addSum * 4));
             await wait(250);
-            finishAgentReply(encodeTraceMessage(payload), 'ARK · edit');
+            finishAgentReply(encodeTraceMessage(payload), 'NOVA · edit');
             return;
           } catch (err) {
             finishAgentReply(
               `Could not edit **${quick.path}**: ${err instanceof Error ? err.message : 'read/write failed'}.`,
-              'ARK · edit',
+              'NOVA · edit',
             );
             return;
           }
@@ -5355,30 +5538,44 @@ export function AIChat() {
         }
         if (chatStudioDiskRootRef.current && window.arkDesktop?.readTextFile) {
           const diskRoot = chatStudioDiskRootRef.current;
-          const rels = [
-            'src/App.jsx', 'src/App.tsx', 'src/App.css', 'src/index.css',
-            'index.html', 'css/styles.css', 'js/app.js', 'package.json',
-          ];
-          const sep = diskRoot.includes('\\') ? '\\' : '/';
-          const loaded: Record<string, string> = {};
-          for (const rel of rels) {
-            try {
-              const abs = `${diskRoot.replace(/[/\\]+$/, '')}${sep}${rel.replace(/\//g, sep)}`;
-              const read = await window.arkDesktop.readTextFile({ path: abs });
-              if (read?.ok && typeof read.text === 'string') loaded[rel] = read.text;
-            } catch { /* missing */ }
-          }
-          if (Object.keys(loaded).length) {
-            Object.assign(stickyFiles, loaded);
-            stickyCount = Object.keys(stickyFiles).length;
-            setChatStudioFiles({ ...stickyFiles });
-            chatStudioFilesRef.current = { ...stickyFiles };
-            resolvedStudio.files = stickyFiles;
+          try {
+            const loaded = await loadPreviewFilesFromDisk(diskRoot);
+            if (Object.keys(loaded).length) {
+              Object.assign(stickyFiles, loaded);
+              stickyCount = Object.keys(stickyFiles).length;
+              setChatStudioFiles({ ...stickyFiles });
+              chatStudioFilesRef.current = { ...stickyFiles };
+              resolvedStudio.files = stickyFiles;
+            }
+          } catch {
+            const rels = [
+              'src/App.jsx', 'src/App.tsx', 'src/App.css', 'src/index.css',
+              'index.html', 'css/styles.css', 'js/app.js', 'package.json',
+            ];
+            const sep = diskRoot.includes('\\') ? '\\' : '/';
+            const loaded: Record<string, string> = {};
+            for (const rel of rels) {
+              try {
+                const abs = `${diskRoot.replace(/[/\\]+$/, '')}${sep}${rel.replace(/\//g, sep)}`;
+                const read = await window.arkDesktop.readTextFile({ path: abs });
+                if (read?.ok && typeof read.text === 'string') loaded[rel] = read.text;
+              } catch { /* missing */ }
+            }
+            if (Object.keys(loaded).length) {
+              Object.assign(stickyFiles, loaded);
+              stickyCount = Object.keys(stickyFiles).length;
+              setChatStudioFiles({ ...stickyFiles });
+              chatStudioFilesRef.current = { ...stickyFiles };
+              resolvedStudio.files = stickyFiles;
+            }
           }
         }
         const { finalizeWebEdits } = await import('@/lib/webProjectCanon');
         const micro = finalizeWebEdits(stickyFiles, editUserMessage, [], { projectName: projectLabel });
-        if (micro.length || /\b(?:change|rename|set|make|update)\b[\s\S]{0,80}\b(?:title|headline|heading|hero|button|label|text)\b/i.test(editUserMessage)) {
+        if (
+          micro.length
+          || /\b(?:change|rename|set|make|update|add|remove|fix|delete|drop)\b/i.test(editUserMessage)
+        ) {
           setMessages(prev => prev.map(m => (
             m.id === assistantId
               ? { ...m, content: '__generating__:chat:Updating project files…' }
@@ -5393,7 +5590,7 @@ export function AIChat() {
             diskRoot: chatStudioDiskRootRef.current,
           });
           const elapsedMs = Date.now() - replyStartedAt;
-          if (applied.ok) {
+          if (applied.ok && applied.updated.length) {
             setChatStudioFiles(applied.files);
             chatStudioFilesRef.current = applied.files;
             resolvedStudio.files = applied.files;
@@ -5412,12 +5609,20 @@ export function AIChat() {
               changedPaths: applied.updated,
               applied: true,
             });
+            const patchFileChanges = applied.updated.map((path) => {
+              const diff = countLineDiff(
+                String(stickyFiles?.[path] || ''),
+                String(applied.files?.[path] || ''),
+              );
+              return { path, added: diff.added, removed: diff.removed };
+            });
             const reply = buildStudioTraceMessage({
               startedAt: replyStartedAt,
               elapsedMs,
               userMessage: content,
               answer,
               wrotePaths: applied.updated,
+              fileChanges: patchFileChanges,
               projectName: projectLabel,
             });
             const next = messagesRef.current.map(m => (
@@ -5425,7 +5630,7 @@ export function AIChat() {
                 ? {
                   ...m,
                   content: reply,
-                  provider_used: visionHopMeta ? `ARK · vision → patch` : 'ARK · local patch',
+                  provider_used: visionHopMeta ? `NOVA · vision → patch` : 'NOVA · local patch',
                   elapsed_ms: elapsedMs,
                 }
                 : m
@@ -5460,7 +5665,7 @@ export function AIChat() {
               ? {
                 ...m,
                 content: failReply,
-                provider_used: 'ARK · local patch',
+                provider_used: 'NOVA · local patch',
                 elapsed_ms: elapsedMs,
               }
               : m
@@ -5506,7 +5711,7 @@ export function AIChat() {
           void pushLivePreview(multi.files, false);
           finishAgentReply(
             visionHopMeta ? `${multi.reply}\n\n_Vision hop: ${visionHopMeta}_` : multi.reply,
-            visionHopMeta ? 'ARK · vision → multi-agent' : 'ARK · multi-agent',
+            visionHopMeta ? 'NOVA · vision → multi-agent' : 'NOVA · multi-agent',
           );
           return;
         }
@@ -5525,8 +5730,8 @@ export function AIChat() {
       ) {
         if (stickyCount === 0) {
           finishAgentReply(
-            'Bound folder path is set, but ARK could not load files from disk yet. Use **+ → Open folder** again on this chat, then retry.',
-            'ARK · agent',
+            'Bound folder path is set, but NOVA could not load files from disk yet. Use **+ → Open folder** again on this chat, then retry.',
+            'NOVA · agent',
           );
           return;
         }
@@ -5567,7 +5772,7 @@ export function AIChat() {
             return {
               reply: routed.reply || '',
               modelName: routed.modelName,
-              providerLabel: routerProviderLabel(routed, 'ARK · agent'),
+              providerLabel: routerProviderLabel(routed, 'NOVA · agent'),
             };
           },
         });
@@ -5602,7 +5807,7 @@ export function AIChat() {
             canContinue: loop.hitStepCap,
           });
           const provider = loop.providerLabel
-            || (loop.hitStepCap ? 'ARK · agent (continue)' : 'ARK · agent');
+            || (loop.hitStepCap ? 'NOVA · agent (continue)' : 'NOVA · agent');
           finishAgentReply(
             visionHopMeta ? `${traced}\n\n_Vision hop: ${visionHopMeta}_` : traced,
             visionHopMeta ? `${provider} · vision` : provider,
@@ -5663,12 +5868,20 @@ export function AIChat() {
               changedPaths: applied.updated,
               applied: true,
             });
+            const patchFileChanges = applied.updated.map((path) => {
+              const diff = countLineDiff(
+                String(stickyFiles?.[path] || ''),
+                String(applied.files?.[path] || ''),
+              );
+              return { path, added: diff.added, removed: diff.removed };
+            });
             const reply = buildStudioTraceMessage({
               startedAt: replyStartedAt,
               elapsedMs,
               userMessage: content,
               answer,
               wrotePaths: applied.updated,
+              fileChanges: patchFileChanges,
               projectName: projectLabel,
             });
             const next = messagesRef.current.map(m => (
@@ -5676,7 +5889,7 @@ export function AIChat() {
                 ? {
                   ...m,
                   content: reply,
-                  provider_used: visionHopMeta ? `ARK · vision → patch` : 'ARK · local patch',
+                  provider_used: visionHopMeta ? `NOVA · vision → patch` : 'NOVA · local patch',
                   elapsed_ms: elapsedMs,
                 }
                 : m
@@ -5716,11 +5929,10 @@ export function AIChat() {
           if (mySeq !== genSeqRef.current || stopRequestedRef.current) return;
           const text = String(live || '').trim();
           if (text.length < 2) return;
-          const dump = /@@@FILE|```[\w]*\n|<!DOCTYPE\b|<html[\s>]|export\s+default\s+function/i.test(text);
-          // Never show "Building…" during planning just because the model streamed a fence.
+          // Chat mode: stream the answer as-is. Never flip to a status label mid-reply (causes flicker).
           const bubble = allowEdits
             ? `__generating__:chat:${liveCodingStatusText(text)}`
-            : (dump ? 'Thinking through your idea…' : text);
+            : text;
           setMessages(prev => {
             const next = prev.map(m => (
               m.id === assistantId ? { ...m, content: bubble } : m
@@ -5905,23 +6117,29 @@ export function AIChat() {
         activeGenChatIdRef.current = null;
       }
       try {
-        const raw = sessionStorage.getItem('ark:inflight-media');
+        const raw = sessionStorage.getItem('NOVA:inflight-media');
         const inflight = raw ? JSON.parse(raw) as { chatId?: string } : null;
         if (!inflight?.chatId || inflight.chatId === activeChatId) {
-          sessionStorage.removeItem('ark:inflight-media');
+          sessionStorage.removeItem('NOVA:inflight-media');
         }
       } catch {
-        sessionStorage.removeItem('ark:inflight-media');
+        sessionStorage.removeItem('NOVA:inflight-media');
       }
       setGenerating(false);
     };
 
     const finalizeAssistant = (finalText: string, provider: string, libraryId?: string) => {
-      if (mySeq !== genSeqRef.current) return;
-      if (provider && provider !== 'ARK · setup needed') {
+      // Persist to THIS turn's chat even if the user opened New Chat (genSeq bump / UI clear).
+      // Only skip when a newer send replaced this turn on the SAME chat.
+      const supersededHere = mySeq !== genSeqRef.current
+        && activeGenChatIdRef.current === activeChatId;
+      if (supersededHere) return;
+      if (provider && provider !== 'NOVA · setup needed') {
         setLocalPrefs({ lastAnsweredLabel: provider });
       }
-      const threadChatId = persistChatIdRef.current || activeChatId;
+      // Always the chat that started this turn — never the viewed Recent
+      // (persistChatIdRef tracks the open thread and would poison another chat).
+      const threadChatId = activeChatId;
       const routeChat = routeChatIdRef.current;
       const elapsedMs = Date.now() - replyStartedAt;
       if (threadChatId) {
@@ -5946,8 +6164,21 @@ export function AIChat() {
           : m
       ));
 
-      // Prefer live messages; fall back to stored thread when the view already switched chats.
-      let next = patchThread(messagesRef.current);
+      // Prefer this turn's messages; if the view already switched, patch storage for THIS chat only.
+      let next = patchThread(
+        (routeChat === threadChatId ? messagesRef.current : null)
+          || (() => {
+            try {
+              const raw = localStorage.getItem(chatThreadKey(threadChatId));
+              const stored = raw ? JSON.parse(raw) as ChatMessage[] : [];
+              if (Array.isArray(stored) && stored.some(m => m.id === assistantId)) return stored;
+            } catch {
+              /* ignore */
+            }
+            return null;
+          })()
+          || messagesRef.current,
+      );
       if (!next.some(m => m.id === assistantId)) {
         try {
           const raw = localStorage.getItem(chatThreadKey(threadChatId));
@@ -5967,6 +6198,7 @@ export function AIChat() {
       const viewingThisThread = Boolean(routeChat && threadChatId && routeChat === threadChatId);
       if (viewingThisThread) {
         messagesRef.current = next;
+        messagesChatIdRef.current = threadChatId;
       }
 
       const activeCreationId = route.name === 'chat' ? route.creationId : undefined;
@@ -5989,7 +6221,7 @@ export function AIChat() {
       pushStatus: pushAssistantStatus,
     };
 
-    // First-run guarantee: no live chat path → wait if installing, else honest CTA (no fake ARK Core answer).
+    // First-run guarantee: no live chat path → wait if installing, else honest CTA (no fake NOVA Core answer).
     // engineGenerate IPC exists on desktop even when no GGUF is installed — do not treat IPC as capacity.
     if (
       !pluginId
@@ -6007,7 +6239,7 @@ export function AIChat() {
           tipAt(tipStartIndex()),
         ].join('\n')
         : honestNoLiveChatReply();
-      finalizeAssistant(honest, installing ? 'ARK · installing' : 'ARK · setup needed');
+      finalizeAssistant(honest, installing ? 'NOVA · installing' : 'NOVA · setup needed');
       clearGeneratingIfMine();
       window.setTimeout(() => {
         if (mySeq === genSeqRef.current) flushQueuedSend();
@@ -6029,12 +6261,13 @@ export function AIChat() {
     void (async () => {
       const routeHistory = chatRouteSeedRef.current.history;
       const stickyBrain = chatRouteSeedRef.current.sticky;
-      let response = 'ARK Router could not complete this request.';
+      let response = 'NOVA Router could not complete this request.';
       let usedPlugin = false;
       let skipReplySanitize = false;
       let lastLibraryId: string | undefined;
       let resolvedProvider = providerLabel;
       let streamedPartial = '';
+      let lastGoodLive = '';
       let abandoned = false;
       let idleTimer: number | undefined;
       let earlyResolve: ((value: { reply: string }) => void) | null = null;
@@ -6137,6 +6370,12 @@ export function AIChat() {
             const hydrated = await loadPreviewFilesFromDisk(root);
             if (Object.keys(hydrated).length) {
               filesForPatch = { ...filesForPatch, ...hydrated };
+              for (const [rel, text] of Object.entries(hydrated)) {
+                const cur = filesForPatch[rel];
+                if (!cur || (typeof text === 'string' && text.length > String(cur).length)) {
+                  filesForPatch[rel] = text;
+                }
+              }
               setChatStudioFiles(filesForPatch);
               chatStudioFilesRef.current = filesForPatch;
             }
@@ -6220,7 +6459,7 @@ export function AIChat() {
                     ? 'This GitHub repo is empty. Start with a blank page, then add what I describe.'
                     : `Continue in ${picked.full_name}. Inspect the files, then add, remove, or upgrade as I ask.`);
                 try {
-                  localStorage.setItem(`ark:project-draft:${project.id}`, seed);
+                  localStorage.setItem(`NOVA:project-draft:${project.id}`, seed);
                 } catch { /* ignore */ }
                 response = [
                   `Pulled **${picked.full_name}** into this chat.`,
@@ -6312,6 +6551,13 @@ export function AIChat() {
               const hydrated = await loadPreviewFilesFromDisk(root);
               if (Object.keys(hydrated).length) {
                 filesForPatch = { ...filesForPatch, ...hydrated };
+                // Prefer longer on-disk App.jsx if studio map was thinned by a prior bad hydrate.
+                for (const [rel, text] of Object.entries(hydrated)) {
+                  const cur = filesForPatch[rel];
+                  if (!cur || (typeof text === 'string' && text.length > String(cur).length)) {
+                    filesForPatch[rel] = text;
+                  }
+                }
                 setChatStudioFiles(filesForPatch);
                 chatStudioFilesRef.current = filesForPatch;
               }
@@ -6319,7 +6565,7 @@ export function AIChat() {
             const micro = finalizeWebEdits(filesForPatch, content, [], {
               projectName: studioPathBasename(root || '') || undefined,
             });
-            if (micro.length || /\b(?:change|rename|set|make|update)\b/i.test(content)) {
+            if (micro.length || /\b(?:change|rename|set|make|update|add|remove|fix|delete|drop)\b/i.test(content)) {
               const applied = await applyChatReplyEdits({
                 reply: '',
                 projectId: chatStudioProjectIdRef.current,
@@ -6406,7 +6652,7 @@ export function AIChat() {
             }
             if (Object.keys(filesForInspect).length === 0 && pid) {
               try {
-                const raw = localStorage.getItem(`ark:chat-studio-files:${pid}`);
+                const raw = localStorage.getItem(`NOVA:chat-studio-files:${pid}`);
                 if (raw) {
                   const parsed = JSON.parse(raw) as { files?: Record<string, string> };
                   if (parsed?.files && Object.keys(parsed.files).length) {
@@ -6466,10 +6712,9 @@ export function AIChat() {
                 if (abandoned || stopRequestedRef.current || mySeq !== genSeqRef.current) return;
                 const text = String(live || '').trim();
                 if (text.length < 2) return;
-                const dump = /@@@FILE|```[\w]*\n|<!DOCTYPE\b|<html[\s>]|export\s+default\s+function/i.test(text);
                 const bubble = allowEdits
                   ? `__generating__:chat:${liveCodingStatusText(text)}`
-                  : (dump ? 'Thinking through your idea…' : text);
+                  : text;
                 setMessages(prev => {
                   const next = prev.map(m => (
                     m.id === assistantId ? { ...m, content: bubble } : m
@@ -6590,10 +6835,10 @@ export function AIChat() {
         try {
           const setAssistantContent = (text: string) => {
             if (abandoned || stopRequestedRef.current || mySeq !== genSeqRef.current) return;
-            const threadChatId = persistChatIdRef.current || activeChatId;
+            const threadChatId = activeChatId;
             const patch = (list: ChatMessage[]) =>
               list.map(m => (m.id === assistantId ? { ...m, content: text } : m));
-            const viewing = !routeChatIdRef.current || routeChatIdRef.current === threadChatId;
+            const viewing = Boolean(routeChatIdRef.current && routeChatIdRef.current === threadChatId);
             if (viewing) {
               setMessages(prev => {
                 const next = patch(prev.some(m => m.id === assistantId) ? prev : messagesRef.current);
@@ -6608,7 +6853,7 @@ export function AIChat() {
               const stored = raw ? JSON.parse(raw) as ChatMessage[] : [];
               const base = Array.isArray(stored) && stored.some(m => m.id === assistantId)
                 ? stored
-                : messagesRef.current;
+                : [...normalized, userMsg, { ...assistantMsg, content: text }];
               persistModeThread(mode, patch(base), { chatId: threadChatId });
             } catch {
               /* ignore */
@@ -6647,8 +6892,8 @@ export function AIChat() {
           const imagePinned: ChatModelOption = mode === 'image'
             ? pinnedModel
             : {
-              id: 'ark-image-core',
-              name: 'ARK Image Core',
+              id: 'NOVA-image-core',
+              name: 'NOVA Image Core',
               source: 'local',
               detail: 'Free · Pollinations · local SD when installed',
               kind: 'image',
@@ -6683,7 +6928,7 @@ export function AIChat() {
             response = 'Image generation failed. Try again in a moment.';
             usedPlugin = true;
           } else {
-            resolvedProvider = routerProviderLabel(routed, 'ARK Image Core');
+            resolvedProvider = routerProviderLabel(routed, 'NOVA Image Core');
             const hopNote = failoverChipText(routed, imagePinned);
             if (hopNote) setFailoverNote(hopNote);
             if (mode === 'image' && pinnedModel.source === 'auto' && routed.source !== 'none') {
@@ -6754,10 +6999,10 @@ export function AIChat() {
         try {
           const setAssistantContent = (text: string) => {
             if (abandoned || stopRequestedRef.current || mySeq !== genSeqRef.current) return;
-            const threadChatId = persistChatIdRef.current || activeChatId;
+            const threadChatId = activeChatId;
             const patch = (list: ChatMessage[]) =>
               list.map(m => (m.id === assistantId ? { ...m, content: text } : m));
-            const viewing = !routeChatIdRef.current || routeChatIdRef.current === threadChatId;
+            const viewing = Boolean(routeChatIdRef.current && routeChatIdRef.current === threadChatId);
             if (viewing) {
               setMessages(prev => {
                 const next = patch(prev.some(m => m.id === assistantId) ? prev : messagesRef.current);
@@ -6772,7 +7017,7 @@ export function AIChat() {
               const stored = raw ? JSON.parse(raw) as ChatMessage[] : [];
               const base = Array.isArray(stored) && stored.some(m => m.id === assistantId)
                 ? stored
-                : messagesRef.current;
+                : [...normalized, userMsg, { ...assistantMsg, content: text }];
               persistModeThread(mode, patch(base), { chatId: threadChatId });
             } catch {
               /* ignore */
@@ -6899,14 +7144,8 @@ export function AIChat() {
             }))
             : buildRouterHistory([], content, vision);
           if (planningTalk) {
-            chatTurnCtlRef.current.pushStatus('Thinking through your idea…');
-            await new Promise<void>(r => {
-              window.setTimeout(
-                r,
-                Math.max(2800, Math.min(10000, briefReadDelayMs(content || pendingIdea?.summary || ''))),
-              );
-            });
-            if (mySeq !== genSeqRef.current || stopRequestedRef.current) return;
+            // Single status only — no multi-second delay that thrash-replaces the bubble before tokens arrive.
+            chatTurnCtlRef.current.pushStatus('Thinking…');
             history = [
               { role: 'user' as const, content: planningConversationHint(pendingIdea?.summary || undefined) },
               { role: 'assistant' as const, content: 'Understood. I will stay on their topic, give a thorough answer, and not invent a random product.' },
@@ -6948,10 +7187,21 @@ export function AIChat() {
               ...history,
             ];
           }
+          if (looksLikeThreadSummaryAsk(content)) {
+            history = [
+              { role: 'user' as const, content: threadSummarySystemHint() },
+              {
+                role: 'assistant' as const,
+                content: 'Understood. I will summarize only this chat thread from the prior turns.',
+              },
+              ...history,
+            ];
+          }
           const sticky = stickyBrain;
           const pinnedIsCoder = /coder|starcoder/i.test(`${pinnedModel.id || ''} ${pinnedModel.name || ''}`);
           const judgmentAsk = looksLikeDirectJudgmentAsk(content);
-          const useChatBrain = (planningTalk || judgmentAsk) && (pinnedIsCoder || /1\.5b|1.5B|0\.5b/i.test(`${pinnedModel.id || ''} ${pinnedModel.name || ''}`));
+          const summaryAsk = looksLikeThreadSummaryAsk(content);
+          const useChatBrain = (planningTalk || judgmentAsk || summaryAsk) && (pinnedIsCoder || /1\.5b|1.5B|0\.5b/i.test(`${pinnedModel.id || ''} ${pinnedModel.name || ''}`));
           const timeoutMs = 250_000;
           const firstTokenMs = planningTalk ? 55_000 : 35_000;
           let sawToken = false;
@@ -6973,11 +7223,14 @@ export function AIChat() {
               const live = usableAssistantText(streamedPartial, content, previousAssistant)
                 || streamedPartial.trim();
               const liveClean = live && !looksLikePromptEcho(live) ? live : '';
-              // Only real answer tokens count — echo used to flip sawToken and disable the 35s timeout.
-              if (liveClean) sawToken = true;
+              if (liveClean) {
+                lastGoodLive = liveClean;
+                sawToken = true;
+              }
               // Fast-fail when the model is only re-emitting the system prompt.
               if (
                 !liveClean
+                && !lastGoodLive
                 && looksLikePromptEcho(streamedPartial)
                 && streamedPartial.trim().length > 140
                 && !abandoned
@@ -6990,6 +7243,7 @@ export function AIChat() {
                 });
                 return;
               }
+              const display = lastGoodLive || liveClean || `__generating__:chat:${statusLabel}`;
               setMessages(prev => {
                 // Don't stream another thread onto a blank New Chat / different recent.
                 if (routeChatIdRef.current !== activeChatId) {
@@ -6997,7 +7251,7 @@ export function AIChat() {
                   persistTimerRef.current = window.setTimeout(() => {
                     const liveMsg = {
                       ...assistantMsg,
-                      content: liveClean || `__generating__:chat:${statusLabel}`,
+                      content: display,
                     };
                     persistModeThread(mode, [...normalized, userMsg, liveMsg], {
                       chatId: activeChatId,
@@ -7007,14 +7261,17 @@ export function AIChat() {
                 }
                 const next = prev.map(m => {
                   if (m.id !== assistantId) return m;
-                  // Keep streaming the real answer even if it includes sample HTML/code.
-                  return { ...m, content: liveClean || `__generating__:chat:${planningTalk ? 'Thinking through your idea…' : statusLabel}` };
+                  // Never flip back to a status label once real answer text has landed (stops flicker).
+                  return { ...m, content: display };
                 });
                 messagesRef.current = next;
+                messagesChatIdRef.current = activeChatId;
                 if (persistTimerRef.current) window.clearTimeout(persistTimerRef.current);
+                const snapshot = next;
+                const persistTo = activeChatId;
                 persistTimerRef.current = window.setTimeout(() => {
-                  persistModeThread(mode, messagesRef.current, {
-                    chatId: persistChatIdRef.current || activeChatId,
+                  persistModeThread(mode, snapshot, {
+                    chatId: persistTo,
                   });
                 }, 220);
                 return next;
@@ -7058,10 +7315,64 @@ export function AIChat() {
           const rawReply = stopRequestedRef.current && streamedPartial
             ? streamedPartial
             : routed.reply;
-          const candidate = String(rawReply || streamedPartial || '').trim();
+          const candidate = String(rawReply || streamedPartial || lastGoodLive || '').trim();
           response = usableAssistantText(rawReply, content, previousAssistant)
             || usableAssistantText(streamedPartial, content, previousAssistant)
+            || lastGoodLive
             || (looksLikePromptEcho(candidate) ? '' : candidate);
+          if (looksLikeThreadSummaryAsk(content)) {
+            // Prefer persisted thread for THIS chat — messagesRef can lag right after a Recent switch.
+            let threadMsgs = messagesRef.current.filter(m => m.id !== assistantId);
+            if (activeChatId) {
+              try {
+                const raw = localStorage.getItem(chatThreadKey(activeChatId));
+                if (raw) {
+                  const parsed = JSON.parse(raw);
+                  const list = Array.isArray(parsed) ? parsed : [];
+                  if (list.length >= threadMsgs.length) {
+                    threadMsgs = list.filter((m: ChatMessage) => m.id !== assistantId);
+                  }
+                }
+              } catch { /* keep threadMsgs */ }
+            }
+            let localSummary = buildThreadSummaryFromMessages([
+              ...threadMsgs,
+              { role: 'user', content },
+            ]);
+            // If the in-memory thread is empty after a Recent switch, rebuild from persisted mode thread.
+            if (/still short/i.test(localSummary) && activeChatId) {
+              try {
+                const raw = localStorage.getItem(chatThreadKey(activeChatId));
+                if (raw) {
+                  const parsed = JSON.parse(raw);
+                  const list = Array.isArray(parsed) ? parsed : (parsed?.messages || []);
+                  if (Array.isArray(list) && list.length) {
+                    localSummary = buildThreadSummaryFromMessages([
+                      ...list.filter((m: ChatMessage) => m.id !== assistantId),
+                      { role: 'user', content },
+                    ]);
+                  }
+                }
+              } catch { /* keep localSummary */ }
+            }
+            const userBits = [
+              ...threadMsgs.filter(m => m.role === 'user').map(m => String(m.content || '')),
+            ]
+              .map(t => t.replace(/<!--[\s\S]*?-->/g, '').trim())
+              .filter(Boolean)
+              .slice(-8);
+            const mentionsThread = userBits.some((u) => {
+              const tokens = u.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 4).slice(0, 10);
+              return tokens.some((w) => response.toLowerCase().includes(w));
+            });
+            const thin = !response.trim()
+              || response.trim().length < 48
+              || looksLikePromptEcho(response)
+              || /Would you like more information on any of these steps/i.test(response);
+            if (thin || !mentionsThread) {
+              response = localSummary;
+            }
+          }
           if (
             looksLikeCopyPasteCodeAsk(content)
             && mode !== 'image'
@@ -7087,7 +7398,7 @@ export function AIChat() {
               );
               if (nextBrain) setThreadBrain(nextBrain);
             }
-            if (pinnedModel.source === 'local' && pinnedModel.id !== 'ark-auto') {
+            if (pinnedModel.source === 'local' && pinnedModel.id !== 'NOVA-auto') {
               setLocalPrefs({ lastChatModelId: pinnedModel.id });
             }
           }
@@ -7104,7 +7415,7 @@ export function AIChat() {
               ? usableAssistantText(streamedPartial, content, previousAssistant) || (looksLikePromptEcho(streamedPartial) ? '' : streamedPartial.trim())
               : (timedOut
                 ? 'Response timed out. Try again or pick another model.'
-                : (err instanceof Error ? err.message : 'ARK Router failed'));
+                : (err instanceof Error ? err.message : 'NOVA Router failed'));
           response = classifyErrorMessage(rawErr).message;
           usedPlugin = true;
         }
@@ -7141,6 +7452,13 @@ export function AIChat() {
               const hydrated = await loadPreviewFilesFromDisk(root);
               if (Object.keys(hydrated).length) {
                 filesForPatch = { ...filesForPatch, ...hydrated };
+                // Prefer longer on-disk App.jsx if studio map was thinned by a prior bad hydrate.
+                for (const [rel, text] of Object.entries(hydrated)) {
+                  const cur = filesForPatch[rel];
+                  if (!cur || (typeof text === 'string' && text.length > String(cur).length)) {
+                    filesForPatch[rel] = text;
+                  }
+                }
                 setChatStudioFiles(filesForPatch);
                 chatStudioFilesRef.current = filesForPatch;
               }
@@ -7241,11 +7559,11 @@ export function AIChat() {
       setInput('Continue');
       void sendMessageRef.current('Continue');
     };
-    window.addEventListener('ark:agent-continue', onContinue);
-    return () => window.removeEventListener('ark:agent-continue', onContinue);
+    window.addEventListener('NOVA:agent-continue', onContinue);
+    return () => window.removeEventListener('NOVA:agent-continue', onContinue);
   }, []);
 
-  /** Grow textarea only — never remount + / ARK (that remount caused flicker + clipped text). */
+  /** Grow textarea only — never remount + / NOVA (that remount caused flicker + clipped text). */
   const resizeComposer = useCallback(() => {
     const el = textareaRef.current;
     if (!el) return;
@@ -7411,7 +7729,7 @@ export function AIChat() {
                   setActiveModel(model);
                   if (model.kind === 'chat') {
                     setLocalPrefs({
-                      defaultModelId: 'ark-auto',
+                      defaultModelId: 'NOVA-auto',
                       lastChatModelId: undefined,
                       aiMode: 'automatic',
                       autoFailover: true,
@@ -7497,7 +7815,7 @@ export function AIChat() {
         {(() => {
           const notReadyLocal = modelsForTab.filter(m =>
             m.source === 'local'
-            && m.id !== 'ark-auto'
+            && m.id !== 'NOVA-auto'
             && !engineReadyIds.has(m.id)
             && !installingModels.some(i => i.id === m.id)
             && !localModels.some(l => l.id === m.id),
@@ -7813,27 +8131,101 @@ export function AIChat() {
           )}
           <div className="flex gap-2 min-w-0 items-end">
           <div
+            data-ark-composer="1"
             className={`flex-1 min-w-0 flex flex-col border border-surface-border bg-ark-navy-900/90 shadow-lg shadow-black/20 overflow-hidden ${
               mode === 'voice' ? 'rounded-2xl' : 'rounded-xl'
             }`}
           >
-          {queueLen > 0 && (
-            <div className="w-full min-w-0 box-border flex items-center justify-between gap-2 border-b border-amber-500/20 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-100/90">
-              <span className="min-w-0 flex-1 truncate">
-                {queueLen === 1
-                  ? '1 message queued. sends as soon as this reply finishes'
-                  : `${queueLen} messages queued. send next when this reply finishes`}
-              </span>
-              <button
-                type="button"
-                className="shrink-0 rounded-md px-2 py-0.5 text-amber-200/90 hover:bg-amber-500/20 transition-colors"
-                onClick={() => {
-                  pendingQueueRef.current = [];
-                  setQueueLen(0);
-                }}
-              >
-                Clear
-              </button>
+          {queueLen > 0 && pendingQueueRef.current.length > 0 && (
+            <div className="w-full min-w-0 box-border flex flex-col gap-1.5 border-b border-amber-500/20 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-100/90">
+              <div className="flex items-center justify-between gap-2">
+                <span className="min-w-0 flex-1 truncate">
+                  {queueLen === 1
+                    ? '1 message queued — edit or wait for this reply to finish'
+                    : `${queueLen} messages queued — next sends when this reply finishes`}
+                </span>
+                <button
+                  type="button"
+                  className="shrink-0 rounded-md px-2 py-0.5 text-amber-200/90 hover:bg-amber-500/20 transition-colors"
+                  onClick={() => {
+                    pendingQueueRef.current = [];
+                    setQueueLen(0);
+                    setQueueTick(t => t + 1);
+                    editingQueueIdRef.current = null;
+                    setEditingQueueId(null);
+                    setEditingQueueText('');
+                  }}
+                >
+                  Clear
+                </button>
+              </div>
+              <ul className="space-y-1.5" key={queueTick}>
+                {pendingQueueRef.current.map((q, idx) => (
+                  <li key={q.id} className="rounded-md border border-amber-500/20 bg-ark-navy-950/40 px-2 py-1.5">
+                    {editingQueueId === q.id ? (
+                      <div className="flex flex-col gap-1.5">
+                        <textarea
+                          value={editingQueueText}
+                          onChange={e => setEditingQueueText(e.target.value)}
+                          rows={2}
+                          className="w-full resize-none rounded-md border border-amber-500/30 bg-ark-navy-950 px-2 py-1 text-[12px] text-content-primary outline-none focus:border-amber-400/50"
+                        />
+                        <div className="flex justify-end gap-1.5">
+                          <button
+                            type="button"
+                            className="rounded-md px-2 py-0.5 text-amber-200/80 hover:bg-amber-500/15"
+                            onClick={() => {
+                              editingQueueIdRef.current = null;
+                              setEditingQueueId(null);
+                              setEditingQueueText('');
+                            }}
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="button"
+                            className="rounded-md bg-amber-500/90 px-2.5 py-0.5 font-medium text-ark-navy-950 hover:bg-amber-400"
+                            onClick={() => {
+                              const text = editingQueueText.trim();
+                              if (!text) return;
+                              pendingQueueRef.current = pendingQueueRef.current.map(item => (
+                                item.id === q.id ? { ...item, text } : item
+                              ));
+                              setQueueTick(t => t + 1);
+                              editingQueueIdRef.current = null;
+                              setEditingQueueId(null);
+                              setEditingQueueText('');
+                              // If the reply already finished while editing, flush now.
+                              if (!generatingRef.current) flushQueuedSend();
+                            }}
+                          >
+                            Save
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex items-start gap-2">
+                        <span className="min-w-0 flex-1 text-amber-50/90 break-words [overflow-wrap:anywhere]">
+                          <span className="text-amber-200/50 mr-1">{idx + 1}.</span>
+                          {q.text.length > 160 ? `${q.text.slice(0, 157)}…` : q.text}
+                        </span>
+                        <button
+                          type="button"
+                          aria-label="Edit queued message"
+                          className="shrink-0 rounded-md px-1.5 py-0.5 text-amber-200/90 hover:bg-amber-500/20"
+                          onClick={() => {
+                            editingQueueIdRef.current = q.id;
+                            setEditingQueueId(q.id);
+                            setEditingQueueText(q.text);
+                          }}
+                        >
+                          Edit
+                        </button>
+                      </div>
+                    )}
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
           <input
@@ -7984,7 +8376,7 @@ export function AIChat() {
                 className="inline-flex items-center gap-1 rounded-full border border-surface-border/80 bg-surface-hover/60 hover:bg-surface-hover px-2.5 py-1 text-xs text-content-primary transition-colors max-w-[9rem]"
                 title={`Active model · ${
                   activeModel.source === 'auto'
-                    ? (threadBrain ? autoEquippedCaption(threadBrain) : 'ARK Auto · picks best brain')
+                    ? (threadBrain ? autoEquippedCaption(threadBrain) : 'NOVA Auto · picks best brain')
                     : activeModel.name
                 }`}
                 aria-label="Select model"
@@ -8090,7 +8482,7 @@ export function AIChat() {
         )}
         {capacity && mode === 'video' && !capacity.videoFree && (
           <span className="text-[11px] text-amber-400/90">
-            Open desktop ARK Engine for free video routes
+            Open desktop NOVA Engine for free video routes
           </span>
         )}
 
@@ -8334,7 +8726,7 @@ export function AIChat() {
             {mode === 'video' && (
               <>
                 <p className="text-[11px] text-content-tertiary text-center mt-4 max-w-md mx-auto">
-                  Pick clip length (10 / 20 / 30s) above the composer before you send. ARK renders quality frames. expect ~15–30s.
+                  Pick clip length (10 / 20 / 30s) above the composer before you send. NOVA renders quality frames. expect ~15–30s.
                 </p>
                 {ideaGrid(VIDEO_IDEAS)}
               </>
@@ -8349,7 +8741,7 @@ export function AIChat() {
               ref={messagesScrollRef}
               onScroll={onMessagesScroll}
               onWheel={onMessagesWheel}
-              className="flex-1 min-h-0 overflow-auto px-4 sm:px-8 py-6 ark-scroll-quiet"
+              className="flex-1 min-h-0 overflow-auto px-4 sm:px-8 py-6 NOVA-scroll-quiet"
             >
             <div className="max-w-5xl mx-auto w-full space-y-5">
               {messages.length === 0 && showOpenThread && (
@@ -8366,7 +8758,7 @@ export function AIChat() {
                 >
                   {msg.role !== 'user' && (
                     <div className="w-8 h-8 flex items-center justify-center shrink-0 mt-0.5">
-                      <ArkMark className="w-7 h-7" title="ARK" />
+                      <ArkMark className="w-7 h-7" title="NOVA" />
                     </div>
                   )}
                   <div

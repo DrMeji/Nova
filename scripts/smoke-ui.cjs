@@ -9,8 +9,8 @@ const http = require('http');
 
 const root = path.join(__dirname, '..');
 const electronPath = require('electron');
-const logFile = path.join(process.env.TEMP || root, 'ark-smoke-ui.log');
-const resultFile = path.join(process.env.TEMP || root, 'ark-smoke-ui-result.json');
+const logFile = path.join(process.env.TEMP || root, 'NOVA-smoke-ui.log');
+const resultFile = path.join(process.env.TEMP || root, 'NOVA-smoke-ui-result.json');
 
 fs.writeFileSync(logFile, '');
 function log(msg) {

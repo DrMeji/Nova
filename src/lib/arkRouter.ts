@@ -1,11 +1,11 @@
 /**
- * ARK Router. ARK-owned routing for chat / image / video.
+ * NOVA Router. NOVA-owned routing for chat / image / video.
  *
- * Auto hops (ARK is the brain; Ollama is never identity):
- *   capable ARK Engine GGUF (intent + RAM) → free-key cloud if local is
+ * Auto hops (NOVA is the brain; Ollama is never identity):
+ *   capable NOVA Engine GGUF (intent + RAM) → free-key cloud if local is
  *   weak/missing → remaining Engine GGUFs → paid keys → optional Ollama last
  *
- * Chat memory is ARK-owned: history travels with every hop so a new
+ * Chat memory is NOVA-owned: history travels with every hop so a new
  * provider continues mid-task instead of greeting like a fresh chat.
  */
 
@@ -14,6 +14,7 @@ import {
   sanitizeAssistantReply,
   looksLikePromptEcho,
   looksLikeRestatedPriorAnswer,
+  looksLikeUserAskEcho,
   isSoftContinuityAsk,
   usableAssistantText,
   type RouterChatTurn,
@@ -92,7 +93,7 @@ export type ArkRouteOpts = {
   preferredModelId?: string;
   preferredModelName?: string;
   preferredSource?: 'local' | 'cloud' | 'auto';
-  /** Prior + current user turns owned by ARK (not the provider). */
+  /** Prior + current user turns owned by NOVA (not the provider). */
   history?: RouterChatTurn[];
   /** When set, local GGUF tokens stream into this callback. */
   onChunk?: (text: string) => void;
@@ -123,11 +124,11 @@ function askCloudRetryReply(attempted: string[]): ArkRouterResult {
     reply: [
       'Local brain failed or is not ready.',
       '',
-      'Enable **Auto failover** in Settings → AI, or pick a cloud model from the ARK menu and send again.',
+      'Enable **Auto failover** in Settings → AI, or pick a cloud model from the NOVA menu and send again.',
       '',
       '**Retry with cloud?** Choose a cloud model, then resend your message.',
     ].join('\n'),
-    modelName: 'ARK Auto',
+    modelName: 'NOVA Auto',
     source: 'none',
     tier: 'local-free',
     attempted,
@@ -173,7 +174,7 @@ async function tryLocalChat(
   onAttemptReset?: () => void,
 ): Promise<ArkRouterResult | null> {
   const runOne = async (id: string | undefined): Promise<ArkRouterResult | null> => {
-    attempted.push(id ? `ARK Engine · ${id}` : 'ARK Engine');
+    attempted.push(id ? `NOVA Engine · ${id}` : 'NOVA Engine');
     try {
       if (!window.arkDesktop?.engineGenerate) {
         const brain = await probeBrain();
@@ -208,6 +209,33 @@ async function tryLocalChat(
           Object.assign(result, retry);
         }
       }
+      // Local models often restate “I want to build…” — strip/retry so the bubble answers as NOVA.
+      if (
+        kind === 'chat'
+        && looksLikeUserAskEcho(cleaned || rawText, message)
+      ) {
+        onAttemptReset?.();
+        const noEchoPrompt = [
+          packHistoryPrompt(history, message),
+          '',
+          'CRITICAL RETRY: Do NOT restate the user message. Do NOT start with “I want to…”. '
+          + 'Open as the assistant (e.g. “Sure — here is how I would approach that”), then give concrete steps.',
+        ].join('\n');
+        const retry = onChunk
+          ? await brainGenerateStream(noEchoPrompt, id, onChunk, kind)
+          : await brainGenerate(noEchoPrompt, id, kind);
+        const retryClean = usableAssistantText(retry.reply, message, prevAsst);
+        const retryRaw = String(retry.reply || '').trim();
+        if (retryClean && !looksLikeUserAskEcho(retryClean, message)) {
+          cleaned = retryClean;
+          rawText = retryRaw;
+          Object.assign(result, retry);
+        } else if (retryClean || retryRaw) {
+          cleaned = usableAssistantText(retryClean || retryRaw, message, prevAsst) || cleaned;
+          rawText = retryRaw || rawText;
+          Object.assign(result, retry);
+        }
+      }
       // If a local GGUF echoes the system prompt, we must fail this attempt so failover
       // can hop to a model that returns a real answer.
       if (!cleaned.trim() && looksLikePromptEcho(rawText)) return null;
@@ -219,7 +247,7 @@ async function tryLocalChat(
           return {
             reply: prose,
             media: result.media,
-            modelName: result.modelName || 'ARK Engine',
+            modelName: result.modelName || 'NOVA Engine',
             modelId: id || result.modelName,
             source: result.source || 'ark-engine',
             tier: 'local-free',
@@ -242,7 +270,7 @@ async function tryLocalChat(
       return {
         reply,
         media: result.media,
-        modelName: result.modelName || 'ARK Engine',
+        modelName: result.modelName || 'NOVA Engine',
         modelId: id || result.modelName,
         source: result.source || 'ark-engine',
         tier: 'local-free',
@@ -282,9 +310,9 @@ async function tryLocalChat(
         if (
           m.status === 'ready'
           && m.id !== modelId
-          && m.id !== 'ark-core'
-          && m.id !== 'ark-image-core'
-          && m.id !== 'ark-video-core'
+          && m.id !== 'NOVA-core'
+          && m.id !== 'NOVA-image-core'
+          && m.id !== 'NOVA-video-core'
         ) extras.push(m.id);
       }
     } catch {
@@ -406,7 +434,7 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
   const preferredId = opts.preferredModelId;
   const preferredName = opts.preferredModelName || preferredId || '';
   const isAuto =
-    preferredId === 'ark-auto'
+    preferredId === 'NOVA-auto'
     || opts.preferredSource === 'auto';
   const pinnedCloud = opts.preferredSource === 'cloud' && !isAuto;
   const pinnedOllama = Boolean(preferredId?.startsWith('ollama:')) && !isAuto;
@@ -415,7 +443,7 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
     && !pinnedCloud
     && !pinnedOllama
     && Boolean(preferredId)
-    && preferredId !== 'ark-auto'
+    && preferredId !== 'NOVA-auto'
     && opts.preferredSource === 'local';
   const history = historyFor(opts);
   const intent = classifyChatIntent(opts.message, opts.kind);
@@ -468,14 +496,14 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
     };
   }
 
-  // ── Pinned cloud model (skipped for ARK Auto) ──────────────────────
+  // ── Pinned cloud model (skipped for NOVA Auto) ──────────────────────
   // Explicit cloud picks must stick: cascade among cloud keys only — never snap to local.
   if (pinnedCloud && !isAuto) {
     if (!modeAllowsCloud(mode)) {
       return {
         reply: [
           'Local-only mode is on, so the cloud model you picked was not used.',
-          'Switch Routing mode in Settings → AI, or pick a local brain from the ARK menu.',
+          'Switch Routing mode in Settings → AI, or pick a local brain from the NOVA menu.',
         ].join(' '),
         modelName: preferredName || 'Cloud',
         source: 'none',
@@ -506,7 +534,7 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
       reply: failover
         ? [
           `Cloud model **${preferredName || preferredId || 'Cloud'}** failed, and other cloud keys did not answer.`,
-          'ARK stayed on cloud (did not switch to a local brain).',
+          'NOVA stayed on cloud (did not switch to a local brain).',
           'Check the matching API key in Models → Cloud, or pick another cloud model.',
         ].join(' ')
         : [
@@ -535,7 +563,7 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
     }
   }
 
-  // ── Pinned ARK Engine GGUF ─────────────────────────────────────────
+  // ── Pinned NOVA Engine GGUF ─────────────────────────────────────────
   if (pinnedLocalEngine) {
     const localPinned = await tryLocalChat(
       history,
@@ -552,7 +580,7 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
     if (!failover) {
       return {
         reply: 'That local brain isn’t ready. Install it from Local AI / Models, or enable Auto failover in Settings.',
-        modelName: preferredName || 'ARK Engine',
+        modelName: preferredName || 'NOVA Engine',
         source: 'none',
         tier: 'local-free',
         attempted,
@@ -597,7 +625,7 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
   const rest = ranked.slice(1);
   const capableLocal = Boolean(picked && !isWeakChatBrain(picked));
 
-  // ── ARK Auto: Engine is the brain; Ollama is last-resort optional ──
+  // ── NOVA Auto: Engine is the brain; Ollama is last-resort optional ──
   if (isAuto) {
     if (opts.stickyModelId && opts.stickyPinnedSource) {
       const sticky = await tryStickyBrain(
@@ -676,10 +704,10 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
       return {
         reply: [
           'Local-only mode is on, but no live local brain is ready.',
-          'Install a GGUF model into ARK Engine (Local AI / Models), or enable optional Ollama.',
-          'ARK Core’s template replies are not a live model. they won’t answer like ChatGPT.',
+          'Install a GGUF model into NOVA Engine (Local AI / Models), or enable optional Ollama.',
+          'NOVA Core’s template replies are not a live model. they won’t answer like ChatGPT.',
         ].join('\n'),
-        modelName: 'ARK Engine',
+        modelName: 'NOVA Engine',
         source: 'none',
         tier: 'local-free',
         attempted,
@@ -745,7 +773,7 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
 
     return {
       reply: honestNoLiveChatReply(),
-      modelName: 'ARK Auto',
+      modelName: 'NOVA Auto',
       source: 'none',
       tier: 'local-free',
       attempted,
@@ -776,10 +804,10 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
     return {
       reply: [
         'Local-only mode is on, but no live local brain is ready.',
-        'Install a GGUF model into ARK Engine (Local AI / Models), or enable optional Ollama.',
-        'ARK Core’s template replies are not a live model. they won’t answer like ChatGPT.',
+        'Install a GGUF model into NOVA Engine (Local AI / Models), or enable optional Ollama.',
+        'NOVA Core’s template replies are not a live model. they won’t answer like ChatGPT.',
       ].join('\n'),
-      modelName: 'ARK Engine',
+      modelName: 'NOVA Engine',
       source: 'none',
       tier: 'local-free',
       attempted,
@@ -813,10 +841,10 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
   const ollama = await tryOllama(history, opts.message, preferredId, attempted);
   if (ollama) return ollama;
 
-  // Never return ARK Core template as a finished answer. be honest.
+  // Never return NOVA Core template as a finished answer. be honest.
   return {
     reply: honestNoLiveChatReply(),
-    modelName: 'ARK Auto',
+    modelName: 'NOVA Auto',
     source: 'none',
     tier: 'local-free',
     attempted,
@@ -828,7 +856,7 @@ function hitSource(provider: string) {
 }
 
 function isAutoRoute(opts: ArkRouteOpts) {
-  return opts.preferredModelId === 'ark-auto' || opts.preferredSource === 'auto';
+  return opts.preferredModelId === 'NOVA-auto' || opts.preferredSource === 'auto';
 }
 
 async function tryStickyImage(
@@ -862,7 +890,7 @@ async function tryStickyImage(
     }
   }
 
-  const modelId = opts.stickyModelId || 'ark-image-core';
+  const modelId = opts.stickyModelId || 'NOVA-image-core';
   try {
     const result = await brainGenerate(opts.message, modelId, 'image', {
       mediaDurationSec: opts.mediaDurationSec,
@@ -872,7 +900,7 @@ async function tryStickyImage(
       return result.reply
         ? {
           reply: result.reply,
-          modelName: result.modelName || 'ARK Image Core',
+          modelName: result.modelName || 'NOVA Image Core',
           modelId,
           source: result.source || 'ark-media',
           tier: 'no-key-free',
@@ -883,7 +911,7 @@ async function tryStickyImage(
     return {
       reply: result.reply,
       media: result.media,
-      modelName: result.modelName || 'ARK Image Core',
+      modelName: result.modelName || 'NOVA Image Core',
       modelId,
       source: result.source || 'ark-media',
       tier: result.media.real ? 'no-key-free' : 'local-free',
@@ -900,7 +928,7 @@ async function tryStickyVideo(
 ): Promise<ArkRouterResult | null> {
   if (!opts.stickyModelId || !opts.stickyPinnedSource) return null;
   attempted.push(`Sticky · ${opts.stickyModelName || opts.stickyModelId}`);
-  const modelId = opts.stickyModelId || 'ark-video-core';
+  const modelId = opts.stickyModelId || 'NOVA-video-core';
   try {
     const result = await brainGenerate(opts.message, modelId, 'video', {
       mediaDurationSec: opts.mediaDurationSec,
@@ -927,7 +955,7 @@ async function tryStickyVideo(
     return {
       reply,
       media: result.media,
-      modelName: result.modelName || 'ARK Video Core',
+      modelName: result.modelName || 'NOVA Video Core',
       modelId,
       source,
       tier: isMp4 ? 'no-key-free' : isFallback ? 'local-free' : (result.media?.real ? 'no-key-free' : 'local-free'),
@@ -988,8 +1016,8 @@ async function routeImage(opts: ArkRouteOpts): Promise<ArkRouterResult> {
   };
 
   const tryLocalMedia = async (modelId?: string): Promise<ArkRouterResult | null> => {
-    const mid = modelId || opts.preferredModelId || 'ark-image-core';
-    const label = mid === 'ark-image-core' ? 'ARK Image Core' : mid;
+    const mid = modelId || opts.preferredModelId || 'NOVA-image-core';
+    const label = mid === 'NOVA-image-core' ? 'NOVA Image Core' : mid;
     attempted.push(label);
     try {
       const result = await brainGenerate(opts.message, mid, 'image', {
@@ -1025,7 +1053,7 @@ async function routeImage(opts: ArkRouteOpts): Promise<ArkRouterResult> {
     if (cloud) return cloud;
     if (!failover && opts.preferredSource === 'cloud') {
       return {
-        reply: 'Cloud image failed. Add a Hugging Face or OpenAI key in Models → Cloud, or switch to ARK Image Core.',
+        reply: 'Cloud image failed. Add a Hugging Face or OpenAI key in Models → Cloud, or switch to NOVA Image Core.',
         modelName: opts.preferredModelName || 'Cloud image',
         source: 'none',
         tier: 'paid',
@@ -1083,7 +1111,7 @@ async function routeImage(opts: ArkRouteOpts): Promise<ArkRouterResult> {
       'Image generation failed. No local image weights and the free image host did not return a real image.',
       'Open Local AI to install image weights, or add a Hugging Face / OpenAI key in Models → Cloud.',
     ].join(' '),
-    modelName: 'ARK Router',
+    modelName: 'NOVA Router',
     source: 'none',
     tier: 'no-key-free',
     attempted,
@@ -1099,10 +1127,10 @@ async function routeVideo(opts: ArkRouteOpts): Promise<ArkRouterResult> {
     if (sticky && sticky.source !== 'none') return sticky;
   }
 
-  const modelId = opts.preferredModelId && opts.preferredModelId !== 'ark-auto'
+  const modelId = opts.preferredModelId && opts.preferredModelId !== 'NOVA-auto'
     ? opts.preferredModelId
-    : 'ark-video-core';
-  attempted.push(modelId === 'ark-video-core' ? 'ARK Video Core' : modelId);
+    : 'NOVA-video-core';
+  attempted.push(modelId === 'NOVA-video-core' ? 'NOVA Video Core' : modelId);
   try {
     const result = await brainGenerate(opts.message, modelId, 'video', {
       mediaDurationSec: opts.mediaDurationSec,
@@ -1134,25 +1162,25 @@ async function routeVideo(opts: ArkRouteOpts): Promise<ArkRouterResult> {
     return {
       reply,
       media: result.media,
-      modelName: result.modelName || 'ARK Video Core',
+      modelName: result.modelName || 'NOVA Video Core',
       modelId,
       source,
       tier: isMp4 ? 'no-key-free' : isFallback ? 'local-free' : (result.media?.real ? 'no-key-free' : 'local-free'),
       attempted,
     };
   } catch (err) {
-    if (modelId !== 'ark-video-core') {
+    if (modelId !== 'NOVA-video-core') {
       try {
-        attempted.push('ARK Video Core');
-        const retry = await brainGenerate(opts.message, 'ark-video-core', 'video', {
+        attempted.push('NOVA Video Core');
+        const retry = await brainGenerate(opts.message, 'NOVA-video-core', 'video', {
           mediaDurationSec: opts.mediaDurationSec,
         });
         if (retry?.media?.dataUrl) {
           return {
             reply: retry.reply,
             media: retry.media,
-            modelName: retry.modelName || 'ARK Video Core',
-            modelId: 'ark-video-core',
+            modelName: retry.modelName || 'NOVA Video Core',
+            modelId: 'NOVA-video-core',
             source: retry.source || 'ark-media',
             tier: retry.media.real ? 'no-key-free' : 'local-free',
             attempted,
@@ -1172,7 +1200,7 @@ async function routeVideo(opts: ArkRouteOpts): Promise<ArkRouterResult> {
         err instanceof Error ? err.message : 'Video generation failed',
         'Open Local AI to install video weights, or add a key in Models → Cloud.',
       ].join(' '),
-      modelName: 'ARK Video Core',
+      modelName: 'NOVA Video Core',
       source: 'none',
       tier: 'no-key-free',
       attempted,

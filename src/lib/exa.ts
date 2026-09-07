@@ -12,7 +12,7 @@ export async function verifyExaToken(token: string): Promise<{ label: string }> 
       'x-api-key': trimmed,
     },
     body: JSON.stringify({
-      query: 'ARK connectivity test',
+      query: 'NOVA connectivity test',
       numResults: 1,
       type: 'auto',
     }),

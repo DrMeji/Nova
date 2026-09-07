@@ -1,5 +1,5 @@
 /**
- * Smoke packaged win-unpacked ARK.exe — must show Auth UI, not blank root.
+ * Smoke packaged win-unpacked NOVA.exe — must show Auth UI, not blank root.
  */
 const { spawn } = require('child_process');
 const path = require('path');
@@ -7,9 +7,9 @@ const fs = require('fs');
 const http = require('http');
 
 const root = path.join(__dirname, '..');
-const exe = path.join(root, 'release', 'win-unpacked', 'ARK.exe');
+const exe = path.join(root, 'release', 'win-unpacked', 'NOVA.exe');
 const port = 9444;
-const logFile = path.join(process.env.TEMP || root, 'ark-smoke-packaged.log');
+const logFile = path.join(process.env.TEMP || root, 'NOVA-smoke-packaged.log');
 
 fs.writeFileSync(logFile, '');
 function log(msg) {
@@ -131,7 +131,7 @@ child.stdout.on('data', (d) => log('OUT ' + d.toString().trim()));
       value.hasArkDesktop === true &&
       value.rootLen > 50 &&
       !fatal &&
-      /Sign in|Welcome|ARK|BUILD/i.test(text);
+      /Sign in|Welcome|NOVA|BUILD/i.test(text);
     log(ok ? 'PACKAGED SMOKE PASS' : 'PACKAGED SMOKE FAIL');
     code = ok ? 0 : 1;
   } catch (e) {
@@ -142,7 +142,7 @@ child.stdout.on('data', (d) => log('OUT ' + d.toString().trim()));
       child.kill();
     } catch {}
     try {
-      require('child_process').execSync('taskkill /F /IM ARK.exe', { stdio: 'ignore' });
+      require('child_process').execSync('taskkill /F /IM NOVA.exe', { stdio: 'ignore' });
     } catch {}
     try {
       require('child_process').execSync('taskkill /F /IM electron.exe', { stdio: 'ignore' });

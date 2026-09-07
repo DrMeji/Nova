@@ -1,8 +1,8 @@
 /**
- * ARK Engine — ARK's own local AI runtime (not Ollama, not a wrapper around another app).
+ * NOVA Engine — NOVA's own local AI runtime (not Ollama, not a wrapper around another app).
  *
  * Models live under the app userData folder. Chat prefers real GGUF + llama-cli when
- * installed; ARK Core remains a builtin fallback template only.
+ * installed; NOVA Core remains a builtin fallback template only.
  */
 
 const fs = require('fs');
@@ -87,7 +87,7 @@ function writeMarker(id, meta, extra = {}) {
 }
 
 let phase = 'online';
-let activeModelId = 'ark-core';
+let activeModelId = 'NOVA-core';
 /** @type {Record<string, { progress: number, error?: string, phase?: string, cancel?: boolean }>} */
 const downloads = {};
 /** @type {string[]} */
@@ -146,7 +146,7 @@ function listModels() {
       .map((g) => ({
         id: `gguf:${g.file}`,
         name: g.file.replace(/\.gguf$/i, ''),
-        detail: `GGUF · ${g.sizeMb} MB · ARK Engine`,
+        detail: `GGUF · ${g.sizeMb} MB · NOVA Engine`,
         sizeGb: Math.round((g.sizeMb / 1024) * 10) / 10,
         status: 'ready',
         gguf: true,
@@ -156,12 +156,12 @@ function listModels() {
 
 function getStatus() {
   const models = listModels();
-  // Only auto-switch away from ark-core when caller did not explicitly pick Core.
-  if (activeModelId === 'ark-core') {
+  // Only auto-switch away from NOVA-core when caller did not explicitly pick Core.
+  if (activeModelId === 'NOVA-core') {
     if (hasRealGguf(DEFAULT_BRAIN_ID)) {
       activeModelId = DEFAULT_BRAIN_ID;
     } else {
-      const readyBrain = models.find((m) => m.status === 'ready' && m.gguf && m.id !== 'ark-core');
+      const readyBrain = models.find((m) => m.status === 'ready' && m.gguf && m.id !== 'NOVA-core');
       if (readyBrain) activeModelId = readyBrain.id;
     }
   }
@@ -172,8 +172,8 @@ function getStatus() {
     service: 'ark-engine',
     version: '0.4.0',
     phase,
-    activeModelId: active?.id ?? 'ark-core',
-    activeModelName: active?.name ?? 'ARK Core',
+    activeModelId: active?.id ?? 'NOVA-core',
+    activeModelName: active?.name ?? 'NOVA Core',
     modelsDir: modelsDir(),
     modelsDirDefault: arkPaths.defaultModelsDir(),
     modelsDirIsCustom: arkPaths.modelsDirInfo().isCustom,
@@ -189,13 +189,13 @@ function getStatus() {
     note:
       phase === 'online'
         ? (llamaBin && arkGguf.listGgufFiles().length
-          ? 'ARK Engine online · local GGUF brain ready'
-          : 'ARK Engine online · install a local brain for zero-key chat')
+          ? 'NOVA Engine online · local GGUF brain ready'
+          : 'NOVA Engine online · install a local brain for zero-key chat')
         : phase === 'degraded'
-          ? 'ARK Engine degraded · runtime not ready yet'
+          ? 'NOVA Engine degraded · runtime not ready yet'
         : phase === 'starting'
-          ? 'Starting ARK Engine…'
-          : 'ARK Engine offline',
+          ? 'Starting NOVA Engine…'
+          : 'NOVA Engine offline',
   };
 }
 
@@ -211,10 +211,10 @@ function start() {
       runtimeOk = false;
     }
     const llamaBin = arkGguf.findLlamaBinary();
-    const ready = listModels().find((m) => m.gguf && m.status === 'ready' && m.id !== 'ark-core');
+    const ready = listModels().find((m) => m.gguf && m.status === 'ready' && m.id !== 'NOVA-core');
     if (runtimeOk && llamaBin) {
       phase = 'online';
-      // Defer GGUF warm so opening ARK / typing does not peg CPU while the UI is settling.
+      // Defer GGUF warm so opening NOVA / typing does not peg CPU while the UI is settling.
       if (ready) {
         const ggufId = String(ready.id).startsWith('gguf:') ? String(ready.id).slice(5) : ready.id;
         setTimeout(() => {
@@ -238,7 +238,7 @@ function stop() {
 function setActiveModel(id) {
   const models = listModels();
   const found = models.find((m) => m.id === id && m.status === 'ready');
-  if (!found) throw new Error('Model not installed in ARK Engine');
+  if (!found) throw new Error('Model not installed in NOVA Engine');
   activeModelId = id;
   const ggufId = String(id).startsWith('gguf:') ? String(id).slice(5) : id;
   void arkGguf.warmServer(ggufId);
@@ -539,7 +539,7 @@ function deleteInstalledModel(id) {
   const raw = String(id || '').trim();
   if (!raw) return { ok: false, error: 'No model selected' };
   const meta = catalogAll().find((m) => m.id === raw);
-  if (meta?.builtin || raw === 'ark-core' || raw === 'ark-image-core' || raw === 'ark-video-core') {
+  if (meta?.builtin || raw === 'NOVA-core' || raw === 'NOVA-image-core' || raw === 'NOVA-video-core') {
     return { ok: false, error: 'Cannot delete a built-in model' };
   }
 
@@ -567,7 +567,7 @@ function deleteInstalledModel(id) {
     : arkGguf.findGgufForModel(activeModelId);
   if (raw === activeModelId || (activeGguf && targets.includes(activeGguf))) {
     try { arkGguf.stopServer(); } catch { /* ignore */ }
-    activeModelId = 'ark-core';
+    activeModelId = 'NOVA-core';
   }
 
   try {
@@ -632,15 +632,15 @@ async function ensureRuntime() {
 function arkCoreGenerate(message, modelName) {
   const text = String(message || '').trim();
   if (!text) {
-    return 'ARK Engine is online. Install a local GGUF brain from Local AI for live answers.';
+    return 'NOVA Engine is online. Install a local GGUF brain from Local AI for live answers.';
   }
 
   const lower = text.toLowerCase();
   const preview = text.length > 280 ? `${text.slice(0, 280)}…` : text;
 
-  if (/who are you|what are you|what is ark/.test(lower)) {
+  if (/who are you|what are you|what is NOVA/.test(lower)) {
     return [
-      'I am ARK Engine — the local runtime inside ARK.',
+      'I am NOVA Engine — the local runtime inside NOVA.',
       'Install the default local brain (Qwen2.5 1.5B) from Local AI, or connect a free cloud key for full chat.',
     ].join('\n');
   }
@@ -649,7 +649,7 @@ function arkCoreGenerate(message, modelName) {
     const status = getStatus();
     const ready = status.models.filter((m) => m.status === 'ready' && m.gguf).map((m) => m.name);
     return [
-      'ARK Engine status',
+      'NOVA Engine status',
       `• Phase: ${status.phase}`,
       `• Active: ${status.activeModelName}`,
       `• GGUF brains: ${ready.join(', ') || 'none yet'}`,
@@ -659,11 +659,11 @@ function arkCoreGenerate(message, modelName) {
   }
 
   return [
-    `ARK Engine · ${modelName}`,
+    `NOVA Engine · ${modelName}`,
     '',
     `I heard: “${preview}”`,
     '',
-    'ARK Core is a template helper, not a live LLM.',
+    'NOVA Core is a template helper, not a live LLM.',
     'Install the default local brain from Local AI (Llama 3.2 3B or Qwen2.5 7B when your PC can run it) or connect Groq / Google / OpenRouter.',
   ].join('\n');
 }
@@ -680,15 +680,15 @@ async function generate(message, opts = {}) {
     if (localOnlyIds.has(String(modelId || '')) && !arkSd.isLocalImageReady()) {
       return {
         ok: false,
-        reply: 'Local image weights are not installed. Open Local AI to install them, or use ARK Image Core.',
-        modelId: modelId || 'ark-image-core',
+        reply: 'Local image weights are not installed. Open Local AI to install them, or use NOVA Image Core.',
+        modelId: modelId || 'NOVA-image-core',
         modelName: model?.name || String(modelId),
         source: 'none',
       };
     }
-    const mediaLabel = (!model || model.id === 'ark-core' || model.builtin)
-      ? 'ARK Image Core'
-      : (model.name || 'ARK Image Core');
+    const mediaLabel = (!model || model.id === 'NOVA-core' || model.builtin)
+      ? 'NOVA Image Core'
+      : (model.name || 'NOVA Image Core');
     const media = await arkMedia.generateImage(message, mediaLabel, {
       referenceImageDataUrl: opts.referenceImageDataUrl,
       allowNsfw: Boolean(opts.allowNsfw),
@@ -696,7 +696,7 @@ async function generate(message, opts = {}) {
     return {
       ok: media.ok !== false,
       reply: media.reply,
-      modelId: modelId || 'ark-image-core',
+      modelId: modelId || 'NOVA-image-core',
       modelName: media.modelName || mediaLabel,
       source: media.source || 'ark-media',
       media: media.dataUrl ? {
@@ -709,13 +709,13 @@ async function generate(message, opts = {}) {
     };
   }
   if (kind === 'video' || (modelId && String(modelId).includes('video'))) {
-    const media = await arkMedia.generateVideo(message, model?.name || 'ARK Video Core', {
+    const media = await arkMedia.generateVideo(message, model?.name || 'NOVA Video Core', {
       durationSec: opts.mediaDurationSec,
     });
     return {
       ok: media.ok !== false,
       reply: media.reply,
-      modelId: modelId || 'ark-video-core',
+      modelId: modelId || 'NOVA-video-core',
       modelName: media.modelName,
       source: media.source || 'ark-media',
       media: media.dataUrl ? {
@@ -735,7 +735,7 @@ async function generate(message, opts = {}) {
       throw new Error('Qwen2-VL is not installed. Download the vision bundle from Models → Vision in Local AI.');
     }
     if (phase !== 'online' && phase !== 'degraded') {
-      throw new Error('ARK Engine is offline. Start it from Local AI.');
+      throw new Error('NOVA Engine is offline. Start it from Local AI.');
     }
     const onChunk = typeof opts.onChunk === 'function' ? opts.onChunk : null;
     const gguf = await arkGguf.runGgufStream(
@@ -757,27 +757,27 @@ async function generate(message, opts = {}) {
     };
   }
 
-  if (requestedId === 'ark-core') {
+  if (requestedId === 'NOVA-core') {
     return {
       ok: true,
-      reply: arkCoreGenerate(message, 'ARK Core'),
-      modelId: 'ark-core',
-      modelName: 'ARK Core',
-      source: 'ark-template',
+      reply: arkCoreGenerate(message, 'NOVA Core'),
+      modelId: 'NOVA-core',
+      modelName: 'NOVA Core',
+      source: 'NOVA-template',
       template: true,
     };
   }
 
   if (phase !== 'online' && phase !== 'degraded') {
-    throw new Error('ARK Engine is offline. Start it from Local AI.');
+    throw new Error('NOVA Engine is offline. Start it from Local AI.');
   }
   if (phase === 'degraded' && !arkGguf.findLlamaBinary()) {
-    throw new Error('ARK Engine is degraded — local runtime is not ready. Open Local AI to install a brain.');
+    throw new Error('NOVA Engine is degraded — local runtime is not ready. Open Local AI to install a brain.');
   }
 
   const ramGb = Math.round(os.totalmem() / (1024 * 1024 * 1024));
   // Only honor a caller-specified id. activeModelId must not pin Lindsay/Auto to 1.5B.
-  const explicit = requestedId && requestedId !== 'ark-core' && requestedId !== 'ark-auto';
+  const explicit = requestedId && requestedId !== 'NOVA-core' && requestedId !== 'NOVA-auto';
   if (!explicit || !model || model.status !== 'ready' || !model.gguf) {
     const intent = arkModelRank.classifyIntent(message, kind);
     const pickedId = arkModelRank.pickReadyEngineId(models, intent, ramGb);
@@ -791,7 +791,7 @@ async function generate(message, opts = {}) {
   }
 
   if (!model || (model.status !== 'ready' && !model.gguf)) {
-    throw new Error('Selected model is not ready in ARK Engine');
+    throw new Error('Selected model is not ready in NOVA Engine');
   }
 
   const ggufId = String(model.id).startsWith('gguf:')

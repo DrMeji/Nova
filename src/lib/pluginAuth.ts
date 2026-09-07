@@ -10,7 +10,7 @@ const AUTH_LINKS: Record<string, PluginAuthLink> = {
   github: {
     label: 'GitHub token settings',
     url: 'https://github.com/settings/tokens?type=beta',
-    hint: 'Create a fine-grained or classic PAT, then paste it below. ARK verifies live.',
+    hint: 'Create a fine-grained or classic PAT, then paste it below. NOVA verifies live.',
   },
   notion: {
     label: 'Notion integrations',
@@ -90,7 +90,7 @@ const AUTH_LINKS: Record<string, PluginAuthLink> = {
   vercel: {
     label: 'Vercel tokens',
     url: 'https://vercel.com/account/tokens',
-    hint: 'Create a Vercel access token and paste it below. ARK verifies it live.',
+    hint: 'Create a Vercel access token and paste it below. NOVA verifies it live.',
   },
   discord: {
     label: 'Discord developer portal',
@@ -100,7 +100,7 @@ const AUTH_LINKS: Record<string, PluginAuthLink> = {
   datadog: {
     label: 'Datadog API keys',
     url: 'https://app.datadoghq.com/organization-settings/api-keys',
-    hint: 'Paste API key, or apiKey|appKey for monitors. ARK verifies live.',
+    hint: 'Paste API key, or apiKey|appKey for monitors. NOVA verifies live.',
   },
   shopify: {
     label: 'Shopify admin token',
@@ -185,12 +185,12 @@ const AUTH_LINKS: Record<string, PluginAuthLink> = {
   stripe: {
     label: 'Stripe API keys',
     url: 'https://dashboard.stripe.com/apikeys',
-    hint: 'Create a secret key (test or live) and paste it below. ARK verifies live.',
+    hint: 'Create a secret key (test or live) and paste it below. NOVA verifies live.',
   },
   exa: {
     label: 'Exa API keys',
     url: 'https://dashboard.exa.ai/api-keys',
-    hint: 'Create an API key and paste it below. ARK runs a live search to verify.',
+    hint: 'Create an API key and paste it below. NOVA runs a live search to verify.',
   },
   supabase: {
     label: 'Supabase access tokens',
@@ -204,7 +204,7 @@ export function getPluginAuthLink(pluginId: string): PluginAuthLink {
     AUTH_LINKS[pluginId] || {
       label: 'Open provider site',
       url: 'https://ark.local',
-      hint: 'Open the provider site, create a token or OAuth access token, then paste it here. ARK stores it in the OS vault.',
+      hint: 'Open the provider site, create a token or OAuth access token, then paste it here. NOVA stores it in the OS vault.',
     }
   );
 }

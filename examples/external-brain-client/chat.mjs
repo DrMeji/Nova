@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Minimal external client for ARK’s brain API (http://127.0.0.1:8787).
+ * Minimal external client for NOVA’s brain API (http://127.0.0.1:8787).
  *
  * Use this from Lindsay or any other app that needs a local brain.
  *
@@ -86,7 +86,7 @@ async function main() {
   const stream = args.includes('--stream');
   const ollama = args.includes('--ollama');
   const message = args.filter((a) => a !== '--stream' && a !== '--ollama').join(' ')
-    || 'Say hello from ARK Engine';
+    || 'Say hello from NOVA Engine';
 
   const contract = await fetch(`${DISCOVERY_URL}/v1/contract`, { headers: headers() })
     .then((r) => r.ok ? r.json() : null)
@@ -95,7 +95,7 @@ async function main() {
 
   const health = await fetch(`${BRAIN}/health`).then((r) => r.json()).catch(() => null);
   if (!health?.ok) {
-    console.error('ARK brain not reachable at', BRAIN, '— start the desktop app first.');
+    console.error('NOVA Brain not reachable at', BRAIN, '— start the desktop app first.');
     process.exit(1);
   }
   console.error('brain ok ·', health.contractVersion || health.version || '');

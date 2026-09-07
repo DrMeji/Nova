@@ -18,7 +18,7 @@ export function SiteHeader() {
       <div className="mx-auto max-w-6xl px-5 sm:px-8 h-16 flex items-center justify-between gap-4">
         <Link to="/" className="flex items-center gap-2.5 min-w-0 text-[var(--fg)]">
           <ArkMark size={30} className="shrink-0" />
-          <span className="display text-lg font-semibold tracking-tight">ARK</span>
+          <span className="display text-lg font-semibold tracking-tight">NOVA</span>
         </Link>
 
         <nav className="hidden sm:flex items-center gap-7">

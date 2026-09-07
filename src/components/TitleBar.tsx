@@ -14,7 +14,7 @@ export function TitleBar() {
   const { route } = useRouter();
   const { user, profile, loading } = useAuth();
   const context = !user || loading
-    ? 'ARK'
+    ? 'NOVA'
     : (needsFirstRunSetup() || !profile?.onboarding_completed)
       ? 'Setup'
       : titleForRoute(route);
@@ -43,7 +43,7 @@ export function TitleBar() {
   }, []);
 
   useEffect(() => {
-    document.title = (!context || context === 'ARK') ? 'ARK' : `ARK · ${context}`;
+    document.title = (!context || context === 'NOVA') ? 'NOVA' : `NOVA · ${context}`;
   }, [context]);
 
   if (!visible) return null;

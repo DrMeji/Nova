@@ -67,7 +67,7 @@ function parseEventTitle(userText: string): string {
     /(?:create|add|schedule|new)\s+(?:an?\s+)?(?:event|meeting|appointment)\s*(?:called|titled|named|:)\s*(.+)$/i,
   );
   if (titled?.[1]) {
-    return titled[1].replace(/[?.!]+$/, '').trim().slice(0, 120) || 'Event from ARK';
+    return titled[1].replace(/[?.!]+$/, '').trim().slice(0, 120) || 'Event from NOVA';
   }
   const bare = userText.match(
     /(?:create|add|schedule|new)\s+(?:an?\s+)?(?:event|meeting|appointment)\s+(.+)$/i,
@@ -80,7 +80,7 @@ function parseEventTitle(userText: string): string {
       .slice(0, 120);
     if (cleaned) return cleaned;
   }
-  return 'Event from ARK';
+  return 'Event from NOVA';
 }
 
 export async function createCalendarEvent(

@@ -156,7 +156,15 @@ function looksLikeDeleteProjectAsk(text: string): boolean {
 function looksLikeDeleteFollowUp(text: string): boolean {
   const t = String(text || '').trim();
   if (!DELETE_RE.test(t)) return false;
+  if (
+    /\b(?:remove|delete)\b[\s\S]{0,60}\b(?:footer|header|button|line|icon|nav|menu|section|text|copyright|css|class|style|color|image|logo|padding|margin|link|title)\b/i.test(t)
+  ) {
+    return false;
+  }
   if (looksLikeDeleteProjectAsk(t) || looksLikeDeleteFileAsk(t)) return false;
+  if (/\bremove\b/i.test(t) && !/\b(?:delete|trash|wipe|get rid of)\b/i.test(t)) {
+    return false;
+  }
   return (
     /\b(it|this|that)\b/i.test(t)
     || /\b(that|this)\s+(?:file|folder)\b/i.test(t)

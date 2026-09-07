@@ -1,5 +1,5 @@
 /**
- * Streaming HTTPS downloads for ARK Engine (GGUF weights + llama.cpp binary).
+ * Streaming HTTPS downloads for NOVA Engine (GGUF weights + llama.cpp binary).
  * Runs in Electron main — not subject to renderer host allowlist.
  */
 
@@ -18,7 +18,7 @@ function requestOnce(url, redirectsLeft = 8) {
       url,
       {
         headers: {
-          'User-Agent': 'ARK-Engine/0.3',
+          'User-Agent': 'NOVA-Engine/0.3',
           Accept: '*/*',
         },
       },

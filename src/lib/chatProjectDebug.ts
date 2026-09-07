@@ -1,6 +1,6 @@
 /**
  * Hands-free project debug: user describes a bug + where the project lives.
- * ARK should open that folder, scan code, diagnose, and patch — not just explain.
+ * NOVA should open that folder, scan code, diagnose, and patch — not just explain.
  */
 
 import { parseFolderPathAsk, type FolderPathRef } from '@/lib/folderPathAsk';
@@ -13,10 +13,15 @@ const PROBLEM_RE =
 const PROJECT_RE =
   /\b(?:app|application|project|code|codebase|website|site|program|repo|repository|source)\b/i;
 
-/** User wants ARK to find/fix a problem in a real project on disk. */
+/** User wants NOVA to find/fix a problem in a real project on disk. */
 export function looksLikeProjectDebugAsk(text: string): boolean {
   const t = String(text || '').trim();
   if (!t) return false;
+  // Chat-thread recap is never a disk-debug request.
+  if (/\b(?:summarize|summary|recap)\b/i.test(t) && /\b(?:chat|conversation|thread)\b/i.test(t)) {
+    return false;
+  }
+  if (/\bwhat\s+did\s+we\s+(?:just\s+)?(?:talk|discuss|cover|say)\b/i.test(t)) return false;
   if (/\b(?:can you|could you|help me)\s+(?:edit|read|write)\s+files?\b/i.test(t) && !PROBLEM_RE.test(t)) {
     return false;
   }

@@ -64,10 +64,10 @@ export function VoiceSettingsPanel({ onSaved }: VoiceSettingsPanelProps) {
     };
     void loadVoices();
     const onAudio = () => setPrefs(getLocalPrefs());
-    window.addEventListener('ark:voice-audio-changed', onAudio);
+    window.addEventListener('NOVA:voice-audio-changed', onAudio);
     navigator.mediaDevices?.addEventListener?.('devicechange', refreshDevices);
     return () => {
-      window.removeEventListener('ark:voice-audio-changed', onAudio);
+      window.removeEventListener('NOVA:voice-audio-changed', onAudio);
       navigator.mediaDevices?.removeEventListener?.('devicechange', refreshDevices);
     };
   }, [refreshDevices]);
@@ -115,7 +115,7 @@ export function VoiceSettingsPanel({ onSaved }: VoiceSettingsPanelProps) {
       <div className="rounded-xl border border-surface-border bg-ark-navy-900/40 p-4 space-y-3">
         <p className="text-sm font-medium text-content-primary">Voice chat</p>
         <p className="text-xs text-content-tertiary leading-relaxed">
-          Talk with ARK back and forth — questions, stories, chit-chat only. No builds, file edits, or PC control.
+          Talk with NOVA back and forth — questions, stories, chit-chat only. No builds, file edits, or PC control.
         </p>
         <div className="flex items-center justify-between gap-4">
           <p className="text-sm text-content-primary">Enable Voice tab in Chat</p>
@@ -158,7 +158,7 @@ export function VoiceSettingsPanel({ onSaved }: VoiceSettingsPanelProps) {
           </button>
         </div>
         <p className="text-[11px] text-content-tertiary -mt-1">
-          ARK picks your active mic automatically. Choose a device below to override.
+          NOVA picks your active mic automatically. Choose a device below to override.
         </p>
         <select
           value={prefs.voiceInputAuto ? VOICE_DEVICE_AUTO : (prefs.voiceInputDeviceId || '')}
@@ -196,7 +196,7 @@ export function VoiceSettingsPanel({ onSaved }: VoiceSettingsPanelProps) {
           Headphones / speakers
         </p>
         <p className="text-[11px] text-content-tertiary -mt-1">
-          ARK follows your Windows default output. Override here if you want a specific device.
+          NOVA follows your Windows default output. Override here if you want a specific device.
         </p>
         <select
           value={prefs.voiceOutputAuto ? VOICE_DEVICE_AUTO : (prefs.voiceOutputDeviceId || '')}
@@ -233,7 +233,7 @@ export function VoiceSettingsPanel({ onSaved }: VoiceSettingsPanelProps) {
         <p className="text-xs text-content-tertiary leading-relaxed">
           {neuralTts
             ? 'Female or Male neural speech (natural voice, needs internet). Answers still come from your chat brain in Models.'
-            : 'Spoken voice falls back to your PC system voice. Use the ARK desktop app for neural speech.'}
+            : 'Spoken voice falls back to your PC system voice. Use the NOVA desktop app for neural speech.'}
         </p>
         <select
           value={spokenVoice}

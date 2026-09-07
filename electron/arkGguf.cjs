@@ -1,6 +1,6 @@
 /**
- * Optional GGUF runtime for ARK Engine.
- * Looks for *.gguf in the ARK models folder and a local llama binary
+ * Optional GGUF runtime for NOVA Engine.
+ * Looks for *.gguf in the NOVA models folder and a local llama binary
  * (ark-engine/bin/llama-cli). Can bootstrap llama.cpp release builds.
  */
 
@@ -106,7 +106,7 @@ function writeTempVisionImages(b64List) {
   const paths = [];
   for (let i = 0; i < b64List.length; i++) {
     const buf = Buffer.from(b64List[i], 'base64');
-    const p = path.join(os.tmpdir(), `ark-vl-${process.pid}-${Date.now()}-${i}.png`);
+    const p = path.join(os.tmpdir(), `NOVA-vl-${process.pid}-${Date.now()}-${i}.png`);
     fs.writeFileSync(p, buf);
     paths.push(p);
   }
@@ -660,7 +660,7 @@ async function bindLlamaServer(bin, gguf, modelId) {
     stopServer();
     if (cancelRequested) return false;
   }
-  lastServerError = 'llama-server failed to start — ARK will use one-shot CLI instead';
+  lastServerError = 'llama-server failed to start — NOVA will use one-shot CLI instead';
   return false;
 }
 
@@ -784,7 +784,10 @@ async function runGgufServerStream(modelId, prompt, onChunk, timeoutMs, nPredict
 }
 
 const ARK_SYSTEM =
-  'You are ARK, a normal helpful AI chat assistant. Talk like ChatGPT — not a design studio or image tool unless they ask to make something. '
+  'You are NOVA, a normal helpful AI chat assistant. Talk like ChatGPT — not a design studio or image tool unless they ask to make something. '
+  + 'If someone asks what NOVA is, who you are, or what this app does: say you are NOVA, an AI creation studio that runs on their PC for chat, projects, and models. '
+  + 'Never introduce yourself as ARK or Ark. The product name is NOVA. '
+  + 'You are not the video game Ark: Survival Evolved. Never “correct” the user’s spelling of NOVA. '
   + 'Never echo the user’s greeting. If they only say hi/hello/hey, reply: “Hello! How can I assist you today?” '
   + 'Be accurate and complete. Cover the main facts, then ask: “Want more on any of that?” '
   + 'If they ask multiple questions, answer each one directly. Do not replace a timeline/worth-it ask with a full project plan dump. '
@@ -822,7 +825,7 @@ function promptBody(prompt) {
 }
 
 function isPackedArkPrompt(body) {
-  return /^You are ARK(?:,|\s)/i.test(String(body || '').trim());
+  return /^You are NOVA(?:,|\s)/i.test(String(body || '').trim());
 }
 
 /** ChatML for Qwen/Mistral/Gemma; Llama 3 headers for llama3*. */
@@ -831,7 +834,7 @@ function wrapChatPrompt(modelId, prompt) {
   if (/<\|im_start\|>/.test(body) || /<\|start_header_id\|>/.test(body)) {
     return body.endsWith('\n') ? body : `${body}\n`;
   }
-  // packHistoryPrompt() already includes ARK's identity/instructions for local single-string
+  // packHistoryPrompt() already includes NOVA's identity/instructions for local single-string
   // engines. Wrapping that again as a second system message makes some GGUFs (notably Qwen)
   // parrot the prompt instead of answering.
   if (isPackedArkPrompt(body)) {
@@ -958,12 +961,12 @@ function stripLlamaCliNoise(text) {
     return stripCliFooter(t.slice(afterAssistant));
   }
 
-  const markRe = /(?:^|\n)\s*(?:ARK|Assistant)\s*:\s+(?!<\|)/gi;
+  const markRe = /(?:^|\n)\s*(?:NOVA|Assistant)\s*:\s+(?!<\|)/gi;
   let lastMark = null;
   let mm;
   while ((mm = markRe.exec(t)) !== null) lastMark = mm;
   if (lastMark && typeof lastMark.index === 'number') {
-    t = t.slice(lastMark.index + lastMark[0].length).replace(/^\s*ARK\s*:\s*/i, '');
+    t = t.slice(lastMark.index + lastMark[0].length).replace(/^\s*NOVA\s*:\s*/i, '');
   }
 
   const lines = t.split('\n');
@@ -1061,7 +1064,7 @@ function runGgufCliStream(modelId, prompt, onChunk, timeoutMs = 240000, nPredict
     const mmproj = findMmprojForModel(modelId);
     const bin = findLlamaBinary();
     if (!gguf) {
-      reject(new Error('No GGUF weights found in ARK Engine models folder'));
+      reject(new Error('No GGUF weights found in NOVA Engine models folder'));
       return;
     }
     if (!bin) {

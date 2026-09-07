@@ -38,10 +38,10 @@ export type RecentChat = {
   archivedAt?: string;
 };
 
-const PROJECTS_KEY = 'ark:recent-projects';
-const CREATIONS_KEY = 'ark:recent-creations';
-const CHATS_KEY = 'ark:recent-chats';
-const DELETED_MEDIA_KEY = 'ark:deleted-media-ids';
+const PROJECTS_KEY = 'NOVA:recent-projects';
+const CREATIONS_KEY = 'NOVA:recent-creations';
+const CHATS_KEY = 'NOVA:recent-chats';
+const DELETED_MEDIA_KEY = 'NOVA:deleted-media-ids';
 
 /** Keep Recent short; older unpinned chats move to History. */
 const RECENT_SIDEBAR_MAX = 12;
@@ -108,7 +108,7 @@ export function renameRecentChatTitle(chatId: string, title: string): RecentChat
   );
   saveRecentChats(list);
   try {
-    window.dispatchEvent(new Event('ark:chats-changed'));
+    window.dispatchEvent(new Event('NOVA:chats-changed'));
   } catch {
     /* ignore */
   }
@@ -125,7 +125,7 @@ export function removeRecentProject(id: string): RecentProject[] {
 export function clearRecentProjects(): RecentProject[] {
   saveRecentProjects([]);
   try {
-    window.dispatchEvent(new Event('ark:projects-changed'));
+    window.dispatchEvent(new Event('NOVA:projects-changed'));
   } catch {
     /* ignore */
   }
@@ -148,7 +148,7 @@ export function ensureRecentProject(id: string, name?: string): RecentProject[] 
   const next = [nextEntry, ...list.filter(p => p.id !== id)].slice(0, 30);
   saveRecentProjects(next);
   try {
-    window.dispatchEvent(new Event('ark:projects-changed'));
+    window.dispatchEvent(new Event('NOVA:projects-changed'));
   } catch {
     /* ignore */
   }
@@ -195,7 +195,7 @@ export function upsertCreation(entry: RecentCreation) {
     dataUrl: entry.dataUrl || memoryThumbs.get(entry.id),
   });
   saveRecentCreations(list);
-  window.dispatchEvent(new Event('ark:creations-changed'));
+  window.dispatchEvent(new Event('NOVA:creations-changed'));
   return list;
 }
 
@@ -268,7 +268,7 @@ export function upsertRecentChat(entry: RecentChat) {
   const list = loadRecentChats().filter(c => c.id !== entry.id);
   list.unshift(merged);
   saveRecentChats(list);
-  window.dispatchEvent(new Event('ark:chats-changed'));
+  window.dispatchEvent(new Event('NOVA:chats-changed'));
   return list;
 }
 
@@ -279,7 +279,7 @@ export function togglePinnedChat(chatId: string): RecentChat[] {
       : c,
   );
   saveRecentChats(list);
-  window.dispatchEvent(new Event('ark:chats-changed'));
+  window.dispatchEvent(new Event('NOVA:chats-changed'));
   return list;
 }
 
@@ -290,7 +290,7 @@ export function togglePinnedProject(id: string): RecentProject[] {
       : p,
   );
   saveRecentProjects(list);
-  window.dispatchEvent(new Event('ark:projects-changed'));
+  window.dispatchEvent(new Event('NOVA:projects-changed'));
   return list;
 }
 
@@ -317,7 +317,7 @@ export function archiveRecentChat(chatId: string) {
       : c,
   );
   saveRecentChats(list);
-  window.dispatchEvent(new Event('ark:chats-changed'));
+  window.dispatchEvent(new Event('NOVA:chats-changed'));
   return list;
 }
 
@@ -359,8 +359,8 @@ export function deleteRecentChatPermanently(chatId: string) {
   // Drop any leftover creations still tagged to this chat
   saveRecentCreations(loadRecentCreations().filter(c => c.chatId !== chatId));
 
-  window.dispatchEvent(new Event('ark:chats-changed'));
-  window.dispatchEvent(new Event('ark:creations-changed'));
+  window.dispatchEvent(new Event('NOVA:chats-changed'));
+  window.dispatchEvent(new Event('NOVA:creations-changed'));
   return nextChats;
 }
 
@@ -404,7 +404,7 @@ export function collectChatMediaIds(chatId: string, creationId?: string): string
   }
   try {
     if (creationId) {
-      const raw = localStorage.getItem(`ark:chat-thread:creation:${creationId}`);
+      const raw = localStorage.getItem(`NOVA:chat-thread:creation:${creationId}`);
       if (raw) {
         for (const m of raw.matchAll(/ark-media:([A-Za-z0-9_-]+)/g)) ids.add(m[1]);
       }
@@ -425,8 +425,8 @@ function wipeCreationLocal(creationId: string) {
   const nextCreations = loadRecentCreations().filter(c => c.id !== creationId);
   saveRecentCreations(nextCreations);
   try {
-    localStorage.removeItem(`ark:chat-thread:creation:${creationId}`);
-    localStorage.removeItem(`ark:media-feedback:${creationId}`);
+    localStorage.removeItem(`NOVA:chat-thread:creation:${creationId}`);
+    localStorage.removeItem(`NOVA:media-feedback:${creationId}`);
   } catch {
     /* ignore */
   }
@@ -471,8 +471,8 @@ export function deleteCreationPermanently(creationId: string) {
     ),
   );
 
-  window.dispatchEvent(new Event('ark:creations-changed'));
-  window.dispatchEvent(new Event('ark:chats-changed'));
+  window.dispatchEvent(new Event('NOVA:creations-changed'));
+  window.dispatchEvent(new Event('NOVA:chats-changed'));
   return loadRecentCreations();
 }
 
@@ -492,7 +492,7 @@ export function titleFromPrompt(prompt: string): string {
 }
 
 export function chatThreadKey(chatId: string) {
-  return `ark:chat-thread:chat:${chatId}`;
+  return `NOVA:chat-thread:chat:${chatId}`;
 }
 
 export async function resolveCreationDataUrl(creation: RecentCreation): Promise<string | null> {
@@ -538,11 +538,11 @@ export function slimChatContent(content: string, libraryId?: string): string {
   return content
     .replace(/!\[([^\]]*)\]\((data:image\/[^)]+)\)/g, (_m, alt) => {
       const id = libraryId || 'inline';
-      return `![${alt || 'ARK generation'}](ark-media:${id})`;
+      return `![${alt || 'NOVA generation'}](ark-media:${id})`;
     })
     .replace(/!\[([^\]]*)\]\((data:video\/[^)]+)\)/g, (_m, alt) => {
       const id = libraryId || 'inline';
-      return `![${alt || 'ARK generation'}](ark-media:${id})`;
+      return `![${alt || 'NOVA generation'}](ark-media:${id})`;
     });
 }
 
@@ -552,7 +552,7 @@ export function mediaMessageMarkdown(
   dataUrl?: string,
   opts?: { real?: boolean; kind?: 'image' | 'video'; source?: string },
 ): string {
-  const safe = (alt || 'ARK generation').slice(0, 80).replace(/[\[\]]/g, '');
+  const safe = (alt || 'NOVA generation').slice(0, 80).replace(/[\[\]]/g, '');
   const body = dataUrl ? `![${safe}](${dataUrl})` : `![${safe}](ark-media:${libraryId})`;
   const sourceLine = '';
   if (opts?.source?.includes('motion-still')) {
@@ -572,7 +572,7 @@ export function mediaMessageMarkdown(
 }
 
 export function feedbackKey(id: string) {
-  return `ark:media-feedback:${id}`;
+  return `NOVA:media-feedback:${id}`;
 }
 
 export type MediaFeedback = 'like' | 'dislike' | null;

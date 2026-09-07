@@ -26,7 +26,7 @@ const sample = [
   '  /exit or Ctrl+C     stop or exit',
   '',
   '> <|im_start|>user',
-  'You are ARK, the assistant in the ARK desktop creation studio',
+  'You are NOVA, the assistant in the NOVA desktop creation studio',
   'User: Who is Albert Einstein?<|im_end|>',
   '<|im_start|>assistant',
   '',
@@ -43,7 +43,7 @@ if (!/Albert Einstein/.test(cleaned)) {
   console.error('FAIL: cleaner still drops the answer');
   process.exit(1);
 }
-if (/You are ARK/.test(cleaned) || /<\|im_start\|>/.test(cleaned)) {
+if (/You are NOVA/.test(cleaned) || /<\|im_start\|>/.test(cleaned)) {
   console.error('FAIL: cleaner kept prompt echo');
   process.exit(1);
 }

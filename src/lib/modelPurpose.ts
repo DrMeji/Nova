@@ -11,7 +11,7 @@ export function modelPurposeText(opts: {
     return 'Reads images, screenshots, and UI captures for multimodal chat.';
   }
   if (cat === 'image') {
-    return 'Generates images from text prompts inside ARK.';
+    return 'Generates images from text prompts inside NOVA.';
   }
   if (cat === 'video') {
     return 'Creates or extends video clips from prompts.';

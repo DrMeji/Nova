@@ -9,7 +9,7 @@ export function SiteFooter() {
           <div>
             <div className="flex items-center gap-2.5 mb-3 text-[var(--fg)]">
               <ArkMark size={26} />
-              <span className="display text-lg font-semibold">ARK</span>
+              <span className="display text-lg font-semibold">NOVA</span>
             </div>
             <p className="text-sm text-[var(--fg-muted)] leading-relaxed max-w-xs">
               AI creation studio for your PC. Local brains, free cloud keys, and projects that stay on your disk.
@@ -47,7 +47,7 @@ export function SiteFooter() {
           </div>
         </div>
         <p className="mt-10 pt-6 border-t border-[var(--line)] text-xs text-[var(--fg-muted)] text-center">
-          © {new Date().getFullYear()} ARK. Desktop app on Windows.
+          © {new Date().getFullYear()} NOVA. Desktop app on Windows.
         </p>
       </div>
     </footer>

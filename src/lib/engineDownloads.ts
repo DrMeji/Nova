@@ -1,5 +1,5 @@
 /**
- * Process-wide ARK Engine download tracker.
+ * Process-wide NOVA Engine download tracker.
  * Survives Models / Local AI unmount so progress keeps updating when you leave the tab.
  */
 

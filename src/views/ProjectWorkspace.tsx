@@ -166,7 +166,7 @@ type CodeModel = {
 };
 
 const CODE_MODELS: CodeModel[] = [
-  { id: 'ark-auto', name: 'ARK', source: 'auto', detail: 'Best coder · stays on for this project' },
+  { id: 'NOVA-auto', name: 'NOVA', source: 'auto', detail: 'Best coder · stays on for this project' },
 ];
 
 const CLOUD_CODE_WHEN_KEYED: (CodeModel & { keyId: string })[] = [
@@ -193,7 +193,7 @@ function emptyWorkspaceProject(userId: string, id = '', name = 'Code'): ProjectR
     id,
     user_id: userId,
     name,
-    description: 'Local ARK code workspace',
+    description: 'Local NOVA Code workspace',
     project_type: 'web',
     status: 'idle',
     build_status: 'idle',
@@ -240,7 +240,7 @@ function preferredLiveEditPath(paths: string[]): string | undefined {
 function defaultCodeModel(): CodeModel {
   const prefs = getLocalPrefs();
   const pref = prefs.defaultCodeModelId || prefs.defaultModelId;
-  if (!pref || pref === 'ark-auto') return CODE_MODELS[0];
+  if (!pref || pref === 'NOVA-auto') return CODE_MODELS[0];
   const cloud = CLOUD_CODE_WHEN_KEYED.find(m => m.id === pref);
   if (cloud && hasProviderApiKey(cloud.keyId)) return cloud;
   // Models catalog ids (gemini-2-flash, etc.) must stay cloud — never snap to a fake local label.
@@ -544,7 +544,7 @@ export function ProjectWorkspace() {
       project_id: pid,
       role: 'assistant',
       content: text,
-      provider_used: 'ARK',
+      provider_used: 'NOVA',
       created_at: new Date().toISOString(),
     };
     setMessages(prev => {
@@ -579,7 +579,7 @@ export function ProjectWorkspace() {
       project_id: pid,
       role: 'assistant',
       content: assistantText,
-      provider_used: 'ARK',
+      provider_used: 'NOVA',
       created_at: new Date().toISOString(),
     };
     setMessages(prev => {
@@ -628,7 +628,7 @@ export function ProjectWorkspace() {
       await window.arkDesktop.previewOpenWindow({
         projectId: pid,
         url: bust,
-        title: d ? `${d.label} · ${d.width}×${d.height}` : `${project?.name || 'ARK'} preview`,
+        title: d ? `${d.label} · ${d.width}×${d.height}` : `${project?.name || 'NOVA'} preview`,
         kind: native && d ? 'device' : 'web',
         device: d
           ? { label: d.label, width: d.width, height: d.height, family: d.family }
@@ -790,7 +790,7 @@ export function ProjectWorkspace() {
         }));
       setLocalModels(installed);
       setActiveModel(prev => {
-        if (prev.source !== 'local' || prev.id === 'ark-auto') return prev;
+        if (prev.source !== 'local' || prev.id === 'NOVA-auto') return prev;
         const hit = installed.find(m => m.id === prev.id);
         return hit || prev;
       });
@@ -830,10 +830,10 @@ export function ProjectWorkspace() {
   useEffect(() => {
     if (!projectId) return;
     try {
-      const draft = localStorage.getItem(`ark:project-draft:${projectId}`);
+      const draft = localStorage.getItem(`NOVA:project-draft:${projectId}`);
       if (draft) {
         setChatInput(draft);
-        localStorage.removeItem(`ark:project-draft:${projectId}`);
+        localStorage.removeItem(`NOVA:project-draft:${projectId}`);
         requestAnimationFrame(() => textareaRef.current?.focus());
       }
     } catch {
@@ -919,9 +919,9 @@ export function ProjectWorkspace() {
   useEffect(() => {
     if (!projectId) return;
     try {
-      const raw = localStorage.getItem(`ark:project-seed-files:${projectId}`);
+      const raw = localStorage.getItem(`NOVA:project-seed-files:${projectId}`);
       if (!raw) return;
-      localStorage.removeItem(`ark:project-seed-files:${projectId}`);
+      localStorage.removeItem(`NOVA:project-seed-files:${projectId}`);
       const files = JSON.parse(raw) as Record<string, string>;
       if (!files || typeof files !== 'object') return;
       setFileContents(prev => {
@@ -959,7 +959,7 @@ export function ProjectWorkspace() {
     }
   }, [projectId]);
 
-  // Load / persist project files on disk (ARK userData/ark-projects)
+  // Load / persist project files on disk (NOVA userData/ark-projects)
   useEffect(() => {
     if (!projectId || !window.arkDesktop?.projectRead) return;
     let cancelled = false;
@@ -1025,7 +1025,7 @@ export function ProjectWorkspace() {
                 '',
                 'What should I do with it? Pick a prompt below, or type your own.',
               ].join('\n'),
-              provider_used: 'ARK',
+              provider_used: 'NOVA',
               created_at: new Date().toISOString(),
             },
           ];
@@ -1067,10 +1067,10 @@ export function ProjectWorkspace() {
   useEffect(() => {
     const refresh = () => setChatPlugins(getChatEnabledPlugins(loadPluginState()));
     refresh();
-    window.addEventListener('ark:plugins-changed', refresh);
+    window.addEventListener('NOVA:plugins-changed', refresh);
     window.addEventListener('focus', refresh);
     return () => {
-      window.removeEventListener('ark:plugins-changed', refresh);
+      window.removeEventListener('NOVA:plugins-changed', refresh);
       window.removeEventListener('focus', refresh);
     };
   }, []);
@@ -1164,7 +1164,7 @@ export function ProjectWorkspace() {
       setModelRatio(getModelHealthRatio(pid));
       const pathLine = opts.inPlace && opts.root
         ? `Opened **${folderLabel}** at \`${opts.root}\` (${count} source files). Editing on disk.${skipNote}`
-        : `Imported **${folderLabel}** (${count} files) into ARK.${skipNote}`;
+        : `Imported **${folderLabel}** (${count} files) into NOVA.${skipNote}`;
       postAttachInChat(
         encodeChatAttach({ kind: 'folder', name: folderLabel, count, projectId: pid }),
         [
@@ -1190,7 +1190,7 @@ export function ProjectWorkspace() {
       if (d?.label) setAttachProgressLabel(d.label);
       else if (d?.total) setAttachProgressLabel(`Reading ${d.done || 0}/${d.total}`);
     };
-    window.addEventListener('ark:project-import-progress', onProg);
+    window.addEventListener('NOVA:project-import-progress', onProg);
     try {
       const res = await openApi({
         projectId: pid,
@@ -1230,7 +1230,7 @@ export function ProjectWorkspace() {
       }
       void refreshGit(pid);
     } finally {
-      window.removeEventListener('ark:project-import-progress', onProg);
+      window.removeEventListener('NOVA:project-import-progress', onProg);
       setAttachBusy(false);
       setAttachProgressLabel('');
     }
@@ -1248,7 +1248,7 @@ export function ProjectWorkspace() {
       return;
     }
     const ok = window.confirm(
-      `Allow ARK to read and edit files under this folder?\n\n${stat.path || typed.trim()}`,
+      `Allow NOVA to read and edit files under this folder?\n\n${stat.path || typed.trim()}`,
     );
     if (!ok) return;
     await openWorkspaceInPlace(stat.path || typed.trim());
@@ -1273,7 +1273,7 @@ export function ProjectWorkspace() {
       const d = (ev as CustomEvent).detail as { label?: string } | undefined;
       if (d?.label) setAttachProgressLabel(d.label);
     };
-    window.addEventListener('ark:project-import-progress', onProg);
+    window.addEventListener('NOVA:project-import-progress', onProg);
     try {
       const res = await window.arkDesktop?.gitCloneOpen?.({
         projectId: pid,
@@ -1303,7 +1303,7 @@ export function ProjectWorkspace() {
       }
       void refreshGit(pid);
     } finally {
-      window.removeEventListener('ark:project-import-progress', onProg);
+      window.removeEventListener('NOVA:project-import-progress', onProg);
       setAttachBusy(false);
       setAttachProgressLabel('');
     }
@@ -1577,7 +1577,7 @@ export function ProjectWorkspace() {
         return;
       }
       if (!gitInfo?.git || gitInfo.dirty) {
-        await gitCommit(projectId, 'Update from ARK');
+        await gitCommit(projectId, 'Update from NOVA');
       }
       const pushed = await gitPush(projectId, token);
       if (!pushed.ok) {
@@ -1630,7 +1630,7 @@ export function ProjectWorkspace() {
 
   const headerCommit = async () => {
     if (!projectId || gitBusy || !canEdit) return;
-    const msg = window.prompt('Commit message:', 'Update from ARK')?.trim();
+    const msg = window.prompt('Commit message:', 'Update from NOVA')?.trim();
     if (!msg) return;
     setGitBusy(true);
     try {
@@ -1713,7 +1713,7 @@ export function ProjectWorkspace() {
       postAssistantNote(`You're on ${head || 'HEAD'}. Create or switch to a feature branch first.`);
       return;
     }
-    const title = window.prompt('Pull request title:', st.log?.[0]?.replace(/^[a-f0-9]+\s+/i, '') || 'Changes from ARK')?.trim();
+    const title = window.prompt('Pull request title:', st.log?.[0]?.replace(/^[a-f0-9]+\s+/i, '') || 'Changes from NOVA')?.trim();
     if (!title) return;
     if (!window.confirm(`Push branch "${head}" and open a pull request on GitHub?`)) return;
 
@@ -1761,7 +1761,7 @@ export function ProjectWorkspace() {
         project_id: project.id || projectId || 'draft',
         role: 'assistant',
         content: 'Read access. you can inspect and ask questions, but cannot edit files or push.',
-        provider_used: 'ARK',
+        provider_used: 'NOVA',
         created_at: new Date().toISOString(),
       }]);
       return;
@@ -1808,7 +1808,7 @@ export function ProjectWorkspace() {
               '',
               'I also could not scaffold files offline for that ask. Connect a free key or install a local brain, then try again.',
             ].join('\n'),
-            provider_used: 'ARK',
+            provider_used: 'NOVA',
             created_at: new Date().toISOString(),
           }]);
           setChatInput('');
@@ -1870,7 +1870,7 @@ export function ProjectWorkspace() {
         project_id: project.id || projectId || 'draft',
         role: 'assistant',
         content: honestNoLiveChatReply(),
-        provider_used: 'ARK',
+        provider_used: 'NOVA',
         created_at: new Date().toISOString(),
       }]);
       return;
@@ -1962,7 +1962,7 @@ export function ProjectWorkspace() {
         project_id: pid,
         role: 'assistant',
         content: 'Which should I build? Apple (Xcode), Android (Android Studio), or a website in the browser? I will not start writing files until you pick.',
-        provider_used: 'ARK',
+        provider_used: 'NOVA',
         created_at: new Date().toISOString(),
       };
       setMessages(prev => {
@@ -2000,7 +2000,7 @@ export function ProjectWorkspace() {
         project_id: pid,
         role: 'assistant',
         content: familyAsk,
-        provider_used: 'ARK',
+        provider_used: 'NOVA',
         created_at: new Date().toISOString(),
       };
       setMessages(prev => {
@@ -2224,7 +2224,7 @@ export function ProjectWorkspace() {
       const pluginId = detectPluginIntent(content, enabled.map(p => p.id));
 
       let replyText = '';
-      let provider = 'ARK';
+      let provider = 'NOVA';
       let changedPaths: string[] = [];
       let previewTouched = false;
       let stallTimer: number | undefined;
@@ -2325,7 +2325,7 @@ export function ProjectWorkspace() {
         });
         if (studio) {
           replyText = studio.reply;
-          provider = 'ARK';
+          provider = 'NOVA';
           if (studio.reload) {
             const read = await window.arkDesktop?.projectRead?.(pid);
             if (read?.files) applyProjectFiles(read.files);
@@ -2403,7 +2403,7 @@ export function ProjectWorkspace() {
               return {
                 reply: routed.reply || '',
                 modelName: routed.modelName,
-                providerLabel: routerProviderLabel(routed, 'ARK · agent'),
+                providerLabel: routerProviderLabel(routed, 'NOVA · agent'),
               };
             },
           });
@@ -2413,7 +2413,7 @@ export function ProjectWorkspace() {
             setFileContents(loop.files);
             changedPaths = loop.updated;
             replyText = loop.reply;
-            provider = loop.providerLabel || 'ARK · agent';
+            provider = loop.providerLabel || 'NOVA · agent';
             if (loop.updated.length) {
               bumpStep('apply');
               void refreshLivePreview(loop.files);
@@ -2659,7 +2659,7 @@ export function ProjectWorkspace() {
           }
           waitOpen = false;
           aborted = true;
-          provider = routerProviderLabel(routed, 'ARK');
+          provider = routerProviderLabel(routed, 'NOVA');
 
           if (activeModel.source === 'auto' && routed.source !== 'none') {
             const nextBrain = saveAutoThreadBrain(
@@ -3018,7 +3018,7 @@ export function ProjectWorkspace() {
       project_id: pid,
       role: 'assistant',
       content: 'Got your image in the chat. Ask me what you want. describe it, debug from a screenshot, or use it as a reference.',
-      provider_used: 'ARK',
+      provider_used: 'NOVA',
       created_at: new Date().toISOString(),
     };
     setMessages(prev => {
@@ -3073,7 +3073,7 @@ export function ProjectWorkspace() {
           setPreviewUrl(url);
           setPreviewReady(true);
           setBuildProgress(100);
-        window.open(url, 'ark-preview');
+        window.open(url, 'NOVA-preview');
       } catch (err) {
         setPreviewReady(false);
         setBuildProgress(0);
@@ -3188,7 +3188,7 @@ export function ProjectWorkspace() {
   const openPreviewInBrowser = () => {
     const url = livePreviewUrl || previewUrl;
     if (!url || url.startsWith('blob:') || url.includes('127.0.0.1:0')) {
-      setSandboxNote('No preview URL yet. ask ARK to create a page, then open Preview.');
+      setSandboxNote('No preview URL yet. Ask NOVA to create a page, then open Preview.');
       window.setTimeout(() => setSandboxNote(null), 3200);
       return;
     }
@@ -3559,7 +3559,7 @@ export function ProjectWorkspace() {
         {/* Chat center. hidden when opened from Chat Code pill (planning stays in Chat) */}
         {showWorkspaceChat && (
         <div className="flex-1 min-w-0 flex flex-col bg-ark-navy-950">
-          {/* Compact toolbar. no permanent ARK Agent header */}
+          {/* Compact toolbar. no permanent NOVA Agent header */}
           <div className="shrink-0 h-10 px-3 flex items-center justify-between gap-2">
             <div className="flex items-center gap-1.5 min-w-0">
               <button
@@ -3575,8 +3575,17 @@ export function ProjectWorkspace() {
                 <span>Changes</span>
                 {fileChanges.length > 0 ? (
                   <span className="flex items-center gap-1 tabular-nums">
-                    <span className="text-emerald-400">+{fileChanges.reduce((n, f) => n + f.added, 0)}</span>
-                    <span className="text-red-400">-{fileChanges.reduce((n, f) => n + f.removed, 0)}</span>
+                    {(() => {
+                      const add = fileChanges.reduce((n, f) => n + f.added, 0);
+                      const del = fileChanges.reduce((n, f) => n + f.removed, 0);
+                      return (
+                        <>
+                          {add > 0 ? <span className="text-emerald-400">+{add}</span> : null}
+                          {del > 0 ? <span className="text-red-400">-{del}</span> : null}
+                          {add === 0 && del === 0 ? <span className="text-content-tertiary/70">0</span> : null}
+                        </>
+                      );
+                    })()}
                   </span>
                 ) : (
                   <span className="text-content-tertiary/70">0</span>
@@ -3612,7 +3621,7 @@ export function ProjectWorkspace() {
                 </button>
               </div>
               {fileChanges.length === 0 ? (
-                <p className="text-[11px] text-content-tertiary">No changes yet. Ask ARK to edit the project.</p>
+                <p className="text-[11px] text-content-tertiary">No changes yet. Ask NOVA to edit the project.</p>
               ) : (
                 <div className="space-y-1.5 max-h-40 overflow-y-auto">
                   {fileChanges.map(file => (
@@ -3628,9 +3637,10 @@ export function ProjectWorkspace() {
                     >
                       <span className="text-content-primary font-mono truncate">{file.path}</span>
                     <span className="tabular-nums shrink-0 ml-2">
-                        <span className="text-emerald-400">+{file.added}</span>
-                      {' '}
-                        <span className="text-red-400">-{file.removed}</span>
+                      {file.added > 0 ? <span className="text-emerald-400">+{file.added}</span> : null}
+                      {file.added > 0 && file.removed > 0 ? ' ' : null}
+                      {file.removed > 0 ? <span className="text-red-400">-{file.removed}</span> : null}
+                      {file.added === 0 && file.removed === 0 ? <span className="text-content-tertiary">·</span> : null}
                     </span>
                     </button>
                   ))}
@@ -3644,7 +3654,7 @@ export function ProjectWorkspace() {
               <p className="text-[11px] text-content-secondary mb-2">Build runs</p>
               {runHistory.length === 0 ? (
                 <p className="text-[11px] text-content-tertiary">
-                  Fresh build steps appear here after you ask ARK to create something new.
+                  Fresh build steps appear here after you Ask NOVA to create something new.
                 </p>
               ) : (
                 <div className="space-y-1.5">
@@ -3668,7 +3678,7 @@ export function ProjectWorkspace() {
                 <p className="text-sm text-content-secondary mb-1">Start building with chat</p>
                 <p className="text-xs text-content-tertiary max-w-sm mx-auto">
                   {canEdit
-                    ? 'Ask ARK to add a page, fix a bug, or build an iPhone / Android app. Fresh builds show progress briefly, then in History.'
+                    ? 'Ask NOVA to add a page, fix a bug, or build an iPhone / Android app. Fresh builds show progress briefly, then in History.'
                     : 'You have Read on this project. you can inspect and discuss the code, but you cannot edit or push.'}
                 </p>
               </div>
@@ -4159,7 +4169,7 @@ export function ProjectWorkspace() {
                     onClick={() => setModelMenuOpen(o => !o)}
                     className="inline-flex items-center gap-1 rounded-full border border-surface-border/80 bg-surface-hover/60 hover:bg-surface-hover px-2 py-1 text-[11px] text-content-primary transition-colors max-w-[8.5rem]"
                     title={activeModel.source === 'auto'
-                      ? (threadBrain ? autoEquippedCaption(threadBrain) : 'ARK Auto · picks best coder')
+                      ? (threadBrain ? autoEquippedCaption(threadBrain) : 'NOVA Auto · picks best coder')
                       : activeModel.name}
                     aria-label="Select model"
                     aria-expanded={modelMenuOpen}
@@ -4193,7 +4203,7 @@ export function ProjectWorkspace() {
                           onClick={() => {
                             setActiveModel(model);
                             if (model.source === 'auto') {
-                              setLocalPrefs({ defaultModelId: 'ark-auto', defaultCodeModelId: 'ark-auto', aiMode: 'automatic', autoFailover: true });
+                              setLocalPrefs({ defaultModelId: 'NOVA-auto', defaultCodeModelId: 'NOVA-auto', aiMode: 'automatic', autoFailover: true });
                             } else {
                               setLocalPrefs({ defaultCodeModelId: model.id, defaultModelId: model.id });
                               if (projectId) clearThreadBrain(projectId, 'coding');
@@ -4257,7 +4267,7 @@ export function ProjectWorkspace() {
                 activeModel.source === 'auto'
                   ? autoRingDetail(threadBrain, 'coding')
                   : activeModel.source === 'local'
-                    ? 'Local · ARK Engine'
+                    ? 'Local · NOVA Engine'
                     : 'Cloud · connected key'
               }
             />
@@ -4312,7 +4322,7 @@ export function ProjectWorkspace() {
                     <button
                       type="button"
                       onClick={undoLastEdit}
-                      title="Undo last ARK edit"
+                      title="Undo last NOVA edit"
                       className="inline-flex items-center gap-1 text-[11px] text-content-tertiary hover:text-content-primary px-1"
                     >
                       <Undo2 className="w-3 h-3" />
@@ -4373,7 +4383,7 @@ export function ProjectWorkspace() {
                       <FileCode className="w-5 h-5 text-content-tertiary" />
                       <p className="text-sm text-content-secondary">No code yet</p>
                       <p className="text-xs text-content-tertiary max-w-xs">
-                        Ask ARK in chat to create files. they’ll show up here.
+                        Ask NOVA in chat to create files. they’ll show up here.
                       </p>
                     </div>
                   ) : (
@@ -4415,7 +4425,7 @@ export function ProjectWorkspace() {
                     ) : previewDevice ? (
                       <DevicePreview
                         device={previewDevice}
-                        html={`<!doctype html><html><body style="margin:0;background:#070b14;color:#e8eef8;font-family:sans-serif;padding:24px"><p>${previewDevice.label}</p><p>Ask ARK to rebuild if this preview is empty.</p></body></html>`}
+                        html={`<!doctype html><html><body style="margin:0;background:#070b14;color:#e8eef8;font-family:sans-serif;padding:24px"><p>${previewDevice.label}</p><p>Ask NOVA to rebuild if this preview is empty.</p></body></html>`}
                       />
                     ) : (
                     <div className="h-full flex flex-col items-center justify-center text-center px-8 gap-2">
@@ -4454,7 +4464,7 @@ export function ProjectWorkspace() {
                       <Play className="w-5 h-5 text-sky-400" />
                       <p className="text-sm text-content-secondary">No static preview yet</p>
                       <p className="text-xs text-content-tertiary max-w-xs">
-                        Ask ARK in chat to create the page, then open Preview. This is static HTML in a sandbox (scripts only. no forms posting out). It is not a running npm server.
+                        Ask NOVA in chat to create the page, then open Preview. This is static HTML in a sandbox (scripts only. no forms posting out). It is not a running npm server.
                       </p>
                     </div>
                   )}

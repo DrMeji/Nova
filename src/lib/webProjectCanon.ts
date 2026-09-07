@@ -388,12 +388,12 @@ h1 {
 
   if (wantsSearchBar) {
     const heading = readHeading(html);
-    if (!/id=["']ark-search["']/i.test(html) && !/class=["'][^"']*search-bar/i.test(html)) {
+    if (!/id=["']NOVA-search["']/i.test(html) && !/class=["'][^"']*search-bar/i.test(html)) {
       const bar = `
   <header class="top-bar" aria-label="Toolbar">
-    <label class="search-bar" for="ark-search">
+    <label class="search-bar" for="NOVA-search">
       <span class="search-bar-icon" aria-hidden="true">⌕</span>
-      <input id="ark-search" type="search" placeholder="Search…" autocomplete="off" />
+      <input id="NOVA-search" type="search" placeholder="Search…" autocomplete="off" />
     </label>
   </header>`;
       if (/<body[^>]*>/i.test(html)) {
@@ -461,7 +461,7 @@ h1 {
     }
     if (!/ark-search/i.test(js)) {
       js += `
-document.getElementById('ark-search')?.addEventListener('keydown', (e) => {
+document.getElementById('NOVA-search')?.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') e.preventDefault();
 });
 `;
@@ -681,7 +681,7 @@ export function reactSurgicalMicroAskEdits(
   }
   if (
     !isWebMicroAsk(t)
-    && !/\b(rename|change|tint|make|update|finish|feel\s+finished|apply|badge|unread|syncing|connect\s+bank|folder\s+groups?|find\s+in\s+note|tags?\s+chips?)\b/i.test(t)
+    && !/\b(rename|change|tint|make|update|finish|feel\s+finished|apply|badge|unread|syncing|connect\s+bank|folder\s+groups?|find\s+in\s+note|tags?\s+chips?|add|remove|delete|copyright|contact|footer|nav)\b/i.test(t)
   ) {
     return [];
   }
@@ -694,6 +694,54 @@ export function reactSurgicalMicroAskEdits(
   let css = flat[cssPath] || '';
   let touchedApp = false;
   let touchedCss = false;
+
+  // Add Contact / Support (or similar) nav control that scrolls to buy / contact.
+  {
+    const navLabelMatch = t.match(/\b(?:add|put|insert|include)\b[\s\S]{0,40}\b(contact|support|help)\b/i)
+      || (/\b(?:nav|navbar|header|menu|top)\b/i.test(t)
+        ? t.match(/\b(contact|support|help)\b/i)
+        : null);
+    const navLabelRaw = navLabelMatch?.[1] || '';
+    const navLabel = navLabelRaw
+      ? navLabelRaw.charAt(0).toUpperCase() + navLabelRaw.slice(1).toLowerCase()
+      : '';
+    if (
+      navLabel
+      && /\b(?:add|put|insert|include)\b/i.test(t)
+      && /\b(?:nav|navbar|header|menu|top|link)\b/i.test(t)
+      && !new RegExp(`>\\s*${navLabel}\\s*<`, 'i').test(app)
+    ) {
+      const scrollTarget = /\bbuy\b/i.test(t) ? 'buy' : (/\bcontact\b/i.test(t) ? 'buy' : 'buy');
+      const navBtn = `<button type="button" onClick={() => go('${scrollTarget}')}>${navLabel}</button>`;
+      if (/<nav className="links">[\s\S]*?<\/nav>/i.test(app)) {
+        app = app.replace(
+          /(<nav className="links">[\s\S]*?)(<\/nav>)/i,
+          `$1${navBtn}\n        $2`,
+        );
+        touchedApp = true;
+      } else if (/<\/nav>/i.test(app)) {
+        app = app.replace(/<\/nav>/i, `${navBtn}\n      </nav>`);
+        touchedApp = true;
+      }
+    }
+  }
+
+  // Remove footer copyright / © line.
+  if (
+    /\b(?:remove|delete|drop|get rid of)\b/i.test(t)
+    && /\b(?:copyright|©|footer\s+(?:line|text|copy))\b/i.test(t)
+  ) {
+    if (/<span>\s*Copyright[\s\S]*?<\/span>/i.test(app)) {
+      app = app.replace(/<span>\s*Copyright[\s\S]*?<\/span>/i, '');
+      touchedApp = true;
+    } else if (/Copyright\s+\{?new Date\(\)\.getFullYear\(\)\}?[\s\S]*?(?:<\/span>|<\/p>)/i.test(app)) {
+      app = app.replace(/\s*<span>\s*Copyright[\s\S]*?<\/span>/i, '');
+      touchedApp = true;
+    } else if (/©[^<\n]{0,80}/i.test(app)) {
+      app = app.replace(/\s*©[^<\n]{0,80}/i, '');
+      touchedApp = true;
+    }
+  }
 
   const col = t.match(/rename\s+(?:the\s+)?([A-Za-z][A-Za-z0-9_-]*)\s+column\s+to\s+([A-Za-z][A-Za-z0-9_-]*)/i)
     || t.match(/rename\s+(?:the\s+)?([A-Za-z][A-Za-z0-9_-]*)\s+to\s+([A-Za-z][A-Za-z0-9_-]*)/i);
@@ -898,7 +946,7 @@ export function reactFeaturePolishEdits(
   }
 
   if (wantsFind && !/data-ark-find-bar/i.test(app)) {
-    const find = `<label className="ark-find-bar" data-ark-find-bar="1">Find in note <input placeholder="Search in note…" /></label>`;
+    const find = `<label className="NOVA-find-bar" data-ark-find-bar="1">Find in note <input placeholder="Search in note…" /></label>`;
     app = app.replace(
       /(<(?:div|section|main)[^>]*className=["'][^"']*(?:editor|main|content|pane)[^"']*["'][^>]*>)/i,
       `$1${find}`,
@@ -915,7 +963,7 @@ export function reactFeaturePolishEdits(
   }
 
   if (wantsTags && !/data-ark-tags/i.test(app)) {
-    const tags = `<div className="ark-tags" data-ark-tags="1"><span>draft</span><span>idea</span><span>review</span></div>`;
+    const tags = `<div className="NOVA-tags" data-ark-tags="1"><span>draft</span><span>idea</span><span>review</span></div>`;
     app = app.replace(/(<h1[^>]*>[\s\S]*?<\/h1>)/i, `$1${tags}`);
     if (!/data-ark-tags/i.test(app)) {
       app = app.replace(/return\s*\(/i, `return (\n    <>\n    ${tags}\n`);
@@ -978,7 +1026,7 @@ import {
 } from 'lucide-react';
 import './App.css';
 
-const STORAGE_KEY = 'ark-finance-v1';
+const STORAGE_KEY = 'NOVA-finance-v1';
 const WALLETS = [
   { id: 'checking', name: 'Checking', balance: 2450 },
   { id: 'savings', name: 'Savings', balance: 8200 },
@@ -1211,7 +1259,7 @@ function buildPulseAppJsx(title: string, brief = ''): string {
     return `import { useEffect, useRef, useState } from 'react';
 import './App.css';
 
-const LAPS_KEY = 'ark-pulse-laps-v1';
+const LAPS_KEY = 'NOVA-pulse-laps-v1';
 function loadLaps() {
   try { const p = JSON.parse(localStorage.getItem(LAPS_KEY) || '[]'); return Array.isArray(p) ? p : []; } catch { return []; }
 }
@@ -1269,7 +1317,7 @@ export default function App() {
   return `import { useEffect, useRef, useState } from 'react';
 import './App.css';
 
-const NOTE_KEY = 'ark-pulse-note-v1';
+const NOTE_KEY = 'NOVA-pulse-note-v1';
 const FOCUS_SECS = 25 * 60;
 
 function loadNote() {
@@ -1368,7 +1416,7 @@ function buildKanbanAppJsx(title: string): string {
 import { Plus, X } from 'lucide-react';
 import './App.css';
 
-const STORAGE_KEY = 'ark-kanban-v1';
+const STORAGE_KEY = 'NOVA-kanban-v1';
 const COLUMNS = [
   { id: 'backlog', label: 'Backlog' },
   { id: 'doing', label: 'Doing' },
@@ -1562,11 +1610,11 @@ const CHANNELS = [
 ];
 const MEMBERS = [
   { name: 'You', status: 'online' },
-  { name: 'Ark Bot', status: 'online' },
+  { name: 'NOVA Bot', status: 'online' },
   { name: 'Guest', status: 'idle' },
 ];
 const SEED = [
-  { id: '1', channel: 'general', author: 'Ark Bot', text: 'Welcome to ${safeTitle}. pick a channel or open DMs.' },
+  { id: '1', channel: 'general', author: 'NOVA Bot', text: 'Welcome to ${safeTitle}. pick a channel or open DMs.' },
 ];
 
 export default function App() {
@@ -2189,7 +2237,7 @@ export function reactUiMicroAskEdits(
     const jsx = `import { useEffect, useMemo, useState } from 'react';
 import './App.css';
 
-const STORAGE_KEY = 'ark-tasks-v1';
+const STORAGE_KEY = 'NOVA-tasks-v1';
 
 function loadTasks() {
   try {
@@ -2348,7 +2396,7 @@ export default function App() {
     const jsx = `import { useEffect, useMemo, useState } from 'react';
 import './App.css';
 
-const STORAGE_KEY = 'ark-notes-v1';
+const STORAGE_KEY = 'NOVA-notes-v1';
 
 function loadNotes() {
   try {

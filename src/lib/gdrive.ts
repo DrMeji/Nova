@@ -97,7 +97,7 @@ export async function runDriveLive(
     }
     const rest = uploadMatch[1].trim();
     const parts = rest.split(/\s+[—–]\s+|\s+-{1,2}\s+/);
-    const title = (parts[0] || 'ARK note').trim();
+    const title = (parts[0] || 'NOVA note').trim();
     const content = (parts.slice(1).join('. ').trim() || title);
     const file = await uploadDriveTextFile(token, title, content);
     return [

@@ -224,8 +224,8 @@ export function MessageView() {
 
   useEffect(() => {
     const compact = () => setRailCompact(true);
-    window.addEventListener('ark:compact-connect-rail', compact);
-    return () => window.removeEventListener('ark:compact-connect-rail', compact);
+    window.addEventListener('NOVA:compact-connect-rail', compact);
+    return () => window.removeEventListener('NOVA:compact-connect-rail', compact);
   }, []);
 
   useEffect(() => {
@@ -430,11 +430,11 @@ export function MessageView() {
     setAddError(null);
     setAddOk(null);
     if (!isDevArkAlias(raw) && !isArkUserId(id)) {
-      setAddError('Enter a 7-digit ARK ID (or DEV)');
+      setAddError('Enter a 7-digit NOVA ID (or DEV)');
       return;
     }
     if (!isDevArkAlias(raw) && id === myArkId) {
-      setAddError('That’s your own ARK ID');
+      setAddError('That’s your own NOVA ID');
       return;
     }
     if (!isDevArkAlias(raw) && isBlockedArkId(id)) {
@@ -569,7 +569,7 @@ export function MessageView() {
               <div>
                 <h1 className="text-2xl font-semibold text-content-primary tracking-tight">Add a friend</h1>
                 <p className="text-sm text-content-tertiary mt-2 leading-relaxed">
-                  Enter their 7-digit ARK ID. You’ll see them on the left when you have people to message.
+                  Enter their 7-digit NOVA ID. You’ll see them on the left when you have people to message.
                 </p>
               </div>
               <div className="flex items-center gap-2 rounded-full bg-ark-navy-900/80 border border-white/10 p-1.5 pl-4">
@@ -577,7 +577,7 @@ export function MessageView() {
                   value={addId}
                   onChange={e => setAddId(e.target.value)}
                   onKeyDown={e => { if (e.key === 'Enter') void add(); }}
-                  placeholder="ARK ID"
+                  placeholder="NOVA ID"
                   className="flex-1 min-w-0 bg-transparent text-sm font-mono text-content-primary placeholder:text-content-tertiary outline-none"
                 />
                 <button
@@ -615,7 +615,7 @@ export function MessageView() {
                     value={addId}
                     onChange={e => setAddId(e.target.value)}
                     onKeyDown={e => { if (e.key === 'Enter') void add(); }}
-                    placeholder="Add ARK ID"
+                    placeholder="Add NOVA ID"
                     inputMode="numeric"
                     className="flex-1 min-w-0 bg-transparent text-xs font-mono text-content-primary placeholder:text-content-tertiary outline-none py-1"
                   />
@@ -633,8 +633,8 @@ export function MessageView() {
                 <button
                   type="button"
                   onClick={() => setRailCompact(false)}
-                  title="Add ARK ID"
-                  aria-label="Add ARK ID"
+                  title="Add NOVA ID"
+                  aria-label="Add NOVA ID"
                   className="h-8 w-8 rounded-lg flex items-center justify-center text-content-tertiary hover:text-content-primary hover:bg-surface-hover"
                 >
                   <UserPlus className="w-4 h-4" />

@@ -1,6 +1,6 @@
 /**
  * Registered external MCP servers (user-defined).
- * Separate from ARK Plugins (BuildRun catalog) — these are stdio/SSE tool hosts.
+ * Separate from NOVA Plugins (BuildRun catalog) — these are stdio/SSE tool hosts.
  */
 
 export type McpTransport = 'stdio' | 'sse';
@@ -25,8 +25,8 @@ export type McpServerConfig = {
   lastCheckedAt?: string | null;
 };
 
-const KEY = 'ark:mcp-servers';
-export const MCP_CHANGED_EVENT = 'ark:mcp-changed';
+const KEY = 'NOVA:mcp-servers';
+export const MCP_CHANGED_EVENT = 'NOVA:mcp-changed';
 
 function emitChanged() {
   try {

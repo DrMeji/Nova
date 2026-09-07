@@ -1,5 +1,5 @@
 /**
- * ARK design Skill packs. built-in playbooks auto-attached by project kind.
+ * NOVA design Skill packs. built-in playbooks auto-attached by project kind.
  * Separate from SaaS Plugins (GitHub/Notion/…). Inspired by taste/arsenal-style skills.
  */
 
@@ -94,7 +94,7 @@ export const ARK_SKILL_PACKS: ArkSkillPack[] = [
   },
 ];
 
-const SKILL_PREF_KEY = 'ark:skills-enabled';
+const SKILL_PREF_KEY = 'NOVA:skills-enabled';
 
 export function getEnabledSkillIds(): ArkSkillId[] {
   try {
@@ -112,7 +112,7 @@ export function getEnabledSkillIds(): ArkSkillId[] {
 export function setEnabledSkillIds(ids: ArkSkillId[]) {
   try {
     localStorage.setItem(SKILL_PREF_KEY, JSON.stringify(ids));
-    window.dispatchEvent(new CustomEvent('ark:skills-changed'));
+    window.dispatchEvent(new CustomEvent('NOVA:skills-changed'));
   } catch {
     /* ignore */
   }
@@ -174,7 +174,7 @@ export function selectSkillsForBrief(
 export function formatSkillsForPrompt(skills: ArkSkillPack[]): string {
   if (!skills.length) return '';
   const lines = [
-    '## ARK design skills (follow these)',
+    '## NOVA design skills (follow these)',
     ...skills.map(s => `- **${s.name}:** ${s.rules}`),
   ];
   return lines.join('\n');

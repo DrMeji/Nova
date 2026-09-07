@@ -1,28 +1,28 @@
-/** Single source of truth for ARK Engine model catalog + Ollama-style aliases. */
+/** Single source of truth for NOVA Engine model catalog + Ollama-style aliases. */
 
 const DEFAULT_BRAIN_ID = 'qwen25-15b';
 
 const CATALOG = [
   {
-    id: 'ark-core',
-    name: 'ARK Core',
+    id: 'NOVA-core',
+    name: 'NOVA Core',
     detail: 'Built-in template · not a live LLM',
     sizeGb: 0,
     status: 'ready',
     builtin: true,
   },
   {
-    id: 'ark-image-core',
-    name: 'ARK Image Core',
+    id: 'NOVA-image-core',
+    name: 'NOVA Image Core',
     detail: 'Free images · Pollinations · Image tab',
     sizeGb: 0,
     status: 'ready',
     builtin: true,
   },
   {
-    id: 'ark-video-core',
-    name: 'ARK Video Core',
-    detail: 'Free / motion MP4 · Video tab · ARK Engine',
+    id: 'NOVA-video-core',
+    name: 'NOVA Video Core',
+    detail: 'Free / motion MP4 · Video tab · NOVA Engine',
     sizeGb: 0,
     status: 'ready',
     builtin: true,

@@ -1,9 +1,9 @@
-﻿const { spawn } = require('child_process');
+const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const electron = require('electron');
 const root = path.join(__dirname, '..');
-const logPath = path.join(process.env.TEMP, 'ark-smoke.log');
+const logPath = path.join(process.env.TEMP, 'NOVA-smoke.log');
 fs.writeFileSync(logPath, '');
 function log(m) { fs.appendFileSync(logPath, `[${new Date().toISOString()}] ${m}\n`); console.log(m); }
 
@@ -17,7 +17,7 @@ let out = '';
 child.stdout.on('data', d => { out += d; log('OUT '+d.toString().trim()); });
 child.stderr.on('data', d => { out += d; log('ERR '+d.toString().trim()); });
 setTimeout(() => {
-  const healthy = /\[ark-brain\].*127\.0\.0\.1:8787|\[ark-engine\] ready/i.test(out);
+  const healthy = /\[NOVA-brain\].*127\.0\.0\.1:8787|\[ark-engine\] ready/i.test(out);
   log(healthy ? 'startup healthy; timeout kill' : 'startup markers missing; timeout kill');
   try { child.kill(); } catch {}
   process.exit(healthy ? 0 : 1);

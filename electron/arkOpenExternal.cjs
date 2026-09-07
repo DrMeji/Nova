@@ -2,7 +2,7 @@
 
 const { shell } = require('electron');
 
-/** Hosts ARK intentionally opens (Connect, docs, updates, OAuth). */
+/** Hosts NOVA intentionally opens (Connect, docs, updates, OAuth). */
 const ALLOWED_EXTERNAL_HOST_SUFFIXES = [
   'github.com',
   'githubusercontent.com',

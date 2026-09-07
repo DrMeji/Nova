@@ -1,4 +1,4 @@
-/** Live Notion API helpers for the ARK Notion plugin. */
+/** Live Notion API helpers for the NOVA Notion plugin. */
 
 import { apiErrorMessage, desktopRequest } from '@/lib/httpDesktop';
 
@@ -120,7 +120,7 @@ export async function createNotionPage(
 ) {
   let parentId = parentPageId;
   if (!parentId) {
-    const hits = await searchNotion(token, 'ARK');
+    const hits = await searchNotion(token, 'NOVA');
     const page = hits.find(h => h.object === 'page');
     if (!page) throw new Error('Share at least one page with the integration, then try again');
     parentId = page.id;
@@ -238,9 +238,9 @@ export async function runNotionLive(
     const titleMatch = userText.match(
       /(?:create|add|new|write)\s+(?:a\s+)?(?:page|note|doc)\s*[:\-]?\s*(.+)$/i,
     );
-    const title = (titleMatch?.[1] || 'Note from ARK').replace(/[?.!]+$/, '').trim().slice(0, 120);
+    const title = (titleMatch?.[1] || 'Note from NOVA').replace(/[?.!]+$/, '').trim().slice(0, 120);
     const account = await verifyNotionToken(token);
-    const page = await createNotionPage(token, title, `Created from ARK chat:\n${userText.slice(0, 500)}`);
+    const page = await createNotionPage(token, title, `Created from NOVA chat:\n${userText.slice(0, 500)}`);
     return [
       `Notion · created (@${account.label})`,
       '',
@@ -261,7 +261,7 @@ export async function runNotionLive(
 
   const queryMatch = lower.match(/(?:search|find|look up|open|read)\s+(.+)$/);
   const query = queryMatch?.[1]?.replace(/[?.!]+$/, '').trim()
-    || (/(brief|spec)/.test(lower) ? 'brief' : 'ARK');
+    || (/(brief|spec)/.test(lower) ? 'brief' : 'NOVA');
 
   const [account, results] = await Promise.all([
     verifyNotionToken(token),

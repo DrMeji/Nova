@@ -1,4 +1,4 @@
-/** Central ARK port and loopback config — single source for main process. */
+/** Central NOVA port and loopback config — single source for main process. */
 
 module.exports = {
   BRAIN_PORT_BASE: 8787,

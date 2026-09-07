@@ -162,7 +162,7 @@ export async function runLinearLive(
     }
     const titleMatch = userText.match(/(?:create|new|add)\s+(?:an?\s+)?(?:issue|ticket|bug|task)\s*[:\-]?\s*(.+)$/i);
     const title = (titleMatch?.[1] || userText.replace(/using linear[,:]?/i, '').trim()).slice(0, 120)
-      || 'New issue from ARK';
+      || 'New issue from NOVA';
     const issue = await createLinearIssue(token, title);
     return [
       `Linear · created (@${account.label})`,

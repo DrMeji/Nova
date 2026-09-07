@@ -56,7 +56,7 @@ export function ResetPage() {
     try {
       const { error } = await supabase.auth.updateUser({ password });
       if (error) throw error;
-      setMsg('Password updated. Open the ARK app and sign in with your new password.');
+      setMsg('Password updated. Open the NOVA app and sign in with your new password.');
       setPassword('');
       setConfirm('');
     } catch (ex) {

@@ -25,7 +25,7 @@ export function getVoiceTtsVoiceUri(): string {
   return getLocalPrefs().voiceTtsVoiceUri || '';
 }
 
-/** ARK ships two neural voices — female default, male optional. */
+/** NOVA ships two neural voices — female default, male optional. */
 export const VOICE_TTS_FEMALE_ID = 'en-US-JennyNeural';
 export const VOICE_TTS_MALE_ID = 'en-US-GuyNeural';
 
@@ -47,7 +47,7 @@ export function setVoiceAudioPrefs(patch: {
   voiceOutputAuto?: boolean;
 }) {
   setLocalPrefs(patch);
-  window.dispatchEvent(new Event('ark:voice-audio-changed'));
+  window.dispatchEvent(new Event('NOVA:voice-audio-changed'));
 }
 
 function cleanDeviceLabel(label: string): string {

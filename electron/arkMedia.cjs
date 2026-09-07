@@ -1,5 +1,5 @@
 /**
- * ARK media generation — local SD when installed, free hosts, real MP4 fallbacks.
+ * NOVA media generation — local SD when installed, free hosts, real MP4 fallbacks.
  */
 
 const fs = require('fs');
@@ -46,8 +46,8 @@ function palette(seed) {
 function buildFallbackSvg(prompt, modelName, kind) {
   const seed = hashPrompt(prompt);
   const p = palette(seed);
-  const title = escapeXml((prompt || 'ARK media').slice(0, 72));
-  const model = escapeXml(modelName || 'ARK Engine');
+  const title = escapeXml((prompt || 'NOVA media').slice(0, 72));
+  const model = escapeXml(modelName || 'NOVA Engine');
   if (kind === 'video') {
     return `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="768" height="432" viewBox="0 0 768 432">
@@ -111,7 +111,7 @@ async function fetchImageUrl(url, timeoutMs = 45_000) {
         target,
         {
           headers: {
-            'User-Agent': 'ARK-Desktop/0.3',
+            'User-Agent': 'NOVA-Desktop/0.3',
             Referer: 'https://pollinations.ai/',
             Accept: 'image/jpeg,image/png,image/*,*/*',
           },
@@ -227,7 +227,7 @@ function sourceDisplayName(source, fallback) {
   if (/ai-horde/i.test(s)) return 'AI Horde';
   if (/huggingface/i.test(s)) return 'Hugging Face FLUX';
   if (/local|sd\./i.test(s)) return 'Local SD';
-  return fallback || 'ARK Image Core';
+  return fallback || 'NOVA Image Core';
 }
 
 function sniffJpegSize(buf) {
@@ -485,7 +485,7 @@ async function fetchHfImage(prompt) {
             Authorization: `Bearer ${token}`,
             'Content-Type': 'application/json',
             Accept: 'image/png',
-            'User-Agent': 'ARK-Desktop',
+            'User-Agent': 'NOVA-Desktop',
           },
           body: JSON.stringify({ inputs: text }),
           signal: ac.signal,
@@ -529,7 +529,7 @@ async function fetchHordeImage(prompt, opts = {}) {
   const headers = {
     'Content-Type': 'application/json',
     apikey: '0000000000',
-    'Client-Agent': 'ARK-Desktop:0.2:https://github.com/DrMeji/Ark',
+    'Client-Agent': 'NOVA-Desktop:0.2:https://github.com/DrMeji/Ark',
   };
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), 38_000);
@@ -628,7 +628,7 @@ async function fetchVideoUrl(url, timeoutMs) {
   try {
     const res = await fetch(url, {
       method: 'GET',
-      headers: { 'User-Agent': 'ARK-Desktop' },
+      headers: { 'User-Agent': 'NOVA-Desktop' },
       redirect: 'follow',
       signal: ac.signal,
     });
@@ -702,7 +702,7 @@ async function fetchHfVideo(prompt) {
             Authorization: `Bearer ${token}`,
             'Content-Type': 'application/json',
             Accept: 'video/mp4',
-            'User-Agent': 'ARK-Desktop',
+            'User-Agent': 'NOVA-Desktop',
           },
           body: JSON.stringify({ inputs: String(prompt || '').slice(0, 400) }),
           signal: ac.signal,
@@ -999,7 +999,7 @@ async function generateImage(prompt, modelName, opts = {}) {
     fs.writeFileSync(file, buf);
     const mime = ext === 'png' ? 'png' : ext === 'webp' ? 'webp' : 'jpeg';
     const dataUrl = `data:image/${mime};base64,${buf.toString('base64')}`;
-    const niceName = sourceDisplayName(winner.source, label || modelName || 'ARK Image Core');
+    const niceName = sourceDisplayName(winner.source, label || modelName || 'NOVA Image Core');
     const entry = {
       id,
       kind: 'image',
@@ -1157,7 +1157,7 @@ async function generateImage(prompt, modelName, opts = {}) {
   return {
     ok: false,
     kind: 'image',
-    modelName: modelName || 'ARK Image Core',
+    modelName: modelName || 'NOVA Image Core',
     libraryId: id,
     real: false,
     source: 'none',
@@ -1195,7 +1195,7 @@ async function generateVideo(prompt, modelName, opts = {}) {
       kind: 'video',
       title: String(prompt).slice(0, 80),
       prompt: String(prompt),
-      modelName: modelName || 'ARK Video Core',
+      modelName: modelName || 'NOVA Video Core',
       path: file,
       createdAt: new Date().toISOString(),
       source: mp4.source,
@@ -1281,7 +1281,7 @@ async function generateVideo(prompt, modelName, opts = {}) {
           kind: 'video',
           title: String(prompt).slice(0, 80),
           prompt: String(prompt),
-          modelName: modelName || 'ARK Video Core',
+          modelName: modelName || 'NOVA Video Core',
           path: file,
           createdAt: new Date().toISOString(),
           source: 'motion-still-mp4',
@@ -1311,7 +1311,7 @@ async function generateVideo(prompt, modelName, opts = {}) {
   return {
     ok: false,
     kind: 'video',
-    modelName: modelName || 'ARK Video Core',
+    modelName: modelName || 'NOVA Video Core',
     libraryId: id,
     real: false,
     source: 'none',

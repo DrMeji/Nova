@@ -153,7 +153,7 @@ function LocalDownloadControl({
       type="button"
       onClick={onDownload}
       className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors"
-      title="Download into ARK Engine"
+      title="Download into NOVA Engine"
       aria-label={`Download ${name}`}
     >
       <Download className="w-4 h-4" />
@@ -198,7 +198,7 @@ export function LocalAI() {
   const [hunted, setHunted] = useState<HuntedModel[]>([]);
   const [huntNote, setHuntNote] = useState('');
   const downloadingIds = Object.keys(downloadProgressMap).filter(id => (downloadProgressMap[id] ?? 0) < 100);
-  const [statusNote, setStatusNote] = useState('Starting ARK Engine…');
+  const [statusNote, setStatusNote] = useState('Starting NOVA Engine…');
   const [engineMeta, setEngineMeta] = useState<ArkEngineStatus | null>(null);
   const [brainNote, setBrainNote] = useState('Brain API · checking');
   const [speedTesting, setSpeedTesting] = useState(false);
@@ -317,9 +317,9 @@ export function LocalAI() {
         status.models
           .filter(m =>
             m.status === 'ready'
-            && m.id !== 'ark-core'
-            && m.id !== 'ark-image-core'
-            && m.id !== 'ark-video-core',
+            && m.id !== 'NOVA-core'
+            && m.id !== 'NOVA-image-core'
+            && m.id !== 'NOVA-video-core',
           )
           .map(m => {
             const cat = CATALOG.find(c => c.id === m.id);
@@ -345,7 +345,7 @@ export function LocalAI() {
         if (!cancelled) applyEngine(status);
       }).catch(() => undefined);
     };
-    window.addEventListener('ark:engine-models-changed', onModels);
+    window.addEventListener('NOVA:engine-models-changed', onModels);
     void (async () => {
       try {
         const status = await startEngine();
@@ -361,14 +361,14 @@ export function LocalAI() {
       if (!cancelled) {
         setBrainNote(
           brain.ok
-            ? `ARK Brain · ${brain.version ?? 'ok'} @ ${brainUrl.replace('http://', '')}`
-            : 'ARK Brain · offline (restart desktop ARK)',
+            ? `NOVA Brain · ${brain.version ?? 'ok'} @ ${brainUrl.replace('http://', '')}`
+            : 'NOVA Brain · offline (restart desktop NOVA)',
         );
       }
     })();
     return () => {
       cancelled = true;
-      window.removeEventListener('ark:engine-models-changed', onModels);
+      window.removeEventListener('NOVA:engine-models-changed', onModels);
     };
   }, []);
 
@@ -390,14 +390,14 @@ export function LocalAI() {
 
   const toggleEngine = () => {
     if (engineRunning) {
-      if (!window.confirm('Stop ARK Engine? In-flight Chat replies on this PC will fail or fall back to a cloud key.')) {
+      if (!window.confirm('Stop NOVA Engine? In-flight Chat replies on this PC will fail or fall back to a cloud key.')) {
         return;
       }
       void stopEngine().then(applyEngine);
       return;
     }
     setEnginePhase('starting');
-    setStatusNote('Starting ARK Engine…');
+    setStatusNote('Starting NOVA Engine…');
     void startEngine().then(applyEngine);
   };
 
@@ -406,7 +406,7 @@ export function LocalAI() {
       .then(status => {
         applyEngine(status);
         setLocalPrefs({ defaultModelId: id });
-        setStatusNote(`ARK Engine · active model updated`);
+        setStatusNote(`NOVA Engine · active model updated`);
       })
       .catch(err => {
         setStatusNote(err instanceof Error ? err.message : 'Could not switch model');
@@ -543,9 +543,9 @@ export function LocalAI() {
   ];
 
   const advancedRows = [
-    { label: 'Runtime', value: 'ARK Engine' },
+    { label: 'Runtime', value: 'NOVA Engine' },
     { label: 'Active model', value: engineMeta?.activeModelName ?? activeModel.name },
-    { label: 'ARK Brain', value: brainNote },
+    { label: 'NOVA Brain', value: brainNote },
     { label: 'GGUF files', value: String((engineMeta as { ggufCount?: number } | null)?.ggufCount ?? 0) },
     { label: 'GGUF binary', value: (engineMeta as { ggufBinary?: boolean } | null)?.ggufBinary ? 'Found' : 'Not installed' },
     { label: 'Models folder', value: engineMeta?.modelsDir ?? '—' },
@@ -996,7 +996,7 @@ export function LocalAI() {
                 </div>
                 {!preloadPlan ? (
                   <p className="text-sm text-content-tertiary px-1">
-                    Run a speed test to calculate when ARK should start downloading the next model in the background.
+                    Run a speed test to calculate when NOVA should start downloading the next model in the background.
                   </p>
                 ) : (
                   <>
@@ -1180,7 +1180,7 @@ export function LocalAI() {
                   </div>
                 </div>
                 <p className="text-xs text-content-tertiary mb-3 font-mono break-all">
-                  {engineMeta?.modelsDir ?? 'Open ARK Desktop to see the models folder on this PC.'}
+                  {engineMeta?.modelsDir ?? 'Open NOVA Desktop to see the models folder on this PC.'}
                 </p>
                 <div
                   className="mb-4 rounded-xl border border-dashed border-surface-border px-4 py-6 text-center text-xs text-content-tertiary"
@@ -1330,7 +1330,7 @@ export function LocalAI() {
                   Existing downloads stay where they are. New GGUF installs go to the folder above.
                   {engineMeta?.modelsDirIsCustom
                     ? ` Default was ${engineMeta.modelsDirDefault ?? 'app data'}.`
-                    : ' Using the default ARK Engine location.'}
+                    : ' Using the default NOVA Engine location.'}
                 </p>
               </section>
 

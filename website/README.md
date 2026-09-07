@@ -1,6 +1,6 @@
-# ARK website
+# NOVA website
 
-Public marketing + account-help site for ARK (separate from the desktop Electron app).
+Public marketing + account-help site for NOVA (separate from the desktop Electron app).
 
 ## Preview locally
 
@@ -35,4 +35,4 @@ Buttons point at the **public** installer feed only:
 
 https://github.com/DrMeji/Ark/releases/latest
 
-Do not link the private Ark-Source repo from this site.
+Do not link the private NOVA-Source repo from this site.

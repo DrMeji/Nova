@@ -1,7 +1,7 @@
 /** First-run setup gate. localStorage + Electron userData (source of truth on desktop). */
 
-const SETUP_KEY = 'ark:setup-completed';
-const BYPASS_KEY = 'ark:bypass-enabled';
+const SETUP_KEY = 'NOVA:setup-completed';
+const BYPASS_KEY = 'NOVA:bypass-enabled';
 /** TEMP while building: always land on AuthScreen after rebuilds. Remove later. */
 export const FORCE_AUTH_ON_LAUNCH = false;
 
@@ -29,14 +29,14 @@ export function markSetupCompleted() {
   gatePromise = null;
   freshInstallGate = false;
   void window.arkDesktop?.setupSet?.(true)?.catch?.(() => {});
-  window.dispatchEvent(new Event('ark:setup-changed'));
+  window.dispatchEvent(new Event('NOVA:setup-changed'));
 }
 
 export function clearSetupCompleted() {
   localStorage.removeItem(SETUP_KEY);
   gatePromise = null;
   void window.arkDesktop?.setupSet?.(false)?.catch?.(() => {});
-  window.dispatchEvent(new Event('ark:setup-changed'));
+  window.dispatchEvent(new Event('NOVA:setup-changed'));
 }
 
 /**

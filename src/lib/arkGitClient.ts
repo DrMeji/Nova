@@ -1,5 +1,5 @@
 /**
- * Renderer helpers for ARK Code git (clone / commit / push / review).
+ * Renderer helpers for NOVA Code git (clone / commit / push / review).
  */
 
 export type GitStatus = {
@@ -64,32 +64,32 @@ export function classifyGitAsk(message: string):
 
 export async function gitStatus(projectId: string): Promise<GitStatus> {
   const res = await window.arkDesktop?.gitStatus?.(projectId);
-  return res || { ok: false, error: 'Git is only available in the ARK desktop app.' };
+  return res || { ok: false, error: 'Git is only available in the NOVA desktop app.' };
 }
 
 export async function gitClone(projectId: string, url: string, token?: string): Promise<GitStatus> {
   const res = await window.arkDesktop?.gitClone?.({ projectId, url, token });
-  return res || { ok: false, error: 'Git clone needs the ARK desktop app.' };
+  return res || { ok: false, error: 'Git clone needs the NOVA desktop app.' };
 }
 
 export async function gitCommit(projectId: string, message: string): Promise<GitStatus> {
   const res = await window.arkDesktop?.gitCommit?.({ projectId, message });
-  return res || { ok: false, error: 'Git commit needs the ARK desktop app.' };
+  return res || { ok: false, error: 'Git commit needs the NOVA desktop app.' };
 }
 
 export async function gitPush(projectId: string, token?: string): Promise<GitStatus> {
   const res = await window.arkDesktop?.gitPush?.({ projectId, token });
-  return res || { ok: false, error: 'Git push needs the ARK desktop app.' };
+  return res || { ok: false, error: 'Git push needs the NOVA desktop app.' };
 }
 
 export async function gitPull(projectId: string, token?: string): Promise<GitStatus> {
   const res = await window.arkDesktop?.gitPull?.({ projectId, token });
-  return res || { ok: false, error: 'Git pull needs the ARK desktop app.' };
+  return res || { ok: false, error: 'Git pull needs the NOVA desktop app.' };
 }
 
 export async function gitDiff(projectId: string): Promise<GitStatus> {
   const res = await window.arkDesktop?.gitDiff?.(projectId);
-  return res || { ok: false, error: 'Git diff needs the ARK desktop app.' };
+  return res || { ok: false, error: 'Git diff needs the NOVA desktop app.' };
 }
 
 export async function gitSetOrigin(projectId: string, remoteUrl: string): Promise<GitStatus> {

@@ -43,11 +43,13 @@ export function planningConversationHint(topicHint?: string): string {
     'This is a real back-and-forth. Do NOT rush them to build. Do NOT end by saying “say go and I’ll create files” unless they already asked to build.',
     'Reply in complete sentences. Never stop mid-phrase. Aim for about 80–160 words each planning turn.',
     'Open by restating their idea in your own words (one full sentence), then give a concrete best-way-to-start take (2–4 sentences).',
+    'Name the problem you heard and a practical resolution path before asking anything.',
     'Then ask 1–3 product questions in plain language. Prefer flowing prose or light bullets over a stiff numbered exam.',
+    'Never end with “Would you like more information on any of these steps?” or “Do you have specific questions?”',
     'Good questions: web vs phone app, who it is for, the one must-have for v1, calm vs playful feel, offline or online.',
     'If they want a phone/mobile app, ask whether it is for overall iOS, overall Android, or a specific device (e.g. iPhone 16, Galaxy S23) — never quiz them on tech stacks.',
     'On follow-up turns, react to what they just said, refine the plan, and keep asking only what is still missing. Stay conversational until they clearly ask to create/build on disk.',
-    'HARD BAN — never ask: tech-stack experience, “want recommendations?”, coding skill, frameworks/languages they know, how they will handle auth, login, privacy, encryption, databases, hosting, or compliance. ARK users are not engineers; ARK chooses defaults (private by default, sensible auth when needed) without interviewing them.',
+    'HARD BAN — never ask: tech-stack experience, “want recommendations?”, coding skill, frameworks/languages they know, how they will handle auth, login, privacy, encryption, databases, hosting, or compliance. NOVA users are not engineers; NOVA chooses defaults (private by default, sensible auth when needed) without interviewing them.',
     'Never ask them to pick a stack or “how to handle user authentication and data privacy.”',
     'Invite them to add more detail when ready (“Anything else you already know you want?”).',
     'Avoid empty openers like “Great!” / “Let’s clarify a few details” with no substance first.',
@@ -74,6 +76,8 @@ export function scrubPlanningReply(text: string): string {
   ];
   for (const re of banned) out = out.replace(re, '');
   out = out
+    .replace(/(?:\n+|^)\s*Would you like more information on any of these steps[^.!?\n]*[.!?]?\s*/gi, '\n')
+    .replace(/(?:\n+|^)\s*Do you have (?:any )?specific questions(?: about[^.!?\n]*)?[.!]?\s*/gi, '\n')
     .replace(/\n{3,}/g, '\n\n')
     .replace(/[ \t]+\n/g, '\n')
     .replace(/\n[ \t]+/g, '\n')

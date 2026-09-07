@@ -4,7 +4,7 @@ const CHIPS = [
   { label: 'Local brain ready', live: true },
   { label: 'Free keys · Auto route', live: false },
   { label: 'Projects on disk', live: false },
-  { label: 'Friends by ARK ID', live: false },
+  { label: 'Friends by NOVA ID', live: false },
   { label: 'Plugins connected', live: false },
   { label: 'Chat offline with a local brain', live: true },
   { label: 'Models install', live: false },

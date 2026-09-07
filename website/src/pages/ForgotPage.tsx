@@ -17,7 +17,7 @@ export function ForgotPage() {
     setErr(null);
     const trimmed = email.trim();
     if (!trimmed) {
-      setErr('Enter the email on your ARK account.');
+      setErr('Enter the email on your NOVA account.');
       return;
     }
     if (!supabaseConfigured || !supabase) {
@@ -31,7 +31,7 @@ export function ForgotPage() {
       const redirectTo = `${window.location.origin}/account/reset`;
       const { error } = await supabase.auth.resetPasswordForEmail(trimmed, { redirectTo });
       if (error) throw error;
-      setMsg('If that email has an ARK account, a reset link is on the way. Check your inbox (and spam).');
+      setMsg('If that email has an NOVA account, a reset link is on the way. Check your inbox (and spam).');
     } catch (ex) {
       setErr(ex instanceof Error ? ex.message : 'Could not send reset email.');
     } finally {
@@ -56,7 +56,7 @@ export function ForgotPage() {
             Reset password
           </h1>
           <p className="text-[var(--fg-muted)] leading-relaxed mb-8">
-            We’ll email a link to set a new password. After it works, sign in again inside the ARK desktop app.
+            We’ll email a link to set a new password. After it works, sign in again inside the NOVA desktop app.
           </p>
 
           <form className="panel space-y-4" onSubmit={onSubmit}>

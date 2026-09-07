@@ -2,7 +2,7 @@
  * Project stack detection. leaf module (no chat/disk imports).
  */
 
-import { looksLikeLandingBrief, prefersReactAppScaffold } from '@/lib/webLandingFromBrief';
+import { looksLikeLandingBrief, prefersReactAppScaffold, wantsInteractiveSpaScaffold } from '@/lib/webLandingFromBrief';
 
 export type ProjectKind = 'static-web' | 'vite-react' | 'python' | 'node-cli' | 'unknown';
 
@@ -40,8 +40,10 @@ export function detectProjectKind(text: string): ProjectKind {
     return 'static-web';
   }
   if (/\b(node\s+cli|command\s+line\s+tool|cli\s+tool)\b/.test(lower)) return 'node-cli';
-  // Bare "website/site" alone is not enough for Vite. landings already handled above.
-  if (/\b(react|vite|next|web\s+app|electron|discord|call|chat\s+app)\b/.test(lower)) return 'vite-react';
+  // Interactive product / game apps (including spatial / WebGL / canvas runners) → Vite React.
+  if (/\b(react|vite|next|web\s+app|electron|discord|call|chat\s+app|3d|webgl|three\.?js|babylon|modeler|dinosaur|dino\s+runner|chrome\s+dino)\b/.test(lower)) {
+    return 'vite-react';
+  }
   if (/\b(website|site)\b/.test(lower) && /\b(react|vite|spa|dashboard|app)\b/.test(lower)) return 'vite-react';
   return 'vite-react';
 }
@@ -59,6 +61,8 @@ export function resolveProjectKindForCreate(
     return 'static-web';
   }
   if (prefersReactAppScaffold(summary)) return 'vite-react';
+  // Interactive premium marketing sites stay on Vite React (animated SPA), not blank static HTML.
+  if (wantsInteractiveSpaScaffold(summary)) return 'vite-react';
   if (storedKind && storedKind !== 'unknown') return storedKind;
   if (looksLikeLandingBrief(summary)) return 'static-web';
   return parsedKind || 'vite-react';

@@ -37,7 +37,7 @@ export async function postFigmaComment(token: string, fileKey: string, message: 
 }
 
 export async function listFigmaTeamProjects(_token: string, _teamId?: string) {
-  // Figma requires a team id (`GET /v1/teams/:team_id/projects`). ARK opens files by URL instead.
+  // Figma requires a team id (`GET /v1/teams/:team_id/projects`). NOVA opens files by URL instead.
   return [] as { id: string; name: string }[];
 }
 

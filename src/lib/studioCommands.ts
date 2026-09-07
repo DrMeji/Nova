@@ -105,7 +105,7 @@ export async function runCodeStudioCommand(opts: {
   if (gitKind === 'commit') {
     const msg = message.match(/commit(?:\s+these changes)?(?:\s+with)?\s*[:\-]\s*(.+)$/i)?.[1]
       || message.match(/["“](.+)["”]/)?.[1]
-      || 'Update from ARK';
+      || 'Update from NOVA';
     const committed = await gitCommit(projectId, msg.trim());
     if (!committed.ok) return { reply: committed.error || 'Commit failed.' };
     return { reply: committed.message || formatGitReview(committed) };
@@ -114,13 +114,13 @@ export async function runCodeStudioCommand(opts: {
   if (gitKind === 'push') {
     const token = githubToken();
     if (!token) {
-      return { reply: 'Connect GitHub in Plugins so ARK can push. Then try Push again.' };
+      return { reply: 'Connect GitHub in Plugins so NOVA can push. Then try Push again.' };
     }
     const blocked = needGithubWrite();
     if (blocked) return { reply: blocked };
     const st = await gitStatus(projectId);
     if (st.git && st.dirty) {
-      await gitCommit(projectId, 'Update from ARK');
+      await gitCommit(projectId, 'Update from NOVA');
     }
     const pushed = await gitPush(projectId, token);
     if (!pushed.ok) return { reply: pushed.error || 'Push failed.' };
@@ -154,7 +154,7 @@ export async function runCodeStudioCommand(opts: {
     const st = await gitStatus(projectId);
     const title = message.match(/titled?\s+["“]?([^"”\n]+)["”]?/i)?.[1]?.trim()
       || st.log?.[0]?.replace(/^[a-f0-9]+\s+/i, '')
-      || 'Changes from ARK';
+      || 'Changes from NOVA';
     const result = await workflowOpenPullRequest({
       projectId,
       token,
@@ -168,7 +168,7 @@ export async function runCodeStudioCommand(opts: {
     const ch = message.match(/#([\w-]+)/)?.[1] || 'dev';
     const review = await gitDiff(projectId);
     const summary = [
-      `Update from ARK · ${projectName}`,
+      `Update from NOVA · ${projectName}`,
       review.branch ? `Branch: ${review.branch}` : '',
       review.text || 'Files were updated in the Code workspace.',
     ].filter(Boolean).join('\n');

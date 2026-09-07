@@ -6,7 +6,7 @@ export type OpenChatCodeDetail = {
   name?: string;
 };
 
-export const OPEN_CHAT_CODE_EVENT = 'ark:open-code-overlay';
+export const OPEN_CHAT_CODE_EVENT = 'NOVA:open-code-overlay';
 
 export function requestOpenChatCode(detail?: OpenChatCodeDetail): void {
   try {

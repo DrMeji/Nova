@@ -1,6 +1,6 @@
 /** Transient notices shown above the sidebar profile (messages, jobs, updates). */
 
-export const SIDEBAR_TOAST_EVENT = 'ark:sidebar-toast';
+export const SIDEBAR_TOAST_EVENT = 'NOVA:sidebar-toast';
 
 export type SidebarToastDetail = {
   message: string;

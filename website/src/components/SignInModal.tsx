@@ -26,7 +26,7 @@ export function SignInModal() {
     setErr(null);
     setInfo(null);
     if (!supabase || !configured) {
-      setErr('Sign in is not configured yet. You can still download ARK and create an account in the desktop app.');
+      setErr('Sign in is not configured yet. You can still download NOVA and create an account in the desktop app.');
       return;
     }
     setBusy(true);

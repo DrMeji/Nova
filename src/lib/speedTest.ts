@@ -25,7 +25,7 @@ export type PreloadPlan = {
   nextModelName: string;
   nextModelSizeGb: number;
   downloadSeconds: number;
-  /** Session progress % when ARK should begin downloading the next model */
+  /** Session progress % when NOVA should begin downloading the next model */
   startAtPercent: number;
   rating: 'slow' | 'ok' | 'fast';
   ratingLabel: string;
@@ -73,7 +73,7 @@ export function formatMBps(MBps: number) {
   return mbLabel;
 }
 
-const SPEED_STORE_KEY = 'ark:network-speed';
+const SPEED_STORE_KEY = 'NOVA:network-speed';
 
 export type SavedSpeed = SpeedSample & {
   at: number;
@@ -164,10 +164,10 @@ export function computePreloadPlan(
 
   const summary =
     rating === 'slow'
-      ? `Connection is limited. ARK should start the next model around ${startAtPercent}% usage so it is ready before a switch.`
+      ? `Connection is limited. NOVA should start the next model around ${startAtPercent}% usage so it is ready before a switch.`
       : rating === 'fast'
-        ? `Connection is strong. ARK can wait until about ${startAtPercent}% usage before preloading the next model.`
-        : `ARK should begin preloading around ${startAtPercent}% usage so the next model is ready when you need it.`;
+        ? `Connection is strong. NOVA can wait until about ${startAtPercent}% usage before preloading the next model.`
+        : `NOVA should begin preloading around ${startAtPercent}% usage so the next model is ready when you need it.`;
 
   return {
     nextModelName: model.name,

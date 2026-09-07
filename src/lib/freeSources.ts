@@ -1,5 +1,5 @@
 /**
- * Free model / capacity discovery. sources ARK can lock in for coding & creation.
+ * Free model / capacity discovery. sources NOVA can lock in for coding & creation.
  * Catalog grows over time; UI surfaces these in Models search / Cloud.
  */
 
@@ -17,14 +17,14 @@ export type FreeSource = {
   initial: string;
 };
 
-/** What ARK already wires or is actively locking in. */
+/** What NOVA already wires or is actively locking in. */
 export const FREE_SOURCES: FreeSource[] = [
   {
     id: 'ark-engine-core',
-    name: 'ARK Engine Core',
+    name: 'NOVA Engine Core',
     kind: 'local-weights',
     use: 'chat',
-    detail: 'Built-in local brain. first hop in ARK Router; no third-party runtime required.',
+    detail: 'Built-in local brain. first hop in NOVA Router; no third-party runtime required.',
     wired: true,
     tone: 'from-sky-500 to-blue-700',
     initial: 'AE',
@@ -34,7 +34,7 @@ export const FREE_SOURCES: FreeSource[] = [
     name: 'Pollinations (images)',
     kind: 'no-key',
     use: 'image',
-    detail: 'Free no-key image host. ARK Router image path via ARK Image Core.',
+    detail: 'Free no-key image host. NOVA Router image path via NOVA Image Core.',
     wired: true,
     tone: 'from-pink-500 to-rose-700',
     initial: 'Po',
@@ -54,7 +54,7 @@ export const FREE_SOURCES: FreeSource[] = [
     name: 'Ollama models',
     kind: 'optional-runtime',
     use: 'multi',
-    detail: 'Optional plug-in hop in ARK Router. never required.',
+    detail: 'Optional plug-in hop in NOVA Router. never required.',
     wired: true,
     tone: 'from-zinc-400 to-zinc-700',
     initial: 'Ol',
@@ -85,7 +85,7 @@ export const FREE_SOURCES: FreeSource[] = [
     name: 'Google AI Studio',
     kind: 'free-key',
     use: 'coding',
-    detail: 'Gemini free tier API key. Routed by ARK Router.',
+    detail: 'Gemini free tier API key. Routed by NOVA Router.',
     wired: true,
     tone: 'from-blue-500 to-sky-700',
     initial: 'G',
@@ -95,7 +95,7 @@ export const FREE_SOURCES: FreeSource[] = [
     name: 'Groq',
     kind: 'free-key',
     use: 'coding',
-    detail: 'Fast free-tier Llama. routed by ARK Router.',
+    detail: 'Fast free-tier Llama. routed by NOVA Router.',
     wired: true,
     tone: 'from-orange-500 to-red-700',
     initial: 'Gq',
@@ -105,7 +105,7 @@ export const FREE_SOURCES: FreeSource[] = [
     name: 'OpenRouter free routes',
     kind: 'free-key',
     use: 'coding',
-    detail: 'Community free model routes. routed by ARK Router.',
+    detail: 'Community free model routes. routed by NOVA Router.',
     wired: true,
     tone: 'from-violet-500 to-purple-800',
     initial: 'OR',
@@ -115,7 +115,7 @@ export const FREE_SOURCES: FreeSource[] = [
     name: 'Hugging Face Inference',
     kind: 'free-key',
     use: 'multi',
-    detail: 'HF token for chat (router) and FLUX image generation. Wired into ARK Router.',
+    detail: 'HF token for chat (router) and FLUX image generation. Wired into NOVA Router.',
     wired: true,
     tone: 'from-yellow-500 to-amber-700',
     initial: 'HF',
@@ -125,7 +125,7 @@ export const FREE_SOURCES: FreeSource[] = [
     name: 'NVIDIA NIM free',
     kind: 'free-key',
     use: 'coding',
-    detail: 'NIM / build.nvidia.com key. OpenAI-compatible chat hop in ARK Router.',
+    detail: 'NIM / build.nvidia.com key. OpenAI-compatible chat hop in NOVA Router.',
     wired: true,
     tone: 'from-lime-500 to-green-800',
     initial: 'NV',
@@ -135,7 +135,7 @@ export const FREE_SOURCES: FreeSource[] = [
     name: 'Together AI',
     kind: 'free-key',
     use: 'coding',
-    detail: 'Together open-model hosting. Wired into ARK Router.',
+    detail: 'Together open-model hosting. Wired into NOVA Router.',
     wired: true,
     tone: 'from-indigo-500 to-blue-800',
     initial: 'To',
@@ -145,7 +145,7 @@ export const FREE_SOURCES: FreeSource[] = [
     name: 'Fireworks AI',
     kind: 'free-key',
     use: 'coding',
-    detail: 'Fireworks serverless open models. Wired into ARK Router.',
+    detail: 'Fireworks serverless open models. Wired into NOVA Router.',
     wired: true,
     tone: 'from-rose-500 to-orange-700',
     initial: 'Fw',
@@ -155,7 +155,7 @@ export const FREE_SOURCES: FreeSource[] = [
     name: 'DeepSeek',
     kind: 'free-key',
     use: 'coding',
-    detail: 'DeepSeek chat/coder API. Wired into ARK Router.',
+    detail: 'DeepSeek chat/coder API. Wired into NOVA Router.',
     wired: true,
     tone: 'from-blue-400 to-indigo-700',
     initial: 'DS',
@@ -165,7 +165,7 @@ export const FREE_SOURCES: FreeSource[] = [
     name: 'Mistral',
     kind: 'free-key',
     use: 'coding',
-    detail: 'Mistral / Codestral API. Wired into ARK Router.',
+    detail: 'Mistral / Codestral API. Wired into NOVA Router.',
     wired: true,
     tone: 'from-orange-400 to-amber-700',
     initial: 'Mi',
@@ -175,7 +175,7 @@ export const FREE_SOURCES: FreeSource[] = [
     name: 'Cerebras',
     kind: 'free-key',
     use: 'coding',
-    detail: 'Ultra-fast Llama free tier. Wired into ARK Router.',
+    detail: 'Ultra-fast Llama free tier. Wired into NOVA Router.',
     wired: true,
     tone: 'from-cyan-500 to-teal-800',
     initial: 'Ce',
@@ -185,7 +185,7 @@ export const FREE_SOURCES: FreeSource[] = [
     name: 'SambaNova',
     kind: 'free-key',
     use: 'coding',
-    detail: 'SambaNova Cloud free-key hop. Wired into ARK Router.',
+    detail: 'SambaNova Cloud free-key hop. Wired into NOVA Router.',
     wired: true,
     tone: 'from-fuchsia-500 to-purple-800',
     initial: 'Sn',

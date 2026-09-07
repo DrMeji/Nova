@@ -75,7 +75,7 @@ type CloudProvider = {
   initial: string;
   /** Catalog ping is not live. Key / Live / Retired badges are the honest status. */
   health: 'available' | 'limited' | 'offline';
-  /** Live in ARK Router / media today vs catalog only */
+  /** Live in NOVA Router / media today vs catalog only */
   availability: 'live' | 'coming_soon' | 'retired';
 };
 
@@ -116,24 +116,24 @@ const LOCAL_MODELS: LocalModel[] = [
   { id: 'phi4-reasoning', name: 'Phi-4 Reasoning', description: 'Compact reasoning model for local use.', size: '8.5 GB', category: 'reasoning', tiers: ['free'], tone: 'from-sky-500 to-indigo-800', initial: 'Φ4' },
 
   // Vision (understand images, not generate)
-  { id: 'qwen2-vl-7b', name: 'Qwen2-VL 7B', description: 'Vision bundle (~7.4 GB). On-device image chat when both GGUF + mmproj are installed — ARK hops vision → your chat/coder brain automatically.', size: '7.4 GB', category: 'vision', tiers: ['free'], recommended: true, tone: 'from-teal-500 to-emerald-800', initial: 'VL' },
+  { id: 'qwen2-vl-7b', name: 'Qwen2-VL 7B', description: 'Vision bundle (~7.4 GB). On-device image chat when both GGUF + mmproj are installed — NOVA hops vision → your chat/coder brain automatically.', size: '7.4 GB', category: 'vision', tiers: ['free'], recommended: true, tone: 'from-teal-500 to-emerald-800', initial: 'VL' },
   { id: 'llava-13b', name: 'LLaVA 13B', description: 'Image chat and visual Q&A (local VL — coming to Engine downloads).', size: '7.8 GB', category: 'vision', tiers: ['free'], tone: 'from-lime-500 to-green-800', initial: 'Lv' },
   { id: 'minicpm-v', name: 'MiniCPM-V', description: 'Efficient multimodal model for vision tasks (local VL — coming soon).', size: '5.1 GB', category: 'vision', tiers: ['free'], tone: 'from-green-500 to-teal-800', initial: 'Mv' },
   { id: 'llama32-vision-11b', name: 'Llama 3.2 Vision 11B', description: 'Meta multimodal model for image understanding (local VL — coming soon).', size: '7.9 GB', category: 'vision', tiers: ['free'], tone: 'from-indigo-400 to-violet-800', initial: 'LV' },
   { id: 'moondream2', name: 'Moondream 2', description: 'Tiny vision model for quick image captions (local VL — coming soon).', size: '1.7 GB', category: 'vision', tiers: ['free'], tone: 'from-yellow-500 to-amber-700', initial: 'Md' },
 
   // Image generation (Image tab)
-  { id: 'ark-image-core', name: 'ARK Image Core', description: 'Free Pollinations images; uses local SD when installed.', size: 'Cloud / local', category: 'image', tiers: ['free'], recommended: true, tone: 'from-pink-500 to-rose-800', initial: 'AI' },
-  { id: 'sd15-local', name: 'Stable Diffusion 1.5 (Local)', description: 'On-device images via ARK Engine (sd.cpp). Download from Local AI.', size: '4.0 GB', category: 'image', tiers: ['free'], recommended: true, tone: 'from-yellow-500 to-amber-700', initial: 'SD' },
-  { id: 'sdxl-turbo-local', name: 'SDXL Turbo (Local)', description: 'Fast on-device drafts via ARK Engine. ~6.9 GB.', size: '6.9 GB', category: 'image', tiers: ['free'], recommended: true, tone: 'from-fuchsia-500 to-pink-700', initial: 'ST' },
-  { id: 'flux-schnell-local', name: 'FLUX.1 Schnell (Local)', description: 'On-device FLUX via ARK Engine (~13 GB: model + VAE + CLIP + T5).', size: '13 GB', category: 'image', tiers: ['free'], recommended: true, tone: 'from-violet-500 to-purple-800', initial: 'Fx' },
+  { id: 'NOVA-image-core', name: 'NOVA Image Core', description: 'Free Pollinations images; uses local SD when installed.', size: 'Cloud / local', category: 'image', tiers: ['free'], recommended: true, tone: 'from-pink-500 to-rose-800', initial: 'AI' },
+  { id: 'sd15-local', name: 'Stable Diffusion 1.5 (Local)', description: 'On-device images via NOVA Engine (sd.cpp). Download from Local AI.', size: '4.0 GB', category: 'image', tiers: ['free'], recommended: true, tone: 'from-yellow-500 to-amber-700', initial: 'SD' },
+  { id: 'sdxl-turbo-local', name: 'SDXL Turbo (Local)', description: 'Fast on-device drafts via NOVA Engine. ~6.9 GB.', size: '6.9 GB', category: 'image', tiers: ['free'], recommended: true, tone: 'from-fuchsia-500 to-pink-700', initial: 'ST' },
+  { id: 'flux-schnell-local', name: 'FLUX.1 Schnell (Local)', description: 'On-device FLUX via NOVA Engine (~13 GB: model + VAE + CLIP + T5).', size: '13 GB', category: 'image', tiers: ['free'], recommended: true, tone: 'from-violet-500 to-purple-800', initial: 'Fx' },
   { id: 'sdxl-turbo', name: 'SDXL Turbo', description: 'Alias. Use SDXL Turbo (Local) in Local AI.', size: '6.9 GB', category: 'image', tiers: ['free'], tone: 'from-fuchsia-500 to-pink-700', initial: 'ST' },
   { id: 'sd-15', name: 'Stable Diffusion 1.5', description: 'Alias. Use Stable Diffusion 1.5 (Local) in Local AI.', size: '4.0 GB', category: 'image', tiers: ['free'], tone: 'from-yellow-500 to-amber-700', initial: 'SD' },
   { id: 'playground-v25', name: 'Playground v2.5', description: 'Aesthetic local image generation.', size: '8.2 GB', category: 'image', tiers: ['free'], tone: 'from-rose-400 to-orange-700', initial: 'Pg' },
 
   // Video generation (Video tab)
-  { id: 'ark-video-core', name: 'ARK Video Core', description: 'Built-in ARK video model for the Video tab.', size: '3.2 GB', category: 'video', tiers: ['free'], recommended: true, tone: 'from-sky-500 to-indigo-800', initial: 'AV' },
-  { id: 'cogvideox-2b', name: 'CogVideoX 2B', description: 'Short clips via ARK Engine free/cloud video path (not on-device weights yet).', size: '5.5 GB', category: 'video', tiers: ['free'], recommended: true, tone: 'from-cyan-500 to-blue-800', initial: 'Cv' },
+  { id: 'NOVA-video-core', name: 'NOVA Video Core', description: 'Built-in NOVA video model for the Video tab.', size: '3.2 GB', category: 'video', tiers: ['free'], recommended: true, tone: 'from-sky-500 to-indigo-800', initial: 'AV' },
+  { id: 'cogvideox-2b', name: 'CogVideoX 2B', description: 'Short clips via NOVA Engine free/cloud video path (not on-device weights yet).', size: '5.5 GB', category: 'video', tiers: ['free'], recommended: true, tone: 'from-cyan-500 to-blue-800', initial: 'Cv' },
   { id: 'wan-14b', name: 'Wan 2.1 14B', description: 'Higher quality video via Engine free/cloud routes when available.', size: '18 GB', category: 'video', tiers: ['free'], tone: 'from-indigo-500 to-violet-900', initial: 'Wn' },
   { id: 'ltx-video', name: 'LTX Video', description: 'Fast video drafts via Engine free video providers.', size: '7.1 GB', category: 'video', tiers: ['free'], tone: 'from-emerald-400 to-teal-800', initial: 'LT' },
 
@@ -163,21 +163,21 @@ const LOCAL_CATEGORIES: { id: LocalModel['category']; title: string; icon: typeo
   }));
 
 const CLOUD_PROVIDERS: CloudProvider[] = [
-  { id: 'ollama', name: 'Ollama', description: 'Optional plug-in. Connect any Ollama models the same way you connect other sources. ARK never requires it.', tiers: ['free'], tone: 'from-zinc-400 to-zinc-700', initial: 'Ol', health: 'available', availability: 'live' },
-  { id: 'pollinations', name: 'Pollinations', description: 'Free images via Flux / GPT Image (ARK Image Core). Avoids Sana default.', tiers: ['free'], tone: 'from-pink-500 to-rose-700', initial: 'Po', health: 'available', availability: 'live' },
-  { id: 'openrouter', name: 'OpenRouter', description: 'Free + paid routes used by ARK Router.', tiers: ['free', 'pro'], tone: 'from-violet-500 to-purple-800', initial: 'OR', health: 'available', availability: 'live' },
-  { id: 'google', name: 'Google AI Studio', description: 'Gemini free tier. Wired into ARK Router.', tiers: ['free', 'pro'], tone: 'from-blue-500 to-sky-700', initial: 'G', health: 'available', availability: 'live' },
-  { id: 'groq', name: 'Groq', description: 'Fast Llama free tier. Wired into ARK Router.', tiers: ['free', 'pro'], tone: 'from-orange-500 to-red-700', initial: 'Gq', health: 'available', availability: 'live' },
+  { id: 'ollama', name: 'Ollama', description: 'Optional plug-in. Connect any Ollama models the same way you connect other sources. NOVA never requires it.', tiers: ['free'], tone: 'from-zinc-400 to-zinc-700', initial: 'Ol', health: 'available', availability: 'live' },
+  { id: 'pollinations', name: 'Pollinations', description: 'Free images via Flux / GPT Image (NOVA Image Core). Avoids Sana default.', tiers: ['free'], tone: 'from-pink-500 to-rose-700', initial: 'Po', health: 'available', availability: 'live' },
+  { id: 'openrouter', name: 'OpenRouter', description: 'Free + paid routes used by NOVA Router.', tiers: ['free', 'pro'], tone: 'from-violet-500 to-purple-800', initial: 'OR', health: 'available', availability: 'live' },
+  { id: 'google', name: 'Google AI Studio', description: 'Gemini free tier. Wired into NOVA Router.', tiers: ['free', 'pro'], tone: 'from-blue-500 to-sky-700', initial: 'G', health: 'available', availability: 'live' },
+  { id: 'groq', name: 'Groq', description: 'Fast Llama free tier. Wired into NOVA Router.', tiers: ['free', 'pro'], tone: 'from-orange-500 to-red-700', initial: 'Gq', health: 'available', availability: 'live' },
   { id: 'openai', name: 'OpenAI', description: 'GPT models for chat, code, and DALL·E.', tiers: ['pro'], tone: 'from-emerald-400 to-green-800', initial: 'OA', health: 'available', availability: 'live' },
   { id: 'anthropic', name: 'Anthropic', description: 'Claude models for long context work.', tiers: ['pro'], tone: 'from-amber-500 to-orange-800', initial: 'An', health: 'available', availability: 'live' },
-  { id: 'huggingface', name: 'Hugging Face', description: 'Chat + FLUX images via Inference. Wired into ARK Router.', tiers: ['free', 'pro'], tone: 'from-yellow-500 to-amber-700', initial: 'HF', health: 'available', availability: 'live' },
-  { id: 'nvidia', name: 'NVIDIA NIM', description: 'NVIDIA hosted inference. free-key hop in ARK Router.', tiers: ['free', 'pro'], tone: 'from-lime-500 to-green-800', initial: 'NV', health: 'available', availability: 'live' },
-  { id: 'together', name: 'Together AI', description: 'Open model hosting. Wired into ARK Router.', tiers: ['free', 'pro'], tone: 'from-indigo-500 to-blue-800', initial: 'To', health: 'available', availability: 'live' },
-  { id: 'fireworks', name: 'Fireworks AI', description: 'Fast serverless inference. Wired into ARK Router.', tiers: ['free', 'pro'], tone: 'from-rose-500 to-orange-700', initial: 'Fw', health: 'available', availability: 'live' },
-  { id: 'deepseek', name: 'DeepSeek', description: 'Coding and reasoning via API. Wired into ARK Router.', tiers: ['free', 'pro'], tone: 'from-blue-400 to-indigo-700', initial: 'DS', health: 'available', availability: 'live' },
-  { id: 'mistral', name: 'Mistral', description: 'Mistral and Codestral. Wired into ARK Router.', tiers: ['free', 'pro'], tone: 'from-orange-400 to-amber-700', initial: 'Mi', health: 'available', availability: 'live' },
-  { id: 'cerebras', name: 'Cerebras', description: 'Ultra-fast Llama free tier. Wired into ARK Router.', tiers: ['free', 'pro'], tone: 'from-cyan-500 to-teal-800', initial: 'Ce', health: 'available', availability: 'live' },
-  { id: 'sambanova', name: 'SambaNova', description: 'SambaNova Cloud open models. Wired into ARK Router.', tiers: ['free', 'pro'], tone: 'from-fuchsia-500 to-purple-800', initial: 'Sn', health: 'available', availability: 'live' },
+  { id: 'huggingface', name: 'Hugging Face', description: 'Chat + FLUX images via Inference. Wired into NOVA Router.', tiers: ['free', 'pro'], tone: 'from-yellow-500 to-amber-700', initial: 'HF', health: 'available', availability: 'live' },
+  { id: 'nvidia', name: 'NVIDIA NIM', description: 'NVIDIA hosted inference. free-key hop in NOVA Router.', tiers: ['free', 'pro'], tone: 'from-lime-500 to-green-800', initial: 'NV', health: 'available', availability: 'live' },
+  { id: 'together', name: 'Together AI', description: 'Open model hosting. Wired into NOVA Router.', tiers: ['free', 'pro'], tone: 'from-indigo-500 to-blue-800', initial: 'To', health: 'available', availability: 'live' },
+  { id: 'fireworks', name: 'Fireworks AI', description: 'Fast serverless inference. Wired into NOVA Router.', tiers: ['free', 'pro'], tone: 'from-rose-500 to-orange-700', initial: 'Fw', health: 'available', availability: 'live' },
+  { id: 'deepseek', name: 'DeepSeek', description: 'Coding and reasoning via API. Wired into NOVA Router.', tiers: ['free', 'pro'], tone: 'from-blue-400 to-indigo-700', initial: 'DS', health: 'available', availability: 'live' },
+  { id: 'mistral', name: 'Mistral', description: 'Mistral and Codestral. Wired into NOVA Router.', tiers: ['free', 'pro'], tone: 'from-orange-400 to-amber-700', initial: 'Mi', health: 'available', availability: 'live' },
+  { id: 'cerebras', name: 'Cerebras', description: 'Ultra-fast Llama free tier. Wired into NOVA Router.', tiers: ['free', 'pro'], tone: 'from-cyan-500 to-teal-800', initial: 'Ce', health: 'available', availability: 'live' },
+  { id: 'sambanova', name: 'SambaNova', description: 'SambaNova Cloud open models. Wired into NOVA Router.', tiers: ['free', 'pro'], tone: 'from-fuchsia-500 to-purple-800', initial: 'Sn', health: 'available', availability: 'live' },
   { id: 'perplexity', name: 'Perplexity', description: 'Sonar chat with live search. add your API key.', tiers: ['pro'], tone: 'from-teal-400 to-cyan-800', initial: 'Px', health: 'available', availability: 'live' },
   { id: 'xai', name: 'xAI', description: 'Grok models. add your xAI API key.', tiers: ['pro'], tone: 'from-zinc-400 to-black', initial: 'xA', health: 'available', availability: 'live' },
   { id: 'github-models', name: 'GitHub Models', description: 'Retired by GitHub (July 2026).', tiers: ['free'], tone: 'from-zinc-500 to-zinc-900', initial: 'GH', health: 'offline', availability: 'retired' },
@@ -206,9 +206,9 @@ export const CLOUD_MODELS: CloudModel[] = [
   { id: 'deepseek-coder', name: 'DeepSeek Coder', description: 'Specialized coding via DeepSeek API.', provider: 'DeepSeek', category: 'coding', tiers: ['free', 'pro'], tone: 'from-cyan-500 to-blue-800', initial: 'DC' },
   { id: 'codestral', name: 'Codestral', description: 'Mistral coding model in the cloud.', provider: 'Mistral', category: 'coding', tiers: ['free', 'pro'], tone: 'from-orange-400 to-amber-700', initial: 'Cs' },
   { id: 'qwen-coder-plus', name: 'Qwen2.5-Coder Plus', description: 'Cloud coding model via OpenRouter hosts.', provider: 'OpenRouter', category: 'coding', tiers: ['free', 'pro'], tone: 'from-sky-500 to-blue-700', initial: 'QC' },
-  { id: 'groq-llama33', name: 'Llama 3.3 70B (Groq)', description: 'Fast free-tier coding/chat via Groq. ARK Router.', provider: 'Groq', category: 'coding', tiers: ['free'], tone: 'from-orange-500 to-red-700', initial: 'Gq' },
-  { id: 'openrouter-llama-free', name: 'Llama 3.3 Free (OpenRouter)', description: 'OpenRouter free route. ARK Router.', provider: 'OpenRouter', category: 'coding', tiers: ['free'], tone: 'from-violet-500 to-indigo-800', initial: 'OR' },
-  { id: 'github-gpt4o', name: 'GPT-4o (GitHub Models)', description: 'GitHub Models retired July 2026. Not available in ARK.', provider: 'GitHub Models', category: 'coding', tiers: ['free'], tone: 'from-zinc-500 to-zinc-900', initial: 'GH' },
+  { id: 'groq-llama33', name: 'Llama 3.3 70B (Groq)', description: 'Fast free-tier coding/chat via Groq. NOVA Router.', provider: 'Groq', category: 'coding', tiers: ['free'], tone: 'from-orange-500 to-red-700', initial: 'Gq' },
+  { id: 'openrouter-llama-free', name: 'Llama 3.3 Free (OpenRouter)', description: 'OpenRouter free route. NOVA Router.', provider: 'OpenRouter', category: 'coding', tiers: ['free'], tone: 'from-violet-500 to-indigo-800', initial: 'OR' },
+  { id: 'github-gpt4o', name: 'GPT-4o (GitHub Models)', description: 'GitHub Models retired July 2026. Not available in NOVA.', provider: 'GitHub Models', category: 'coding', tiers: ['free'], tone: 'from-zinc-500 to-zinc-900', initial: 'GH' },
 
   // Reasoning
   { id: 'o3-mini', name: 'o3-mini', description: 'OpenAI reasoning model for harder tasks.', provider: 'OpenAI', category: 'reasoning', tiers: ['pro'], tone: 'from-emerald-500 to-teal-800', initial: 'o3' },
@@ -224,7 +224,7 @@ export const CLOUD_MODELS: CloudModel[] = [
   { id: 'llama-vision-cloud', name: 'Llama 3.2 Vision', description: 'Open vision model via cloud hosts.', provider: 'Together AI', category: 'vision', tiers: ['free', 'pro'], tone: 'from-indigo-400 to-violet-800', initial: 'LV' },
 
   // Image generation
-  { id: 'ark-pollinations', name: 'ARK Image (Pollinations)', description: 'Free no-key images. Wired into Image tab by default.', provider: 'Pollinations', category: 'image', tiers: ['free'], tone: 'from-pink-500 to-rose-700', initial: 'Po' },
+  { id: 'NOVA-pollinations', name: 'NOVA Image (Pollinations)', description: 'Free no-key images. Wired into Image tab by default.', provider: 'Pollinations', category: 'image', tiers: ['free'], tone: 'from-pink-500 to-rose-700', initial: 'Po' },
   { id: 'dall-e-3', name: 'DALL·E 3', description: 'Image generation from OpenAI.', provider: 'OpenAI', category: 'image', tiers: ['pro'], tone: 'from-pink-500 to-rose-800', initial: 'D3' },
   { id: 'imagen-3', name: 'Imagen 3', description: 'Google image generation.', provider: 'Google', category: 'image', tiers: ['pro'], tone: 'from-sky-400 to-blue-700', initial: 'Im' },
   { id: 'flux-pro', name: 'FLUX Pro', description: 'High quality image generation.', provider: 'Together AI', category: 'image', tiers: ['pro'], tone: 'from-violet-500 to-purple-800', initial: 'Fx' },
@@ -238,12 +238,12 @@ export const CLOUD_MODELS: CloudModel[] = [
   { id: 'gemini-flash-code', name: 'Gemini 2.0 Flash (Coding)', description: 'Free-tier Google coding assistant.', provider: 'Google', category: 'coding', tiers: ['free'], tone: 'from-blue-400 to-sky-700', initial: 'Gc' },
 
   // Video generation
-  { id: 'ark-pollinations-video', name: 'ARK Video (Pollinations)', description: 'Free short MP4 when the host answers. Otherwise a 4s motion clip from a still. labeled honestly.', provider: 'Pollinations', category: 'video', tiers: ['free'], tone: 'from-pink-500 to-violet-800', initial: 'Pv' },
+  { id: 'NOVA-pollinations-video', name: 'NOVA Video (Pollinations)', description: 'Free short MP4 when the host answers. Otherwise a 4s motion clip from a still. labeled honestly.', provider: 'Pollinations', category: 'video', tiers: ['free'], tone: 'from-pink-500 to-violet-800', initial: 'Pv' },
   { id: 'runway-gen3', name: 'Runway Gen-3', description: 'Cloud video generation and editing.', provider: 'Runway', category: 'video', tiers: ['pro'], tone: 'from-emerald-400 to-teal-800', initial: 'Rw' },
   { id: 'luma-ray2', name: 'Luma Ray2', description: 'Text and image to video.', provider: 'Luma', category: 'video', tiers: ['pro'], tone: 'from-sky-400 to-indigo-800', initial: 'Lu' },
-  { id: 'kling-1', name: 'Kling', description: 'Short cinematic cloud clips. Not wired in ARK yet.', provider: 'OpenRouter', category: 'video', tiers: ['free', 'pro'], tone: 'from-violet-500 to-purple-800', initial: 'Kl' },
-  { id: 'pika-2', name: 'Pika 2.0', description: 'Fast creative video drafts. Not wired in ARK yet.', provider: 'OpenRouter', category: 'video', tiers: ['free', 'pro'], tone: 'from-pink-500 to-rose-800', initial: 'Pk' },
-  { id: 'sora', name: 'Sora', description: 'OpenAI video generation. Not wired in ARK yet.', provider: 'OpenAI', category: 'video', tiers: ['pro'], tone: 'from-emerald-400 to-green-800', initial: 'So' },
+  { id: 'kling-1', name: 'Kling', description: 'Short cinematic cloud clips. Not wired in NOVA yet.', provider: 'OpenRouter', category: 'video', tiers: ['free', 'pro'], tone: 'from-violet-500 to-purple-800', initial: 'Kl' },
+  { id: 'pika-2', name: 'Pika 2.0', description: 'Fast creative video drafts. Not wired in NOVA yet.', provider: 'OpenRouter', category: 'video', tiers: ['free', 'pro'], tone: 'from-pink-500 to-rose-800', initial: 'Pk' },
+  { id: 'sora', name: 'Sora', description: 'OpenAI video generation. Not wired in NOVA yet.', provider: 'OpenAI', category: 'video', tiers: ['pro'], tone: 'from-emerald-400 to-green-800', initial: 'So' },
 
   // Fast
   { id: 'groq-llama-fast', name: 'Llama 3.3 70B (Groq)', description: 'Very fast Llama responses on Groq.', provider: 'Groq', category: 'fast', tiers: ['free', 'pro'], tone: 'from-orange-500 to-red-700', initial: 'Gq' },
@@ -263,7 +263,7 @@ const CLOUD_MODEL_CATEGORIES: { id: CloudModel['category']; title: string; icon:
   { id: 'video', title: 'Video', icon: Video },
 ];
 
-/** Providers ARK Router / media can actually call today. */
+/** Providers NOVA Router / media can actually call today. */
 const LIVE_MODEL_PROVIDERS = new Set([
   'OpenAI',
   'Anthropic',
@@ -356,7 +356,7 @@ function canRunOnPc(model: LocalModel, pc: HardwareClass, ramGb = 8) {
 }
 
 function buildFitLists(pc: HardwareClass, ramGb = 8) {
-  // Prefer models ARK can actually install; keep others discoverable via Search.
+  // Prefer models NOVA can actually install; keep others discoverable via Search.
   const installable = LOCAL_MODELS.filter(m => isEngineDownloadable(m.id));
   const pool = installable.length ? installable : LOCAL_MODELS;
   const compatible = sortModelsByCategoryThenSizeDesc(
@@ -405,7 +405,7 @@ function ModelInstallControl({
   if (isOn) {
     return (
       <span className="inline-flex items-center gap-0.5 shrink-0">
-        <StatusCheck label={`Installed ${name} in ARK Engine`} />
+        <StatusCheck label={`Installed ${name} in NOVA Engine`} />
         {onDelete && (
           <button
             type="button"
@@ -424,7 +424,7 @@ function ModelInstallControl({
     return (
       <span
         className="inline-flex items-center rounded-full bg-surface-hover/80 px-2 py-1 text-[10px] font-medium text-content-tertiary shrink-0"
-        title="Listed for discovery. Not downloadable in ARK Engine yet"
+        title="Listed for discovery. Not downloadable in NOVA Engine yet"
       >
         Discover
       </span>
@@ -449,7 +449,7 @@ function ModelInstallControl({
       type="button"
       onClick={onInstall}
       className="inline-flex items-center gap-1.5 h-8 rounded-full px-2.5 shrink-0 text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors text-[11px] font-medium"
-      title="Download into ARK Engine"
+      title="Download into NOVA Engine"
       aria-label={`Download ${name}`}
     >
       <Download className="w-4 h-4" />
@@ -535,11 +535,11 @@ export function ModelsView() {
       setOllamaOn(isOllamaEnabled());
     };
     hydrate();
-    window.addEventListener('ark:cloud-sources-changed', hydrate);
-    window.addEventListener('ark:provider-keys-changed', hydrate);
+    window.addEventListener('NOVA:cloud-sources-changed', hydrate);
+    window.addEventListener('NOVA:provider-keys-changed', hydrate);
     return () => {
-      window.removeEventListener('ark:cloud-sources-changed', hydrate);
-      window.removeEventListener('ark:provider-keys-changed', hydrate);
+      window.removeEventListener('NOVA:cloud-sources-changed', hydrate);
+      window.removeEventListener('NOVA:provider-keys-changed', hydrate);
     };
   }, []);
 
@@ -563,9 +563,9 @@ export function ModelsView() {
           status.models
             .filter(m =>
               m.status === 'ready'
-              && m.id !== 'ark-core'
-              && m.id !== 'ark-image-core'
-              && m.id !== 'ark-video-core',
+              && m.id !== 'NOVA-core'
+              && m.id !== 'NOVA-image-core'
+              && m.id !== 'NOVA-video-core',
             )
             .map(m => m.id),
         );
@@ -582,9 +582,9 @@ export function ModelsView() {
           status.models
             .filter(m =>
               m.status === 'ready'
-              && m.id !== 'ark-core'
-              && m.id !== 'ark-image-core'
-              && m.id !== 'ark-video-core',
+              && m.id !== 'NOVA-core'
+              && m.id !== 'NOVA-image-core'
+              && m.id !== 'NOVA-video-core',
             )
             .map(m => m.id),
         );
@@ -597,7 +597,7 @@ export function ModelsView() {
     const onHw = () => {
       void getAccurateHardware(true).then(setHw);
     };
-    window.addEventListener('ark:hardware-rescanned', onHw);
+    window.addEventListener('NOVA:hardware-rescanned', onHw);
     let cancelled = false;
     void getAccurateHardware(true).then(info => {
       if (cancelled) return;
@@ -609,9 +609,9 @@ export function ModelsView() {
         status.models
           .filter(m =>
             m.status === 'ready'
-            && m.id !== 'ark-core'
-            && m.id !== 'ark-image-core'
-            && m.id !== 'ark-video-core',
+            && m.id !== 'NOVA-core'
+            && m.id !== 'NOVA-image-core'
+            && m.id !== 'NOVA-video-core',
           )
           .map(m => m.id),
       );
@@ -619,7 +619,7 @@ export function ModelsView() {
     }).catch(() => undefined);
     return () => {
       cancelled = true;
-      window.removeEventListener('ark:hardware-rescanned', onHw);
+      window.removeEventListener('NOVA:hardware-rescanned', onHw);
     };
   }, []);
 
@@ -936,7 +936,7 @@ export function ModelsView() {
       return;
     }
     if (!isEngineDownloadable(id)) {
-      setOllamaNote('Not downloadable in ARK Engine yet. search shows discovery only.');
+      setOllamaNote('Not downloadable in NOVA Engine yet. search shows discovery only.');
       return;
     }
     if (installed.has(id) || isEngineDownloading(id)) return;
@@ -977,7 +977,7 @@ export function ModelsView() {
       return;
     }
     if (!isEngineDownloadable(id)) {
-      setOllamaNote('Not downloadable in ARK Engine yet. search shows discovery only.');
+      setOllamaNote('Not downloadable in NOVA Engine yet. search shows discovery only.');
       return;
     }
     const model = LOCAL_MODELS.find(m => m.id === id);
@@ -1540,7 +1540,7 @@ export function ModelsView() {
                                     ? 'bg-surface-hover text-ark-accent-green'
                                     : 'text-content-secondary hover:text-content-primary hover:bg-surface-hover'
                               }`}
-                              title={avail !== 'live' ? 'Not wired in ARK yet' : isOn ? 'On in Chat. click to turn off' : 'Enable in Chat'}
+                              title={avail !== 'live' ? 'Not wired in NOVA yet' : isOn ? 'On in Chat. click to turn off' : 'Enable in Chat'}
                               aria-label={isOn ? `Disable ${model.name}` : `Enable ${model.name}`}
                             >
                               {isOn ? <Check className="w-4 h-4" /> : <Plus className="w-4 h-4" />}

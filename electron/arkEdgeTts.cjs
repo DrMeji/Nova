@@ -2,7 +2,7 @@
 
 const { Communicate } = require('edge-tts-universal');
 
-/** Microsoft Edge neural TTS — two ARK voices (female / male). */
+/** Microsoft Edge neural TTS — two NOVA voices (female / male). */
 const VOICES = [
   { id: 'en-US-JennyNeural', name: 'Female', locale: 'en-US', gender: 'Female' },
   { id: 'en-US-GuyNeural', name: 'Male', locale: 'en-US', gender: 'Male' },

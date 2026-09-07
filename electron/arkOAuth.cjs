@@ -62,7 +62,7 @@ async function startGitHubDeviceFlow() {
     headers: {
       Accept: 'application/json',
       'Content-Type': 'application/json',
-      'User-Agent': 'ARK-Desktop',
+      'User-Agent': 'NOVA-Desktop',
     },
     body: JSON.stringify({
       client_id: clientId,
@@ -93,7 +93,7 @@ async function startGitHubDeviceFlow() {
         headers: {
           Accept: 'application/json',
           'Content-Type': 'application/json',
-          'User-Agent': 'ARK-Desktop',
+          'User-Agent': 'NOVA-Desktop',
         },
         body: JSON.stringify({
           client_id: clientId,
@@ -108,7 +108,7 @@ async function startGitHubDeviceFlow() {
             headers: {
               Authorization: `Bearer ${tokenRes.access_token}`,
               Accept: 'application/vnd.github+json',
-              'User-Agent': 'ARK-Desktop',
+              'User-Agent': 'NOVA-Desktop',
             },
           });
           label = me.login || label;
@@ -163,7 +163,7 @@ function startLocalCallback({ authorizeUrl, exchange }) {
         const err = u.searchParams.get('error');
         if (err) {
           res.writeHead(200, { 'Content-Type': 'text/html' });
-          res.end('<html><body><h2>ARK</h2><p>Authorization denied. You can close this window.</p></body></html>');
+          res.end('<html><body><h2>NOVA</h2><p>Authorization denied. You can close this window.</p></body></html>');
           cleanup();
           resolve({ ok: false, message: err });
           return;
@@ -175,7 +175,7 @@ function startLocalCallback({ authorizeUrl, exchange }) {
         }
         const tokens = await exchange(code, `http://127.0.0.1:${server.address().port}/callback`);
         res.writeHead(200, { 'Content-Type': 'text/html' });
-        res.end('<html><body><h2>ARK connected</h2><p>You can close this window and return to ARK.</p></body></html>');
+        res.end('<html><body><h2>NOVA connected</h2><p>You can close this window and return to NOVA.</p></body></html>');
         cleanup();
         resolve({ ok: true, ...tokens });
       } catch (e) {
@@ -283,7 +283,7 @@ async function startPluginOAuth(pluginId) {
         });
         const data = await fetchJson('https://oauth2.googleapis.com/token', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': 'ARK-Desktop' },
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': 'NOVA-Desktop' },
           body: body.toString(),
         });
         return {

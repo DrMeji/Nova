@@ -30,11 +30,11 @@ function readExistingFields() {
 function buildNote({ email, password, pin }) {
   const when = new Date().toISOString();
   const lines = [
-    'ARK — TEMPORARY local login note',
+    'NOVA — TEMPORARY local login note',
     '================================',
     '',
-    'This file is ONLY on this PC (inside the ARK app data folder).',
-    'It is NOT uploaded to ARK servers, GitHub, or the internet.',
+    'This file is ONLY on this PC (inside the NOVA app data folder).',
+    'It is NOT uploaded to NOVA servers, GitHub, or the internet.',
     'Anyone with access to this Windows user profile can read it.',
     '',
     'Why it exists: email password-reset / PIN reset are not wired yet.',
@@ -45,7 +45,7 @@ function buildNote({ email, password, pin }) {
     `Password: ${password || '(not saved yet — sign in once)'}`,
     `PIN:      ${pin || '(not set)'}`,
     '',
-    'Forgot password or PIN in ARK? Open this folder and read this file.',
+    'Forgot password or PIN in NOVA? Open this folder and read this file.',
     '',
   ];
   return lines.join('\n');

@@ -3,7 +3,7 @@
  * Not a substitute for real email reset — bridge until that exists.
  */
 
-const NOTICE_KEY = 'ark:local-recovery-notice-shown';
+const NOTICE_KEY = 'NOVA:local-recovery-notice-shown';
 
 export type LocalRecoveryInfo = {
   ok: boolean;
@@ -82,14 +82,14 @@ export function markLocalRecoveryNoticeShown() {
 }
 
 export function formatForgotPasswordHelp(info: LocalRecoveryInfo): string {
-  const folder = info.folder || '(ARK app data → account-recovery)';
+  const folder = info.folder || '(NOVA app data → account-recovery)';
   const file = info.path || 'local-login-note.txt';
   if (info.exists) {
     return [
       'Temporary password / PIN help (this PC only)',
       '',
-      'ARK does not email password or PIN resets yet.',
-      'Your last successful sign-in and PIN (if set) are saved in a private note on this computer only — nothing is sent to ARK servers.',
+      'NOVA does not email password or PIN resets yet.',
+      'Your last successful sign-in and PIN (if set) are saved in a private note on this computer only — nothing is sent to NOVA servers.',
       '',
       `Open this folder:\n${folder}`,
       '',
@@ -103,7 +103,7 @@ export function formatForgotPasswordHelp(info: LocalRecoveryInfo): string {
     'Temporary password help (this PC only)',
     '',
     'No local recovery note was found yet.',
-    'Sign in or create an account once on this PC — ARK will save a private note under the ARK app data folder (not the internet).',
+    'Sign in or create an account once on this PC — NOVA will save a private note under the NOVA app data folder (not the internet).',
     '',
     `Expected folder:\n${folder}`,
     '',

@@ -12,9 +12,12 @@ if ($Tag -notmatch '^v\d+\.\d+\.\d+$') {
 
 $releaseDir = Join-Path (Join-Path $PSScriptRoot '..') 'release'
 $assets = @(
+  'NOVA-Setup.exe',
+  'NOVA-Setup.exe.blockmap',
   'ARK-Setup.exe',
   'ARK-Setup.exe.blockmap',
   'latest.yml',
+  'NOVA-Portable.exe',
   'ARK-Portable.exe'
 )
 
@@ -30,7 +33,7 @@ function Get-ReleaseAssets {
 foreach ($repo in $Repos) {
   Write-Host "Publishing $Tag to $repo ..."
   $version = if ($Tag.StartsWith('v')) { $Tag.Substring(1) } else { $Tag }
-  $title = "ARK $version"
+  $title = "NOVA $version"
 
   gh release view $Tag --repo $repo 2>$null | Out-Null
   if ($LASTEXITCODE -eq 0) {
@@ -43,9 +46,9 @@ foreach ($repo in $Repos) {
   }
 
   $notes = @(
-    "ARK $Tag",
+    "NOVA $Tag",
     '',
-    'Download ARK-Setup.exe for the Windows installer.',
+    'Download ARK-Setup.exe (installer) for Windows. The app name is NOVA.',
     'Source code zip attachments on this public repo are README-only - not the app.'
   ) -join "`n"
 

@@ -16,7 +16,7 @@ export type PreviewOpenOpts = {
   device?: { label: string; width: number; height: number; family?: string } | null;
 };
 
-/** Open localhost / preview in an ARK-owned closable window (never a system browser). */
+/** Open localhost / preview in an NOVA-owned closable window (never a system browser). */
 export async function openInAppPreview(
   url: string,
   opts?: PreviewOpenOpts,
@@ -41,7 +41,7 @@ export async function openInAppPreview(
   return true;
 }
 
-/** Start / refresh the static preview server and open (or reload) the ARK preview window. */
+/** Start / refresh the static preview server and open (or reload) the NOVA preview window. */
 export async function ensureInAppPreview(opts: {
   projectId: string;
   title?: string;
@@ -49,7 +49,7 @@ export async function ensureInAppPreview(opts: {
   preferUrl?: string | null;
 }): Promise<string | null> {
   const { projectId, title, files, preferUrl } = opts;
-  // Vite / already-running localhost URL. open that host in the ARK window.
+  // Vite / already-running localhost URL. open that host in the NOVA window.
   if (preferUrl && /localhost|127\.0\.0\.1/.test(preferUrl) && isViteProject(files)) {
     await openInAppPreview(preferUrl, { projectId, title });
     return preferUrl;
@@ -165,10 +165,40 @@ export async function loadPreviewFilesFromDisk(root: string): Promise<Record<str
     'dev.bat',
     'requirements.txt',
     'app/main.py',
+    'src/main.jsx',
+    'src/main.tsx',
+    'src/App.jsx',
+    'src/App.tsx',
+    'src/App.css',
+    'src/index.css',
+    'src/index.js',
+    'src/index.tsx',
+    'css/styles.css',
+    'js/app.js',
+    '.gitignore',
   ];
   for (const rel of textRels) {
     const text = await readTextRel(root, rel);
     if (text != null) files[rel] = text;
+  }
+
+  // Pull additional source files from src/ (and common web folders) so studio
+  // rebinds never drop App.jsx / CSS after a Recent switch.
+  for (const dir of ['src', 'src/components', 'src/pages', 'css', 'js', 'styles']) {
+    try {
+      const listing = await window.arkDesktop?.listDir?.(joinRoot(root, dir));
+      if (!listing?.ok) continue;
+      for (const item of listing.items || []) {
+        if (item.kind !== 'file' || !item.name) continue;
+        if (!/\.(html?|css|js|jsx|mjs|cjs|ts|tsx|svg|json)$/i.test(item.name)) continue;
+        const rel = `${dir}/${item.name}`.replace(/\\/g, '/');
+        if (files[rel]) continue;
+        const text = await readTextRel(root, rel);
+        if (text != null) files[rel] = text;
+      }
+    } catch {
+      /* ignore */
+    }
   }
 
   // Static asset siblings next to static/index.html (text only — images stay on live server).
@@ -189,7 +219,7 @@ export async function loadPreviewFilesFromDisk(root: string): Promise<Record<str
     }
   }
 
-  // If only static/index.html exists, mirror it at / so ARK's preview server can open it,
+  // If only static/index.html exists, mirror it at / so NOVA's preview server can open it,
   // keeping /static/* links working for CSS/JS.
   if (!files['index.html'] && files['static/index.html']) {
     files['index.html'] = '<!DOCTYPE html><html><head><meta charset="utf-8" />'
@@ -203,7 +233,7 @@ export async function loadPreviewFilesFromDisk(root: string): Promise<Record<str
 
 /**
  * Open the right preview for a bound folder:
- * Vite → npm run dev; FastAPI/run.bat → localhost; else static HTML in ARK's preview window.
+ * Vite → npm run dev; FastAPI/run.bat → localhost; else static HTML in NOVA's preview window.
  */
 export async function ensureBoundFolderPreview(opts: {
   root: string;

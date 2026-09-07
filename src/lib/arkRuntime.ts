@@ -4,7 +4,7 @@
  * that is NOT import.meta.env.DEV, but it IS a dev session (isPackaged === false).
  */
 
-/** True for Start Menu / ARK-Setup.exe installs. */
+/** True for Start Menu / NOVA-Setup.exe installs. */
 export function isArkPackagedApp(): boolean {
   if (typeof window === 'undefined') return !import.meta.env.DEV;
   return window.arkDesktop?.isPackaged === true;

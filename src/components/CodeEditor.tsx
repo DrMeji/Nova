@@ -36,14 +36,14 @@ export const CodeEditor = forwardRef<HTMLTextAreaElement, CodeEditorProps>(
     }, [jumpLine, path, ref, value]);
 
     return (
-      <div className="ark-code-editor relative h-full min-h-0 overflow-hidden rounded-md">
-        <div className="ark-code-gutter" aria-hidden>
+      <div className="NOVA-code-editor relative h-full min-h-0 overflow-hidden rounded-md">
+        <div className="NOVA-code-gutter" aria-hidden>
           {lines.map(n => (
             <div key={n}>{n}</div>
           ))}
         </div>
         <pre
-          className="ark-code-highlight"
+          className="NOVA-code-highlight"
           aria-hidden
           dangerouslySetInnerHTML={{ __html: `${highlighted}\n` }}
         />
@@ -84,7 +84,7 @@ export const CodeEditor = forwardRef<HTMLTextAreaElement, CodeEditorProps>(
           spellCheck={false}
           wrap="off"
           readOnly={readOnly}
-          className="ark-code-input"
+          className="NOVA-code-input"
           aria-label={path}
         />
       </div>

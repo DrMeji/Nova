@@ -1,5 +1,5 @@
 /**
- * Natural-language folder references. "on my desktop I have a folder called ark-demo".
+ * Natural-language folder references. "on my desktop I have a folder called NOVA-demo".
  */
 
 import { isProjectCreateBrief } from '@/lib/chatCreateBrief';
@@ -28,7 +28,7 @@ const INSTALLED_APPS_ASK_RE =
   /\b(?:apps?|applications?|programs?|software)\b[\s\S]{0,40}\b(?:installed|install(?:ed|ation)?s?|do\s+i\s+have)\b/i;
 
 export const GRANT_OFF_FOLDER_MSG =
-  'I need permission to read folders on your PC.\n\nOn first setup, enable **Give ARK access to your PC** (or open **Settings → Security** → Allow Desktop folder access + Full PC access), confirm the dialog, then ask again.';
+  'I need permission to read folders on your PC.\n\nOn first setup, enable **Give NOVA access to your PC** (or open **Settings → Security** → Allow Desktop folder access + Full PC access), confirm the dialog, then ask again.';
 
 export function cleanFolderName(raw: string): string {
   let s = String(raw || '').trim();

@@ -16,7 +16,7 @@ export function DevicePreview({
       <div className="h-full w-full flex flex-col items-center justify-center p-8 gap-2 text-center">
         <p className="text-sm text-content-secondary">No preview HTML yet</p>
         <p className="text-xs text-content-tertiary max-w-sm">
-          Ask ARK to build or open a file. the {device.label} frame appears when there is content to show.
+          Ask NOVA to build or open a file. the {device.label} frame appears when there is content to show.
         </p>
       </div>
     );
@@ -46,7 +46,7 @@ export function DevicePreview({
         />
       </div>
       <p className="text-[11px] text-content-tertiary max-w-sm text-center leading-relaxed">
-        In-ARK layout preview. Ship from Xcode or Android Studio after you push to GitHub.
+        In-app layout preview. Ship from Xcode or Android Studio after you push to GitHub.
       </p>
     </div>
   );

@@ -106,8 +106,8 @@ export async function deleteOwnAccountPermanently(): Promise<{ ok: true } | { ok
     }
 
     try {
-      localStorage.removeItem('ark:friend-requests');
-      localStorage.removeItem('ark:bypass');
+      localStorage.removeItem('NOVA:friend-requests');
+      localStorage.removeItem('NOVA:bypass');
       localStorage.removeItem('ark:delete-scheduled-at');
       localStorage.removeItem('ark:delete-scheduled-email');
     } catch {

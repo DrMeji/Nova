@@ -1,12 +1,12 @@
-# ARK product brain
+# NOVA product brain
 
-Product rules for ARK Engine, models, and creation flows.
+Product rules for NOVA Engine, models, and creation flows.
 
 ## Core identity
 
-- **ARK owns its own brain.** Local inference, model storage, Local AI UI, and the localhost brain API are ARK Engine — not a wrapper around any third-party local app.
-- ARK must **run without** Ollama (or similar) installed. Never make a third-party local runtime required.
-- Do **not** treat Ollama as ARK’s brain, default engine, or identity.
+- **NOVA owns its own brain.** Local inference, model storage, Local AI UI, and the localhost brain API are NOVA Engine — not a wrapper around any third-party local app.
+- NOVA must **run without** Ollama (or similar) installed. Never make a third-party local runtime required.
+- Do **not** treat Ollama as NOVA’s brain, default engine, or identity.
 
 ## Pluggable model sources
 
@@ -15,7 +15,7 @@ Product rules for ARK Engine, models, and creation flows.
 
 ## Free model discovery
 
-- Prefer free local ARK Engine models first.
+- Prefer free local NOVA Engine models first.
 - Surface free cloud options: GitHub Models, Hugging Face Inference, OpenRouter free routes, Google AI Studio free tier, Groq free tier, Pollinations-style free media, etc.
 - When a free key or no-key endpoint works, wire it into Models / Chat / Image / Video so the user just picks and creates.
 
@@ -28,12 +28,12 @@ Product rules for ARK Engine, models, and creation flows.
 ## Generated media
 
 - Image / video outputs must be **real media** when a free/local/cloud path is available — not text-on-gradient placeholders presented as finished art.
-- Generations are **saved into Recent → Creations** (and ARK Engine media storage) so users can reopen them.
+- Generations are **saved into Recent → Creations** (and NOVA Engine media storage) so users can reopen them.
 - Be honest in UI if only a preview/fallback was produced.
 
 ## Product bar
 
-ARK should feel like a modern AI studio: the user types what they want, and the app **does it** — chat, code, image, video — in one place.
+NOVA should feel like a modern AI studio: the user types what they want, and the app **does it** — chat, code, image, video — in one place.
 
 - **Free models are the default.** Slow is OK. Fake “done” states are not.
 - Aim for a useful result in **under a few minutes**. Start the real request immediately.
@@ -42,6 +42,6 @@ ARK should feel like a modern AI studio: the user types what they want, and the 
 
 ## Lindsay / brain API
 
-- External clients talk to **ARK’s** brain API / engine on loopback (port from Settings → AI → Brain API).
-- Ollama-shaped `/api/*` and OpenAI-shaped `/v1/chat/completions` exist so external apps can point at ARK instead.
+- External clients talk to **NOVA’s** brain API / engine on loopback (port from Settings → AI → Brain API).
+- Ollama-shaped `/api/*` and OpenAI-shaped `/v1/chat/completions` exist so external apps can point at NOVA instead.
 - Cookbook: `docs/ark-brain-api.md` · sample: `examples/external-brain-client/`.

@@ -133,7 +133,7 @@ export function updateAgentRepoIndex(
 
 function indexCacheKey(scope: string): string {
   const s = String(scope || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').slice(0, 120);
-  return `ark:agent-index:v1:${s || 'default'}`;
+  return `NOVA:agent-index:v1:${s || 'default'}`;
 }
 
 /** Persist index contents (tokens rebuilt on load). Survives chat reloads. */

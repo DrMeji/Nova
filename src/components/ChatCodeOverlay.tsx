@@ -4,7 +4,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { Code2, FileCode, Folder, FolderOpen, X } from 'lucide-react';
+import { ChevronRight, Code2, FileCode, Folder, FolderOpen, X } from 'lucide-react';
 import { CodeEditor } from '@/components/CodeEditor';
 import { fileTintClass } from '@/lib/syntaxHighlight';
 
@@ -66,22 +66,29 @@ function TreeRows({
         const pad = 8 + depth * 12;
         if (node.kind === 'folder') {
           const open = expanded.has(node.path);
+          const hasKids = Boolean(node.children?.length);
           return (
             <div key={node.path}>
               <button
                 type="button"
-                className="w-full flex items-center gap-1.5 py-1 pr-2 text-left text-[12px] text-content-secondary hover:bg-surface-hover/80"
+                className="w-full flex items-center gap-1 py-1 pr-2 text-left text-[12px] text-content-secondary hover:bg-surface-hover/80"
                 style={{ paddingLeft: pad }}
                 onClick={() => onToggle(node.path)}
+                aria-expanded={open}
               >
+                <ChevronRight
+                  className={`w-3 h-3 shrink-0 text-content-tertiary transition-transform ${
+                    open ? 'rotate-90' : ''
+                  } ${hasKids ? 'opacity-100' : 'opacity-40'}`}
+                />
                 {open
                   ? <FolderOpen className="w-3.5 h-3.5 shrink-0 text-amber-400/80" />
                   : <Folder className="w-3.5 h-3.5 shrink-0 text-amber-400/80" />}
                 <span className="truncate">{node.name}</span>
               </button>
-              {open && node.children?.length ? (
+              {open && hasKids ? (
                 <TreeRows
-                  nodes={node.children}
+                  nodes={node.children!}
                   depth={depth + 1}
                   selected={selected}
                   expanded={expanded}

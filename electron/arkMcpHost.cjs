@@ -156,7 +156,7 @@ async function initializeSession(session) {
   await sendRpc(session, 'initialize', {
     protocolVersion: '2024-11-05',
     capabilities: {},
-    clientInfo: { name: 'ARK', version: '0.1' },
+    clientInfo: { name: 'NOVA', version: '0.1' },
   });
   // notification (no id)
   try {

@@ -23,7 +23,7 @@ export type TeamState = {
 };
 
 function key(projectId: string) {
-  return `ark:team:${projectId}`;
+  return `NOVA:team:${projectId}`;
 }
 
 export function loadTeamState(projectId: string): TeamState {
@@ -87,7 +87,7 @@ export const BLANK_STARTER: Record<string, string> = {
 <body>
   <main class="wrap">
     <h1>Blank page</h1>
-    <p>Tell ARK what to add. a search bar, a dashboard, a ChatGPT-style layout, anything.</p>
+    <p>Tell NOVA what to add. a search bar, a dashboard, a ChatGPT-style layout, anything.</p>
   </main>
   <script src="js/app.js"></script>
 </body>
@@ -104,6 +104,6 @@ body {
 h1 { font-size: 1.75rem; font-weight: 600; }
 p { color: #9aa8c7; line-height: 1.5; }
 `,
-  'js/app.js': `console.log('ARK blank page ready');
+  'js/app.js': `console.log('NOVA blank page ready');
 `,
 };

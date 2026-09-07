@@ -12,5 +12,5 @@ export function appendScaffoldHonesty(text: string): string {
 }
 
 export function isTemplateEngineReply(reply: string): boolean {
-  return /ARK Core is a template helper|not a live LLM/i.test(reply);
+  return /NOVA Core is a template helper|not a live LLM/i.test(reply);
 }

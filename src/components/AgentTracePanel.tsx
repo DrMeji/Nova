@@ -117,11 +117,11 @@ function FilesChangedCard({
     <div className="rounded-xl border border-surface-border/70 bg-surface-hover/30 px-3 py-2.5 max-w-full min-w-0">
       <p className="text-[12px] font-medium text-content-primary mb-1.5">
         {rows.length} File{rows.length === 1 ? '' : 's'} Changed
-        {(totalAdd > 0 || totalDel > 0) ? (
+        {totalAdd > 0 || totalDel > 0 ? (
           <span className="ml-2 text-[11px] font-normal text-content-tertiary">
-            <span className="text-emerald-400">+{totalAdd}</span>
-            {' '}
-            <span className="text-rose-400">-{totalDel}</span>
+            {totalAdd > 0 ? <span className="text-emerald-400">+{totalAdd}</span> : null}
+            {totalAdd > 0 && totalDel > 0 ? ' ' : null}
+            {totalDel > 0 ? <span className="text-rose-400">-{totalDel}</span> : null}
           </span>
         ) : null}
       </p>
@@ -129,6 +129,8 @@ function FilesChangedCard({
         {visible.map(row => {
           const badge = fileExtBadge(row.path);
           const name = row.path.split(/[/\\]/).pop() || row.path;
+          const add = Math.max(0, row.added || 0);
+          const del = Math.max(0, row.removed || 0);
           return (
             <li key={row.path} className="flex items-center gap-2.5 min-w-0">
               <span className={`inline-flex h-5 min-w-[1.6rem] items-center justify-center rounded-md px-1 text-[9px] font-bold ${badge.tone}`}>
@@ -138,9 +140,10 @@ function FilesChangedCard({
                 {name}
               </span>
               <span className="shrink-0 text-[11px] font-mono tabular-nums text-content-tertiary">
-                <span className="text-emerald-400">+{row.added}</span>
-                {' '}
-                <span className="text-rose-400">-{row.removed}</span>
+                {add > 0 ? <span className="text-emerald-400">+{add}</span> : null}
+                {add > 0 && del > 0 ? ' ' : null}
+                {del > 0 ? <span className="text-rose-400">-{del}</span> : null}
+                {add === 0 && del === 0 ? <span className="text-content-tertiary">·</span> : null}
               </span>
             </li>
           );

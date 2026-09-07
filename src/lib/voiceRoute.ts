@@ -53,7 +53,7 @@ async function tryCloudRoute(
   const prefs = getLocalPrefs();
   if (prefs.aiMode === 'local_only') return null;
 
-  if (model?.source === 'cloud' && model.id && model.id !== 'ark-auto') {
+  if (model?.source === 'cloud' && model.id && model.id !== 'NOVA-auto') {
     const hit = await cloudChatPreferredThenCascade({
       modelId: model.id,
       modelName: model.name,

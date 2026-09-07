@@ -8,10 +8,10 @@ export type DiscussionMessage = {
   senderArkId?: string;
 };
 
-const VIEWERS_KEY = 'ark:network-post-viewers';
-const SAVERS_KEY = 'ark:network-post-savers';
-const DISCUSSIONS_KEY = 'ark:network-discussions';
-const DISCUSSION_READ_KEY = 'ark:network-discussion-read';
+const VIEWERS_KEY = 'NOVA:network-post-viewers';
+const SAVERS_KEY = 'NOVA:network-post-savers';
+const DISCUSSIONS_KEY = 'NOVA:network-discussions';
+const DISCUSSION_READ_KEY = 'NOVA:network-discussion-read';
 
 function readMap<T>(key: string): Record<string, T> {
   try {

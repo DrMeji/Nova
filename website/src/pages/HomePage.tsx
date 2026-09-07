@@ -1,10 +1,11 @@
 import { SiteHeader } from '../components/SiteHeader';
 import { SiteFooter } from '../components/SiteFooter';
 import { SiteBackdrop } from '../components/SiteBackdrop';
-import { ArkMark } from '../components/ArkMark';
+import { NovaMark } from '../components/NovaMark';
 import { HeroChips } from '../components/HeroChips';
 import { useAuth } from '../lib/auth';
 import { RELEASES_URL } from '../lib/constants';
+import { PRODUCT_NAME } from '../lib/brand';
 
 const FEATURES = [
   {
@@ -13,14 +14,14 @@ const FEATURES = [
   },
   {
     title: 'Free cloud keys',
-    body: 'Connect Groq, Google, or OpenRouter once. ARK routes and fails over so replies keep coming.',
+    body: 'Connect Groq, Google, or OpenRouter once. NOVA routes and fails over so replies keep coming.',
   },
   {
     title: 'Projects on disk',
     body: 'Scaffold and edit real folders on your machine, not a locked sandbox in someone else’s cloud.',
   },
   {
-    title: 'Friends by ARK ID',
+    title: 'Friends by NOVA ID',
     body: 'Add people with a 7-digit ID (or DEV). Message when you’re mutual friends; block when you need to.',
   },
   {
@@ -37,17 +38,17 @@ const STEPS = [
   {
     n: '01',
     title: 'Download for Windows',
-    body: 'Install ARK on your PC. Open the app when setup finishes and you are ready to create.',
+    body: 'Install NOVA on your PC. Open the app when setup finishes and you are ready to create.',
   },
   {
     n: '02',
     title: 'Sign in',
-    body: 'Sign in with email and password (or create an account). Your ARK ID is how friends find you.',
+    body: 'Sign in with email and password (or create an account). Your NOVA ID is how friends find you.',
   },
   {
     n: '03',
     title: 'Add a brain or free keys',
-    body: 'Install a local model for offline chat, or connect free cloud keys. ARK can route between them for you.',
+    body: 'Install a local model for offline chat, or connect free cloud keys. NOVA can route between them for you.',
   },
   {
     n: '04',
@@ -58,8 +59,8 @@ const STEPS = [
 
 const FAQS = [
   {
-    q: 'Is ARK free?',
-    a: 'Yes for the desktop app. Use free cloud keys and/or a local brain. ARK does not charge you for chat.',
+    q: 'Is NOVA free?',
+    a: 'Yes for the desktop app. Use free cloud keys and/or a local brain. NOVA does not charge you for chat.',
   },
   {
     q: 'Where do I download?',
@@ -67,11 +68,11 @@ const FAQS = [
   },
   {
     q: 'Who owns what I create?',
-    a: 'You do. ARK does not take ownership of your projects or creations, and does not claim a share of your work.',
+    a: 'You do. NOVA does not take ownership of your projects or creations, and does not claim a share of your work.',
   },
   {
     q: 'Windows blocked the installer',
-    a: 'SmartScreen and firewall prompts are common on first run. Minimize them and keep using ARK. They are not a failed install.',
+    a: 'SmartScreen and firewall prompts are common on first run. Minimize them and keep using NOVA. They are not a failed install.',
   },
 ];
 
@@ -91,7 +92,7 @@ export function HomePage() {
                 Create with AI that lives on your PC
               </h1>
               <p className="mt-5 max-w-lg text-base sm:text-lg text-[var(--fg-muted)] leading-relaxed">
-                ARK is your studio for chat, projects, and models. Local first, free cloud when you need it, private by
+                NOVA is your studio for chat, projects, and models. Local first, free cloud when you need it, private by
                 default.
               </p>
               <div className="mt-8 flex flex-wrap items-center gap-3">
@@ -105,8 +106,8 @@ export function HomePage() {
             </div>
 
             <div className="fade-up-delay relative flex justify-center lg:justify-end">
-              <div className="hero-visual float-soft">
-                <ArkMark size={220} className="hero-mark" />
+              <div className="hero-visual">
+                <NovaMark size={220} className="hero-mark" animated />
                 <HeroChips />
               </div>
             </div>
@@ -137,7 +138,7 @@ export function HomePage() {
                 Everything in one studio
               </h2>
               <p className="mt-3 text-[var(--fg-muted)] leading-relaxed">
-                From first install to shipping a project, ARK keeps the tools together without locking your files away.
+                From first install to shipping a project, NOVA keeps the tools together without locking your files away.
               </p>
             </div>
             <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -198,7 +199,7 @@ export function HomePage() {
         <section className="px-5 sm:px-8 pb-24">
           <div className="mx-auto max-w-6xl cta-band text-center px-6 py-14 sm:py-16">
             <h2 className="display text-3xl sm:text-4xl font-semibold tracking-tight text-[var(--fg)] mb-3">
-              Ready to open ARK?
+              Ready to open NOVA?
             </h2>
             <p className="text-[var(--fg-muted)] max-w-md mx-auto mb-8 leading-relaxed">
               Install on Windows, sign in, and start with a free key or a local brain.

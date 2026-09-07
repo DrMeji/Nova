@@ -62,7 +62,7 @@ export { formatElapsed as formatCallElapsed };
 export function CallProvider({ children }: { children: ReactNode }) {
   const { user, profile } = useAuth();
   const myArkId = isArkDevEmail(user?.email) ? 'DEV' : (profile?.ark_id || '');
-  const myName = profile?.display_name || myArkId || 'ARK user';
+  const myName = profile?.display_name || myArkId || 'NOVA user';
   const [session, setSession] = useState<CallSession | null>(null);
   const [incoming, setIncoming] = useState<IncomingCall | null>(null);
   const [elapsedSec, setElapsedSec] = useState(0);
@@ -164,10 +164,10 @@ export function CallProvider({ children }: { children: ReactNode }) {
       const signal = (ev as CustomEvent<CallSignal>).detail;
       if (signal) handleRemoteSignal(signal);
     };
-    window.addEventListener('ark:call-signal', onLocal);
+    window.addEventListener('NOVA:call-signal', onLocal);
     return () => {
       unsub();
-      window.removeEventListener('ark:call-signal', onLocal);
+      window.removeEventListener('NOVA:call-signal', onLocal);
     };
   }, [myArkId, handleRemoteSignal]);
 

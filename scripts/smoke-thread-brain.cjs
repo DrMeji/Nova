@@ -1,6 +1,6 @@
 /** Thread brain keys must stay scoped by chat/project id + kind. */
 function threadBrainKey(scopeId, kind = 'chat') {
-  return `ark:chat-thread:brain:${scopeId}:${kind}`;
+  return `NOVA:chat-thread:brain:${scopeId}:${kind}`;
 }
 
 const chat = threadBrainKey('abc', 'chat');

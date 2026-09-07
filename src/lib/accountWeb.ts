@@ -1,4 +1,4 @@
-/** Deployed ARK account website (website/ folder) — used for Supabase email reset redirects. */
+/** Deployed NOVA account website (website/ folder) — used for Supabase email reset redirects. */
 
 export function accountWebsiteOrigin(): string {
   const v = (import.meta as { env?: Record<string, string> }).env?.VITE_ARK_WEBSITE_ORIGIN;

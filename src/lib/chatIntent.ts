@@ -1,5 +1,5 @@
 /**
- * What the user is asking for. drives which ARK Engine model Auto loads.
+ * What the user is asking for. drives which NOVA Engine model Auto loads.
  * Ollama is never part of this decision.
  */
 
@@ -62,14 +62,18 @@ export function looksLikeCodeAsk(text: string): boolean {
 export function looksLikeCopyPasteCodeAsk(text: string): boolean {
   const t = String(text || '').trim();
   if (!t) return false;
-  if (/\b(?:copy[\s-]?paste|paste(?:able)?|clipboard)\b/i.test(t) && /\b(?:code|snippet|html|css|js|tsx?|jsx)\b/i.test(t)) {
+  if (/\b(?:copy[\s-]?paste|paste(?:able)?|clipboard)\b/i.test(t) && /\b(?:code|snippet|html|css|js|tsx?|jsx|source)\b/i.test(t)) {
     return true;
   }
-  if (/\b(?:give|show|write|paste|provide)\b[\s\S]{0,40}\b(?:me\s+)?(?:the\s+)?(?:full\s+)?(?:code|source|snippet)\b/i.test(t)
+  if (/\b(?:give|show|write|paste|provide|see|want)\b[\s\S]{0,48}\b(?:me\s+)?(?:the\s+)?(?:full\s+)?(?:source\s+)?(?:code|snippet)\b/i.test(t)
     && !/\b(?:create\s+(?:a\s+)?(?:project|folder)|on\s+disk|preview|localhost|scaffold)\b/i.test(t)) {
     return true;
   }
-  if (/\bin\s+chat\b/i.test(t) && /\b(?:code|snippet)\b/i.test(t)) return true;
+  if (/\b(?:source\s+code|see\s+(?:the\s+)?code|show\s+(?:the\s+)?code)\b/i.test(t)
+    && !/\b(?:create\s+(?:a\s+)?(?:project|folder)|on\s+disk|preview|localhost)\b/i.test(t)) {
+    return true;
+  }
+  if (/\bin\s+chat\b/i.test(t) && /\b(?:code|snippet|source)\b/i.test(t)) return true;
   return false;
 }
 

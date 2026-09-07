@@ -79,7 +79,7 @@ export function NotificationsView() {
         id: `fr-in-${req.id}`,
         kind: 'friend' as const,
         title: `${req.fromName} wants to be friends`,
-        body: `${req.fromName} · ARK ID ${req.fromArkId} sent you a friend request.`,
+        body: `${req.fromName} · NOVA ID ${req.fromArkId} sent you a friend request.`,
         createdAt: req.createdAt,
         unread: true,
         forArkId: myArkId,
@@ -104,11 +104,11 @@ export function NotificationsView() {
 
   useEffect(() => {
     const bump = () => setLocalTick(t => t + 1);
-    window.addEventListener('ark:local-notifications', bump);
-    window.addEventListener('ark:friend-requests', bump);
+    window.addEventListener('NOVA:local-notifications', bump);
+    window.addEventListener('NOVA:friend-requests', bump);
     return () => {
-      window.removeEventListener('ark:local-notifications', bump);
-      window.removeEventListener('ark:friend-requests', bump);
+      window.removeEventListener('NOVA:local-notifications', bump);
+      window.removeEventListener('NOVA:friend-requests', bump);
     };
   }, []);
 
@@ -213,7 +213,7 @@ export function NotificationsView() {
                         <div className="shrink-0 pt-0.5">
                           {friend ? (
                             <ArkAvatar
-                              name={friend.fromName || 'ARK user'}
+                              name={friend.fromName || 'NOVA user'}
                               src={friend.fromAvatarUrl || (friend.fromArkId === profile?.ark_id ? getLocalPrefs().avatarDataUrl : undefined)}
                               size="md"
                             />

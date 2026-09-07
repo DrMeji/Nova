@@ -1,18 +1,18 @@
 @echo off
-title ARK Desktop (source build)
+title NOVA Desktop (source build)
 cd /d "%~dp0"
 
 echo.
 echo  ========================================
-echo   ARK - source build (Open-ARK-Build)
+echo   NOVA - source build (Open-ARK-Build)
 echo  ========================================
 echo.
 echo  This is your day-to-day test path:
 echo    - Builds THIS folder and opens Electron
 echo    - Uses its own profile: %%AppData%%\ARK-Dev
-echo    - Models/keys do NOT mix with Start Menu ARK
+echo    - Models/keys do NOT mix with Start Menu NOVA
 echo.
-echo  Do NOT run Start Menu ARK at the same time.
+echo  Do NOT run Start Menu NOVA at the same time.
 echo  For installer/update testing use Open-ARK-Packaged.bat
 echo.
 
@@ -64,7 +64,7 @@ if not exist "%ELECTRON_EXE%" (
 )
 
 echo.
-echo  Build OK - launching ARK (dev profile ARK-Dev).
+echo  Build OK - launching NOVA (dev profile NOVA-Dev).
 echo  Settings - Testers is unlocked on source builds.
 echo  Close the app window when you are done testing.
 echo.

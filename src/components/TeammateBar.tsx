@@ -108,7 +108,7 @@ export function TeammateBar({
             </button>
           </div>
           <p className="text-[10px] text-content-tertiary mb-2 leading-relaxed">
-            Each person works in their own ARK. GitHub is how work meets. You assign an area so nobody collides.
+            Each person works in their own NOVA. GitHub is how work meets. You assign an area so nobody collides.
           </p>
           {people.length === 0 && (
             <p className="text-[11px] text-content-tertiary mb-2">No teammates yet. Invite a GitHub username.</p>
@@ -119,7 +119,7 @@ export function TeammateBar({
                 <Face person={p} title={p.login} />
                 <div className="min-w-0 flex-1">
                   <p className="text-xs text-content-primary truncate">
-                    {p.arkId ? (p.displayName || `ARK ${formatArkId(p.arkId)}`) : `@${p.login}`}
+                    {p.arkId ? (p.displayName || `NOVA ${formatArkId(p.arkId)}`) : `@${p.login}`}
                   </p>
                   <p className="text-[10px] text-content-tertiary">
                     {p.arkId ? formatArkId(p.arkId) : accessLabel(githubPermissionToAccess(p))}
@@ -166,12 +166,12 @@ export function TeammateBar({
           <div className="w-full max-w-sm rounded-2xl border border-surface-border bg-ark-navy-950 p-4 shadow-xl">
             <p className="text-sm font-medium text-content-primary mb-1">Invite a teammate</p>
             <p className="text-[11px] text-content-tertiary mb-3 leading-relaxed">
-              Add them with their 7-digit ARK ID (Settings → Account). GitHub usernames still work if the project is on GitHub.
+              Add them with their 7-digit NOVA ID (Settings → Account). GitHub usernames still work if the project is on GitHub.
             </p>
             <input
               value={username}
               onChange={e => setUsername(e.target.value.replace(/^@/, ''))}
-              placeholder="ARK ID or GitHub username"
+              placeholder="NOVA ID or GitHub username"
               className="w-full bg-ark-navy-900 border border-surface-border rounded-lg px-3 py-2 text-sm text-content-primary mb-2"
             />
             <div className="flex gap-1 mb-2">

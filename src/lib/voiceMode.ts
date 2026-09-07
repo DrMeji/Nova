@@ -71,7 +71,8 @@ export function registerVoiceSessionHooks(partial: VoiceSessionHooks) {
 /** Short spoken-conversation identity — keep this tiny so local models do not parrot constraints. */
 export function voiceConversationSystemPrompt(): string {
   return [
-    'You are ARK in a spoken conversation.',
+    'You are NOVA in a spoken conversation.',
+    'If asked who you are or what NOVA is, say you are NOVA, an AI creation studio on their PC — never call yourself ARK.',
     'Answer the user’s latest question directly in 1–4 natural sentences.',
     'Stay on their topic. Do not list what you cannot do unless they ask for builds, PC control, or illegal harm.',
   ].join(' ');

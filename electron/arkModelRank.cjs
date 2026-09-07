@@ -1,6 +1,6 @@
 /**
  * Shared Engine model ranking (keep in sync with src/lib/enginePick.ts).
- * Used by ARK Engine + Brain API so Lindsay and in-app chat pick the same GGUF.
+ * Used by NOVA Engine + Brain API so Lindsay and in-app chat pick the same GGUF.
  * Never involves Ollama.
  */
 
@@ -80,8 +80,8 @@ function rankedReadyEngineIds(models, intent, ramGb) {
   const ram = Number(ramGb) > 0 ? Number(ramGb) : 8;
   const ready = new Set(
     (models || [])
-      .filter((m) => m && m.status === 'ready' && m.id && m.id !== 'ark-core'
-        && m.id !== 'ark-image-core' && m.id !== 'ark-video-core'
+      .filter((m) => m && m.status === 'ready' && m.id && m.id !== 'NOVA-core'
+        && m.id !== 'NOVA-image-core' && m.id !== 'NOVA-video-core'
         && !String(m.id).includes('image') && !String(m.id).includes('video')
         && !String(m.id).startsWith('sd') && m.id !== 'flux-schnell-local')
       .map((m) => String(m.id)),

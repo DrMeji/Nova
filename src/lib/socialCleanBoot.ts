@@ -8,11 +8,11 @@ import { loadLocalNotifications } from '@/lib/localNotifications';
 /** Bump when shipping a release that must reset social dev residue. */
 export const SOCIAL_RELEASE_CLEAN_TOKEN = 'social-release-2026-08-26';
 
-/** One-time client wipe so everyone picks up freshly rotated cloud ARK IDs. */
-export const ARK_ID_ROTATION_TOKEN = 'ark-id-rotation-2026-08-26';
+/** One-time client wipe so everyone picks up freshly rotated cloud NOVA IDs. */
+export const ARK_ID_ROTATION_TOKEN = 'NOVA-id-rotation-2026-08-26';
 
 const SOCIAL_WIPE_KEYS = [
-  'ark:friend-requests',
+  'NOVA:friend-requests',
 ];
 
 function wipeFriendNotifications() {
@@ -40,22 +40,22 @@ export function clearSocialDevData() {
     }
   }
   wipeFriendNotifications();
-  window.dispatchEvent(new CustomEvent('ark:friend-requests'));
+  window.dispatchEvent(new CustomEvent('NOVA:friend-requests'));
 }
 
 function clearLocalArkIdCache() {
   try {
-    const keys = Object.keys(localStorage).filter(k => k.startsWith('ark:ark-id:'));
+    const keys = Object.keys(localStorage).filter(k => k.startsWith('NOVA:NOVA-id:'));
     for (const key of keys) localStorage.removeItem(key);
   } catch {
     /* ignore */
   }
 }
 
-/** Run once per rotation token so stale per-machine ARK IDs are dropped. */
+/** Run once per rotation token so stale per-machine NOVA IDs are dropped. */
 export function runArkIdRotationIfNeeded(): boolean {
   try {
-    const tokenKey = 'ark:ark-id-rotation';
+    const tokenKey = 'NOVA:NOVA-id-rotation';
     if (localStorage.getItem(tokenKey) === ARK_ID_ROTATION_TOKEN) return false;
     clearLocalArkIdCache();
     clearSocialDevData();
@@ -70,7 +70,7 @@ export function runArkIdRotationIfNeeded(): boolean {
 export function runSocialReleaseCleanIfNeeded(): boolean {
   try {
     if (window.arkDesktop?.isPackaged !== true) return false;
-    const tokenKey = 'ark:social-release-clean';
+    const tokenKey = 'NOVA:social-release-clean';
     if (localStorage.getItem(tokenKey) === SOCIAL_RELEASE_CLEAN_TOKEN) return false;
     clearSocialDevData();
     localStorage.setItem(tokenKey, SOCIAL_RELEASE_CLEAN_TOKEN);

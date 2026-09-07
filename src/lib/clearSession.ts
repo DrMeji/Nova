@@ -1,15 +1,15 @@
 /** Wipe chat threads + recent lists for a clean test boot. */
 
 const WIPE_KEYS = [
-  'ark:chat-thread:general',
-  'ark:chat-thread:image',
-  'ark:chat-thread:video',
-  'ark:chat-thread:code',
+  'NOVA:chat-thread:general',
+  'NOVA:chat-thread:image',
+  'NOVA:chat-thread:video',
+  'NOVA:chat-thread:code',
   'ark:chat-draft:image',
-  'ark:chat-draft:video',
-  'ark:recent-creations',
-  'ark:recent-projects',
-  'ark:recent-chats',
+  'NOVA:chat-draft:video',
+  'NOVA:recent-creations',
+  'NOVA:recent-projects',
+  'NOVA:recent-chats',
 ];
 
 /** Bump this string whenever we need a forced clean slate on next launch. */
@@ -32,19 +32,19 @@ export function clearArkSessionHistory() {
     }
     for (const k of keys) {
       if (
-        k.startsWith('ark:chat-thread:')
-        || k.startsWith('ark:chat-draft:')
-        || k.startsWith('ark:chat-studio:')
-        || k.startsWith('ark:chat-studio-files:')
-        || k.startsWith('ark:chat-code-pill:')
-        || k.startsWith('ark:chat-last-folder:')
-        || k.startsWith('ark:chat-last-disk-target:')
-        || k.startsWith('ark:chat-pending-add-file:')
-        || k.startsWith('ark:chat-pending-greenfield:')
-        || k.startsWith('ark:media-feedback:')
-        || k === 'ark:recent-creations'
-        || k === 'ark:recent-projects'
-        || k === 'ark:recent-chats'
+        k.startsWith('NOVA:chat-thread:')
+        || k.startsWith('NOVA:chat-draft:')
+        || k.startsWith('NOVA:chat-studio:')
+        || k.startsWith('NOVA:chat-studio-files:')
+        || k.startsWith('NOVA:chat-code-pill:')
+        || k.startsWith('NOVA:chat-last-folder:')
+        || k.startsWith('NOVA:chat-last-disk-target:')
+        || k.startsWith('NOVA:chat-pending-add-file:')
+        || k.startsWith('NOVA:chat-pending-greenfield:')
+        || k.startsWith('NOVA:media-feedback:')
+        || k === 'NOVA:recent-creations'
+        || k === 'NOVA:recent-projects'
+        || k === 'NOVA:recent-chats'
       ) {
         localStorage.removeItem(k);
       }
@@ -57,8 +57,8 @@ export function clearArkSessionHistory() {
   } catch {
     /* ignore */
   }
-  window.dispatchEvent(new Event('ark:creations-changed'));
-  window.dispatchEvent(new Event('ark:chats-changed'));
+  window.dispatchEvent(new Event('NOVA:creations-changed'));
+  window.dispatchEvent(new Event('NOVA:chats-changed'));
 }
 
 /** User-initiated: wipe chat threads and drafts. Does not delete models or API keys. */
@@ -79,7 +79,7 @@ export async function clearLocalAppCaches() {
   } catch {
     /* ignore */
   }
-  window.dispatchEvent(new Event('ark:cache-cleared'));
+  window.dispatchEvent(new Event('NOVA:cache-cleared'));
 }
 
 /** Run once per token so reopen is empty for testing. Skip in packaged installs. */

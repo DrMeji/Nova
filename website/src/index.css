@@ -279,6 +279,56 @@ img {
   filter: drop-shadow(0 18px 40px rgba(0, 0, 0, 0.18));
 }
 
+.nova-mark-animated .nova-ray {
+  stroke-dasharray: 140;
+  stroke-dashoffset: 140;
+  animation: novaRayDraw 1.35s ease forwards;
+}
+.nova-mark-animated .nova-ray:nth-child(2) { animation-delay: 0.04s; }
+.nova-mark-animated .nova-ray:nth-child(3) { animation-delay: 0.08s; }
+.nova-mark-animated .nova-ray:nth-child(4) { animation-delay: 0.12s; }
+.nova-mark-animated .nova-ray:nth-child(5) { animation-delay: 0.16s; }
+.nova-mark-animated .nova-ray:nth-child(6) { animation-delay: 0.2s; }
+.nova-mark-animated .nova-ray:nth-child(7) { animation-delay: 0.24s; }
+.nova-mark-animated .nova-ray:nth-child(8) { animation-delay: 0.28s; }
+.nova-mark-animated .nova-ray:nth-child(9) { animation-delay: 0.32s; }
+.nova-mark-animated .nova-ray:nth-child(10) { animation-delay: 0.36s; }
+.nova-mark-animated .nova-ray:nth-child(11) { animation-delay: 0.4s; }
+.nova-mark-animated .nova-ray:nth-child(12) { animation-delay: 0.44s; }
+.nova-mark-animated .nova-ray:nth-child(13) { animation-delay: 0.48s; }
+.nova-mark-animated .nova-hub {
+  animation: novaHubPulse 2.8s ease-in-out 1.2s infinite;
+}
+.nova-mark-animated .nova-node {
+  opacity: 0;
+  transform-origin: center;
+  animation: novaNodeIn 0.45s ease forwards;
+  animation-delay: 0.95s;
+}
+.nova-mark-animated .nova-node-hollow {
+  animation-delay: 1.05s;
+}
+.nova-mark-animated {
+  animation: novaBreath 5.5s ease-in-out 1.6s infinite;
+  transform-origin: 50% 50%;
+}
+
+@keyframes novaRayDraw {
+  to { stroke-dashoffset: 0; }
+}
+@keyframes novaHubPulse {
+  0%, 100% { opacity: 0.78; }
+  50% { opacity: 1; }
+}
+@keyframes novaNodeIn {
+  from { opacity: 0; transform: scale(0.55); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes novaBreath {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.035); }
+}
+
 .hero-float-layer {
   position: absolute;
   inset: 0;

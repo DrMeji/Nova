@@ -77,14 +77,14 @@ const SECTIONS: { id: string; label: string; icon: typeof User; disabled?: boole
 ];
 
 const AI_MODES = [
-  { value: 'automatic', label: 'Automatic', description: 'ARK Router: local → free keys → paid' },
+  { value: 'automatic', label: 'Automatic', description: 'NOVA Router: local → free keys → paid' },
   { value: 'local_only', label: 'Local Only', description: 'Always use local AI, never use cloud' },
   { value: 'cloud_when_available', label: 'Cloud When Available', description: 'Prefer free/paid cloud, local as backup' },
-  { value: 'local_fallback', label: 'Local Fallback', description: 'Try cloud first, then ARK Engine' },
+  { value: 'local_fallback', label: 'Local Fallback', description: 'Try cloud first, then NOVA Engine' },
 ];
 
 const DEFAULT_MODELS = [
-  { id: 'ark-auto', label: 'ARK Auto', detail: 'Free-first · silent failover', source: 'auto' },
+  { id: 'NOVA-auto', label: 'NOVA Auto', detail: 'Free-first · silent failover', source: 'auto' },
   { id: 'qwen25-coder-14b', label: 'Qwen2.5 Coder 14B', detail: 'Local · coding', source: 'local' },
   { id: 'qwen25-coder-7b', label: 'Qwen2.5 Coder 7B', detail: 'Local · balanced', source: 'local' },
   { id: 'llama32-3b', label: 'Llama 3.2 3B', detail: 'Local · fast', source: 'local' },
@@ -158,7 +158,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
   const [keyDraft, setKeyDraft] = useState('');
   const [checkingUpdates, setCheckingUpdates] = useState(false);
   const [downloadingUpdate, setDownloadingUpdate] = useState(false);
-  const [updateMsg, setUpdateMsg] = useState('Press Check for update to look for a newer ARK build.');
+  const [updateMsg, setUpdateMsg] = useState('Press Check for update to look for a newer NOVA build.');
   const [updateInfo, setUpdateInfo] = useState<{
     newerAvailable: boolean;
     setupAssetUrl?: string;
@@ -205,8 +205,8 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
 
   useEffect(() => {
     const onFeat = () => setFeatureTick(t => t + 1);
-    window.addEventListener('ark:features-changed', onFeat);
-    return () => window.removeEventListener('ark:features-changed', onFeat);
+    window.addEventListener('NOVA:features-changed', onFeat);
+    return () => window.removeEventListener('NOVA:features-changed', onFeat);
   }, []);
 
   useEffect(() => {
@@ -264,8 +264,8 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
     if (activeSection !== 'storage' && activeSection !== 'models') return;
     refreshStorage();
     const onModels = () => refreshStorage();
-    window.addEventListener('ark:engine-models-changed', onModels);
-    return () => window.removeEventListener('ark:engine-models-changed', onModels);
+    window.addEventListener('NOVA:engine-models-changed', onModels);
+    return () => window.removeEventListener('NOVA:engine-models-changed', onModels);
   }, [activeSection]);
 
   useEffect(() => {
@@ -407,7 +407,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
         setUpdateMsg(
           info.newerAvailable && !info.setupAssetUrl
             ? `${cleanMsg} (installer file not published yet. try again later)`
-            : cleanMsg || (info.newerAvailable ? `Update available: ARK ${info.latestTag || ''}`.trim() : 'You’re up to date.'),
+            : cleanMsg || (info.newerAvailable ? `Update available: NOVA ${info.latestTag || ''}`.trim() : 'You’re up to date.'),
         );
         setUpdateInfo(
           info.newerAvailable
@@ -453,9 +453,9 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
       (engineStatus?.models ?? []).filter(
         (m): m is ArkEngineModel =>
           m.status === 'ready'
-          && m.id !== 'ark-core'
-          && m.id !== 'ark-image-core'
-          && m.id !== 'ark-video-core',
+          && m.id !== 'NOVA-core'
+          && m.id !== 'NOVA-image-core'
+          && m.id !== 'NOVA-video-core',
       ),
     [engineStatus],
   );
@@ -554,7 +554,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                 if (section.disabled || section.comingSoon) return;
                 setActiveSection(section.id);
               }}
-              className={`ark-nav-item ${navCompact ? '!px-2 !gap-0 !justify-center w-10' : ''} ${activeSection === section.id ? 'active' : ''} ${
+              className={`NOVA-nav-item ${navCompact ? '!px-2 !gap-0 !justify-center w-10' : ''} ${activeSection === section.id ? 'active' : ''} ${
                 section.disabled || section.comingSoon ? 'opacity-45 cursor-not-allowed pointer-events-none' : ''
               }`}
               title={section.comingSoon ? `${section.label} · coming soon` : section.disabled ? 'Locked' : section.label}
@@ -659,7 +659,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                     <p className="text-sm font-medium text-content-primary truncate">{displayName || 'Guest'}</p>
                     <p className="text-xs text-content-tertiary truncate flex items-center gap-1.5 mt-0.5">
                       <Mail className="w-3 h-3" />
-                      {user?.email ?? 'guest@ark.local'}
+                      {user?.email ?? 'guest@NOVA.local'}
                     </p>
                     <p className="text-[11px] text-content-tertiary mt-1 inline-flex items-center gap-1">
                       <BadgeCheck className="w-3 h-3 text-sky-400" />
@@ -676,7 +676,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                 />
                 <div>
                   <div className="flex items-center gap-2 mb-1.5">
-                    <label className="block text-xs font-medium text-content-secondary">ARK ID</label>
+                    <label className="block text-xs font-medium text-content-secondary">NOVA ID</label>
                   </div>
                   <div className="flex items-center gap-2 min-w-0">
                     <p className="flex-1 min-w-0 rounded-lg border border-surface-border bg-ark-navy-900/80 px-3 py-2 text-sm font-mono tracking-[0.18em] sm:tracking-[0.28em] text-content-primary overflow-x-auto">
@@ -698,14 +698,14 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                         }).catch(() => undefined);
                       }}
                       className="ark-btn-secondary shrink-0"
-                      title="Copy ARK ID"
+                      title="Copy NOVA ID"
                     >
                       {arkCopied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
                       {arkCopied ? 'Copied' : 'Copy'}
                     </button>
                   </div>
                 </div>
-                <Field label="Email" value={user?.email ?? 'guest@ark.local'} onChange={() => {}} disabled />
+                <Field label="Email" value={user?.email ?? 'guest@NOVA.local'} onChange={() => {}} disabled />
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <InfoCard title="Plan" value="Free on this PC" />
@@ -781,10 +781,10 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
               <div
                 role="dialog"
                 aria-modal="true"
-                aria-labelledby="ark-delete-account-title"
+                aria-labelledby="NOVA-delete-account-title"
                 className="w-full max-w-md rounded-2xl border border-rose-500/40 bg-ark-navy-900 shadow-2xl p-5 space-y-3"
               >
-                <h3 id="ark-delete-account-title" className="text-base font-semibold text-content-primary">
+                <h3 id="NOVA-delete-account-title" className="text-base font-semibold text-content-primary">
                   You&apos;re about to delete your account
                 </h3>
                 <p className="text-sm text-content-secondary leading-relaxed">
@@ -924,7 +924,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
             <SettingsSection title="AI">
               <div className="space-y-6 max-w-3xl">
                 {/* Status */}
-                <div className="ark-card p-4 flex items-center gap-3">
+                <div className="NOVA-card p-4 flex items-center gap-3">
                   <div className="w-10 h-10 rounded-lg bg-ark-accent-green/10 flex items-center justify-center shrink-0">
                     <Cpu className="w-5 h-5 text-ark-accent-green" />
                   </div>
@@ -938,7 +938,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                 </div>
 
                 <div className="rounded-xl border border-surface-border p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                  <p className="text-sm font-medium text-content-primary">ARK Brain details</p>
+                  <p className="text-sm font-medium text-content-primary">NOVA Brain details</p>
                   <button
                     type="button"
                     className="ark-btn-secondary text-xs shrink-0 self-start sm:self-center"
@@ -947,7 +947,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                       navigate({ name: 'brain' });
                     }}
                   >
-                    Open ARK Brain
+                    Open NOVA Brain
                   </button>
                 </div>
 
@@ -989,7 +989,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
 
                 {/* Content safety. NSFW in one self-contained card */}
                 <SettingsGroup title="Content safety (Image)">
-                  <div className="ark-card p-4 space-y-3">
+                  <div className="NOVA-card p-4 space-y-3">
                     <ToggleRow
                       label="Allow NSFW content"
                       value={prefs.allowNsfw}
@@ -1152,11 +1152,11 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                   <div className="rounded-xl border border-rose-500/40 bg-rose-950/30 px-4 py-3">
                     <p className="text-sm font-semibold text-rose-200">NO_ENCRYPTION: secure key storage is unavailable</p>
                     <p className="text-xs text-rose-100/75 mt-1">
-                      ARK will not save provider secrets as plaintext. Repair Windows credential encryption before connecting a key.
+                      NOVA will not save provider secrets as plaintext. Repair Windows credential encryption before connecting a key.
                     </p>
                   </div>
                 ) : null}
-                <div className="ark-card p-3.5 flex items-center gap-3">
+                <div className="NOVA-card p-3.5 flex items-center gap-3">
                   <div className="w-9 h-9 rounded-lg bg-ark-blue-500/10 flex items-center justify-center shrink-0">
                     <Cloud className="w-4 h-4 text-ark-blue-400" />
                   </div>
@@ -1468,7 +1468,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                     const url = URL.createObjectURL(blob);
                     const a = document.createElement('a');
                     a.href = url;
-                    a.download = 'ark-settings-export.json';
+                    a.download = 'NOVA-settings-export.json';
                     a.click();
                     URL.revokeObjectURL(url);
                   }}
@@ -1553,11 +1553,11 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                     <div className="rounded-xl border border-surface-border divide-y divide-surface-border/80 overflow-hidden">
                       {installedModels.map(model => (
                         <div key={model.id} className="flex items-center gap-3 px-3.5 py-2.5 min-w-0">
-                          <StatusCheck label={`${model.name} installed in ARK Engine`} />
+                          <StatusCheck label={`${model.name} installed in NOVA Engine`} />
                           <div className="min-w-0 flex-1">
                             <p className="text-sm font-medium text-content-primary truncate">{model.name}</p>
                             <p className="text-[11px] text-content-tertiary truncate">
-                              {model.detail || (model.sizeGb ? `${model.sizeGb} GB` : 'ARK Engine')}
+                              {model.detail || (model.sizeGb ? `${model.sizeGb} GB` : 'NOVA Engine')}
                             </p>
                           </div>
                           <button
@@ -1640,7 +1640,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                       setHw(info);
                       setHwScanning(false);
                       setHwFlash(info.accurate ? 'Updated' : 'Approximate scan');
-                      window.dispatchEvent(new Event('ark:hardware-rescanned'));
+                      window.dispatchEvent(new Event('NOVA:hardware-rescanned'));
                       window.setTimeout(() => setHwFlash(''), 2000);
                     });
                   }}
@@ -1998,7 +1998,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                   onChange={v => patchPrefs({ chatFirst: v })}
                 />
 
-                <div className="flex items-center gap-3 p-4 ark-card min-w-0">
+                <div className="flex items-center gap-3 p-4 NOVA-card min-w-0">
                   <div className="w-9 h-9 rounded-lg bg-ark-accent-green/10 flex items-center justify-center shrink-0">
                     <Lock className="w-4 h-4 text-ark-accent-green" />
                   </div>
@@ -2017,7 +2017,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                 <div className="rounded-3xl border border-surface-border bg-ark-navy-900/55 p-5 sm:p-6 flex flex-col gap-4 shadow-[0_8px_28px_rgba(0,0,0,0.28)]">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="text-sm font-medium text-content-primary">ARK v{appVersion}</p>
+                      <p className="text-sm font-medium text-content-primary">NOVA v{appVersion}</p>
                       <p className="text-xs text-content-tertiary mt-0.5">{updateMsg}</p>
                       {downloadingUpdate && (
                         <div className="mt-3 h-2 rounded-full bg-surface-hover overflow-hidden max-w-xs">
@@ -2031,8 +2031,8 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                     <div className="flex flex-wrap items-center gap-2 shrink-0">
                       <button
                         type="button"
-                        title="Open ARK on GitHub"
-                        aria-label="Open ARK on GitHub"
+                        title="Open NOVA on GitHub"
+                        aria-label="Open NOVA on GitHub"
                         onClick={() =>
                           void window.arkDesktop?.openExternal?.('https://github.com/DrMeji/Ark/releases')
                         }
@@ -2045,7 +2045,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                           type="button"
                           onClick={downloadUpdate}
                           disabled={downloadingUpdate}
-                          title="Download and install the latest ARK"
+                          title="Download and install the latest NOVA"
                           className="ark-btn-primary !rounded-full"
                         >
                           {downloadingUpdate ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
@@ -2066,7 +2066,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                   </div>
                   {updateInfo?.newerAvailable && updateInfo.setupAssetUrl && !downloadingUpdate ? (
                     <p className="text-[11px] text-amber-200/90 leading-relaxed">
-                      A newer ARK is ready. Install it now for the latest fixes and features.
+                      A newer NOVA is ready. Install it now for the latest fixes and features.
                     </p>
                   ) : null}
                   {signingStatus ? (
@@ -2082,7 +2082,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                     <h2 className="text-sm font-semibold text-content-primary">About</h2>
                   </div>
                   <p className="text-xs text-content-secondary">
-                    ARK v{appVersion}
+                    NOVA v{appVersion}
                   </p>
                   <p className="text-[11px] text-content-tertiary mt-1">
                     Brain contract {brainContractVersion || 'unavailable'} · port {(() => {
@@ -2097,7 +2097,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                 </div>
 
                 <ToggleRow
-                  label="Launch ARK when Windows starts"
+                  label="Launch NOVA when Windows starts"
                   value={prefs.launchOnStartup}
                   onChange={v => {
                     patchPrefs({ launchOnStartup: v });
@@ -2129,7 +2129,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                   <div className="space-y-3">
                     {visibleChangelog.length === 0 ? (
                       <p className="text-xs text-content-tertiary">
-                        You’re on ARK v{appVersion}.
+                        You’re on NOVA v{appVersion}.
                       </p>
                     ) : (
                       visibleChangelog.map(entry => (
@@ -2170,7 +2170,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
             <SettingsSection title="Testers">
               {isArkDevSession() && (
                 <div className="rounded-xl border border-sky-500/25 bg-sky-500/10 p-3 mb-3 text-xs text-sky-100/90">
-                  Dev profile · separate AppData from retail ARK
+                  Dev profile · separate AppData from retail NOVA
                 </div>
               )}
               <div className="space-y-3">
@@ -2205,7 +2205,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                     className="ark-btn-secondary text-xs"
                     onClick={() => {
                       clearSetupCompleted();
-                      setSavedFlash('Setup cleared. restart ARK to see onboarding');
+                      setSavedFlash('Setup cleared. restart NOVA to see onboarding');
                       window.setTimeout(() => setSavedFlash(''), 2500);
                     }}
                   >
@@ -2416,7 +2416,7 @@ function ToggleRow({
   bare?: boolean;
 }) {
   return (
-    <div className={`flex items-center justify-between gap-4 min-w-0 ${bare ? '' : 'p-4 ark-card'} ${disabled ? 'opacity-70' : ''}`}>
+    <div className={`flex items-center justify-between gap-4 min-w-0 ${bare ? '' : 'p-4 NOVA-card'} ${disabled ? 'opacity-70' : ''}`}>
       <div className="flex-1 min-w-0 pr-2">
         <p className="text-sm font-medium text-content-primary">{label}</p>
       </div>
@@ -2454,7 +2454,7 @@ function ThemeCard({ label, active, onClick }: { label: string; active: boolean;
 
 function InfoCard({ title, value }: { title: string; value: string }) {
   return (
-    <div className="ark-card p-4">
+    <div className="NOVA-card p-4">
       <p className="text-xs text-content-tertiary">{title}</p>
       <p className="text-sm font-medium text-content-primary mt-1">{value}</p>
     </div>
@@ -2475,7 +2475,7 @@ function StorageBar({
   tone: string;
 }) {
   return (
-    <div className="ark-card p-4 min-w-0">
+    <div className="NOVA-card p-4 min-w-0">
       <div className="flex justify-between gap-3 mb-2 min-w-0">
         <span className="text-sm text-content-primary truncate">{label}</span>
         <span className="text-xs text-content-tertiary shrink-0">{used} / {total}</span>

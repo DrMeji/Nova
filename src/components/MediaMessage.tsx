@@ -291,7 +291,7 @@ function MediaActions({ src, alt }: { src: string; alt: string }) {
         const url = URL.createObjectURL(out);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `ark-${Date.now()}.${ext}`;
+        a.download = `NOVA-${Date.now()}.${ext}`;
         document.body.appendChild(a);
         a.click();
         a.remove();
@@ -300,7 +300,7 @@ function MediaActions({ src, alt }: { src: string; alt: string }) {
         // Fallback: still avoid .svg from base64 false-positives
         const a = document.createElement('a');
         a.href = src;
-        a.download = `ark-${Date.now()}.${mediaDownloadExt(src, isVideo)}`;
+        a.download = `NOVA-${Date.now()}.${mediaDownloadExt(src, isVideo)}`;
         a.click();
       }
     })();
@@ -437,7 +437,7 @@ export function MessageContent({
           answer={shown}
           live={live ?? (!payload.done && !answer)}
           onContinue={payload.canContinue ? () => {
-            window.dispatchEvent(new CustomEvent('ark:agent-continue'));
+            window.dispatchEvent(new CustomEvent('NOVA:agent-continue'));
           } : undefined}
         />
       );
@@ -502,7 +502,7 @@ export function MessageContent({
       {chunks.map((chunk, i) => {
         if (chunk.type === 'media') {
           const src = chunk.value;
-          const alt = chunk.alt || 'ARK generation';
+          const alt = chunk.alt || 'NOVA generation';
           if (
             src.startsWith('data:image/')
             || src.startsWith('data:video/')

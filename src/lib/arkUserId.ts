@@ -1,7 +1,7 @@
 /**
- * Each ARK account gets one 7-digit ID (1000000–9999999), except the designated
- * developer account whose public ARK ID is the literal `DEV`.
- * Share this instead of email. Users cannot edit their ARK ID.
+ * Each NOVA account gets one 7-digit ID (1000000–9999999), except the designated
+ * developer account whose public NOVA ID is the literal `DEV`.
+ * Share this instead of email. Users cannot edit their NOVA ID.
  */
 
 import { supabase } from '@/lib/supabase';
@@ -11,11 +11,11 @@ export const ARK_ID_RE = /^[1-9]\d{6}$/;
 export const ARK_DEV_ID = 'DEV';
 
 function storageKey(userId: string) {
-  return `ark:ark-id:${userId || 'guest-local'}`;
+  return `NOVA:NOVA-id:${userId || 'guest-local'}`;
 }
 
 function usedKey() {
-  return 'ark:ark-id-used';
+  return 'NOVA:NOVA-id-used';
 }
 
 /** True for a normal 7-digit ID or the developer alias DEV. */
@@ -125,7 +125,7 @@ export type ArkLookupHit = {
   legacyArkId?: string;
 };
 
-/** Look up a public ARK ID (no email). Returns null if unknown or offline. */
+/** Look up a public NOVA ID (no email). Returns null if unknown or offline. */
 const lookupCache = new Map<string, { at: number; value: ArkLookupHit | null }>();
 const LOOKUP_CACHE_MS = 15_000;
 
@@ -160,7 +160,7 @@ export async function lookupArkUser(arkId: string): Promise<ArkLookupHit | null>
       lookupCache.set(cacheKey, { at: Date.now(), value: null });
       return null;
     }
-    // Public ARK ID stays DEV for the developer account; display name is separate
+    // Public NOVA ID stays DEV for the developer account; display name is separate
     // (e.g. AutoFoot) so friends see the name, not only "DEV".
     const rawName = row.display_name ? String(row.display_name).trim() : '';
     const displayName = rawName && rawName.toUpperCase() !== ARK_DEV_ID ? rawName : null;
@@ -178,7 +178,7 @@ export async function lookupArkUser(arkId: string): Promise<ArkLookupHit | null>
 }
 
 /**
- * Ensure this account has a public ARK ID.
+ * Ensure this account has a public NOVA ID.
  * Developer email is forced to the literal `DEV` so friends see DEV, not digits.
  */
 export async function ensureArkId(userId: string, email?: string | null): Promise<string> {

@@ -120,8 +120,8 @@ export async function runGmailLive(
     const subMatch = userText.match(/\bsubject\s+(.+?)(?:\s+body\s+|$)/i);
     const bodyMatch = userText.match(/\bbody\s+(.+)$/i);
     const to = toMatch?.[1]?.replace(/[>,]+$/, '') || '';
-    const subject = (subMatch?.[1] || 'Hello from ARK').trim();
-    const body = (bodyMatch?.[1] || 'Sent from ARK.').trim();
+    const subject = (subMatch?.[1] || 'Hello from NOVA').trim();
+    const body = (bodyMatch?.[1] || 'Sent from NOVA.').trim();
     if (!to) {
       return [
         'Gmail · send',
@@ -163,7 +163,7 @@ export async function runGmailLive(
         ? `To send for real (needs Send permission + gmail.send scope):`
         : 'Draft only until you confirm send.',
       toAddr
-        ? `confirm send to ${toAddr} subject Re: ${subject} body Thanks for your note. following up from ARK.`
+        ? `confirm send to ${toAddr} subject Re: ${subject} body Thanks for your note. following up from NOVA.`
         : '',
     ].filter(Boolean).join('\n');
   }

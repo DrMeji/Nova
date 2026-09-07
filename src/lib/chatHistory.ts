@@ -1,6 +1,6 @@
 /**
- * ARK-owned chat memory for Router hops.
- * The thread lives in ARK; each provider gets a compact recent window
+ * NOVA-owned chat memory for Router hops.
+ * The thread lives in NOVA; each provider gets a compact recent window
  * so failover continues mid-task instead of greeting like a new chat.
  */
 
@@ -27,33 +27,39 @@ export const ANSWER_THE_ASK =
   + 'Do not substitute a different topic, dump unrelated files, repeat an earlier overview, or invent a “better” answer they did not ask for. '
   + 'If the latest message has multiple questions, answer EACH one in order with a clear take (short paragraph or bullet per question). '
   + 'Do not replace a direct ask (timeline, worth-it, yes/no, recommendation) with a generic multi-week project plan unless they asked for a full plan. '
-  + 'For casual chat, opinions, or “what do you think” takes: give your own answer in 2–5 sentences first. Never bounce the same question back. One short follow-up after you answered is fine. '
+  + 'For casual chat, opinions, or “what do you think” takes: give your own answer in 2–5 sentences first. Never bounce the same question back. '
+  + 'When someone describes a real problem (losing track of books, sleep issues, a product idea): acknowledge the problem briefly, then give a concrete resolution or plan. Sound like a sharp collaborator, not a survey. '
   + 'When details are missing for a *recommendation that needs personal facts* (allergies, budget, goal, symptoms, location), ask 2–4 short clarifying questions first — then recommend. '
   + 'If you cannot answer, say so in one clear line. '
   + 'Do not offer coding lessons, programming tutorials, or app-building help unless the user is clearly asking about software development. '
   + 'On general conversation (weather, facts, chit-chat, recommendations), stay on that topic only — never pivot to "I can teach you to code" or similar.';
 
 export const BASE_SYSTEM =
-  'You are ARK, a normal helpful AI chat assistant. Talk like ChatGPT. not a design studio or image tool unless they ask to make something. '
-  + 'You are not the video game Ark: Survival Evolved. Never “correct” the user’s spelling of ARK. '
+  'You are NOVA, a normal helpful AI chat assistant. Talk like ChatGPT. not a design studio or image tool unless they ask to make something. '
+  + 'If someone asks what NOVA is, who you are, or what this app does: say you are NOVA, an AI creation studio that runs on their PC for chat, projects, and models. '
+  + 'Never introduce yourself as ARK or Ark. The product name is NOVA. '
+  + 'You are not the video game Ark: Survival Evolved. Never “correct” the user’s spelling of NOVA. '
   + 'Read past typos and misspellings: infer the intended word (e.g. “recomendation” → recommendation, “misplaned” → misspelled) and answer that intent. '
   + 'Do not lecture about spelling or grammar unless they ask you to proofread. '
   + `${ANSWER_THE_ASK} `
   + 'Never invent bracket placeholders such as [current date], [name], [path], or [insert here]. Use real values or ask one clear question. '
   + 'When they ask what day or date it is, use the real today date from the system context line — never write “[current date]”. '
-  + 'On this PC, ARK Chat can create, read, edit, rename, and delete files in granted folders when the user asks. '
+  + 'On this PC, NOVA Chat can create, read, edit, rename, and delete files in granted folders when the user asks. '
   + 'If they ask whether you can edit files (or yes/no): say yes, then ask for the path and what to change. Do not give a generic programming tutorial. '
   + 'When web lookup notes are provided in the thread, prefer those facts over guessing. Still answer the user directly. '
   + 'For places (restaurants, shops): if preferences/allergies are unknown, ask briefly first; then recommend and offer a maps link when you know a location. '
   + 'For troubleshooting (car, PC, home): give likely causes and safe next steps, ask when the symptom happens, and say when a pro should look at it. '
   + 'When they ask for ideas for an app, website, coffee shop, etc.: give concrete pieces that product should have, then say where to start first and offer to begin. '
   + 'When they ask what a project is or what they are building: explain the product goal in plain language from the evidence, then suggest a practical next step. do not paste a generic file inventory. '
-  + 'Be accurate and complete. Cover the main facts they need, then one short follow-up: "Want more on any of that?" '
+  + 'Be accurate and complete. Lead with the problem you heard and a clear path forward. Never close with hollow quiz lines like “Would you like more information on any of these steps?” or “Do you have specific questions?” '
+  + 'If a follow-up is useful, ask one concrete question about their situation (who it is for, what “done” looks like, or which piece to tackle first). '
   + 'If they reply yes / yeah / sure / more / go on / overall / full detail, continue that SAME topic with NEW depth. Never restart with a greeting. Never restate the same summary. '
   + 'Read every user message carefully before answering. Prefer a thorough, useful reply over a rushed short one. '
   + 'Never use em dashes or en dashes (the long dash characters). Prefer periods or commas. Do not put a long dash between clauses. '
   + 'Never invent a new subject (movies, TV, celebrities, weather, EcoBuddy-style fake products) when the thread is about something else. '
   + 'Never echo the user’s greeting. If they only say hi/hello/hey, reply: "Hello! How can I assist you today?" '
+  + 'Never open by restating their request in first person ("I want to build…", "I would like to create…"). '
+  + 'Acknowledge as the assistant ("Sure — here is how I would approach that"), then give concrete steps. '
   + 'When they give concrete product/device/gear specs (camera mm / f-stop / ISO / shutter, iPhone model + lenses, bike size, GPU, phone storage, etc.), '
   + 'ground every recommendation in THOSE specs: best settings, technique, or next steps for that exact kit — not generic advice that ignores what they listed. '
   + 'Name their gear back once so it is clear you used it, then give tailored guidance. '
@@ -77,7 +83,7 @@ function todaySystemLine(): string {
 }
 
 const CONTINUITY =
-  'This is a follow-up in the same ARK chat. '
+  'This is a follow-up in the same NOVA chat. '
   + 'Stay on the same topic as the earlier turns (coding lesson, app idea, troubleshooting, weather, etc.). '
   + 'Interpret typos the same way: guess the intended words and stay helpful. '
   + 'If they say “more details”, “dive deeper”, “recommended area”, “yes”, “yeah”, “sure”, “overall”, or similar, deepen the PREVIOUS answer with NEW facts. do not switch subjects, do not greet them again, and do not paraphrase the same numbers. '
@@ -92,24 +98,24 @@ const CHAT_CODE_OUTPUT =
   'Give one short intro sentence, then one complete markdown code fence. No placeholders.';
 
 const SYSTEM_ECHO_RE =
-  /^You are ARK(?:,|\s)[\s\S]*?(?:Do not echo the prompt\.|Never continue a previous sentence[^.\n]*\.|Answer only the latest user message[^.\n]*\.)/i;
+  /^You are NOVA(?:,|\s)[\s\S]*?(?:Do not echo the prompt\.|Never continue a previous sentence[^.\n]*\.|Answer only the latest user message[^.\n]*\.)/i;
 const PROMPT_FRAGMENT_RE =
-  /^(?:You are ARK\b|Answer the latest user request clearly\.?|Answer the user’s latest question[^\n]*\.?|Do not echo the prompt\.?|Do not correct the spelling of ARK\.?|Answer only the latest user message with a brand-new reply\.?|Never continue a previous sentence, list item, or closing question\.?)$/i;
+  /^(?:You are NOVA\b|Answer the latest user request clearly\.?|Answer the user’s latest question[^\n]*\.?|Do not echo the prompt\.?|Do not correct the spelling of NOVA\.?|Answer only the latest user message with a brand-new reply\.?|Never continue a previous sentence, list item, or closing question\.?)$/i;
 const INSTRUCTION_LEAD_RES = [
   /^Never continue a previous sentence[^\n]*\.?\s*/i,
   /^The user wants working source code[^\n]*\.?\s*/i,
   /^Reply with:\s*\(1\)[^\n]*\s*/i,
   /^Give one short intro sentence[^\n]*\.?\s*/i,
   /^Answer only the latest user message[^\n]*\.?\s*/i,
-  /^Do not (?:echo the prompt|correct the spelling of ARK|repeat system instructions)[^\n]*\.?\s*/i,
+  /^Do not (?:echo the prompt|correct the spelling of NOVA|repeat system instructions)[^\n]*\.?\s*/i,
   /^Pick the right fence tag[^\n]*\.?\s*/i,
-  /^You are ARK, the assistant[^\n]*(?:\n(?!```)[^\n]{0,240})*\n+/i,
-  /^You are ARK, a (?:normal )?helpful AI chat assistant[^\n]*(?:\n(?!```)[^\n]{0,280})*\n+/i,
+  /^You are NOVA, the assistant[^\n]*(?:\n(?!```)[^\n]{0,240})*\n+/i,
+  /^You are NOVA, a (?:normal )?helpful AI chat assistant[^\n]*(?:\n(?!```)[^\n]{0,280})*\n+/i,
 ];
 
 
 const CODING_WORKSPACE_ECHO_RE =
-  /^You are ARK inside a developer project workspace[\s\S]*?(?:WITHOUT @@@FILE blocks\.|answer normally WITHOUT @@@FILE blocks\.)/i;
+  /^You are NOVA inside a developer project workspace[\s\S]*?(?:WITHOUT @@@FILE blocks\.|answer normally WITHOUT @@@FILE blocks\.)/i;
 
 const BUILD_HINT =
   /\b(build|create|make|implement|develop)\b.{0,48}\b(app|apps|website|site|calculator|program|game|page|ui)\b|\b(write|give|paste|show)\b.{0,32}\b(code|html|css|javascript|python|script|source)\b|\bfull (file|source)\b|\bcopy and paste\b/i;
@@ -299,8 +305,8 @@ export function slimTurnContent(content: string, maxChars = MAX_TURN_CHARS): str
     .replace(/data:image\/[a-zA-Z+]+;base64,[A-Za-z0-9+/=]+/g, '[image]');
   // Drop accidental llama.cpp banners that may have been stored in older threads
   if (/loading model|available commands|llama\.cpp/i.test(text)) {
-    const ark = text.match(/(?:^|\n)\s*(?:ARK|Assistant)\s*:\s*([\s\S]+)/i);
-    if (ark?.[1]) text = ark[1].replace(/^\s*ARK\s*:\s*/i, '');
+    const NOVA = text.match(/(?:^|\n)\s*(?:NOVA|Assistant)\s*:\s*([\s\S]+)/i);
+    if (NOVA?.[1]) text = NOVA[1].replace(/^\s*NOVA\s*:\s*/i, '');
     text = text
       .split('\n')
       .filter(line => {
@@ -438,7 +444,7 @@ function wantsChatCode(latest: string) {
 
 export function flattenHistoryText(history: RouterChatTurn[]): string {
   return history
-    .map(t => `${t.role === 'user' ? 'User' : 'ARK'}: ${String(t.content || '').trim()}`)
+    .map(t => `${t.role === 'user' ? 'User' : 'NOVA'}: ${String(t.content || '').trim()}`)
     .filter(Boolean)
     .join('\n');
 }
@@ -486,7 +492,7 @@ export function compressHistoryIfNeeded(
   const blob = [
     firstUser ? `Original ask: ${firstUser}` : '',
     userBeats.length ? `Earlier user points:\n${userBeats.join('\n')}` : '',
-    asstBeats.length ? `Earlier ARK points:\n${asstBeats.join('\n')}` : '',
+    asstBeats.length ? `Earlier NOVA points:\n${asstBeats.join('\n')}` : '',
   ].filter(Boolean).join('\n').slice(0, aggressive ? 4_500 : 6_500);
   return [
     {
@@ -603,17 +609,17 @@ export function sanitizeAssistantReply(
     peeled = text;
     for (const re of INSTRUCTION_LEAD_RES) text = text.replace(re, '').trim();
   }
-  if (/^You are ARK[\s\S]{20,400}$/i.test(text.trim())) return '';
+  if (/^You are NOVA[\s\S]{20,400}$/i.test(text.trim())) return '';
 
   text = text.replace(/^\(?\s*truncated\s*\)?\s*/i, '').trim();
 
-  // Prefer the completion after the last ARK: / Assistant: marker (packed prompt echo).
-  const markRe = /(?:^|\n)\s*(?:ARK|Assistant)\s*:\s*/gi;
+  // Prefer the completion after the last NOVA: / Assistant: marker (packed prompt echo).
+  const markRe = /(?:^|\n)\s*(?:NOVA|Assistant)\s*:\s*/gi;
   let lastMark: RegExpExecArray | null = null;
   let m: RegExpExecArray | null;
   while ((m = markRe.exec(text)) !== null) lastMark = m;
   if (lastMark && typeof lastMark.index === 'number') {
-    text = text.slice(lastMark.index + lastMark[0].length).replace(/^\s*ARK\s*:\s*/i, '').trim();
+    text = text.slice(lastMark.index + lastMark[0].length).replace(/^\s*NOVA\s*:\s*/i, '').trim();
   }
 
   // Drop leading shell-style echoes: "> hello"
@@ -621,7 +627,7 @@ export function sanitizeAssistantReply(
   text = text.replace(/^>\s*.+$/m, '').trim();
 
   // Orphan leftovers from a prior turn (list item / typo-correction closer)
-  text = text.replace(/^[a-z]\.\s+Is there anything specific you'd like to know about Ark\??\s*/i, '').trim();
+  text = text.replace(/^[a-z]\.\s+Is there anything specific you'd like to know about NOVA\??\s*/i, '').trim();
   text = text.replace(/^[a-z]\.\s+(?:If you have any specific|I(?:['’]d| would) be happy)[^\n]*\n*/i, '').trim();
   text = text.replace(/^Hello!\s+It (?:looks|seems) like you might have (?:meant|a typo)[^\n]*\n*/i, '').trim();
   text = tidyMarkdownStars(text);
@@ -649,6 +655,7 @@ export function sanitizeAssistantReply(
     if (firstLine.toLowerCase() === user.toLowerCase() || firstLine.toLowerCase() === `> ${user}`.toLowerCase()) {
       text = text.slice(firstLine.length).replace(/^\n+/, '').trim();
     }
+    text = stripFirstPersonAskRestatement(text, user);
   }
 
   // If the model re-emits the previous assistant answer, drop that prefix / paragraphs.
@@ -744,12 +751,68 @@ export function sanitizeAssistantReply(
       .trim();
   }
 
+  // Drop hollow quiz closers local models love ("Would you like more information on any of these steps?").
+  text = text
+    .replace(/(?:\n+|^)\s*Would you like more information on any of these steps[^.!?\n]*[.!?]?\s*/gi, '\n')
+    .replace(/(?:\n+|^)\s*Do you have (?:any )?specific questions(?: about[^.!?\n]*)?[.!]?\s*/gi, '\n')
+    .replace(/(?:\n+|^)\s*Would you like (?:me to )?(?:provide )?(?:more|any) (?:information|details|help)[^.!?\n]*[.!?]?\s*$/gim, '\n')
+    .replace(/(?:\n+|^)\s*Would you like to (?:start with|focus on|add or modify|try|explore|continue with)[^.!?\n]*[.!?]?\s*$/gim, '\n')
+    .replace(/(?:\n+|^)\s*Would you like (?:to )?(?:me to )?[^.!?\n]{0,80}\?\s*$/gim, '\n')
+    .replace(/(?:\n+|^)\s*Want more on any of that\??\s*$/gim, '\n')
+    .replace(/(?:\n+|^)\s*(?:How do these suggestions sound[^.!?\n]*[.!?]?\s*)?(?:Are there any specific areas you'?d like (?:to focus on first|more detail on))\??\s*$/gim, '\n')
+    .replace(/(?:\n+|^)\s*Let me know if you (?:have|need|want) (?:any )?(?:questions|more)[^.!?\n]*[.!?]?\s*$/gim, '\n')
+    .replace(/(?:\n+|^)\s*What platform or technology do you plan to use[^.!?\n]*[.!?]?\s*$/gim, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+
   // Soft “yes” after a real answer: drop fresh greetings that ignore continuity.
   if (user && isSoftContinuityAsk(user)) {
     text = text
       .replace(/^Hello[!.,]?\s+/i, '')
       .replace(/^Hi[!.,]?\s+How\s+can\s+I\s+assist[^.!?\n]*[.!?]?\s*/i, '')
       .replace(/^How\s+can\s+I\s+assist\s+you\s+further[^.!?\n]*[.!?]?\s*/i, '')
+      .trim();
+  }
+
+  // Unless the user asked to see source in chat, never leave code fences / JSX dumps in the bubble.
+  const keepCodeInChat = Boolean(
+    user
+    && (
+      /\b(?:copy[\s-]?paste|paste(?:able)?|clipboard)\b/i.test(user)
+      || /\b(?:give|show|write|paste|provide|see)\b[\s\S]{0,48}\b(?:me\s+)?(?:the\s+)?(?:full\s+)?(?:source\s+)?(?:code|snippet)\b/i.test(user)
+      || (/\bin\s+chat\b/i.test(user) && /\b(?:code|snippet|source)\b/i.test(user))
+    )
+    && !/\b(?:create\s+(?:a\s+)?(?:project|folder)|on\s+disk|preview|localhost|scaffold)\b/i.test(user)
+  );
+  if (!keepCodeInChat) {
+    const hadFence = /```|@@@FILE|<!DOCTYPE\b|<html[\s>]|export\s+default\s+function/i.test(text)
+      || /<(?:section|div|header|nav|button|form|select|option|style|script)\b/i.test(text)
+      || /\b(?:document\.querySelector|addEventListener|useState\s*\(|className\s*=)/i.test(text)
+      || ((text.match(/[{};]/g) || []).length >= 10 && /className=|<\/?[A-Z][A-Za-z]+/.test(text));
+    if (hadFence) {
+      text = text
+        .replace(/@@@FILE\s+[^\n\r]+\s*```[\w.+-]*\s*\n[\s\S]*?```/gi, '')
+        .replace(/```[\s\S]*?```/g, '')
+        .replace(/```[\w.+-]*[^\n]*\n[\s\S]*$/g, '')
+        .replace(/(?:^|\n)\s*(?:html|jsx|javascript|css|tsx?)\s*\n?[\s\S]*?(?=\n\s*(?:Open your|Save all|If you need|Responded)|$)/gi, '\n')
+        .replace(/<\/?[A-Za-z][^>]*>/g, '')
+        .replace(/\b(?:document\.querySelector|addEventListener)\([^)]*\)[^.;\n]*[.;]?/gi, '')
+        .replace(/^\s*(?:import|export|const|let|var|function|return|className=)\b[^\n]*$/gim, '')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+      if (!text || text.length < 12 || /here'?s how you can do it/i.test(text)) {
+        text = 'I applied that in your project files. Open **Code** or **Preview** to review — say if you want the source shown here.';
+      }
+    }
+  }
+
+  // Summaries: collapse “1. 2. 3.” laundry lists into flowing prose when clearly a recap ask.
+  if (user && /\b(?:summarize|summary|recap)\b/i.test(user) && /\b(?:chat|conversation|thread)\b/i.test(user)) {
+    text = text
+      .replace(/^(?:Sure[!.,]?\s*)?(?:Here'?s|Here is)(?:\s+a)?\s+summary[^.!?\n]*[.!]?\s*/i, '')
+      .replace(/^\s*\d+\.\s+/gm, '')
+      .replace(/\n{2,}/g, ' ')
+      .replace(/\s+/g, ' ')
       .trim();
   }
 
@@ -778,20 +841,20 @@ export function looksLikePromptEcho(reply: string): boolean {
   if (!t) return false;
   if (PROMPT_FRAGMENT_RE.test(t)) return true;
   // Strong signal: models sometimes re-emit the exact system instruction block.
-  if (/^You are ARK, a (?:normal )?helpful AI chat assistant/i.test(t)) {
+  if (/^You are NOVA, a (?:normal )?helpful AI chat assistant/i.test(t)) {
     return /Hello! How can I assist you today/i.test(t) || /Never nest asterisks/i.test(t) || /Want more on any of that/i.test(t);
   }
-  if (/^You are ARK, the assistant inside the ARK desktop creation studio on this computer\./i.test(t)) {
+  if (/^You are NOVA, the assistant inside the NOVA desktop creation studio on this computer\./i.test(t)) {
     return /Do not echo the prompt\./i.test(t) || /Answer the latest user request clearly\./i.test(t);
   }
-  if (/^You are ARK, the assistant in the ARK desktop creation studio/i.test(t)) {
+  if (/^You are NOVA, the assistant in the NOVA desktop creation studio/i.test(t)) {
     return /Never continue a previous sentence/i.test(t) || /Answer only the latest user message/i.test(t);
   }
   if (/^Never continue a previous sentence/i.test(t) && /The user wants working source code/i.test(t)) {
     return !/```/.test(t);
   }
   // Weaker fallback: if it starts like the system prompt, and contains typical system phrases.
-  if (/^You are ARK(?:,|\s)/i.test(t) && /Do not echo the prompt\./i.test(t)) return true;
+  if (/^You are NOVA(?:,|\s)/i.test(t) && /Do not echo the prompt\./i.test(t)) return true;
   return false;
 }
 
@@ -836,6 +899,18 @@ export function looksLikeUserAskEcho(reply: string, userMessage: string): boolea
     if (/^updated\b/i.test(r) && r.length < u.length * 2.8) return true;
     if (r.length < u.length * 1.6) return true;
   }
+  // First-person restatement of a build/create ask (“I want to build a basic 3D…”)
+  const lead = r.slice(0, Math.min(220, r.length));
+  if (
+    /^(?:sure[,.]?\s+)?i\s+(?:want|would like|['’]d like|am trying|need)\s+to\s+(?:build|create|make|start)/i.test(lead)
+    && /\b(?:build|create|make)\b/i.test(u)
+  ) {
+    const ut = significantTokens(u);
+    const lt = significantTokens(lead);
+    let hit = 0;
+    for (const w of lt) if (ut.has(w)) hit += 1;
+    if (ut.size >= 4 && hit / Math.min(ut.size, Math.max(lt.size, 1)) >= 0.45) return true;
+  }
   // High token overlap on short replies
   const ut = new Set(ul.split(/[^a-z0-9]+/).filter(w => w.length > 3));
   const rt = rl.split(/[^a-z0-9]+/).filter(w => w.length > 3);
@@ -845,6 +920,42 @@ export function looksLikeUserAskEcho(reply: string, userMessage: string): boolea
     if (hit / rt.length >= 0.72 && !/```|@@@FILE/.test(r)) return true;
   }
   return false;
+}
+
+/**
+ * Drop a leading first-person paraphrase of the user’s ask
+ * (“I want to build a basic 3D modeling app…”) so the bubble starts as the assistant.
+ */
+export function stripFirstPersonAskRestatement(reply: string, userMessage: string): string {
+  let text = String(reply || '').trim();
+  const user = String(userMessage || '').trim();
+  if (!text || user.length < 16) return text;
+
+  const ut = significantTokens(user);
+  if (ut.size < 4) return text;
+
+  const isFirstPersonLead = (lead: string) => (
+    /^(?:sure[,.]?\s+)?(?:i\s+(?:want|would like|['’]d like|am trying|need|plan)\s+to|let'?s\s+(?:build|create|make))\b/i.test(lead.trim())
+  );
+
+  for (let pass = 0; pass < 3; pass++) {
+    // Prefer first sentence; fall back to first line / first 220 chars.
+    const sentence = text.match(/^[\s\S]{8,500}?[.!?](?=\s|$)/)?.[0]
+      || text.split(/\n+/)[0]
+      || text.slice(0, 220);
+    const lead = String(sentence || '').trim();
+    if (lead.length < 18 || !isFirstPersonLead(lead)) break;
+
+    const lt = significantTokens(lead);
+    let hit = 0;
+    for (const w of lt) if (ut.has(w)) hit += 1;
+    const denom = Math.min(ut.size, Math.max(lt.size, 1));
+    // Paraphrases often share key nouns (3d, modeling, cubes…) even when wording differs.
+    if (hit < 3 && hit / denom < 0.35) break;
+
+    text = text.slice(lead.length).replace(/^[\s.]+/, '').trim();
+  }
+  return text;
 }
 
 /** Prefer sanitized text, but never hide a real answer behind prompt-echo stripping. */
@@ -862,17 +973,17 @@ export function usableAssistantText(
   let light = String(raw || '').replace(/\r\n/g, '\n').trim();
   if (!light) return '';
   if (isCannedGreetingReply(light, lastUserMessage)) return '';
-  const markRe = /(?:^|\n)\s*(?:ARK|Assistant)\s*:\s*/gi;
+  const markRe = /(?:^|\n)\s*(?:NOVA|Assistant)\s*:\s*/gi;
   let lastMark: RegExpExecArray | null = null;
   let m: RegExpExecArray | null;
   while ((m = markRe.exec(light)) !== null) lastMark = m;
   if (lastMark && typeof lastMark.index === 'number') {
     light = light.slice(lastMark.index + lastMark[0].length).trim();
   }
-  light = light.replace(/^You are ARK[\s\S]*?(?:\n\n|User:\s*)/i, '').trim();
+  light = light.replace(/^You are NOVA[\s\S]*?(?:\n\n|User:\s*)/i, '').trim();
   light = light.replace(/^>\s*/gm, '').trim();
   if (isCannedGreetingReply(light, lastUserMessage)) return '';
-  if (light.length >= 2 && !/^You are ARK\b/i.test(light)) return light;
+  if (light.length >= 2 && !/^You are NOVA\b/i.test(light)) return light;
   return '';
 }
 
@@ -924,4 +1035,62 @@ export function tidyMarkdownStars(text: string): string {
   out = out.replace(/\*\*\*\*+/g, '**');
   out = out.replace(/\*\*\s*\*\*/g, '');
   return out;
+}
+
+/** “What did we talk about / summarize this chat” — stay in-thread, do not invent a new topic. */
+export function looksLikeThreadSummaryAsk(text: string): boolean {
+  const t = String(text || '').trim();
+  if (!t || t.length > 220) return false;
+  if (/\b(?:summarize|summary)\b/i.test(t) && /\b(?:this\s+)?(?:chat|conversation|thread|so\s+far|we\s+(?:just\s+)?(?:talked|discussed))\b/i.test(t)) {
+    return true;
+  }
+  if (/\bwhat\s+did\s+we\s+(?:just\s+)?(?:talk|discuss|cover|say)\b/i.test(t)) return true;
+  if (/\b(?:recap|catch\s+me\s+up)\b/i.test(t) && /\b(?:chat|conversation|this|earlier)\b/i.test(t)) return true;
+  if (/^(?:remind\s+me|what\s+were\s+we\s+(?:talking|discussing))\b/i.test(t)) return true;
+  return false;
+}
+
+export function threadSummarySystemHint(): string {
+  return [
+    'The user wants a summary of THIS chat thread only.',
+    'Write one short professional paragraph (3–6 sentences). No numbered lists, no bullets, no “Sure! Here’s a summary”.',
+    'Cover the main topic and where things stand. Do not invent work that was not discussed.',
+  ].join(' ');
+}
+
+/** Deterministic fallback when the model blanks on a summarize-this-chat ask. */
+export function buildThreadSummaryFromMessages(
+  messages: { role?: string; content?: string }[],
+): string {
+  const turns = (messages || [])
+    .map((m) => ({
+      role: m.role === 'assistant' ? 'assistant' as const : 'user' as const,
+      text: usableAssistantText(String(m.content || '')).replace(/\s+/g, ' ').trim(),
+    }))
+    .filter((t) => t.text.length >= 8 && !t.text.startsWith('__generating__:'))
+    .slice(-16);
+
+  if (turns.length < 2) {
+    return 'This chat is still short — send a few more messages and I can recap cleanly.';
+  }
+
+  const userBits = turns.filter((t) => t.role === 'user').map((t) => t.text).slice(-5);
+  const asstBits = turns.filter((t) => t.role === 'assistant').map((t) => firstSentence(t.text)).slice(-4);
+
+  const topics = userBits
+    .map((u) => u.replace(/^(yo|hey|ok|alright|yeah|so)\b[\s,]*/i, '').trim())
+    .filter(Boolean)
+    .map((u) => (u.length > 90 ? `${u.slice(0, 87)}…` : u));
+
+  const covered = asstBits
+    .filter((a) => a && !/want more on any of that|would you like/i.test(a))
+    .map((a) => (a.length > 100 ? `${a.slice(0, 97)}…` : a));
+
+  const topicClause = topics.length
+    ? `You were talking about ${topics.slice(0, 3).join('; ')}.`
+    : 'You shared a few thoughts in this thread.';
+  const coverClause = covered.length
+    ? ` We covered ${covered.slice(0, 2).join(' ')}`
+    : '';
+  return `${topicClause}${coverClause}`.replace(/\s+/g, ' ').trim();
 }

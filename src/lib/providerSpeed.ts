@@ -17,7 +17,7 @@ type ProbeSpec = {
   run: (key: string) => Promise<{ ok: boolean; status: number }>;
 };
 
-const API_SPEED_STORE_KEY = 'ark:api-speed';
+const API_SPEED_STORE_KEY = 'NOVA:api-speed';
 
 function openaiModels(url: string, extraHeaders?: Record<string, string>) {
   return async (key: string) => {
@@ -41,7 +41,7 @@ const PROBES: Record<string, ProbeSpec> = {
     name: 'OpenRouter',
     run: openaiModels('https://openrouter.ai/api/v1/models', {
       'HTTP-Referer': 'https://ark.local',
-      'X-Title': 'ARK',
+      'X-Title': 'NOVA',
     }),
   },
   openai: {

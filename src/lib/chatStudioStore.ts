@@ -11,7 +11,7 @@ export type ChatStudioSnapshot = {
 };
 
 function chatStudioKey(chatId: string) {
-  return `ark:chat-studio:${chatId}`;
+  return `NOVA:chat-studio:${chatId}`;
 }
 
 export function studioPathBasename(diskRoot: string | null | undefined): string {
@@ -66,7 +66,7 @@ function studioPathJoin(root: string, name: string): string {
 
 /**
  * Resolve THIS chat's project folder.
- * Never return another thread's in-memory root. Prefer ARK Projects\{chatTitle}
+ * Never return another thread's in-memory root. Prefer NOVA Projects\{chatTitle}
  * when the stored studio diskRoot basename does not match the chat's product name
  * (fixes cross-chat Localhost bleed after a wrong persist).
  */
@@ -146,8 +146,12 @@ export async function resolveChatProjectRoot(opts: {
     const documents = roots?.roots?.find(r => r.id === 'documents')?.path;
     if (wantName && buildIntent) {
       const arkHomes: string[] = [];
-      if (documents) arkHomes.push(studioPathJoin(documents, 'ARK Projects'));
+      if (documents) {
+        arkHomes.push(studioPathJoin(documents, 'NOVA Projects'));
+        arkHomes.push(studioPathJoin(documents, 'ARK Projects'));
+      }
       if (desktop) {
+        arkHomes.push(studioPathJoin(desktop, 'NOVA Projects'));
         arkHomes.push(studioPathJoin(desktop, 'ARK Projects'));
         arkHomes.push(studioPathJoin(desktop, 'Projects'));
       }
@@ -279,7 +283,7 @@ export function clearChatStudio(chatId: string) {
 
 /** Sticky Code pill for this chat. set when build/files start; cleared only when chat is deleted. */
 function chatCodePillKey(chatId: string) {
-  return `ark:chat-code-pill:${chatId}`;
+  return `NOVA:chat-code-pill:${chatId}`;
 }
 
 export function setChatCodePill(chatId: string, on = true) {
@@ -319,7 +323,7 @@ export type LastListedFolder = {
 export const LAST_LISTED_FOLDER_TTL_MS = 30 * 60 * 1000;
 
 function lastListedFolderKey(chatId: string) {
-  return `ark:chat-last-folder:${chatId}`;
+  return `NOVA:chat-last-folder:${chatId}`;
 }
 
 export function setLastListedFolder(chatId: string, folder: { path: string; name: string }) {
@@ -371,7 +375,7 @@ export type LastDiskTarget = {
 export const LAST_DISK_TARGET_TTL_MS = 30 * 60 * 1000;
 
 function lastDiskTargetKey(chatId: string) {
-  return `ark:chat-last-disk-target:${chatId}`;
+  return `NOVA:chat-last-disk-target:${chatId}`;
 }
 
 export function setLastDiskTarget(
@@ -425,7 +429,7 @@ export type LastPendingAddFile = {
 export const LAST_PENDING_ADD_FILE_TTL_MS = 30 * 60 * 1000;
 
 function lastPendingAddFileKey(chatId: string) {
-  return `ark:chat-pending-add-file:${chatId}`;
+  return `NOVA:chat-pending-add-file:${chatId}`;
 }
 
 export function setLastPendingAddFile(chatId: string, fileName: string) {
@@ -484,7 +488,7 @@ export type LastPendingGreenfield = {
 export const LAST_PENDING_GREENFIELD_TTL_MS = 60 * 60 * 1000;
 
 function lastPendingGreenfieldKey(chatId: string) {
-  return `ark:chat-pending-greenfield:${chatId}`;
+  return `NOVA:chat-pending-greenfield:${chatId}`;
 }
 
 export function setLastPendingGreenfield(

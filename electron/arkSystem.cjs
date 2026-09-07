@@ -1,5 +1,5 @@
 /**
- * Accurate machine probe for ARK (Electron main).
+ * Accurate machine probe for NOVA (Electron main).
  * Avoids browser caps like navigator.deviceMemory (often wrong / capped).
  */
 
@@ -184,7 +184,7 @@ async function probeSpeedTest() {
       const lib = parsed.protocol === 'http:' ? http : https;
       const req = lib.get(url, {
         headers: {
-          'User-Agent': 'ARK-Engine/0.4',
+          'User-Agent': 'NOVA-Engine/0.4',
           Accept: '*/*',
           Range: `bytes=${start}-${end}`,
         },

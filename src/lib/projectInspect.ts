@@ -776,7 +776,7 @@ export function buildInspectPrompt(
       ? 'Propose concrete upgrades from the files. only what they asked.'
       : 'Report findings from the attached files that match their ask.';
 
-  return `You are ARK reviewing a local project on this PC. ${job} Do NOT write @@@FILE blocks and do NOT dump whole files.
+  return `You are NOVA reviewing a local project on this PC. ${job} Do NOT write @@@FILE blocks and do NOT dump whole files.
 
 CRITICAL RULES (read first):
 - You CAN see the attached project files below. Never say you cannot see the project.
@@ -789,7 +789,7 @@ Answer the user’s latest request directly; do not substitute a different topic
 
 ${rules}
 
-Project: ${projectName || 'ARK project'}
+Project: ${projectName || 'NOVA project'}
 
 File tree (partial):
 ${tree || '(empty)'}
@@ -819,7 +819,7 @@ export function buildNamedPatchPrompt(
     return `--- ${path} ---\n${body}`;
   });
 
-  return `You are ARK in a local coding studio. The user asked you to fix existing files.
+  return `You are NOVA in a local coding studio. The user asked you to fix existing files.
 
 Write FULL updated contents only for these files (no new app, no extra files):
 ${paths.map(p => `- ${p}`).join('\n') || '(the files named in the request)'}
@@ -832,7 +832,7 @@ Format:
 
 Then one short summary. Do not recreate the project. Do not add index.html unless it is in the list above.
 
-Project: ${projectName || 'ARK project'}
+Project: ${projectName || 'NOVA project'}
 
 Current files to edit:
 ${chunks.join('\n\n')}

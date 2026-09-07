@@ -1,16 +1,16 @@
 import { useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
 
-const DISMISS_KEY = 'ark:guest-social-banner-dismiss';
+const DISMISS_KEY = 'NOVA:guest-social-banner-dismiss';
 
 type Props = {
   feature: 'networking' | 'message' | 'call';
 };
 
 const COPY: Record<Props['feature'], string> = {
-  networking: 'Posts on this PC stay local until you sign in. Sign in to share work with other ARK IDs on the network.',
-  message: 'Messages are saved on this PC as Guest. Sign in to reach other people by ARK ID across devices.',
-  call: 'Voice calls need sign-in so ARK can route to your ARK ID. You can still browse contacts locally as Guest.',
+  networking: 'Posts on this PC stay local until you sign in. Sign in to share work with other NOVA IDs on the network.',
+  message: 'Messages are saved on this PC as Guest. Sign in to reach other people by NOVA ID across devices.',
+  call: 'Voice calls need sign-in so NOVA can route to your NOVA ID. You can still browse contacts locally as Guest.',
 };
 
 export function GuestSocialBanner({ feature }: Props) {

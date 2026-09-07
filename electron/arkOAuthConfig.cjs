@@ -8,7 +8,7 @@ const path = require('path');
 const { app } = require('electron');
 
 function configPath() {
-  return path.join(app.getPath('userData'), 'ark-oauth-clients.json');
+  return path.join(app.getPath('userData'), 'NOVA-oauth-clients.json');
 }
 
 function load() {

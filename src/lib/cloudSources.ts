@@ -6,7 +6,7 @@
 import { getProviderApiKeys } from '@/lib/localPrefs';
 import { isOllamaEnabled } from '@/lib/ollamaOptional';
 
-const CLOUD_SOURCE_KEY = 'ark:cloud-sources';
+const CLOUD_SOURCE_KEY = 'NOVA:cloud-sources';
 
 export const NO_KEY_PROVIDER_IDS = new Set(['pollinations', 'ollama']);
 
@@ -61,7 +61,7 @@ function readState(): CloudSourceState {
 function writeState(next: CloudSourceState) {
   try {
     localStorage.setItem(CLOUD_SOURCE_KEY, JSON.stringify(next));
-    window.dispatchEvent(new Event('ark:cloud-sources-changed'));
+    window.dispatchEvent(new Event('NOVA:cloud-sources-changed'));
   } catch {
     /* ignore */
   }

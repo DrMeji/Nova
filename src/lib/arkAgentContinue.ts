@@ -13,7 +13,7 @@ export type AgentContinueState = {
   at: number;
 };
 
-const PREFIX = 'ark:agent-continue:';
+const PREFIX = 'NOVA:agent-continue:';
 
 export function agentContinueKey(chatKey: string): string {
   return `${PREFIX}${chatKey || 'chat'}`;

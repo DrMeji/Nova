@@ -1,5 +1,5 @@
 /**
- * Local git for ARK Code — uses the Git binary on this PC.
+ * Local git for NOVA Code — uses the Git binary on this PC.
  */
 
 const fs = require('fs');
@@ -21,7 +21,7 @@ function runGit(cwd, args, opts = {}) {
         if (err.code === 'ENOENT') {
           resolve({
             ok: false,
-            error: 'Git is not installed on this PC. Install Git for Windows, then try again in ARK.',
+            error: 'Git is not installed on this PC. Install Git for Windows, then try again in NOVA.',
           });
           return;
         }
@@ -37,11 +37,11 @@ function runGit(cwd, args, opts = {}) {
 async function ensureIdentity(cwd) {
   const name = await runGit(cwd, ['config', 'user.name']);
   if (!name.ok || !name.stdout) {
-    await runGit(cwd, ['config', 'user.name', 'ARK']);
+    await runGit(cwd, ['config', 'user.name', 'NOVA']);
   }
   const email = await runGit(cwd, ['config', 'user.email']);
   if (!email.ok || !email.stdout) {
-    await runGit(cwd, ['config', 'user.email', 'ark@local']);
+    await runGit(cwd, ['config', 'user.email', 'NOVA@local']);
   }
 }
 
@@ -97,7 +97,7 @@ async function commitAll(cwd, message) {
   await ensureIdentity(cwd);
   const add = await runGit(cwd, ['add', '-A']);
   if (!add.ok) return add;
-  const msg = String(message || 'Update from ARK').slice(0, 200);
+  const msg = String(message || 'Update from NOVA').slice(0, 200);
   const committed = await runGit(cwd, ['commit', '-m', msg]);
   if (!committed.ok) {
     if (/nothing to commit/i.test(committed.error || '')) {
@@ -113,7 +113,7 @@ async function push(cwd, token) {
   if (!cwd) return { ok: false, error: 'No project folder' };
   const st = await status(cwd);
   if (!st.git) return { ok: false, error: 'This folder is not a git repo yet. Commit first.' };
-  if (!st.remote) return { ok: false, error: 'No origin remote. Create a GitHub repo from ARK first, or add origin.' };
+  if (!st.remote) return { ok: false, error: 'No origin remote. Create a GitHub repo from NOVA first, or add origin.' };
   const result = await runGit(cwd, ['push', '-u', 'origin', 'HEAD'], {
     env: authEnv(token),
     timeout: 180_000,

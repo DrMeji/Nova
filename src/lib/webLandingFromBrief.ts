@@ -148,6 +148,16 @@ export function wantsChatAppScaffold(text: string): boolean {
 export function wantsInteractiveSpaScaffold(text: string): boolean {
   const t = String(text || '');
   if (wantsChatAppScaffold(t)) return true;
+  // Spatial / modeling / viewport tools need a real Vite React app (WebGL), not a landing page.
+  if (/\b(3d|three\.?js|webgl|babylon|modeling\s+app|modeler|viewport|orbit\s+controls?|blender[-\s]?like)\b/i.test(t)
+    && /\b(app|editor|tool|scene|mesh|cube|sphere|viewport|canvas)\b/i.test(t)) {
+    return true;
+  }
+  // Canvas games (Chrome dino runner, etc.)
+  if (/\b(chrome\s+dino|dinosaur\s+game|dino\s+runner|t-?rex\s+(?:runner|game))\b/i.test(t)
+    || (/\bdinosaur\b/i.test(t) && /\b(game|runner|jump|space)\b/i.test(t))) {
+    return true;
+  }
   if (/\b(kanban|drag[\s-]?and[\s-]?drop|draggable|localStorage)\b/i.test(t)
     && /\b(column|board|card|modal|task|backlog)\b/i.test(t)) {
     return true;
@@ -163,6 +173,16 @@ export function wantsInteractiveSpaScaffold(text: string): boolean {
   // Dense tool UI / trading cockpit. tabs + live controls, not a marketing landing.
   if (/\b(watchlist|orders?\s+tab|trading\s+cockpit|trade\s*rail|desktop[- ]style)\b/i.test(t)
     && /\b(tab|settings|panel|button|cockpit|software)\b/i.test(t)) {
+    return true;
+  }
+  // Premium animated product sites (Apple-like marketing) need React motion + working CTAs.
+  if (
+    /\b(animated|premium|full-?bleed|scroll(?:able)?\s+sections?|bag\s+drawer|product\s+bag)\b/i.test(t)
+    && /\b(website|web\s*site|site|marketing|landing|homepage|storefront)\b/i.test(t)
+  ) {
+    return true;
+  }
+  if (/\b(?:apple[\s-]?like|professional\s+animated|working\s+(?:buy|buttons?)|learn\s+more\s+buttons?)\b/i.test(t)) {
     return true;
   }
   // Calculators ship as static HTML/CSS/JS. not a Vite React SPA.
@@ -1560,7 +1580,7 @@ body {
     },
     {
       path: 'contact.html',
-      content: legalShell('Contact', `<p style="color:var(--muted);margin-top:1rem">Press and partnerships: hello@${escapeHtml(title).toLowerCase().replace(/\s+/g, '')}.studio</p><p style="color:var(--muted);margin-top:1rem">For product support, reply through your ARK project chat or the in-page newsletter capture on the home page.</p>`),
+      content: legalShell('Contact', `<p style="color:var(--muted);margin-top:1rem">Press and partnerships: hello@${escapeHtml(title).toLowerCase().replace(/\s+/g, '')}.studio</p><p style="color:var(--muted);margin-top:1rem">For product support, reply through your NOVA project chat or the in-page newsletter capture on the home page.</p>`),
     },
     { path: '.gitignore', content: '.DS_Store\nThumbs.db\n*.log\n.env\n.env.*\n' },
   ];
@@ -1646,8 +1666,8 @@ button:hover { filter: brightness(1.05); }
 textarea { margin-bottom: 0.75rem; resize: vertical; }
 @media (max-width: 720px) { .layout { grid-template-columns: 1fr; } }
 `;
-  const js = `const finishedKey = 'ark:${title.replace(/'/g, '')}:finished';
-const notesKey = 'ark:${title.replace(/'/g, '')}:notes';
+  const js = `const finishedKey = 'NOVA:${title.replace(/'/g, '')}:finished';
+const notesKey = 'NOVA:${title.replace(/'/g, '')}:notes';
 const list = document.getElementById('finishedList');
 const form = document.getElementById('addFinished');
 const notes = document.getElementById('notesBox');
@@ -1686,78 +1706,14 @@ saveNotes.addEventListener('click', () => {
 }
 
 export function buildLandingPageFiles(name: string, brief: string): LandingFile[] {
+  // Intentionally blank: no stock Unsplash heroes, restaurant packs, or "Book" CTAs.
+  // Callers must get unique UI from the model, not a canned landing.
   const title = String(name || 'Site').trim() || 'Site';
-  let urls = pickUrls(brief);
-
-  // Book club / reading circle — not a restaurant "Book a table" landing.
-  if (/\bbook\s*club\b/i.test(brief) || /\b(reading\s+circle|bookshelf|who\s+finished|current\s+book)\b/i.test(brief)) {
-    return buildBookClubLandingFiles(title, brief);
-  }
-
-  if (wantsPremiumProductLanding(brief)) {
-    return buildPremiumProductLandingFiles(title, brief);
-  }
-
-  if (/\b(gallery|masonry|portfolio|photographer|photo\s+grid|framelab)\b/i.test(brief)
-    || (urls.length >= 4 && /\b(black|nav|work|about)\b/i.test(brief))) {
-    return buildPortfolioFiles(title, brief, urls);
-  }
-
-  if (/\b(festival|lineup|ticket\s+cta|jazz|concert|velvet)\b/i.test(brief)
-    && !/\b(watchlist|trading|orders?\s+tab|trade\s*rail)\b/i.test(brief)) {
-    return buildFestivalLandingFiles(title, brief);
-  }
-
-  if (/\b(watchlist|trading\s+cockpit|trade\s*rail|orders?\s+tab)\b/i.test(brief)
-    || (/\b(watchlist|orders|settings)\b/i.test(brief) && /\b(tab|cockpit|desktop)\b/i.test(brief))) {
-    return buildTradeCockpitFiles(title, brief);
-  }
-
-  if (/\bcalculator\b/i.test(brief)
-    || (/\bcalc\b/i.test(brief) && /\b(scientific|professional|pro|engineer)\b/i.test(brief))) {
-    return buildProCalculatorFiles(title, brief);
-  }
-
-  // "Use Unsplash" with no concrete URLs. still ship a real hero + menu photos.
-  if (!urls.length && /\b(restaurant|menu|dining|cafe|food|platehouse|unsplash)\b/i.test(brief)) {
-    urls = [
-      'https://images.unsplash.com/photo-1414235077428-338989a2e8c0?w=1600&q=80',
-      'https://images.unsplash.com/photo-1540189549336-e6e99c3679fe?w=900&q=80',
-      'https://images.unsplash.com/photo-1565299624946-b28f40a0ae38?w=900&q=80',
-      'https://images.unsplash.com/photo-1476224203421-9ac39bcb3327?w=900&q=80',
-    ];
-  }
-
-  const hero = urls[0] || 'https://images.unsplash.com/photo-1501785888041-af3ef285b470?w=1600&q=80';
-  const headline = pickHeadline(brief, title);
-  const subtitle = pickSubtitle(brief)
-    || (/\b(restaurant|dining|cafe)\b/i.test(brief) ? 'Seasonal plates, warm light, a table waiting for you.' : 'Built with ARK');
-  const buttons = pickButtons(brief);
-  const cards = pickCards(brief, urls);
-  const btnList = buttons.length ? buttons : (/\b(restaurant|menu|booking|reserve)\b/i.test(brief) ? ['Reserve', 'View menu'] : ['Get started']);
-  const btnHtml = btnList.map((b) => {
-    const lower = b.toLowerCase();
-    const href = /menu|dish|view/i.test(lower) ? '#menu'
-      : /reserve|book|table|order/i.test(lower) ? '#reserve'
-      : '#menu';
-    return `<a class="btn" href="${href}">${escapeHtml(b)}</a>`;
-  }).join('\n        ');
-  const cardsHtml = cards.map(c => `
-      <article class="card">
-        ${c.image ? `<img src="${escapeHtml(c.image)}" alt="${escapeHtml(c.title)}" loading="lazy" />` : ''}
-        <div class="card-body">
-          <h3>${escapeHtml(c.title)}</h3>
-          <p>${escapeHtml(c.meta)}</p>
-          <a class="btn btn-sm" href="#reserve">Book</a>
-        </div>
-      </article>`).join('\n');
-
-  const footerInner = /\b(restaurant|menu|dining|cafe|harbor|plate)\b/i.test(brief)
-    ? `<p id="reserve">Tue–Sun · 5pm–10pm · Walk-ins welcome</p>
-    <p>&copy; ${new Date().getFullYear()} ${escapeHtml(title)}</p>`
-    : `<p>&copy; ${new Date().getFullYear()} ${escapeHtml(title)}</p>`;
-
-  const html = `<!DOCTYPE html>
+  void brief;
+  return [
+    {
+      path: 'index.html',
+      content: `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -1766,120 +1722,24 @@ export function buildLandingPageFiles(name: string, brief: string): LandingFile[
   <link rel="stylesheet" href="css/styles.css" />
 </head>
 <body>
-  <header class="hero" style="--hero:url('${escapeHtml(hero)}')">
-    <div class="hero-inner">
-      <p class="brand">${escapeHtml(title)}</p>
-      <h1>${escapeHtml(headline)}</h1>
-      <p class="sub">${escapeHtml(subtitle)}</p>
-      <div class="actions">
-        ${btnHtml}
-      </div>
-    </div>
-  </header>
-  <main>
-    <section id="menu" class="grid" aria-label="Menu">
-${cardsHtml || '      <p class="empty">Add sections in chat. this page is ready to edit.</p>'}
-    </section>
-  </main>
-  <footer>
-    ${footerInner}
-  </footer>
+  <div id="app"></div>
   <script src="js/app.js"></script>
 </body>
 </html>
-`;
-
-  const css = `* { box-sizing: border-box; margin: 0; }
-body {
-  font-family: Georgia, "Times New Roman", serif;
-  color: #f4f1ea;
-  background: #141210;
-  line-height: 1.45;
-}
-.hero {
-  min-height: 72vh;
-  background:
-    linear-gradient(180deg, rgba(12,10,8,0.55), rgba(12,10,8,0.82)),
-    var(--hero) center/cover no-repeat;
-  display: grid;
-  place-items: center;
-  text-align: center;
-  padding: 3rem 1.25rem;
-}
-.brand {
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  font-size: 0.75rem;
-  opacity: 0.85;
-  margin-bottom: 0.75rem;
-  font-family: system-ui, sans-serif;
-}
-.hero h1 {
-  font-size: clamp(2.4rem, 6vw, 4rem);
-  font-weight: 500;
-  margin-bottom: 0.6rem;
-}
-.sub { opacity: 0.9; max-width: 28rem; margin: 0 auto 1.5rem; }
-.actions { display: flex; flex-wrap: wrap; gap: 0.75rem; justify-content: center; }
-.btn {
-  display: inline-block;
-  padding: 0.7rem 1.15rem;
-  border-radius: 999px;
-  background: #e8dcc8;
-  color: #1a1510;
-  text-decoration: none;
-  font-family: system-ui, sans-serif;
-  font-weight: 600;
-  font-size: 0.9rem;
-  border: 0;
-  cursor: pointer;
-}
-.btn-sm { padding: 0.4rem 0.85rem; font-size: 0.8rem; margin-top: 0.5rem; }
-.grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 1.25rem;
-  padding: 2.5rem 1.25rem 3rem;
-  max-width: 1100px;
-  margin: 0 auto;
-}
-.card {
-  background: #1e1a16;
-  border: 1px solid rgba(255,255,255,0.08);
-  border-radius: 14px;
-  overflow: hidden;
-}
-.card img { width: 100%; height: 180px; object-fit: cover; display: block; }
-.card-body { padding: 1rem 1rem 1.15rem; }
-.card h3 { font-size: 1.15rem; margin-bottom: 0.35rem; }
-.card p { opacity: 0.8; font-size: 0.92rem; font-family: system-ui, sans-serif; }
-footer {
-  padding: 1.5rem;
-  text-align: center;
-  opacity: 0.55;
-  font-size: 0.85rem;
-  font-family: system-ui, sans-serif;
-}
-.empty { opacity: 0.6; grid-column: 1 / -1; text-align: center; }
-`;
-
-  const js = `document.querySelectorAll('a.btn').forEach((a) => {
-  a.addEventListener('click', (e) => {
-    const id = a.getAttribute('href');
-    if (!id || id.charAt(0) !== '#') return;
-    const el = document.querySelector(id);
-    if (el) {
-      e.preventDefault();
-      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-  });
-});
-`;
-
-  return [
-    { path: 'index.html', content: html },
-    { path: 'css/styles.css', content: css },
-    { path: 'js/app.js', content: js },
+`,
+    },
+    {
+      path: 'css/styles.css',
+      content: `* { box-sizing: border-box; }
+html, body { margin: 0; min-height: 100%; }
+#app { min-height: 100vh; }
+`,
+    },
+    {
+      path: 'js/app.js',
+      content: `document.documentElement.dataset.arkReady = '1';
+`,
+    },
     { path: '.gitignore', content: '.DS_Store\nThumbs.db\n*.log\n.env\n.env.*\n' },
   ];
 }

@@ -1,5 +1,5 @@
 /**
- * Run approved shell commands for ARK agent (npm, pip, git, …).
+ * Run approved shell commands for NOVA Agent (npm, pip, git, …).
  * Execution mode always comes from stored workspace grants — never from the renderer.
  */
 
@@ -89,7 +89,7 @@ function commandAllowed(command, mode, userConfirmed) {
     }
     // Allowlisted still needs an explicit confirm from the UI (skipConfirm after dialog).
     if (!userConfirmed) {
-      return { ok: false, needsConfirm: true, error: 'Confirm this command in ARK before it can run.' };
+      return { ok: false, needsConfirm: true, error: 'Confirm this command in NOVA before it can run.' };
     }
     return { ok: true };
   }
@@ -98,7 +98,7 @@ function commandAllowed(command, mode, userConfirmed) {
     // Known package managers / git may run quietly; interpreters always need confirm.
     if (onAllowlist(cmd) && !isPowerfulInterpreter(cmd)) return { ok: true };
     if (!userConfirmed) {
-      return { ok: false, needsConfirm: true, error: 'Confirm this command in ARK before it can run.' };
+      return { ok: false, needsConfirm: true, error: 'Confirm this command in NOVA before it can run.' };
     }
     return { ok: true };
   }
@@ -106,7 +106,7 @@ function commandAllowed(command, mode, userConfirmed) {
   // run_all — allowlisted non-interpreters may run; everything else needs UI confirm.
   if (onAllowlist(cmd) && !isPowerfulInterpreter(cmd)) return { ok: true };
   if (!userConfirmed) {
-    return { ok: false, needsConfirm: true, error: 'Confirm this command in ARK before it can run.' };
+    return { ok: false, needsConfirm: true, error: 'Confirm this command in NOVA before it can run.' };
   }
   return { ok: true };
 }
@@ -120,7 +120,7 @@ function resolveCwd(cwd) {
     return { ok: false, error: arkSelfGuard.protectedPathError() };
   }
   if (!arkProjects.isAllowedExternalPath(p)) {
-    return { ok: false, error: 'That folder is outside ARK access. Enable Desktop/Documents or Full PC access in Settings.' };
+    return { ok: false, error: 'That folder is outside NOVA access. Enable Desktop/Documents or Full PC access in Settings.' };
   }
   return { ok: true, path: p };
 }
@@ -200,7 +200,8 @@ function portFromUrl(url) {
   }
 }
 
-const DEV_PORT_CANDIDATES = [5173, 5174, 5175, 5176, 5177, 5178, 5179, 5180];
+/** Project Vite previews. start above NOVA's own UI ports (5173–5174). */
+const DEV_PORT_CANDIDATES = Array.from({ length: 151 }, (_, i) => 5200 + i);
 
 async function findFreeDevPort() {
   for (const port of DEV_PORT_CANDIDATES) {
@@ -224,7 +225,7 @@ async function waitForDevServerUrl(port, timeoutMs = 25_000) {
 
 function spawnHiddenDevServer(cwd, port) {
   const { spawn } = require('child_process');
-  // Force IPv4 + an explicit free port so we never steal ARK's own Vite or miss ::1-only binds.
+  // Force IPv4 + an explicit free port so we never steal NOVA's own Vite or miss ::1-only binds.
   const run = `npm run dev -- --host 127.0.0.1 --port ${port} --strictPort`;
   const env = { ...process.env, BROWSER: 'none' };
   if (process.platform === 'win32') {
@@ -295,7 +296,7 @@ async function agentStartDevServer(payload) {
 
   const port = await findFreeDevPort();
   if (!port) {
-    return { ok: false, error: 'No free port in 5173–5180 for the project dev server.' };
+    return { ok: false, error: 'No free port in 5200–5350 for the project dev server.' };
   }
 
   try {

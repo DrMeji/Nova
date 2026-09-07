@@ -136,6 +136,6 @@ assert.ok(loop.steps.some(s => s.tool === 'done'), 'expected done step');
 assert.ok(String(loop.files['src/App.tsx'] || '').includes('hello'), 'file should contain hello');
 assert.ok(loop.reply.toLowerCase().includes('hello') || loop.ok);
 
-console.log('ark-agent-loop smoke: ok');
+console.log('NOVA-agent-loop smoke: ok');
 console.log(`  model calls=${calls} steps=${loop.steps.map(s => s.tool).join('→')}`);
 console.log(`  updated=${loop.updated.join(',') || '(none)'}`);

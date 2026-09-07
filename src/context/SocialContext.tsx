@@ -67,8 +67,8 @@ export function SocialProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const bump = () => setBlockedUsers(loadBlockedUsers());
-    window.addEventListener('ark:blocks-changed', bump);
-    return () => window.removeEventListener('ark:blocks-changed', bump);
+    window.addEventListener('NOVA:blocks-changed', bump);
+    return () => window.removeEventListener('NOVA:blocks-changed', bump);
   }, []);
 
   // Re-pull live names/avatars when opening Message (friends may have updated Settings).
@@ -128,7 +128,7 @@ export function SocialProvider({ children }: { children: ReactNode }) {
     const prefs = getLocalPrefs();
     const fromName = prefs.displayName?.trim() && prefs.displayName.trim() !== 'Guest'
       ? prefs.displayName.trim()
-      : (profile?.display_name?.trim() || (isArkDevEmail(user?.email) ? 'DEV' : 'ARK user'));
+      : (profile?.display_name?.trim() || (isArkDevEmail(user?.email) ? 'DEV' : 'NOVA user'));
     const result = await sendFriendRequest({
       fromArkId: myArkId,
       fromName,

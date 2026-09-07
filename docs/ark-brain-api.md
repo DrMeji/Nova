@@ -1,22 +1,22 @@
-# ARK Brain API — external apps
+# NOVA Brain API — external apps
 
-ARK owns this loopback API. External apps (personal assistants like Lindsay, agents, IDEs, custom tools) talk to **ARK Engine** on this PC — not to Ollama or any third-party local runtime.
+NOVA owns this loopback API. External apps (personal assistants like Lindsay, agents, IDEs, custom tools) talk to **NOVA Engine** on this PC — not to Ollama or any third-party local runtime.
 
-Base URL: copy it from **Settings → AI → Brain API**. It is loopback-only and commonly starts at `http://127.0.0.1:8787`, but ARK may select another available port.
+Base URL: copy it from **Settings → AI → Brain API**. It is loopback-only and commonly starts at `http://127.0.0.1:8787`, but NOVA may select another available port.
 
 Lindsay migration: [lindsay-migration.md](./lindsay-migration.md)
 
-Packaged ARK requires the token shown in **Settings → AI → Brain API**. Set it as `ARK_BRAIN_TOKEN` and send `Authorization: Bearer <token>`. Authentication is optional only in an unpackaged localhost development build.
+Packaged NOVA requires the token shown in **Settings → AI → Brain API**. Set it as `ARK_BRAIN_TOKEN` and send `Authorization: Bearer <token>`. Authentication is optional only in an unpackaged localhost development build.
 
 Contract: `GET /v1/contract` (currently **0.4.0**)
 
 ## Why this exists
 
-Apps that used to require Ollama can point at ARK instead and get every installed Engine model (plus ARK’s router when using the native API). ARK stays the brain; other apps are clients.
+Apps that used to require Ollama can point at NOVA instead and get every installed Engine model (plus NOVA’s router when using the native API). NOVA stays the brain; other apps are clients.
 
-If the request omits `model` (or sends `ark-auto`), Engine picks the best **ready** GGUF for the prompt: instruct models for chat, Coder GGUFs for build/code asks, skipping sizes that do not fit this PC’s RAM. A tiny 1.5B is only used when nothing larger is installed.
+If the request omits `model` (or sends `NOVA-auto`), Engine picks the best **ready** GGUF for the prompt: instruct models for chat, Coder GGUFs for build/code asks, skipping sizes that do not fit this PC’s RAM. A tiny 1.5B is only used when nothing larger is installed.
 
-## Native ARK routes
+## Native NOVA routes
 
 | Method | Path | Notes |
 |--------|------|--------|
@@ -40,7 +40,7 @@ Point the app’s Ollama base URL at the URL shown in **Settings → AI** (not `
 | POST | `/api/chat` |
 | POST | `/api/generate` |
 
-Streaming uses Ollama-style NDJSON. Model names are ARK Engine ids (e.g. `qwen25-15b`, `qwen25-coder-7b`).
+Streaming uses Ollama-style NDJSON. Model names are NOVA Engine ids (e.g. `qwen25-15b`, `qwen25-coder-7b`).
 
 ### OpenAI-shaped
 
@@ -52,14 +52,14 @@ Streaming uses Ollama-style NDJSON. Model names are ARK Engine ids (e.g. `qwen25
 
 ```bash
 export ARK_BRAIN_URL="http://127.0.0.1:8787" # copy the actual URL from Settings → AI
-export ARK_BRAIN_TOKEN="..."                   # required in packaged ARK
+export ARK_BRAIN_TOKEN="..."                   # required in packaged NOVA
 curl -s "$ARK_BRAIN_URL/health"
 curl -s "$ARK_BRAIN_URL/v1/contract"
 curl -s "$ARK_BRAIN_URL/api/tags" -H "Authorization: Bearer $ARK_BRAIN_TOKEN"
 curl -s "$ARK_BRAIN_URL/v1/chat" \
   -H "Authorization: Bearer $ARK_BRAIN_TOKEN" \
   -H "Content-Type: application/json" \
-  -d "{\"message\":\"Say hello from ARK Engine\",\"kind\":\"chat\"}"
+  -d "{\"message\":\"Say hello from NOVA Engine\",\"kind\":\"chat\"}"
 ```
 
 Multi-turn:

@@ -1,6 +1,6 @@
 /**
  * Hunt GGUF brains from more than one file host.
- * ARK Engine remains the runtime. this only finds and downloads weights.
+ * NOVA Engine remains the runtime. this only finds and downloads weights.
  */
 
 import { getHardwareClass, parseRamGb, type HardwareInfo } from '@/lib/api';
@@ -21,12 +21,12 @@ export type HuntedModel = {
   downloads?: number;
 };
 
-const CACHE_KEY = 'ark:model-hunt-cache-v2';
+const CACHE_KEY = 'NOVA:model-hunt-cache-v2';
 const CACHE_MS = 6 * 60 * 60 * 1000;
 
 const QUANT_PREF = [/q4_k_m/i, /q4_k_s/i, /q5_k_m/i, /iq4_xs/i, /q4_0/i, /q5_0/i];
 
-/** Skip Hub hits that are already the pinned ARK Engine catalog. */
+/** Skip Hub hits that are already the pinned NOVA Engine catalog. */
 const KNOWN_CATALOG = [
   'qwen2.5-1.5b-instruct',
   'llama-3.2-3b-instruct',

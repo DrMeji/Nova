@@ -41,7 +41,7 @@ export function TokenUsageRing({
   const btnRef = useRef<HTMLButtonElement>(null);
   const popRef = useRef<HTMLDivElement>(null);
 
-  const label = modelName?.trim() || 'ARK Auto';
+  const label = modelName?.trim() || 'NOVA Auto';
   const detail = modelDetail?.trim() || 'Session';
   const isLocal = /\blocal\b|on-device/i.test(detail);
 

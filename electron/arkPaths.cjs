@@ -1,5 +1,5 @@
 /**
- * Shared ARK on-disk paths. Models folder can be overridden by the user.
+ * Shared NOVA on-disk paths. Models folder can be overridden by the user.
  */
 
 const fs = require('fs');

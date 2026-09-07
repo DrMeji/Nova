@@ -1,5 +1,5 @@
 /**
- * Strip accidental ARK self-leaks from model replies on packaged installs.
+ * Strip accidental NOVA self-leaks from model replies on packaged installs.
  */
 
 import { isArkDevSession, isArkPackagedApp } from '@/lib/arkRuntime';
@@ -10,7 +10,7 @@ const LEAK_PATTERNS: RegExp[] = [
   /electron[/\\]main\.cjs/,
   /electron[/\\]preload\.cjs/,
   /app\.asar(?:[/\\]|$)/i,
-  /DrMeji[/\\]Ark-Source/i,
+  /DrMeji[/\\]NOVA-Source/i,
 ];
 
 export function redactArkSelfLeak(text: string): string {
@@ -40,7 +40,7 @@ export function redactArkSelfLeak(text: string): string {
   }
 
   return raw
-    .replace(/[^\s'"]*app\.asar[^\s'"]*/gi, '[ARK internal path]')
-    .replace(/electron[/\\](?:main|preload)\.cjs/gi, '[ARK internal file]')
+    .replace(/[^\s'"]*app\.asar[^\s'"]*/gi, '[NOVA internal path]')
+    .replace(/electron[/\\](?:main|preload)\.cjs/gi, '[NOVA internal file]')
     .trim();
 }

@@ -78,7 +78,10 @@ export function ComposerPlusMenu({
       const btn = btnRef.current;
       if (!btn) return;
       const r = btn.getBoundingClientRect();
-      setPos({ left: r.left, bottom: window.innerHeight - r.top + 6 });
+      // Sit fully above the chat composer box (not mid-overlap with its top edge).
+      const shell = btn.closest('[data-ark-composer]') as HTMLElement | null;
+      const topEdge = shell?.getBoundingClientRect().top ?? r.top;
+      setPos({ left: r.left, bottom: window.innerHeight - topEdge + 10 });
     };
     place();
     window.addEventListener('resize', place);

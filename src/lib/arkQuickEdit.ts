@@ -17,9 +17,9 @@ export function parseAddCommentAsk(message: string): { path: string; comment: st
     const says = t.match(
       /\bsays?\s+(?:that\s+)?(.+?)(?=\s+near\b|\s+at\s+the\b|\s+to\s+the\b|\s+in\s+(?:the\s+)?(?:top|file|app)|\s*,\s*then\b|\s*$)/i,
     );
-    comment = (says?.[1] || 'ARK agent was here').trim().replace(/[.,;:]+$/g, '');
+    comment = (says?.[1] || 'NOVA Agent was here').trim().replace(/[.,;:]+$/g, '');
   }
-  if (!comment) comment = 'ARK agent was here';
+  if (!comment) comment = 'NOVA Agent was here';
   return { path, comment };
 }
 
@@ -67,7 +67,7 @@ export function applyVisibleHtmlMarker(html: string, marker: string): string {
   if (!text || !body) return body;
   if (body.includes(`data-ark-agent-mark`) && body.includes(text)) return body;
 
-  const badge = `<span data-ark-agent-mark="1" class="ark-agent-mark" style="margin-left:10px;font-size:11px;font-weight:600;letter-spacing:.04em;color:#34d399;opacity:.95">${text.replace(/</g, '&lt;')}</span>`;
+  const badge = `<span data-ark-agent-mark="1" class="NOVA-agent-mark" style="margin-left:10px;font-size:11px;font-weight:600;letter-spacing:.04em;color:#34d399;opacity:.95">${text.replace(/</g, '&lt;')}</span>`;
 
   if (/class="[^"]*topbar-title[^"]*"/i.test(body)) {
     return body.replace(

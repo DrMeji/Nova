@@ -46,7 +46,7 @@ import { countUnreadLocalNotifications } from '@/lib/localNotifications';
 import { ARK_UPDATE_INDICATOR_CACHE_KEY, checkArkGitHubUpdate, clearUpdateIndicatorCache, downloadAndInstallArkUpdate, type ArkUpdateInfo } from '@/lib/arkUpdates';
 
 function BrainNavIcon({ className }: { className?: string }) {
-  return <ArkMark className={className || 'w-4 h-4'} title="ARK Brain" />;
+  return <ArkMark className={className || 'w-4 h-4'} title="NOVA Brain" />;
 }
 
 function getNavGroups(): {
@@ -152,8 +152,8 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const onFeat = () => setNavTick(t => t + 1);
-    window.addEventListener('ark:features-changed', onFeat);
-    return () => window.removeEventListener('ark:features-changed', onFeat);
+    window.addEventListener('NOVA:features-changed', onFeat);
+    return () => window.removeEventListener('NOVA:features-changed', onFeat);
   }, []);
 
   const NAV_GROUPS = useMemo(() => getNavGroups(), [navTick]);
@@ -171,8 +171,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   useEffect(() => {
     const bump = () => setNotifUnread(countUnreadLocalNotifications(myArkIdForNotifs));
     bump();
-    window.addEventListener('ark:local-notifications', bump);
-    return () => window.removeEventListener('ark:local-notifications', bump);
+    window.addEventListener('NOVA:local-notifications', bump);
+    return () => window.removeEventListener('NOVA:local-notifications', bump);
   }, [myArkIdForNotifs]);
 
   useEffect(() => {
@@ -332,17 +332,24 @@ export function AppShell({ children }: { children: ReactNode }) {
     setSettingsOpen(true);
   };
 
-  const updateRequired = Boolean(
-    updateInfo?.newerAvailable && updateInfo.setupAssetUrl && !updateBusy,
-  );
-
   const closeSettings = () => {
-    if (updateRequired) {
-      setSettingsSection('updates');
-      setSettingsOpen(true);
-      return;
-    }
     setSettingsOpen(false);
+  };
+
+  const startUpdateDownload = () => {
+    if (!updateInfo?.newerAvailable || !updateInfo.setupAssetUrl || !updateInfo.latestTag || updateBusy) return;
+    void (async () => {
+      setUpdateBusy(true);
+      const result = await downloadAndInstallArkUpdate({
+        setupAssetUrl: updateInfo.setupAssetUrl!,
+        latestTag: updateInfo.latestTag!,
+      });
+      if (!result?.ok) {
+        setUpdateBusy(false);
+        setUpdateInfo(null);
+        clearUpdateIndicatorCache();
+      }
+    })();
   };
 
   const setPresenceStatus = (next: PresenceStatus) => {
@@ -356,8 +363,8 @@ export function AppShell({ children }: { children: ReactNode }) {
       const section = (e as CustomEvent<{ section?: string }>).detail?.section || 'account';
       openSettings(section);
     };
-    window.addEventListener('ark:open-settings', onOpen);
-    return () => window.removeEventListener('ark:open-settings', onOpen);
+    window.addEventListener('NOVA:open-settings', onOpen);
+    return () => window.removeEventListener('NOVA:open-settings', onOpen);
   }, []);
 
   useEffect(() => {
@@ -379,11 +386,11 @@ export function AppShell({ children }: { children: ReactNode }) {
     };
     refresh();
     window.addEventListener('ark:prefs-changed', refresh);
-    window.addEventListener('ark:engine-models-changed', refresh);
+    window.addEventListener('NOVA:engine-models-changed', refresh);
     return () => {
       alive = false;
       window.removeEventListener('ark:prefs-changed', refresh);
-      window.removeEventListener('ark:engine-models-changed', refresh);
+      window.removeEventListener('NOVA:engine-models-changed', refresh);
     };
   }, []);
 
@@ -425,10 +432,6 @@ export function AppShell({ children }: { children: ReactNode }) {
       if (!alive || !info) return;
       setUpdateInfo(info);
       writeCache(info);
-      if (info.newerAvailable && info.setupAssetUrl) {
-        setSettingsSection('updates');
-        setSettingsOpen(true);
-      }
     };
 
     void maybeCheck();
@@ -529,13 +532,14 @@ export function AppShell({ children }: { children: ReactNode }) {
             title={`${item.title} · double-click to rename`}
           >
             <Icon className="w-3.5 h-3.5 shrink-0 text-content-tertiary" strokeWidth={1.75} />
-            <span className="min-w-0 flex-1 text-left">
-              <span className="block truncate">{item.title}</span>
-            </span>
-            {item.pinned ? <Star className="w-2.5 h-2.5 text-amber-300 shrink-0 fill-amber-300" /> : null}
-            {doneAway ? <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" aria-hidden /> : null}
+            <span className="min-w-0 flex-1 text-left truncate">{item.title}</span>
           </button>
         )}
+        {!editing && doneAway ? (
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0 mr-1" aria-hidden title="Updated" />
+        ) : !editing ? (
+          <span className="w-1.5 h-1.5 shrink-0 mr-1" aria-hidden />
+        ) : null}
         {!editing && (
           <>
             <button
@@ -547,7 +551,11 @@ export function AppShell({ children }: { children: ReactNode }) {
                 if (item.kind === 'chat') pinChat(item.id);
                 else pinProject(item.id);
               }}
-              className="opacity-0 group-hover:opacity-100 focus:opacity-100 w-7 h-7 rounded-md flex items-center justify-center text-content-tertiary hover:text-amber-300 hover:bg-white/5 shrink-0 transition-opacity"
+              className={`w-7 h-7 rounded-md flex items-center justify-center shrink-0 transition-opacity ${
+                item.pinned
+                  ? 'opacity-100 text-amber-300'
+                  : 'opacity-0 group-hover:opacity-100 focus:opacity-100 text-content-tertiary hover:text-amber-300 hover:bg-white/5'
+              }`}
             >
               <Star className={`w-3.5 h-3.5 ${item.pinned ? 'fill-amber-300 text-amber-300' : ''}`} />
             </button>
@@ -603,7 +611,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       // On Message / Networking / Call the people/filter rail stays visible;
       // collapsing the main nav only compacts that rail to icons.
       if (next && (route.name === 'message' || route.name === 'networking' || route.name === 'call')) {
-        window.dispatchEvent(new CustomEvent('ark:compact-connect-rail'));
+        window.dispatchEvent(new CustomEvent('NOVA:compact-connect-rail'));
       }
       return next;
     });
@@ -723,21 +731,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                   {updateInfo?.newerAvailable && updateInfo.setupAssetUrl && updateInfo.latestTag ? (
                     <button
                       type="button"
-                      onClick={() => {
-                        if (updateBusy) return;
-                        void (async () => {
-                          setUpdateBusy(true);
-                          const result = await downloadAndInstallArkUpdate({
-                            setupAssetUrl: updateInfo.setupAssetUrl!,
-                            latestTag: updateInfo.latestTag!,
-                          });
-                          if (!result?.ok) {
-                            setUpdateBusy(false);
-                            setUpdateInfo(null);
-                            clearUpdateIndicatorCache();
-                          }
-                        })();
-                      }}
+                      onClick={startUpdateDownload}
                       className={`relative rounded-lg !p-1.5 transition-colors ${
                         updateBusy
                           ? 'opacity-60'
@@ -873,6 +867,22 @@ export function AppShell({ children }: { children: ReactNode }) {
             )}
             {collapsed ? (
               <div className="flex flex-col items-center gap-1.5">
+                {updateInfo?.newerAvailable && updateInfo.setupAssetUrl && updateInfo.latestTag ? (
+                  <button
+                    type="button"
+                    onClick={startUpdateDownload}
+                    disabled={updateBusy}
+                    title={updateBusy ? 'Downloading update…' : `Update available (${updateInfo.latestTag})`}
+                    aria-label="Update now"
+                    className={`w-9 h-9 rounded-xl border flex items-center justify-center transition-colors ${
+                      updateBusy
+                        ? 'opacity-60 border-surface-border bg-ark-navy-900/80 text-content-tertiary'
+                        : 'border-emerald-400/35 bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25'
+                    }`}
+                  >
+                    <Download className="w-4 h-4" />
+                  </button>
+                ) : null}
                 <SidebarCallDock />
                 <button
                   type="button"
@@ -900,6 +910,30 @@ export function AppShell({ children }: { children: ReactNode }) {
               </div>
             ) : (
               <div className="space-y-2">
+                {updateInfo?.newerAvailable && updateInfo.setupAssetUrl && updateInfo.latestTag ? (
+                  <button
+                    type="button"
+                    onClick={startUpdateDownload}
+                    disabled={updateBusy}
+                    className={`w-full flex items-center gap-2 rounded-xl border px-2.5 py-2 text-left transition-colors ${
+                      updateBusy
+                        ? 'opacity-70 border-surface-border bg-ark-navy-950/80 text-content-secondary'
+                        : 'border-emerald-400/30 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/15 hover:border-emerald-400/45'
+                    }`}
+                    title={updateBusy ? 'Downloading update…' : `Update to ${updateInfo.latestTag}`}
+                    aria-label="Update now"
+                  >
+                    <Download className="w-3.5 h-3.5 shrink-0" />
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-[11px] font-semibold leading-tight">
+                        {updateBusy ? 'Downloading update…' : 'New update available'}
+                      </span>
+                      <span className="block text-[10px] text-emerald-300/80 truncate mt-0.5">
+                        {updateBusy ? 'Stay in the app while it installs' : `Update now · ${updateInfo.latestTag}`}
+                      </span>
+                    </span>
+                  </button>
+                ) : null}
                 <SidebarCallDock />
                 <div className="flex items-center gap-2 rounded-xl border border-surface-border bg-ark-navy-950/80 px-2.5 py-2">
                   <button
@@ -937,8 +971,8 @@ export function AppShell({ children }: { children: ReactNode }) {
                     <button
                       type="button"
                       className="p-1.5 rounded-lg shrink-0 text-content-tertiary hover:text-content-primary hover:bg-surface-hover"
-                      title="Copy your ARK ID"
-                      aria-label="Copy your ARK ID"
+                      title="Copy your NOVA ID"
+                      aria-label="Copy your NOVA ID"
                       onClick={() => {
                         const arkIdText = isArkDevEmail(user?.email)
                           ? 'DEV'
@@ -989,7 +1023,6 @@ export function AppShell({ children }: { children: ReactNode }) {
         onClose={closeSettings}
         title="Settings"
         size="settings"
-        preventClose={updateRequired}
       >
         <SettingsContent
           onClose={closeSettings}

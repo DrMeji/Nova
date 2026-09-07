@@ -1,5 +1,5 @@
 /**
- * ARK’s local brain HTTP API (desktop loopback).
+ * NOVA’s local brain HTTP API (desktop loopback).
  * External tools can use this later. the app itself owns the engine.
  *
  * Base URL (desktop): http://127.0.0.1:8787

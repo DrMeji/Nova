@@ -29,9 +29,9 @@ export function BrainView() {
       <div className="min-h-full flex items-center justify-center px-4 sm:px-6 py-6">
         <div className="w-full max-w-xl space-y-4">
           <div className="flex items-center gap-3 mb-2">
-            <ArkMark className="w-9 h-9" title="ARK Brain" />
+            <ArkMark className="w-9 h-9" title="NOVA Brain" />
             <div>
-              <h1 className="text-xl font-semibold text-content-primary">ARK Brain</h1>
+              <h1 className="text-xl font-semibold text-content-primary">NOVA Brain</h1>
               <p className="text-[12px] text-content-tertiary">
                 Local engine status and the HTTP API other apps can use as their brain.
               </p>
@@ -58,10 +58,10 @@ export function BrainView() {
               <span className="text-content-primary">
                 {(() => {
                   if (!engineSnap) return '—';
-                  if (engineSnap.activeModelName !== 'ARK Core') return engineSnap.activeModelName;
+                  if (engineSnap.activeModelName !== 'NOVA Core') return engineSnap.activeModelName;
                   return engineSnap.models.find(model =>
                     model.status === 'ready'
-                    && !['ark-core', 'ark-image-core', 'ark-video-core'].includes(model.id)
+                    && !['NOVA-core', 'NOVA-image-core', 'NOVA-video-core'].includes(model.id)
                   )?.name || engineSnap.activeModelName;
                 })()}
               </span>

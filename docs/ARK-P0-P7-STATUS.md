@@ -1,4 +1,4 @@
-# ARK P0–P7 Implementation Status
+# NOVA P0–P7 Implementation Status
 
 Last updated: 2026-08-26 (v0.1.162 hardening pass)
 
@@ -8,12 +8,12 @@ Last updated: 2026-08-26 (v0.1.162 hardening pass)
 |----------|--------|
 | **P0** Debug/fix pipeline | **Working** — open path → scan → diagnose → patch → verify loop |
 | **P1** Image recreate/upscale | **Working** — Pollinations + HF FLUX img2img; 1280px upscale pass in engine |
-| **P2** Model routing | **Working** — ARK Auto: local → free cloud → paid; large-repo coding prefers cloud |
+| **P2** Model routing | **Working** — NOVA Auto: local → free cloud → paid; large-repo coding prefers cloud |
 | **P3** File ops | **Working** — read/rename/create/delete routing + disk guards |
 | **P4** Preview / localhost | **Working** — Vite warm-start + auto Preview window on debug open |
 | **P5** Voice / Video | **Parked** — tabs hidden; enable via `featurePark` when ready |
 | **P6** Social | **Working** — friend requests v0.1.160; apply Supabase migration on prod if needed |
-| **P7** Ship polish | **Working** — releases on Ark-Source + public Ark; CI needs `ARK_PUBLIC_RELEASE_TOKEN` for auto public publish |
+| **P7** Ship polish | **Working** — releases on NOVA-Source + public NOVA; CI needs `ARK_PUBLIC_RELEASE_TOKEN` for auto public publish |
 
 ## P0 — Hands-free builder
 
@@ -30,7 +30,7 @@ Last updated: 2026-08-26 (v0.1.162 hardening pass)
 
 ## P2 — Routing
 
-- Free-key cascade then paid keys on ARK Auto failover
+- Free-key cascade then paid keys on NOVA Auto failover
 - `preferCloudCoding` for large-repo patch/debug turns
 
 ## P3 — File ops
@@ -44,8 +44,8 @@ Last updated: 2026-08-26 (v0.1.162 hardening pass)
 
 ## P5 — Voice / Video
 
-- Video tab is parked in the current retail build; ARK Video Core remains an internal/fallback pipeline.
-- Voice tab is parked in the current retail build; Web Speech → ARK chat → TTS is not exposed as a retail route.
+- Video tab is parked in the current retail build; NOVA Video Core remains an internal/fallback pipeline.
+- Voice tab is parked in the current retail build; Web Speech → NOVA chat → TTS is not exposed as a retail route.
 
 ## P6 — Social
 
@@ -54,12 +54,12 @@ Last updated: 2026-08-26 (v0.1.162 hardening pass)
 
 ## P7 — Ship
 
-- Tag push builds on Ark-Source; public Ark via CI token or `scripts/publish-public-release.ps1`
+- Tag push builds on NOVA-Source; public NOVA via CI token or `scripts/publish-public-release.ps1`
 
 ## Security
 
 - Chat self-harm guard (`arkSelfGuard.ts`)
-- Disk block for ARK install paths (`electron/arkSelfGuard.cjs`)
+- Disk block for NOVA install paths (`electron/arkSelfGuard.cjs`)
 - Reply sanitizer for packaged leaks (`replySanitizer.ts`)
 
 ## Smoke tests
