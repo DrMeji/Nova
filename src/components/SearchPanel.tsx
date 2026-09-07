@@ -67,8 +67,7 @@ function socialSearchItems(): SearchItem[] {
   if (isRevealed('message')) {
     items.push({ id: 'message', label: 'Message', group: 'Navigate', description: 'Direct messages', icon: MessageSquare, route: { name: 'message' } });
   }
-  // TEMP: Notifications parked during update-splash QA.
-  // items.push({ id: 'notifications', label: 'Notifications', group: 'Navigate', description: 'Updates, friends, and downloads', icon: Bell, route: { name: 'notifications' } });
+  items.push({ id: 'notifications', label: 'Notifications', group: 'Navigate', description: 'Updates, friends, and downloads', icon: Bell, route: { name: 'notifications' } });
   return items;
 }
 

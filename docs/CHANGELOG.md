@@ -1,5 +1,17 @@
 # ARK changelog
 
+## 0.1.193 — 2026-09-07
+
+Restore Notifications; fix packaged Preview splash IPC so the update splash can be checked.
+
+**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.193/ARK-Setup.exe) · [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.193)
+
+### Connect
+- Notifications tab restored in the sidebar and Search
+
+### Update splash
+- Preview splash works again in installed builds (preload had blocked the API)
+
 ## 0.1.192 — 2026-09-07
 
 Update splash: remove nested inset panel; slightly more space between icon and progress bar.
