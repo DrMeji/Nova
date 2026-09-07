@@ -1,5 +1,22 @@
 # NOVA changelog
 
+## 0.1.198 — 2026-09-07
+
+Auth, onboarding/game, and installer branding polish so both GitHub feeds ship the same NOVA build.
+
+**Windows installer:** [NOVA-Setup.exe](https://github.com/DrMeji/Nova/releases/download/v0.1.198/NOVA-Setup.exe) · [Release notes](https://github.com/DrMeji/Nova/releases/tag/v0.1.198)
+
+### Auth / first run
+- Sign in / Sign up stays first on bat launches (bypass is session-only)
+- Cleaner auth card; onboarding finishing screen keeps Play game + Enter NOVA
+
+### Game / download
+- Dual-panel runner + download UI polish (left game, right progress)
+
+### Installer / branding
+- Update splash uses the NOVA radial mark
+- Releases publish as **NOVA-Setup.exe** on Nova and Nova-Source
+
 ## 0.1.197 — 2026-09-07
 
 Rebrand to **NOVA**, softer updates UI, and the build/create accuracy work from recent live testing.
