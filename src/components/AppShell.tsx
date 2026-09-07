@@ -104,7 +104,8 @@ function getNavGroups(): {
       items: [
         { label: 'Networking', icon: Globe, route: { name: 'networking' }, activity: 'networking', comingSoon: isSocialParked('networking') },
         { label: 'Message', icon: MessageSquare, route: { name: 'message' }, activity: 'message', comingSoon: isSocialParked('message') },
-        { label: 'Notifications', icon: Bell, route: { name: 'notifications' }, activity: 'notifications' },
+        // TEMP: Notifications parked while we focus on update-splash QA. Re-enable soon.
+        // { label: 'Notifications', icon: Bell, route: { name: 'notifications' }, activity: 'notifications' },
       ],
     },
   ];

@@ -1936,17 +1936,14 @@ async function openUpdateSplash() {
 }
 
 /**
- * Dev/bat only: show the official Updating splash for ~2s with a fake progress fill, then close.
- * Packaged installs must never call this — Update uses openUpdateSplash + real download instead.
+ * Show the official Updating splash for a few seconds with a fake progress fill.
+ * Temporarily allowed in packaged builds for splash QA.
  */
-async function previewSplashDev(durationMs = 2000) {
-  if (app.isPackaged) {
-    return { ok: false, error: 'Splash preview is only available in bat/dev builds.' };
-  }
-  const ms = Math.max(800, Math.min(8000, Number(durationMs) || 2000));
+async function previewSplashDev(durationMs = 4500) {
+  const ms = Math.max(800, Math.min(12000, Number(durationMs) || 4500));
   try {
     await openUpdateSplash();
-    const steps = 12;
+    const steps = 16;
     for (let i = 1; i <= steps; i++) {
       if (!updateSplashWin || updateSplashWin.isDestroyed()) break;
       await setUpdateSplashPercent(Math.round((i / steps) * 100));
@@ -1971,5 +1968,7 @@ module.exports = {
   markUiShown,
   clearUiShown,
   previewSplashDev,
+  openUpdateSplash,
+  splashHtml,
   UPDATE_REPO,
 };

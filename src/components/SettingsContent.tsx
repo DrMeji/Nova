@@ -448,15 +448,14 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
     })();
   };
 
-  /** Bat/dev: preview the official update splash (~2s). */
+  /** Preview the official update splash (~4.5s) for layout QA. */
   const previewUpdateSplash = () => {
-    if (!isArkDevSession()) return;
     setDownloadingUpdate(true);
     setUpdatePercent(0);
     setUpdateMsg('Previewing update splash…');
     void (async () => {
       try {
-        const result = await window.arkDesktop?.updateSplashPreview?.({ durationMs: 2000 });
+        const result = await window.arkDesktop?.updateSplashPreview?.({ durationMs: 4500 });
         if (!result?.ok) {
           setUpdateMsg(result?.error || 'Splash preview failed.');
         } else {
@@ -2074,17 +2073,6 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                           {downloadingUpdate ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
                           {downloadingUpdate ? 'Updating…' : 'Update'}
                         </button>
-                      ) : isArkDevSession() ? (
-                        <button
-                          type="button"
-                          onClick={previewUpdateSplash}
-                          disabled={downloadingUpdate || checkingUpdates}
-                          title="Bat/dev: preview the official update splash"
-                          className="ark-btn-primary !rounded-full"
-                        >
-                          {downloadingUpdate ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-                          {downloadingUpdate ? 'Preview…' : 'Preview splash'}
-                        </button>
                       ) : (
                         <button
                           type="button"
@@ -2096,6 +2084,16 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                           {checkingUpdates ? 'Checking…' : 'Check for update'}
                         </button>
                       )}
+                      <button
+                        type="button"
+                        onClick={previewUpdateSplash}
+                        disabled={downloadingUpdate || checkingUpdates}
+                        title="Preview the update splash screen"
+                        className="ark-btn-primary !rounded-full"
+                      >
+                        {downloadingUpdate ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                        {downloadingUpdate ? 'Preview…' : 'Preview splash'}
+                      </button>
                     </div>
                   </div>
                   {updateInfo?.newerAvailable && updateInfo.setupAssetUrl && !downloadingUpdate ? (

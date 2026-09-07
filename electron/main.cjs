@@ -685,11 +685,8 @@ ipcMain.handle('ark:update-download', async (_event, payload) =>
 );
 ipcMain.handle('ark:update-state', async () => arkUpdater.getState());
 ipcMain.handle('ark:update-splash-preview', async (_event, payload) => {
-  // Hard gate: packaged / Setup.exe installs never run the fake bat preview splash.
-  if (app.isPackaged) {
-    return { ok: false, error: 'Splash preview is only available in bat/dev builds.' };
-  }
-  return arkUpdater.previewSplashDev(payload?.durationMs);
+  // Temporarily allowed in packaged builds so we can QA the update splash layout.
+  return arkUpdater.previewSplashDev(payload?.durationMs ?? 4500);
 });
 ipcMain.handle('ark:post-update-consume', async () => arkUpdater.consumePostUpdate());
 

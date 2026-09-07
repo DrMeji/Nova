@@ -348,6 +348,16 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.191',
+    channel: 'stable' as const,
+    date: 'Sep 6, 2026',
+    title: 'Splash preview + Notifications parked',
+    notes: [
+      'Settings → Updates has Preview splash so you can see the rounded update screen without installing',
+      'Notifications is temporarily hidden from the sidebar while we QA the splash',
+    ],
+  },
+  {
     version: '0.1.190',
     channel: 'stable' as const,
     date: 'Sep 6, 2026',
