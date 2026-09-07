@@ -1,5 +1,14 @@
 # ARK changelog
 
+## 0.1.192 — 2026-09-07
+
+Update splash: remove nested inset panel; slightly more space between icon and progress bar.
+
+**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.192/ARK-Setup.exe) · [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.192)
+
+### Update splash
+- One solid panel only (no darker outer + lighter inner box)
+- Icon and progress bar spaced a bit farther apart
 
 ## 0.1.180 — 2026-09-03
 

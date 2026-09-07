@@ -523,15 +523,11 @@ function resolveUpdateIco() {
 const SPLASH_W = 480;
 const SPLASH_H = 320;
 const SPLASH_ICON_PX = 120;
-const SPLASH_ICON_GAP = 28;
+const SPLASH_ICON_GAP = 48;
 const SPLASH_TRACK_W = 280;
 const SPLASH_TRACK_H = 10;
-/** Panel + slightly darker outer so HTA can show a rounded inset box. */
+/** One panel color only — no nested outer/inner boxes. */
 const SPLASH_BG = '#161618';
-const SPLASH_OUTER_BG = '#0c0c0e';
-const SPLASH_CARD_BG = SPLASH_BG;
-/** Rounded box on all four corners. */
-const SPLASH_RADIUS = 28;
 
 function splashRobotSvg() {
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80" width="${SPLASH_ICON_PX}" height="${SPLASH_ICON_PX}" aria-hidden="true" class="splash-ark-icon" style="display:block;margin:0 auto;">
@@ -559,19 +555,15 @@ function splashIconMarkup() {
   return splashRobotSvg();
 }
 
-/** One solid rounded box: icon centered, progress bar directly under it. */
+/** One solid box: icon centered, progress bar a bit below it. No nested panels. */
 function splashShellCss(opts = {}) {
   const hta = Boolean(opts.hta);
   if (hta) {
-    // mshta = IE engine: no flex. One centered cell so the bar sits under the icon
-    // (not glued to the window bottom). Inset card + darker outer shows rounded corners.
+    // mshta = IE engine: no flex. Single fill color (no inset card).
     return `
-  html,body{margin:0;width:100%;height:100%;background:${SPLASH_OUTER_BG};overflow:hidden;user-select:none;}
-  table.shell{width:100%;height:100%;border-collapse:collapse;background:${SPLASH_OUTER_BG};}
-  td.shell-pad{padding:14px;}
-  .card{width:100%;height:100%;background:${SPLASH_CARD_BG};border-radius:${SPLASH_RADIUS}px;overflow:hidden;}
-  table.layout{width:100%;height:100%;border-collapse:collapse;background:${SPLASH_CARD_BG};}
-  td.center{padding:0;text-align:center;vertical-align:middle;}
+  html,body{margin:0;width:100%;height:100%;background:${SPLASH_BG};overflow:hidden;user-select:none;}
+  table.layout{width:100%;height:100%;border-collapse:collapse;background:${SPLASH_BG};}
+  td.center{padding:0;text-align:center;vertical-align:middle;background:${SPLASH_BG};}
   .stack{width:100%;text-align:center;}
   .logo-wrap{width:${SPLASH_ICON_PX}px;height:${SPLASH_ICON_PX}px;margin:0 auto ${SPLASH_ICON_GAP}px auto;}
   .logo-wrap img{width:${SPLASH_ICON_PX}px;height:${SPLASH_ICON_PX}px;display:block;border:0;background:transparent;margin:0 auto;}
@@ -579,10 +571,10 @@ function splashShellCss(opts = {}) {
   #fill{position:absolute;left:0;top:0;bottom:0;width:0;height:100%;background:#f4f4f5;font-size:0;line-height:0;border-radius:999px;}
 `;
   }
+  // Opaque single fill — no transparent host + inset card (that read as two boxes).
   return `
-  html,body{margin:0;width:100%;height:100%;background:transparent;color:#f4f4f5;font-family:"Segoe UI",system-ui,sans-serif;overflow:hidden;user-select:none;}
-  .wrap{box-sizing:border-box;width:100%;height:100%;margin:0;padding:10px;display:flex;align-items:center;justify-content:center;background:transparent;}
-  .card{box-sizing:border-box;width:100%;height:100%;max-width:100%;background:${SPLASH_CARD_BG};border-radius:${SPLASH_RADIUS}px;padding:36px 32px;text-align:center;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:${SPLASH_ICON_GAP}px;overflow:hidden;}
+  html,body{margin:0;width:100%;height:100%;background:${SPLASH_BG};color:#f4f4f5;font-family:"Segoe UI",system-ui,sans-serif;overflow:hidden;user-select:none;}
+  .panel{box-sizing:border-box;width:100%;height:100%;margin:0;padding:40px 32px;background:${SPLASH_BG};display:flex;flex-direction:column;align-items:center;justify-content:center;gap:${SPLASH_ICON_GAP}px;overflow:hidden;text-align:center;}
   .logo-wrap{margin:0 auto;width:${SPLASH_ICON_PX}px;height:${SPLASH_ICON_PX}px;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
   .logo-wrap img,.logo-wrap svg{width:${SPLASH_ICON_PX}px;height:${SPLASH_ICON_PX}px;object-fit:contain;display:block;margin:0 auto;border:0;background:transparent;}
   @keyframes splashHeadShimmer{0%{transform:translate(0,0) rotate(0deg);}50%{transform:translate(6px,-4px) rotate(180deg);}100%{transform:translate(0,0) rotate(360deg);}}
@@ -631,19 +623,15 @@ function splashBodyMarkup(opts = {}) {
   }
   if (hta) {
     return `
-  <table class="shell" role="presentation"><tr><td class="shell-pad">
-    <div class="card">
-      <table class="layout" role="presentation"><tr><td class="center">
-        <div class="stack">
-          <div class="logo-wrap">${icon}</div>
-          <div class="track"><div id="fill"></div></div>
-        </div>
-      </td></tr></table>
+  <table class="layout" role="presentation"><tr><td class="center">
+    <div class="stack">
+      <div class="logo-wrap">${icon}</div>
+      <div class="track"><div id="fill"></div></div>
     </div>
   </td></tr></table>`;
   }
   return `
-  <div class="card">
+  <div class="panel">
     <div class="logo-wrap">${icon}</div>
     <div class="track"><div id="fill"></div></div>
   </div>`;
@@ -728,9 +716,7 @@ ${splashShellCss()}
   html,body{-webkit-app-region:drag;}
 </style></head>
 <body>
-  <div class="wrap">
-    ${splashBodyMarkup()}
-  </div>
+  ${splashBodyMarkup()}
   <script>
     window.__arkSet = function(pct) {
       var n = Math.max(0, Math.min(100, Math.round(Number(pct) || 0)));
@@ -1028,9 +1014,9 @@ async function runStandaloneSplash(argv) {
     maximizable: false,
     minimizable: false,
     fullscreenable: false,
-    // Transparent host so the inner card can show rounded corners (card paints the panel).
-    transparent: true,
-    backgroundColor: '#00000000',
+    // Opaque one-tone panel (no transparent host + inset card = no double box).
+    transparent: false,
+    backgroundColor: SPLASH_BG,
     roundedCorners: true,
     hasShadow: true,
     show: false,
@@ -1904,8 +1890,8 @@ async function openUpdateSplash() {
     fullscreenable: false,
     frame: false,
     thickFrame: false,
-    transparent: true,
-    backgroundColor: '#00000000',
+    transparent: false,
+    backgroundColor: SPLASH_BG,
     roundedCorners: true,
     alwaysOnTop: true,
     skipTaskbar: false,
