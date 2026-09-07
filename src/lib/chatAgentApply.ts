@@ -19,6 +19,7 @@ import { safeProjectWrite } from '@/lib/projectWriteSafe';
 import { skillPromptAppendix } from '@/lib/arkSkills';
 import { detectProjectKind } from '@/lib/projectKind';
 import { verifyProjectAfterPatch } from '@/lib/postPatchVerify';
+import { applyAgentPatches, parseAgentPatches } from '@/lib/arkAgentPatch';
 
 export type ChatApplyResult = {
   ok: boolean;
@@ -121,7 +122,22 @@ export async function applyChatReplyEdits(opts: {
   if (Object.keys(baseFiles).length === 0 && opts.diskRoot) {
     baseFiles = await hydrateFilesFromDiskRoot(opts.diskRoot);
   }
+
+  // Patch-first: SEARCH/REPLACE on existing files before full @@@FILE dumps.
   let edits = parseFileEdits(opts.reply);
+  const patches = parseAgentPatches(opts.reply);
+  if (patches.length) {
+    const patched = applyAgentPatches(baseFiles, patches);
+    if (patched.updated.length) {
+      const fromPatches = patched.updated.map((p) => ({ path: p, content: patched.files[p]! }));
+      // Prefer patches when they applied; keep any @@@FILE creates that patches did not cover.
+      const patchedPaths = new Set(fromPatches.map((e) => e.path));
+      edits = [
+        ...fromPatches,
+        ...edits.filter((e) => !patchedPaths.has(e.path)),
+      ];
+    }
+  }
   if (!edits.length) {
     edits = extractChatStyleFileEdits(opts.reply, userMessageForParse, baseFiles);
   }

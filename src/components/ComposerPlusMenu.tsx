@@ -1,8 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import {
-  Plus, ListTree, MessageCircleQuestion, Bug, FolderOpen, ImagePlus, Zap, Users,
-} from 'lucide-react';
+import { Plus } from 'lucide-react';
 
 export type ComposerPlusAction =
   | 'plan'
@@ -29,39 +27,36 @@ type Props = {
   buttonClassName?: string;
 };
 
-const ITEMS: {
+type MenuItem = {
   id: ComposerPlusAction;
   label: string;
-  hint: string;
-  icon: typeof ListTree;
-}[] = [
-  { id: 'plan', label: 'Plan', hint: 'Steps only. no file writes until Go implement', icon: ListTree },
-  { id: 'ask', label: 'Ask', hint: 'Answer only. no disk writes or commands', icon: MessageCircleQuestion },
-  { id: 'agent', label: 'Agent', hint: 'Optional. tool loop for multi-step edits', icon: Zap },
-  { id: 'debug', label: 'Debug', hint: 'Find bugs and propose fixes', icon: Bug },
-  { id: 'multitask', label: 'Multi-agent', hint: 'Design → Code → Verify on this project together', icon: Users },
-  { id: 'bind-path', label: 'Bind project…', hint: 'Pick a folder or paste its path (reads on demand)', icon: FolderOpen },
-  { id: 'import-folder', label: 'Import copy', hint: 'Copy folder into ARK storage (sandbox)', icon: FolderOpen },
+};
+
+const MODE_ITEMS: MenuItem[] = [
+  { id: 'plan', label: 'Plan' },
+  { id: 'ask', label: 'Ask' },
+  { id: 'agent', label: 'Agent' },
+  { id: 'debug', label: 'Debug' },
+  { id: 'multitask', label: 'Multi-agent' },
 ];
 
-const MODE_IDS = new Set<ComposerPlusAction>(['plan', 'ask', 'agent', 'debug', 'multitask']);
+const MODE_IDS = new Set<ComposerPlusAction>(MODE_ITEMS.map((m) => m.id));
 
-function itemsForScope(scope: 'chat' | 'image' | 'code') {
+function itemsForScope(scope: 'chat' | 'image' | 'code'): MenuItem[] {
   if (scope === 'image') {
-    return [
-      { id: 'image' as const, label: 'Add photo', hint: 'Upload a photo to recreate or improve', icon: ImagePlus },
-    ];
+    return [{ id: 'image', label: 'Add photo' }];
   }
   if (scope === 'code') {
-    return ITEMS.filter(m =>
-      m.id === 'bind-path'
-      || m.id === 'import-folder'
-      || MODE_IDS.has(m.id));
+    return [
+      ...MODE_ITEMS,
+      { id: 'bind-path', label: 'Bind project' },
+      { id: 'import-folder', label: 'Import copy' },
+    ];
   }
-  // Chat: modes + single path bind (no separate Open folder / Enter path).
-  return ITEMS.filter(m =>
-    m.id === 'bind-path'
-    || m.id === 'plan' || m.id === 'ask' || m.id === 'agent' || m.id === 'multitask' || m.id === 'debug');
+  return [
+    ...MODE_ITEMS,
+    { id: 'bind-path', label: 'Bind project' },
+  ];
 }
 
 export function ComposerPlusMenu({
@@ -76,8 +71,6 @@ export function ComposerPlusMenu({
   const btnRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const visible = itemsForScope(scope);
-  const modes = visible.filter(m => MODE_IDS.has(m.id));
-  const attach = visible.filter(m => !MODE_IDS.has(m.id));
 
   useEffect(() => {
     if (!open || busy) return;
@@ -127,61 +120,34 @@ export function ComposerPlusMenu({
     ? createPortal(
       <div
         ref={menuRef}
-        className="w-56 rounded-lg border border-surface-border bg-ark-navy-900 shadow-xl overflow-hidden"
+        className="rounded-xl border border-white/10 bg-[#141416] shadow-2xl px-1.5 py-1.5"
         style={{
           position: 'fixed',
           left: pos.left,
           bottom: pos.bottom,
           zIndex: 99999,
+          maxWidth: 'min(92vw, 560px)',
         }}
       >
-        {modes.length > 0 && (
-          <>
-            <p className="px-2.5 pt-2 pb-1 text-[10px] text-content-tertiary">
-              Optional modes for the next message
-            </p>
-            <div className="pb-1">
-              {modes.map(m => (
+        <div className="flex flex-wrap items-center gap-0.5">
+          {visible.map((m, i) => {
+            const showSep = i > 0 && MODE_IDS.has(visible[i - 1]!.id) && !MODE_IDS.has(m.id);
+            return (
+              <span key={m.id} className="contents">
+                {showSep ? (
+                  <span className="mx-1 h-4 w-px bg-white/10 shrink-0" aria-hidden />
+                ) : null}
                 <button
-                  key={m.id}
                   type="button"
                   onClick={() => pick(m.id)}
-                  className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left hover:bg-surface-hover transition-colors"
+                  className="px-2.5 py-1.5 rounded-lg text-[13px] font-medium text-zinc-200 hover:text-white hover:bg-white/[0.08] transition-colors whitespace-nowrap"
                 >
-                  <m.icon className="w-3.5 h-3.5 text-content-tertiary shrink-0" strokeWidth={1.75} />
-                  <span className="min-w-0 flex-1">
-                    <span className="block text-[13px] text-content-primary leading-tight">{m.label}</span>
-                    <span className="block text-[10px] text-content-tertiary truncate leading-tight">{m.hint}</span>
-                  </span>
+                  {m.label}
                 </button>
-              ))}
-            </div>
-            {attach.length > 0 && <div className="mx-2.5 border-t border-surface-border" />}
-          </>
-        )}
-        {attach.length > 0 && (
-          <>
-            <p className="px-2.5 pt-2 pb-1 text-[10px] text-content-tertiary">
-              {scope === 'image' ? 'Photos only' : 'Project'}
-            </p>
-            <div className="pb-1">
-              {attach.map(m => (
-                <button
-                  key={m.id}
-                  type="button"
-                  onClick={() => pick(m.id)}
-                  className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left hover:bg-surface-hover transition-colors"
-                >
-                  <m.icon className="w-3.5 h-3.5 text-content-tertiary shrink-0" strokeWidth={1.75} />
-                  <span className="min-w-0 flex-1">
-                    <span className="block text-[13px] text-content-primary leading-tight">{m.label}</span>
-                    <span className="block text-[10px] text-content-tertiary truncate leading-tight">{m.hint}</span>
-                  </span>
-                </button>
-              ))}
-            </div>
-          </>
-        )}
+              </span>
+            );
+          })}
+        </div>
       </div>,
       document.body,
     )
@@ -198,8 +164,8 @@ export function ComposerPlusMenu({
         }}
         disabled={busy}
         className={`relative ${buttonClassName || 'w-9 h-9 rounded-full flex items-center justify-center text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors shrink-0'} ${busy ? 'opacity-90 cursor-wait' : ''}`}
-        title={busy ? 'Uploading…' : scope === 'image' ? 'Add photo' : 'Add mode or bind a project'}
-        aria-label={busy ? 'Uploading' : scope === 'image' ? 'Add photo' : 'Add mode or bind a project'}
+        title={busy ? 'Uploading…' : scope === 'image' ? 'Add photo' : 'Modes and project'}
+        aria-label={busy ? 'Uploading' : scope === 'image' ? 'Add photo' : 'Modes and project'}
         aria-expanded={open}
         aria-busy={busy}
       >

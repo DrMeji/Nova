@@ -1,5 +1,22 @@
 # ARK changelog
 
+## 0.1.196 — 2026-09-07
+
+Cursor-style + menu, agent quality upgrades, and chat/build behavior fixes from live testing.
+
+**Windows installer:** [ARK-Setup.exe](https://github.com/DrMeji/Ark/releases/download/v0.1.196/ARK-Setup.exe) · [Release notes](https://github.com/DrMeji/Ark/releases/tag/v0.1.196)
+
+### Composer
+- + menu is name-only in one row (Plan, Ask, Agent, Debug, Multi-agent, Bind project)
+
+### Agent quality
+- Patch-first SEARCH/REPLACE apply; richer file packing; free-cloud coding prefer earlier
+- Durable agent search index; git_status tool; HTML structure verify for static sites
+
+### Chat / builds
+- Casual opinions answer first (no bounce-back questions)
+- Book-club builds get a real tracker page; product names like ShelfCircle stick
+
 ## 0.1.195 — 2026-09-07
 
 Upgrade the real install splash toward the Preview look: colored icon + rounded progress bar.

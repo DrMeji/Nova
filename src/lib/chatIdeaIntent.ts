@@ -170,6 +170,9 @@ export function extractGreenfieldName(text: string): string | null {
   const patterns = [
     /\b(?:called|named|name(?:d)?\s+it|call\s+it)\s+["“']([^"”']{2,48})["”']/i,
     /\b(?:called|named|name(?:d)?\s+it|call\s+it)\s+([A-Za-z][A-Za-z0-9 _-]{1,40})/i,
+    /\bname\s+it\s+something\s+like\s+([A-Za-z][A-Za-z0-9_-]{2,40})/i,
+    /\bok\s+([A-Z][A-Za-z0-9]{2,40})\s+(?:sounds\s+good|is\s+fine|works)\b/,
+    /\b([A-Z][A-Za-z0-9]{2,40})\s+(?:sounds\s+good|is\s+fine)\b/,
     /\bleaning\s+([A-Za-z][A-Za-z0-9_-]{1,40})\s+as\s+the\s+name\b/i,
     /\bas\s+the\s+name[,:]?\s+([A-Za-z][A-Za-z0-9_-]{1,40})\b/i,
     /\b(?:app|application)\s+named\s+["“']?([A-Za-z][A-Za-z0-9 _-]{1,40})/i,
@@ -180,6 +183,7 @@ export function extractGreenfieldName(text: string): string | null {
     /\bcreate\s+([A-Z][A-Za-z0-9]{1,40})\s+(?:as|restaurant|website|site|kanban|notes?|utility)\b/i,
     /\bi\s+want\s+to\s+(?:work\s+on|build|create|make)\s+(?:a\s+)?(?:project\s+)?(?:called\s+)?([A-Za-z][A-Za-z0-9 _-]{2,40})/i,
     /\b(?:build|create|make)\s+([A-Za-z][A-Za-z0-9 _-]{2,40})\s+(?:app|system|platform|product)\b/i,
+    /\bbuild\s+([A-Z][A-Za-z0-9]{2,40})\s+(?:website|site|web\s*app)\b/,
   ];
   for (const re of patterns) {
     const m = t.match(re);

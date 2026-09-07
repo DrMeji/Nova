@@ -1,4 +1,5 @@
 import { classifyMobileTarget, looksLikeWebsiteBuild, mobileCodingRules } from '@/lib/mobileTarget';
+import { extractGreenfieldName } from '@/lib/chatIdeaIntent';
 import { layoutLockEdits, planMobileFiles, simpleVisualPatchEdits } from '@/lib/mobileTemplates';
 import { isLayoutLockAsk } from '@/lib/mobileDevices';
 import {
@@ -72,20 +73,34 @@ Your job is to help the user build and change real software in this project.
 Answer the user’s latest request directly (build / edit / fix / explain). Do not substitute a different feature, dump unrelated files, or “improve” something they did not ask for. If they only asked a question, answer it. do not invent file edits.
 Interpret typos and misspellings generously (infer the intended words) and do not lecture about spelling unless they ask.
 
-When the user asks you to build, add, remove, upgrade, fix, or change code, you MUST emit @@@FILE blocks with FULL file contents. Do not only explain how to create files. The left tree and Start preview only update when you write files.
+When the user asks you to build, add, remove, upgrade, fix, or change code, you MUST write real files. The left tree and Start preview only update when you write files.
 
-Format every create/update exactly:
+**Edits to existing files (preferred):** SEARCH/REPLACE patches — smaller and safer than rewriting the whole file:
+PATH: relative/file.ext
+SEARCH:
+exact old text from the file
+REPLACE:
+new text
+
+You may also use:
+<<<<<<< SEARCH
+exact old text
+=======
+new text
+>>>>>>> REPLACE
+
+**New files or large scaffolds:** emit @@@FILE blocks with FULL file contents:
 
 @@@FILE path/relative/to/project.ext
 \`\`\`
 ...entire file contents here...
 \`\`\`
 
-Prefer small, correct diffs as full-file rewrites. If the user mentions GitHub or a remote repo, still write real files into this local project first. cloning/PRs can come after the files exist on disk.
+If the user mentions GitHub or a remote repo, still write real files into this local project first. cloning/PRs can come after the files exist on disk.
 
 Rules:
 - Use real paths with folders: css/styles.css, js/app.js, src/App.tsx, package.json (forward slashes). Parent folders are created automatically.
-- Change only what the user asked. Emit @@@FILE with FULL content for each file you touch, but do NOT rewrite unrelated files.
+- Change only what the user asked. Prefer SEARCH/REPLACE for small edits. Use @@@FILE full contents for creates or when most of the file must change.
 - For a one-line CSS tweak, touch only the CSS (and HTML only if needed). Do not regenerate the whole app.
 - Never create a folder named path/to. that phrase is not a real path. Always write index.html, css/styles.css, js/app.js (or src/…).
 - For typical web UIs, split markup, styles, and behavior:
@@ -98,34 +113,31 @@ Rules:
 - Keep text readable on the background (dark bg → light text; light bg → dark text). Do not add a Theme Toggle unless the user asked for one.
 - Match the ask: add new files/features, remove dead UI, upgrade the page, or fix a bug. Do not only patch unless that is what they asked.
 - Empty projects: start from a blank working page and grow it. Do not refuse because the folder is empty.
-- If the user is only asking a question (no code change), answer normally WITHOUT @@@FILE blocks.
+- If the user is only asking a question (no code change), answer normally WITHOUT @@@FILE or SEARCH/REPLACE blocks.
 
 ${LAYOUT_RULES}`;
 
 const CODING_INSTRUCTIONS_LITE = `You are ARK Code. Edit ONLY what the user asked.
 Interpret typos generously; do not lecture about spelling unless asked.
 
-Output @@@FILE path + COMPLETE file content for each changed file. Do not rewrite unrelated files.
+Prefer SEARCH/REPLACE for edits to existing files. Use @@@FILE with COMPLETE file content for new files or large rewrites.
 Do not echo the user message. Do not dump tutorials.
 Keep HTML/CSS/JS in sync.
 
-Format:
+Patch format:
+PATH: css/styles.css
+SEARCH:
+old
+REPLACE:
+new
+
+Or create:
 @@@FILE index.html
 \`\`\`
 full file
 \`\`\`
 
-@@@FILE css/styles.css
-\`\`\`
-full file
-\`\`\`
-
-@@@FILE js/app.js
-\`\`\`
-full file
-\`\`\`
-
-Use those real paths (or src/… for React). Never write path/to/…. that is only an example people say in chat, not a folder.
+Use real paths (or src/… for React). Never write path/to/…. that is only an example people say in chat, not a folder.
 
 Then one short chat summary only (no code). Press Start to preview. Never write Summary text into the page files.
 
@@ -191,6 +203,26 @@ export function rankFilesForTurnPack(
     else if (base.length >= 4 && lower.includes(base.toLowerCase())) bump(k, 18);
     if (/(^|\/)readme(\.md)?$/i.test(k)) bump(k, 16);
     if (/(^|\/)package\.json$/i.test(k)) bump(k, 14);
+  }
+
+  // Content tokens from the ask (cheap keyword hit — no embeddings).
+  const tokens = lower
+    .replace(/[^a-z0-9_./\s-]+/g, ' ')
+    .split(/\s+/)
+    .filter((w) => w.length >= 4)
+    .slice(0, 8);
+  if (tokens.length) {
+    const scanLimit = Math.min(keys.length, 80);
+    for (let i = 0; i < scanLimit; i++) {
+      const k = keys[i]!;
+      const body = String(flat[k] || '').toLowerCase().slice(0, 12_000);
+      if (!body) continue;
+      let hits = 0;
+      for (const t of tokens) {
+        if (body.includes(t)) hits += 1;
+      }
+      if (hits > 0) bump(k, 6 + hits * 4);
+    }
   }
 
   // Bug-hunt hints: prefer chat/generating/stop-related sources when the user describes UI bugs.
@@ -756,8 +788,13 @@ function escapeHtml(s: string) {
 }
 
 function titleFromAsk(message: string) {
+  // Prefer explicit product names from casual speech ("ShelfCircle sounds good").
+  const named = extractGreenfieldName(message);
+  if (named && !/^My (App|Website|Web App)$/i.test(named)) return named;
   const called = String(message || '').match(/\bcalled\s+([A-Za-z0-9][A-Za-z0-9 '-]{1,40})/);
   if (called?.[1]) return called[1].trim();
+  const camel = String(message || '').match(/\b([A-Z][a-z]+[A-Z][A-Za-z0-9]+)\b/);
+  if (camel?.[1] && !/^(HTML|CSS|JS|API)$/i.test(camel[1])) return camel[1];
   return inferBuildLabel(message);
 }
 

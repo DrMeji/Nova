@@ -75,10 +75,11 @@ function pickButtons(text: string): string[] {
       out.push(label);
     }
   }
-  if (/\bbook(?:ing)?\b/i.test(t) && !out.some(o => /^book$/i.test(o) || /^reserve$/i.test(o))) {
+  if (/\bbook(?:ing)?\b/i.test(t) && !/\bbook\s*club\b/i.test(t) && !/\b(reading|bookshelf|shelf)\b/i.test(t)
+    && !out.some(o => /^book$/i.test(o) || /^reserve$/i.test(o))) {
     out.push(/\b(restaurant|dining|cafe|menu)\b/i.test(t) || /\breserve\b/i.test(t) ? 'Reserve' : 'Book');
   }
-  if (/\bmenu\b/i.test(t) && !out.some(o => /menu/i.test(o))) {
+  if (/\bmenu\b/i.test(t) && !/\bbook\s*club\b/i.test(t) && !out.some(o => /menu/i.test(o))) {
     out.push('View menu');
   }
   return out.slice(0, 4);
@@ -1565,9 +1566,133 @@ body {
   ];
 }
 
+/** Cozy book-club tracker (current book, finished list, notes). */
+function buildBookClubLandingFiles(name: string, brief: string): LandingFile[] {
+  const title = String(name || 'ShelfCircle').trim() || 'ShelfCircle';
+  const darkGreen = /dark\s+green|forest|emerald/i.test(brief);
+  const cream = /cream|cozy|library/i.test(brief);
+  const bg = darkGreen || cream ? '#12241a' : '#12241a';
+  const ink = '#f3ead7';
+  const accent = '#c4a574';
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>${escapeHtml(title)}</title>
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <header class="top">
+    <p class="brand">${escapeHtml(title)}</p>
+    <h1>This month's circle</h1>
+    <p class="sub">Current book, who finished, and shared notes.</p>
+  </header>
+  <main class="layout">
+    <section class="card" aria-labelledby="current-book">
+      <h2 id="current-book">Current book</h2>
+      <p class="book-title" id="bookTitle">The Midnight Library</p>
+      <p class="meta">Pick by Maya · 4 weeks left</p>
+    </section>
+    <section class="card" aria-labelledby="finished">
+      <h2 id="finished">Who finished</h2>
+      <ul class="people" id="finishedList">
+        <li>Jordan</li>
+        <li>Sam</li>
+      </ul>
+      <form id="addFinished" class="row">
+        <input name="name" placeholder="Add a name" required />
+        <button type="submit">Add</button>
+      </form>
+    </section>
+    <section class="card wide" aria-labelledby="notes">
+      <h2 id="notes">Notes</h2>
+      <textarea id="notesBox" rows="6" placeholder="Quotes, questions, spoilers with a warning…"></textarea>
+      <button type="button" id="saveNotes">Save notes</button>
+    </section>
+  </main>
+  <script src="js/app.js"></script>
+</body>
+</html>
+`;
+  const css = `* { box-sizing: border-box; margin: 0; }
+body {
+  font-family: Georgia, "Times New Roman", serif;
+  background: ${bg};
+  color: ${ink};
+  min-height: 100vh;
+  line-height: 1.5;
+}
+.top { padding: 2.5rem 1.5rem 1rem; max-width: 920px; margin: 0 auto; }
+.brand { letter-spacing: 0.16em; text-transform: uppercase; font-size: 0.75rem; opacity: 0.8; margin-bottom: 0.75rem; font-family: system-ui, sans-serif; }
+h1 { font-size: clamp(1.8rem, 4vw, 2.6rem); font-weight: 500; margin-bottom: 0.4rem; }
+.sub { opacity: 0.75; max-width: 36rem; }
+.layout { max-width: 920px; margin: 0 auto; padding: 1rem 1.5rem 3rem; display: grid; gap: 1rem; grid-template-columns: 1fr 1fr; }
+.card { background: rgba(243,234,215,0.06); border: 1px solid rgba(243,234,215,0.14); border-radius: 16px; padding: 1.25rem; }
+.card.wide { grid-column: 1 / -1; }
+h2 { font-size: 1rem; letter-spacing: 0.04em; text-transform: uppercase; font-family: system-ui, sans-serif; margin-bottom: 0.75rem; color: ${accent}; }
+.book-title { font-size: 1.45rem; margin-bottom: 0.35rem; }
+.meta { opacity: 0.7; font-size: 0.95rem; }
+.people { list-style: none; padding: 0; margin: 0 0 1rem; }
+.people li { padding: 0.35rem 0; border-bottom: 1px solid rgba(243,234,215,0.1); }
+.row { display: flex; gap: 0.5rem; }
+input, textarea, button {
+  font: inherit; border-radius: 10px; border: 1px solid rgba(243,234,215,0.2);
+  background: rgba(0,0,0,0.25); color: ${ink}; padding: 0.55rem 0.75rem;
+}
+input, textarea { width: 100%; }
+button { background: ${accent}; color: #1a140c; border: 0; cursor: pointer; font-family: system-ui, sans-serif; font-weight: 600; }
+button:hover { filter: brightness(1.05); }
+textarea { margin-bottom: 0.75rem; resize: vertical; }
+@media (max-width: 720px) { .layout { grid-template-columns: 1fr; } }
+`;
+  const js = `const finishedKey = 'ark:${title.replace(/'/g, '')}:finished';
+const notesKey = 'ark:${title.replace(/'/g, '')}:notes';
+const list = document.getElementById('finishedList');
+const form = document.getElementById('addFinished');
+const notes = document.getElementById('notesBox');
+const saveNotes = document.getElementById('saveNotes');
+
+function loadFinished() {
+  try { return JSON.parse(localStorage.getItem(finishedKey) || '["Jordan","Sam"]'); } catch { return ['Jordan', 'Sam']; }
+}
+function renderFinished(names) {
+  list.innerHTML = names.map((n) => '<li>' + String(n).replace(/[<>&]/g, '') + '</li>').join('');
+}
+let people = loadFinished();
+renderFinished(people);
+form.addEventListener('submit', (e) => {
+  e.preventDefault();
+  const name = new FormData(form).get('name');
+  if (!name) return;
+  people = [...people, String(name).trim()];
+  localStorage.setItem(finishedKey, JSON.stringify(people));
+  renderFinished(people);
+  form.reset();
+});
+notes.value = localStorage.getItem(notesKey) || '';
+saveNotes.addEventListener('click', () => {
+  localStorage.setItem(notesKey, notes.value);
+  saveNotes.textContent = 'Saved';
+  setTimeout(() => { saveNotes.textContent = 'Save notes'; }, 1200);
+});
+`;
+  return [
+    { path: 'index.html', content: html },
+    { path: 'css/styles.css', content: css },
+    { path: 'js/app.js', content: js },
+    { path: '.gitignore', content: '.DS_Store\nThumbs.db\n*.log\n.env\n.env.*\n' },
+  ];
+}
+
 export function buildLandingPageFiles(name: string, brief: string): LandingFile[] {
   const title = String(name || 'Site').trim() || 'Site';
   let urls = pickUrls(brief);
+
+  // Book club / reading circle — not a restaurant "Book a table" landing.
+  if (/\bbook\s*club\b/i.test(brief) || /\b(reading\s+circle|bookshelf|who\s+finished|current\s+book)\b/i.test(brief)) {
+    return buildBookClubLandingFiles(title, brief);
+  }
 
   if (wantsPremiumProductLanding(brief)) {
     return buildPremiumProductLandingFiles(title, brief);

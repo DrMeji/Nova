@@ -6,7 +6,7 @@ import { hasAnyCloudChatKey } from '@/lib/cloudChat';
 import { getLocalPrefs } from '@/lib/localPrefs';
 import { looksLikeProjectDebugAsk } from '@/lib/chatProjectDebug';
 
-const LARGE_REPO_FILES = 180;
+const LARGE_REPO_FILES = 40;
 
 export function countSourceFiles(files: Record<string, string>): number {
   return Object.keys(files || {}).filter(k =>
@@ -27,6 +27,7 @@ export function shouldPreferCloudForCoding(opts: {
   const mode = getLocalPrefs().aiMode;
   if (mode === 'local_only') return false;
   if (opts.agentLoop) return true;
+  if (opts.allowFileEdits) return true;
   if (opts.fileCount < LARGE_REPO_FILES) return false;
   return /\b(fix|patch|edit|debug|stop|generating|@@@FILE|change|update)\b/i.test(opts.message)
     || looksLikeProjectDebugAsk(opts.message);

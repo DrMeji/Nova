@@ -16,6 +16,8 @@ import {
 } from '@/lib/arkAgentRepo';
 import {
   buildAgentRepoIndex,
+  loadPersistedAgentRepoIndex,
+  persistAgentRepoIndex,
   searchAgentIndex,
   updateAgentRepoIndex,
   type AgentRepoIndex,
@@ -33,6 +35,7 @@ export type AgentLoopToolName =
   | 'write'
   | 'patch'
   | 'run'
+  | 'git_status'
   | 'mcp'
   | 'done';
 
@@ -98,7 +101,7 @@ export type AgentLoopOpts = {
 };
 
 const DEFAULT_MAX = 24;
-const TOOL_NAMES = 'list|read|grep|write|patch|run|mcp|done';
+const TOOL_NAMES = 'list|read|grep|write|patch|run|git_status|mcp|done';
 
 function pushStep(
   steps: AgentLoopStep[],
@@ -254,7 +257,8 @@ function buildLoopSystemPrompt(opts: {
     : '(none yet — start with list or grep)';
   return [
     'You are ARK Agent on a bound project. Use tools until the task is done.',
-    'One tool per reply. Prefer grep/read before editing. Prefer TOOL: patch over full-file write.',
+    'Prefer grep/read before editing. Prefer TOOL: patch over full-file write.',
+    'One primary tool per reply (you may include a second read/grep only if needed).',
     'Never touch files outside this workspace. Never invent paths you have not listed or read.',
     '',
     opts.kindHint,
@@ -269,6 +273,8 @@ function buildLoopSystemPrompt(opts: {
     '',
     'TOOL: grep',
     'QUERY: text to find',
+    '',
+    'TOOL: git_status',
     '',
     'TOOL: patch',
     'PATH: relative/file.ext',
@@ -422,7 +428,10 @@ async function persistWrites(
 export async function runArkAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult> {
   const maxSteps = opts.maxSteps ?? agentLoopMaxSteps();
   let files = filterAgentFiles({ ...opts.files });
-  let index: AgentRepoIndex = buildAgentRepoIndex(files);
+  const indexScope = String(opts.diskRoot || opts.projectId || opts.projectName || 'project');
+  let index: AgentRepoIndex =
+    loadPersistedAgentRepoIndex(indexScope, files) || buildAgentRepoIndex(files);
+  persistAgentRepoIndex(indexScope, index);
   const updated = new Set<string>();
   const steps: AgentLoopStep[] = [];
   const observations: string[] = [...(opts.priorObservations || [])];
@@ -608,6 +617,7 @@ export async function runArkAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopRes
         updated.add(p);
         index = updateAgentRepoIndex(index, p, files[p] || '');
       }
+      persistAgentRepoIndex(indexScope, index);
       const persisted = await persistWrites(opts, files, applied.updated, projectName);
       if (!persisted.ok) {
         observations.push(`patch disk write failed: ${persisted.error}`);
@@ -663,6 +673,7 @@ export async function runArkAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopRes
           updated.add(p);
           index = updateAgentRepoIndex(index, p, files[p] || '');
         }
+        persistAgentRepoIndex(indexScope, index);
         observations.push(
           `write ok: ${applied.updated.join(', ') || 'no path list'}\n${applied.reply.slice(0, 800)}`,
         );
@@ -720,6 +731,39 @@ export async function runArkAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopRes
         label: ran.ok ? `Ran ${command}` : ran.needsConfirm ? `Needs confirm · ${command}` : `Failed · ${command}`,
         detail: ran.output.slice(0, 800),
         ok: ran.ok,
+      }, opts.onStep);
+      continue;
+    }
+
+    if (action.tool === 'git_status') {
+      pushStep(steps, { tool: 'git_status', label: 'Git status', detail: opts.diskRoot || '' }, opts.onStep);
+      if (!opts.diskRoot) {
+        observations.push('git_status failed: no disk root bound');
+        pushStep(steps, { tool: 'git_status', label: 'Git status failed', detail: 'No disk root', ok: false }, opts.onStep);
+        continue;
+      }
+      const status = await runShellCommand({
+        command: 'git status --short',
+        cwd: opts.diskRoot,
+        autoRunAllowlisted: true,
+      });
+      const diff = await runShellCommand({
+        command: 'git diff --stat',
+        cwd: opts.diskRoot,
+        autoRunAllowlisted: true,
+      });
+      const out = [
+        `git status → ${status.ok ? 'ok' : 'fail'}`,
+        status.output.slice(0, 1500) || '(clean)',
+        'git diff --stat:',
+        diff.output.slice(0, 1200) || '(none)',
+      ].join('\n');
+      observations.push(out);
+      pushStep(steps, {
+        tool: 'git_status',
+        label: status.ok ? 'Git status' : 'Git status failed',
+        detail: out.slice(0, 600),
+        ok: status.ok,
       }, opts.onStep);
       continue;
     }

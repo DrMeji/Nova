@@ -60,6 +60,22 @@ export async function verifyProjectAfterPatch(opts: {
   }
 
   if (!command) {
+    // Static HTML sites: light structure check instead of silent skip.
+    const htmlPath = changedPaths.find((p) => /\.html?$/i.test(p))
+      || Object.keys(files).find((p) => /(^|\/)index\.html$/i.test(p));
+    if (htmlPath && files[htmlPath]) {
+      const html = String(files[htmlPath]);
+      const ok = /<html[\s>]/i.test(html) && /<\/html>/i.test(html);
+      return {
+        ran: true,
+        ok,
+        command: 'html-structure',
+        output: ok ? 'index.html has html root' : 'Missing <html>…</html> in changed HTML',
+        summary: ok
+          ? '\n\n**Verify:** HTML structure looks ok.'
+          : '\n\n**Verify:** HTML structure check failed — missing html root tags.',
+      };
+    }
     return { ran: false, ok: true, summary: '' };
   }
 

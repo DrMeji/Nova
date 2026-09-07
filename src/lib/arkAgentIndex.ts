@@ -130,3 +130,56 @@ export function updateAgentRepoIndex(
   }
   return { ...index, fileCount: index.contents.size, builtAt: Date.now() };
 }
+
+function indexCacheKey(scope: string): string {
+  const s = String(scope || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').slice(0, 120);
+  return `ark:agent-index:v1:${s || 'default'}`;
+}
+
+/** Persist index contents (tokens rebuilt on load). Survives chat reloads. */
+export function persistAgentRepoIndex(scope: string, index: AgentRepoIndex): void {
+  if (!scope || typeof localStorage === 'undefined') return;
+  try {
+    const contents: Record<string, string> = {};
+    for (const [path, body] of index.contents) {
+      contents[path] = body;
+      if (Object.keys(contents).length >= 400) break;
+    }
+    localStorage.setItem(
+      indexCacheKey(scope),
+      JSON.stringify({ builtAt: index.builtAt, fileCount: index.fileCount, contents }),
+    );
+  } catch {
+    /* quota / private mode */
+  }
+}
+
+/** Load cached index if it still matches roughly the same file count. */
+export function loadPersistedAgentRepoIndex(
+  scope: string,
+  files: Record<string, string>,
+): AgentRepoIndex | null {
+  if (!scope || typeof localStorage === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(indexCacheKey(scope));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as {
+      builtAt?: number;
+      fileCount?: number;
+      contents?: Record<string, string>;
+    };
+    if (!parsed?.contents || typeof parsed.contents !== 'object') return null;
+    const liveCount = Object.keys(files || {}).length;
+    if (typeof parsed.fileCount === 'number' && Math.abs(parsed.fileCount - liveCount) > 40) {
+      return null;
+    }
+    // Rebuild from live files when possible (fresher); else from cache bodies.
+    const merged: Record<string, string> = { ...parsed.contents };
+    for (const [path, body] of Object.entries(files || {})) {
+      if (typeof body === 'string') merged[path] = body;
+    }
+    return buildAgentRepoIndex(merged);
+  } catch {
+    return null;
+  }
+}
