@@ -125,7 +125,7 @@ export function looksLikeFolderCatalogAsk(text: string): boolean {
   if (/\b(?:inside|in)\s+(?:my\s+)?(?:desktop\s+)?folder\b/i.test(t)) return true;
   if (/\bunder\s+[A-Za-z0-9_.-]+\b/i.test(t) && /\bdesktop\b/i.test(t)) return true;
   if (/\bprojects?\b/i.test(t) && /\bdesktop\b/i.test(t) && /\b(?:inside|what|tell|show|in it)\b/i.test(t)) {
-    // "Open DeBloat on Desktop Projects. Tell me what it does" is analyze, not inventory.
+    // "Open MyApp on Desktop Projects. Tell me what it does" is analyze, not inventory.
     if (/\b(?:open|work\s+on|summarize|flag|about|how it works)\b/i.test(t)) return false;
     return true;
   }

@@ -140,7 +140,7 @@ function modePrefersCloud(mode: AiModePref) {
 }
 
 import { isTemplateEngineReply } from '@/lib/codeBuildHonesty';
-import { codingOutputIncomplete, stripFileBlocks } from '@/lib/projectCodeEdit';
+import { codingOutputIncomplete, coerceCodingFileReply, stripFileBlocks } from '@/lib/projectCodeEdit';
 
 function isStrongLocal(source?: string) {
   return source === 'ark-gguf' || source === 'ark-engine' || source === 'ark-media';
@@ -185,8 +185,15 @@ async function tryLocalChat(
         ? await brainGenerateStream(prompt, id, onChunk, kind)
         : await brainGenerate(prompt, id, kind);
       const prevAsst = [...history].reverse().find(t => t.role === 'assistant')?.content;
-      let cleaned = usableAssistantText(result.reply, message, prevAsst);
       let rawText = String(result.reply || '').trim();
+      if (kind === 'coding') {
+        rawText = coerceCodingFileReply(rawText);
+      }
+      // Coding replies must keep @@@FILE / SEARCH blocks for disk apply.
+      // usableAssistantText/sanitizeAssistantReply strips those for chat bubbles.
+      let cleaned = kind === 'coding'
+        ? rawText
+        : usableAssistantText(result.reply, message, prevAsst);
       // Soft “yes / more / overall”: if the model restated the prior answer, retry once with a harder deepen prompt.
       if (
         kind === 'chat'
@@ -241,20 +248,63 @@ async function tryLocalChat(
       if (!cleaned.trim() && looksLikePromptEcho(rawText)) return null;
       const reply = cleaned || rawText;
       if (!reply || isTemplateEngineReply(reply)) return null;
+      // Coding must never ship a greeting — force one hard code retry, then fail closed.
+      if (
+        kind === 'coding'
+        && (
+          /Hello! How can I assist you today\??/i.test(reply.trim())
+          || /^(hi|hello|hey)[.!]?\s*(how can I help|what can I do)?[.!]?\s*$/i.test(reply.trim())
+        )
+        && !/@@@FILE\b/i.test(reply)
+        && reply.trim().length < 400
+      ) {
+        onAttemptReset?.();
+        const codeRetryPrompt = [
+          packHistoryPrompt(history, message),
+          '',
+          'CRITICAL: Do NOT greet. The user asked for code/files. Emit COMPLETE @@@FILE blocks with full source now. No chatter.',
+        ].join('\n');
+        try {
+          const retry = onChunk
+            ? await brainGenerateStream(codeRetryPrompt, id, onChunk, kind)
+            : await brainGenerate(codeRetryPrompt, id, kind);
+          const retryRaw = String(retry.reply || '').trim();
+          const retryClean = usableAssistantText(retryRaw, message, prevAsst);
+          if (
+            retryRaw
+            && !/Hello! How can I assist you today\??/i.test(retryRaw)
+            && (/@@@FILE\b/i.test(retryRaw) || retryRaw.length > 400)
+          ) {
+            cleaned = retryClean || retryRaw;
+            rawText = retryRaw;
+            Object.assign(result, retry);
+          } else {
+            return null;
+          }
+        } catch {
+          return null;
+        }
+      }
       if (kind === 'coding' && codingOutputIncomplete(rawText, message)) {
-        const prose = stripFileBlocks(cleaned || rawText).trim();
-        if (prose.length >= 60 && !looksLikePromptEcho(prose) && !isTemplateEngineReply(prose)) {
-          return {
-            reply: prose,
-            media: result.media,
-            modelName: result.modelName || 'NOVA Engine',
-            modelId: id || result.modelName,
-            source: result.source || 'ark-engine',
-            tier: 'local-free',
-            attempted,
-            continued: hasContinuity(history),
-            ipcFallback: 'ipcFallback' in result ? result.ipcFallback : undefined,
-          };
+        // Never strip @@@FILE into prose-only — that made create/build leave empty scaffolds.
+        // Prefer returning whatever file blocks we have (even if imperfect) so apply can run;
+        // otherwise fail this attempt so failover/retry can try again.
+        const closed = /@@@FILE\b/i.test(rawText) || /<<<<<<< SEARCH/.test(rawText);
+        if (closed) {
+          const keep = cleaned || rawText;
+          if (keep.trim()) {
+            return {
+              reply: keep,
+              media: result.media,
+              modelName: result.modelName || 'NOVA Engine',
+              modelId: id || result.modelName,
+              source: result.source || 'ark-engine',
+              tier: 'local-free',
+              attempted,
+              continued: hasContinuity(history),
+              ipcFallback: 'ipcFallback' in result ? result.ipcFallback : undefined,
+            };
+          }
         }
         onAttemptReset?.();
         return null;
@@ -267,8 +317,80 @@ async function tryLocalChat(
         });
         return null;
       }
+      // Thin or rushed chat answers — deepen for substance (1+ min think is OK).
+      const thoroughAsk = /\b(?:explain|thorough|cover|detail|why|how\s+does|trilateration|walk\s+me\s+through)\b/i.test(
+        String(message || ''),
+      );
+      if (
+        kind === 'chat'
+        && reply.trim().length > 0
+        && (
+          reply.trim().length < 900
+          || (thoroughAsk && reply.trim().length < 2200)
+        )
+        && !/^(hi|hello|hey|thanks|thank you)[.!]?\s*$/i.test(reply.trim())
+        && !looksLikePromptEcho(reply)
+      ) {
+        onAttemptReset?.();
+        const deepenPrompt = [
+          packHistoryPrompt(history, message),
+          '',
+          thoroughAsk
+            ? 'CRITICAL RETRY: Expand this into a longer, clearer answer. Cover every requested topic with concrete detail. Take your time. Do not pad with filler. Do not restart with a greeting.'
+            : 'CRITICAL RETRY: Your last draft was too short or rushed. Take your time. Write a longer, clearer, more accurate answer with real detail, numbered structure if helpful, and concrete examples. Do not pad with filler. Do not restart with a greeting.',
+        ].join('\n');
+        try {
+          const retry = onChunk
+            ? await brainGenerateStream(deepenPrompt, id, onChunk, kind)
+            : await brainGenerate(deepenPrompt, id, kind);
+          const retryClean = usableAssistantText(retry.reply, message, prevAsst);
+          const retryRaw = String(retry.reply || '').trim();
+          if ((retryClean || retryRaw).length > reply.length) {
+            cleaned = retryClean || retryRaw;
+            rawText = retryRaw;
+            Object.assign(result, retry);
+          }
+        } catch {
+          /* keep first reply */
+        }
+      }
+      // Thorough asks: one more expansion pass so answers aren't rushed in a few seconds.
+      const afterDeepen = (cleaned || rawText || reply).trim();
+      if (
+        kind === 'chat'
+        && thoroughAsk
+        && afterDeepen.length > 0
+        && afterDeepen.length < 3600
+        && !looksLikePromptEcho(afterDeepen)
+      ) {
+        onAttemptReset?.();
+        const expandPrompt = [
+          packHistoryPrompt(history, message),
+          '',
+          'EXPAND FURTHER: Add another layer of accurate detail (edge cases, common misconceptions, and a short concrete example). Keep the same topic. Do not greet. Do not shorten.',
+          '',
+          'Draft so far:',
+          afterDeepen.slice(0, 2800),
+        ].join('\n');
+        try {
+          const retry = onChunk
+            ? await brainGenerateStream(expandPrompt, id, onChunk, kind)
+            : await brainGenerate(expandPrompt, id, kind);
+          const retryClean = usableAssistantText(retry.reply, message, prevAsst);
+          const retryRaw = String(retry.reply || '').trim();
+          const best = (retryClean || retryRaw);
+          if (best.length > afterDeepen.length) {
+            cleaned = best;
+            rawText = retryRaw;
+            Object.assign(result, retry);
+          }
+        } catch {
+          /* keep deepened reply */
+        }
+      }
+      const finalReply = (kind === 'coding' ? (cleaned || rawText) : (cleaned || rawText)) || reply;
       return {
-        reply,
+        reply: finalReply,
         media: result.media,
         modelName: result.modelName || 'NOVA Engine',
         modelId: id || result.modelName,
@@ -449,7 +571,7 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
   const intent = classifyChatIntent(opts.message, opts.kind);
   const brainKind: 'chat' | 'coding' = intent === 'coding' ? 'coding' : 'chat';
   const acceptCodingReply = (reply: string) =>
-    brainKind !== 'coding' || !codingOutputIncomplete(reply, opts.message);
+    brainKind !== 'coding' || !codingOutputIncomplete(coerceCodingFileReply(reply), opts.message);
   const tryFreeCloud = () => cloudChatFreeKeys(
     opts.message,
     attempted,

@@ -18,6 +18,15 @@ import { PlayGameButton, PlayWhileDownloading } from '@/components/fun/PlayWhile
 
 type ToastRow = { id: string; message: string };
 
+function jobRoleLabel(job: EngineDownloadJob): string {
+  const id = String(job.id || '').toLowerCase();
+  const name = String(job.name || '');
+  if (/next brain/i.test(name)) return 'Next brain';
+  if (/coder/i.test(id) || /coder/i.test(name)) return 'Coding model';
+  if (/qwen25-7b|instruct|llama|mistral|chat/i.test(`${id} ${name}`)) return 'Chat brain';
+  return name.replace(/^Next brain · /i, '').trim() || job.id;
+}
+
 export function JobsStrip({ variant = 'footer' }: { variant?: 'footer' | 'sidebar' }) {
   const [jobs, setJobs] = useState<EngineDownloadJob[]>(() => getEngineDownloadJobs());
   const [updateJob, setUpdateJob] = useState<{ percent: number; message: string } | null>(null);
@@ -96,8 +105,8 @@ export function JobsStrip({ variant = 'footer' }: { variant?: 'footer' | 'sideba
 
   const shell =
     variant === 'sidebar'
-      ? 'mb-2 rounded-xl border border-white/10 bg-ark-navy-950/90 px-2.5 py-2 space-y-1.5'
-      : 'shrink-0 border-t border-surface-border bg-ark-navy-950/95 px-3 py-2 space-y-1.5';
+      ? 'mb-2 rounded-xl border border-white/[0.08] bg-ark-navy-950/95 px-3 py-2.5 space-y-2'
+      : 'shrink-0 border-t border-surface-border bg-ark-navy-950/95 px-3 py-2.5 space-y-2';
 
   return (
     <>
@@ -108,77 +117,92 @@ export function JobsStrip({ variant = 'footer' }: { variant?: 'footer' | 'sideba
         </p>
       ))}
       {downloading.length > 0 ? (
-        <div className="flex items-center justify-between gap-2">
-          <p className="text-[10px] text-content-tertiary">Slow install? Pass the time.</p>
-          <PlayGameButton onClick={() => setPlayOpen(true)} />
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-[11px] text-content-secondary leading-tight">Pass the time</p>
+            <p className="text-[10px] text-content-tertiary leading-tight mt-0.5">
+              Extra models can finish in the background
+            </p>
+          </div>
+          <PlayGameButton onClick={() => setPlayOpen(true)} className="shrink-0" />
         </div>
       ) : null}
-      {active.map(job => (
-        <div key={job.id} className="flex items-start gap-2 text-xs">
-          {!job.error && !job.canceling ? (
-            <Loader2 className="w-3.5 h-3.5 text-sky-400 animate-spin shrink-0 mt-0.5" />
-          ) : null}
-          <div className="min-w-0 flex-1">
-            {job.error ? (
-              <ArkErrorInline message={job.error} />
-            ) : (
-              <>
-                <p className="text-content-secondary truncate">
-                  {job.canceling
-                    ? 'Canceling…'
-                    : /next brain/i.test(job.name)
-                      ? 'Preparing next brain'
-                      : 'Downloading'}{' '}
-                  {job.name.replace(/^Next brain · /i, '') || job.id}
-                  {!job.canceling ? ` · ${Math.round(job.progress)}%` : ''}
-                </p>
-                {!job.canceling && job.progress < 100 ? (
-                  <div className="h-1 mt-1 bg-surface-hover rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-sky-500/70 transition-all"
-                      style={{ width: `${Math.min(100, job.progress)}%` }}
-                    />
+      {active.map(job => {
+        const label = jobRoleLabel(job);
+        const pct = Math.round(job.progress);
+        return (
+          <div key={job.id} className="space-y-1">
+            <div className="flex items-center gap-2 text-[11px]">
+              {!job.error && !job.canceling ? (
+                <Loader2 className="w-3.5 h-3.5 text-sky-400 animate-spin shrink-0" />
+              ) : null}
+              <div className="min-w-0 flex-1">
+                {job.error ? (
+                  <ArkErrorInline message={job.error} />
+                ) : (
+                  <div className="flex items-baseline justify-between gap-2 min-w-0">
+                    <p className="text-content-secondary truncate">
+                      {job.canceling ? 'Canceling…' : label}
+                    </p>
+                    {!job.canceling ? (
+                      <span className="tabular-nums text-content-tertiary shrink-0">{pct}%</span>
+                    ) : null}
                   </div>
-                ) : null}
-              </>
-            )}
-            {job.error ? (
-              <div className="flex gap-2 mt-1">
-                <button type="button" className="text-[10px] text-content-tertiary hover:text-content-secondary" onClick={() => dismissEngineDownloadError(job.id)}>
-                  Dismiss
+                )}
+              </div>
+              {!job.error && !job.canceling ? (
+                <button
+                  type="button"
+                  className="shrink-0 p-0.5 text-content-tertiary hover:text-rose-300"
+                  aria-label="Cancel download"
+                  onClick={() => void cancelEngineDownload(job.id)}
+                >
+                  <X className="w-3.5 h-3.5" />
                 </button>
+              ) : null}
+            </div>
+            {job.error ? (
+              <button
+                type="button"
+                className="text-[10px] text-content-tertiary hover:text-content-secondary"
+                onClick={() => dismissEngineDownloadError(job.id)}
+              >
+                Dismiss
+              </button>
+            ) : null}
+            {!job.error && !job.canceling && job.progress < 100 ? (
+              <div className="h-1 bg-white/[0.06] rounded-full overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-sky-500/80 transition-all"
+                  style={{ width: `${Math.min(100, job.progress)}%` }}
+                />
               </div>
             ) : null}
           </div>
-          {!job.error && !job.canceling ? (
-            <button
-              type="button"
-              className="shrink-0 p-1 text-content-tertiary hover:text-rose-300"
-              aria-label="Cancel download"
-              onClick={() => void cancelEngineDownload(job.id)}
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
-          ) : null}
-        </div>
-      ))}
+        );
+      })}
       {rotationNote ? (
         <p className="text-xs text-content-tertiary truncate">{rotationNote}</p>
       ) : null}
       {updateJob ? (
-        <div className="flex items-start gap-2 text-xs">
-          <Loader2 className="w-3.5 h-3.5 text-sky-400 animate-spin shrink-0 mt-0.5" />
-          <div className="min-w-0 flex-1">
-            <p className="text-content-secondary truncate">
-              {updateJob.message}
-              {updateJob.percent > 0 ? ` · ${Math.round(updateJob.percent)}%` : ''}
-            </p>
+        <div className="space-y-1">
+          <div className="flex items-center gap-2 text-[11px]">
+            <Loader2 className="w-3.5 h-3.5 text-sky-400 animate-spin shrink-0" />
+            <p className="min-w-0 flex-1 text-content-secondary truncate">{updateJob.message}</p>
             {updateJob.percent > 0 ? (
-              <div className="h-1 mt-1 bg-surface-hover rounded-full overflow-hidden">
-                <div className="h-full bg-emerald-500/70 transition-all" style={{ width: `${Math.min(100, updateJob.percent)}%` }} />
-              </div>
+              <span className="tabular-nums text-content-tertiary shrink-0">
+                {Math.round(updateJob.percent)}%
+              </span>
             ) : null}
           </div>
+          {updateJob.percent > 0 ? (
+            <div className="h-1 bg-white/[0.06] rounded-full overflow-hidden">
+              <div
+                className="h-full rounded-full bg-emerald-500/70 transition-all"
+                style={{ width: `${Math.min(100, updateJob.percent)}%` }}
+              />
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>

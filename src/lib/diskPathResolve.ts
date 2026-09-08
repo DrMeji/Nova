@@ -43,10 +43,18 @@ function aliasToRootId(word: string): string | null {
   return null;
 }
 
-/** Extract where on disk the user wants a file (Pictures, Desktop\\Projects, DeBloat, …). */
+/** Extract where on disk the user wants a file (Pictures, Desktop\\Projects, named folders, …). */
 export function extractDiskParentHintFromText(text: string): string | undefined {
   const t = String(text || '').trim();
   if (!t) return undefined;
+
+  // "same / this / current project folder" means keep the bound workspace — not Desktop\Projects.
+  if (/\b(?:same|this|current|open|existing)\s+project(?:\s+folder)?\b/i.test(t)) {
+    return undefined;
+  }
+  if (/\b(?:same|this|current)\s+folder\b/i.test(t) && !/\b(?:add|create|write|put)\s+(?:a\s+|the\s+|new\s+)?file\b/i.test(t)) {
+    return undefined;
+  }
 
   const abs = t.match(/\b([A-Za-z]:\\(?:[^\s"'<>|]+\\)*[^\s"'<>|]+)\b/);
   if (abs?.[1] && !/\.[A-Za-z0-9]{1,6}$/i.test(abs[1])) {
@@ -55,7 +63,7 @@ export function extractDiskParentHintFromText(text: string): string | undefined 
 
   if (
     /\b(?:desktop\s+)?projects?\s+folder\b/i.test(t)
-    || (/\bproject\s+folder\b/i.test(t) && !/\b(?:called|named)\s+[A-Za-z]/i.test(t))
+    || (/\bproject\s+folder\b/i.test(t) && !/\b(?:called|named|same|this|current|open|existing)\b/i.test(t))
     || (/\b(?:on|in)\s+(?:my\s+)?desktop\b/i.test(t) && /\bprojects?\b/i.test(t))
   ) {
     return DESKTOP_PROJECTS_PARENT;

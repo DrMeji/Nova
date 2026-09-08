@@ -96,7 +96,10 @@ export function finalizeCodingChatBubble(opts: {
     );
   }
   if (opts.applyError === 'no_edits' || opts.applyError === 'no_changes') {
-    return 'I understood the ask, but nothing was saved to your project files yet. Try again. I will patch the files on disk this time.';
+    return (
+      'I’m having an issue — I can’t provide the change you’re asking for right now.\n\n'
+      + 'No template was substituted. Try one clearer ask, and I’ll apply it to the open project.'
+    );
   }
   if (opts.editMode && /\b(?:here'?s the updated|updated codebase|full (?:source|code) below|copy[- ]paste)\b/i.test(stripped)) {
     return 'I almost pasted source into chat. Ask once more and I will apply the edits on disk only, then show Files Changed.';

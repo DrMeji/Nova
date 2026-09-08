@@ -22,6 +22,16 @@ export function looksLikeProjectDebugAsk(text: string): boolean {
     return false;
   }
   if (/\bwhat\s+did\s+we\s+(?:just\s+)?(?:talk|discuss|cover|say)\b/i.test(t)) return false;
+  // Pure knowledge / explain asks (e.g. "atmosphere error" in a GPS lesson) are not disk debug,
+  // even if they also say "do not create a project".
+  if (
+    /\b(?:explain\s+how|how\s+does|what\s+is|describe\s+how|be\s+thorough)\b/i.test(t)
+    && !/\b(?:my|this|the)\s+(?:app|project|code|site|website|repo)\b/i.test(t)
+    && !parseFolderPathAsk(t)
+    && !extractDiskParentHintFromText(t)
+  ) {
+    return false;
+  }
   if (/\b(?:can you|could you|help me)\s+(?:edit|read|write)\s+files?\b/i.test(t) && !PROBLEM_RE.test(t)) {
     return false;
   }

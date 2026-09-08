@@ -307,27 +307,40 @@ export function OnboardingScreen() {
       const status = await getEngineStatus().catch(() => null);
       const listed = status?.models || [];
       const haveBrain = listed.some((m) => m.id === brainId && m.status === 'ready');
+      // Only count the selected chat brain — do not treat any large Qwen file as "done".
+      const brainToken = brainId.toLowerCase().replace(/_/g, '-');
       const haveWeightsOnDisk = Boolean(
-        status?.modelFiles?.some((f) => f.sizeMb > 50 && (
-          f.file.toLowerCase().includes(brainId.toLowerCase())
-          || f.file.toLowerCase().includes('qwen')
-        )),
+        status?.modelFiles?.some((f) => {
+          const name = String(f.file || '').toLowerCase();
+          if (f.sizeMb <= 50) return false;
+          if (name.includes(brainToken)) return true;
+          // Instruct chat brain GGUF names (not coder).
+          if (brainId === 'qwen25-7b' && /qwen2\.5-7b-instruct/i.test(name) && !/coder/i.test(name)) return true;
+          if (brainId === 'qwen25-15b' && /qwen2\.5-1\.5b/i.test(name)) return true;
+          return false;
+        }),
       );
+
+      const queueOptionalCoder = () => {
+        const coder = hw ? getRecommendedCoderModel(hw) : null;
+        if (!coder || coder.id === brainId) return;
+        const haveCoder = listed.some((m) => m.id === coder.id && m.status === 'ready');
+        if (haveCoder) return;
+        void downloadEngineModel(coder.id).catch(() => undefined);
+      };
 
       if (haveBrain || haveWeightsOnDisk) {
         // Stay on this screen so Play game / Enter NOVA are usable (dev bat often already has weights).
         setProgress(100);
         setFinishReady(true);
         downloadStarted = true;
+        queueOptionalCoder();
         return;
       }
 
       await downloadEngineModel(brainId);
       downloadStarted = true;
-      const coder = hw ? getRecommendedCoderModel(hw) : null;
-      if (coder && coder.id !== brainId) {
-        void downloadEngineModel(coder.id).catch(() => undefined);
-      }
+      queueOptionalCoder();
 
       await new Promise<void>((resolve) => {
         const tick = window.setInterval(async () => {
@@ -966,8 +979,8 @@ export function OnboardingScreen() {
               </div>
               <p className="text-[11px] text-content-tertiary text-center leading-relaxed">
                 {finishReady
-                  ? 'Your local brain is already on this PC. You can play a quick game, then enter NOVA when you’re ready.'
-                  : 'This is a one-time download (~1 GB for the default brain). Stay here until it finishes so Chat has something real to talk to.'}
+                  ? 'Your chat brain is ready — enter NOVA whenever you want. An optional coding model may keep downloading in the background (you’ll see it above your profile).'
+                  : 'This is a one-time download for your chat brain. Stay here until it finishes so Chat has something real to talk to.'}
               </p>
               {!finishError ? (
                 <div className="flex flex-col items-center gap-2">

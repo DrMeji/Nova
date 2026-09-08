@@ -87,10 +87,24 @@ export function looksLikeDeleteProjectAsk(text: string): boolean {
   ) {
     return false;
   }
+  // UI edits: "remove the side panel… edit this project" must never open Delete project.
+  if (
+    /\b(?:remove|delete)\b[\s\S]{0,80}\b(?:panel|sidebar|clutter|hud|ui|section|button|text|header|footer|nav|menu|indicator|label|footer|copyright)\b/i.test(t)
+    && !/\b(?:delete|remove|trash|wipe)\s+(?:the\s+)?(?:entire\s+)?(?:project|folder|workspace|directory)\b/i.test(t)
+  ) {
+    return false;
+  }
+  if (
+    /\bremove\b/i.test(t)
+    && !/\b(?:delete|trash|wipe|get rid of)\b/i.test(t)
+    && !/\bremove\s+(?:the\s+)?(?:entire\s+)?(?:project|folder|workspace|directory)\b/i.test(t)
+  ) {
+    return false;
+  }
   // Require the delete verb to be tied to a project/folder target — not a distant "project" word.
   return (
     /\b(?:delete|remove|trash|wipe|get rid of)\b[\s\S]{0,48}\b(?:project|workspace|repo|repository|folder|directory)\b/i.test(t)
-    || /\b(?:project|workspace|repo|repository|folder|directory)\b[\s\S]{0,32}\b(?:delete|remove|trash|wipe|get rid of)\b/i.test(t)
+    || /\b(?:project|workspace|repo|repository|folder|directory)\b[\s\S]{0,24}\b(?:delete|trash|wipe|get rid of)\b/i.test(t)
   );
 }
 

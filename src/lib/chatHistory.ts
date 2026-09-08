@@ -25,9 +25,10 @@ const MAX_TURN_CHARS = 6_000;
 export const ANSWER_THE_ASK =
   'Answer the user’s latest question or request directly. chat fact, image, code, edit, ideas, or folder focus. '
   + 'Do not substitute a different topic, dump unrelated files, repeat an earlier overview, or invent a “better” answer they did not ask for. '
-  + 'If the latest message has multiple questions, answer EACH one in order with a clear take (short paragraph or bullet per question). '
+  + 'If the latest message has multiple questions, answer EACH one in order with a clear take (a real paragraph or bullets per question — not one-liners). '
   + 'Do not replace a direct ask (timeline, worth-it, yes/no, recommendation) with a generic multi-week project plan unless they asked for a full plan. '
-  + 'For casual chat, opinions, or “what do you think” takes: give your own answer in 2–5 sentences first. Never bounce the same question back. '
+  + 'For casual chat, opinions, or “what do you think” takes: give a thoughtful answer (several clear paragraphs) first. Never bounce the same question back. '
+  + 'Prefer a thorough, accurate reply over a rushed short one. Take the space you need to be clear and correct. '
   + 'When someone describes a real problem (losing track of books, sleep issues, a product idea): acknowledge the problem briefly, then give a concrete resolution or plan. Sound like a sharp collaborator, not a survey. '
   + 'When details are missing for a *recommendation that needs personal facts* (allergies, budget, goal, symptoms, location), ask 2–4 short clarifying questions first — then recommend. '
   + 'If you cannot answer, say so in one clear line. '
@@ -967,7 +968,7 @@ export function usableAssistantText(
   const cleaned = sanitizeAssistantReply(raw, lastUserMessage, previousAssistant);
   if (cleaned.trim()) {
     if (isCannedGreetingReply(cleaned, lastUserMessage)) return '';
-    return cleaned.trim();
+    return stripEmbeddedSystemPrompt(cleaned).trim();
   }
 
   let light = String(raw || '').replace(/\r\n/g, '\n').trim();
@@ -981,10 +982,24 @@ export function usableAssistantText(
     light = light.slice(lastMark.index + lastMark[0].length).trim();
   }
   light = light.replace(/^You are NOVA[\s\S]*?(?:\n\n|User:\s*)/i, '').trim();
+  light = stripEmbeddedSystemPrompt(light);
   light = light.replace(/^>\s*/gm, '').trim();
   if (isCannedGreetingReply(light, lastUserMessage)) return '';
   if (light.length >= 2 && !/^You are NOVA\b/i.test(light)) return light;
   return '';
+}
+
+/** Models sometimes glue the system prompt into the middle of an answer ("The TCPYou are NOVA…"). */
+function stripEmbeddedSystemPrompt(text: string): string {
+  let out = String(text || '');
+  if (!/You are NOVA,/i.test(out)) return out;
+  // Drop from "You are NOVA," through the next double newline or greeting, keep surrounding answer.
+  out = out.replace(
+    /You are NOVA,[\s\S]*?(?:Hello! How can I assist you today\??\s*)?(?=\n\n|[A-Z]|$)/i,
+    '',
+  );
+  out = out.replace(/\s{2,}/g, ' ').replace(/\s+([.!?])/g, '$1').trim();
+  return out;
 }
 
 function firstSentence(text: string) {

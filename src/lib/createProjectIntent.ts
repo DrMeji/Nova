@@ -73,6 +73,9 @@ export function extractProjectName(text: string): string | null {
     // "Create the Ledger Bay project on disk"
     /\bcreate\s+(?:the\s+)?([A-Za-z][A-Za-z0-9][A-Za-z0-9 _-]{1,40}?)\s+project(?:\s+on\s+disk)?\b/i,
     /\bcreate\s+(?:the\s+)?([A-Za-z][A-Za-z0-9][A-Za-z0-9 _-]{1,40}?)\s+on\s+disk\b/i,
+    // "build EmberOak on disk" / "go ahead and build QuietStreak on disk"
+    /\b(?:build|create|scaffold)\s+([A-Z][A-Za-z0-9]{1,40})\s+on\s+disk\b/,
+    /\b(?:build|create|scaffold)\s+([A-Z][A-Za-z0-9]{1,40})\b(?=[\s\S]{0,80}\bon\s+disk\b)/,
     /\bcreate\s+(?:a\s+)?(?:new\s+)?project\s+["“']?([A-Za-z][A-Za-z0-9 _-]{1,40})/i,
     /\bcreate\s+([A-Z][A-Za-z0-9]{1,40})\s*[—–\-:]/,
     /\bcreate\s+([A-Z][A-Za-z0-9]{1,40})\s+as\b/i,
@@ -91,7 +94,7 @@ export function extractProjectName(text: string): string | null {
       raw = raw.replace(/\s+(?:and|with|that|which|where|when|so|for|but|featuring|including|—|–|-)\b.*$/i, '').trim();
       raw = raw.replace(/\s+(?:app|project|website|site|on|for|with)\b.*$/i, '').trim();
       // Reject ultra-generic leftovers from older chats ("My", "New", "App").
-      if (/^(my|new|app|project|the|this|that)$/i.test(raw)) continue;
+      if (/^(my|new|app|project|the|this|that|ok|yeah|cool|sure)$/i.test(raw)) continue;
       if (raw.length >= 2 && raw.length <= 48) return raw;
     }
   }
@@ -269,7 +272,11 @@ export function resolveCreateIntentFromThread(
     };
   }
 
-  if (!looksLikeImplementGo(message) && !/\bcreate\s+it\b/i.test(message) && !/^create\s+project\s+/i.test(message.trim())) {
+  if (!looksLikeImplementGo(message)
+    && !/\bcreate\s+it\b/i.test(message)
+    && !/^create\s+project\s+/i.test(message.trim())
+    && !(looksLikeProjectBuildAsk(message) && /\bon\s+disk\b/i.test(message))
+  ) {
     return null;
   }
 

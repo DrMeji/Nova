@@ -801,8 +801,8 @@ async function generate(message, opts = {}) {
   if (arkGguf.findGgufForModel(ggufId) && arkGguf.findLlamaBinary()) {
     try {
       const onChunk = typeof opts.onChunk === 'function' ? opts.onChunk : null;
-      const timeoutMs = kind === 'coding' ? 300_000 : 240_000;
-      const nPredictMin = kind === 'coding' ? 8192 : 4096;
+      const timeoutMs = kind === 'coding' ? 420_000 : 300_000;
+      const nPredictMin = kind === 'coding' ? 16384 : 8192;
       const requested = typeof opts.nPredict === 'number' && Number.isFinite(opts.nPredict)
         ? opts.nPredict
         : nPredictMin;

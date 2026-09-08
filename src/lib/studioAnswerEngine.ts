@@ -11,7 +11,13 @@ import {
   STUDIO_FIX_ASK_RE,
   STUDIO_WIDER_RE,
 } from '@/lib/chatStudio';
-import { flattenProjectFiles, rankFilesForTurnPack, classifyCodeTurnSize, type ProjectFileMap } from '@/lib/projectCodeEdit';
+import {
+  coerceCodingFileReply,
+  flattenProjectFiles,
+  rankFilesForTurnPack,
+  classifyCodeTurnSize,
+  type ProjectFileMap,
+} from '@/lib/projectCodeEdit';
 import {
   collectProjectFindings,
   describeProjectFromFiles,
@@ -22,6 +28,7 @@ import {
   type InspectFinding,
 } from '@/lib/projectInspect';
 import { looksLikeProjectDebugAsk } from '@/lib/chatProjectDebug';
+import { looksLikeProductCorrectionAsk } from '@/lib/chatBuildIntent';
 import { shouldPreferCloudForCoding, countSourceFiles } from '@/lib/codingCloudPolicy';
 import { estimateTokens } from '@/lib/tokenUsage';
 
@@ -79,8 +86,11 @@ const PACK_BUDGET_CODE = 10_000;
 const PACK_FILE_CHARS = 4_500;
 const PACK_FILE_CHARS_CODE = 2_600;
 const PACK_MAX_FILES_CODE = 12;
-const MODEL_TIMEOUT_MS = 55_000;
-const MODEL_TIMEOUT_CODE_MS = 90_000;
+const MODEL_TIMEOUT_MS = 90_000;
+/** Debug/fix coding turns. */
+const MODEL_TIMEOUT_CODE_MS = 180_000;
+/** Create / full UI rewrite with @@@FILE blocks — local 7B needs real time (1–5+ min). */
+const MODEL_TIMEOUT_BUILD_MS = 420_000;
 
 function cleanAsk(message: string): string {
   return String(message || '')
@@ -108,6 +118,9 @@ export function classifyStudioIntent(
   if (!ask) return 'freeform';
   if (SMALLTALK_RE.test(ask) && ask.length < 24) return 'freeform';
 
+  // Product corrections must rebuild files — never become a Local scan.
+  if (looksLikeProductCorrectionAsk(String(message || ''))) return 'freeform';
+
   if (looksLikeProjectDebugAsk(String(message || ''))) return 'debug';
   if (STUDIO_WIDER_RE.test(ask)) return 'wider';
   if (STUDIO_FIX_ASK_RE.test(ask) || /^(fix|how)\??$/i.test(ask) || /\bfix\s*#?\s*\d+\b/i.test(ask)) {
@@ -120,8 +133,16 @@ export function classifyStudioIntent(
   }
 
   const hasSecurity = /\b(security|securit|vulnerab|xss|injection|secret|secrets|malware|eval\b|exploit|cve)\b/i.test(ask);
+  if (
+    /\b(?:ui|ux|user interface|layout|screen|button|design|looks?)\b/i.test(ask)
+    && /\b(problem|issue|bug|broken|wrong|risk|fix|improve|bad)\b/i.test(ask)
+    && !looksLikeProductCorrectionAsk(String(message || ''))
+  ) {
+    // keep hasUi false for product-type corrections handled above
+  }
   const hasUi = /\b(ui|ux|user interface|layout|screen|button|design|looks?)\b/i.test(ask)
-    && /\b(problem|issue|bug|broken|wrong|risk|fix|improve|bad)\b/i.test(ask);
+    && /\b(problem|issue|bug|broken|wrong|risk|fix|improve|bad)\b/i.test(ask)
+    && !/\b(?:scrap|rebuild|actual\s+game|not\s+what\s+i\s+asked|turn\s+(?:this|it)\s+into)\b/i.test(ask);
   if (hasSecurity && hasUi) return 'security-ui';
   if (hasSecurity) return 'security';
   if (hasUi) return 'ui';
@@ -254,12 +275,27 @@ export function packStudioContext(input: StudioAnswerInput): {
     ? `Optional prior findings from local scan:\n${findings.map(f => `- ${f.path}: ${f.detail}`).join('\n')}`
     : 'Optional prior findings from local scan: (none yet)';
 
+  const wantsFullUiBuild = input.allowFileEdits && (
+    /\b(?:build|create|rewrite|first real ui|@@@file|scaffold|from this brief)\b/i.test(ask)
+    || /\bsrc\/App\.(jsx|tsx)\b/i.test(ask)
+  );
   const fileRule = input.planOnly
     ? 'PLAN ONLY. output a step-by-step plan. No @@@FILE blocks, no file writes. End with: Say "go implement" when you want me to build this.'
     : input.allowFileEdits
       ? handsFreeDebug
         ? 'Hands-free debug: start with 2-4 sentences naming the root cause (file in backticks + why it breaks). Then emit @@@FILE blocks with COMPLETE updated file contents for every file you change. Do not stop at a checklist. Keep edits surgical. After the files, add ONE short sentence on how to verify.'
-        : 'The user wants you to CHANGE THE CODE NOW. Emit @@@FILE blocks with COMPLETE file contents for every file you change. Do not only describe the change. Keep edits surgical. only files that need to change. After the files, add ONE short plain-English sentence (no code fences, no file dumps). Example: "Added the logo centered on screen."'
+        :         wantsFullUiBuild
+          ? [
+            'BUILD THE PRODUCT UI NOW. Do not describe it. Do not summarize the plan.',
+            'Emit @@@FILE blocks with COMPLETE file contents for src/App.jsx (or App.tsx), src/App.css, and src/index.css at minimum.',
+            'Every @@@FILE line must include a path (@@@FILE src/App.jsx). Never emit a bare @@@FILE.',
+            'Prefer a single App.jsx with all sections inline. Do not import missing ./components/* files.',
+            'App.jsx must be a real interactive UI matching the brief — never an empty <div className="app" />, never a single search box, never placeholder "Ask NOVA" copy.',
+            'Take the time needed: aim for a substantial App (roughly 150+ lines / 2500+ characters of real JSX) with multiple sections, real controls, and polished CSS (hundreds of lines of CSS when the brief is a rich site).',
+            'Do not stop early with a minimal form+list stub when the brief asks for a full product or marketing-quality site.',
+            'After the files, add ONE short plain-English sentence only (no code fences).',
+          ].join(' ')
+          : 'The user wants you to CHANGE THE CODE NOW. Emit @@@FILE blocks with COMPLETE file contents for every file you change. Do not only describe the change. Keep edits surgical. only files that need to change. After the files, add ONE short plain-English sentence (no code fences, no file dumps). Example: "Added the logo centered on screen."'
       : 'Do NOT write @@@FILE blocks. Do not dump whole files.';
 
   const system = [
@@ -354,17 +390,34 @@ function localScanAnswer(
   return spoken;
 }
 
+function hasFileEditBlocks(text: string): boolean {
+  const raw = String(text || '');
+  if (/@@@FILE\b/i.test(raw) || /<<<<<<< SEARCH/.test(raw) || /\bPATH:\s*\S+/i.test(raw)) return true;
+  return /@@@FILE\b/i.test(coerceCodingFileReply(raw));
+}
+
+function preferFileBearingText(...candidates: string[]): string {
+  for (const c of candidates) {
+    const coerced = coerceCodingFileReply(String(c || '').trim());
+    if (hasFileEditBlocks(coerced)) return coerced;
+  }
+  return String(candidates.find((c) => String(c || '').trim()) || '').trim();
+}
+
 export async function answerStudio(
   input: StudioAnswerInput,
   onDelta?: (text: string) => void,
 ): Promise<StudioAnswerResult> {
   const ask = cleanAsk(input.userMessage);
-  const intent = classifyStudioIntent(input.userMessage, input.lastIntent);
+  // File-edit / create-UI turns must always hit the model — never Local scan.
+  const intent = input.allowFileEdits
+    ? 'freeform'
+    : classifyStudioIntent(input.userMessage, input.lastIntent);
   const packed = packStudioContext({ ...input, userMessage: ask });
   let findings = packed.findings;
   const packedTokens = packed.packedTokens;
 
-  if (usesLocalScan(intent) && !prefersModel(intent)) {
+  if (!input.allowFileEdits && usesLocalScan(intent) && !prefersModel(intent)) {
     const text = stripStudioMeta(localScanAnswer(intent, input.files, input.projectName, findings, ask));
     return {
       text,
@@ -376,7 +429,7 @@ export async function answerStudio(
     };
   }
 
-  if ((intent === 'fix' || intent === 'recommend') && findings.length) {
+  if (!input.allowFileEdits && (intent === 'fix' || intent === 'recommend') && findings.length) {
     const structured = stripStudioMeta(localScanAnswer(intent, input.files, input.projectName, findings, ask));
     return {
       text: structured,
@@ -388,7 +441,7 @@ export async function answerStudio(
     };
   }
 
-  if (intent === 'overview' || intent === 'file-detail') {
+  if (!input.allowFileEdits && (intent === 'overview' || intent === 'file-detail')) {
     const text = stripStudioMeta(localScanAnswer(intent, input.files, input.projectName, findings, ask));
     return {
       text,
@@ -402,7 +455,9 @@ export async function answerStudio(
 
   if (input.shouldAbort?.()) {
     return {
-      text: stripStudioMeta(localScanAnswer(intent, input.files, input.projectName, findings, ask)),
+      text: input.allowFileEdits
+        ? ''
+        : stripStudioMeta(localScanAnswer(intent, input.files, input.projectName, findings, ask)),
       intent,
       findings,
       meta: 'Local scan \u00b7 attached files',
@@ -420,9 +475,11 @@ export async function answerStudio(
 
   try {
     const routeKind = (input.mode === 'code' || input.allowFileEdits) ? 'coding' : 'chat';
-    const timeoutMs = routeKind === 'coding' && looksLikeProjectDebugAsk(input.userMessage)
-      ? MODEL_TIMEOUT_CODE_MS
-      : MODEL_TIMEOUT_MS;
+    const timeoutMs = input.allowFileEdits
+      ? MODEL_TIMEOUT_BUILD_MS
+      : routeKind === 'coding' && looksLikeProjectDebugAsk(input.userMessage)
+        ? MODEL_TIMEOUT_CODE_MS
+        : MODEL_TIMEOUT_MS;
     const routePromise = arkRoute({
       message: packed.prompt,
       kind: routeKind,
@@ -457,17 +514,32 @@ export async function answerStudio(
     ]);
 
     if (input.shouldAbort?.()) {
+      const partial = stripStudioMeta(streamed);
       return {
-        text: stripStudioMeta(streamed) || stripStudioMeta(localScanAnswer(intent, input.files, input.projectName, findings, ask)),
+        text: input.allowFileEdits
+          ? (hasFileEditBlocks(partial) ? partial : '')
+          : (partial || stripStudioMeta(localScanAnswer(intent, input.files, input.projectName, findings, ask))),
         intent,
         findings,
         meta: 'Local model \u00b7 attached files',
         streamed: Boolean(streamed),
-      packedTokens,
+        packedTokens,
       };
     }
 
     if (!timed.ok) {
+      const partial = stripStudioMeta(streamed);
+      // Never replace a build turn with Local scan — that wipes @@@FILE blocks mid-stream.
+      if (input.allowFileEdits) {
+        return {
+          text: hasFileEditBlocks(partial) ? partial : '',
+          intent,
+          findings,
+          meta: 'Local model \u00b7 timed out',
+          streamed: Boolean(streamed),
+          packedTokens,
+        };
+      }
       const fallback = stripStudioMeta(localScanAnswer(
         intent === 'freeform' ? 'debug' : intent,
         input.files,
@@ -482,14 +554,98 @@ export async function answerStudio(
         findings,
         meta: 'Local scan \u00b7 attached files',
         streamed: false,
-      packedTokens,
+        packedTokens,
       };
     }
 
-    let spoken = stripStudioMeta(String(timed.routed.reply || streamed || '').trim());
+    const routedReply = stripStudioMeta(String(timed.routed.reply || '').trim());
+    const fromStream = stripStudioMeta(streamed);
+    // Prefer whichever still has file blocks — coerce bare App dumps; don't let prose hops win.
+    let spoken = preferFileBearingText(routedReply, fromStream);
     const routerNoModel = /live model connected|install the default local brain|connect free capacity/i.test(spoken);
     const noAccess = routerNoModel || /don'?t have (specific |any )?details|without more context|could you please provide more|i can'?t (see|access|read)|no (access|visibility) to (the )?files|project with the id/i.test(spoken);
     if (noAccess || !spoken || looksLikePromptEcho(spoken)) {
+      const partial = stripStudioMeta(streamed);
+      if (input.allowFileEdits && hasFileEditBlocks(partial || spoken)) {
+        return {
+          text: hasFileEditBlocks(spoken) ? spoken : partial,
+          intent,
+          findings,
+          meta: 'Local model \u00b7 attached files',
+          streamed: Boolean(streamed),
+          packedTokens,
+        };
+      }
+      if (input.allowFileEdits) {
+        // Do not invent Local scan. Keep any non-echo spoken text for the caller to retry.
+        const keep = (!looksLikePromptEcho(spoken) && spoken && !routerNoModel) ? spoken : '';
+        const fromStream = hasFileEditBlocks(partial) ? partial : '';
+        spoken = fromStream || keep;
+        if (!spoken) {
+          // One hard re-ask: file blocks only.
+          const retryPrompt = [
+            'Output ONLY @@@FILE blocks. No preface. No plan. No questions.',
+            'Start with this exact line:',
+            '@@@FILE src/App.jsx',
+            'Then the full React App source. Then @@@FILE src/App.css and @@@FILE src/index.css.',
+            'Build what the user asked for.',
+            '',
+            ask.slice(0, 2500),
+          ].join('\n');
+          try {
+            let retryStream = '';
+            const retryRoute = await arkRoute({
+              message: retryPrompt,
+              kind: 'coding',
+              preferCloudCoding: shouldPreferCloudForCoding({
+                fileCount: countSourceFiles(input.files),
+                message: ask,
+                allowFileEdits: true,
+              }),
+              preferredModelId: input.preferredModelId,
+              preferredModelName: input.preferredModelName,
+              preferredSource: input.preferredSource as 'local' | 'cloud' | 'auto' | undefined,
+              stickyModelId: input.stickyModelId,
+              stickyModelName: input.stickyModelName,
+              stickyPinnedSource: input.stickyPinnedSource as 'local' | 'cloud' | undefined,
+              history: buildRouterHistory([], retryPrompt, undefined, { keepContinuity: false, kind: 'coding' }),
+              onChunk: prefs.streamResponses && onDelta
+                ? (piece) => {
+                  if (input.shouldAbort?.()) return;
+                  retryStream += piece;
+                  const live = stripStudioMeta(retryStream);
+                  if (live.length < 2) return;
+                  onDelta(live);
+                }
+                : undefined,
+            });
+            const retryRouted = stripStudioMeta(String(retryRoute.reply || '').trim());
+            const retryFromStream = stripStudioMeta(retryStream);
+            const retryText = preferFileBearingText(retryRouted, retryFromStream);
+            if (hasFileEditBlocks(retryText)) {
+              return {
+                text: retryText,
+                intent,
+                findings,
+                meta: `${routerProviderLabel(retryRoute, 'Local model')} \u00b7 file retry`,
+                streamed: Boolean(retryStream) || prefs.streamResponses,
+                packedTokens,
+              };
+            }
+            spoken = retryText;
+          } catch {
+            /* keep empty */
+          }
+        }
+        return {
+          text: hasFileEditBlocks(spoken) ? preferFileBearingText(spoken) : '',
+          intent,
+          findings,
+          meta: hasFileEditBlocks(spoken) ? 'Local model \u00b7 attached files' : 'Local model \u00b7 no file blocks',
+          streamed: Boolean(streamed),
+          packedTokens,
+        };
+      }
       if (!findings.length) findings = collectProjectFindings(input.files, 'all');
       spoken = stripStudioMeta(localScanAnswer(
         intent === 'freeform' ? 'debug' : intent,
@@ -504,13 +660,67 @@ export async function answerStudio(
         findings,
         meta: 'Local scan \u00b7 attached files',
         streamed: false,
-      packedTokens,
+        packedTokens,
       };
+    }
+
+    // Build turns that described UI but forgot @@@FILE — one hard re-ask.
+    if (input.allowFileEdits && !hasFileEditBlocks(spoken)) {
+      const retryPrompt = [
+        'Your previous reply had no @@@FILE blocks. Try again.',
+        'Output ONLY @@@FILE blocks. Start with: @@@FILE src/App.jsx',
+        'Then full App source, then @@@FILE src/App.css and @@@FILE src/index.css.',
+        '',
+        ask.slice(0, 2500),
+      ].join('\n');
+      try {
+        let retryStream = '';
+        const retryRoute = await arkRoute({
+          message: retryPrompt,
+          kind: 'coding',
+          preferCloudCoding: shouldPreferCloudForCoding({
+            fileCount: countSourceFiles(input.files),
+            message: ask,
+            allowFileEdits: true,
+          }),
+          preferredModelId: input.preferredModelId,
+          preferredModelName: input.preferredModelName,
+          preferredSource: input.preferredSource as 'local' | 'cloud' | 'auto' | undefined,
+          stickyModelId: input.stickyModelId,
+          stickyModelName: input.stickyModelName,
+          stickyPinnedSource: input.stickyPinnedSource as 'local' | 'cloud' | undefined,
+          history: buildRouterHistory([], retryPrompt, undefined, { keepContinuity: false, kind: 'coding' }),
+          onChunk: prefs.streamResponses && onDelta
+            ? (piece) => {
+              if (input.shouldAbort?.()) return;
+              retryStream += piece;
+              const live = stripStudioMeta(retryStream);
+              if (live.length < 2) return;
+              onDelta(live);
+            }
+            : undefined,
+        });
+        const retryRouted = stripStudioMeta(String(retryRoute.reply || '').trim());
+        const retryFromStream = stripStudioMeta(retryStream);
+        const retryText = preferFileBearingText(retryRouted, retryFromStream);
+        if (hasFileEditBlocks(retryText)) {
+          return {
+            text: retryText,
+            intent,
+            findings,
+            meta: `${routerProviderLabel(retryRoute, 'Local model')} \u00b7 file retry`,
+            streamed: Boolean(retryStream) || prefs.streamResponses,
+            packedTokens,
+          };
+        }
+      } catch {
+        /* keep spoken */
+      }
     }
 
     const label = routerProviderLabel(timed.routed, 'Local model');
     return {
-      text: spoken,
+      text: preferFileBearingText(spoken),
       intent,
       findings: findings.length ? findings : collectProjectFindings(input.files, 'all'),
       meta: `${label} \u00b7 attached files`,
@@ -518,6 +728,17 @@ export async function answerStudio(
       packedTokens,
     };
   } catch {
+    const partial = stripStudioMeta(streamed);
+    if (input.allowFileEdits) {
+      return {
+        text: hasFileEditBlocks(partial) ? partial : '',
+        intent,
+        findings,
+        meta: 'Local model \u00b7 error',
+        streamed: Boolean(streamed),
+        packedTokens,
+      };
+    }
     if (!findings.length) findings = collectProjectFindings(input.files, 'all');
     return {
       text: stripStudioMeta(localScanAnswer(

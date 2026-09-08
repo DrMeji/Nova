@@ -200,7 +200,7 @@ export async function handleAddFileChatRequest(opts: {
   if (!parentPath) {
     return {
       kind: 'reply',
-      text: 'Where should this file go?\n\nSay e.g. *add it to Desktop\\Projects* or *inside DeBloat*. or open a project folder first.',
+      text: 'Where should this file go?\n\nSay e.g. *add it to Desktop\\Projects* or *inside the open project folder*, or open a project folder first.',
     };
   }
 

@@ -7,6 +7,7 @@ import { looksLikeImplementGo, isPlanPrefixedMessage } from '@/lib/chatPlanMode'
 import { looksLikePromptEcho } from '@/lib/chatHistory';
 import { looksLikeConversationalPlanningAsk, wantsPlanningOnly } from '@/lib/chatIdeaIntent';
 import { looksLikeProjectDebugAsk } from '@/lib/chatProjectDebug';
+import { looksLikeInPlaceRebuildAsk, looksLikeProductCorrectionAsk } from '@/lib/chatBuildIntent';
 
 export const NO_WORKSPACE_MSG =
   'No workspace yet. Use **+ → Open folder** or name a folder on your Desktop (turn on access in **Settings → Security**).\n\nIf you want to talk through an app idea first, just keep chatting. say **lets build this** only when you want files on disk.';
@@ -85,10 +86,16 @@ export function looksLikeCodeEditAsk(text: string): boolean {
     && !/\b(?:file|code|component|css|folder|scaffold|project)\b/i.test(t)) {
     return false;
   }
-  if (/\b(?:do\s+not|don't|dont)\s+create\b/i.test(t)) return false;
+  if (/\b(?:do\s+not|don't|dont)\s+create\b/i.test(t) && !/\b(?:new\s+project|sibling)\b/i.test(t)) {
+    // "don't create a new project — rebuild this" still counts as an edit.
+  } else if (/\b(?:do\s+not|don't|dont)\s+create\b/i.test(t)) {
+    return false;
+  }
   if (looksLikeImplementGo(t) || looksLikeBuildStart(t)) return true;
-  if (/\b(?:scrap|rebuild|redo|replace)\b[\s\S]{0,80}\b(?:ui|layout|app|folder|project|screen|page)\b/i.test(t)) return true;
+  if (looksLikeProductCorrectionAsk(t) || looksLikeInPlaceRebuildAsk(t)) return true;
+  if (/\b(?:scrap|rebuild|redo|replace)\b[\s\S]{0,80}\b(?:ui|layout|app|folder|project|screen|page|everything|game|site)\b/i.test(t)) return true;
   if (/\bturn\s+(?:this|it)\s+into\b/i.test(t)) return true;
+  if (/\b(?:not\s+what\s+i\s+(?:asked|wanted)|completely\s+wrong|actual\s+game)\b/i.test(t)) return true;
   if (/\b(title\s*bar|sidebar|note\s*list|main\s+editor|dark\s+theme)\b/i.test(t)) return true;
   if (/\blocalStorage\b/i.test(t) && /\b(add|change|update|persist|save|use|wire|hook)\b/i.test(t)) return true;
   // Explicit disk-apply asks always count as edits (even when phrasing is feature-heavy).
@@ -98,7 +105,24 @@ export function looksLikeCodeEditAsk(text: string): boolean {
   ) {
     return true;
   }
-  if (/\b(drop|remove|delete|get rid of)\b[\s\S]{0,80}\b(page|section|about|button|nav|tab|footer|copyright|line|text|link|icon)\b/i.test(t)) {
+  if (/\b(drop|remove|delete|get rid of)\b[\s\S]{0,80}\b(page|section|about|button|nav|tab|footer|copyright|line|text|link|icon|panel|clutter|sidebar|hud|indicator)\b/i.test(t)) {
+    return true;
+  }
+  if (/\bedit\s+this\s+(?:same\s+)?(?:project|app|game|site|folder)\b/i.test(t)) return true;
+  // Bound-project game tweaks only — not casual chat like “a speed bump every few meals”.
+  if (
+    /\b(?:make\s+(?:the\s+)?(?:player|snake|pac|character)\s+(?:a\s+bit\s+)?faster|bump\s+(?:the\s+)?(?:power[\s-]?pellet|score)|power[\s-]?pellet\s+(?:score\s+)?(?:to\s+)?100)\b/i.test(t)
+  ) {
+    return true;
+  }
+  // Spatial / 3D editor micro-edits (grid, cube button, orbit) on the open project.
+  if (
+    /\b(?:grid|cube|sphere|mesh|orbit|viewport|contrast)\b/i.test(t)
+    && /\b(?:bump|make|add|show|obvious|brighter|stronger|contrast|default)\b/i.test(t)
+  ) {
+    return true;
+  }
+  if (/\bsame\s+project(?:\s+folder)?\b/i.test(t) && /\b(?:bump|make|add|change|update|fix|edit)\b/i.test(t)) {
     return true;
   }
   if (/\bwaitlist\b/i.test(t) || (/\bcontact\b/i.test(t) && /\b(email|form|button)\b/i.test(t) && /\b(keep|only|just|add|change)\b/i.test(t))) {

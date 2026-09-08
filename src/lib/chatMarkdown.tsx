@@ -219,7 +219,7 @@ export function ChatMarkdown({ text }: { text: string }) {
           );
         }
         return (
-          <p key={i} className="whitespace-pre-wrap">
+          <p key={i} className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] min-w-0">
             {renderInline(block.text)}
           </p>
         );

@@ -479,10 +479,24 @@ export function parseFileEdits(reply: string): ParsedFileEdit[] {
   const seen = new Set<string>();
 
   const push = (pathRaw: string, content: string) => {
-    const path = normalizePath(pathRaw);
+    let path = normalizePath(pathRaw);
+    // Bare @@@FILE left the next code line as "path" — treat as App when it looks like source.
+    if (
+      !path
+      || !path.includes('.')
+      || /^(?:import|export|const|function|class|```)/i.test(String(pathRaw || '').trim())
+    ) {
+      const sniff = String(content || pathRaw || '');
+      if (/export\s+default|function\s+App|const\s+App\s*=/i.test(sniff)) path = 'src/App.jsx';
+      else if (/^\s*(?:\/\*|\.|body\s*\{|:root)/i.test(sniff)) path = 'src/App.css';
+      else return;
+    }
     if (!path || !path.includes('.') || path.length > 180) return;
     if (!/^[A-Za-z0-9_./@+-]+$/.test(path)) return;
-    const body = content.replace(/\r\n/g, '\n').replace(/^\n+|\n+$/g, '');
+    let body = scrubLeakedFileMarkers(content.replace(/\r\n/g, '\n').replace(/^\n+|\n+$/g, ''));
+    if (/\.json$/i.test(path) || /(^|\/)package\.json$/i.test(path)) {
+      body = sanitizeJsonFileContent(path, body);
+    }
     if (!body.trim()) return;
     if (seen.has(path)) {
       const idx = found.findIndex(f => f.path === path);
@@ -500,8 +514,8 @@ export function parseFileEdits(reply: string): ParsedFileEdit[] {
     push(m[1], m[2]);
   }
 
-  // @@@FILE path\n content until next @@@FILE or end (no fence)
-  const atFileLoose = /@@@FILE\s+([^\n\r]+)\n([\s\S]*?)(?=\n@@@FILE\s+|$)/gi;
+  // @@@FILE path\n content until next @@@FILE, bare @@@ junk, or end (no fence)
+  const atFileLoose = /@@@FILE\s+([^\n\r]+)\n([\s\S]*?)(?=\n@@@FILE\s+|\n@@@(?:\s|$)|$)/gi;
   while ((m = atFileLoose.exec(text)) !== null) {
     const path = m[1];
     let body = m[2].trim();
@@ -798,77 +812,7 @@ function titleFromAsk(message: string) {
   return inferBuildLabel(message);
 }
 
-function pythonFallback(userMessage: string): string {
-  const title = escapeHtml(titleFromAsk(userMessage)).replace(/&quot;/g, '"');
-  return `# ${title}
-# Local NOVA project. run with: python main.py
-
-def main():
-    print(${JSON.stringify(titleFromAsk(userMessage))})
-
-if __name__ == "__main__":
-    main()
-`;
-}
-
-function reactFallback(userMessage: string): ParsedFileEdit[] {
-  const title = titleFromAsk(userMessage);
-  return [
-    {
-      path: 'index.html',
-      content: `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>${escapeHtml(title)}</title>
-  <link rel="stylesheet" href="src/index.css" />
-</head>
-<body>
-  <div id="root"></div>
-  <script type="module" src="src/main.tsx"></script>
-</body>
-</html>`,
-    },
-    {
-      path: 'src/index.css',
-      content: `* { box-sizing: border-box; }
-body { margin: 0; font-family: system-ui, sans-serif; background: #0f172a; color: #e2e8f0; }
-#root { min-height: 100vh; display: grid; place-items: center; padding: 24px; }
-.card { background: #1e293b; border-radius: 16px; padding: 28px; max-width: 420px; }
-button { border: 0; border-radius: 10px; padding: 10px 16px; background: #6366f1; color: #fff; font-weight: 600; cursor: pointer; }
-`,
-    },
-    {
-      path: 'src/App.tsx',
-      content: `export default function App() {
-  return (
-    <div className="card">
-      <h1>${title.replace(/\\/g, '\\\\').replace(/`/g, '\\`')}</h1>
-      <p>Ask NOVA to change this React app.</p>
-    </div>
-  );
-}
-`,
-    },
-    {
-      path: 'src/main.tsx',
-      content: `import React from 'react';
-import { createRoot } from 'react-dom/client';
-import App from './App';
-import './index.css';
-
-createRoot(document.getElementById('root')!).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>,
-);
-`,
-    },
-  ];
-}
-
-/** Offline fallback when the brain times out or returns no file blocks. */
+/** Only patch an existing tree. Never invent Hello World / stock React / landings. */
 export function scaffoldFallbackEdits(
   userMessage: string,
   files?: ProjectFileMap,
@@ -888,138 +832,24 @@ export function scaffoldFallbackEdits(
   const hasHtml = Object.keys(flat).some(p => /\.html?$/i.test(p));
   const hasReactApp = Object.keys(flat).some(p => /(^|\/)App\.(jsx|tsx)$/i.test(p));
 
-  // Vite / React projects: deterministic logo/layout patches (scoped by project name).
   if (hasReactApp && files) {
     const react = reactUiMicroAskEdits(flat, userMessage, { projectName: opts?.projectName });
     if (react.length) return react;
   }
 
-  // Existing project: micro-asks first (bg, search bar, rename…), then layout, then color.
   if (hasHtml) {
     const micro = webMicroAskEdits(flat, userMessage);
     if (micro.length) return micro;
-    const layout = webUiLayoutPatchEdits(flat, userMessage);
-    if (layout.length) return layout;
     const visual = simpleVisualPatchEdits(flat, userMessage);
     if (visual.length) return visual;
   }
 
-  // Never inject canned landings / stock heroes when the model wrote nothing.
-  // Empty shells come from create; fresh UI must come from a real model reply.
   return [];
 }
 
-/**
- * Local patch for “center title + top-right search/profile icons” when the model fails.
- * Rewrites the three web files as a coherent page so preview does not go blank.
- */
-export function webUiLayoutPatchEdits(files: ProjectFileMap, userMessage: string): ParsedFileEdit[] {
-  const t = String(userMessage || '');
-  const wantsIcons = /\b(search|profile|account)\b/i.test(t) && /\b(icon|button|top|corner|right)\b/i.test(t);
-  const wantsCenter = /\b(center|middle|centred|centered)\b/i.test(t);
-  if (!wantsIcons && !wantsCenter) return [];
-
-  const flat = flattenProjectFiles(files);
-  const htmlPath = Object.keys(flat).find(p => /(^|\/)index\.html$/i.test(p))
-    || Object.keys(flat).find(p => /\.html?$/i.test(p));
-  if (!htmlPath) return [];
-  const cssPath = Object.keys(flat).find(p => /(^|\/)(styles?|index)\.css$/i.test(p)) || 'css/styles.css';
-  const jsPath = Object.keys(flat).find(p => /(^|\/)app\.js$/i.test(p)) || 'js/app.js';
-
-  // Preserve background/color hints from current CSS when possible.
-  const prevCss = flat[cssPath] || '';
-  const bg = prevCss.match(/body\s*\{[^}]*background(?:-color)?\s*:\s*([^;]+)/i)?.[1]?.trim() || '#0b1220';
-  const fg = prevCss.match(/body\s*\{[^}]*\bcolor\s*:\s*([^;]+)/i)?.[1]?.trim() || '#e8eefc';
-  const titleMatch = (flat[htmlPath] || '').match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
-  const heading = (titleMatch?.[1] || 'Hello World').replace(/<[^>]+>/g, '').trim() || 'Hello World';
-
-  const html = `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>${escapeHtml(heading)}</title>
-  <link rel="stylesheet" href="css/styles.css" />
-</head>
-<body>
-  <header class="top-bar" aria-label="Toolbar">
-    <button type="button" class="icon-btn" id="btn-search" title="Search" aria-label="Search">
-      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-        <circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>
-      </svg>
-    </button>
-    <button type="button" class="icon-btn" id="btn-profile" title="Account" aria-label="Account">
-      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-        <circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 4-6 8-6s8 2 8 6"/>
-      </svg>
-    </button>
-  </header>
-  <main class="page">
-    <h1>${escapeHtml(heading)}</h1>
-  </main>
-  <script src="js/app.js"></script>
-</body>
-</html>
-`;
-
-  const css = `* { box-sizing: border-box; }
-html, body {
-  margin: 0;
-  min-height: 100%;
-  font-family: system-ui, -apple-system, Segoe UI, sans-serif;
-  background: ${bg};
-  color: ${fg};
-}
-.top-bar {
-  position: fixed;
-  top: 1rem;
-  right: 1rem;
-  z-index: 10;
-  display: flex;
-  gap: 0.5rem;
-  align-items: center;
-}
-.icon-btn {
-  width: 2.5rem;
-  height: 2.5rem;
-  border-radius: 999px;
-  border: 1px solid rgba(255,255,255,0.18);
-  background: rgba(255,255,255,0.06);
-  color: inherit;
-  display: grid;
-  place-items: center;
-  cursor: pointer;
-}
-.icon-btn:hover { background: rgba(255,255,255,0.12); }
-.page {
-  min-height: 100vh;
-  display: grid;
-  place-items: center;
-  padding: 2rem;
-  text-align: center;
-}
-h1 {
-  margin: 0;
-  font-size: clamp(2rem, 5vw, 3rem);
-  font-weight: 700;
-  letter-spacing: -0.02em;
-}
-`;
-
-  const js = `document.documentElement.dataset.arkReady = '1';
-document.getElementById('btn-search')?.addEventListener('click', () => {
-  window.alert('Search');
-});
-document.getElementById('btn-profile')?.addEventListener('click', () => {
-  window.alert('Account');
-});
-`;
-
-  return [
-    { path: htmlPath.includes('/') ? htmlPath : 'index.html', content: html },
-    { path: cssPath.includes('/') ? cssPath : 'css/styles.css', content: css },
-    { path: jsPath.includes('/') ? jsPath : 'js/app.js', content: js },
-  ];
+/** Removed: never rewrite pages into Hello World / icon-bar shells. */
+export function webUiLayoutPatchEdits(_files: ProjectFileMap, _userMessage: string): ParsedFileEdit[] {
+  return [];
 }
 
 /** True when the user asked Code to build or change files (not just explain). */
@@ -1045,72 +875,9 @@ export function wantsProjectFileEdits(message: string): boolean {
   return false;
 }
 
-/** Static HTML/CSS/JS starter. Start preview works with no npm. */
-export function webScaffoldFallbackEdits(userMessage: string): ParsedFileEdit[] {
-  const title = titleFromAsk(userMessage);
-  const hello = /\bhello\s*world\b/i.test(userMessage);
-  const heading = hello ? 'Hello World' : title;
-  const safeHeading = escapeHtml(heading);
-  const safeTitle = escapeHtml(title);
-  return [
-    {
-      path: 'index.html',
-      content: `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>${safeTitle}</title>
-  <link rel="stylesheet" href="css/styles.css" />
-</head>
-<body>
-  <main class="page">
-    <h1>${safeHeading}</h1>
-    <p class="tagline">Built in NOVA Code. press Start to preview, then ask for changes.</p>
-  </main>
-  <script src="js/app.js"></script>
-</body>
-</html>
-`,
-    },
-    {
-      path: 'css/styles.css',
-      content: `* { box-sizing: border-box; }
-html, body {
-  margin: 0;
-  min-height: 100%;
-  font-family: system-ui, -apple-system, Segoe UI, sans-serif;
-  background: #0b1220;
-  color: #e8eefc;
-}
-.page {
-  min-height: 100vh;
-  display: grid;
-  place-items: center;
-  padding: 2rem;
-  text-align: center;
-}
-h1 {
-  margin: 0 0 0.75rem;
-  font-size: clamp(2rem, 5vw, 3rem);
-  font-weight: 700;
-  letter-spacing: -0.02em;
-}
-.tagline {
-  margin: 0;
-  max-width: 28rem;
-  color: #9db0d0;
-  line-height: 1.5;
-}
-`,
-    },
-    {
-      path: 'js/app.js',
-      content: `// ${heading.replace(/\\/g, '\\\\').replace(/`/g, '\\`')}
-document.documentElement.dataset.arkReady = '1';
-`,
-    },
-  ];
+/** Removed: never invent a Hello World static site when the model blanks. */
+export function webScaffoldFallbackEdits(_userMessage: string): ParsedFileEdit[] {
+  return [];
 }
 
 /** Inline linked CSS/JS so the Start tab works from local files. */
@@ -1227,16 +994,169 @@ export function parseClosedFileEdits(reply: string): ParsedFileEdit[] {
 export function codingPromptWantsFiles(userMessage: string): boolean {
   const t = String(userMessage || '');
   if (/Do NOT write @@@FILE/i.test(t)) return false;
-  return /@@@FILE\s+path/i.test(t);
+  if (/@@@FILE\b/i.test(t)) return true;
+  if (/\b(?:emit|write|output)\b[\s\S]{0,40}\b(?:@@@FILE|file blocks?|complete file contents)\b/i.test(t)) return true;
+  if (/\b(?:build|rewrite|create)\b[\s\S]{0,80}\b(?:src\/App\.|first real ui|product ui)\b/i.test(t)) return true;
+  return /SEARCH\/REPLACE|<<<<<<< SEARCH/i.test(t);
+}
+
+function looksLikeFullUiBuildAsk(userMessage: string): boolean {
+  return /\b(?:first real ui|from this brief|Emit COMPLETE @@@FILE|Build the first real UI|RETRY:.*unusable UI|product UI matching|rich|multi-?section|landing|marketing site|fully built)\b/i.test(
+    String(userMessage || ''),
+  );
+}
+
+/** Too thin for a create/product UI pass — keep generating / failover instead of shipping a stub. */
+export function isThinProductUiSource(
+  appSource: string | undefined | null,
+  briefOrAsk?: string,
+): boolean {
+  const s = String(appSource || '');
+  const ask = String(briefOrAsk || '');
+  const tags = s.match(/<[A-Za-z][\w.-]*/g) || [];
+  // Exact / minimal visual specs (black screen + icon, etc.) are intentionally small.
+  if (
+    /\b(?:exact(?:ly)?|precisely|follow precisely|nothing else|no other|pure black|#000000|centered icon|only\s+(?:this|these)\s+requirements)\b/i.test(ask)
+  ) {
+    return s.length < 160 || tags.length < 2;
+  }
+  const richBrief = /\b(?:landing|marketing|museum|store|shop|portfolio|animation|hero|multi-?section|fully built|premium|cinematic|gallery|editorial)\b/i.test(ask)
+    || /\b(?:first real ui|from this brief|product UI matching)\b/i.test(ask);
+  if (!richBrief) {
+    // Simple tools/trackers: only reject truly tiny shells.
+    return s.length < 1200 || tags.length < 12;
+  }
+  if (s.length < 2200) return true;
+  if (tags.length < 28) return true;
+  const sections = (s.match(/\b(?:header|nav|footer|section|aside|main|hero)\b/gi) || []).length
+    + (s.match(/className=["'][^"']+/g) || []).length;
+  if (s.length < 3500 && sections < 10) return true;
+  return false;
+}
+
+/**
+ * Local models often dump App.jsx / CSS without @@@FILE markers.
+ * Wrap salvageable dumps so apply + incomplete checks can use them.
+ */
+export function coerceCodingFileReply(reply: string): string {
+  let text = String(reply || '').trim();
+  if (!text) return text;
+
+  // Drop leading chatty greeting before file blocks (models often prepend it).
+  text = text.replace(
+    /^(?:Hello!?\s+How can I assist you today\??\s*)+/i,
+    '',
+  ).trim();
+  // Drop echoed system prompt if the model still emitted file blocks after it.
+  if (/@@@FILE\b/i.test(text) && /You are NOVA,/i.test(text)) {
+    const fileAt = text.search(/@@@FILE\b/i);
+    if (fileAt > 0) text = text.slice(fileAt).trim();
+  }
+  // Models sometimes put the marker inside a markdown comment/fence header.
+  text = text.replace(/\/\/\s*@@@FILE\b/gi, '@@@FILE');
+  text = text.replace(/<!--\s*@@@FILE\b/gi, '@@@FILE');
+  // Close an open fence before the next @@@FILE (exact UI dumps often omit ```).
+  text = text.replace(/(^|\n)@@@FILE\b/g, (full, lead, offset) => {
+    if (offset === 0) return full;
+    const before = text.slice(0, offset);
+    const opens = (before.match(/```/g) || []).length;
+    if (opens % 2 === 1) return `${lead}\`\`\`\n@@@FILE`;
+    return full;
+  });
+
+  // Models often emit "@@@FILE" with no path before a fence or import dump.
+  text = text.replace(
+    /@@@FILE\s*(?:\r?\n)+(?=\s*(?:```|import\s|export\s|\/\*|\/\/))/gi,
+    '@@@FILE src/App.jsx\n',
+  );
+  text = text.replace(
+    /@@@FILE\s+(?:```[\w.+-]*|jsx|tsx|javascript|css)\s*\r?\n/gi,
+    '@@@FILE src/App.jsx\n',
+  );
+
+  const parsed = parseFileEdits(text);
+  // Exact/minimal UIs (black screen + icon) are often 180–350 chars — still usable.
+  const hasUsableApp = parsed.some(
+    (e) => /(?:^|\/)App\.(jsx|tsx)$/i.test(e.path) && String(e.content || '').length >= 160,
+  );
+  if (hasUsableApp) return text;
+
+  const blocks: string[] = [];
+  const takeFence = (re: RegExp, path: string) => {
+    const m = re.exec(text);
+    if (!m?.[1]?.trim()) return;
+    const body = m[1].replace(/\r\n/g, '\n').trim();
+    if (body.length < 40) return;
+    blocks.push(`@@@FILE ${path}\n\`\`\`\n${body}\n\`\`\``);
+  };
+
+  takeFence(/```(?:jsx|tsx|javascript|js)\s*\n([\s\S]*?)```/i, 'src/App.jsx');
+  takeFence(/```css\s*\n([\s\S]*?)```/i, 'src/App.css');
+
+  if (!blocks.some((b) => /@@@FILE src\/App\.jsx/i.test(b))) {
+    const appMatch = text.match(
+      /((?:import\s+[^;]+;\s*)*)(?:export\s+default\s+function\s+App\s*\(|(?:const|let|var)\s+App\s*=\s*(?:async\s*)?\(|function\s+App\s*\()([\s\S]+)/i,
+    );
+    if (appMatch && appMatch[0].length >= 160) {
+      let body = appMatch[0].trim();
+      if (!/^import\s/i.test(body) && !/export\s+default/i.test(body)) {
+        body = `import './App.css';\n${body}`;
+      }
+      if (!/export\s+default\s+App\b/i.test(body) && /(?:const|let|var)\s+App\s*=/.test(body)) {
+        body = `${body}\nexport default App;`;
+      }
+      blocks.unshift(`@@@FILE src/App.jsx\n\`\`\`\n${body}\n\`\`\``);
+    }
+  }
+
+  // Also salvage a CSS dump that never got a path.
+  if (!blocks.some((b) => /@@@FILE src\/App\.css/i.test(b))) {
+    const cssMatch = text.match(/(?:^|\n)((?:\.|\#|body|html|:root)[^{]*\{[\s\S]{200,})/);
+    if (cssMatch?.[1]) {
+      blocks.push(`@@@FILE src/App.css\n\`\`\`\n${cssMatch[1].trim()}\n\`\`\``);
+    }
+  }
+
+  if (!blocks.length) return text;
+  return `${blocks.join('\n\n')}\n`;
 }
 
 /** Local/cloud coding reply that asked for files but never closed them. */
 export function codingOutputIncomplete(reply: string, userMessage: string): boolean {
-  const text = String(reply || '');
-  if (replyHasUnclosedFileBlock(text)) return true;
+  const raw = String(reply || '');
+  const coerced = coerceCodingFileReply(raw);
+  // Raw unclosed @@@FILE still counts as incomplete (even if coerce can't help).
+  if (/@@@FILE\b/i.test(raw) && replyHasUnclosedFileBlock(raw)) return true;
   if (!codingPromptWantsFiles(userMessage)) return false;
-  if (parseClosedFileEdits(text).length > 0) return false;
-  const html = extractStreamingHtml(text);
+  const closed = parseClosedFileEdits(coerced);
+  if (closed.length > 0) {
+    if (looksLikeFullUiBuildAsk(userMessage)) {
+      const app = closed.find((e) => /(?:^|\/)App\.(jsx|tsx)$/i.test(e.path));
+      if (app) {
+        const s = app.content || '';
+        const exactMinimal = /\b(?:exact(?:ly)?|precisely|follow precisely|pure black|#000000|centered icon|nothing else|no other)\b/i.test(
+          String(userMessage || ''),
+        );
+        // Reject empty/search stubs at the router — thin-but-real UIs are retried in create flow.
+        // Exact visual specs are intentionally short (often <400 chars).
+        if (s.length < (exactMinimal ? 160 : 400)) return true;
+        if (/placeholder=["']Search/i.test(s) && (s.match(/<[A-Za-z]/g) || []).length < 12) return true;
+        if (/return\s*\(\s*<div\s+className=["']app["']\s*\/>\s*\)/i.test(s)) return true;
+        // Split-component scaffolds without companion @@@FILE blocks break Preview.
+        if (/from\s+['"]\.\/components\//i.test(s)) {
+          const needed = [...s.matchAll(/from\s+['"](\.\/components\/[^'"]+)['"]/gi)].map((m) => m[1]);
+          const emitted = closed.map((e) => e.path.replace(/\\/g, '/'));
+          const missing = needed.some((rel) => {
+            const base = rel.replace(/^\.\//, '');
+            return !emitted.some((p) => p === base || p.endsWith(`/${base}`) || p.includes(base.replace(/^components\//, 'components/')));
+          });
+          if (missing) return true;
+        }
+      }
+    }
+    return false;
+  }
+  const html = extractStreamingHtml(coerced);
   if (html && fileContentLooksComplete('index.html', html)) return false;
   return true;
 }
@@ -1335,9 +1255,74 @@ function looksLikeCodeDump(text: string): boolean {
   return false;
 }
 
+/** Strip leftover @@@FILE markers / fence junk the model appends after a file body. */
+export function scrubLeakedFileMarkers(content: string): string {
+  let body = String(content || '');
+  const nextFile = body.search(/\n@@@FILE\s+\S/i);
+  if (nextFile >= 0) body = body.slice(0, nextFile);
+  body = body.replace(/\n@@@[\s\S]*$/g, '');
+  body = body.replace(/\s*@@@\s*$/g, '');
+  body = body.replace(/\n```\s*$/g, '');
+  return body.trimEnd();
+}
+
+/** Repair / reject corrupt JSON bodies (especially package.json). */
+export function sanitizeJsonFileContent(path: string, content: string): string {
+  let body = scrubLeakedFileMarkers(content).trim();
+  if (!body) return body;
+  try {
+    return `${JSON.stringify(JSON.parse(body), null, 2)}\n`;
+  } catch {
+    const start = body.search(/[\{\[]/);
+    if (start < 0) return '';
+    let depth = 0;
+    let end = -1;
+    let inStr = false;
+    let esc = false;
+    for (let i = start; i < body.length; i += 1) {
+      const ch = body[i];
+      if (inStr) {
+        if (esc) {
+          esc = false;
+          continue;
+        }
+        if (ch === '\\') {
+          esc = true;
+          continue;
+        }
+        if (ch === '"') inStr = false;
+        continue;
+      }
+      if (ch === '"') {
+        inStr = true;
+        continue;
+      }
+      if (ch === '{' || ch === '[') depth += 1;
+      else if (ch === '}' || ch === ']') {
+        depth -= 1;
+        if (depth === 0) {
+          end = i;
+          break;
+        }
+      }
+    }
+    if (end < 0) return '';
+    const sliced = body.slice(start, end + 1);
+    try {
+      return `${JSON.stringify(JSON.parse(sliced), null, 2)}\n`;
+    } catch {
+      console.warn('[NOVA] dropping invalid JSON write', path);
+      return '';
+    }
+  }
+}
+
 /** Remove chat-style “Summary:” blobs the model sometimes writes into the page. */
 export function sanitizeAppliedWebContent(path: string, content: string): string {
-  let body = String(content || '');
+  let body = scrubLeakedFileMarkers(content);
+  if (/\.json$/i.test(path) || /(^|\/)package\.json$/i.test(path)) {
+    return sanitizeJsonFileContent(path, body);
+  }
   if (/\.html?$/i.test(path)) {
     body = body.replace(/<p[^>]*>\s*Summary:\s*[\s\S]*?<\/p>/gi, '');
     body = body.replace(/Summary:\s*The text[\s\S]{0,500}/gi, '');
@@ -1345,7 +1330,6 @@ export function sanitizeAppliedWebContent(path: string, content: string): string
   }
   if (/\.css$/i.test(path)) {
     body = body.replace(/\/\*\s*Summary:[\s\S]*?\*\//gi, '');
-    // Dark background + dark text → force readable foreground
     const darkBg = /body\s*\{[^}]*(?:background(?:-color)?\s*:\s*(?:#0|#1|#2|black)|background(?:-color)?\s*:\s*rgb\(\s*0)/i.test(body);
     const darkText = /(?:body|h1)\s*\{[^}]*\bcolor\s*:\s*(?:#0|#1|#2|#3|black)/i.test(body);
     if (darkBg && darkText) {
@@ -1420,8 +1404,8 @@ export function applyFileEdits(
       ?? files[base]
       ?? '';
     const next = sanitizeAppliedWebContent(path, edit.content);
-
-    // Multiset line diff so replace/edit shows both + and − (not net line count only).
+    // Don't clobber a good on-disk file with empty/corrupt sanitized output.
+    if (!String(next || '').trim()) continue;
     const beforeLines = String(prev || '').split('\n');
     const afterLines = String(next || '').split('\n');
     const beforeCounts = new Map<string, number>();

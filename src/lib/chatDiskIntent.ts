@@ -14,6 +14,8 @@ import {
   extractDiskParentHintFromText,
 } from './diskPathResolve';
 import { isProjectCreateBrief } from './chatCreateBrief';
+import { looksLikeInPlaceRebuildAsk } from './chatBuildIntent';
+import { looksLikeCodeEditAsk } from './chatAgentTurn';
 
 export { DESKTOP_PROJECTS_PARENT } from './diskPathResolve';
 
@@ -146,10 +148,22 @@ function looksLikeDeleteProjectAsk(text: string): boolean {
   const t = String(text || '').trim();
   if (!DELETE_RE.test(t)) return false;
   if (looksLikeDeleteFileAsk(t)) return false;
+  // UI edits in a bound workspace: "remove the panel… edit this project" is NOT folder delete.
+  if (
+    /\b(?:remove|delete)\b[\s\S]{0,80}\b(?:panel|sidebar|clutter|hud|ui|section|button|text|header|footer|nav|menu|indicator|label)\b/i.test(t)
+    && !/\b(?:delete|remove|trash|wipe)\s+(?:the\s+)?(?:entire\s+)?(?:project|folder|workspace|directory)\b/i.test(t)
+  ) {
+    return false;
+  }
+  // "remove" alone near the word "project" (e.g. edit this project / remove a panel) is not delete-folder.
+  if (/\bremove\b/i.test(t) && !/\b(?:delete|trash|wipe|get rid of)\b/i.test(t)
+    && !/\bremove\s+(?:the\s+)?(?:entire\s+)?(?:project|folder|workspace|directory)\b/i.test(t)) {
+    return false;
+  }
+  // Require the delete verb to be close to a project/folder target.
   return (
-    /\b(projects?|workspaces?|repos?|repositories)\b/i.test(t)
-    || (/\b(folders?|directories)\b/i.test(t) && /\b(named|called|project)\b/i.test(t))
-    || /\bdelete\s+(?:the\s+)?(?:project|workspace|folder|directory)\b/i.test(t)
+    /\b(?:delete|remove|trash|wipe|get rid of)\b[\s\S]{0,48}\b(?:project|workspace|repo|repository|folder|directory)\b/i.test(t)
+    || /\b(?:project|workspace|repo|repository|folder|directory)\b[\s\S]{0,24}\b(?:delete|trash|wipe|get rid of)\b/i.test(t)
   );
 }
 
@@ -305,6 +319,14 @@ export function extractAddFileParentHint(text: string): string | undefined {
 export function looksLikeAddFileDestinationClarify(text: string): boolean {
   const t = String(text || '').trim();
   if (!t) return false;
+  // Same-chat scrap/rebuild is not "where should this file go?"
+  if (looksLikeInPlaceRebuildAsk(t)) return false;
+  // Bound-project UI edits ("same project folder", bump contrast, add cube…) are never file destinations.
+  if (looksLikeCodeEditAsk(t)) return false;
+  if (/\b(?:same|this|current|open|existing)\s+project(?:\s+folder)?\b/i.test(t)) return false;
+  if (/\b(?:same|this|current)\s+folder\b/i.test(t) && !/\b(?:add|create|write|put)\s+(?:a\s+|the\s+|new\s+)?file\b/i.test(t)) {
+    return false;
+  }
   // UI / layout asks that mention "desktop" are not file destinations.
   if (/\b(?:into|to)\s+(?:a\s+|the\s+)?desktop\s+(?:app|application|layout|window|ui)\b/i.test(t)) {
     return false;
@@ -321,7 +343,11 @@ export function looksLikeAddFileDestinationClarify(text: string): boolean {
   if (/\b(?:in|into|inside|to)\s+(?:the\s+)?(?:my\s+)?(pictures?|photos?|desktop|documents?|downloads?)\b/i.test(t)) {
     return true;
   }
-  if (/\bproject\s+folder\b/i.test(t) && !/\b(?:what|list|show|tell|which|delete|remove)\b/i.test(t)) {
+  // Bare "project folder" as a destination (not "same/this project folder", not rebuild guards).
+  if (
+    /\bproject\s+folder\b/i.test(t)
+    && !/\b(?:same|this|current|open|existing|what|list|show|tell|which|delete|remove|do\s+not|don't|dont|never|scrap|rebuild|redo)\b/i.test(t)
+  ) {
     return true;
   }
   return false;
@@ -399,6 +425,10 @@ export function classifyDiskIntent(
 ): DiskIntent {
   const t = String(message || '').trim();
   if (isProjectCreateBrief(t)) return { type: 'none' };
+  // Bound-workspace scrap/rebuild must never become add_file / delete_project.
+  if (looksLikeInPlaceRebuildAsk(t)) return { type: 'none' };
+  // UI/code edits on the open project are never "create a loose file on Desktop".
+  if (looksLikeCodeEditAsk(t) && !looksLikeAddFileAsk(t)) return { type: 'none' };
   const recent = opts?.recentUserMessages || [];
   const pendingAddFile = opts?.pendingAddFile || null;
   const stickyDiskTarget = opts?.stickyDiskTarget || null;

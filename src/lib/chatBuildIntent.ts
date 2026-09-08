@@ -2,10 +2,45 @@
  * High-priority intent: user wants to CREATE / BUILD an app. never list Desktop folders.
  */
 
-/** Scrap/rebuild the open (or named) folder in place. never spin up a sibling project. */
+/** Same-chat “you built the wrong thing — rebuild as X” (bound workspace). */
+export function looksLikeProductCorrectionAsk(text: string): boolean {
+  const t = String(text || '').trim();
+  if (!t || t.length < 12) return false;
+
+  // Explicit scrap / start over / rebuild as…
+  if (
+    /\b(?:scrap|scratch|trash|throw\s+away|delete|wipe)\b[\s\S]{0,60}\b(?:everything|it|this|all|the\s+(?:ui|app|site|page|project|files?))\b/i.test(t)
+    || /\b(?:start\s+over|from\s+scratch|redo\s+(?:everything|it|this)|rebuild\s+(?:everything|it|this|as|from))\b/i.test(t)
+    || /\b(?:replace\s+(?:the\s+)?(?:entire|whole|all)|completely\s+wrong|totally\s+wrong)\b/i.test(t)
+  ) {
+    return true;
+  }
+
+  // “Not what I asked / wrong product type”
+  if (
+    /\b(?:not\s+what\s+i\s+(?:asked|wanted|meant)|that(?:'s| is)\s+not\s+what\s+i\s+(?:asked|wanted)|wrong\s+(?:app|site|game|product|build|thing|ui|page|website))\b/i.test(t)
+    || /\bi\s+asked\s+for\s+(?:a|an)\b/i.test(t) && /\b(?:not\s+a|instead\s+of|not\s+an?)\b/i.test(t)
+    || /\byou\s+(?:built|made|created)\b[\s\S]{0,80}\b(?:wrong|instead|marketing|landing|website)\b/i.test(t)
+  ) {
+    return true;
+  }
+
+  // “Turn this into / rebuild as / instead make…”
+  if (
+    /\b(?:turn\s+(?:this|it)\s+into|rebuild\s+as|make\s+it\s+(?:a|an)|instead\s+(?:make|build|create)|i\s+need\s+(?:an?\s+)?actual)\b/i.test(t)
+    && /\b(?:game|app|site|website|store|shop|bracelet|product|canvas|playable|landing|dashboard)\b/i.test(t)
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+/** Scrap/rebuild the open folder in place. never spin up a sibling project. */
 export function looksLikeInPlaceRebuildAsk(text: string): boolean {
   const t = String(text || '').trim();
   if (!t) return false;
+  if (looksLikeProductCorrectionAsk(t)) return true;
   if (!/\b(?:scrap|rebuild|redo|replace|start\s+over)\b/i.test(t)) return false;
   return (
     /\b(?:same\s+folder|this\s+folder|this\s+project|this\s+same\s+folder|in\s+place|current\s+ui|keep\s+the\s+same(?:\s+project)?\s+folder)\b/i.test(t)
@@ -28,6 +63,9 @@ export function looksLikeProjectBuildAsk(text: string): boolean {
   // Explicit create / scaffold
   if (/\bcreate\s+(?:a\s+)?(?:new\s+)?project\b/i.test(t)) return true;
   if (/\bcreate\s+(?:a\s+)?(?:new\s+)?(?:website|site|web\s*app|app|application)\b/i.test(t)) return true;
+  // "build QuietStreak as a real app on disk"
+  if (/\bbuild\s+[A-Z][A-Za-z0-9_-]{2,40}\b/i.test(t) && /\b(?:on\s+disk|open\s+preview|as\s+a\s+real)\b/i.test(t)) return true;
+  if (/\bnew\s+project\s+[A-Z][A-Za-z0-9_-]{2,40}\b/i.test(t) && /\b(?:on\s+disk|build|create)\b/i.test(t)) return true;
   // "Create a React + Vite app named <Name>". words between create and app are OK.
   if (/\bcreate\s+(?:a\s+)?(?:new\s+)?[\s\S]{0,120}?\b(?:app|application|website|site|project)\b/i.test(t)) return true;
   if (/\b(?:react|vite)\b/i.test(t) && /\b(?:create|build|named|called)\b/i.test(t)) return true;

@@ -92,7 +92,7 @@ export function GeneratingPlaceholder({
           <span className="ark-status-dot ark-status-dot-2" />
           <span className="ark-status-dot ark-status-dot-3" />
         </span>
-        <span className="text-content-secondary text-xs font-medium tracking-wide">{shown}</span>
+        <span className="min-w-0 flex-1 text-content-secondary text-xs font-medium tracking-wide break-words [overflow-wrap:anywhere]">{shown}</span>
       </div>
     );
   }

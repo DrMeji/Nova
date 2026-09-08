@@ -236,10 +236,13 @@ function githubHttpHint(status) {
   if (status === 404) {
     return ` GitHub returned 404 for ${UPDATE_REPO} (private or missing). Updates need a public release feed.`;
   }
+  if (status === 301 || status === 302) {
+    return ' GitHub moved the releases feed — install the latest NOVA-Setup.exe from github.com/DrMeji/Nova/releases once, then Check for updates will work again.';
+  }
   return ` HTTP ${status}.`;
 }
 
-function httpsJsonOnce(url) {
+function httpsJsonOnce(url, redirectsLeft = 6) {
   return new Promise((resolve, reject) => {
     const req = https.get(
       url,
@@ -250,6 +253,24 @@ function httpsJsonOnce(url) {
         },
       },
       (res) => {
+        const code = res.statusCode || 0;
+        // GitHub returns 301 when a repo was renamed (e.g. Ark → Nova). Follow it.
+        if ([301, 302, 303, 307, 308].includes(code) && res.headers.location && redirectsLeft > 0) {
+          res.resume();
+          let next = res.headers.location;
+          try {
+            next = new URL(next, url).href;
+          } catch {
+            resolve({ status: code, data: null });
+            return;
+          }
+          if (!/^https:\/\/api\.github\.com\//i.test(next)) {
+            resolve({ status: code, data: null });
+            return;
+          }
+          httpsJsonOnce(next, redirectsLeft - 1).then(resolve, reject);
+          return;
+        }
         let body = '';
         res.on('data', (c) => {
           body += c;
@@ -261,7 +282,7 @@ function httpsJsonOnce(url) {
           } catch {
             data = null;
           }
-          resolve({ status: res.statusCode || 0, data });
+          resolve({ status: code, data });
         });
       },
     );
@@ -416,7 +437,7 @@ function parseLatestYmlSha512(ymlText) {
 
 function fetchTrustedText(url) {
   return new Promise((resolve, reject) => {
-    if (!/^https:\/\/github\.com\/DrMeji\/Ark\/releases\/download\//i.test(url)
+    if (!/^https:\/\/github\.com\/DrMeji\/(?:Nova|Ark)\/releases\/download\//i.test(url)
       && !isTrustedDownloadHost(url)) {
       reject(new Error('Untrusted metadata URL'));
       return;

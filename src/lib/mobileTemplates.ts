@@ -821,27 +821,14 @@ export function planMobileFiles(target: MobileTarget, message: string, projectNa
 }
 
 export function mobileTemplateEdits(
-  target: MobileTarget,
-  message: string,
-  projectName?: string,
-  files?: Record<string, string>,
+  _target: MobileTarget,
+  _message: string,
+  _projectName?: string,
+  _files?: Record<string, string>,
 ): ParsedFileEdit[] {
-  const name = productName(message, projectName || 'ArkApp', files);
-  const bundle = bundleId(name);
-  const idea = ideaFromMessage(message, name);
-  const devices = resolveDevices(target, message);
-  const edits: ParsedFileEdit[] = [
-    { path: '.gitignore', content: gitignore() },
-    { path: 'README.md', content: readme({ name, target, bundle, ios: devices.ios, android: devices.android }) },
-    { path: 'ark-preview.html', content: previewHtml(name, idea, devices.ios || devices.android!) },
-  ];
-  if (target === 'ios' || target === 'both') {
-    edits.push(...iosFiles(name, bundle, idea, devices.ios!));
-  }
-  if (target === 'android' || target === 'both') {
-    edits.push(...androidFiles(name, bundle, idea, devices.android!));
-  }
-  return edits;
+  // Never invent a full iOS/Android app from a canned template.
+  // Model must write native files; layoutLockEdits can still patch an existing tree.
+  return [];
 }
 
 function iosAppDir(files: Record<string, string>) {

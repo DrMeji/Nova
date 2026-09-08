@@ -129,7 +129,8 @@ export async function ensureEngineRuntime() {
 
 function ggufNPredictForKind(kind?: 'image' | 'video' | 'chat' | 'coding') {
   const prefs = getLocalPrefs();
-  const min = kind === 'coding' ? 8192 : 4096;
+  // Prefer long generations — rushed short answers looked "done" but were thin.
+  const min = kind === 'coding' ? 16384 : 8192;
   return Math.max(Number(prefs.ggufNPredict) || 0, min);
 }
 

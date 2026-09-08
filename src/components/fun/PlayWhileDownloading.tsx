@@ -228,7 +228,7 @@ export function PlayGameButton({ onClick, className = '' }: { onClick: () => voi
     <button
       type="button"
       onClick={onClick}
-      className={`inline-flex items-center gap-1.5 rounded-full border border-sky-500/35 bg-sky-500/10 px-2.5 py-1 text-[11px] font-medium text-sky-200 hover:bg-sky-500/15 transition-colors ${className}`}
+      className={`inline-flex items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] px-2.5 py-1.5 text-[11px] font-medium text-sky-200 hover:bg-white/[0.07] hover:border-sky-500/30 transition-colors ${className}`}
     >
       Play game
     </button>

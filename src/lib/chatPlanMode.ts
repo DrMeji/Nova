@@ -19,6 +19,10 @@ export function looksLikeImplementGo(message: string): boolean {
   if (/^create\s+project\s+[A-Za-z]/i.test(t) && t.length < 80) return true;
   if (IMPLEMENT_GO_RE.test(t)) return true;
   if (/\bbuild\s+it\s+now\b/i.test(t)) return true;
+  // Human: "build EmberOak on disk" / "create QuietStreak on disk"
+  if (/\b(?:build|create|scaffold)\s+[A-Z][A-Za-z0-9]{1,40}\b/i.test(t) && /\bon\s+disk\b/i.test(t)) {
+    return true;
+  }
   return GO_AHEAD_BUILD_RE.test(t);
 }
 

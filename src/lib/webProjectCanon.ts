@@ -836,150 +836,7 @@ export function reactSurgicalMicroAskEdits(
   if (touchedCss) out.push({ path: cssPath, content: css });
   if (out.length) return out;
 
-  // Feature polish asks (badges / syncing / connect bank / find bar / tags) on an existing App.
-  return reactFeaturePolishEdits(files, message);
-}
-
-/** Inject visible polish into an existing React App without dumping source into chat. */
-export function reactFeaturePolishEdits(
-  files: WebFileMap,
-  message: string,
-): WebFileEdit[] {
-  const t = String(message || '');
-  if (!t.trim()) return [];
-  const wantsUnread = /\bunread\b|\bbadge\s*counts?\b|\bbadges?\b/i.test(t);
-  const wantsSync = /\bsyncing\b|\btyping\s+indicator\b/i.test(t);
-  const wantsBank = /\bconnect\s+bank\b|\bconnected\s+avatars?\b|\bstatus\s+bar\b/i.test(t);
-  const wantsFolders = /\bfolder\s+groups?\b/i.test(t);
-  const wantsFind = /\bfind\s+in\s+note\b|\bfind\s+bar\b/i.test(t);
-  const wantsTags = /\btags?\s+chips?\b|\btag\s+chips?\b/i.test(t);
-  if (!wantsUnread && !wantsSync && !wantsBank && !wantsFolders && !wantsFind && !wantsTags) {
-    return [];
-  }
-
-  const flat = flatten(files);
-  const appPath = findReactAppPath(flat);
-  if (!appPath || !flat[appPath]) return [];
-  const cssPath = findReactCssPath(flat, appPath);
-  let app = String(flat[appPath]);
-  let css = String(flat[cssPath] || '');
-  let touchedApp = false;
-  let touchedCss = false;
-
-  if (wantsUnread && !/ark-unread-badge|data-ark-unread/i.test(app)) {
-    if (/(className=["'][^"']*(?:row|account|channel|item|wallet)[^"']*["'][^>]*>)/i.test(app)) {
-      app = app.replace(
-        /(className=["'][^"']*(?:row|account|channel|item|wallet)[^"']*["'][^>]*>)/i,
-        '$1<span className="ark-unread-badge" data-ark-unread="1">3</span>',
-      );
-      touchedApp = true;
-    } else if (/return\s*\(/i.test(app)) {
-      app = app.replace(
-        /return\s*\(/i,
-        'return (\n    <>\n    <div className="ark-unread-badge" data-ark-unread="1" style={{position:\'fixed\',top:12,right:12,zIndex:40}}>3 unread</div>\n',
-      );
-      // Only wrap if we did not already close a fragment — avoid corrupting nested functions.
-      if (!/<>[\s\S]*<\/>\s*\)\s*;?\s*$/m.test(app)) {
-        app = app.replace(/\);\s*\n\}\s*$/m, '    </>\n  );\n}\n');
-      }
-      touchedApp = true;
-    }
-    if (!/\.ark-unread-badge/.test(css)) {
-      css += `\n.ark-unread-badge{display:inline-flex;min-width:1.1rem;height:1.1rem;padding:0 0.35rem;border-radius:999px;align-items:center;justify-content:center;background:#ef4444;color:#fff;font-size:0.65rem;font-weight:700;margin-left:0.35rem;}\n`;
-      touchedCss = true;
-    }
-  }
-
-  if (wantsSync && !/data-ark-syncing/i.test(app)) {
-    const sync = '<p className="ark-syncing" data-ark-syncing="1">syncing…</p>';
-    if (/transaction|table|messages|editor|main/i.test(app)) {
-      app = app.replace(
-        /(<(?:div|section|main)[^>]*className=["'][^"']*(?:main|messages|table|editor|content)[^"']*["'][^>]*>)/i,
-        `$1${sync}`,
-      );
-      touchedApp = true;
-    } else {
-      app = app.replace(/return\s*\(\s*<>/, `return (\n    <>\n    ${sync}`);
-      if (!/data-ark-syncing/i.test(app)) {
-        app = app.replace(/return\s*\(/i, `return (\n    <>\n    ${sync}\n`);
-        if (!/<\/>\s*\);\s*$/m.test(app)) app = app.replace(/\);\s*$/m, '    </>\n  );');
-      }
-      touchedApp = true;
-    }
-    if (!/\.ark-syncing/.test(css)) {
-      css += `\n.ark-syncing{margin:0.35rem 0;font-size:0.75rem;opacity:0.7;font-style:italic;}\n`;
-      touchedCss = true;
-    }
-  }
-
-  if (wantsBank && !/data-ark-connect-bank/i.test(app)) {
-    const bar = `<div className="ark-status-bar" data-ark-connect-bank="1"><button type="button">Connect Bank</button><span className="ark-avatars" aria-label="connected"><i/><i/><i/></span></div>`;
-    if (/<\/div>\s*\)\s*;?\s*$/m.test(app)) {
-      app = app.replace(/<\/div>\s*(\)\s*;?\s*)$/m, `${bar}</div>$1`);
-      touchedApp = true;
-    } else {
-      app = app.replace(/return\s*\(/i, `return (\n    <>\n    ${bar}\n`);
-      if (!/<\/>\s*\);\s*$/m.test(app)) app = app.replace(/\);\s*$/m, '    </>\n  );');
-      touchedApp = true;
-    }
-    if (!/\.ark-status-bar/.test(css)) {
-      css += `\n.ark-status-bar{position:sticky;bottom:0;display:flex;align-items:center;justify-content:space-between;gap:0.75rem;padding:0.55rem 0.85rem;background:color-mix(in srgb, var(--card, #151c27) 92%, #000);border-top:1px solid #ffffff14;}\n.ark-status-bar button{border:0;border-radius:999px;padding:0.4rem 0.85rem;background:var(--accent,#38bdf8);color:#041018;font-weight:700;cursor:pointer;}\n.ark-avatars{display:inline-flex;}\n.ark-avatars i{width:1.35rem;height:1.35rem;border-radius:999px;background:#64748b;margin-left:-0.35rem;border:2px solid #0b1220;display:inline-block;}\n.ark-avatars i:nth-child(2){background:#38bdf8;}\n.ark-avatars i:nth-child(3){background:#a78bfa;}\n`;
-      touchedCss = true;
-    }
-  }
-
-  if (wantsFolders && !/data-ark-folder-groups/i.test(app)) {
-    const block = `<div className="ark-folder-groups" data-ark-folder-groups="1"><p>Library</p><button type="button">Personal</button><button type="button">Work</button><button type="button">Archive</button></div>`;
-    app = app.replace(
-      /(<(?:aside|nav|div)[^>]*className=["'][^"']*(?:sidebar|rail|library|list)[^"']*["'][^>]*>)/i,
-      `$1${block}`,
-    );
-    if (!/data-ark-folder-groups/i.test(app)) {
-      app = app.replace(/return\s*\(/i, `return (\n    <>\n    ${block}\n`);
-      if (!/<\/>\s*\);\s*$/m.test(app)) app = app.replace(/\);\s*$/m, '    </>\n  );');
-    }
-    touchedApp = true;
-    if (!/\.ark-folder-groups/.test(css)) {
-      css += `\n.ark-folder-groups{display:grid;gap:0.35rem;margin:0.5rem 0 0.85rem;}\n.ark-folder-groups p{margin:0;font-size:0.7rem;text-transform:uppercase;opacity:0.65;letter-spacing:0.04em;}\n.ark-folder-groups button{text-align:left;border:0;border-radius:8px;padding:0.4rem 0.55rem;background:transparent;color:inherit;cursor:pointer;}\n.ark-folder-groups button:hover{background:#ffffff10;}\n`;
-      touchedCss = true;
-    }
-  }
-
-  if (wantsFind && !/data-ark-find-bar/i.test(app)) {
-    const find = `<label className="ark-find-bar" data-ark-find-bar="1">Find in note <input placeholder="Search in note…" /></label>`;
-    app = app.replace(
-      /(<(?:div|section|main)[^>]*className=["'][^"']*(?:editor|main|content|pane)[^"']*["'][^>]*>)/i,
-      `$1${find}`,
-    );
-    if (!/data-ark-find-bar/i.test(app)) {
-      app = app.replace(/return\s*\(/i, `return (\n    <>\n    ${find}\n`);
-      if (!/<\/>\s*\);\s*$/m.test(app)) app = app.replace(/\);\s*$/m, '    </>\n  );');
-    }
-    touchedApp = true;
-    if (!/\.ark-find-bar/.test(css)) {
-      css += `\n.ark-find-bar{display:flex;align-items:center;gap:0.5rem;font-size:0.75rem;opacity:0.9;margin:0.4rem 0 0.75rem;}\n.ark-find-bar input{flex:1;border:1px solid #ffffff18;border-radius:8px;padding:0.35rem 0.55rem;background:#0006;color:inherit;}\n`;
-      touchedCss = true;
-    }
-  }
-
-  if (wantsTags && !/data-ark-tags/i.test(app)) {
-    const tags = `<div className="ark-tags" data-ark-tags="1"><span>draft</span><span>idea</span><span>review</span></div>`;
-    app = app.replace(/(<h1[^>]*>[\s\S]*?<\/h1>)/i, `$1${tags}`);
-    if (!/data-ark-tags/i.test(app)) {
-      app = app.replace(/return\s*\(/i, `return (\n    <>\n    ${tags}\n`);
-      if (!/<\/>\s*\);\s*$/m.test(app)) app = app.replace(/\);\s*$/m, '    </>\n  );');
-    }
-    touchedApp = true;
-    if (!/\.ark-tags/.test(css)) {
-      css += `\n.ark-tags{display:flex;flex-wrap:wrap;gap:0.35rem;margin:0.35rem 0 0.75rem;}\n.ark-tags span{border:1px solid #ffffff22;border-radius:999px;padding:0.15rem 0.55rem;font-size:0.7rem;opacity:0.85;}\n`;
-      touchedCss = true;
-    }
-  }
-
-  const edits: WebFileEdit[] = [];
-  if (touchedApp) edits.push({ path: appPath, content: app });
-  if (touchedCss) edits.push({ path: cssPath, content: css || String(flat[cssPath] || '') });
-  return edits;
+  return [];
 }
 
 function findReactAppPath(flat: WebFileMap): string | null {
@@ -997,1114 +854,186 @@ function findReactCssPath(flat: WebFileMap, appPath: string): string {
   return 'src/App.css';
 }
 
-/** Original geometric mark. not Discord's logo. */
-function brandLogoSvg(initial: string): string {
-  const letter = escapeHtml(initial.slice(0, 1).toUpperCase() || 'N');
-  return `<svg className="brand-mark" viewBox="0 0 48 48" aria-hidden="true" role="img">
-  <polygon points="24,4 44,14 44,34 24,44 4,34 4,14" fill="none" stroke="currentColor" stroke-width="2.5"/>
-  <text x="24" y="30" text-anchor="middle" font-size="16" font-weight="700" fill="currentColor" font-family="system-ui,sans-serif">${letter}</text>
-</svg>`;
-}
+export function arcadeGameMicroAskEdits(files: WebFileMap, message: string): WebFileEdit[] {
+  const flat = flatten(files);
+  const appPath = Object.keys(flat).find((p) => /(^|\/)App\.(jsx|tsx)$/i.test(p));
+  if (!appPath) return [];
+  let src = String(flat[appPath] || '');
+  const t = String(message || '');
+  let changed = false;
+  const out: WebFileEdit[] = [];
 
-function patchPackageJsonForLucide(flat: WebFileMap): WebFileEdit | null {
-  const pkgPath = flat['package.json'] != null ? 'package.json' : null;
-  if (!pkgPath) return null;
-  try {
-    const pkg = JSON.parse(String(flat[pkgPath]));
-    pkg.dependencies = { ...(pkg.dependencies || {}), 'lucide-react': '^0.474.0' };
-    return { path: pkgPath, content: `${JSON.stringify(pkg, null, 2)}\n` };
-  } catch {
-    return null;
-  }
-}
-
-function buildFinanceAppJsx(title: string): string {
-  const safeTitle = escapeHtml(title);
-  return `import { useEffect, useMemo, useState } from 'react';
-import {
-  LayoutDashboard, Wallet, ArrowLeftRight, Target, Settings, Plus, X, Moon, Sun,
-} from 'lucide-react';
-import './App.css';
-
-const STORAGE_KEY = 'NOVA-finance-v1';
-const WALLETS = [
-  { id: 'checking', name: 'Checking', balance: 2450 },
-  { id: 'savings', name: 'Savings', balance: 8200 },
-  { id: 'credit', name: 'Credit', balance: -420 },
-];
-const SEED = [
-  { id: '1', wallet: 'checking', category: 'Salary', note: 'Payroll', amount: 3200, date: '2026-08-01' },
-  { id: '2', wallet: 'checking', category: 'Food', note: 'Groceries', amount: -86.4, date: '2026-08-03' },
-  { id: '3', wallet: 'credit', category: 'Rent', note: 'August rent', amount: -1400, date: '2026-08-01' },
-];
-
-function loadState() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    const parsed = raw ? JSON.parse(raw) : null;
-    if (parsed?.transactions?.length) return parsed;
-  } catch { /* ignore */ }
-  return { transactions: SEED, theme: 'dark', displayName: 'You' };
-}
-
-export default function App() {
-  const [page, setPage] = useState('overview');
-  const [walletId, setWalletId] = useState('checking');
-  const [state, setState] = useState(loadState);
-  const [modalOpen, setModalOpen] = useState(false);
-  const [draft, setDraft] = useState({ amount: '', category: 'Food', note: '', date: new Date().toISOString().slice(0, 10) });
-
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    document.documentElement.dataset.theme = state.theme;
-  }, [state]);
-
-  const txs = useMemo(
-    () => state.transactions.filter(t => t.wallet === walletId).sort((a, b) => b.date.localeCompare(a.date)),
-    [state.transactions, walletId],
-  );
-  const net = useMemo(() => state.transactions.reduce((s, t) => s + Number(t.amount), 0), [state.transactions]);
-  const weekly = useMemo(() => {
-    const days = [0, 0, 0, 0, 0, 0, 0];
-    state.transactions.forEach(t => {
-      if (Number(t.amount) >= 0) return;
-      const d = new Date(t.date).getDay();
-      days[d] += Math.abs(Number(t.amount));
-    });
-    return days;
-  }, [state.transactions]);
-  const maxBar = Math.max(1, ...weekly);
-
-  const addTx = () => {
-    const amount = Number(draft.amount);
-    if (!Number.isFinite(amount) || !draft.amount) return;
-    setState(s => ({
-      ...s,
-      transactions: [
-        { id: String(Date.now()), wallet: walletId, category: draft.category, note: draft.note || draft.category, amount, date: draft.date },
-        ...s.transactions,
-      ],
-    }));
-    setModalOpen(false);
-    setDraft({ amount: '', category: 'Food', note: '', date: new Date().toISOString().slice(0, 10) });
-  };
-
-  const nav = [
-    { id: 'overview', label: 'Overview', icon: LayoutDashboard },
-    { id: 'wallets', label: 'Wallets', icon: Wallet },
-    { id: 'cashflow', label: 'Cashflow', icon: ArrowLeftRight },
-    { id: 'goals', label: 'Goals', icon: Target },
-    { id: 'prefs', label: 'Preferences', icon: Settings },
-  ];
-
-  return (
-    <div className="finance-shell">
-      <aside className="side">
-        <div className="brand">${safeTitle}</div>
-        {nav.map(n => {
-          const Icon = n.icon;
-          return (
-            <button key={n.id} type="button" className={page === n.id ? 'nav active' : 'nav'} onClick={() => setPage(n.id)}>
-              <Icon size={18} /> {n.label}
-            </button>
+  // Snake: speed after meals + food glow
+  if (/tickMsRef|mealsRef|randFood/i.test(src)) {
+    if (/\b(?:speed|faster|bump)\b/i.test(t) && /\b(?:food|meal|pickup|every\s*3|3\s+food)\b/i.test(t)) {
+      if (/mealsRef\.current\s*%\s*3\s*===\s*0/.test(src) || /tickMsRef\.current\s*=\s*Math\.max/.test(src)) {
+        // already has speed ramp — ensure interval is 3
+        src = src.replace(/mealsRef\.current\s*%\s*\d+/g, 'mealsRef.current % 3');
+        changed = true;
+      } else if (/mealsRef\.current\s*\+=\s*1/.test(src)) {
+        src = src.replace(
+          /(mealsRef\.current\s*\+=\s*1;?)/,
+          `$1\n        if (mealsRef.current % 3 === 0) tickMsRef.current = Math.max(70, tickMsRef.current - 12);`,
+        );
+        changed = true;
+      }
+    }
+    if (/\bglow\b/i.test(t) && /\bfood\b/i.test(t)) {
+      if (/foodGlow|shadowBlur|food.*glow/i.test(src)) {
+        src = src.replace(/shadowBlur\s*=\s*\d+/g, 'shadowBlur = 28');
+        changed = true;
+      } else if (/fillRect\(\s*st\.food\.x\s*\*\s*CELL/.test(src) || /food\.x\s*\*\s*CELL/.test(src)) {
+        src = src.replace(
+          /(ctx\.fillStyle\s*=\s*['"][^'"]+['"];\s*\n\s*)(ctx\.fillRect\(\s*st\.food\.x)/,
+          `$1ctx.shadowColor = '#ff6b6b';\n      ctx.shadowBlur = 28;\n      $2`,
+        );
+        if (!/shadowBlur = 28/.test(src)) {
+          src = src.replace(
+            /(ctx\.fillRect\(\s*st\.food\.x\s*\*\s*CELL[^;]*;)/,
+            `ctx.shadowColor = '#ff6b6b';\n      ctx.shadowBlur = 28;\n      $1\n      ctx.shadowBlur = 0;`,
           );
-        })}
-      </aside>
-      <main className="main">
-        <header className="top">
-          <h1>{nav.find(n => n.id === page)?.label}</h1>
-          <button type="button" className="btn" onClick={() => setModalOpen(true)}><Plus size={16} /> Add Transaction</button>
-        </header>
-
-        {page === 'overview' && (
-          <section className="stack">
-            <div className="tiles">
-              <div className="tile"><span>Net worth</span><strong>{net.toLocaleString(undefined, { style: 'currency', currency: 'USD' })}</strong></div>
-              <div className="tile"><span>Wallets</span><strong>{WALLETS.length}</strong></div>
-              <div className="tile"><span>Transactions</span><strong>{state.transactions.length}</strong></div>
-            </div>
-            <div className="card">
-              <h2>Weekly spend</h2>
-              <svg viewBox="0 0 280 100" className="chart" role="img" aria-label="Weekly spend">
-                {weekly.map((v, i) => (
-                  <rect key={i} x={20 + i * 36} y={90 - (v / maxBar) * 70} width="22" height={(v / maxBar) * 70 || 2} rx="4" />
-                ))}
-              </svg>
-            </div>
-            <div className="card">
-              <h2>Recent</h2>
-              {state.transactions.length === 0 ? <p className="empty">No transactions yet.</p> : (
-                <ul className="ledger">{state.transactions.slice(0, 8).map(t => (
-                  <li key={t.id}><span>{t.note}</span><em className={t.amount < 0 ? 'neg' : 'pos'}>{t.amount.toFixed(2)}</em></li>
-                ))}</ul>
-              )}
-            </div>
-          </section>
-        )}
-
-        {(page === 'wallets' || page === 'cashflow') && (
-          <section className="stack">
-            <div className="tiles">
-              {WALLETS.map(w => (
-                <button key={w.id} type="button" className={walletId === w.id ? 'tile active' : 'tile'} onClick={() => setWalletId(w.id)}>
-                  <span>{w.name}</span><strong>{w.balance.toLocaleString(undefined, { style: 'currency', currency: 'USD' })}</strong>
-                </button>
-              ))}
-            </div>
-            <div className="card">
-              <h2>{WALLETS.find(w => w.id === walletId)?.name} ledger</h2>
-              {txs.length === 0 ? <p className="empty">No rows for this wallet.</p> : (
-                <ul className="ledger">{txs.map(t => (
-                  <li key={t.id}><span>{t.date} · {t.category} · {t.note}</span><em className={t.amount < 0 ? 'neg' : 'pos'}>{t.amount.toFixed(2)}</em></li>
-                ))}</ul>
-              )}
-            </div>
-          </section>
-        )}
-
-        {page === 'goals' && (
-          <section className="tiles">
-            {[{ name: 'Savings', pct: 62 }, { name: 'Travel', pct: 28 }].map(g => (
-              <div key={g.name} className="tile goal">
-                <svg viewBox="0 0 36 36" className="ring"><circle cx="18" cy="18" r="15.5" /><circle cx="18" cy="18" r="15.5" style={{ strokeDasharray: \`\${g.pct} 100\` }} /></svg>
-                <div><span>{g.name}</span><strong>{g.pct}%</strong></div>
-              </div>
-            ))}
-          </section>
-        )}
-
-        {page === 'prefs' && (
-          <section className="card prefs">
-            <label>Display name<input value={state.displayName} onChange={e => setState(s => ({ ...s, displayName: e.target.value }))} /></label>
-            <button type="button" className="btn" onClick={() => setState(s => ({ ...s, theme: s.theme === 'dark' ? 'light' : 'dark' }))}>
-              {state.theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />} Switch to {state.theme === 'dark' ? 'light' : 'dark'}
-            </button>
-          </section>
-        )}
-      </main>
-
-      {modalOpen && (
-        <div className="modal-backdrop" onClick={() => setModalOpen(false)}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
-            <header><h2>Add transaction</h2><button type="button" onClick={() => setModalOpen(false)}><X size={16} /></button></header>
-            <label>Amount<input value={draft.amount} onChange={e => setDraft(d => ({ ...d, amount: e.target.value }))} placeholder="-42.50" /></label>
-            <label>Category
-              <select value={draft.category} onChange={e => setDraft(d => ({ ...d, category: e.target.value }))}>
-                {['Food', 'Rent', 'Salary', 'Transfer', 'Travel'].map(c => <option key={c}>{c}</option>)}
-              </select>
-            </label>
-            <label>Note<input value={draft.note} onChange={e => setDraft(d => ({ ...d, note: e.target.value }))} /></label>
-            <label>Date<input type="date" value={draft.date} onChange={e => setDraft(d => ({ ...d, date: e.target.value }))} /></label>
-            <button type="button" className="btn primary" onClick={addTx}>Save</button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-`;
-}
-
-function buildFinanceAppCss(): string {
-  return `:root, [data-theme="dark"] {
-  --bg: #0c1210; --panel: #141c18; --text: #e8f2ec; --muted: #8aa396; --accent: #3dd68c; --line: #24302a; --neg: #f07178; --pos: #3dd68c;
-}
-[data-theme="light"] {
-  --bg: #f3f7f4; --panel: #ffffff; --text: #14201a; --muted: #5b6f64; --accent: #0f9f6e; --line: #d7e3db; --neg: #c0392b; --pos: #0f9f6e;
-}
-* { box-sizing: border-box; }
-body { margin: 0; font-family: "Segoe UI", system-ui, sans-serif; background: var(--bg); color: var(--text); }
-.finance-shell { display: grid; grid-template-columns: 220px 1fr; min-height: 100vh; }
-.side { border-right: 1px solid var(--line); padding: 1rem 0.75rem; background: var(--panel); }
-.brand { font-weight: 700; letter-spacing: 0.04em; margin: 0 0.5rem 1rem; }
-.nav { width: 100%; display: flex; gap: 0.55rem; align-items: center; border: 0; background: transparent; color: var(--muted); padding: 0.65rem 0.75rem; border-radius: 10px; cursor: pointer; }
-.nav.active, .nav:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--text); }
-.main { padding: 1.25rem 1.5rem 2rem; }
-.top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
-.top h1 { margin: 0; font-size: 1.35rem; }
-.btn { display: inline-flex; gap: 0.4rem; align-items: center; border: 1px solid var(--line); background: var(--panel); color: var(--text); border-radius: 999px; padding: 0.45rem 0.85rem; cursor: pointer; }
-.btn.primary { background: var(--accent); color: #062216; border-color: transparent; font-weight: 600; }
-.stack { display: grid; gap: 1rem; }
-.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 0.75rem; }
-.tile { text-align: left; border: 1px solid var(--line); background: var(--panel); border-radius: 14px; padding: 0.9rem 1rem; color: inherit; cursor: pointer; }
-.tile.active { outline: 2px solid var(--accent); }
-.tile span, .card h2 { color: var(--muted); font-size: 0.8rem; }
-.tile strong { display: block; margin-top: 0.35rem; font-size: 1.25rem; }
-.card { border: 1px solid var(--line); background: var(--panel); border-radius: 16px; padding: 1rem; }
-.chart { width: 100%; height: 120px; fill: var(--accent); }
-.ledger { list-style: none; margin: 0; padding: 0; }
-.ledger li { display: flex; justify-content: space-between; gap: 1rem; padding: 0.55rem 0; border-bottom: 1px solid var(--line); }
-.neg { color: var(--neg); } .pos { color: var(--pos); }
-.empty { color: var(--muted); }
-.goal { display: flex; gap: 0.75rem; align-items: center; }
-.ring { width: 52px; height: 52px; transform: rotate(-90deg); }
-.ring circle { fill: none; stroke: var(--line); stroke-width: 3; }
-.ring circle:last-child { stroke: var(--accent); }
-.prefs { display: grid; gap: 0.85rem; max-width: 360px; }
-.prefs label, .modal label { display: grid; gap: 0.3rem; font-size: 0.85rem; color: var(--muted); }
-.prefs input, .modal input, .modal select { border: 1px solid var(--line); background: var(--bg); color: var(--text); border-radius: 10px; padding: 0.55rem 0.7rem; }
-.modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.45); display: grid; place-items: center; padding: 1rem; }
-.modal { width: min(420px, 100%); background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 1rem; display: grid; gap: 0.75rem; }
-.modal header { display: flex; justify-content: space-between; align-items: center; }
-.modal header h2 { margin: 0; font-size: 1rem; color: var(--text); }
-.modal header button { border: 0; background: transparent; color: var(--muted); cursor: pointer; }
-@media (max-width: 800px) { .finance-shell { grid-template-columns: 1fr; } .side { display: flex; gap: 0.35rem; overflow-x: auto; } }
-`;
-}
-
-function buildPulseAppJsx(title: string, brief = ''): string {
-  const safeTitle = escapeHtml(title);
-  const wantStopwatch = /\b(stopwatch|lap)\b/i.test(brief);
-  if (wantStopwatch) {
-    return `import { useEffect, useRef, useState } from 'react';
-import './App.css';
-
-const LAPS_KEY = 'NOVA-pulse-laps-v1';
-function loadLaps() {
-  try { const p = JSON.parse(localStorage.getItem(LAPS_KEY) || '[]'); return Array.isArray(p) ? p : []; } catch { return []; }
-}
-function fmt(ms) {
-  const total = Math.floor(ms / 1000);
-  const mm = String(Math.floor(total / 60)).padStart(2, '0');
-  const ss = String(total % 60).padStart(2, '0');
-  const cs = String(Math.floor((ms % 1000) / 10)).padStart(2, '0');
-  return mm + ':' + ss + '.' + cs;
-}
-
-export default function App() {
-  const [ms, setMs] = useState(0);
-  const [running, setRunning] = useState(false);
-  const [laps, setLaps] = useState(loadLaps);
-  const tick = useRef(null);
-  const started = useRef(0);
-  const base = useRef(0);
-  useEffect(() => { try { localStorage.setItem(LAPS_KEY, JSON.stringify(laps)); } catch {} }, [laps]);
-  useEffect(() => {
-    if (!running) { if (tick.current) clearInterval(tick.current); return undefined; }
-    started.current = Date.now();
-    tick.current = setInterval(() => setMs(base.current + (Date.now() - started.current)), 40);
-    return () => clearInterval(tick.current);
-  }, [running]);
-  return (
-    <div className="pulse-shell stopwatch">
-      <header className="pulse-bar"><strong>${safeTitle}</strong><span>Emerald stopwatch</span></header>
-      <div className="pulse-grid">
-        <section className="timer-card glow-ring">
-          <p className="label">Stopwatch</p>
-          <div className="clock">{fmt(ms)}</div>
-          <div className="row">
-            <button type="button" className="btn primary" onClick={() => { if (!running) setRunning(true); }} disabled={running}>Start</button>
-            <button type="button" className="btn" onClick={() => { if (running) { base.current = ms; setRunning(false); } }} disabled={!running}>Pause</button>
-            <button type="button" className="btn" onClick={() => { setRunning(false); base.current = 0; setMs(0); setLaps([]); }}>Reset</button>
-            <button type="button" className="btn primary" onClick={() => setLaps((p) => [{ id: Date.now(), at: ms }, ...p].slice(0, 40))} disabled={ms === 0}>Lap</button>
-          </div>
-        </section>
-        <section className="note-card">
-          <p className="label">Lap times</p>
-          <ul className="laps">
-            {laps.length === 0 && <li className="empty">No laps yet</li>}
-            {laps.map((item, i) => (
-              <li key={item.id}><span>Lap {laps.length - i}</span><strong>{fmt(item.at)}</strong></li>
-            ))}
-          </ul>
-        </section>
-      </div>
-    </div>
-  );
-}
-`;
-  }
-  return `import { useEffect, useRef, useState } from 'react';
-import './App.css';
-
-const NOTE_KEY = 'NOVA-pulse-note-v1';
-const FOCUS_SECS = 25 * 60;
-
-function loadNote() {
-  try { return localStorage.getItem(NOTE_KEY) || ''; } catch { return ''; }
-}
-
-export default function App() {
-  const [seconds, setSeconds] = useState(FOCUS_SECS);
-  const [running, setRunning] = useState(false);
-  const [note, setNote] = useState(loadNote);
-  const tick = useRef(null);
-
-  useEffect(() => {
-    localStorage.setItem(NOTE_KEY, note);
-  }, [note]);
-
-  useEffect(() => {
-    if (!running) {
-      if (tick.current) clearInterval(tick.current);
-      return undefined;
-    }
-    tick.current = setInterval(() => {
-      setSeconds((s) => {
-        if (s <= 1) {
-          setRunning(false);
-          return 0;
         }
-        return s - 1;
-      });
-    }, 1000);
-    return () => clearInterval(tick.current);
-  }, [running]);
-
-  const mm = String(Math.floor(seconds / 60)).padStart(2, '0');
-  const ss = String(seconds % 60).padStart(2, '0');
-
-  return (
-    <div className="pulse-shell">
-      <header className="pulse-bar"><strong>${safeTitle}</strong><span>Focus utility</span></header>
-      <div className="pulse-grid">
-        <section className="timer-card">
-          <p className="label">Pomodoro</p>
-          <div className="clock">{mm}:{ss}</div>
-          <div className="row">
-            <button type="button" className="btn primary" onClick={() => setRunning(true)} disabled={running || seconds === 0}>Start</button>
-            <button type="button" className="btn" onClick={() => setRunning(false)} disabled={!running}>Pause</button>
-            <button type="button" className="btn" onClick={() => { setRunning(false); setSeconds(FOCUS_SECS); }}>Reset</button>
-          </div>
-        </section>
-        <section className="note-card">
-          <p className="label">Scratch pad</p>
-          <textarea
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            placeholder="Quick notes. saved locally…"
-          />
-        </section>
-      </div>
-    </div>
-  );
-}
-`;
-}
-
-function buildPulseAppCss(brief = ''): string {
-  const emerald = /\b(emerald|stopwatch|lap|green)\b/i.test(brief);
-  const root = emerald
-    ? ':root { --bg:#07140f; --panel:#0f2a1f; --text:#e8f7ef; --muted:#8aafa0; --accent:#3dd68c; --line:#1d3d30; --glow:rgba(61,214,140,0.35); }'
-    : ':root { --bg:#10141a; --panel:#1a222d; --text:#e8eef7; --muted:#8b97a8; --accent:#f0b429; --line:#2a3442; --glow:rgba(240,180,41,0.2); }';
-  return `${root}
-* { box-sizing: border-box; }
-body { margin: 0; font-family: "Segoe UI", system-ui, sans-serif; background: radial-gradient(900px 480px at 15% -5%, var(--glow), transparent), linear-gradient(160deg, var(--bg), #0a1210 55%, var(--bg)); color: var(--text); }
-.pulse-shell { min-height: 100vh; }
-.pulse-bar { display:flex; justify-content:space-between; align-items:center; padding:0.85rem 1.1rem; border-bottom:1px solid var(--line); background: rgba(0,0,0,0.25); }
-.pulse-bar span { color: var(--muted); font-size: 0.8rem; }
-.pulse-grid { display:grid; grid-template-columns: 1fr 1fr; gap:1rem; padding:1.25rem; max-width:960px; margin:0 auto; }
-.timer-card, .note-card { background: var(--panel); border:1px solid var(--line); border-radius:16px; padding:1.1rem; min-height:280px; }
-.glow-ring { box-shadow: 0 0 0 1px var(--line), 0 0 36px var(--glow); }
-.label { margin:0 0 0.75rem; color:var(--muted); letter-spacing:0.08em; text-transform:uppercase; font-size:0.72rem; }
-.clock { font-size:4rem; font-variant-numeric: tabular-nums; font-weight:600; margin:1rem 0 1.25rem; }
-.row { display:flex; gap:0.5rem; flex-wrap:wrap; }
-.btn { border:1px solid var(--line); background:#0c1612; color:var(--text); border-radius:10px; padding:0.55rem 0.9rem; cursor:pointer; }
-.btn.primary { background: var(--accent); color:#062015; border-color:transparent; font-weight:600; }
-.btn:disabled { opacity:0.45; cursor:not-allowed; }
-.note-card textarea { width:100%; height:210px; resize:vertical; border:1px solid var(--line); border-radius:12px; background:#07110d; color:var(--text); padding:0.75rem; font:inherit; }
-.laps { list-style:none; margin:0; padding:0; display:grid; gap:0.45rem; max-height:260px; overflow:auto; }
-.laps li { display:flex; justify-content:space-between; padding:0.55rem 0.7rem; border-radius:10px; background:rgba(0,0,0,0.22); border:1px solid var(--line); }
-.laps .empty { color:var(--muted); border-style:dashed; }
-@media (max-width:720px) { .pulse-grid { grid-template-columns: 1fr; } }
-`;
-}
-
-function buildKanbanAppJsx(title: string): string {
-  const safeTitle = escapeHtml(title);
-  return `import { useEffect, useMemo, useState } from 'react';
-import { Plus, X } from 'lucide-react';
-import './App.css';
-
-const STORAGE_KEY = 'NOVA-kanban-v1';
-const COLUMNS = [
-  { id: 'backlog', label: 'Backlog' },
-  { id: 'doing', label: 'Doing' },
-  { id: 'review', label: 'Review' },
-  { id: 'done', label: 'Done' },
-];
-
-function loadCards() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    const parsed = raw ? JSON.parse(raw) : null;
-    if (Array.isArray(parsed) && parsed.length) return parsed;
-  } catch { /* ignore */ }
-  return [
-    { id: '1', column: 'backlog', title: 'Sketch board chrome', notes: 'Dark original UI, not a Trello clone.' },
-    { id: '2', column: 'doing', title: 'Wire drag-and-drop', notes: 'HTML5 DnD between columns.' },
-    { id: '3', column: 'review', title: 'Persist to localStorage', notes: 'Survive reloads.' },
-  ];
-}
-
-export default function App() {
-  const [cards, setCards] = useState(loadCards);
-  const [modalOpen, setModalOpen] = useState(false);
-  const [draftTitle, setDraftTitle] = useState('');
-  const [draftNotes, setDraftNotes] = useState('');
-  const [draftColumn, setDraftColumn] = useState('backlog');
-  const [draggingId, setDraggingId] = useState(null);
-
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(cards));
-  }, [cards]);
-
-  const byColumn = useMemo(() => {
-    const map = Object.fromEntries(COLUMNS.map((c) => [c.id, []]));
-    for (const card of cards) {
-      if (map[card.column]) map[card.column].push(card);
-      else map.backlog.push(card);
+        changed = true;
+      }
     }
-    return map;
-  }, [cards]);
-
-  const openAdd = (columnId) => {
-    setDraftColumn(columnId);
-    setDraftTitle('');
-    setDraftNotes('');
-    setModalOpen(true);
-  };
-
-  const saveCard = () => {
-    const title = draftTitle.trim();
-    if (!title) return;
-    setCards((prev) => [
-      { id: String(Date.now()), column: draftColumn, title, notes: draftNotes.trim() },
-      ...prev,
-    ]);
-    setModalOpen(false);
-  };
-
-  const onDropColumn = (columnId) => {
-    if (!draggingId) return;
-    setCards((prev) => prev.map((c) => (c.id === draggingId ? { ...c, column: columnId } : c)));
-    setDraggingId(null);
-  };
-
-  return (
-    <div className="kanban-shell">
-      <header className="kanban-top">
-        <div>
-          <p className="eyebrow">Board</p>
-          <h1>${safeTitle}</h1>
-        </div>
-        <button type="button" className="btn primary" onClick={() => openAdd('backlog')}>
-          <Plus size={16} /> Add Card
-        </button>
-      </header>
-      <div className="board">
-        {COLUMNS.map((col) => (
-          <section
-            key={col.id}
-            className="column"
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={() => onDropColumn(col.id)}
-          >
-            <div className="column-head">
-              <h2>{col.label}</h2>
-              <span>{byColumn[col.id].length}</span>
-              <button type="button" className="ghost" onClick={() => openAdd(col.id)} aria-label={\`Add to \${col.label}\`}>
-                <Plus size={14} />
-              </button>
-            </div>
-            <ul className="card-list">
-              {byColumn[col.id].map((card) => (
-                <li
-                  key={card.id}
-                  className="kcard"
-                  draggable
-                  onDragStart={() => setDraggingId(card.id)}
-                  onDragEnd={() => setDraggingId(null)}
-                >
-                  <strong>{card.title}</strong>
-                  {card.notes ? <p>{card.notes}</p> : null}
-                </li>
-              ))}
-              {!byColumn[col.id].length ? <li className="empty">Drop cards here</li> : null}
-            </ul>
-          </section>
-        ))}
-      </div>
-      {modalOpen ? (
-        <div className="modal-backdrop" role="presentation" onClick={() => setModalOpen(false)}>
-          <div className="modal" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
-            <header>
-              <h2>New card</h2>
-              <button type="button" onClick={() => setModalOpen(false)} aria-label="Close"><X size={16} /></button>
-            </header>
-            <label>
-              Title
-              <input value={draftTitle} onChange={(e) => setDraftTitle(e.target.value)} placeholder="Card title" autoFocus />
-            </label>
-            <label>
-              Notes
-              <textarea value={draftNotes} onChange={(e) => setDraftNotes(e.target.value)} placeholder="Optional notes" rows={4} />
-            </label>
-            <label>
-              Column
-              <select value={draftColumn} onChange={(e) => setDraftColumn(e.target.value)}>
-                {COLUMNS.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
-              </select>
-            </label>
-            <button type="button" className="btn primary" onClick={saveCard}>Save card</button>
-          </div>
-        </div>
-      ) : null}
-    </div>
-  );
-}
-`;
-}
-
-function buildKanbanAppCss(): string {
-  return `:root {
-  --bg: #0e1116; --panel: #161b22; --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff; --line: #30363d; --lift: #1c2128;
-}
-* { box-sizing: border-box; }
-body { margin: 0; font-family: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif; background: radial-gradient(1200px 600px at 10% -10%, #1a2740, var(--bg)); color: var(--text); }
-.kanban-shell { min-height: 100vh; padding: 1.25rem 1.5rem 2rem; }
-.kanban-top { display: flex; justify-content: space-between; align-items: end; gap: 1rem; margin-bottom: 1.25rem; }
-.eyebrow { margin: 0; color: var(--muted); font-size: 0.75rem; letter-spacing: 0.12em; text-transform: uppercase; }
-.kanban-top h1 { margin: 0.15rem 0 0; font-size: 1.6rem; }
-.btn { display: inline-flex; gap: 0.4rem; align-items: center; border: 1px solid var(--line); background: var(--panel); color: var(--text); border-radius: 10px; padding: 0.5rem 0.9rem; cursor: pointer; }
-.btn.primary { background: var(--accent); color: #041018; border-color: transparent; font-weight: 600; }
-.board { display: grid; grid-template-columns: repeat(4, minmax(200px, 1fr)); gap: 0.85rem; align-items: start; }
-.column { background: color-mix(in srgb, var(--panel) 88%, transparent); border: 1px solid var(--line); border-radius: 14px; min-height: 420px; padding: 0.65rem; }
-.column-head { display: flex; align-items: center; gap: 0.45rem; margin-bottom: 0.55rem; }
-.column-head h2 { margin: 0; font-size: 0.92rem; flex: 1; }
-.column-head span { color: var(--muted); font-size: 0.75rem; }
-.ghost { border: 0; background: transparent; color: var(--muted); cursor: pointer; display: grid; place-items: center; padding: 0.2rem; }
-.card-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.55rem; min-height: 320px; }
-.kcard { background: var(--lift); border: 1px solid var(--line); border-radius: 12px; padding: 0.75rem 0.8rem; cursor: grab; }
-.kcard:active { cursor: grabbing; }
-.kcard strong { display: block; font-size: 0.92rem; }
-.kcard p { margin: 0.35rem 0 0; color: var(--muted); font-size: 0.82rem; line-height: 1.35; }
-.empty { color: var(--muted); font-size: 0.8rem; padding: 0.75rem; border: 1px dashed var(--line); border-radius: 10px; text-align: center; }
-.modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: grid; place-items: center; padding: 1rem; }
-.modal { width: min(420px, 100%); background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 1rem; display: grid; gap: 0.75rem; }
-.modal header { display: flex; justify-content: space-between; align-items: center; }
-.modal header h2 { margin: 0; font-size: 1rem; }
-.modal header button { border: 0; background: transparent; color: var(--muted); cursor: pointer; }
-.modal label { display: grid; gap: 0.3rem; font-size: 0.85rem; color: var(--muted); }
-.modal input, .modal textarea, .modal select { border: 1px solid var(--line); background: var(--bg); color: var(--text); border-radius: 10px; padding: 0.55rem 0.7rem; font: inherit; }
-@media (max-width: 960px) { .board { grid-template-columns: repeat(2, minmax(180px, 1fr)); } }
-@media (max-width: 560px) { .board { grid-template-columns: 1fr; } .kanban-top { flex-direction: column; align-items: start; } }
-`;
-}
-
-function buildChatAppJsx(title: string): string {
-  const logo = brandLogoSvg(title);
-  const safeTitle = escapeHtml(title);
-  return `import { useMemo, useState } from 'react';
-import {
-  Users, MessageCircle, Settings, Hash, Volume2, Phone,
-  Mic, MicOff, MonitorUp, X, UserPlus, Smile,
-} from 'lucide-react';
-import './App.css';
-
-const FRIENDS = ['Alex', 'Jordan', 'Sam'];
-const CHANNELS = [
-  { id: 'general', name: 'general', type: 'text' },
-  { id: 'random', name: 'random', type: 'text' },
-  { id: 'voice', name: 'Lounge', type: 'voice' },
-];
-const MEMBERS = [
-  { name: 'You', status: 'online' },
-  { name: 'NOVA Bot', status: 'online' },
-  { name: 'Guest', status: 'idle' },
-];
-const SEED = [
-  { id: '1', channel: 'general', author: 'NOVA Bot', text: 'Welcome to ${safeTitle}. pick a channel or open DMs.' },
-];
-
-export default function App() {
-  const [rail, setRail] = useState('servers');
-  const [channelId, setChannelId] = useState('general');
-  const [dmUser, setDmUser] = useState(null);
-  const [draft, setDraft] = useState('');
-  const [messages, setMessages] = useState(SEED);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settingsTab, setSettingsTab] = useState('appearance');
-  const [theme, setTheme] = useState('dark');
-  const [accent, setAccent] = useState('#38bdf8');
-  const [displayName, setDisplayName] = useState('You');
-  const [inCall, setInCall] = useState(false);
-  const [muted, setMuted] = useState(false);
-  const [deafened, setDeafened] = useState(false);
-  const [screenShare, setScreenShare] = useState(false);
-  const [inviteOpen, setInviteOpen] = useState(false);
-
-  const channel = CHANNELS.find(c => c.id === channelId) || CHANNELS[0];
-  const threadKey = dmUser ? \`dm:\${dmUser}\` : channel.id;
-  const thread = useMemo(
-    () => messages.filter(m => (dmUser ? m.dm === dmUser : m.channel === channel.id && !m.dm)),
-    [messages, channel.id, dmUser],
-  );
-
-  const send = () => {
-    const text = draft.trim();
-    if (!text) return;
-    setMessages(prev => [...prev, {
-      id: String(Date.now()),
-      channel: dmUser ? null : channel.id,
-      dm: dmUser,
-      author: displayName,
-      text,
-    }]);
-    setDraft('');
-    if (dmUser) {
-      window.setTimeout(() => {
-        setMessages(prev => [...prev, {
-          id: String(Date.now() + 1),
-          dm: dmUser,
-          author: dmUser,
-          text: \`Got it. "\${text.slice(0, 80)}"\`,
-        }]);
-      }, 600);
+    if (changed) {
+      out.unshift({ path: appPath, content: src });
+      return out;
     }
-  };
+  }
 
-  return (
-    <div className={\`app-shell theme-\${theme}\`} style={{ '--accent': accent }}>
-      <nav className="rail" aria-label="Main">
-        <div className="rail-logo" title="${safeTitle}">
-          ${logo}
-        </div>
-        <button type="button" className={rail === 'friends' ? 'rail-btn active' : 'rail-btn'} onClick={() => { setRail('friends'); setDmUser(null); }} title="Friends"><Users size={20} /></button>
-        <button type="button" className={rail === 'servers' ? 'rail-btn active' : 'rail-btn'} onClick={() => { setRail('servers'); setDmUser(null); }} title="Servers"><Hash size={20} /></button>
-        <button type="button" className={rail === 'dms' ? 'rail-btn active' : 'rail-btn'} onClick={() => setRail('dms')} title="Direct messages"><MessageCircle size={20} /></button>
-        <button type="button" className="rail-btn rail-settings" onClick={() => setSettingsOpen(true)} title="Settings"><Settings size={20} /></button>
-      </nav>
+  // Habit tracker: reset day + satisfying complete
+  if (/quietstreak|todayKey|DEFAULTS|Drink water/i.test(src) || (/habit/i.test(src) && /streak/i.test(src) && /localStorage/.test(src))) {
+    if (/\breset\b/i.test(t) && /\b(?:day|today|habits?)\b/i.test(t) && !/Reset day/i.test(src)) {
+      const resetFn = `  const resetDay = () => setState((prev) => ({ ...prev, done: {} }));\n`;
+      if (!/const resetDay/.test(src)) {
+        src = src.replace(/(const toggle\s*=\s*\([^)]*\)\s*=>\s*\{[\s\S]*?\};\n)/, `$1\n${resetFn}`);
+      }
+      if (!/Reset day/.test(src)) {
+        src = src.replace(
+          /(<\/ul>\s*)/,
+          `$1      <button type="button" className="reset" onClick={resetDay}>Reset day</button>\n`,
+        );
+      }
+      changed = true;
+      const cssPath = Object.keys(flat).find((p) => /(^|\/)App\.css$/i.test(p));
+      if (cssPath) {
+        let css = String(flat[cssPath] || '');
+        if (!/\.reset\s*\{/.test(css)) {
+          css += `\n.reset{margin-top:1.25rem;border:0;border-radius:999px;padding:.65rem 1rem;background:#ffffff12;color:inherit;cursor:pointer}\n`;
+          out.push({ path: cssPath, content: css });
+        }
+      }
+    }
+    if (/\b(?:satisfying|celebration|confetti|pulse|feel)\b/i.test(t) && /\b(?:complete|done|habit|check)\b/i.test(t)) {
+      const cssPath = Object.keys(flat).find((p) => /(^|\/)App\.css$/i.test(p));
+      if (cssPath) {
+        let css = String(flat[cssPath] || '');
+        if (!/@keyframes popDone/.test(css)) {
+          css += `\n.list li.on button{transform:scale(1.02);transition:transform .2s ease,box-shadow .2s ease}\n@keyframes popDone{0%{transform:scale(.96)}60%{transform:scale(1.04)}100%{transform:scale(1)}}\n.list li.on .box{animation:popDone .28s ease}\n`;
+          out.push({ path: cssPath, content: css });
+          changed = true;
+        }
+      }
+    }
+    if (changed) {
+      out.unshift({ path: appPath, content: src });
+      return out;
+    }
+  }
 
-      <aside className="sidebar">
-        {rail === 'friends' && (
-          <>
-            <p className="sidebar-title">Friends</p>
-            <ul className="list">{FRIENDS.map(f => <li key={f}><span className="dot online" />{f}</li>)}</ul>
-          </>
-        )}
-        {rail === 'dms' && (
-          <>
-            <p className="sidebar-title">Direct Messages</p>
-            <ul className="list">
-              {FRIENDS.map(f => (
-                <li key={f}>
-                  <button type="button" className={dmUser === f ? 'row active' : 'row'} onClick={() => { setDmUser(f); setRail('dms'); }}>
-                    <span className="dot online" />{f}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </>
-        )}
-        {(rail === 'servers' || (!dmUser && rail !== 'dms' && rail !== 'friends')) && (
-          <>
-            <p className="sidebar-title">${safeTitle}</p>
-            <p className="sidebar-sub">Text channels</p>
-            <ul className="list">
-              {CHANNELS.filter(c => c.type === 'text').map(c => (
-                <li key={c.id}>
-                  <button type="button" className={channelId === c.id && !dmUser ? 'row active' : 'row'} onClick={() => { setChannelId(c.id); setDmUser(null); setRail('servers'); }}>
-                    <Hash size={14} /> {c.name}
-                  </button>
-                </li>
-              ))}
-            </ul>
-            <p className="sidebar-sub">Voice</p>
-            <ul className="list">
-              {CHANNELS.filter(c => c.type === 'voice').map(c => (
-                <li key={c.id}><button type="button" className="row" onClick={() => setInCall(true)}><Volume2 size={14} /> {c.name}</button></li>
-              ))}
-            </ul>
-          </>
-        )}
-      </aside>
+  // Spatial / ForgeLab editor: grid contrast + obvious Add Cube
+  if (/THREE\.GridHelper|addShape\s*\(|WebGLRenderer/i.test(src)) {
+    if (/\b(?:grid|contrast)\b/i.test(t) && /\b(?:bump|more|brighter|stronger|higher|increase)\b/i.test(t)) {
+      if (/GridHelper\(\s*20\s*,\s*20\s*,\s*0x5a6570\s*,\s*0x2e3540\s*\)/.test(src)) {
+        src = src.replace(
+          /GridHelper\(\s*20\s*,\s*20\s*,\s*0x5a6570\s*,\s*0x2e3540\s*\)/g,
+          'GridHelper(20, 20, 0xb0c0d0, 0x5a6878)',
+        );
+        changed = true;
+      } else if (/GridHelper\([^)]+\)/.test(src)) {
+        src = src.replace(
+          /GridHelper\(\s*([^,]+)\s*,\s*([^,]+)\s*,\s*0x[0-9a-fA-F]+\s*,\s*0x[0-9a-fA-F]+\s*\)/g,
+          'GridHelper($1, $2, 0xb0c0d0, 0x5a6878)',
+        );
+        changed = true;
+      }
+    }
+    if (/\bcube\b/i.test(t) && /\b(?:obvious|clear|bigger|primary|highlight|button)\b/i.test(t)) {
+      if (/onClick=\{\(\)\s*=>\s*apiRef\.current\?\.addShape\('box'\)\}/.test(src)
+        && !/className="primary"|Add Cube/i.test(src)) {
+        src = src.replace(
+          /<button type="button" onClick=\{\(\)\s*=>\s*apiRef\.current\?\.addShape\('box'\)\}>\s*Cube\s*<\/button>/,
+          '<button type="button" className="primary" onClick={() => apiRef.current?.addShape(\'box\')}>Add Cube</button>',
+        );
+        changed = true;
+        const cssPath = Object.keys(flat).find((p) => /(^|\/)App\.css$/i.test(p));
+        if (cssPath) {
+          let css = String(flat[cssPath] || '');
+          if (!/\.primary\s*\{/.test(css)) {
+            css += `\n.tools .primary{background:#4ea1ff;color:#0b1220;font-weight:700;border-color:#4ea1ff}\n.tools .primary:hover{filter:brightness(1.08)}\n`;
+            out.push({ path: cssPath, content: css });
+          }
+        }
+      }
+    }
+    if (changed) {
+      out.unshift({ path: appPath, content: src });
+      return out;
+    }
+  }
 
-      <main className="main">
-        <header className="main-header">
-          <h1>{dmUser ? \`@\${dmUser}\` : \`# \${channel.name}\`}</h1>
-          <div className="header-actions">
-            <button type="button" className="ghost" onClick={() => setInviteOpen(true)}><UserPlus size={16} /> Add people</button>
-            <button type="button" className="ghost" onClick={() => setInCall(v => !v)}><Phone size={16} /> {inCall ? 'End call' : 'Start call'}</button>
-          </div>
-        </header>
-        <div className="messages">
-          {thread.map(m => (
-            <article key={m.id} className="msg">
-              <span className="avatar" style={{ background: accent }}>{(m.author || '?')[0]}</span>
-              <div>
-                <header><strong>{m.author}</strong> <time>{new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time></header>
-                <p>{m.text}</p>
-              </div>
-            </article>
-          ))}
-        </div>
-        <div className="composer">
-          <button type="button" className="icon-btn" aria-label="Emoji"><Smile size={18} /></button>
-          <input
-            value={draft}
-            onChange={e => setDraft(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter') send(); }}
-            placeholder={dmUser ? \`Message @\${dmUser}\` : \`Message #\${channel.name}\`}
-          />
-          <button type="button" className="send" onClick={send}>Send</button>
-        </div>
-        {inCall && (
-          <div className="call-bar">
-            <span><Phone size={14} /> Connected (demo)</span>
-            <div className="call-actions">
-              <button type="button" className={muted ? 'on' : ''} onClick={() => setMuted(v => !v)}>{muted ? <MicOff size={16} /> : <Mic size={16} />}</button>
-              <button type="button" className={deafened ? 'on' : ''} onClick={() => setDeafened(v => !v)} title="Deafen">🔇</button>
-              <button type="button" className={screenShare ? 'on' : ''} onClick={() => setScreenShare(v => !v)}><MonitorUp size={16} /></button>
-              <button type="button" onClick={() => { setInCall(false); setScreenShare(false); }}><X size={16} /></button>
-            </div>
-          </div>
-        )}
-      </main>
+  if (!/frightened|pelletsLeft|pac\s*:|ghosts\s*:/i.test(src)) return [];
 
-      <aside className="members">
-        <p className="sidebar-sub">Members</p>
-        <ul className="list">
-          {MEMBERS.map(m => (
-            <li key={m.name}><span className={\`dot \${m.status}\`} />{m.name}</li>
-          ))}
-        </ul>
-      </aside>
+  if (/\b(?:power|frightened)\b/i.test(t) && /\b(?:indicator|hud|label|show|visible)\b/i.test(t) && !/\bPOWER\b/.test(src)) {
+    if (/ctx\.fillText\(\s*['"]Lives['"]/.test(src)) {
+      src = src.replace(
+        /(ctx\.fillText\(\s*['"]Lives['"][^;]*;)/,
+        `$1\n      if (st.frightened > 0) {\n        ctx.fillStyle = '#3a86ff';\n        ctx.fillText('POWER ' + Math.ceil(st.frightened / 60), 340, 22);\n      }`,
+      );
+      changed = true;
+    } else if (/Lives\s*'\s*\+\s*livesRef/.test(src) || /'Lives '\s*\+/.test(src)) {
+      src = src.replace(
+        /(ctx\.fillText\(\s*'Lives '\s*\+\s*livesRef\.current[^;]*;)/,
+        `$1\n      if (st.frightened > 0) {\n        ctx.fillStyle = '#3a86ff';\n        ctx.fillText('POWER ' + Math.ceil(st.frightened / 60), 340, 22);\n      }`,
+      );
+      changed = true;
+    }
+  }
 
-      {inviteOpen && (
-        <div className="modal-backdrop" onClick={() => setInviteOpen(false)}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
-            <h2>Invite to ${safeTitle}</h2>
-            <p>Share link: <code>${safeTitle.toLowerCase()}.invite/demo</code></p>
-            <button type="button" onClick={() => setInviteOpen(false)}>Close</button>
-          </div>
-        </div>
-      )}
+  if (
+    (/\b(?:bump|increase|change|to\s+100|from\s+50)\b/i.test(t) || /\b100\b/.test(t))
+    && /\b(?:power|pellet|score)\b/i.test(t)
+    && /cell\s*===\s*['"]o['"]\s*\?\s*50/.test(src)
+  ) {
+    src = src.replace(/cell\s*===\s*['"]o['"]\s*\?\s*50/g, "cell === 'o' ? 100");
+    changed = true;
+  }
 
-      {settingsOpen && (
-        <div className="modal-backdrop" onClick={() => setSettingsOpen(false)}>
-          <div className="modal settings" onClick={e => e.stopPropagation()}>
-            <header><h2>Settings</h2><button type="button" onClick={() => setSettingsOpen(false)}><X size={18} /></button></header>
-            <div className="settings-body">
-              <nav>
-                {['account', 'appearance', 'notifications', 'privacy', 'keybinds', 'voice'].map(tab => (
-                  <button key={tab} type="button" className={settingsTab === tab ? 'active' : ''} onClick={() => setSettingsTab(tab)}>{tab}</button>
-                ))}
-              </nav>
-              <div className="settings-panel">
-                {settingsTab === 'account' && (
-                  <label>Display name<input value={displayName} onChange={e => setDisplayName(e.target.value)} /></label>
-                )}
-                {settingsTab === 'appearance' && (
-                  <>
-                    <label>Theme
-                      <select value={theme} onChange={e => setTheme(e.target.value)}>
-                        <option value="dark">Dark</option>
-                        <option value="light">Light</option>
-                      </select>
-                    </label>
-                    <label>Accent color<input type="color" value={accent} onChange={e => setAccent(e.target.value)} /></label>
-                  </>
-                )}
-                {settingsTab === 'notifications' && <p>Notification toggles (demo). all on.</p>}
-                {settingsTab === 'privacy' && <p>Privacy toggles (demo). DMs from friends only.</p>}
-                {settingsTab === 'keybinds' && <p>Ctrl+Enter. send message (read-only list for v1).</p>}
-                {settingsTab === 'voice' && <p>Input / output device dropdowns (demo).</p>}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-`;
-}
+  if (/\bfaster\b/i.test(t) && /\b(?:player|pac|chomp|move)\b/i.test(t) && /stepEntity\(\s*st\.pac\s*,\s*0\.12\s*\)/.test(src)) {
+    src = src.replace(/stepEntity\(\s*st\.pac\s*,\s*0\.12\s*\)/g, 'stepEntity(st.pac, 0.16)');
+    changed = true;
+  }
 
-function buildChatAppCss(): string {
-  return `html, body, #root { margin: 0; height: 100%; }
-* { box-sizing: border-box; }
-.app-shell {
-  --bg: #0c1017;
-  --panel: #151b26;
-  --panel-2: #1c2433;
-  --text: #e8edf5;
-  --muted: #8b95a8;
-  --accent: #38bdf8;
-  min-height: 100vh;
-  display: grid;
-  grid-template-columns: 72px 240px 1fr 200px;
-  background: var(--bg);
-  color: var(--text);
-  font-family: system-ui, Segoe UI, sans-serif;
-}
-.app-shell.theme-light {
-  --bg: #f4f6fa;
-  --panel: #ffffff;
-  --panel-2: #eef1f6;
-  --text: #111827;
-  --muted: #6b7280;
-}
-.rail {
-  background: var(--panel);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.75rem 0;
-  border-right: 1px solid #0003;
-}
-.rail-logo { color: var(--accent); width: 44px; height: 44px; margin-bottom: 0.5rem; }
-.brand-mark { width: 100%; height: 100%; }
-.rail-btn {
-  width: 44px; height: 44px; border: 0; border-radius: 14px;
-  background: var(--panel-2); color: var(--muted); cursor: pointer;
-  display: grid; place-items: center;
-}
-.rail-btn:hover, .rail-btn.active { background: var(--accent); color: #0c1017; }
-.rail-settings { margin-top: auto; }
-.sidebar, .members { background: var(--panel); padding: 0.85rem; border-right: 1px solid #0002; }
-.members { border-right: 0; border-left: 1px solid #0002; }
-.sidebar-title { margin: 0 0 0.75rem; font-weight: 700; }
-.sidebar-sub { margin: 0.75rem 0 0.35rem; font-size: 0.7rem; text-transform: uppercase; color: var(--muted); letter-spacing: 0.04em; }
-.list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.25rem; }
-.row {
-  width: 100%; text-align: left; border: 0; border-radius: 8px; padding: 0.45rem 0.5rem;
-  background: transparent; color: inherit; cursor: pointer; display: flex; align-items: center; gap: 0.35rem;
-}
-.row:hover, .row.active { background: var(--panel-2); }
-.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 0.35rem; }
-.dot.online { background: #34d399; }
-.dot.idle { background: #fbbf24; }
-.main { display: flex; flex-direction: column; min-width: 0; background: var(--bg); }
-.main-header {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 0.85rem 1rem; border-bottom: 1px solid #0003;
-}
-.main-header h1 { margin: 0; font-size: 1rem; }
-.header-actions { display: flex; gap: 0.5rem; }
-.ghost {
-  border: 1px solid #ffffff18; background: transparent; color: inherit;
-  border-radius: 8px; padding: 0.35rem 0.6rem; cursor: pointer; display: inline-flex; align-items: center; gap: 0.35rem;
-}
-.messages { flex: 1; overflow: auto; padding: 1rem; display: grid; gap: 0.85rem; align-content: start; }
-.msg { display: grid; grid-template-columns: 40px 1fr; gap: 0.65rem; }
-.avatar {
-  width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center;
-  font-weight: 700; color: #0c1017;
-}
-.msg header { display: flex; gap: 0.5rem; align-items: baseline; }
-.msg time { color: var(--muted); font-size: 0.75rem; }
-.msg p { margin: 0.2rem 0 0; }
-.composer {
-  display: flex; gap: 0.5rem; padding: 0.75rem 1rem 1rem; align-items: center;
-}
-.composer input {
-  flex: 1; border: 0; border-radius: 10px; padding: 0.7rem 0.85rem;
-  background: var(--panel); color: inherit; outline: none;
-}
-.icon-btn, .send {
-  border: 0; border-radius: 10px; padding: 0.55rem 0.85rem; cursor: pointer;
-}
-.send { background: var(--accent); color: #0c1017; font-weight: 700; }
-.call-bar {
-  display: flex; justify-content: space-between; align-items: center;
-  padding: 0.5rem 1rem; background: var(--panel); border-top: 1px solid #0003;
-}
-.call-actions { display: flex; gap: 0.35rem; }
-.call-actions button {
-  border: 0; border-radius: 8px; padding: 0.4rem; background: var(--panel-2); color: inherit; cursor: pointer;
-}
-.call-actions button.on { background: var(--accent); color: #0c1017; }
-.modal-backdrop {
-  position: fixed; inset: 0; background: #0008; backdrop-filter: blur(4px);
-  display: grid; place-items: center; z-index: 50;
-}
-.modal {
-  background: var(--panel); border-radius: 16px; padding: 1.25rem; width: min(92vw, 420px);
-  box-shadow: 0 20px 60px #0006;
-}
-.modal.settings { width: min(94vw, 640px); }
-.modal header { display: flex; justify-content: space-between; align-items: center; }
-.settings-body { display: grid; grid-template-columns: 140px 1fr; gap: 1rem; margin-top: 1rem; }
-.settings-body nav { display: grid; gap: 0.35rem; }
-.settings-body nav button {
-  text-align: left; border: 0; border-radius: 8px; padding: 0.45rem 0.6rem;
-  background: transparent; color: inherit; cursor: pointer; text-transform: capitalize;
-}
-.settings-body nav button.active { background: var(--panel-2); }
-.settings-panel label { display: grid; gap: 0.35rem; margin-bottom: 0.75rem; }
-.settings-panel input, .settings-panel select {
-  border: 1px solid #ffffff18; border-radius: 8px; padding: 0.45rem 0.6rem; background: var(--panel-2); color: inherit;
-}
-`;
-}
+  if (/\bremove\b/i.test(t) && /\b(?:panel|instruction|clutter|side)\b/i.test(t) && /className="panel"/.test(src)) {
+    src = src.replace(/\s*<div className="panel">[\s\S]*?<\/div>\s*(?=<\/div>\s*\);\s*\})/, '\n');
+    src = src.replace(
+      /grid-template-columns:\s*1fr\s+minmax\([^)]+\)/,
+      'grid-template-columns: 1fr',
+    );
+    changed = true;
+    const cssPath = Object.keys(flat).find((p) => /(^|\/)App\.css$/i.test(p));
+    if (cssPath) {
+      let css = String(flat[cssPath] || '');
+      css = css.replace(/\.panel\s*\{[\s\S]*?\}\n?/g, '');
+      css = css.replace(/grid-template-columns:\s*1fr\s+minmax\([^)]+\);?/, 'grid-template-columns: 1fr;');
+      out.push({ path: cssPath, content: css });
+    }
+  }
 
-/**
- * When the user pastes several project prompts, only use the segment that
- * mentions this project. so NightChat's Discord text cannot patch TaskBox.
- */
-function segmentForProject(message: string, projectName: string): string {
-  const full = String(message || '');
-  const name = String(projectName || '').trim();
-  if (!name || !full) return full;
-  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  // Prefer a numbered list item / line that starts with the project name.
-  const lineRe = new RegExp(
-    `(?:^|\\n)\\s*(?:\\d+[.)]\\s*)?(?:[-*]\\s*)?${escaped}\\b[\\s\\S]*?(?=\\n\\s*(?:\\d+[.)]\\s*)?(?:[-*]\\s*)?[A-Z][A-Za-z0-9_-]{2,}\\b|$)`,
-    'i',
-  );
-  const lineHit = full.match(lineRe)?.[0]?.trim();
-  if (lineHit && lineHit.length > name.length + 8) return lineHit;
-  // Fallback: from the project name to the next ALLCAPS-ish project title.
-  const idx = full.search(new RegExp(`\\b${escaped}\\b`, 'i'));
-  if (idx < 0) return full;
-  const from = full.slice(idx);
-  const next = from.slice(name.length).search(/\n\s*(?:\d+[.)]\s*)?(?:[-*]\s*)?[A-Z][A-Za-z0-9_-]{2,}\b/);
-  return (next >= 0 ? from.slice(0, name.length + next) : from).trim() || full;
-}
-
-function notesShellCss(): string {
-  return `html, body, #root {
-  margin: 0;
-  min-height: 100%;
-  height: 100%;
-}
-
-* { box-sizing: border-box; }
-
-.app {
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-  background: #1e1f22;
-  color: #f2f3f5;
-  font-family: system-ui, Segoe UI, sans-serif;
-}
-
-.titlebar {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 0.7rem 1rem;
-  border-bottom: 1px solid #2b2d31;
-  background: #111214;
-}
-
-.titlebar-hint {
-  color: #949ba4;
-  font-size: 0.8rem;
-}
-
-.shell {
-  flex: 1;
-  min-height: 0;
-  display: grid;
-  grid-template-columns: minmax(220px, 280px) 1fr;
-}
-
-.sidebar {
-  border-right: 1px solid #2b2d31;
-  background: #2b2d31;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-
-.sidebar-tools {
-  display: grid;
-  gap: 0.5rem;
-  padding: 0.75rem;
-}
-
-.primary {
-  border: 0;
-  border-radius: 8px;
-  padding: 0.55rem 0.75rem;
-  background: #5865f2;
-  color: #fff;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.search {
-  border: 1px solid #3f4147;
-  border-radius: 8px;
-  padding: 0.45rem 0.65rem;
-  background: #1e1f22;
-  color: inherit;
-}
-
-.note-list {
-  list-style: none;
-  margin: 0;
-  padding: 0.25rem 0.5rem 1rem;
-  overflow: auto;
-}
-
-.note-item {
-  width: 100%;
-  text-align: left;
-  border: 0;
-  border-radius: 8px;
-  padding: 0.55rem 0.65rem;
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
-  display: grid;
-  gap: 0.15rem;
-}
-
-.note-item:hover { background: #35373c; }
-.note-item.active { background: #404249; }
-
-.note-title { font-weight: 600; font-size: 0.9rem; }
-.note-preview { color: #949ba4; font-size: 0.75rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-
-.editor {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  padding: 1rem 1.25rem 1.25rem;
-  background: #1e1f22;
-}
-
-.editor-title {
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font-size: 1.4rem;
-  font-weight: 700;
-  padding: 0.25rem 0;
-  margin-bottom: 0.75rem;
-  outline: none;
-}
-
-.done-row {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  color: #949ba4;
-  font-size: 0.85rem;
-  margin-bottom: 0.75rem;
-}
-
-.editor-body {
-  flex: 1;
-  min-height: 280px;
-  border: 1px solid #2b2d31;
-  border-radius: 12px;
-  background: #111214;
-  color: inherit;
-  padding: 1rem;
-  resize: none;
-  font: inherit;
-  line-height: 1.5;
-  outline: none;
-}
-
-.empty { color: #949ba4; }
-`;
+  if (!changed) return [];
+  out.unshift({ path: appPath, content: src });
+  return out;
 }
 
 /**
@@ -2115,460 +1044,14 @@ function notesShellCss(): string {
 export function reactUiMicroAskEdits(
   files: WebFileMap,
   message: string,
-  opts?: { projectName?: string },
+  _opts?: { projectName?: string },
 ): WebFileEdit[] {
-  const surgical = reactSurgicalMicroAskEdits(files, message);
-  if (surgical.length) return surgical;
-
-  // Small UI tweaks must not trigger a full layout rebuild just because the
-  // project name maps to kanban/finance/notes. Full create/scaffold briefs still rebuild.
-  const looksLikeTweakOnly = (
-    /\b(rename|tint|change|update|make)\b/i.test(message)
-    && !/\b(create|scaffold|build\s+(?:a|me|the)|named|called)\b/i.test(message)
-    && String(message || '').length < 500
-  );
-  if (looksLikeTweakOnly) {
-    return [];
-  }
-
-  const projectName = String(opts?.projectName || '').trim();
-  const t = segmentForProject(String(message || ''), projectName);
-  const flat = flatten(files);
-  let appPath = findReactAppPath(flat);
-
-  const nameKey = projectName.toLowerCase().replace(/[^a-z0-9]+/g, '');
-  // Do NOT force canned apps from product names (SignalDesk → Discord, BrewDesk → coffee, etc.).
-  // Only the user's brief keywords may choose a layout kind — every create stays fresh otherwise.
-  const kindForced = ((): 'todo' | 'notes' | 'discord' | 'weather' | 'coffee' | 'finance' | 'kanban' | 'pulse' | null => {
-    // Keep only unambiguous name tokens that are the product TYPE itself.
-    if (/^kanban/.test(nameKey)) return 'kanban';
-    if (/^todo/.test(nameKey)) return 'todo';
-    return null;
-  })();
-
-  const wantsLogo = /\b(logo|icon)\b/i.test(t) && /\b(add|put|place|create|insert|center|middle|screen)\b/i.test(t);
-  const wantsCenter = /\b(center|middle)\b/i.test(t) && /\b(screen|page|app|logo|icon)\b/i.test(t)
-    && !/\b(sidebar|note|editor|title\s*bar|task|channel)\b/i.test(t);
-  const wantsNotesLayout = (
-    (
-      /\b(title\s*bar|sidebar|note\s*list|main\s+editor|sticky\s*notes?|notes?\s+app)\b/i.test(t)
-      || (/\b(new\s+note|searchable|localStorage)\b/i.test(t) && /\b(note|list|sidebar|button)\b/i.test(t))
-    )
-    // Hiking / trail / inventory "notes" are not a sticky-notes app.
-    && !/\b(trail|hiking|waypoint|elevation|kiln|glaze|aquarium|reef|livestock|greenhouse|plant)\b/i.test(t)
-  );
-  const wantsTodoLayout = (
-    /\b(todo|task\s*list|add\s+task)\b/i.test(t)
-    || (/\btask\b/i.test(t) && /\b(list|editor|localStorage|button)\b/i.test(t)
-      && !/\b(kanban|column|board|drag)\b/i.test(t))
-  );
-  const wantsKanbanLayout = (
-    /\b(kanban|drag[\s-]?and[\s-]?drop)\b/i.test(t)
-    || (/\b(column|board)\b/i.test(t) && /\b(backlog|doing|review|card|draggable)\b/i.test(t))
-    || /flowdeck|taskrail|columnforge|boardly/.test(nameKey)
-  );
-  const wantsDiscordLayout = (
-    /\b(server\s+rail|channel\s+list|chat\s+pane|member\s+list|welcome\s+screen)\b/i.test(t)
-    || (/\bdiscord\b/i.test(t) && /\b(layout|channels?|sidebar|chat)\b/i.test(t))
-  );
-  // Strong chat signals only. do NOT treat lucide / settings modal / left rail alone as Discord.
-  const wantsChatAppLayout = (
-    wantsDiscordLayout
-    || /\b(direct\s+messages?|voice\s+channel|screen\s+share|server\s+sidebar|threads?\s+panel|command\s+palette|call\s+bar|team\s+messaging|chat\s+app)\b/i.test(t)
-    || (/\b(channel|dm|mute|deafen|friends?)\b/i.test(t) && /\b(react|vite|sidebar|rail|layout)\b/i.test(t)
-      && !/\b(budget|transaction|finance|ledger|wallet|invoice|kanban|note|todo|task)\b/i.test(t))
-  );
-  const wantsFinanceLayout = (
-    /\b(budget|transaction|finance|ledger|wallet|expense|net\s*worth|cashflow)\b/i.test(t)
-    || /coinnest|ledgerfox|vaultbean|moneypit|shelfledger/.test(nameKey)
-  );
-  const wantsPulseLayout = (
-    /\b(pomodoro|focus\s+timer|scratch\s*pad)\b/i.test(t)
-    || (/\btimer\b/i.test(t) && /\b(notepad|scratch|pause|reset)\b/i.test(t))
-    || /deskpulse|chronopad|focuspulse/.test(nameKey)
-  );
-  const wantsWeatherLayout = /\bweather\b/i.test(t) && /\b(dashboard|search|temperature|city)\b/i.test(t);
-  const wantsCoffeeLayout = /\b(coffee|brew|menu|order\s+now|hero)\b/i.test(t)
-    && !/\b(budget|transaction|finance)\b/i.test(t);
-
-  let kind: 'todo' | 'notes' | 'discord' | 'weather' | 'coffee' | 'finance' | 'kanban' | 'pulse' | 'logo' | null = kindForced;
-  if (!kind) {
-    if (wantsKanbanLayout) kind = 'kanban';
-    else if (wantsPulseLayout) kind = 'pulse';
-    else if (wantsFinanceLayout) kind = 'finance';
-    else if (wantsTodoLayout) kind = 'todo';
-    else if (wantsChatAppLayout) kind = 'discord';
-    else if (wantsNotesLayout) kind = 'notes';
-    else if (wantsWeatherLayout) kind = 'weather';
-    else if (wantsCoffeeLayout) kind = 'coffee';
-    else if (wantsLogo || wantsCenter) kind = 'logo';
-  }
-
-  // Never keep Discord layout when the project name + brief are clearly non-chat.
-  if (kind === 'discord' && projectName && !/discord|nightchat|nexus|link|chat|voice|message|signal|desk|team|messaging/i.test(projectName)) {
-    const briefLooksChat = /\b(channel|dm|voice\s+channel|screen\s+share|member\s+list|team\s+messaging|chat\s+app)\b/i.test(t);
-    if (!briefLooksChat) {
-      kind = wantsKanbanLayout ? 'kanban'
-        : wantsPulseLayout ? 'pulse'
-        : wantsFinanceLayout ? 'finance'
-        : wantsTodoLayout ? 'todo'
-        : wantsNotesLayout ? 'notes'
-        : null;
-    }
-  }
-
-  if (!kind) return [];
-
-  // Empty sticky map (after reload). still patch the standard Vite React paths.
-  if (!appPath) {
-    const looksVite = Object.keys(flat).some(p => /vite\.config|package\.json|src\//i.test(p));
-    if (looksVite || Object.keys(flat).length === 0) {
-      appPath = 'src/App.jsx';
-    } else {
-      return [];
-    }
-  }
-
-  const cssPath = findReactCssPath(flat, appPath);
-  const out: WebFileEdit[] = [];
-  const title = escapeHtml(projectName || 'App');
-
-  if (kind === 'todo') {
-    const jsx = `import { useEffect, useMemo, useState } from 'react';
-import './App.css';
-
-const STORAGE_KEY = 'NOVA-tasks-v1';
-
-function loadTasks() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    const parsed = raw ? JSON.parse(raw) : null;
-    if (Array.isArray(parsed) && parsed.length) return parsed;
-  } catch {
-    /* ignore */
-  }
-  return [{ id: '1', title: 'Welcome', body: 'Add your first task…', done: false }];
+  // Only patch what already exists. Never invent todo/notes/discord/kanban/finance shells.
+  const arcade = arcadeGameMicroAskEdits(files, message);
+  if (arcade.length) return arcade;
+  return reactSurgicalMicroAskEdits(files, message);
 }
 
-export default function App() {
-  const [tasks, setTasks] = useState(loadTasks);
-  const [activeId, setActiveId] = useState(() => loadTasks()[0]?.id || '1');
-  const [query, setQuery] = useState('');
-
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
-  }, [tasks]);
-
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return tasks;
-    return tasks.filter(n =>
-      String(n.title || '').toLowerCase().includes(q)
-      || String(n.body || '').toLowerCase().includes(q)
-    );
-  }, [tasks, query]);
-
-  const active = tasks.find(n => n.id === activeId) || tasks[0] || null;
-
-  const addTask = () => {
-    const id = String(Date.now());
-    const next = [{ id, title: 'New task', body: '', done: false }, ...tasks];
-    setTasks(next);
-    setActiveId(id);
-  };
-
-  const updateActive = (patch) => {
-    if (!active) return;
-    setTasks(tasks.map(n => (n.id === active.id ? { ...n, ...patch } : n)));
-  };
-
-  return (
-    <div className="app">
-      <header className="titlebar">
-        <strong>${title}</strong>
-        <span className="titlebar-hint">Todo</span>
-      </header>
-      <div className="shell">
-        <aside className="sidebar">
-          <div className="sidebar-tools">
-            <button type="button" className="primary" onClick={addTask}>Add Task</button>
-            <input
-              className="search"
-              type="search"
-              placeholder="Search tasks…"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-          </div>
-          <ul className="note-list">
-            {filtered.map(n => (
-              <li key={n.id}>
-                <button
-                  type="button"
-                  className={n.id === active?.id ? 'note-item active' : 'note-item'}
-                  onClick={() => setActiveId(n.id)}
-                >
-                  <span className="note-title">{n.done ? '✓ ' : ''}{n.title || 'Untitled'}</span>
-                  <span className="note-preview">{(n.body || '').slice(0, 48) || 'Empty task'}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        </aside>
-        <main className="editor">
-          {active ? (
-            <>
-              <input
-                className="editor-title"
-                value={active.title}
-                onChange={(e) => updateActive({ title: e.target.value })}
-                placeholder="Task title"
-              />
-              <label className="done-row">
-                <input
-                  type="checkbox"
-                  checked={Boolean(active.done)}
-                  onChange={(e) => updateActive({ done: e.target.checked })}
-                />
-                Done
-              </label>
-              <textarea
-                className="editor-body"
-                value={active.body}
-                onChange={(e) => updateActive({ body: e.target.value })}
-                placeholder="Details…"
-              />
-            </>
-          ) : (
-            <p className="empty">Add a task to get started.</p>
-          )}
-        </main>
-      </div>
-    </div>
-  );
-}
-`;
-    const css = notesShellCss();
-    out.push({ path: appPath, content: jsx });
-    out.push({ path: cssPath, content: css });
-    return out;
-  }
-
-  if (kind === 'finance') {
-    const pkgEdit = patchPackageJsonForLucide(flat);
-    if (pkgEdit) out.push(pkgEdit);
-    out.push({ path: appPath, content: buildFinanceAppJsx(title) });
-    out.push({ path: cssPath, content: buildFinanceAppCss() });
-    return out;
-  }
-
-  if (kind === 'kanban') {
-    const pkgEdit = patchPackageJsonForLucide(flat);
-    if (pkgEdit) out.push(pkgEdit);
-    out.push({ path: appPath, content: buildKanbanAppJsx(title) });
-    out.push({ path: cssPath, content: buildKanbanAppCss() });
-    return out;
-  }
-
-  if (kind === 'pulse') {
-    out.push({ path: appPath, content: buildPulseAppJsx(title, t) });
-    out.push({ path: cssPath, content: buildPulseAppCss(t) });
-    return out;
-  }
-
-  if (kind === 'discord') {
-    const pkgEdit = patchPackageJsonForLucide(flat);
-    if (pkgEdit) out.push(pkgEdit);
-    out.push({ path: appPath, content: buildChatAppJsx(title) });
-    out.push({ path: cssPath, content: buildChatAppCss() });
-    return out;
-  }
-
-  // Weather / coffee layouts are not hard-coded here yet. leave to model/scaffold.
-  if (kind === 'weather' || kind === 'coffee') return [];
-
-  if (kind === 'notes') {
-    const noteTitle = escapeHtml(
-      projectName
-      || t.match(/\b(?:called|named)\s+([A-Za-z][A-Za-z0-9_-]{1,24})/i)?.[1]
-      || 'Notes',
-    );
-    const jsx = `import { useEffect, useMemo, useState } from 'react';
-import './App.css';
-
-const STORAGE_KEY = 'NOVA-notes-v1';
-
-function loadNotes() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    const parsed = raw ? JSON.parse(raw) : null;
-    if (Array.isArray(parsed) && parsed.length) return parsed;
-  } catch {
-    /* ignore */
-  }
-  return [{ id: '1', title: 'Welcome', body: 'Write your first note…' }];
-}
-
-export default function App() {
-  const [notes, setNotes] = useState(loadNotes);
-  const [activeId, setActiveId] = useState(() => loadNotes()[0]?.id || '1');
-  const [query, setQuery] = useState('');
-
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(notes));
-  }, [notes]);
-
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return notes;
-    return notes.filter(n =>
-      String(n.title || '').toLowerCase().includes(q)
-      || String(n.body || '').toLowerCase().includes(q)
-    );
-  }, [notes, query]);
-
-  const active = notes.find(n => n.id === activeId) || notes[0] || null;
-
-  const addNote = () => {
-    const id = String(Date.now());
-    const next = [{ id, title: 'New note', body: '' }, ...notes];
-    setNotes(next);
-    setActiveId(id);
-  };
-
-  const updateActive = (patch) => {
-    if (!active) return;
-    setNotes(notes.map(n => (n.id === active.id ? { ...n, ...patch } : n)));
-  };
-
-  return (
-    <div className="app">
-      <header className="titlebar">
-        <strong>${noteTitle}</strong>
-        <span className="titlebar-hint">Sticky notes</span>
-      </header>
-      <div className="shell">
-        <aside className="sidebar">
-          <div className="sidebar-tools">
-            <button type="button" className="primary" onClick={addNote}>New Note</button>
-            <input
-              className="search"
-              type="search"
-              placeholder="Search notes…"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-          </div>
-          <ul className="note-list">
-            {filtered.map(n => (
-              <li key={n.id}>
-                <button
-                  type="button"
-                  className={n.id === active?.id ? 'note-item active' : 'note-item'}
-                  onClick={() => setActiveId(n.id)}
-                >
-                  <span className="note-title">{n.title || 'Untitled'}</span>
-                  <span className="note-preview">{(n.body || '').slice(0, 48) || 'Empty note'}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        </aside>
-        <main className="editor">
-          {active ? (
-            <>
-              <input
-                className="editor-title"
-                value={active.title}
-                onChange={(e) => updateActive({ title: e.target.value })}
-                placeholder="Title"
-              />
-              <textarea
-                className="editor-body"
-                value={active.body}
-                onChange={(e) => updateActive({ body: e.target.value })}
-                placeholder="Start typing…"
-              />
-            </>
-          ) : (
-            <p className="empty">Create a note to get started.</p>
-          )}
-        </main>
-      </div>
-    </div>
-  );
-}
-`;
-
-    const css = notesShellCss();
-
-    out.push({ path: appPath, content: jsx });
-    out.push({ path: cssPath, content: css });
-    return out;
-  }
-
-  if (kind !== 'logo') return [];
-
-  const logoMark = brandLogoSvg(projectName || 'App');
-  const jsx = `import './App.css';
-
-export default function App() {
-  return (
-    <div className="app">
-      <div className="logo-stage" aria-label="App logo">
-        ${logoMark}
-      </div>
-    </div>
-  );
-}
-`;
-
-  const css = `html, body, #root {
-  margin: 0;
-  min-height: 100%;
-}
-
-.app {
-  min-height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: #1e1f22;
-}
-
-.logo-stage {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.ark-logo {
-  width: min(200px, 42vw);
-  height: auto;
-  display: block;
-}
-
-.ark-logo-fallback {
-  width: min(200px, 42vw);
-  height: min(200px, 42vw);
-  border-radius: 28%;
-  background: #5865F2;
-  color: #fff;
-  font: 700 1.25rem/1 system-ui, sans-serif;
-  display: grid;
-  place-items: center;
-}
-`;
-
-  out.push({ path: appPath, content: jsx });
-  out.push({ path: cssPath, content: css });
-  return out;
-}
-
-/**
- * Prefer remapped model edits; if they miss the live preview tree (or ask is micro),
- * merge deterministic local patches onto canonical files.
- */
 export function finalizeWebEdits(
   files: WebFileMap,
   message: string,
@@ -2576,6 +1059,20 @@ export function finalizeWebEdits(
   opts?: { projectName?: string },
 ): WebFileEdit[] {
   const remapped = canonicalizeWebEdits(modelEdits, files);
+
+  // Model already shipped a real App / page dump — never let nav/footer keyword micro-patches
+  // replace a full create/UI rewrite (create briefs often say "nav" + "footer").
+  const ask = String(message || '');
+  const exactMinimal = /\b(?:exact(?:ly)?|precisely|follow precisely|pure black|#000000|centered icon|nothing else|no other)\b/i.test(ask);
+  const appMin = exactMinimal ? 160 : 400;
+  const substantialModel = remapped.some((e) => {
+    const p = String(e.path || '').replace(/\\/g, '/');
+    const n = String(e.content || '').length;
+    if (/(?:^|\/)App\.(jsx|tsx)$/i.test(p) && n >= appMin) return true;
+    if (/(?:^|\/)index\.html$/i.test(p) && n >= 400) return true;
+    return false;
+  });
+  if (substantialModel) return remapped;
 
   // Surgical tweaks first. never let project-name full rebuilds clobber them.
   const surgical = reactSurgicalMicroAskEdits(files, message);

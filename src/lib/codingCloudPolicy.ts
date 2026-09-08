@@ -27,6 +27,17 @@ export function shouldPreferCloudForCoding(opts: {
   const mode = getLocalPrefs().aiMode;
   if (mode === 'local_only') return false;
   if (opts.agentLoop) return true;
+  // First UI / create: prefer local GGUF (long n_predict). Cloud-first was accepting
+  // tiny stub Apps in ~10s and finishing creates under 30s with empty Preview.
+  if (
+    opts.allowFileEdits
+    && /\b(?:first real ui|from this brief|Build the first real UI|Emit COMPLETE @@@FILE|RETRY:.*unusable UI)\b/i.test(
+      opts.message || '',
+    )
+  ) {
+    return false;
+  }
+  if (opts.allowFileEdits && opts.fileCount >= LARGE_REPO_FILES) return true;
   if (opts.allowFileEdits) return true;
   if (opts.fileCount < LARGE_REPO_FILES) return false;
   return /\b(fix|patch|edit|debug|stop|generating|@@@FILE|change|update)\b/i.test(opts.message)

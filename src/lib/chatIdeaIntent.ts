@@ -1,5 +1,5 @@
 /**
- * Greenfield product ideas. plan + optional create (not "Which project folder? DeBloat").
+ * Greenfield product ideas. plan + optional create (not "Which project folder?").
  */
 
 import { slugifyProjectName } from './projectNames';
@@ -183,6 +183,8 @@ export function extractGreenfieldName(text: string): string | null {
     /\bcreate\s+(?:a\s+)?(?:new\s+)?project\s+["“']?([A-Za-z][A-Za-z0-9 _-]{1,40})/i,
     /\bcreate\s+([A-Z][A-Za-z0-9]{1,40})\s*[—–\-:]/,
     /\bcreate\s+([A-Z][A-Za-z0-9]{1,40})\s+(?:as|restaurant|website|site|kanban|notes?|utility)\b/i,
+    /\b(?:build|create|scaffold)\s+([A-Z][A-Za-z0-9]{1,40})\s+on\s+disk\b/,
+    /\b(?:build|create|scaffold)\s+([A-Z][A-Za-z0-9]{1,40})\b(?=[\s\S]{0,80}\bon\s+disk\b)/,
     /\bi\s+want\s+to\s+(?:work\s+on|build|create|make)\s+(?:a\s+)?(?:project\s+)?(?:called\s+)?([A-Za-z][A-Za-z0-9 _-]{2,40})/i,
     /\b(?:build|create|make)\s+([A-Za-z][A-Za-z0-9 _-]{2,40})\s+(?:app|system|platform|product)\b/i,
     /\bbuild\s+([A-Z][A-Za-z0-9]{2,40})\s+(?:website|site|web\s*app)\b/,
@@ -503,7 +505,9 @@ export function looksLikeGreenfieldStartWorkGo(text: string): boolean {
 }
 
 export function looksLikeGreenfieldKeepPlanning(text: string): boolean {
-  return /\b(?:keep\s+planning|plan\s+only|more\s+planning|just\s+plan|not\s+yet|add\s+more\s+features\s+to\s+the\s+plan)\b/i.test(String(text || ''));
+  const t = String(text || '');
+  // Require an explicit planning-continue signal — not bare “not yet” (too common in normal talk).
+  return /\b(?:keep\s+planning|plan\s+only|more\s+planning|just\s+plan|add\s+more\s+features\s+to\s+the\s+plan|expand\s+the\s+plan)\b/i.test(t);
 }
 
 export function looksLikeGreenfieldHaveFolder(text: string): boolean {
@@ -603,6 +607,10 @@ export function looksLikeConversationalPlanningAsk(text: string): boolean {
   if (/\b(?:go\s+build|go\s+implement|implement\s+it|build\s+it\s+now|lets?\s+build\s+(?:this|that|it)|build\s+this|build\s+that|create\s+(?:the\s+)?(?:files|project)\s+now)\b/i.test(t)) {
     return false;
   }
+  // Explicit disk build asks are never “just talking”.
+  if (/\bon\s+disk\b/i.test(t) && /\b(?:build|create|scaffold|make)\b/i.test(t)) return false;
+  if (/\bopen\s+preview\b/i.test(t) && /\b(?:build|create|make)\b/i.test(t)) return false;
+  if (/\bcreate\s+(?:a\s+)?(?:brand[- ]?new\s+)?project\b/i.test(t)) return false;
   if (/\bgo\s+ahead(?:\s+and)?\s+(?:start\s+)?(?:building|build|implement|create|scaffold)\b/i.test(t)) return false;
   if (/\bcreate\s+(?:the\s+)?files\b/i.test(t) && /\b(?:now|please|desktop)\b/i.test(t)) return false;
   if (wantsPlanningOnly(t)) return true;
@@ -1031,6 +1039,6 @@ export function buildMissingWorkFolderReply(wantName: string): string {
     '',
     `Want me to create it as a **new project**? Say **Create project ${wantName}**.`,
     '',
-    'Or name an existing folder: *Let’s work on DeBloat*.',
+    'Or name an existing folder: *Let’s work on MyApp*.',
   ].join('\n');
 }

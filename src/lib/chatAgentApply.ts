@@ -7,10 +7,10 @@
 import {
   applyFileEdits,
   buildFileTreeFromPaths,
+  coerceCodingFileReply,
   extractChatStyleFileEdits,
   formatCodeChatReply,
   parseFileEdits,
-  scaffoldFallbackEdits,
   stripFileBlocks,
   type ProjectFileMap,
 } from '@/lib/projectCodeEdit';
@@ -132,8 +132,9 @@ export async function applyChatReplyEdits(opts: {
   }
 
   // Patch-first: SEARCH/REPLACE on existing files before full @@@FILE dumps.
-  let edits = parseFileEdits(opts.reply);
-  const patches = parseAgentPatches(opts.reply);
+  const replyForParse = coerceCodingFileReply(opts.reply);
+  let edits = parseFileEdits(replyForParse);
+  const patches = parseAgentPatches(replyForParse);
   if (patches.length) {
     const patched = applyAgentPatches(baseFiles, patches);
     if (patched.updated.length) {
@@ -150,17 +151,14 @@ export async function applyChatReplyEdits(opts: {
     edits = extractChatStyleFileEdits(opts.reply, userMessageForParse, baseFiles);
   }
 
-  // Prefer deterministic React/web patches for common UI asks. models often describe without writing.
-  // Never fall back to canned landings when the model reply is empty — that reused the same hero/CTA template.
+  // Prefer model edits. Surgical patches may help on an existing tree.
+  // Never invent canned landings / full app shells when the model wrote nothing.
   const finalized = finalizeWebEdits(baseFiles, rawUser, edits, { projectName: opts.projectName });
   if (finalized.length) {
     edits = finalized;
-  } else if (!edits.length) {
+  } else if (!edits.length && String(opts.reply || '').trim()) {
     const react = reactUiMicroAskEdits(baseFiles, rawUser, { projectName: opts.projectName });
     if (react.length) edits = react;
-    else if (String(opts.reply || '').trim()) {
-      edits = scaffoldFallbackEdits(userMessageForParse, baseFiles, { projectName: opts.projectName });
-    }
   }
 
   if (!edits.length) {
