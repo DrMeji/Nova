@@ -632,6 +632,45 @@ export function latestUserMessage(history: RouterChatTurn[], fallback: string): 
  * Strip GGUF / packed-prompt echoes so the bubble never shows “> hello” or
  * a full User:/NOVA: transcript before the real answer.
  */
+/**
+ * Keep planning outlines that models wrap in ```markdown / ```text.
+ * Only real code languages stay fenced for the code-dump stripper below.
+ */
+function unwrapPlanningFences(input: string): string {
+  let text = String(input || '');
+  const planLang = /^(?:markdown|md|text|plain|outline|plan)?$/i;
+  const codeLang = /^(?:jsx?|tsx?|javascript|typescript|html|css|python|json|bash|sh|shell|xml|sql|rust|go|cpp|c\+\+|c|java|swift|kotlin|vue|svelte)$/i;
+
+  // Closed fences: unwrap planning languages; leave code fences alone.
+  text = text.replace(/```([\w.+-]*)[^\n]*\n([\s\S]*?)```/g, (full, lang, body) => {
+    const l = String(lang || '').trim();
+    if (codeLang.test(l)) return full;
+    if (planLang.test(l) || !l) return String(body || '').replace(/\s+$/, '');
+    // Unknown lang: unwrap if body looks like a list/outline, else keep.
+    if (/^\s*(?:\d+\.|[-*•]|\*\*[^*\n]+)/m.test(body) && !/(?:export\s+default|className=|<!DOCTYPE|function\s*\()/m.test(body)) {
+      return String(body || '').replace(/\s+$/, '');
+    }
+    return full;
+  });
+
+  // Unclosed fence at end (common while streaming): keep the outline, don’t delete to EOF.
+  const unclosed = text.match(/```([\w.+-]*)[^\n]*\n([\s\S]*)$/);
+  if (unclosed) {
+    const l = String(unclosed[1] || '').trim();
+    const body = unclosed[2] || '';
+    const looksCode = codeLang.test(l)
+      || /(?:export\s+default|function\s*\(|const\s+\w+\s*=|className=|<!DOCTYPE)/.test(body);
+    const looksPlan = planLang.test(l)
+      || /^\s*(?:\d+\.|[-*•]|\*\*[^*\n]+)/m.test(body)
+      || (body.length > 80 && !looksCode);
+    if (looksPlan && !looksCode) {
+      text = text.replace(/```[\w.+-]*[^\n]*\n[\s\S]*$/, body.replace(/\s+$/, ''));
+    }
+  }
+
+  return text;
+}
+
 export function sanitizeAssistantReply(
   raw: string,
   lastUserMessage?: string,
@@ -818,6 +857,7 @@ export function sanitizeAssistantReply(
   }
 
   // Unless the user asked to see source in chat, never leave code fences / JSX dumps in the bubble.
+  // Planning outlines often use ```markdown — unwrap those so lists are not retracted mid-stream.
   const keepCodeInChat = Boolean(
     user
     && (
@@ -828,22 +868,29 @@ export function sanitizeAssistantReply(
     && !/\b(?:create\s+(?:a\s+)?(?:project|folder)|on\s+disk|preview|localhost|scaffold)\b/i.test(user)
   );
   if (!keepCodeInChat) {
-    const hadFence = /```|@@@FILE|<!DOCTYPE\b|<html[\s>]|export\s+default\s+function/i.test(text)
+    text = unwrapPlanningFences(text);
+    const hadCodeDump = /@@@FILE|<!DOCTYPE\b|<html[\s>]|export\s+default\s+function/i.test(text)
+      || /```(?:jsx?|tsx?|javascript|typescript|html|css|python|json|bash|sh|shell|xml|sql|rust|go|cpp|c\+\+|java|swift|kotlin|vue|svelte)\b/i.test(text)
       || /<(?:section|div|header|nav|button|form|select|option|style|script)\b/i.test(text)
       || /\b(?:document\.querySelector|addEventListener|useState\s*\(|className\s*=)/i.test(text)
       || ((text.match(/[{};]/g) || []).length >= 10 && /className=|<\/?[A-Z][A-Za-z]+/.test(text));
-    if (hadFence) {
+    if (hadCodeDump) {
       text = text
         .replace(/@@@FILE\s+[^\n\r]+\s*```[\w.+-]*\s*\n[\s\S]*?```/gi, '')
+        .replace(/```(?:jsx?|tsx?|javascript|typescript|html|css|python|json|bash|sh|shell|xml|sql|rust|go|cpp|c\+\+|java|swift|kotlin|vue|svelte)[^\n]*\n[\s\S]*?```/gi, '')
+        .replace(/```(?:jsx?|tsx?|javascript|typescript|html|css|python|json|bash|sh|shell|xml|sql|rust|go|cpp|c\+\+|java|swift|kotlin|vue|svelte)[^\n]*\n[\s\S]*$/gi, '')
         .replace(/```[\s\S]*?```/g, '')
-        .replace(/```[\w.+-]*[^\n]*\n[\s\S]*$/g, '')
         .replace(/(?:^|\n)\s*(?:html|jsx|javascript|css|tsx?)\s*\n?[\s\S]*?(?=\n\s*(?:Open your|Save all|If you need|Responded)|$)/gi, '\n')
         .replace(/<\/?[A-Za-z][^>]*>/g, '')
         .replace(/\b(?:document\.querySelector|addEventListener)\([^)]*\)[^.;\n]*[.;]?/gi, '')
         .replace(/^\s*(?:import|export|const|let|var|function|return|className=)\b[^\n]*$/gim, '')
         .replace(/\n{3,}/g, '\n\n')
         .trim();
-      if (!text || text.length < 12 || /here'?s how you can do it/i.test(text)) {
+      const diskContext = Boolean(
+        user
+        && /\b(?:create\s+(?:a\s+)?(?:project|folder)|on\s+disk|preview|localhost|scaffold|apply|edit\s+(?:the\s+)?(?:code|file)|fix\s+(?:the\s+)?(?:bug|code))\b/i.test(user),
+      );
+      if ((!text || text.length < 12 || /here'?s how you can do it/i.test(text)) && diskContext) {
         text = 'I applied that in your project files. Open **Code** or **Preview** to review — say if you want the source shown here.';
       }
     }

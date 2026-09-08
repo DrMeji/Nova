@@ -376,6 +376,17 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.203',
+    channel: 'stable' as const,
+    date: 'Sep 8, 2026',
+    title: 'Stop retracting chat outlines',
+    notes: [
+      'Fix: FPS / game planning lists no longer disappear mid-stream',
+      '```markdown outlines stay in the bubble instead of being treated as code dumps',
+      'Silent local retries no longer overwrite a longer good answer with a shorter one',
+    ],
+  },
+  {
     version: '0.1.202',
     channel: 'stable' as const,
     date: 'Sep 8, 2026',

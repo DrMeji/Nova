@@ -8253,6 +8253,24 @@ export function AIChat() {
             stickyModelName: useChatBrain ? undefined : sticky?.modelName,
             stickyPinnedSource: useChatBrain ? undefined : sticky?.pinnedSource,
             history,
+            onAttemptReset: () => {
+              // Silent local retries must clear the bubble so a shorter second draft
+              // cannot flash-over a longer outline, then finalize the worse one.
+              streamedPartial = '';
+              lastGoodLive = '';
+              sawToken = false;
+              if (idleTimer) window.clearTimeout(idleTimer);
+              setMessages(prev => {
+                if (routeChatIdRef.current !== activeChatId) return prev;
+                const next = prev.map(m => (
+                  m.id === assistantId
+                    ? { ...m, content: `__generating__:chat:${statusLabel}` }
+                    : m
+                ));
+                messagesRef.current = next;
+                return next;
+              });
+            },
             onChunk: prefs.streamResponses
               ? (piece) => {
               if (abandoned || stopRequestedRef.current || mySeq !== genSeqRef.current) return;
@@ -8262,7 +8280,10 @@ export function AIChat() {
                 || streamedPartial.trim();
               const liveClean = live && !looksLikePromptEcho(live) ? live : '';
               if (liveClean) {
-                lastGoodLive = liveClean;
+                // Prefer the longest clean draft this turn (don’t shrink when sanitize flickers).
+                if (liveClean.length >= lastGoodLive.length) {
+                  lastGoodLive = liveClean;
+                }
                 sawToken = true;
               }
               // Fast-fail when the model is only re-emitting the system prompt.
@@ -8353,11 +8374,18 @@ export function AIChat() {
           const rawReply = stopRequestedRef.current && streamedPartial
             ? streamedPartial
             : routed.reply;
+          const routedClean = usableAssistantText(rawReply, content, previousAssistant);
+          const streamClean = usableAssistantText(streamedPartial, content, previousAssistant);
+          // Prefer the longest usable draft so silent retries cannot retract a solid outline.
+          const candidates = [routedClean, streamClean, lastGoodLive, String(rawReply || '').trim(), streamedPartial.trim()]
+            .map(s => String(s || '').trim())
+            .filter(s => s && !looksLikePromptEcho(s));
+          candidates.sort((a, b) => b.length - a.length);
+          response = candidates[0] || '';
           const candidate = String(rawReply || streamedPartial || lastGoodLive || '').trim();
-          response = usableAssistantText(rawReply, content, previousAssistant)
-            || usableAssistantText(streamedPartial, content, previousAssistant)
-            || lastGoodLive
-            || (looksLikePromptEcho(candidate) ? '' : candidate);
+          if (!response && candidate && !looksLikePromptEcho(candidate)) {
+            response = candidate;
+          }
           if (looksLikeThreadSummaryAsk(content)) {
             // Prefer persisted thread for THIS chat — messagesRef can lag right after a Recent switch.
             let threadMsgs = messagesRef.current.filter(m => m.id !== assistantId);
@@ -8540,7 +8568,10 @@ export function AIChat() {
         const looksLikeDump = /@@@FILE|<!DOCTYPE\b|<html[\s>]|```|export\s+default\s+function|className=|^\s*return\s*\(/im.test(response)
           || ((response.match(/[{};]/g) || []).length >= 10)
           || /\bstruct\s+ContentView\b|\bimport\s+SwiftUI\b/i.test(response);
-        if (looksLikeDump && !looksLikeCopyPasteCodeAsk(content)) {
+        const mostlyPlanOutline = response.length > 200
+          && ((response.match(/^\s*(?:\d+\.|[-*•])/gm) || []).length >= 2)
+          && !/@@@FILE|export\s+default\s+function|className=/i.test(response);
+        if (looksLikeDump && !looksLikeCopyPasteCodeAsk(content) && !mostlyPlanOutline) {
           response = finalizeCodingChatBubble({
             userMessage: content,
             rawReply: response,

@@ -17,6 +17,7 @@ import {
   looksLikeUserAskEcho,
   isSoftContinuityAsk,
   usableAssistantText,
+  stripFirstPersonAskRestatement,
   type RouterChatTurn,
 } from '@/lib/chatHistory';
 import { honestNoLiveChatReply } from '@/lib/arkCapacity';
@@ -216,31 +217,48 @@ async function tryLocalChat(
           Object.assign(result, retry);
         }
       }
-      // Local models often restate “I want to build…” — strip/retry so the bubble answers as NOVA.
+      // Local models often restate “I want to build…” — strip first; only regenerate if still echo-only.
       if (
         kind === 'chat'
         && looksLikeUserAskEcho(cleaned || rawText, message)
       ) {
-        onAttemptReset?.();
-        const noEchoPrompt = [
-          packHistoryPrompt(history, message),
-          '',
-          'CRITICAL RETRY: Do NOT restate the user message. Do NOT start with “I want to…”. '
-          + 'Open as the assistant (e.g. “Sure — here is how I would approach that”), then give concrete steps.',
-        ].join('\n');
-        const retry = onChunk
-          ? await brainGenerateStream(noEchoPrompt, id, onChunk, kind)
-          : await brainGenerate(noEchoPrompt, id, kind);
-        const retryClean = usableAssistantText(retry.reply, message, prevAsst);
-        const retryRaw = String(retry.reply || '').trim();
-        if (retryClean && !looksLikeUserAskEcho(retryClean, message)) {
-          cleaned = retryClean;
-          rawText = retryRaw;
-          Object.assign(result, retry);
-        } else if (retryClean || retryRaw) {
-          cleaned = usableAssistantText(retryClean || retryRaw, message, prevAsst) || cleaned;
-          rawText = retryRaw || rawText;
-          Object.assign(result, retry);
+        const firstDraft = (cleaned || rawText).trim();
+        const stripped = stripFirstPersonAskRestatement(firstDraft, message).trim();
+        const strippedClean = usableAssistantText(stripped, message, prevAsst) || stripped;
+        if (
+          strippedClean.length >= Math.min(280, Math.max(120, Math.floor(firstDraft.length * 0.55)))
+          && !looksLikeUserAskEcho(strippedClean, message)
+        ) {
+          cleaned = strippedClean;
+          rawText = stripped;
+        } else {
+          onAttemptReset?.();
+          const noEchoPrompt = [
+            packHistoryPrompt(history, message),
+            '',
+            'CRITICAL RETRY: Do NOT restate the user message. Do NOT start with “I want to…”. '
+            + 'Open as the assistant (e.g. “Sure — here is how I would approach that”), then give concrete steps.',
+          ].join('\n');
+          const retry = onChunk
+            ? await brainGenerateStream(noEchoPrompt, id, onChunk, kind)
+            : await brainGenerate(noEchoPrompt, id, kind);
+          const retryClean = usableAssistantText(retry.reply, message, prevAsst);
+          const retryRaw = String(retry.reply || '').trim();
+          const retryBest = (retryClean || retryRaw).trim();
+          // Never replace a longer good outline with a shorter retry.
+          if (
+            retryBest
+            && !looksLikeUserAskEcho(retryBest, message)
+            && retryBest.length >= Math.floor(firstDraft.length * 0.85)
+          ) {
+            cleaned = retryClean || retryRaw;
+            rawText = retryRaw;
+            Object.assign(result, retry);
+          } else if (retryBest.length > firstDraft.length) {
+            cleaned = retryClean || retryRaw;
+            rawText = retryRaw;
+            Object.assign(result, retry);
+          }
         }
       }
       // If a local GGUF echoes the system prompt, we must fail this attempt so failover
@@ -318,12 +336,16 @@ async function tryLocalChat(
         return null;
       }
       // Thin or rushed chat answers — deepen for substance (1+ min think is OK).
+      // Skip when the draft already has a real outline/list (retry was retracting FPS plans).
       const thoroughAsk = /\b(?:explain|thorough|cover|detail|why|how\s+does|trilateration|walk\s+me\s+through)\b/i.test(
         String(message || ''),
       );
+      const hasSolidOutline = ((reply.match(/^\s*(?:\d+\.|[-*•])/gm) || []).length >= 3)
+        || ((reply.match(/\*\*[^*\n]{3,}\*\*/g) || []).length >= 3 && reply.trim().length >= 500);
       if (
         kind === 'chat'
         && reply.trim().length > 0
+        && !hasSolidOutline
         && (
           reply.trim().length < 900
           || (thoroughAsk && reply.trim().length < 2200)
