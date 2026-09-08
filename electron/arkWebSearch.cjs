@@ -1,6 +1,6 @@
 /**
  * Lightweight web lookup for Chat (no API key).
- * Uses DuckDuckGo Instant Answer + Wikipedia summary.
+ * Uses DuckDuckGo Instant Answer + lite HTML results + Wikipedia summary.
  */
 
 async function fetchJson(url, timeoutMs = 12_000) {
@@ -19,11 +19,43 @@ async function fetchJson(url, timeoutMs = 12_000) {
   }
 }
 
+async function fetchText(url, timeoutMs = 12_000) {
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: {
+        Accept: 'text/html,application/xhtml+xml',
+        'User-Agent': 'Mozilla/5.0 (compatible; NOVA-Desktop/1.0; +https://nova.local)',
+      },
+      signal: ac.signal,
+      redirect: 'follow',
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.text();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function cleanQuery(raw) {
   return String(raw || '')
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, 220);
+}
+
+function decodeHtml(s) {
+  return String(s || '')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 async function wikipediaSummary(query) {
@@ -85,6 +117,49 @@ async function duckDuckGoInstant(query) {
 }
 
 /**
+ * Lite HTML scrape of DuckDuckGo HTML results — better for news / "today" than Instant Answer.
+ */
+async function duckDuckGoHtmlLite(query) {
+  const q = cleanQuery(query);
+  if (!q) return null;
+  try {
+    const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(q)}`;
+    const html = await fetchText(url);
+    if (!html || html.length < 200) return null;
+    const results = [];
+    const re = /<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+    let m;
+    while ((m = re.exec(html)) && results.length < 6) {
+      let href = decodeHtml(m[1]);
+      const title = decodeHtml(m[2]).slice(0, 160);
+      // DDG wraps outbound links; unwrap uddg= when present.
+      const uddg = href.match(/[?&]uddg=([^&]+)/);
+      if (uddg) {
+        try { href = decodeURIComponent(uddg[1]); } catch { /* keep */ }
+      }
+      if (!title || !href || !/^https?:\/\//i.test(href)) continue;
+      if (/duckduckgo\.com/i.test(href)) continue;
+      results.push({ title, url: href });
+    }
+    // Snippets
+    const snipRe = /<a[^>]+class="result__snippet"[^>]*>([\s\S]*?)<\/a>|<td[^>]+class="result__snippet"[^>]*>([\s\S]*?)<\/td>/gi;
+    const snips = [];
+    let sm;
+    while ((sm = snipRe.exec(html)) && snips.length < 6) {
+      const snip = decodeHtml(sm[1] || sm[2] || '').slice(0, 280);
+      if (snip) snips.push(snip);
+    }
+    if (!results.length) return null;
+    return results.map((r, i) => ({
+      ...r,
+      snippet: snips[i] || '',
+    }));
+  } catch {
+    return null;
+  }
+}
+
+/**
  * @param {string} query
  * @returns {Promise<{ ok: boolean; text: string; sources: { title: string; url: string }[]; error?: string }>}
  */
@@ -92,14 +167,22 @@ async function searchWeb(query) {
   const q = cleanQuery(query);
   if (!q) return { ok: false, text: '', sources: [], error: 'Empty query' };
 
-  const [ddg, wiki] = await Promise.all([
+  const [ddg, wiki, htmlLite] = await Promise.all([
     duckDuckGoInstant(q),
     wikipediaSummary(q),
+    duckDuckGoHtmlLite(q),
   ]);
 
   const lines = [];
   const sources = [];
 
+  if (htmlLite?.length) {
+    lines.push('Web results (recent search):');
+    for (const row of htmlLite) {
+      lines.push(`- ${row.title}${row.snippet ? ` — ${row.snippet}` : ''}${row.url ? ` (${row.url})` : ''}`);
+      if (row.url) sources.push({ title: row.title, url: row.url });
+    }
+  }
   if (wiki?.extract) {
     lines.push(`Wikipedia · ${wiki.title}: ${wiki.extract}`);
     if (wiki.url) sources.push({ title: wiki.title, url: wiki.url });
@@ -127,8 +210,8 @@ async function searchWeb(query) {
 
   return {
     ok: true,
-    text: lines.join('\n').slice(0, 3500),
-    sources: sources.slice(0, 8),
+    text: lines.join('\n').slice(0, 4500),
+    sources: sources.slice(0, 10),
   };
 }
 

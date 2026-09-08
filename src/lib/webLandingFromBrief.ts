@@ -70,6 +70,20 @@ export function wantsInteractiveSpaScaffold(text: string): boolean {
   if (/\b(?:habit|streak|daily\s+checklist|tracker\s+app)\b/i.test(t)) {
     return true;
   }
+  // Streaming product clones (Netflix / Twitch style) need Vite React, not blank static HTML.
+  if (
+    /\b(?:netflix|twitch|nightflix|pulsestream|streaming\s+(?:home|app|site)|live\s+stream(?:ing)?\s+(?:app|site)|billboard|watch\s+page)\b/i.test(t)
+    || (
+      /\b(?:react|vite)\b/i.test(t)
+      && /\b(?:stream(?:ing)?|poster\s+rows?|my\s+list|follow|subscribe)\b/i.test(t)
+    )
+  ) {
+    return true;
+  }
+  // Brand marketing replicas (Apple.com etc.) — animated SPA, not blank static HTML.
+  if (/\b(?:apple\.com|exact\s+replica)\b/i.test(t) && /\b(?:apple|website|site|landing|homepage|marketing)\b/i.test(t)) {
+    return true;
+  }
   if (/\b(watchlist|orders?\s+tab|trading\s+cockpit|trade\s*rail|desktop[- ]style)\b/i.test(t)
     && /\b(tab|settings|panel|button|cockpit|software)\b/i.test(t)) {
     return true;
@@ -108,10 +122,13 @@ export function prefersReactAppScaffold(text: string): boolean {
   const t = String(text || '').toLowerCase();
   if (/\b(static\s+html|plain\s+html|landing\s+page\s+only)\b/.test(t)) return false;
   if (wantsInteractiveSpaScaffold(text)) return true;
+  // Explicit React/Vite asks win over marketing-landing → static-html heuristics.
+  if (/\b(react|vite|next\.?js|npm\s+install|lucide|jsx|tsx|usestate|dev\s+server|localhost|app\.jsx|app\.tsx)\b/.test(t)
+    || /\bsrc\/app\.(jsx|tsx|css)\b/.test(t)) {
+    return true;
+  }
   if (looksLikeMarketingLanding(text)) return false;
-  return (
-    /\b(react|vite|next\.?js|npm\s+install|lucide|jsx|tsx|usestate|dev\s+server|localhost)\b/.test(t)
-  );
+  return false;
 }
 
 /** True when the brief describes a real landing page (not a one-line create). */

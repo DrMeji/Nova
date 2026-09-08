@@ -9,6 +9,7 @@ import { isCatalogMessage, parseCatalogMessage, catalogToPlainText } from '@/lib
 import { isPcExploreMessage, parsePcExploreMessage, pcExploreToPlainText } from '@/lib/pcExplore';
 import { isPromptChipsMessage, parsePromptChipsMessage, promptChipsToPlainText } from '@/lib/chatPromptChips';
 import { getUsableTokens } from '@/lib/ggufContext';
+import { normalizeAssistantLists } from '@/lib/chatPlanMode';
 
 export type RouterChatTurn = {
   role: 'user' | 'assistant';
@@ -77,7 +78,11 @@ function todaySystemLine(): string {
       month: 'long',
       day: 'numeric',
     });
-    return `Today's date is ${label}.`;
+    return (
+      `Today's date is ${label}. `
+      + 'For news, stocks, sports, or “what happened today”, prefer live web lookup notes over older training knowledge. '
+      + 'If you lack live notes, say so clearly instead of inventing 2023-era facts.'
+    );
   } catch {
     return '';
   }
@@ -232,17 +237,32 @@ export function isTopicShift(history: RouterChatTurn[], latestUserMessage: strin
   if (!earlier?.content) return false;
   const a = earlier.content.trim();
   const b = latest;
+
+  // Side quests (lyrics, weather, F1, stocks, news) always break out of a build/plan thread.
+  // Import lazily via inline patterns to avoid circular deps with webSearch.
+  const sideQuest = looksLikeSideQuestInline(b);
+  const priorSide = looksLikeSideQuestInline(a);
+  if (sideQuest && !priorSide) return true;
+  if (sideQuest && priorSide && significantTokens(a).size > 0) {
+    // lyrics → weather is also a shift
+    const ta = significantTokens(a);
+    const tb = significantTokens(b);
+    let overlap = 0;
+    for (const t of tb) if (ta.has(t)) overlap += 1;
+    if (tb.size >= 2 && overlap / tb.size < 0.25) return true;
+  }
+
   const priorIsBuildThread =
     TEACH_HINT.test(a) || CODING_TOPIC_HINT.test(a) || BUILD_HINT.test(a)
-    || /\b(app|website|site|product|project|landing|page|ui|layout)\b/i.test(a);
+    || /\b(app|website|site|product|project|landing|page|ui|layout|marketplace|membership|craftsmen)\b/i.test(a);
   const latestIsBuildish =
     BUILD_HINT.test(b) || CODING_TOPIC_HINT.test(b) || THREAD_CONTINUE_HINT.test(b)
     || /\b(app|website|site|product|project|landing|page|color|font|layout|edit|change|add|fix)\b/i.test(b);
 
-  // Long planning / build threads must stay intact — weak word-overlap must not wipe memory.
-  if (priorIsBuildThread && (latestIsBuildish || b.length < 220)) return false;
-  // After teach/learn or build, short / deepen asks stay on that topic.
-  if ((TEACH_HINT.test(a) || CODING_TOPIC_HINT.test(a) || BUILD_HINT.test(a)) && b.length < 220) return false;
+  // Long planning / build threads must stay intact — unless this is an explicit side quest.
+  if (priorIsBuildThread && !sideQuest && (latestIsBuildish || b.length < 220)) return false;
+  // After teach/learn or build, short / deepen asks stay on that topic (not side quests).
+  if (!sideQuest && (TEACH_HINT.test(a) || CODING_TOPIC_HINT.test(a) || BUILD_HINT.test(a)) && b.length < 220) return false;
   if (BUILD_HINT.test(a) && THREAD_CONTINUE_HINT.test(b)) return false;
   if (BUILD_HINT.test(a) && /\b(app|website|site|product|project|build)\b/i.test(b)) return false;
   // Explicit media ask after a non-media thread is a real switch.
@@ -255,15 +275,34 @@ export function isTopicShift(history: RouterChatTurn[], latestUserMessage: strin
   const ta = significantTokens(a);
   const tb = significantTokens(b);
   if (tb.size < 2 || ta.size < 2) {
-    if ((BUILD_HINT.test(a) || TEACH_HINT.test(a) || CODING_TOPIC_HINT.test(a)) && b.length < 180) return false;
+    if (!sideQuest && (BUILD_HINT.test(a) || TEACH_HINT.test(a) || CODING_TOPIC_HINT.test(a)) && b.length < 180) return false;
     // Short follow-ups in an ongoing thread are almost never a real topic change.
-    if (priorUsers.length >= 2 && b.length < 160) return false;
+    if (!sideQuest && priorUsers.length >= 2 && b.length < 160) return false;
     return a.toLowerCase() !== b.toLowerCase() && !isSoftContinuityAsk(b);
   }
   let overlap = 0;
   for (const t of tb) if (ta.has(t)) overlap += 1;
   // Only treat as a shift when almost no shared words (was 0.28 — too eager mid-build).
   return overlap / tb.size < 0.12;
+}
+
+/** Keep in sync with looksLikeSideQuestAsk in webSearch.ts (avoid import cycles). */
+function looksLikeSideQuestInline(text: string): boolean {
+  const t = String(text || '').trim();
+  if (!t) return false;
+  if (/^(?:keep\s+building|continue\s+building|get\s+back\s+to\s+(?:building|the\s+(?:build|project|site|app)))\b/i.test(t)) {
+    return false;
+  }
+  if (/\b(?:lyrics?|lyric\s+to|words\s+to\s+(?:the\s+)?(?:song|track))\b/i.test(t)) return true;
+  if (/\b(?:song|track|album)\b/i.test(t) && /\b(?:by|from|lyrics|artist)\b/i.test(t)) return true;
+  if (/\b(?:weather|forecast|temperature|humid(?:ity)?)\b/i.test(t)) return true;
+  if (/\b(?:F1|formula\s*1|grand\s+prix|nascar|nba|nfl|mlb|nhl|world\s+cup|premier\s+league)\b/i.test(t)) return true;
+  if (/\b(?:upcoming|next)\s+(?:race|races|gp|grand\s+prix)\b/i.test(t)) return true;
+  if (/\b(?:stock|stocks|share\s+price|AAPL|TSLA|NVDA|S&P|nasdaq|dow\s+jones)\b/i.test(t)) return true;
+  if (/\b(?:white\s+house|president|congress|election|headlines?|breaking\s+news|current\s+events)\b/i.test(t)) return true;
+  if (/\bwhat(?:'s|\s+is)\s+(?:the\s+)?(?:weather|score|price|news)\b/i.test(t)) return true;
+  if (/\bwho\s+won\b|\bwhat\s+happened\s+(?:today|yesterday|this\s+week|in\s+the\s+white\s+house)\b/i.test(t)) return true;
+  return false;
 }
 
 /** Strip UI / media noise so providers get usable text. */
@@ -632,6 +671,7 @@ export function sanitizeAssistantReply(
   text = text.replace(/^[a-z]\.\s+(?:If you have any specific|I(?:['’]d| would) be happy)[^\n]*\n*/i, '').trim();
   text = text.replace(/^Hello!\s+It (?:looks|seems) like you might have (?:meant|a typo)[^\n]*\n*/i, '').trim();
   text = tidyMarkdownStars(text);
+  text = normalizeAssistantLists(text);
 
   // Strip fancy dashes from model output (em/en dash). keep normal hyphens in words/versions.
   text = text
@@ -657,6 +697,8 @@ export function sanitizeAssistantReply(
       text = text.slice(firstLine.length).replace(/^\n+/, '').trim();
     }
     text = stripFirstPersonAskRestatement(text, user);
+    // Strip mirrored openers like “I like your ideas. Let's focus…”
+    text = text.replace(/^(?:i\s+like\s+your\s+ideas?|thanks?(?:\s+for(?:\s+the)?\s+ideas?)?|sounds?\s+good)[,!.]?\s+/i, '').trim();
   }
 
   // If the model re-emits the previous assistant answer, drop that prefix / paragraphs.
@@ -911,6 +953,19 @@ export function looksLikeUserAskEcho(reply: string, userMessage: string): boolea
     let hit = 0;
     for (const w of lt) if (ut.has(w)) hit += 1;
     if (ut.size >= 4 && hit / Math.min(ut.size, Math.max(lt.size, 1)) >= 0.45) return true;
+  }
+  // Mirror openers (“I like your ideas…”) pasted back as the assistant lead.
+  if (
+    /^(?:i\s+like\s+your\s+ideas?|thanks?(?:\s+for\s+(?:the\s+)?ideas?)?|sounds?\s+good)\b/i.test(lead)
+    && /^(?:i\s+like\s+your\s+ideas?|thanks?|sounds?\s+good)\b/i.test(u)
+  ) {
+    return true;
+  }
+  if (
+    /^(?:i\s+like\s+your\s+ideas?)[,.]?\s+/i.test(rl)
+    && /\bi\s+like\s+your\s+ideas?\b/i.test(ul)
+  ) {
+    return true;
   }
   // High token overlap on short replies
   const ut = new Set(ul.split(/[^a-z0-9]+/).filter(w => w.length > 3));

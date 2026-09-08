@@ -50,13 +50,27 @@ export function classifyGitAsk(message: string):
   | 'slack'
   | null {
   const t = message.toLowerCase();
-  if (/\bclone\b/.test(t) && /github\.com|[\w.-]+\/[\w.-]+/.test(t)) return 'clone';
+  // Require an explicit repo target — not product wording like "Twitch clone" + "Follow/Subscribe".
+  if (
+    /\b(?:git\s+)?clone\b/.test(t)
+    && (/github\.com/.test(t) || /\bclone\s+(?:https?:\/\/\S+|[\w.-]+\/[\w.-]+)/i.test(message))
+  ) {
+    return 'clone';
+  }
   if (/\bcreate (a )?(public |private )?(github )?repo\b/.test(t) || /\bpush this (folder|project|repo)\b/.test(t)) {
     return 'create-repo';
   }
   if (/\b(create|open|make)\b.{0,40}\b(pr|pull request)\b/.test(t)) return 'pr';
-  if ((/\bslack\b/.test(t) || /#([\w-]+)/.test(t)) && /\b(post|summarize|summary|send)\b/.test(t)) return 'slack';
-  if (/\b(what (did we |have we )?chang|git diff|review (the )?diff|last commits?)\b/.test(t)) return 'diff';
+  // Slack: require the word slack, or a real #channel (not CSS hex / UI “Send”).
+  const slackChannel = Array.from(message.matchAll(/#([a-z][\w-]{1,80})\b/gi)).some(
+    (m) => !/^[0-9a-f]{3,8}$/i.test(m[1]),
+  );
+  if (
+    (/\bslack\b/.test(t) || (slackChannel && /\b(?:post|summarize|summary)\b/.test(t)))
+    && (/\bslack\b/.test(t) || /\b(?:post|summarize|summary)\b/.test(t))
+  ) {
+    return 'slack';
+  }  if (/\b(what (did we |have we )?chang|git diff|review (the )?diff|last commits?)\b/.test(t)) return 'diff';
   if (/\b(git push|push (this|it|to origin|to github)|commit .{0,40}and push)\b/.test(t)) return 'push';
   if (/\b(git commit|commit (these |my |the )?changes)\b/.test(t)) return 'commit';
   return null;

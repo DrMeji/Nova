@@ -37,6 +37,22 @@ export function isBlankProjectScaffold(files: Record<string, string> | null | un
 export function isBrokenReactAppSource(appSource: string | undefined | null): boolean {
   if (isEmptyReactAppShell(appSource)) return true;
   const s = String(appSource || '');
+  // Endless SVG path / attribute loops (local-model failure mode).
+  if (s.length >= 8000 && new Set(s).size < 100) return true;
+  if (s.length >= 5000) {
+    const start = Math.floor(s.length / 3);
+    for (let len = 28; len <= 48; len += 4) {
+      const probe = s.slice(start, start + len);
+      if (probe.length === len && (s.split(probe).length - 1) >= 40) return true;
+    }
+  }
+  if (/\*\*CSS\b|```(?:jsx|css|tsx)?\s*$/m.test(s) || /This completes the initial implementation/i.test(s)) return true;
+  // useState without importing React hooks — Preview will white-screen.
+  if (/\buseState\s*\(/.test(s) && !/\bimport\s+/.test(s) && !/\bfrom\s+['"]react['"]/.test(s)) return true;
+  // JSX attribute-as-child bug: onClick={...}\n  Play\n</button>
+  if (/onClick=\{[^}]+\}\s*\n\s*[A-Za-z][A-Za-z ]{0,24}\s*\n\s*<\//.test(s)) return true;
+  // Unclosed opening tag before nested tag: onClick={...}\n  <img
+  if (/onClick=\{[^}]+\}\s*\n\s*</.test(s)) return true;
   const hasAppComponent =
     /export\s+default\s+function\s+App\b/i.test(s)
     || /export\s+default\s+(?:function\s*)?\(\s*\)\s*=>/i.test(s)

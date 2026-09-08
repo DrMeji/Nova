@@ -27,15 +27,16 @@ export function shouldPreferCloudForCoding(opts: {
   const mode = getLocalPrefs().aiMode;
   if (mode === 'local_only') return false;
   if (opts.agentLoop) return true;
-  // First UI / create: prefer local GGUF (long n_predict). Cloud-first was accepting
-  // tiny stub Apps in ~10s and finishing creates under 30s with empty Preview.
+  // First UI / create: use cloud when keyed — local 7B often returns empty/thin Apps
+  // in ~20s and the create path wipes to an empty scaffold. Cloud + accept/thin gates
+  // still reject stubs; local remains the fallback when no keys or local_only.
   if (
     opts.allowFileEdits
     && /\b(?:first real ui|from this brief|Build the first real UI|Emit COMPLETE @@@FILE|RETRY:.*unusable UI)\b/i.test(
       opts.message || '',
     )
   ) {
-    return false;
+    return true;
   }
   if (opts.allowFileEdits && opts.fileCount >= LARGE_REPO_FILES) return true;
   if (opts.allowFileEdits) return true;

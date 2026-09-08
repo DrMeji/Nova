@@ -114,7 +114,12 @@ export async function runSlackLive(
     ].filter(Boolean).join('\n');
   }
 
-  if (/\b(search|find|look up)\b/.test(lower)) {
+  // "search bar" / "top search" in website briefs must not become Slack search.
+  const uiSearchChrome = /\bsearch\s*(?:bar|box|field|input|icon|ui)\b|\btop\s+search\b|\bsearch\s+(?:with\s+)?logo\b/i.test(lower);
+  const wantsSlackSearch = !uiSearchChrome
+    && /\b(?:search|find|look\s*up)\b/.test(lower)
+    && (/\bslack\b/.test(lower) || /#[a-z][\w-]{1,80}\b/i.test(userText) || /\bin\s+(?:slack|channels?)\b/i.test(lower));
+  if (wantsSlackSearch) {
     if (perms.length > 0 && !perms.includes('search') && !perms.includes('read')) {
       return [
         'Slack · permission needed',
@@ -122,7 +127,7 @@ export async function runSlackLive(
         'Search needs the Search permission. Enable it under Plugins → Slack → Permissions.',
       ].join('\n');
     }
-    const qMatch = userText.match(/(?:search|find|look up)\s+(.+)$/i);
+    const qMatch = userText.match(/(?:search|find|look\s*up)\s+(?:(?:in|on)\s+(?:slack|#[\w-]+)\s+)?(.+)$/i);
     const query = (qMatch?.[1] || 'NOVA').replace(/[?.!]+$/, '').trim();
     try {
       const matches = await searchSlack(token, query);

@@ -1,4 +1,4 @@
-import { getLocalPrefs, type LocalPrefs } from '@/lib/localPrefs';
+import { getLocalPrefs, setLocalPrefs, type LocalPrefs } from '@/lib/localPrefs';
 import { GRANT_OFF_FOLDER_MSG } from '@/lib/folderPathAsk';
 
 export type WorkspaceGrants = {
@@ -7,6 +7,9 @@ export type WorkspaceGrants = {
   fullPc: boolean;
   executionMode: LocalPrefs['agentExecutionMode'];
 };
+
+/** Last grants pulled from Electron main (survives prefs/localStorage drift). */
+let cachedMainGrants: WorkspaceGrants | null = null;
 
 export function grantsFromPrefs(): WorkspaceGrants {
   const p = getLocalPrefs();
@@ -18,7 +21,7 @@ export function grantsFromPrefs(): WorkspaceGrants {
   };
 }
 
-/** Push Settings grants to the Electron main process (no-op in browser). */
+/** Push Settings grants to the Electron main process (no-op in browser). Also heal prefs from main. */
 export async function syncWorkspaceGrantsFromPrefs(): Promise<void> {
   const grants = grantsFromPrefs();
   try {
@@ -26,11 +29,40 @@ export async function syncWorkspaceGrantsFromPrefs(): Promise<void> {
   } catch {
     /* ignore */
   }
+  try {
+    const remote = await window.arkDesktop?.workspaceGetGrants?.();
+    if (remote?.ok && remote.grants) {
+      cachedMainGrants = {
+        desktop: Boolean(remote.grants.desktop),
+        documents: Boolean(remote.grants.documents),
+        fullPc: Boolean(remote.grants.fullPc),
+        executionMode: remote.grants.executionMode || 'allowlist',
+      };
+      const p = getLocalPrefs();
+      const prefsOff = !p.allowDesktopFolderAccess && !p.allowDocumentsFolderAccess && !p.allowFullPcAccess;
+      const mainOn = cachedMainGrants.desktop || cachedMainGrants.documents || cachedMainGrants.fullPc;
+      // Main process file can be ON while renderer localStorage drifted OFF (common after reinstall/rename).
+      if (prefsOff && mainOn) {
+        setLocalPrefs({
+          allowDesktopFolderAccess: cachedMainGrants.desktop,
+          allowDocumentsFolderAccess: cachedMainGrants.documents,
+          allowFullPcAccess: cachedMainGrants.fullPc,
+          agentExecutionMode: cachedMainGrants.executionMode,
+        });
+      }
+    }
+  } catch {
+    /* ignore */
+  }
 }
 
 export function hasFolderAccessGrant(): boolean {
   const g = grantsFromPrefs();
-  return g.desktop || g.documents || g.fullPc;
+  if (g.desktop || g.documents || g.fullPc) return true;
+  if (cachedMainGrants && (cachedMainGrants.desktop || cachedMainGrants.documents || cachedMainGrants.fullPc)) {
+    return true;
+  }
+  return false;
 }
 
 function joinPath(root: string, name: string): string {

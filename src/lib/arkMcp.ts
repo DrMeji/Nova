@@ -154,6 +154,18 @@ export function formatMcpToolsHelp(): string {
 export function looksLikeArkCapabilityAsk(text: string): boolean {
   const t = String(text || '').trim();
   if (!t) return false;
+  // Product planning / build asks must never hit the file-capability canned reply
+  // (e.g. "Can you help me plan… Do not create files yet.").
+  if (
+    /\b(?:help me plan|professional approach|exact\s+(?:visual\s+)?replica|look\s+like|desktop\s+website|landing\s+page)\b/i.test(t)
+    || /\b(?:do\s+not|don't|dont)\s+create\s+files?\b/i.test(t)
+    || (
+      /\b(?:build|create|make|scaffold)\b/i.test(t)
+      && /\b(?:website|web\s*app|app|game|apple\.com|netflix|twitch)\b/i.test(t)
+    )
+  ) {
+    return false;
+  }
   if (/\b(?:list|show)\s+mcp\b/i.test(t) || /\bmcp tools\b/i.test(t)) return true;
   if (/\bwhat can you do\b/i.test(t) || /\bwhat(?:'s| is) NOVA\b/i.test(t)) return true;
   if (/\b(?:break down|explain|describe)\b/i.test(t) && /\b(?:NOVA\.|mcp\b|tools?)\b/i.test(t)) {
@@ -177,6 +189,8 @@ export function looksLikeArkCapabilityAsk(text: string): boolean {
 
 function isFileCapabilityFocus(question: string): boolean {
   const t = String(question || '');
+  if (/\b(?:do\s+not|don't|dont)\s+create\s+files?\b/i.test(t)) return false;
+  if (/\b(?:help me plan|professional approach|exact\s+replica|desktop\s+website)\b/i.test(t)) return false;
   return /\b(?:edit|read|write|create|modify|change|rename|delete|update)\b/i.test(t)
     && /\b(?:files?|folder|disk|png|jpe?g|image|document|notes?|markdown|\.md\b)\b/i.test(t);
 }

@@ -24,11 +24,12 @@ const DISK_TARGET_TAIL_RE =
 export function slugifyProjectName(name: string): string {
   const s = String(name || '').trim();
   if (!s) return 'new-project';
-  if (/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(s)) return s;
+  // Allow dots so product folders like apple.com stay readable on disk.
+  if (/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(s)) return s;
   return s
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
+    .replace(/[^a-z0-9._]+/g, '-')
+    .replace(/^[-.]+|[-.]+$/g, '')
     .slice(0, 48) || 'new-project';
 }
 

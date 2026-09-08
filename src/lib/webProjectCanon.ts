@@ -205,6 +205,16 @@ function patchBodyColors(css: string, bg: string, fg: string): string {
   return next;
 }
 
+/** Piece-by-piece Discord/chat UI asks — must hit App.jsx, not HTML color micro-patches. */
+export function isStructuralUiPieceAsk(message: string): boolean {
+  const t = String(message || '');
+  if (!t.trim()) return false;
+  if (/\bONLY\s+add\b|\bONLY\s+this\s+piece\b|\bONLY\s+improve\b|\bdo not rebuild\b|\bkeep (?:everything|prior|the black|all pieces)\b/i.test(t)) {
+    return true;
+  }
+  return /\b(?:server\s+rail|server-icon|channel\s+(?:list|column)|channels?\s+column|chat\s+(?:pane|header|composer|system|messages?)|member\s+list|members?\s+column|user\s+bar|settings\s+(?:panel|overlay|gear|modal)|message\s+composer|related\s+videos?)\b/i.test(t);
+}
+
 function findHtmlPath(flat: WebFileMap): string | null {
   if (flat['index.html']) return 'index.html';
   return Object.keys(flat).find(p => /(^|\/)index\.html$/i.test(p) && !isPlaceholderJunkPath(p))
@@ -232,7 +242,10 @@ function readHeading(html: string): string {
 /** Deterministic patches for simple web asks. do not depend on the model. */
 export function webMicroAskEdits(files: WebFileMap, message: string): WebFileEdit[] {
   const t = String(message || '');
+  if (isStructuralUiPieceAsk(t)) return [];
   const flat = flatten(files);
+  // Vite React apps: never rewrite index.html for micro color/search — that fights App.jsx.
+  if (Object.keys(flat).some((p) => /(^|\/)src\/App\.(jsx|tsx)$/i.test(p))) return [];
   const htmlPath = findHtmlPath(flat);
   if (!htmlPath || !flat[htmlPath]) return [];
 
@@ -251,8 +264,12 @@ export function webMicroAskEdits(files: WebFileMap, message: string): WebFileEdi
   const wantsBg = /\bbackground\b/i.test(t) && Boolean(colorWord);
   const wantsTextColor = /\b(text|words?|title|heading|hello\s*world)\b.{0,48}\b(white|black|color|colour)\b|\b(white|black)\s+(color|colour|text)\b/i.test(t);
   const wantsRgb = /\b(rgb|multi[- ]?colou?r|multiple\s+colou?rs?|rainbow|gradient)\b/i.test(t);
-  const wantsSearchBar = /\bsearch\s*bar\b/i.test(t)
-    || (/\bsearch\b/i.test(t) && /\b(top|corner|right|header|bar)\b/i.test(t));
+  // "no search bar" / "without search" must NOT inject a search bar.
+  const searchNegated = /\b(?:no|without|never|skip|omit|don't|do\s+not|dont)\b[\s\S]{0,40}\bsearch(?:\s*bar)?\b/i.test(t);
+  const wantsSearchBar = !searchNegated && (
+    /\bsearch\s*bar\b/i.test(t)
+    || (/\bsearch\b/i.test(t) && /\b(top|corner|right|header|bar)\b/i.test(t))
+  );
   const wantsRemoveToggle = /\b(remove|delete|get rid of)\b.{0,40}\b(toggle|theme)\b/i.test(t)
     || /\b(toggle\s*theme)\b/i.test(t) && /\b(remove|delete)\b/i.test(t);
   const wantsBadgeText = /\bbadge\b/i.test(t) && /\b(text|label|say|to|into)\b/i.test(t);
@@ -641,12 +658,19 @@ document.getElementById('waitlist-form')?.addEventListener('submit', (e) => {
 export function isWebMicroAsk(message: string): boolean {
   const t = String(message || '');
   if (!t.trim()) return false;
+  // Structural Discord/chat piece asks must go through real App.jsx generation — never HTML micro.
+  if (isStructuralUiPieceAsk(t)) return false;
   if (/\b(build|create|make|scaffold)\b.{0,40}\b(app|website|site|page)\b/i.test(t) && /\bhello\s*world\b/i.test(t) === false) {
     // brand-new big builds are not micro. except hello world follow-ups with change verbs
   }
   if (/\bbackground\b/i.test(t) && /\b(black|white|blue|dark|red|green|teal)\b/i.test(t)) return true;
   if (/\b(rgb|multi[- ]?colou?r|multiple\s+colou?rs?|rainbow|gradient|teal)\b/i.test(t)) return true;
-  if (/\bsearch\s*bar\b/i.test(t) || (/\bsearch\b/i.test(t) && /\b(top|corner|right|header|bar)\b/i.test(t))) return true;
+  {
+    const searchNegated = /\b(?:no|without|never|skip|omit|don't|do\s+not|dont)\b[\s\S]{0,40}\bsearch(?:\s*bar)?\b/i.test(t);
+    if (!searchNegated && (/\bsearch\s*bar\b/i.test(t) || (/\bsearch\b/i.test(t) && /\b(top|corner|right|header|bar)\b/i.test(t)))) {
+      return true;
+    }
+  }
   if (/\b(remove|delete)\b.{0,40}\b(toggle|theme)\b/i.test(t)) return true;
   if (/(?:change|rename|set|into).{0,48}(?:to|into)\s+["']?[A-Za-z0-9]/i.test(t)) return true;
   if (/\b(?:make|change|set|update)\b[\s\S]{0,48}\bbutton\b[\s\S]{0,40}\b(?:say|to|into|label)\b/i.test(t)) return true;
@@ -654,8 +678,8 @@ export function isWebMicroAsk(message: string): boolean {
   if (/\bpizza\b/i.test(t) && /\b(change|saying|say|text|title|hello)\b/i.test(t)) return true;
   if (/\b(text|hello\s*world)\b.{0,40}\b(white|black|color)\b/i.test(t)) return true;
   if (/\b(logo|icon)\b/i.test(t) && /\b(add|put|place|center|middle|screen)\b/i.test(t)) return true;
-  if (/\b(title\s*bar|sidebar|note\s*list|localStorage|new\s+note|new\s+page|ink\s+notes|column)\b/i.test(t)) return true;
-  if (/\b(server\s+rail|channel\s+list|chat\s+pane|member\s+list|welcome\s+screen)\b/i.test(t)) return true;
+  // Notes / simple static sites only — do NOT treat Discord layout words as micro.
+  if (/\b(title\s*bar|note\s*list|localStorage|new\s+note|new\s+page|ink\s+notes)\b/i.test(t)) return true;
   if (/\bcreate\s+project\b/i.test(t)) return true;
   if (/\bbadge\b/i.test(t) && /\b(text|label|to|into)\b/i.test(t)) return true;
   if (/\bequals?\s+button\b/i.test(t) && /\b(larger|bigger)\b/i.test(t)) return true;
@@ -676,6 +700,8 @@ export function reactSurgicalMicroAskEdits(
 ): WebFileEdit[] {
   const t = String(message || '');
   if (!t.trim()) return [];
+  // Piece-by-piece Discord layout asks need full model App.jsx writes, not surgical tweaks.
+  if (isStructuralUiPieceAsk(t)) return [];
   if (/\b(scrap|rebuild|from\s+scratch|scaffold\s+(?:a\s+)?new|replace\s+(?:the\s+)?(?:entire\s+)?(?:app|layout|ui)|start\s+over)\b/i.test(t)) {
     return [];
   }
@@ -1052,6 +1078,49 @@ export function reactUiMicroAskEdits(
   return reactSurgicalMicroAskEdits(files, message);
 }
 
+/** True when App.jsx is just the accidental NOVA search chrome stub. */
+export function isNovaSearchStub(content: string): boolean {
+  const c = String(content || '');
+  if (!/NOVA-search|className=["']search-bar["']/i.test(c)) return false;
+  // Real Discord/chat UIs can include a search input later — only treat tiny stubs as junk.
+  if (c.length > 900) return false;
+  return !/\b(?:server-rail|serverRail|channel-list|members|message-list|composer)\b/i.test(c);
+}
+
+function viteBlackShellEdits(): WebFileEdit[] {
+  return [
+    {
+      path: 'src/App.jsx',
+      content: `import './App.css';
+
+export default function App() {
+  return <div className="app" />;
+}
+`,
+    },
+    {
+      path: 'src/App.css',
+      content: `.app {
+  min-height: 100vh;
+  margin: 0;
+  background: #1e1f22;
+}
+`,
+    },
+    {
+      path: 'src/index.css',
+      content: `html, body, #root { height: 100%; margin: 0; background: #1e1f22; }
+`,
+    },
+  ];
+}
+
+function stripSearchChromeFromIndexHtml(html: string): string {
+  return String(html || '')
+    .replace(/\s*<header class=["']top-bar["'][\s\S]*?<\/header>\s*/i, '\n')
+    .replace(/\s*<label class=["']search-bar["'][\s\S]*?<\/label>\s*/i, '\n');
+}
+
 export function finalizeWebEdits(
   files: WebFileMap,
   message: string,
@@ -1059,20 +1128,56 @@ export function finalizeWebEdits(
   opts?: { projectName?: string },
 ): WebFileEdit[] {
   const remapped = canonicalizeWebEdits(modelEdits, files);
-
-  // Model already shipped a real App / page dump — never let nav/footer keyword micro-patches
-  // replace a full create/UI rewrite (create briefs often say "nav" + "footer").
   const ask = String(message || '');
+  const flat = flatten(files);
+  const hasViteReact = Object.keys(flat).some((p) => /(^|\/)src\/App\.(jsx|tsx)$/i.test(p));
+  const structural = isStructuralUiPieceAsk(ask);
+  const searchNegated = /\b(?:no|without|never|skip|omit|don't|do\s+not|dont)\b[\s\S]{0,40}\bsearch(?:\s*bar)?\b/i.test(ask);
+  const wantsSearch = !searchNegated && /\bsearch\s*bar\b/i.test(ask);
+
+  const cleaned = remapped.filter((e) => {
+    const p = String(e.path || '').replace(/\\/g, '/');
+    if (/(?:^|\/)App\.(jsx|tsx)$/i.test(p) && isNovaSearchStub(e.content) && !wantsSearch) return false;
+    return true;
+  }).map((e) => {
+    const p = String(e.path || '').replace(/\\/g, '/');
+    if (/(?:^|\/)index\.html$/i.test(p) && hasViteReact && !wantsSearch) {
+      return { ...e, content: stripSearchChromeFromIndexHtml(e.content) };
+    }
+    return e;
+  });
+
   const exactMinimal = /\b(?:exact(?:ly)?|precisely|follow precisely|pure black|#000000|centered icon|nothing else|no other)\b/i.test(ask);
   const appMin = exactMinimal ? 160 : 400;
-  const substantialModel = remapped.some((e) => {
+  const wantsBlackOnly = /(?:ONLY this piece|full-viewport solid|near-black|#1e1f22)/i.test(ask)
+    && /ONLY this piece|Stop after the black shell|black shell only/i.test(ask);
+
+  // First piece: black shell only — force a real App.jsx, never search chrome.
+  // Must run before "substantial index.html" short-circuit (models often ship a fat HTML toolbar).
+  if (hasViteReact && wantsBlackOnly) {
+    const out = [...viteBlackShellEdits()];
+    const html0 = flat['index.html'] || cleaned.find((e) => /(?:^|\/)index\.html$/i.test(String(e.path || '').replace(/\\/g, '/')))?.content;
+    if (html0 && /NOVA-search|top-bar/i.test(html0)) {
+      out.push({ path: 'index.html', content: stripSearchChromeFromIndexHtml(html0) });
+    } else if (flat['index.html'] && /NOVA-search|top-bar/i.test(flat['index.html'])) {
+      out.push({ path: 'index.html', content: stripSearchChromeFromIndexHtml(flat['index.html']) });
+    }
+    return out;
+  }
+
+  const substantialModel = cleaned.some((e) => {
     const p = String(e.path || '').replace(/\\/g, '/');
     const n = String(e.content || '').length;
-    if (/(?:^|\/)App\.(jsx|tsx)$/i.test(p) && n >= appMin) return true;
+    if (/(?:^|\/)App\.(jsx|tsx)$/i.test(p) && n >= appMin && !isNovaSearchStub(e.content)) return true;
     if (/(?:^|\/)index\.html$/i.test(p) && n >= 400) return true;
     return false;
   });
-  if (substantialModel) return remapped;
+  if (substantialModel) return cleaned;
+
+  // Piece-by-piece Discord/chat UI on a Vite app: trust model App.jsx edits only.
+  if (structural && hasViteReact) {
+    return cleaned.filter((e) => /(?:^|\/)(?:src\/)?App\.(jsx|tsx|css)$/i.test(String(e.path || '').replace(/\\/g, '/')));
+  }
 
   // Surgical tweaks first. never let project-name full rebuilds clobber them.
   const surgical = reactSurgicalMicroAskEdits(files, message);
@@ -1088,10 +1193,10 @@ export function finalizeWebEdits(
     return micro;
   }
 
-  if (remapped.length && touchesPreviewServing(remapped.map(e => e.path), files)) {
-    return remapped;
+  if (cleaned.length && touchesPreviewServing(cleaned.map(e => e.path), files)) {
+    return cleaned;
   }
 
   // Model only hit junk / nothing previewable. keep remapped if any, else empty (caller may scaffold).
-  return remapped;
+  return cleaned;
 }

@@ -12,6 +12,20 @@ import { looksLikeInPlaceRebuildAsk, looksLikeProductCorrectionAsk } from '@/lib
 export const NO_WORKSPACE_MSG =
   'No workspace yet. Use **+ → Open folder** or name a folder on your Desktop (turn on access in **Settings → Security**).\n\nIf you want to talk through an app idea first, just keep chatting. say **lets build this** only when you want files on disk.';
 
+/** Bare “keep building” / continue — recommend next polish, don’t rebuild the whole app. */
+export function looksLikeKeepBuildingAsk(text: string): boolean {
+  const t = String(text || '').replace(/^\[(?:Plan|Ask|Debug|Tasks)\]\s*/i, '').trim();
+  if (!t || t.length > 120) return false;
+  if (
+    /^(?:keep\s+building|continue\s+building|keep\s+going|continue\s+(?:going|polish(?:ing)?)|build\s+more|expand\s+(?:it|this)|polish\s+(?:it|this|more))\s*[.!]?$/i.test(t)
+  ) {
+    return true;
+  }
+  return /\b(?:keep\s+building|continue\s+building)\b/i.test(t)
+    && !/\b(?:from\s+scratch|rebuild|scrap|new\s+project|create\s+project)\b/i.test(t)
+    && t.split(/\s+/).length <= 8;
+}
+
 export type ComposerAgentMode = 'ask' | 'plan' | 'agent' | 'debug' | 'multitask' | null;
 
 export function hasActiveWorkspace(opts: {
@@ -79,6 +93,8 @@ export function modeBlocksExec(mode: 'ask' | 'plan' | 'agent'): boolean {
 export function looksLikeCodeEditAsk(text: string): boolean {
   const t = String(text || '').trim();
   if (!t) return false;
+  // Bare continue signals — recommend next steps; do not treat as a full disk rebuild.
+  if (looksLikeKeepBuildingAsk(t)) return false;
   // Planning / MVP sequencing. not a disk edit.
   if (wantsPlanningOnly(t)) return false;
   if (/\b(?:mvp\s+order|what\s+should\s+i\s+build|build\s+first|sequence\s+the\s+work|week\s+one)\b/i.test(t)) return false;

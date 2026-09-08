@@ -68,23 +68,23 @@ export { slugifyProjectName } from '@/lib/projectNames';
 export function extractProjectName(text: string): string | null {
   const t = String(text || '').trim();
   const patterns = [
-    // "Create the project Peach on disk" / "Create project Peach"
-    /\bcreate\s+(?:the\s+)?project\s+["“']?([A-Za-z][A-Za-z0-9][A-Za-z0-9 _-]{1,40})/i,
+    // "Create the project apple.com on disk" / "Create project Peach"
+    /\bcreate\s+(?:the\s+)?project\s+["“']?([A-Za-z][A-Za-z0-9][A-Za-z0-9._\s-]{0,48})/i,
     // "Create the Ledger Bay project on disk"
-    /\bcreate\s+(?:the\s+)?([A-Za-z][A-Za-z0-9][A-Za-z0-9 _-]{1,40}?)\s+project(?:\s+on\s+disk)?\b/i,
-    /\bcreate\s+(?:the\s+)?([A-Za-z][A-Za-z0-9][A-Za-z0-9 _-]{1,40}?)\s+on\s+disk\b/i,
+    /\bcreate\s+(?:the\s+)?([A-Za-z][A-Za-z0-9][A-Za-z0-9._\s-]{0,48}?)\s+project(?:\s+on\s+disk)?\b/i,
+    /\bcreate\s+(?:the\s+)?([A-Za-z][A-Za-z0-9][A-Za-z0-9._\s-]{0,48}?)\s+on\s+disk\b/i,
     // "build EmberOak on disk" / "go ahead and build QuietStreak on disk"
-    /\b(?:build|create|scaffold)\s+([A-Z][A-Za-z0-9]{1,40})\s+on\s+disk\b/,
-    /\b(?:build|create|scaffold)\s+([A-Z][A-Za-z0-9]{1,40})\b(?=[\s\S]{0,80}\bon\s+disk\b)/,
-    /\bcreate\s+(?:a\s+)?(?:new\s+)?project\s+["“']?([A-Za-z][A-Za-z0-9 _-]{1,40})/i,
-    /\bcreate\s+([A-Z][A-Za-z0-9]{1,40})\s*[—–\-:]/,
-    /\bcreate\s+([A-Z][A-Za-z0-9]{1,40})\s+as\b/i,
-    /\b(?:app|application)\s+named\s+["“']?([A-Za-z][A-Za-z0-9 _-]{1,40})/i,
+    /\b(?:build|create|scaffold)\s+([A-Z][A-Za-z0-9.]{1,40})\s+on\s+disk\b/,
+    /\b(?:build|create|scaffold)\s+([A-Z][A-Za-z0-9.]{1,40})\b(?=[\s\S]{0,80}\bon\s+disk\b)/,
+    /\bcreate\s+(?:a\s+)?(?:new\s+)?project\s+["“']?([A-Za-z][A-Za-z0-9._\s-]{1,48})/i,
+    /\bcreate\s+([A-Z][A-Za-z0-9.]{1,40})\s*[—–\-:]/,
+    /\bcreate\s+([A-Z][A-Za-z0-9.]{1,40})\s+as\b/i,
+    /\b(?:app|application)\s+named\s+["“']?([A-Za-z][A-Za-z0-9._\s-]{1,48})/i,
     /\b(?:called|named|name(?:d)?\s+it|call\s+it)\s+["“']([^"”']{2,48})["”']/i,
-    /\b(?:called|named|name(?:d)?\s+it|call\s+it)\s+([A-Za-z][A-Za-z0-9 _-]{1,40})/i,
+    /\b(?:called|named|name(?:d)?\s+it|call\s+it)\s+([A-Za-z][A-Za-z0-9._\s-]{1,48})/i,
     /\b(?:app|project|website|site)\s+["“']([^"”']{2,48})["”']/i,
-    /\bnew\s+(?:web\s+)?(?:app|project|website|site)\s+([A-Za-z][A-Za-z0-9_-]{1,40})/i,
-    /\bkeep\s+the\s+folder\s+name\s+([A-Za-z][A-Za-z0-9 _-]{1,40})/i,
+    /\bnew\s+(?:web\s+)?(?:app|project|website|site)\s+([A-Za-z][A-Za-z0-9._-]{1,40})/i,
+    /\bkeep\s+the\s+folder\s+name\s+([A-Za-z][A-Za-z0-9._\s-]{1,40})/i,
   ];
   for (const re of patterns) {
     const m = t.match(re);
@@ -193,15 +193,25 @@ export function parseNewProjectIntent(message: string): NewProjectIntent | null 
   // Rich briefs plan first (chips). Short "Create project X" builds now.
   // Explicit disk/preview asks must build immediately — never bounce to yellow "Bind a project".
   const shortChip = /^create\s+project\s+[A-Za-z]/i.test(t.trim()) && t.length < 80;
-  // "Create the project Peach on disk now" must build immediately — never plan-only.
-  const wantsImmediateBuild = /\bon\s+disk\b/i.test(t)
+  // Premium website replicas should plan + research first unless the user clearly says go.
+  const richReplicaBrief = /\b(?:exact\s+replica|identical|clone\s+(?:of\s+)?(?:the\s+)?(?:look|site|homepage)|apple\.com|netflix\.com|twitch\.tv)\b/i.test(t)
+    && /\b(?:website|site|landing|homepage|marketing|web\s*app|replica)\b/i.test(t);
+  const wantsImmediateBuild = !richReplicaBrief && (
+    /\bon\s+disk\b/i.test(t)
     || /\b(?:files?\s+on\s+disk|scaffold\s+now|build\s+it\s+now|open\s+preview|and\s+open\s+preview)\b/i.test(t)
     || /\bcreate\s+(?:a\s+)?(?:brand[- ]?new\s+)?project\s+folder\b/i.test(t)
-    || /\bcreate\s+(?:the\s+)?project\s+[A-Za-z]/i.test(t);
+    || /\bcreate\s+(?:the\s+)?project\s+[A-Za-z]/i.test(t)
+    // "Create a brand-new website project called X" / "Create a new website called X"
+    || /\bcreate\s+(?:a\s+)?(?:brand[- ]?new\s+)?(?:website|site|web\s*app)\b/i.test(t)
+    || /\bbrand[- ]?new\s+(?:website|site|project|app)\b/i.test(t)
+    || (/\bcreate\b/i.test(t) && /\b(?:called|named)\b/i.test(t) && /\b(?:website|site|project|app)\b/i.test(t) && /\bsrc\/app\.(jsx|tsx|css)\b/i.test(t))
+  );
   const preferPlan = !shortChip
     && !looksLikeImplementGo(t)
-    && !wantsImmediateBuild
-    && (looksLikeLandingBrief(t) || prefersReactAppScaffold(t) || t.length > 200);
+    && (richReplicaBrief || (
+      !wantsImmediateBuild
+      && (looksLikeLandingBrief(t) || prefersReactAppScaffold(t) || t.length > 200)
+    ));
 
   return {
     name,

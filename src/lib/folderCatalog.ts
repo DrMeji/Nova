@@ -89,7 +89,7 @@ const FOLDER_CATALOG_RE =
   /\b(what(?:'s| is)\s+(?:in|inside)|what(?:'s| is)\s+in\s+it|what(?:'s| is)\s+inside|what\s+projects?\s+(?:are\s+)?(?:in|inside)|list\s+(?:the\s+)?(?:contents?|files?|folders?)|tell\s+me\s+what(?:'s| is)\s+in|show\s+me\s+what(?:'s| is)\s+in|what\s+do\s+you\s+see\s+in|what(?:'s| is)\s+(?:exactly\s+)?in\s+(?:that|the|my|this)?\s*(?:folder|project)?)\b/i;
 
 const WORK_ON_FOLDER_RE =
-  /\b(start\s+work(?:ing)?\s+on|let'?s\s+(?:work\s+on|open|start)|work\s+on|switch\s+(?:this\s+chat\s+)?to|move\s+(?:to|into)|open\s+(?:the\s+)?(?:project|folder|repo))\b/i;
+  /\b(start\s+work(?:ing)?\s+on|let'?s\s+(?:work\s+on|open)|work\s+on|switch\s+(?:this\s+chat\s+)?to|move\s+(?:to|into)|open\s+(?:the\s+)?(?:project|folder|repo))\b/i;
 
 const KEY_FILE_NAMES = [
   'package.json',
@@ -156,6 +156,14 @@ export function looksLikeStartWorkOnFolderAsk(text: string): boolean {
   if (!t) return false;
   if (looksLikeGreenfieldIdea(t)) return false;
   if (FOLDER_CATALOG_RE.test(t) || /\bwhat(?:'s| is)\s+in\s+it\b/i.test(t)) return false;
+  // "lets start building / keep building the game" is create/continue — not open an existing folder.
+  if (
+    /\b(?:start|keep|continue)\s+building\b/i.test(t)
+    || /\bbuild(?:ing)?\s+(?:the\s+)?(?:game|app|site|ui|fps)\b/i.test(t)
+    || /\bdo\s+not\s+rush\b/i.test(t)
+  ) {
+    return false;
+  }
   // "start working on this/the/a/my project" without a folder name = continue current idea, not bind-existing.
   if (
     /\b(?:start\s+)?work(?:ing)?\s+on\s+(?:a\s+|this\s+|the\s+|my\s+)?project\b/i.test(t)

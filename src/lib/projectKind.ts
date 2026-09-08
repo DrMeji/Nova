@@ -18,6 +18,8 @@ export function detectProjectKind(text: string): ProjectKind {
   }
   if (prefersReactAppScaffold(t)) return 'vite-react';
   if (/\bno\s+static\s+html\b/i.test(t) && /\b(react|vite)\b/i.test(t)) return 'vite-react';
+  // Desktop website / cafe / landing with App.jsx language → Vite (Preview needs npm).
+  if (/\b(desktop\s+(?:website|site|layout)|full[- ]?desktop)\b/.test(lower)) return 'vite-react';
 
   if (/\b(python|flask|fastapi|trading\s+bot|pip|\.py)\b/.test(lower)) return 'python';
   const negatesLanding = /\bno\s+static\s+html\b/i.test(t) || /\bnot\s+(?:a\s+)?(?:static|landing)\b/i.test(t);
@@ -31,17 +33,18 @@ export function detectProjectKind(text: string): ProjectKind {
       )
     )
   ) {
-    return 'static-web';
+    // Prefer Vite for product-style landings so Preview is a real app window, not blank static HTML.
+    return 'vite-react';
   }
   if (/\b(html|simple\s+site|static\s+site|plain\s+html|static\s+html)\b/.test(lower) && !/\bno\s+static\s+html\b/i.test(t)) {
     return 'static-web';
   }
   if (/images\.unsplash\.com|unsplash\.com/.test(lower) && /\b(website|site|create|build)\b/.test(lower)) {
-    return 'static-web';
+    return 'vite-react';
   }
   if (/\b(node\s+cli|command\s+line\s+tool|cli\s+tool)\b/.test(lower)) return 'node-cli';
   // Interactive product / game apps (including spatial / WebGL / canvas runners) → Vite React.
-  if (/\b(react|vite|next|web\s+app|electron|discord|call|chat\s+app|3d|webgl|three\.?js|babylon|modeler|dinosaur|dino\s+runner|chrome\s+dino|habit|streak|tracker)\b/.test(lower)) {
+  if (/\b(react|vite|next|web\s+app|electron|discord|call|chat\s+app|3d|webgl|three\.?js|babylon|modeler|dinosaur|dino\s+runner|chrome\s+dino|habit|streak|tracker|netflix|twitch|streaming\s+app|billboard)\b/.test(lower)) {
     return 'vite-react';
   }
   if (/\b(website|site)\b/.test(lower) && /\b(react|vite|spa|dashboard|app)\b/.test(lower)) return 'vite-react';
@@ -64,6 +67,6 @@ export function resolveProjectKindForCreate(
   // Interactive premium marketing sites stay on Vite React (animated SPA), not blank static HTML.
   if (wantsInteractiveSpaScaffold(summary)) return 'vite-react';
   if (storedKind && storedKind !== 'unknown') return storedKind;
-  if (looksLikeLandingBrief(summary)) return 'static-web';
+  if (looksLikeLandingBrief(summary)) return 'vite-react';
   return parsedKind || 'vite-react';
 }

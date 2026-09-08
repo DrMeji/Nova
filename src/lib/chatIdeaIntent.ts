@@ -607,6 +607,14 @@ export function looksLikeConversationalPlanningAsk(text: string): boolean {
   if (/\b(?:go\s+build|go\s+implement|implement\s+it|build\s+it\s+now|lets?\s+build\s+(?:this|that|it)|build\s+this|build\s+that|create\s+(?:the\s+)?(?:files|project)\s+now)\b/i.test(t)) {
     return false;
   }
+  // Bare “keep building” = recommend next polish — not a from-scratch rebuild.
+  if (/^(?:keep\s+building|continue\s+building|keep\s+going|continue\s+(?:going|polish(?:ing)?))\s*[.!]?$/i.test(t)) {
+    return true;
+  }
+  if (/\b(?:keep\s+building|continue\s+building)\b/i.test(t) && t.split(/\s+/).length <= 8
+    && !/\b(?:from\s+scratch|rebuild|scrap|new\s+project)\b/i.test(t)) {
+    return true;
+  }
   // Explicit disk build asks are never “just talking”.
   if (/\bon\s+disk\b/i.test(t) && /\b(?:build|create|scaffold|make)\b/i.test(t)) return false;
   if (/\bopen\s+preview\b/i.test(t) && /\b(?:build|create|make)\b/i.test(t)) return false;
@@ -676,6 +684,14 @@ export function shouldInjectPlanningConversation(
 ): boolean {
   if (looksLikeImplementGo(content)) return false;
   if (looksLikeDirectJudgmentAsk(content)) return false;
+  // Bare continue — recommend next polish; never treat as a full rebuild trigger.
+  if (
+    /^(?:keep\s+building|continue\s+building|keep\s+going|continue\s+(?:going|polish(?:ing)?))\s*[.!]?$/i.test(String(content || '').trim())
+    || (/\b(?:keep\s+building|continue\s+building)\b/i.test(content) && String(content || '').trim().split(/\s+/).length <= 8
+      && !/\b(?:from\s+scratch|rebuild|scrap|new\s+project)\b/i.test(content))
+  ) {
+    return true;
+  }
   // Bound UI / copy edits are never “planning only” — apply on disk.
   if (
     /\b(?:change|update|set|rename|edit|make)\b[\s\S]{0,100}\b(?:hero|headline|heading|title|h1|button|text|label|copy|wording|background|color)\b/i.test(content)

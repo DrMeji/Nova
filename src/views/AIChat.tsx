@@ -4,9 +4,9 @@ import { useAuth } from '@/context/AuthContext';
 import { useRouter, type ChatMode } from '@/context/RouterContext';
 import { useRecentProjects } from '@/context/RecentProjectsContext';
 import { saveChatMessage } from '@/lib/api';
-import { getLocalPrefs, hasProviderApiKey, setLocalPrefs } from '@/lib/localPrefs';
+import { getLocalPrefs, getProviderApiKeys, hasProviderApiKey, setLocalPrefs } from '@/lib/localPrefs';
 import { isCloudProviderEnabled } from '@/lib/cloudSources';
-import { resolvePreferredCloudProvider } from '@/lib/cloudChat';
+import { resolvePreferredCloudProvider, hasAnyCloudChatKey } from '@/lib/cloudChat';
 import { honestNoLiveChatReply, probeLiveCapacity, type LiveCapacity } from '@/lib/arkCapacity';
 import { tipAt, tipStartIndex } from '@/lib/arkTips';
 import { RotatingTip } from '@/components/RotatingTip';
@@ -188,7 +188,7 @@ import {
   bootstrapProjectWorkspace,
 } from '@/lib/createProjectFlow';
 import { projectUsesNpm, mergeBriefNpmDependencies } from '@/lib/projectScaffolds';
-import { looksLikeImplementGo, shouldBlockChatFileWrites, planningConversationHint } from '@/lib/chatPlanMode';
+import { looksLikeImplementGo, shouldBlockChatFileWrites, planningConversationHint, keepBuildingConversationHint } from '@/lib/chatPlanMode';
 import { looksLikeInPlaceRebuildAsk, looksLikeProductCorrectionAsk, looksLikeProjectBuildAsk } from '@/lib/chatBuildIntent';
 import { isProjectCreateBrief } from '@/lib/chatCreateBrief';
 import { briefReadDelayMs, detectPlanFocus, extractGreenfieldName, looksLikeConversationalPlanningAsk, looksLikeDirectJudgmentAsk, looksLikeGreenfieldCreateGo, looksLikeGreenfieldHaveFolder, looksLikeGreenfieldIdea, looksLikeGreenfieldKeepPlanning, looksLikeGreenfieldStartWorkGo, parseGreenfieldIdea, buildMissingWorkFolderReply, shouldInjectPlanningConversation, wantsPlanningOnly } from '@/lib/chatIdeaIntent';
@@ -198,6 +198,7 @@ import {
   hasActiveWorkspace,
   isChatPlanTurn,
   looksLikeCodeEditAsk,
+  looksLikeKeepBuildingAsk,
   NO_WORKSPACE_MSG,
   normalizeComposerMode,
   stripComposerPrefix,
@@ -218,6 +219,12 @@ import {
   visionCapabilityGapReply,
 } from '@/lib/chatMultiModel';
 import { githubToken } from '@/lib/codeGitHubWorkflow';
+import {
+  cloudKeyNudgeAfterEmptyBuild,
+  cloudKeyNudgeReply,
+  markCloudKeyNudgeShown,
+  shouldOfferCloudKeyNudge,
+} from '@/lib/cloudKeyNudge';
 import { FreeKeyWizard } from '@/components/FreeKeyWizard';
 import { DeleteProjectFolderModal } from '@/components/DeleteProjectFolderModal';
 import { DeleteFileModal } from '@/components/DeleteFileModal';
@@ -225,8 +232,18 @@ import { DeleteFolderClarifyModal } from '@/components/DeleteFolderClarifyModal'
 import { ComposerPlusMenu, type ComposerPlusAction } from '@/components/ComposerPlusMenu';
 import { TokenUsageRing } from '@/components/TokenUsageRing';
 import { ArkErrorInline } from '@/components/ArkErrorInline';
-import { BrandMark } from '@/components/BrandMark';
 import { ArkMark } from '@/components/ArkMark';
+import {
+  planMultiModelWebsiteTeam,
+  formatMultiModelAttribution,
+  multiModelStatusLine,
+  type MultiModelPartResult,
+} from '@/lib/chatMultiModelBuild';
+import {
+  ensureViteReactProjectFiles,
+  isPreviewReady,
+  stripModelProseFromSource,
+} from '@/lib/createBuildQuality';
 import { classifyErrorMessage, isLikelyErrorMessage } from '@/lib/errors';
 import { isVideoTabEnabled, isImageTabEnabled, isVoiceTabEnabled } from '@/lib/featurePark';
 import { notifyChatDone } from '@/lib/activityIndicators';
@@ -246,8 +263,19 @@ import {
 } from '@/lib/chatHistory';
 import {
   looksLikeWebGroundedAsk,
+  looksLikeSideQuestAsk,
+  looksLikeLyricsAsk,
+  looksLikeInventedLyricsDump,
+  looksLikeLinkDirectoryReply,
+  looksLikeBuildBleedReply,
+  looksLikeThinSideQuestReply,
+  honestLyricsUnavailableReply,
+  sideQuestAnswerHint,
+  scrubSideQuestBleed,
+  fallbackAnswerFromLookup,
   webSearchForChat,
   formatWebLookupForPrompt,
+  webLookupUnavailableNote,
 } from '@/lib/webSearch';
 import {
   autoEquippedCaption,
@@ -278,8 +306,9 @@ import {
 import { engineGenerateCancel, getEngineStatus, setEngineModel } from '@/lib/arkEngine';
 import { ensureViteDevServer, isViteProject, openInAppPreview, ensureInAppPreview, refreshLivePreview, ensureBoundFolderPreview, loadPreviewFilesFromDisk } from '@/lib/projectPreview';
 import { cleanProductTitle, looksLikeSpatialApp, looksLikePlayableCanvasGame } from '@/lib/freshSpaFromBrief';
-import { classifyMobileTarget } from '@/lib/mobileTarget';
+import { classifyMobileTarget, isNativeMobileTree } from '@/lib/mobileTarget';
 import { classifyNamedDevice, defaultDeviceForTarget } from '@/lib/mobileDevices';
+import { repairBrokenSiteImageSrcs, siteImageGuidanceForBrief } from '@/lib/siteHeroImages';
 
 const COMPOSER_MODE_PREFIX: Record<'plan' | 'ask' | 'agent' | 'debug' | 'multitask', string> = {
   plan: 'Plan this out step by step, then we can build:\n\n',
@@ -2334,7 +2363,13 @@ export function AIChat() {
       .join('\n');
     const namedDevice = classifyNamedDevice(recentUserBrief);
     const mobileTarget = classifyMobileTarget(recentUserBrief);
-    const wantsPhoneFrame = Boolean(
+    const filesForPreview = snap?.files && Object.keys(snap.files).length
+      ? snap.files
+      : (studioBoundChatIdRef.current === chatId ? chatStudioFilesRef.current : {});
+    // Websites / Vite apps always open as a normal desktop window.
+    // Phone chrome is only for native iOS/Android project trees (later on the stretch list).
+    const nativeMobile = isNativeMobileTree(filesForPreview);
+    const wantsPhoneFrame = nativeMobile && Boolean(
       namedDevice
       || mobileTarget
       || /\b(mobile\s+app|phone\s+app|for\s+(?:ios|android)|iphone|galaxy|pixel)\b/i.test(recentUserBrief),
@@ -3319,7 +3354,21 @@ export function AIChat() {
       return true;
     });
     const previousAssistant = [...priorForHistory].reverse().find(m => m.role === 'assistant')?.content || '';
-    messagesRef.current = [...normalized, userMsg, assistantMsg];
+    const nextThread: ChatMessage[] = [...normalized, userMsg];
+    if (shouldOfferCloudKeyNudge({ chatId: activeChatId, message: content })) {
+      markCloudKeyNudgeShown(activeChatId);
+      nextThread.push({
+        id: crypto.randomUUID(),
+        user_id: user.id,
+        project_id: null,
+        role: 'assistant',
+        content: cloudKeyNudgeReply(),
+        provider_used: 'NOVA',
+        created_at: new Date().toISOString(),
+      });
+    }
+    nextThread.push(assistantMsg);
+    messagesRef.current = nextThread;
     messagesChatIdRef.current = activeChatId;
     persistModeThread(mode, messagesRef.current, { chatId: activeChatId });
     setMessages(messagesRef.current);
@@ -3371,7 +3420,7 @@ export function AIChat() {
       setGenerating(false);
     };
 
-    const finishPlainReply = async (replyText: string) => {
+    const finishPlainReply = async (replyText: string, providerUsed?: string) => {
       const safeText = redactArkSelfLeak(replyText);
       const reply: ChatMessage = {
         id: assistantId,
@@ -3379,7 +3428,7 @@ export function AIChat() {
         project_id: null,
         role: 'assistant',
         content: safeText,
-        provider_used: 'NOVA',
+        provider_used: (providerUsed && providerUsed.trim()) || 'NOVA',
         created_at: new Date().toISOString(),
         elapsed_ms: Date.now() - replyStartedAt,
       };
@@ -4216,7 +4265,7 @@ export function AIChat() {
         await finishPlainReply(
           `${apologyRebuildLead(productName)}\n\n`
           + 'I’m having an issue — I can’t provide the UI you’re asking for from that rebuild pass.\n\n'
-          + 'No template was substituted. Say **keep building** with one clearer ask and I’ll try again from your brief.',
+          + 'No template was substituted. Tell me one clearer detail to polish (hero, sections, motion, or copy) and I’ll try again from your brief.',
         );
         return;
       }
@@ -4501,11 +4550,21 @@ export function AIChat() {
       const workspaceActive = workspaceActiveForCreate;
 
       if (workspaceActive && parseNewProjectIntent(content) && !looksLikeImplementGo(content)) {
-        await finishPlainReply(
-          'This chat already has a workspace open.\n\n'
-          + 'To create **another** project, start a new chat or say **“new project called …”** with a different name.',
+        const askedName = extractProjectName(content) || createIntent.name;
+        const boundName = studioPathBasename(chatStudioDiskRootRef.current || '') || '';
+        const differentProduct = Boolean(
+          askedName
+          && boundName
+          && askedName.replace(/\s+/g, '').toLowerCase() !== boundName.replace(/\s+/g, '').toLowerCase(),
         );
-        return;
+        const brandNewAsk = /\bbrand[- ]?new\b/i.test(content) || /\bcreate\s+(?:a\s+)?new\s+(?:website|site|project|app)\b/i.test(content);
+        if (!differentProduct && !brandNewAsk) {
+          await finishPlainReply(
+            'This chat already has a workspace open.\n\n'
+            + 'To create **another** project, start a new chat or say **“new project called …”** with a different name.',
+          );
+          return;
+        }
       }
 
       if (
@@ -4634,9 +4693,15 @@ export function AIChat() {
         pushAssistantStatus('Building a fresh UI from your brief…');
         let followNote = '';
         let uiBuilt = false;
+        let createProviderUsed = '';
+        const createThoughtLog: string[] = [];
+        const noteThought = (label: string) => {
+          createThoughtLog.push(label);
+          pushAssistantStatus(label);
+        };
         const pid = created.projectId || newProjectId;
         if (pid && created.files) {
-        const briefForBuild = [
+        let briefForBuild = [
           String(buildIntent.summary || '').trim(),
           String(content || '').trim(),
           ...messagesRef.current
@@ -4645,21 +4710,42 @@ export function AIChat() {
             .filter(Boolean)
             .slice(-8),
         ].filter(Boolean).join('\n\n');
+        try {
+          const { looksLikeNeedsCreateResearch, researchCreateReferences } = await import('@/lib/createResearchBrief');
+          if (looksLikeNeedsCreateResearch(briefForBuild)) {
+            pushAssistantStatus('Researching public references…');
+            const researched = await researchCreateReferences({
+              brief: briefForBuild,
+              projectName: buildIntent.name,
+            });
+            if (researched.notes) {
+              briefForBuild = `${briefForBuild}\n\n${researched.notes}`;
+            }
+          }
+        } catch {
+          /* research is best-effort */
+        }
+        pushAssistantStatus('Building a fresh UI from your brief…');
         const spatialBrief = looksLikeSpatialApp(briefForBuild, buildIntent.name);
         let seedFiles = mergeBriefNpmDependencies({ ...created.files }, briefForBuild);
         const sticky = pinnedModel.source === 'auto' ? threadBrainRef.current : null;
         let modelReply = '';
-        const buildUiPrompt = (pass: 'first' | 'retry') => {
-          const exactMinimal = /\b(?:exact(?:ly)?|precisely|follow precisely|pure black|#000000|centered icon|nothing else|no other)\b/i.test(briefForBuild);
+        let multiAppliedFiles: Record<string, string> | null = null;
+        const buildUiPrompt = (pass: 'first' | 'retry' | 'polish') => {
+          const exactMinimal = /\b(?:exact(?:ly)?|precisely|follow precisely|pure black|#000000|#1e1f22|near-black|centered icon|nothing else|no other|ONLY this piece|ONLY add)\b/i.test(briefForBuild);
           return [
             pass === 'retry'
               ? (exactMinimal
                 ? `RETRY: Previous pass did not match the EXACT visual brief for "${buildIntent.name}". Rebuild ONLY what the brief lists — no extras.`
                 : `RETRY: The previous pass left an unusable or too-thin UI for "${buildIntent.name}". Expand it into a full product UI.`)
+              : pass === 'polish'
+                ? `POLISH PASS: Expand and refine the desktop website UI for "${buildIntent.name}" into a premium, dense, professional look. Keep working — do not rush a stub.`
               : `Build the first real UI for "${buildIntent.name}" from this brief.`,
             'Emit COMPLETE @@@FILE blocks for src/App.jsx, src/App.css, and src/index.css.',
             'Each @@@FILE line MUST include the path, e.g. @@@FILE src/App.jsx — never a bare @@@FILE.',
             'Put the full product UI in src/App.jsx + CSS only. Do NOT import ./components/* or react-router unless you also emit @@@FILE blocks for every imported file with complete source.',
+            'This is a DESKTOP website preview (not a phone app). Full-width marketing layout.',
+            siteImageGuidanceForBrief(briefForBuild, buildIntent.name),
             exactMinimal
               ? [
                 'Follow the brief EXACTLY. A minimal correct UI is success — do not add extra marketing sections, Three.js, canvas games, or unrelated libraries.',
@@ -4680,7 +4766,7 @@ export function AIChat() {
               : 'App.jsx must be a real interactive product UI matching the brief — not an empty shell, not a single search box, not a description.',
             exactMinimal
               ? 'If the brief specifies exact text (e.g. NOVA SIGNAL), that string MUST appear in App.jsx. Background and icon sizes must match.'
-              : 'Take the time needed. For a rich site/app expect App.jsx well over 150 lines and substantial CSS with layout, typography, motion, and multiple sections (hero, nav, content, footer as appropriate).',
+              : 'Take the time needed (up to several minutes for a full replica site). For a rich site/app expect App.jsx well over 200 lines and substantial CSS with layout, typography, motion, and multiple sections (hero, nav, content, footer as appropriate). Prefer quality over speed.',
             exactMinimal
               ? ''
               : 'Do not stop at a minimal form+list stub when the brief asks for a polished product experience.',
@@ -4697,69 +4783,203 @@ export function AIChat() {
         };
 
         try {
-          const engineResult = await Promise.race([
-            answerStudio(
-              {
-                userMessage: buildUiPrompt('first'),
-                files: seedFiles,
-                projectName: buildIntent.name,
-                mode: 'code',
-                preferredModelId: pinnedModel.id,
-                preferredModelName: pinnedModel.name,
-                preferredSource: pinnedModel.source,
-                stickyModelId: sticky?.modelId,
-                stickyModelName: sticky?.modelName,
-                stickyPinnedSource: sticky?.pinnedSource,
-                planOnly: false,
-                allowFileEdits: true,
-                shouldAbort: () => mySeq !== genSeqRef.current || stopRequestedRef.current,
-              },
-              (live) => {
-                if (mySeq !== genSeqRef.current || stopRequestedRef.current) return;
-                const text = String(live || '').trim();
-                if (text.length < 2) return;
-                pushAssistantStatus(liveCodingStatusText(text));
-              },
-            ),
-            new Promise<null>((resolve) => {
-              window.setTimeout(() => resolve(null), 420_000);
-            }),
-          ]);
-          modelReply = String(engineResult?.text || '').trim();
-          try {
-            (window as unknown as { __NOVA_LAST_BUILD_UI?: unknown }).__NOVA_LAST_BUILD_UI = {
-              pass: 'first',
-              len: modelReply.length,
-              hasFile: /@@@FILE/i.test(modelReply),
-              meta: engineResult?.meta || null,
-              head: modelReply.slice(0, 600),
-              timedOut: engineResult == null,
-              streamHint: String(engineResult?.meta || ''),
-            };
-          } catch { /* ignore */ }
+          const skipMulti = /\b(?:exact(?:ly)?|precisely|follow precisely|pure black|#000000|#1e1f22|near-black|centered icon|nothing else|no other|ONLY this piece|ONLY add)\b/i.test(briefForBuild)
+            || /ONLY this piece|Stop after the black shell|black shell only/i.test(briefForBuild);
+          const cloudForTeam = CLOUD_CHAT_WHEN_KEYED.filter(
+            (m) => hasProviderApiKey(m.keyId) && isCloudProviderEnabled(m.keyId),
+          );
+          const multiTeam = skipMulti
+            ? null
+            : planMultiModelWebsiteTeam([
+              ...engineLocalModels.map((m) => ({ id: m.id, name: m.name, source: 'local' as const })),
+              ...ollamaModels.map((m) => ({ id: m.id, name: m.name, source: 'local' as const })),
+              ...cloudForTeam.map((m) => ({ id: m.id, name: m.name, source: 'free' as const })),
+            ]);
+
+          if (multiTeam) {
+            noteThought(`Multi-model build · splitting work across ${multiTeam.length} brains…`);
+            let filesAcc = { ...seedFiles };
+            const partResults: MultiModelPartResult[] = [];
+            for (let i = 0; i < multiTeam.length; i++) {
+              const part = multiTeam[i];
+              if (mySeq !== genSeqRef.current || stopRequestedRef.current) break;
+              noteThought(multiModelStatusLine(part, i, multiTeam.length));
+              if (part.model.source === 'local' && !part.model.id.startsWith('ollama:')) {
+                try { await setEngineModel(part.model.id); } catch { /* best-effort hop */ }
+              }
+              const partPrompt = [
+                `Multi-model build for "${buildIntent.name}" — you own: ${part.label}.`,
+                part.promptHint,
+                'Emit COMPLETE @@@FILE blocks. Each @@@FILE line MUST include the path, e.g. @@@FILE src/App.jsx.',
+                'Put product UI in src/App.jsx + CSS. Do NOT import ./components/* unless you also emit those files.',
+                'Never rewrite index.html or package.json. Never output English notes outside @@@FILE blocks.',
+                siteImageGuidanceForBrief(briefForBuild, buildIntent.name),
+                '',
+                briefForBuild,
+              ].filter(Boolean).join('\n');
+              let partReply = '';
+              try {
+                const engineResult = await Promise.race([
+                  answerStudio(
+                    {
+                      userMessage: partPrompt,
+                      files: filesAcc,
+                      projectName: buildIntent.name,
+                      mode: 'code',
+                      preferredModelId: part.model.id,
+                      preferredModelName: part.model.name,
+                      preferredSource: part.model.source === 'local' ? 'local' : 'cloud',
+                      planOnly: false,
+                      allowFileEdits: true,
+                      shouldAbort: () => mySeq !== genSeqRef.current || stopRequestedRef.current,
+                    },
+                    (live) => {
+                      if (mySeq !== genSeqRef.current || stopRequestedRef.current) return;
+                      const text = String(live || '').trim();
+                      if (text.length < 2) return;
+                      pushAssistantStatus(liveCodingStatusText(text));
+                    },
+                  ),
+                  new Promise<null>((resolve) => {
+                    window.setTimeout(() => resolve(null), 300_000);
+                  }),
+                ]);
+                partReply = String(engineResult?.text || '').trim();
+              } catch {
+                partReply = '';
+              }
+              const appliedPart = partReply
+                ? await applyChatReplyEdits({
+                  reply: partReply,
+                  projectId: pid,
+                  projectName: buildIntent.name,
+                  files: filesAcc,
+                  userMessage: briefForBuild,
+                  diskRoot: created.projectPath || chatStudioDiskRootRef.current,
+                })
+                : { ok: false as const, updated: [] as string[], files: filesAcc };
+              if (appliedPart.ok && appliedPart.updated.length) {
+                filesAcc = appliedPart.files;
+                // Strip prose leaks immediately so the next model does not inherit broken CSS/HTML.
+                for (const key of Object.keys(filesAcc)) {
+                  const cleaned = stripModelProseFromSource(key, filesAcc[key]);
+                  if (cleaned !== filesAcc[key]) {
+                    filesAcc = { ...filesAcc, [key]: cleaned };
+                    noteThought(`Caught prose leak in ${key} — cleaned it, continuing…`);
+                  }
+                }
+              } else {
+                noteThought(`Part ${i + 1} missed file edits — keeping prior work and continuing…`);
+              }
+              partResults.push({
+                ...part,
+                ok: Boolean(appliedPart.ok && appliedPart.updated.length),
+                note: part.label,
+                updated: appliedPart.updated || [],
+              });
+              modelReply = partReply;
+            }
+            multiAppliedFiles = filesAcc;
+            createProviderUsed = formatMultiModelAttribution(partResults);
+            try {
+              (window as unknown as { __NOVA_LAST_BUILD_UI?: unknown }).__NOVA_LAST_BUILD_UI = {
+                pass: 'multi-model',
+                parts: partResults.map((p) => ({
+                  role: p.role,
+                  model: p.model.name,
+                  ok: p.ok,
+                  updated: p.updated,
+                })),
+                attribution: createProviderUsed,
+              };
+            } catch { /* ignore */ }
+          } else {
+            const engineResult = await Promise.race([
+              answerStudio(
+                {
+                  userMessage: buildUiPrompt('first'),
+                  files: seedFiles,
+                  projectName: buildIntent.name,
+                  mode: 'code',
+                  preferredModelId: pinnedModel.id,
+                  preferredModelName: pinnedModel.name,
+                  preferredSource: pinnedModel.source,
+                  stickyModelId: sticky?.modelId,
+                  stickyModelName: sticky?.modelName,
+                  stickyPinnedSource: sticky?.pinnedSource,
+                  planOnly: false,
+                  allowFileEdits: true,
+                  shouldAbort: () => mySeq !== genSeqRef.current || stopRequestedRef.current,
+                },
+                (live) => {
+                  if (mySeq !== genSeqRef.current || stopRequestedRef.current) return;
+                  const text = String(live || '').trim();
+                  if (text.length < 2) return;
+                  pushAssistantStatus(liveCodingStatusText(text));
+                },
+              ),
+              new Promise<null>((resolve) => {
+                window.setTimeout(() => resolve(null), 300_000);
+              }),
+            ]);
+            modelReply = String(engineResult?.text || '').trim();
+            createProviderUsed = String(engineResult?.meta || '').split(' · ')[0] || '';
+            try {
+              (window as unknown as { __NOVA_LAST_BUILD_UI?: unknown }).__NOVA_LAST_BUILD_UI = {
+                pass: 'first',
+                len: modelReply.length,
+                hasFile: /@@@FILE/i.test(modelReply),
+                meta: engineResult?.meta || null,
+                head: modelReply.slice(0, 600),
+                timedOut: engineResult == null,
+                streamHint: String(engineResult?.meta || ''),
+              };
+            } catch { /* ignore */ }
+          }
         } catch {
           modelReply = '';
         }
         if (mySeq !== genSeqRef.current) return;
 
-        const applied = modelReply
-          ? await applyChatReplyEdits({
-            reply: modelReply,
-            projectId: pid,
-            projectName: buildIntent.name,
-            files: seedFiles,
-            userMessage: briefForBuild,
-            diskRoot: created.projectPath || chatStudioDiskRootRef.current,
-          })
-          : { ok: false as const, updated: [] as string[], files: seedFiles };
+        const applied = multiAppliedFiles
+          ? { ok: true as const, updated: Object.keys(multiAppliedFiles), files: multiAppliedFiles }
+          : modelReply
+            ? await applyChatReplyEdits({
+              reply: modelReply,
+              projectId: pid,
+              projectName: buildIntent.name,
+              files: seedFiles,
+              userMessage: briefForBuild,
+              diskRoot: created.projectPath || chatStudioDiskRootRef.current,
+            })
+            : { ok: false as const, updated: [] as string[], files: seedFiles };
 
         let filesNow = (applied.ok && applied.updated.length) ? applied.files : seedFiles;
+        // Repair broken placeholder / missing local image srcs before quality gates.
+        for (const key of Object.keys(filesNow)) {
+          if (/(?:^|\/)App\.(jsx|tsx)$/i.test(key.replace(/\\/g, '/'))) {
+            const repaired = repairBrokenSiteImageSrcs(filesNow[key], briefForBuild);
+            if (repaired !== filesNow[key]) {
+              filesNow = { ...filesNow, [key]: repaired };
+              await applyChatReplyEdits({
+                reply: `@@@FILE ${key}\n${repaired}`,
+                projectId: pid,
+                projectName: buildIntent.name,
+                files: filesNow,
+                userMessage: briefForBuild,
+                diskRoot: created.projectPath || chatStudioDiskRootRef.current,
+              });
+            }
+          }
+        }
         let appSrc = filesNow['src/App.jsx'] || filesNow['src/App.tsx'] || '';
         const { isBrokenReactAppSource } = await import('@/lib/freshSpaFromBrief');
-        const { isThinProductUiSource } = await import('@/lib/projectCodeEdit');
+        const { isThinProductUiSource, isPathologicalCodeSource } = await import('@/lib/projectCodeEdit');
         const firstPassFiles = { ...filesNow };
         const firstPassApp = appSrc;
-        const exactMinimalAsk = /\b(?:exact(?:ly)?|precisely|follow precisely|pure black|#000000|centered icon|nothing else|no other)\b/i.test(briefForBuild);
+        const exactMinimalAsk = /\b(?:exact(?:ly)?|precisely|follow precisely|pure black|#000000|#1e1f22|near-black|centered icon|nothing else|no other|ONLY this piece|ONLY add)\b/i.test(briefForBuild);
+        const wantsBlackPieceOnly = /(?:ONLY this piece|full-viewport solid|near-black|#1e1f22)/i.test(briefForBuild)
+          && /ONLY this piece|Stop after the black shell|black shell only/i.test(briefForBuild);
         const exactFidelityFail = (app: string, css: string) => {
           if (!exactMinimalAsk || !app || app.length < 160) return false;
           if (/NOVA SIGNAL/i.test(briefForBuild) && !/NOVA SIGNAL/i.test(app)) return true;
@@ -4767,10 +4987,18 @@ export function AIChat() {
           if (!/\b(?:three\.?js|webgl|3d)\b/i.test(briefForBuild) && /from\s+['"]three['"]|THREE\./i.test(app)) return true;
           return false;
         };
+        const cssTooThin = (() => {
+          if (exactMinimalAsk) return false;
+          if (!/\b(?:twitch|streaming|live\s*stream|landing|marketing|hero|multi-?section|apple\.com|replica)\b/i.test(briefForBuild)) return false;
+          const css = `${filesNow['src/App.css'] || ''}\n${filesNow['src/index.css'] || ''}`;
+          return css.replace(/\s+/g, '').length < 200;
+        })();
         const needsUiRetry = (
           (
             isBrokenReactAppSource(appSrc)
+            || isPathologicalCodeSource(appSrc)
             || isThinProductUiSource(appSrc, briefForBuild)
+            || cssTooThin
             || exactFidelityFail(appSrc, `${filesNow['src/App.css'] || ''}\n${filesNow['src/index.css'] || ''}`)
           )
           // Exact minimal that already matches the brief is success — do not wipe/retry into Three.js.
@@ -4783,7 +5011,7 @@ export function AIChat() {
 
         // If the first model pass left an empty/broken/thin shell, retry once — model only, no templates.
         if (needsUiRetry) {
-          pushAssistantStatus('Retrying unique UI from your brief…');
+          noteThought('Found a problem in the UI — fixing the broken parts (not a full rewrite)…');
           // Revert half-baked UI so Preview does not show a stub search box while we claim failure.
           filesNow = { ...seedFiles };
           appSrc = filesNow['src/App.jsx'] || filesNow['src/App.tsx'] || '';
@@ -4813,7 +5041,7 @@ export function AIChat() {
                 },
               ),
               new Promise<null>((resolve) => {
-                window.setTimeout(() => resolve(null), 420_000);
+                window.setTimeout(() => resolve(null), 300_000);
               }),
             ]);
             modelReply = String(retry?.text || '').trim();
@@ -4848,7 +5076,7 @@ export function AIChat() {
           // If retry produced nothing usable, keep the first pass when it was a real (even if thin) UI.
           const retryBroken = isBrokenReactAppSource(appSrc);
           const firstBroken = isBrokenReactAppSource(firstPassApp);
-          const exactKeep = /\b(?:exact(?:ly)?|precisely|follow precisely|pure black|#000000|centered icon|nothing else|no other)\b/i.test(briefForBuild);
+          const exactKeep = /\b(?:exact(?:ly)?|precisely|follow precisely|pure black|#000000|#1e1f22|near-black|centered icon|nothing else|no other|ONLY this piece|ONLY add)\b/i.test(briefForBuild);
           const firstKeepMin = exactKeep ? 160 : 400;
           if (
             (retryBroken || !appSrc || appSrc.length < (exactKeep ? 160 : 200))
@@ -4865,8 +5093,8 @@ export function AIChat() {
         const finalCss = `${filesNow['src/App.css'] || ''}\n${filesNow['src/index.css'] || ''}`;
         const finalBroken = isBrokenReactAppSource(finalApp);
         const finalThin = isThinProductUiSource(finalApp, briefForBuild);
-        const exactMinimal = /\b(?:exact(?:ly)?|precisely|follow precisely|pure black|#000000|centered icon|nothing else|no other)\b/i.test(briefForBuild);
-        const minLen = exactMinimal ? 160 : 1200;
+        const exactMinimal = /\b(?:exact(?:ly)?|precisely|follow precisely|pure black|#000000|#1e1f22|near-black|centered icon|nothing else|no other|ONLY this piece|ONLY add)\b/i.test(briefForBuild);
+        const minLen = exactMinimal || wantsBlackPieceOnly ? 80 : 1200;
         // Exact briefs: refuse "any UI" — require listed copy and reject wrong genres (3D/marketing).
         let exactMismatch = false;
         let exactMatch = false;
@@ -4917,17 +5145,14 @@ export function AIChat() {
           && (!finalBroken || exactMatch)
           && !exactMismatch
           && finalApp.length >= minLen
-          && (exactMinimal || !finalThin || finalApp.length >= 1200)
+          && (exactMinimal || !finalThin)
         ) {
           uiBuilt = true;
           filesNow = mergeBriefNpmDependencies(filesNow, briefForBuild);
           const changed = (applied.ok && applied.updated.length)
             ? applied.updated
             : Object.keys(filesNow).filter((p) => /(?:^|\/)App\.(jsx|tsx|css)$|index\.css$/i.test(p.replace(/\\/g, '/')));
-          followNote = `\n\nFresh UI written (${changed.slice(0, 8).join(', ')}). Click **Preview** under the chat box to open the live window.`
-            + (finalThin && !exactMinimal
-              ? '\n\nThis pass is lighter than a full museum-grade landing — say **keep building** and I’ll expand sections, motion, and polish.'
-              : '');
+          followNote = `\n\nFresh UI written (${changed.slice(0, 8).join(', ')}). Click **Preview** under the chat box to open the live window.`;
         } else if (uiBuilt) {
           filesNow = mergeBriefNpmDependencies(filesNow, briefForBuild);
           const changed = (applied.ok && applied.updated.length)
@@ -4935,14 +5160,36 @@ export function AIChat() {
             : Object.keys(filesNow).filter((p) => /(?:^|\/)App\.(jsx|tsx|css)$|index\.css$/i.test(p.replace(/\\/g, '/')));
           followNote = `\n\nFresh UI written (${changed.slice(0, 8).join(', ')}). Click **Preview** under the chat box to open the live window.`;
         } else {
+          // Keep a mid-size draft on disk for Preview, but do not claim a finished product UI.
+          const keepFromFinal = !finalBroken && !exactMismatch && finalApp.length >= 800
+            && !isPathologicalCodeSource(finalApp);
+          const keepFromFirst = !exactMismatch && !isBrokenReactAppSource(firstPassApp)
+            && firstPassApp.length >= 800 && !isPathologicalCodeSource(firstPassApp);
+          if (keepFromFinal || keepFromFirst) {
+            if (!keepFromFinal && keepFromFirst) {
+              filesNow = firstPassFiles;
+            }
+            filesNow = mergeBriefNpmDependencies(filesNow, briefForBuild);
+            uiBuilt = true;
+            const changed = Object.keys(filesNow).filter((p) => /(?:^|\/)App\.(jsx|tsx|css)$|index\.css$/i.test(p.replace(/\\/g, '/')));
+            followNote = `\n\nDraft UI kept (${changed.slice(0, 8).join(', ')}) — this pass is lighter than the full brief.`
+              + '\n\nTell me what you want next — layout, sections, motion, or polish — and I’ll expand that.';
+          } else {
           // Keep the empty scaffold on disk — do not leave a half-stub UI that looks "done".
           filesNow = { ...seedFiles, ...mergeBriefNpmDependencies(seedFiles, briefForBuild) };
           followNote = exactMismatch
             ? '\n\n**UI not built.** The model produced a UI that did not match your exact brief (wrong layout/copy). '
-              + 'No template was used. Say **keep building** and I’ll try again from your exact requirements.'
+              + 'No template was used. Tell me one clearer detail to polish and I’ll try again from your exact requirements.'
             : '\n\n**UI not built.** Only the empty project scaffold is on disk (package.json / Vite shell). '
               + 'I’m having an issue — I couldn’t generate the real interface from the model this pass. '
-              + 'No template was used. Say **keep building** and I’ll try again from your brief.';
+              + 'No template was used. Tell me what to improve next and I’ll try again from your brief.';
+          try {
+            if (!hasAnyCloudChatKey()) {
+              followNote += cloudKeyNudgeAfterEmptyBuild();
+            }
+          } catch {
+            /* ignore */
+          }
           // Wipe any stub App the model left on disk so Preview matches the honest failure.
           const revertBlocks = ['src/App.jsx', 'src/App.css', 'src/index.css']
             .filter((p) => filesNow[p] != null)
@@ -4959,10 +5206,179 @@ export function AIChat() {
             });
             if (reverted.ok) filesNow = reverted.files;
           }
+          }
+        }
+
+        // Piece-1 black shell: never keep a NOVA-search stub; force the minimal App on disk.
+        {
+          const { isNovaSearchStub } = await import('@/lib/webProjectCanon');
+          const curApp = filesNow['src/App.jsx'] || filesNow['src/App.tsx'] || '';
+          if (wantsBlackPieceOnly && (isNovaSearchStub(curApp) || !/#1e1f22|#111|#000|background/i.test(`${curApp}\n${filesNow['src/App.css'] || ''}`))) {
+            const blackApp = `import './App.css';\n\nexport default function App() {\n  return <div className="app" />;\n}\n`;
+            const blackCss = `.app {\n  min-height: 100vh;\n  margin: 0;\n  background: #1e1f22;\n}\n`;
+            const blackIndex = `html, body, #root { height: 100%; margin: 0; background: #1e1f22; }\n`;
+            let html = String(filesNow['index.html'] || created.files?.['index.html'] || '');
+            if (/NOVA-search|top-bar/i.test(html)) {
+              html = html
+                .replace(/\s*<header class=["']top-bar["'][\s\S]*?<\/header>\s*/i, '\n')
+                .replace(/\s*<label class=["']search-bar["'][\s\S]*?<\/label>\s*/i, '\n');
+            }
+            filesNow = {
+              ...filesNow,
+              'src/App.jsx': blackApp,
+              'src/App.css': blackCss,
+              'src/index.css': blackIndex,
+              ...(html ? { 'index.html': html } : {}),
+            };
+            const diskRoot = created.projectPath || chatStudioDiskRootRef.current;
+            if (diskRoot && window.arkDesktop?.workspaceWriteFile) {
+              const sep = diskRoot.includes('\\') ? '\\' : '/';
+              const root = diskRoot.replace(/[/\\]+$/, '');
+              for (const [rel, text] of Object.entries({
+                'src/App.jsx': blackApp,
+                'src/App.css': blackCss,
+                'src/index.css': blackIndex,
+                ...(html ? { 'index.html': html } : {}),
+              })) {
+                await window.arkDesktop.workspaceWriteFile({
+                  targetPath: `${root}${sep}${rel.replace(/\//g, sep)}`,
+                  content: text,
+                });
+              }
+            } else {
+              await applyChatReplyEdits({
+                reply: [
+                  '@@@FILE src/App.jsx',
+                  blackApp,
+                  '@@@FILE src/App.css',
+                  blackCss,
+                  '@@@FILE src/index.css',
+                  blackIndex,
+                  ...(html ? [`@@@FILE index.html`, html] : []),
+                ].join('\n'),
+                projectId: pid,
+                projectName: buildIntent.name,
+                files: filesNow,
+                userMessage: 'ONLY this piece: black shell only. Stop after the black shell.',
+                diskRoot,
+              });
+            }
+            uiBuilt = true;
+            followNote = '\n\nFresh UI written (src/App.jsx, src/App.css) — black shell only, as requested.';
+          }
+        }
+
+        // Second intentional polish pass for rich website replicas (takes real time — not a stub).
+        const wantsDeepPolish = /\b(?:exact\s+replica|apple\.com|netflix|twitch|premium|landing|marketing|multi-?section)\b/i.test(briefForBuild)
+          && !/\b(?:exact(?:ly)?|precisely|follow precisely|pure black|#000000|#1e1f22|near-black|centered icon|nothing else|ONLY this piece)\b/i.test(briefForBuild);
+        const appBeforePolish = filesNow['src/App.jsx'] || filesNow['src/App.tsx'] || '';
+        if (
+          wantsDeepPolish
+          && appBeforePolish.length >= 800
+          && mySeq === genSeqRef.current
+          && !stopRequestedRef.current
+        ) {
+          pushAssistantStatus('Polishing the desktop website (second pass)…');
+          try {
+            const polishResult = await Promise.race([
+              answerStudio(
+                {
+                  userMessage: buildUiPrompt('polish'),
+                  files: filesNow,
+                  projectName: buildIntent.name,
+                  mode: 'code',
+                  preferredModelId: pinnedModel.id,
+                  preferredModelName: pinnedModel.name,
+                  preferredSource: pinnedModel.source,
+                  stickyModelId: sticky?.modelId,
+                  stickyModelName: sticky?.modelName,
+                  stickyPinnedSource: sticky?.pinnedSource,
+                  planOnly: false,
+                  allowFileEdits: true,
+                  shouldAbort: () => mySeq !== genSeqRef.current || stopRequestedRef.current,
+                },
+                (live) => {
+                  if (mySeq !== genSeqRef.current || stopRequestedRef.current) return;
+                  const text = String(live || '').trim();
+                  if (text.length < 2) return;
+                  pushAssistantStatus(liveCodingStatusText(text));
+                },
+              ),
+              new Promise<null>((resolve) => {
+                window.setTimeout(() => resolve(null), 300_000);
+              }),
+            ]);
+            const polishReply = String(polishResult?.text || '').trim();
+            if (polishReply && /@@@FILE/i.test(polishReply)) {
+              const polished = await applyChatReplyEdits({
+                reply: polishReply,
+                projectId: pid,
+                projectName: buildIntent.name,
+                files: filesNow,
+                userMessage: briefForBuild,
+                diskRoot: created.projectPath || chatStudioDiskRootRef.current,
+              });
+              if (polished.ok && polished.updated.length) {
+                const nextApp = polished.files['src/App.jsx'] || polished.files['src/App.tsx'] || '';
+                if (
+                  nextApp.length >= appBeforePolish.length
+                  && !isBrokenReactAppSource(nextApp)
+                  && !isPathologicalCodeSource(nextApp)
+                ) {
+                  filesNow = polished.files;
+                  uiBuilt = true;
+                  followNote = `\n\nFresh UI written after research + polish (${polished.updated.slice(0, 8).join(', ')}). Click **Preview** (desktop website window) under the chat box.`
+                    + '\n\nTell me what to expand next if you want another polish pass.';
+                }
+              }
+            }
+          } catch {
+            /* polish is best-effort */
+          }
         }
 
         // Persist brief-driven deps (e.g. three) to disk before npm install.
         filesNow = mergeBriefNpmDependencies(filesNow, briefForBuild);
+        {
+          noteThought('Checking Vite shell + cleaning any bad HTML/CSS…');
+          const ensured = ensureViteReactProjectFiles(filesNow, buildIntent.name);
+          filesNow = ensured.files;
+          if (ensured.repaired.length) {
+            noteThought(`Repaired ${ensured.repaired.slice(0, 6).join(', ')} — keeping the rest of the UI…`);
+            const repairBlocks = Object.keys(filesNow)
+              .filter((p) => ensured.repaired.includes(p) || /^(package\.json|vite\.config\.js|index\.html|src\/)/i.test(p.replace(/\\/g, '/')))
+              .map((p) => `@@@FILE ${p}\n${filesNow[p]}`)
+              .join('\n');
+            if (repairBlocks) {
+              const repairedWrite = await applyChatReplyEdits({
+                reply: repairBlocks,
+                projectId: pid,
+                projectName: buildIntent.name,
+                files: filesNow,
+                userMessage: briefForBuild,
+                diskRoot: created.projectPath || chatStudioDiskRootRef.current,
+              });
+              if (repairedWrite.ok) filesNow = repairedWrite.files;
+            }
+          }
+          let ready = isPreviewReady(filesNow);
+          if (!ready.ok) {
+            noteThought(`Preview check failed (${ready.reasons.slice(0, 2).join('; ')}) — adjusting files…`);
+            const ensured2 = ensureViteReactProjectFiles(filesNow, buildIntent.name);
+            filesNow = ensured2.files;
+            ready = isPreviewReady(filesNow);
+          }
+          if (ready.ok) {
+            uiBuilt = true;
+            noteThought('Preview checks passed — installing and starting the live window…');
+            followNote = `\n\nFresh UI written. Click **Preview** under the chat box to open the live site (same as localhost).`;
+          } else {
+            uiBuilt = false;
+            noteThought(`Still not Preview-ready: ${ready.reasons.slice(0, 3).join('; ')}`);
+            followNote = `\n\n**UI not Preview-ready yet.** ${ready.reasons.slice(0, 3).join('; ')}. `
+              + 'Tell me what to fix and I’ll adjust only the broken parts.';
+          }
+        }
         const pkgKey = Object.keys(filesNow).find((p) => /(^|\/)package\.json$/i.test(p.replace(/\\/g, '/')));
         if (pkgKey && /"three"\s*:/.test(filesNow[pkgKey] || '')) {
           const pkgWrite = await applyChatReplyEdits({
@@ -5002,13 +5418,13 @@ export function AIChat() {
         : (created.files || {});
       const needsNpm = projectUsesNpm(scaffoldKind)
         && Object.keys(bootstrapFiles).some(p => /(^|\/)package\.json$/i.test(p.replace(/\\/g, '/')));
-      if (needsNpm) pushAssistantStatus('Installing dependencies…');
+      if (needsNpm) noteThought('Installing npm dependencies…');
       const bootstrap = created.projectPath
         ? await bootstrapProjectWorkspace(created.projectPath, scaffoldKind, {
           files: bootstrapFiles,
         })
         : { npmInstalled: true };
-      // Bind preview URL for the Preview/Localhost button — never auto-open a window.
+      // Bind preview URL for the Preview button — never auto-open a window.
       if (bootstrap.devServerUrl) {
         setPreviewUrl(bootstrap.devServerUrl);
         persistStudioSnapshot(activeChatId, {
@@ -5021,18 +5437,25 @@ export function AIChat() {
       }
 
       pushAssistantStatus('Preparing answer…');
-      const createdPaths = Object.keys(created.files || {});
+      const finalFiles = chatStudioFilesRef.current || created.files || {};
+      const createdPaths = Object.keys(finalFiles).length
+        ? Object.keys(finalFiles)
+        : Object.keys(created.files || {});
       const createAnswer = uiBuilt
-        ? `${formatCreateProjectReply({ ...buildIntent, kind: scaffoldKind }, created, bootstrap)}${followNote}`
+        ? `${formatCreateProjectReply({ ...buildIntent, kind: scaffoldKind }, {
+          ...created,
+          written: createdPaths,
+          files: finalFiles,
+        }, bootstrap)}${followNote}`
         : [
-          `**Created ${cleanProductTitle(buildIntent.name)}** (empty scaffold only)`,
+          `**Created ${cleanProductTitle(buildIntent.name)}** (scaffold only — UI not Preview-ready)`,
           '',
           `**Path:** \`${created.projectPath}\``,
           created.parentSource ? `**Location:** ${created.parentSource}` : '',
           '',
           bootstrap?.devServerUrl
-            ? `Dev server is at **${bootstrap.devServerUrl}** — Preview will look blank until the UI is written.`
-            : 'Folder is ready, but the product UI was not written yet.',
+            ? `Dev server may be at **${bootstrap.devServerUrl}**, but Preview will look blank until the UI passes checks.`
+            : 'Folder is ready, but the product UI was not verified yet.',
           followNote,
           '',
           'This chat is bound to that folder.',
@@ -5045,15 +5468,18 @@ export function AIChat() {
         changedPaths: createdPaths,
         fileChanges: createdPaths.map(path => ({
           path,
-          added: Math.max(1, String(created.files?.[path] || '').split('\n').length),
+          added: Math.max(1, String(finalFiles?.[path] || created.files?.[path] || '').split('\n').length),
           removed: 0,
         })),
         statusLabels: [
+          ...createThoughtLog.slice(-14),
           `Created ${cleanProductTitle(buildIntent.name)} on disk`,
-          `Wrote ${createdPaths.length} starter file${createdPaths.length === 1 ? '' : 's'}`,
+          uiBuilt
+            ? 'Preview checks passed'
+            : 'Preview checks did not pass — did not claim Ready UI',
         ],
       });
-      await finishPlainReply(createTrace);
+      await finishPlainReply(createTrace, createProviderUsed || undefined);
       return;
       } catch (createErr) {
         const msg = createErr instanceof Error ? createErr.message : String(createErr || 'unknown error');
@@ -5393,6 +5819,9 @@ export function AIChat() {
       && looksLikeArkCapabilityAsk(content)
       && !looksLikeProjectDebugAsk(content)
       && !parseMcpCallIntent(content)
+      && !looksLikeConversationalPlanningAsk(content)
+      && !looksLikeGreenfieldIdea(content)
+      && !wantsPlanningOnly(content)
     ) {
       finishAgentReply(
         formatArkCapabilitiesHelp({
@@ -6084,11 +6513,16 @@ export function AIChat() {
             }
           }
         }
-        const { finalizeWebEdits } = await import('@/lib/webProjectCanon');
+        const { finalizeWebEdits, isStructuralUiPieceAsk } = await import('@/lib/webProjectCanon');
+        const structuralPiece = isStructuralUiPieceAsk(editUserMessage);
         const micro = finalizeWebEdits(stickyFiles, editUserMessage, [], { projectName: projectLabel });
+        // Piece-by-piece Discord/layout asks need the model — empty local patches just return "try clearer ask".
         if (
-          micro.length
-          || /\b(?:change|rename|set|make|update|add|remove|fix|delete|drop)\b/i.test(editUserMessage)
+          !structuralPiece
+          && (
+            micro.length
+            || /\b(?:change|rename|set|make|update|add|remove|fix|delete|drop)\b/i.test(editUserMessage)
+          )
         ) {
           setMessages(prev => prev.map(m => (
             m.id === assistantId
@@ -6565,9 +6999,15 @@ export function AIChat() {
     );
     const keepContinuity = mode === 'code'
       || Boolean(threadBrainRef.current?.pendingModelId || threadBrainRef.current?.freshBudget)
-      || histPrefs.rememberContext
-      // Long threads stay continuous even if the setting was turned off mid-chat.
-      || priorForHistory.length >= 4;
+      || (
+        histPrefs.rememberContext
+        // Long threads stay continuous even if the setting was turned off mid-chat.
+        && !looksLikeSideQuestAsk(content)
+      )
+      || (
+        priorForHistory.length >= 4
+        && !looksLikeSideQuestAsk(content)
+      );
     // Inspect follow-ups must not pack the prior huge dump into GGUF (that hung Thinking…).
     const seedHistory = willInspect
       ? buildRouterHistory([], content)
@@ -6784,6 +7224,7 @@ export function AIChat() {
       let lastGoodLive = '';
       let abandoned = false;
       let idleTimer: number | undefined;
+      let sideQuestLookup: { text: string; sources: { title: string; url: string }[]; ok: boolean } | null = null;
       let earlyResolve: ((value: { reply: string }) => void) | null = null;
       const earlyDone = new Promise<{ reply: string }>((resolve) => {
         earlyResolve = resolve;
@@ -7061,7 +7502,7 @@ export function AIChat() {
         // Bound UI edits: patch on disk first — never dump “edit App.jsx manually” from the model.
         if (editOnBoundPath && looksLikeCodeEditAsk(content)) {
           try {
-            const { finalizeWebEdits } = await import('@/lib/webProjectCanon');
+            const { finalizeWebEdits, isStructuralUiPieceAsk } = await import('@/lib/webProjectCanon');
             const { applyChatReplyEdits } = await import('@/lib/chatAgentApply');
             // Heal missing diskRoot from this chat before writing.
             if (!chatStudioDiskRootRef.current && activeChatId) {
@@ -7093,10 +7534,17 @@ export function AIChat() {
                 chatStudioFilesRef.current = filesForPatch;
               }
             }
+            const structuralPiece = isStructuralUiPieceAsk(content);
             const micro = finalizeWebEdits(filesForPatch, content, [], {
               projectName: studioPathBasename(root || '') || undefined,
             });
-            if (micro.length || /\b(?:change|rename|set|make|update|add|remove|fix|delete|drop)\b/i.test(content)) {
+            if (
+              !structuralPiece
+              && (
+                micro.length
+                || /\b(?:change|rename|set|make|update|add|remove|fix|delete|drop)\b/i.test(content)
+              )
+            ) {
               const applied = await applyChatReplyEdits({
                 reply: '',
                 projectId: chatStudioProjectIdRef.current,
@@ -7666,37 +8114,90 @@ export function AIChat() {
           const prefs = getLocalPrefs();
           const vision = extractVisionImages(content);
           const pendingIdea = getLastPendingGreenfield(activeChatId);
-          const planningTalk = shouldInjectPlanningConversation(content, { pendingIdea: Boolean(pendingIdea) });
+          const sideQuest = looksLikeSideQuestAsk(content);
+          const planningTalk = !sideQuest && shouldInjectPlanningConversation(content, { pendingIdea: Boolean(pendingIdea) });
+          const keepBuildingTalk = !sideQuest && looksLikeKeepBuildingAsk(content);
           let routeMessage = content;
+          const historyKeep = !sideQuest;
           let history = prefs.rememberContext
-            ? (routeHistory.length ? routeHistory : buildRouterHistory(priorForHistory, content, vision, {
-              keepContinuity: true,
-              kind: 'chat',
-            }))
+            ? (routeHistory.length && historyKeep
+              ? routeHistory
+              : buildRouterHistory(priorForHistory, content, vision, {
+                keepContinuity: historyKeep,
+                kind: 'chat',
+              }))
             : buildRouterHistory([], content, vision);
-          if (planningTalk) {
+          // Side quests must not reuse a packed build history that still contains the marketplace brief.
+          if (sideQuest) {
+            history = buildRouterHistory(priorForHistory, content, vision, {
+              keepContinuity: false,
+              kind: 'chat',
+            });
+          }
+          if (sideQuest) {
+            chatTurnCtlRef.current.pushStatus(looksLikeLyricsAsk(content) ? 'Checking lyrics…' : 'Looking that up…');
+            // Copyrighted lyrics: never let the local model invent a full paste.
+            if (looksLikeLyricsAsk(content)) {
+              response = honestLyricsUnavailableReply(content);
+              usedPlugin = true;
+            } else {
+              history = [
+                { role: 'user' as const, content: sideQuestAnswerHint(content) },
+                {
+                  role: 'assistant' as const,
+                  content: 'Understood. I will answer only this question, refuse to invent live facts, and not continue any prior build/product advice.',
+                },
+                ...history,
+              ];
+            }
+          }
+          if (!usedPlugin) {
+          if (planningTalk || keepBuildingTalk) {
             // Single status only — no multi-second delay that thrash-replaces the bubble before tokens arrive.
             chatTurnCtlRef.current.pushStatus('Thinking…');
+            const hint = keepBuildingTalk
+              ? keepBuildingConversationHint(pendingIdea?.summary || chats.find(c => c.id === activeChatId)?.title || undefined)
+              : planningConversationHint(pendingIdea?.summary || undefined);
             history = [
-              { role: 'user' as const, content: planningConversationHint(pendingIdea?.summary || undefined) },
-              { role: 'assistant' as const, content: 'Understood. I will stay on their topic, give a thorough answer, and not invent a random product.' },
+              { role: 'user' as const, content: hint },
+              { role: 'assistant' as const, content: keepBuildingTalk
+                ? 'Understood. I will recommend concrete next polish steps and ask what they want next — no full rebuild, no file dumps.'
+                : 'Understood. I will stay on their topic, give a thorough answer, and not invent a random product.' },
               ...history,
             ];
             routeMessage = content;
           }
-          if (looksLikeWebGroundedAsk(content)) {
+          let preferPerplexityForTurn = false;
+          if (looksLikeWebGroundedAsk(content) && !looksLikeLyricsAsk(content)) {
             chatTurnCtlRef.current.pushStatus('Looking that up…');
             try {
               const hit = await webSearchForChat(content);
               if (mySeq !== genSeqRef.current || stopRequestedRef.current) return;
+              const keys = getProviderApiKeys();
+              preferPerplexityForTurn = Boolean(keys.perplexity) && isCloudProviderEnabled('perplexity');
+              sideQuestLookup = {
+                ok: Boolean(hit.ok),
+                text: String(hit.text || ''),
+                sources: Array.isArray(hit.sources) ? hit.sources : [],
+              };
               const note = hit.ok ? formatWebLookupForPrompt(hit) : '';
               if (note) {
                 history = [
                   ...history,
-                  { role: 'user' as const, content: note },
+                  {
+                    role: 'user' as const,
+                    content: `${note}\n\nUser question (answer this now, facts first): ${String(content || '').trim()}`,
+                  },
+                ];
+              } else {
+                history = [
+                  ...history,
+                  { role: 'user' as const, content: webLookupUnavailableNote() },
                   {
                     role: 'assistant' as const,
-                    content: 'Understood — I will use those lookup notes where helpful, ask clarifying questions when needed, and answer their request directly.',
+                    content: preferPerplexityForTurn
+                      ? 'Understood — built-in lookup was empty; I will answer with a live search model when available and clearly say when facts are uncertain — never a link directory.'
+                      : 'Understood — I will tell the user I lack live web results for this question and recommend Models → Cloud (Perplexity) or Exa, instead of inventing current events or listing random websites.',
                   },
                 ];
               }
@@ -7739,9 +8240,15 @@ export function AIChat() {
           const routePromise = arkRoute({
             message: routeMessage,
             kind: 'chat',
-            preferredModelId: useChatBrain ? undefined : pinnedModel.id,
-            preferredModelName: useChatBrain ? undefined : pinnedModel.name,
-            preferredSource: useChatBrain ? undefined : pinnedModel.source,
+            preferredModelId: preferPerplexityForTurn
+              ? 'perplexity'
+              : (useChatBrain ? undefined : pinnedModel.id),
+            preferredModelName: preferPerplexityForTurn
+              ? 'Perplexity Sonar'
+              : (useChatBrain ? undefined : pinnedModel.name),
+            preferredSource: preferPerplexityForTurn
+              ? 'cloud'
+              : (useChatBrain ? undefined : pinnedModel.source),
             stickyModelId: useChatBrain ? undefined : sticky?.modelId,
             stickyModelName: useChatBrain ? undefined : sticky?.modelName,
             stickyPinnedSource: useChatBrain ? undefined : sticky?.pinnedSource,
@@ -7934,6 +8441,7 @@ export function AIChat() {
             }
           }
           usedPlugin = true;
+          }
         } catch (err) {
           if (idleTimer) window.clearTimeout(idleTimer);
           abandoned = true;
@@ -7968,10 +8476,11 @@ export function AIChat() {
         const isUiEditAsk = looksLikeCodeEditAsk(content)
           || looksLikeImplementGo(content)
           || looksLikeGreenfieldStartWorkGo(content);
-        const planningTurn = !isUiEditAsk && (
+        const planningTurn = !isUiEditAsk && !looksLikeSideQuestAsk(content) && (
           shouldInjectPlanningConversation(content, {
             pendingIdea: Boolean(pendingIdeaNow),
           }) || wantsPlanningOnly(content) || looksLikeConversationalPlanningAsk(content)
+          || looksLikeKeepBuildingAsk(content)
         );
         const wantsDiskPatch = isUiEditAsk && !planningTurn;
         if (wantsDiskPatch && (diskBoundNow || chatStudioDiskRootRef.current)) {
@@ -8015,9 +8524,10 @@ export function AIChat() {
                 previewUrl: previewUrlRef.current,
               });
               void pushLivePreview(applied.files, false);
+              // Keep the streamed prose — never swap it for a canned one-liner.
               response = finalizeCodingChatBubble({
                 userMessage: content,
-                rawReply: '',
+                rawReply: response,
                 changedPaths: applied.updated,
                 applied: true,
                 editMode: true,
@@ -8041,6 +8551,17 @@ export function AIChat() {
         if (planningTurn) {
           const { scrubPlanningReply } = await import('@/lib/chatPlanMode');
           response = scrubPlanningReply(response);
+        }
+        if (looksLikeSideQuestAsk(content)) {
+          response = scrubSideQuestBleed(response, content);
+          if (looksLikeLyricsAsk(content) && looksLikeInventedLyricsDump(response)) {
+            response = honestLyricsUnavailableReply(content);
+          } else if (
+            looksLikeThinSideQuestReply(response, content)
+            || !String(response || '').trim()
+          ) {
+            response = fallbackAnswerFromLookup(content, sideQuestLookup || { text: '', sources: [], ok: false });
+          }
         }
       }
       if (
@@ -8866,7 +9387,7 @@ export function AIChat() {
                 title={previewUrl ? `Open live preview (${previewUrl})` : 'Open live preview window'}
               >
                 <Globe className="w-3.5 h-3.5 text-sky-300" />
-                {previewUrl && /localhost|127\.0\.0\.1/.test(previewUrl) ? 'Localhost' : 'Preview'}
+                Preview
               </button>
             ) : null}
             {(mode === 'general' || mode === 'code') && showStudioPills && codePillSticky ? (
@@ -9049,24 +9570,6 @@ export function AIChat() {
             )}
           </>
         )}
-        {(mode === 'general' || mode === 'code') && chatPlugins.map(plugin => (
-              <button
-                key={plugin.id}
-                type="button"
-                onClick={() => {
-                  const first = plugin.actions[0]?.prompt;
-                  if (first) {
-                    setInput(first);
-                    textareaRef.current?.focus();
-                  }
-                }}
-                className="inline-flex items-center gap-1.5 rounded-full border border-surface-border bg-ark-navy-900/80 px-2 py-0.5 text-[11px] text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors"
-                title={plugin.actions[0]?.label ?? plugin.name}
-              >
-                <BrandMark id={plugin.id} name={plugin.name} initial={plugin.initial} tone={plugin.tone} size="xs" />
-                {plugin.name}
-              </button>
-            ))}
       </div>
     </div>
   );
@@ -9283,14 +9786,9 @@ export function AIChat() {
                 <div
                   key={msg.id}
                   className={`flex gap-3 animate-fade-in w-full ${
-                    msg.role === 'user' ? 'justify-end' : 'justify-start -ml-2 sm:-ml-3'
+                    msg.role === 'user' ? 'justify-end' : 'justify-start'
                   }`}
                 >
-                  {msg.role !== 'user' && (
-                    <div className="w-8 h-8 flex items-center justify-center shrink-0 mt-0.5">
-                      <ArkMark className="w-7 h-7" title="NOVA" />
-                    </div>
-                  )}
                   <div
                     className={`text-sm text-content-primary overflow-hidden min-w-0 ${
                       msg.role === 'user'

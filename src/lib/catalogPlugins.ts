@@ -566,13 +566,25 @@ export const CATALOG_PLUGIN_HANDLERS: Record<string, CatalogPluginEntry> = {
   github: { verify: verifyGitHubToken, runLive: (t, u, o) => runGitHubLive(t, u, o), mention: /github|repo|pull request|\bpr\b|issue/i },
   notion: { verify: verifyNotionToken, runLive: (t, u, o) => runNotionLive(t, u, o), mention: /notion|spec|brief|workspace/i },
   gmail: { verify: verifyGmailToken, runLive: (t, u, o) => runGmailLive(t, u, o), mention: /gmail|inbox|email|mail|unread/i },
-  slack: { verify: verifySlackToken, runLive: (t, u, o) => runSlackLive(t, u, o), mention: /slack|channel|dm/i },
+  // Do NOT match bare "channel" / "dm" — those fire on YouTube "channel + views", UI DMs, etc.
+  // Require "slack" or a #channel with an explicit Slack action verb.
+  slack: {
+    verify: verifySlackToken,
+    runLive: (t, u, o) => runSlackLive(t, u, o),
+    mention: /\bslack\b|(?:\b(?:post|send|message|search|find|look\s*up|summarize|summary)\b[^.\n]{0,80}#[a-z][\w-]{1,80}\b)|(?:#[a-z][\w-]{1,80}\b[^.\n]{0,80}\b(?:post|send|message|search|find|look\s*up|summarize|summary)\b)/i,
+  },
   linear: { verify: verifyLinearToken, runLive: (t, u, o) => runLinearLive(t, u, o), mention: /linear|ticket|issue/i },
   figma: { verify: verifyFigmaToken, runLive: (t, u, o) => runFigmaLive(t, u, o), mention: /figma|design file|frame/i },
   gdrive: { verify: verifyDriveToken, runLive: (t, u, o) => runDriveLive(t, u, o), mention: /drive|google drive|docs|sheets/i },
   gcal: { verify: verifyCalendarToken, runLive: (t, u, o) => runCalendarLive(t, u, o), mention: /calendar|schedule|meeting|agenda|gcal/i },
   vercel: { verify: verifyVercelToken, runLive: (t, u, o) => runVercelLive(t, u, o), mention: /vercel|deploy/i },
-  discord: { verify: verifyDiscordToken, runLive: (t, u, o) => runDiscordLive(t, u, o), mention: /discord|server|guild/i },
+  // Do NOT match bare "discord" / "server" / "guild" — those fire on Discord.com-style website builds.
+  // Require an explicit Discord *integration* ask (using/via Discord, post to Discord, Discord bot, etc.).
+  discord: {
+    verify: verifyDiscordToken,
+    runLive: (t, u, o) => runDiscordLive(t, u, o),
+    mention: /\b(?:using|via|from|in|to)\s+discord\b|\bdiscord\s+(?:plugin|integration|bot|api|webhook)\b|\bpost\s+(?:to\s+)?discord\b|\bdiscord\s+(?:post|send|message|list|unread)\b/i,
+  },
   telegram: { verify: verifyTelegramToken, runLive: (t, u) => runTelegramLive(t, u), mention: /telegram|bot/i },
   stripe: { verify: verifyStripeToken, runLive: (t, u) => runStripeLive(t, u), mention: /stripe|charge|payment/i },
   exa: { verify: verifyExaToken, runLive: (t, u) => runExaLive(t, u), mention: /exa|web search|search the web/i },

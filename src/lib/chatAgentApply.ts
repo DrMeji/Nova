@@ -14,7 +14,7 @@ import {
   stripFileBlocks,
   type ProjectFileMap,
 } from '@/lib/projectCodeEdit';
-import { finalizeWebEdits, reactUiMicroAskEdits } from '@/lib/webProjectCanon';
+import { finalizeWebEdits, reactUiMicroAskEdits, isNovaSearchStub } from '@/lib/webProjectCanon';
 import { safeProjectWrite } from '@/lib/projectWriteSafe';
 import { skillPromptAppendix } from '@/lib/arkSkills';
 import { detectProjectKind } from '@/lib/projectKind';
@@ -186,7 +186,35 @@ export async function applyChatReplyEdits(opts: {
     };
   }
 
-  const next = applied.files;
+  const next = { ...applied.files };
+  // Hard reject accidental NOVA search-chrome stubs on Vite App.jsx (piece builds / black shell).
+  {
+    const searchWanted = /\bsearch\s*bar\b/i.test(rawUser)
+      && !/\b(?:no|without|never|skip|omit|don't|do\s+not|dont)\b[\s\S]{0,40}\bsearch(?:\s*bar)?\b/i.test(rawUser);
+    const wantsBlackOnly = /(?:ONLY this piece|full-viewport solid|near-black|#1e1f22)/i.test(rawUser)
+      && /ONLY this piece|Stop after the black shell|black shell only/i.test(rawUser);
+    for (const key of Object.keys(next)) {
+      const norm = key.replace(/\\/g, '/');
+      if (/(?:^|\/)App\.(jsx|tsx)$/i.test(norm) && isNovaSearchStub(next[key]) && !searchWanted) {
+        if (wantsBlackOnly) {
+          next[key] = `import './App.css';\n\nexport default function App() {\n  return <div className="app" />;\n}\n`;
+          next['src/App.css'] = `.app {\n  min-height: 100vh;\n  margin: 0;\n  background: #1e1f22;\n}\n`;
+          next['src/index.css'] = `html, body, #root { height: 100%; margin: 0; background: #1e1f22; }\n`;
+          if (!changed.includes(key)) changed.push(key);
+          if (!changed.includes('src/App.css')) changed.push('src/App.css');
+          if (!changed.includes('src/index.css')) changed.push('src/index.css');
+        } else if (baseFiles[key] && !isNovaSearchStub(baseFiles[key])) {
+          next[key] = baseFiles[key];
+        }
+      }
+      if (/(?:^|\/)index\.html$/i.test(norm) && /NOVA-search|class=["']top-bar["']/i.test(next[key]) && !searchWanted) {
+        next[key] = String(next[key])
+          .replace(/\s*<header class=["']top-bar["'][\s\S]*?<\/header>\s*/i, '\n')
+          .replace(/\s*<label class=["']search-bar["'][\s\S]*?<\/label>\s*/i, '\n');
+        if (!changed.includes(key)) changed.push(key);
+      }
+    }
+  }
   const payloadFiles = Object.fromEntries(changed.map((p: string) => [p, next[p]]));
 
   let wroteOk = false;

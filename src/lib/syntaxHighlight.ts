@@ -39,7 +39,7 @@ function esc(text: string) {
 }
 
 function tok(cls: string, text: string) {
-  return `<span class="NOVA-tok-${cls}">${esc(text)}</span>`;
+  return `<span class="ark-tok-${cls}">${esc(text)}</span>`;
 }
 
 function highlightJsLike(code: string): string {

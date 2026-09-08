@@ -1,23 +1,53 @@
 import { useState, type ReactNode } from 'react';
 import { Check, Copy } from 'lucide-react';
 import { tidyMarkdownStars } from '@/lib/chatHistory';
+import { normalizeAssistantLists } from '@/lib/chatPlanMode';
 import { openInSystemBrowser } from '@/lib/openExternal';
+
+type ListItem = { text: string; kids?: string[] };
 
 type Block =
   | { type: 'p'; text: string }
   | { type: 'h'; level: 1 | 2 | 3 | 4; text: string }
-  | { type: 'ol'; items: string[] }
+  | { type: 'ol'; items: ListItem[] }
   | { type: 'ul'; items: string[] }
   | { type: 'code'; lang: string; code: string };
+
+/** Match "1. Title", "**1. Title:**", "1) Title" — models often bold the whole numbered line. */
+function matchOrderedLine(line: string): { indent: string; body: string } | null {
+  const m = line.match(/^(\s*)(?:\*\*\s*)?(\d+)[.)]\s+(.*)$/);
+  if (!m) return null;
+  let body = String(m[3] || '').trim();
+  // Unwrap a whole-line bold wrapper: **Hero Section:** → Hero Section:
+  if (/^\*\*.+\*\*:?\s*$/.test(body)) {
+    body = body.replace(/^\*\*/, '').replace(/\*\*:?\s*$/, (tail) => (tail.includes(':') ? ':' : ''));
+  }
+  body = body.trim();
+  if (!body) return null;
+  return { indent: m[1], body };
+}
+
+function matchBulletLine(line: string): string | null {
+  const m = line.match(/^\s*[-*•]\s+(.*)$/);
+  return m ? String(m[1] || '').trim() : null;
+}
+
+function matchStarLine(line: string): string | null {
+  const m = line.match(/^\s*[★☆✦]\s+(.*)$/);
+  if (!m) return null;
+  return String(m[1] || '').trim().replace(/^\*\*/, '').replace(/\*\*:?\s*$/, (t) => (t.includes(':') ? ':' : ''));
+}
 
 function splitBlocks(text: string): Block[] {
   const lines = text.replace(/\r\n/g, '\n').split('\n');
   const blocks: Block[] = [];
   let para: string[] = [];
-  let ol: string[] | null = null;
+  let ol: ListItem[] | null = null;
   let ul: string[] | null = null;
   let codeLang: string | null = null;
   let codeLines: string[] | null = null;
+  // Blank lines inside a list should not break numbering — only flush when content resumes non-list.
+  let blankPending = false;
 
   const flushPara = () => {
     if (!para.length) return;
@@ -30,6 +60,7 @@ function splitBlocks(text: string): Block[] {
     if (ul?.length) blocks.push({ type: 'ul', items: ul });
     ol = null;
     ul = null;
+    blankPending = false;
   };
   const flushCode = () => {
     if (codeLines) {
@@ -57,9 +88,20 @@ function splitBlocks(text: string): Block[] {
       continue;
     }
 
+    if (!line.trim()) {
+      if (ol || ul) {
+        blankPending = true;
+        continue;
+      }
+      flushPara();
+      continue;
+    }
+
     const heading = line.match(/^\s*(#{1,4})\s+(.+?)\s*#*\s*$/);
-    const ordered = line.match(/^\s*\d+[.)]\s+(.*)$/);
-    const bullet = line.match(/^\s*[-*•]\s+(.*)$/);
+    const ordered = matchOrderedLine(line);
+    const star = matchStarLine(line);
+    const bullet = matchBulletLine(line);
+
     if (heading) {
       flushPara();
       flushList();
@@ -67,26 +109,59 @@ function splitBlocks(text: string): Block[] {
       blocks.push({ type: 'h', level, text: heading[2].trim() });
       continue;
     }
+
     if (ordered) {
       flushPara();
-      if (ul) flushList();
+      // Starting / continuing an ordered list ends any open bullet list.
+      if (ul) {
+        blocks.push({ type: 'ul', items: ul });
+        ul = null;
+      }
+      blankPending = false;
       ol = ol || [];
-      ol.push(ordered[1]);
+      ol.push({ text: ordered.body, kids: [] });
       continue;
     }
-    if (bullet) {
+
+    if (star != null) {
       flushPara();
-      if (ol) flushList();
+      if (ul) {
+        blocks.push({ type: 'ul', items: ul });
+        ul = null;
+      }
+      // Nest ★ subsections under the current main numbered step.
+      if (ol?.length) {
+        blankPending = false;
+        const last = ol[ol.length - 1];
+        last.kids = last.kids || [];
+        last.kids.push(`★ ${star}`);
+        continue;
+      }
+      blankPending = false;
       ul = ul || [];
-      ul.push(bullet[1]);
+      ul.push(`★ ${star}`);
       continue;
     }
-    if (!line.trim()) {
+
+    if (bullet != null) {
       flushPara();
-      flushList();
+      // Nest bullets under the current ordered item — do NOT flush the ol
+      // (that was forcing every "1. Title" into its own one-item list).
+      if (ol?.length) {
+        blankPending = false;
+        const last = ol[ol.length - 1];
+        last.kids = last.kids || [];
+        last.kids.push(bullet);
+        continue;
+      }
+      blankPending = false;
+      ul = ul || [];
+      ul.push(bullet);
       continue;
     }
-    if (ol || ul) flushList();
+
+    // Non-list prose: end any open list.
+    if (blankPending || ol || ul) flushList();
     para.push(line);
   }
   flushPara();
@@ -183,7 +258,7 @@ const HEADING_CLASS: Record<1 | 2 | 3 | 4, string> = {
 };
 
 export function ChatMarkdown({ text }: { text: string }) {
-  const cleaned = tidyMarkdownStars(text).trim();
+  const cleaned = normalizeAssistantLists(tidyMarkdownStars(text)).trim();
   if (!cleaned) return null;
   const blocks = splitBlocks(cleaned);
   return (
@@ -202,19 +277,54 @@ export function ChatMarkdown({ text }: { text: string }) {
         }
         if (block.type === 'ol') {
           return (
-            <ol key={i} className="list-decimal pl-5 space-y-1">
+            <ol key={i} className="list-decimal pl-5 space-y-2">
               {block.items.map((item, j) => (
-                <li key={j}>{renderInline(item)}</li>
+                <li key={j} className="[&::marker]:font-semibold">
+                  <span className="font-semibold">{renderInline(item.text)}</span>
+                  {item.kids && item.kids.length > 0 ? (
+                    <ul className="list-none pl-0 mt-1 space-y-1 font-normal">
+                      {item.kids.map((kid, k) => {
+                        const isStar = /^★\s+/.test(kid);
+                        const label = isStar ? kid.replace(/^★\s+/, '') : kid;
+                        if (isStar) {
+                          return (
+                            <li key={k} className="font-normal flex gap-2">
+                              <span className="shrink-0 text-content-secondary" aria-hidden>★</span>
+                              <span className="font-semibold">{renderInline(label)}</span>
+                            </li>
+                          );
+                        }
+                        return (
+                          <li key={k} className="font-normal list-disc ml-5">
+                            {renderInline(label)}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  ) : null}
+                </li>
               ))}
             </ol>
           );
         }
         if (block.type === 'ul') {
           return (
-            <ul key={i} className="list-disc pl-5 space-y-1">
-              {block.items.map((item, j) => (
-                <li key={j}>{renderInline(item)}</li>
-              ))}
+            <ul key={i} className="list-none pl-0 space-y-1">
+              {block.items.map((item, j) => {
+                const isStar = /^★\s+/.test(item);
+                const label = isStar ? item.replace(/^★\s+/, '') : item;
+                if (isStar) {
+                  return (
+                    <li key={j} className="flex gap-2">
+                      <span className="shrink-0 text-content-secondary" aria-hidden>★</span>
+                      <span className="font-semibold">{renderInline(label)}</span>
+                    </li>
+                  );
+                }
+                return (
+                  <li key={j} className="list-disc ml-5">{renderInline(label)}</li>
+                );
+              })}
             </ul>
           );
         }

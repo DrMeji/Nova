@@ -1006,6 +1006,28 @@ function looksLikeFullUiBuildAsk(userMessage: string): boolean {
   );
 }
 
+/**
+ * Local models sometimes balloon App.jsx with endless SVG path / attribute repeats.
+ * Treat that as unusable so create retries instead of shipping junk.
+ */
+export function isPathologicalCodeSource(source: string | undefined | null): boolean {
+  const s = String(source || '');
+  if (s.length < 5000) return false;
+  // Long file with a tiny alphabet (digits/dashes loops) is almost never real UI.
+  if (s.length >= 8000 && new Set(s).size < 100) return true;
+  // Any mid-file 28–48 char probe that appears dozens of times.
+  const start = Math.floor(s.length / 3);
+  for (let len = 28; len <= 48; len += 4) {
+    for (let off = 0; off < 160; off += 16) {
+      const probe = s.slice(start + off, start + off + len);
+      if (probe.length < len) continue;
+      if ((s.split(probe).length - 1) >= 40) return true;
+    }
+  }
+  if (/\*\*CSS\b|```css|This completes the initial implementation/i.test(s)) return true;
+  return false;
+}
+
 /** Too thin for a create/product UI pass — keep generating / failover instead of shipping a stub. */
 export function isThinProductUiSource(
   appSource: string | undefined | null,
@@ -1014,13 +1036,14 @@ export function isThinProductUiSource(
   const s = String(appSource || '');
   const ask = String(briefOrAsk || '');
   const tags = s.match(/<[A-Za-z][\w.-]*/g) || [];
+  if (isPathologicalCodeSource(s)) return true;
   // Exact / minimal visual specs (black screen + icon, etc.) are intentionally small.
   if (
-    /\b(?:exact(?:ly)?|precisely|follow precisely|nothing else|no other|pure black|#000000|centered icon|only\s+(?:this|these)\s+requirements)\b/i.test(ask)
+    /\b(?:exact(?:ly)?|precisely|follow precisely|nothing else|no other|pure black|#000000|#1e1f22|near-black|centered icon|only\s+(?:this|these)\s+requirements|ONLY this piece|ONLY add)\b/i.test(ask)
   ) {
-    return s.length < 160 || tags.length < 2;
+    return s.length < 80 || tags.length < 1;
   }
-  const richBrief = /\b(?:landing|marketing|museum|store|shop|portfolio|animation|hero|multi-?section|fully built|premium|cinematic|gallery|editorial)\b/i.test(ask)
+  const richBrief = /\b(?:landing|marketing|museum|store|shop|portfolio|animation|hero|multi-?section|fully built|premium|cinematic|gallery|editorial|twitch|streaming|live\s*stream|streamer|netflix|watch\s*page|browse|apple\.com|replica|exact\s+replica|pac-?man|game|three\.?js|3d)\b/i.test(ask)
     || /\b(?:first real ui|from this brief|product UI matching)\b/i.test(ask);
   if (!richBrief) {
     // Simple tools/trackers: only reject truly tiny shells.
@@ -1139,7 +1162,8 @@ export function codingOutputIncomplete(reply: string, userMessage: string): bool
         );
         // Reject empty/search stubs at the router — thin-but-real UIs are retried in create flow.
         // Exact visual specs are intentionally short (often <400 chars).
-        if (s.length < (exactMinimal ? 160 : 400)) return true;
+        if (s.length < (exactMinimal ? 160 : 1800)) return true;
+        if (!exactMinimal && isThinProductUiSource(s, userMessage)) return true;
         if (/placeholder=["']Search/i.test(s) && (s.match(/<[A-Za-z]/g) || []).length < 12) return true;
         if (/return\s*\(\s*<div\s+className=["']app["']\s*\/>\s*\)/i.test(s)) return true;
         // Split-component scaffolds without companion @@@FILE blocks break Preview.
@@ -1220,8 +1244,9 @@ export function formatCodeChatReply(
   if (changedPaths.length && previewOk) {
     const hello = /\bhello\s*world\b/i.test(ask) && /\b(build|create|make)\b/i.test(ask);
     const pizza = /\bpizza\b/i.test(ask);
-    const bg = /\bbackground\b/i.test(ask);
-    const search = /\bsearch\b/i.test(ask);
+    const structural = /\bONLY\s+add\b|\bserver\s+rail\b|\bchannel\s+(?:list|column)\b|\bchat\s+(?:pane|header|composer)\b|\bmember\s+list\b|\buser\s+bar\b/i.test(ask);
+    const bg = /\bbackground\b/i.test(ask) && !structural;
+    const search = /\bsearch\b/i.test(ask) && !structural;
     const rgb = /\b(rgb|multi[- ]?colou?r|gradient)\b/i.test(ask);
     const toggle = /\b(toggle|theme)\b/i.test(ask) && /\b(remove|delete)\b/i.test(ask);
     if (usable) return `${clean}\n\n${doneFooter}`;
@@ -1231,10 +1256,10 @@ export function formatCodeChatReply(
     if (search) return `Done. search is in the top-right. ${doneFooter}`;
     if (rgb) return `Done. multi-color title is applied. ${doneFooter}`;
     if (toggle) return `Done. removed the theme toggle. ${doneFooter}`;
-    if (/\b(logo|icon)\b/i.test(ask) && /\b(center|middle|screen)\b/i.test(ask)) {
+    if (/\b(logo|icon)\b/i.test(ask) && /\b(center|middle|screen)\b/i.test(ask) && !structural) {
       return `Done. added the logo centered on screen. ${doneFooter}`;
     }
-    if (/\b(icon|profile|account|center|logo|button)\b/i.test(ask)) {
+    if (/\b(icon|profile|account|center|logo|button)\b/i.test(ask) && !structural) {
       return `Done. updated the layout. ${doneFooter}`;
     }
     return `Done. I updated the project. ${doneFooter}`;
@@ -1262,6 +1287,10 @@ export function scrubLeakedFileMarkers(content: string): string {
   if (nextFile >= 0) body = body.slice(0, nextFile);
   body = body.replace(/\n@@@[\s\S]*$/g, '');
   body = body.replace(/\s*@@@\s*$/g, '');
+  // Model often appends ```css / **CSS… / This completes… after a valid App body.
+  body = body.replace(/\n```(?:[a-z0-9_+-]*)?\s*[\s\S]*$/i, '');
+  body = body.replace(/\n\*\*[^\n]{0,80}\*?\*?[\s\S]*$/g, '');
+  body = body.replace(/\nThis completes[\s\S]*$/i, '');
   body = body.replace(/\n```\s*$/g, '');
   return body.trimEnd();
 }
@@ -1320,6 +1349,11 @@ export function sanitizeJsonFileContent(path: string, content: string): string {
 /** Remove chat-style “Summary:” blobs the model sometimes writes into the page. */
 export function sanitizeAppliedWebContent(path: string, content: string): string {
   let body = scrubLeakedFileMarkers(content);
+  // Refuse pathological ballooned sources so create/retry can replace them.
+  if (/\.(?:jsx?|tsx?|css)$/i.test(path) && isPathologicalCodeSource(body)) {
+    console.warn('[NOVA] dropping pathological write', path, body.length);
+    return '';
+  }
   if (/\.json$/i.test(path) || /(^|\/)package\.json$/i.test(path)) {
     return sanitizeJsonFileContent(path, body);
   }

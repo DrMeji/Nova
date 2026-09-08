@@ -257,12 +257,40 @@ export async function bootstrapProjectWorkspace(
     skipConfirm: true,
   });
 
-  if (!install.handled || (install.reply && /could not run|ENOENT|npm error/i.test(install.reply))) {
-    return {
-      npmInstalled: false,
-      bootstrapNote: sanitizeBootstrapNote(install.reply)
-        || 'Could not install npm dependencies automatically. Say **install npm dependencies** to retry, or open the folder and run `npm install` once.',
-    };
+  if (!install.handled || (install.reply && /could not run|ENOENT|npm error|not recognized|not found/i.test(install.reply))) {
+    // Fresh machines often lack Node — try a silent winget install once, then retry npm.
+    const nodeOk = await window.arkDesktop?.agentRun?.({
+      command: 'node -v',
+      cwd: undefined,
+      skipConfirm: true,
+      userConfirmed: true,
+    });
+    if (!nodeOk?.ok) {
+      await window.arkDesktop?.agentRun?.({
+        command: 'winget install OpenJS.NodeJS.LTS --accept-package-agreements --accept-source-agreements',
+        cwd: undefined,
+        skipConfirm: true,
+        userConfirmed: true,
+      });
+      const retry = await runAgentCommand({
+        command: 'npm install',
+        cwd: projectPath,
+        skipConfirm: true,
+      });
+      if (!retry.handled || (retry.reply && /could not run|ENOENT|npm error/i.test(retry.reply))) {
+        return {
+          npmInstalled: false,
+          bootstrapNote: sanitizeBootstrapNote(retry.reply || install.reply)
+            || 'Could not install npm dependencies. Install Node.js LTS, then say **install npm dependencies**.',
+        };
+      }
+    } else {
+      return {
+        npmInstalled: false,
+        bootstrapNote: sanitizeBootstrapNote(install.reply)
+          || 'Could not install npm dependencies automatically. Say **install npm dependencies** to retry, or open the folder and run `npm install` once.',
+      };
+    }
   }
 
   const dev = await window.arkDesktop?.agentStartDevServer?.({ cwd: projectPath });
@@ -310,8 +338,8 @@ export function formatCreateProjectReply(
         : isStatic || intent.kind === 'static-web'
           ? '**Ready**. use **Preview** under the chat box to open the site, or **Code** to edit files. Tell me what to add.'
           : bootstrap?.devServerUrl
-            ? `**Ready**. dependencies installed. Dev server is at **${bootstrap.devServerUrl}**. click **Localhost** under the chat box to open it.\n\nTell me what to build (layout, pages, features) and I will edit the files here.`
-            : '**Ready**. dependencies installed. Tell me what to build and I will edit the files here.',
+            ? `**Ready**. dependencies installed. Dev server is at **${bootstrap.devServerUrl}**. Click **Preview** under the chat box to open it (same window as localhost).\n\nTell me what to build (layout, pages, features) and I will edit the files here.`
+            : '**Ready**. dependencies installed. Click **Preview** under the chat box when you want to open the live window.',
     bootstrap?.bootstrapNote && bootstrap.npmInstalled ? `\n${bootstrap.bootstrapNote}` : '',
     '',
     'This chat is bound to that folder.',

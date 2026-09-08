@@ -87,10 +87,10 @@ const PACK_FILE_CHARS = 4_500;
 const PACK_FILE_CHARS_CODE = 2_600;
 const PACK_MAX_FILES_CODE = 12;
 const MODEL_TIMEOUT_MS = 90_000;
-/** Debug/fix coding turns. */
-const MODEL_TIMEOUT_CODE_MS = 180_000;
-/** Create / full UI rewrite with @@@FILE blocks — local 7B needs real time (1–5+ min). */
-const MODEL_TIMEOUT_BUILD_MS = 420_000;
+/** Debug/fix coding turns — keep snappy (under ~30–60s feel for small edits). */
+const MODEL_TIMEOUT_CODE_MS = 120_000;
+/** Full website / app / game creates — allow up to ~5 minutes per model pass. */
+const MODEL_TIMEOUT_BUILD_MS = 300_000;
 
 function cleanAsk(message: string): string {
   return String(message || '')
