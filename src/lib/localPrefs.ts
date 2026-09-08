@@ -376,6 +376,16 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.204',
+    channel: 'stable' as const,
+    date: 'Sep 8, 2026',
+    title: 'New NOVA circuit-tree icon',
+    notes: [
+      'App, tray, installer, splash, and in-app marks use the new connecting-tree brand icon',
+      'Exact artwork — no redraw of the mark',
+    ],
+  },
+  {
     version: '0.1.203',
     channel: 'stable' as const,
     date: 'Sep 8, 2026',

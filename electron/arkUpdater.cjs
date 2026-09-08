@@ -552,25 +552,31 @@ const SPLASH_TRACK_H = 10;
 const SPLASH_BG = '#161618';
 
 function splashNovaMarkSvg() {
-  // Same radial mark as NovaMark / nova-mark.svg — scaled into the splash icon box.
+  // Prefer the exact brand PNG so splash matches taskbar / installer icons.
+  const dataUri = splashMarkDataUri();
+  if (dataUri) {
+    return `<img class="splash-nova-icon" src="${dataUri}" width="${SPLASH_ICON_PX}" height="${SPLASH_ICON_PX}" alt="" style="display:block;margin:0 auto;width:${SPLASH_ICON_PX}px;height:${SPLASH_ICON_PX}px;object-fit:contain;background:transparent;border:0;" />`;
+  }
+  // Fallback: circuit-tree silhouette (same mark as brand art).
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="${SPLASH_ICON_PX}" height="${SPLASH_ICON_PX}" aria-hidden="true" class="splash-nova-icon" style="display:block;margin:0 auto;">
-    <g stroke="#f4f4f5" stroke-width="4.2" stroke-linecap="round" stroke-linejoin="round" fill="none">
-      <circle cx="64" cy="64" r="8.5"/>
-      <path d="M64 55.5 V24"/><path d="M64 72.5 V104"/><path d="M72.5 64 H104"/><path d="M55.5 64 H24"/>
-      <path d="M70.2 57.8 L78 50 L96 50"/><path d="M70.2 57.8 L78 50 L78 32"/>
-      <path d="M57.8 57.8 L50 50 L32 50"/><path d="M57.8 57.8 L50 50 L50 32"/>
-      <path d="M70.2 70.2 L78 78 L96 78"/><path d="M70.2 70.2 L78 78 L78 96"/>
-      <path d="M57.8 70.2 L50 78 L32 78"/><path d="M57.8 70.2 L50 78 L50 96"/>
+    <g stroke="#f4f4f5" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" fill="none">
+      <path d="M64 112 V22"/>
+      <path d="M58 112 V88 L28 58 L28 40"/>
+      <path d="M70 112 V88 L100 58 L100 40"/>
+      <path d="M58 96 L40 70 L18 70"/>
+      <path d="M70 96 L88 70 L110 70"/>
+      <path d="M58 100 L46 84 L18 84"/>
+      <path d="M70 100 L82 84 L110 84"/>
+      <path d="M58 112 V104"/><path d="M70 112 V104"/>
     </g>
-    <g fill="#f4f4f5">
-      <circle cx="64" cy="24" r="3.6" fill="none" stroke="#f4f4f5" stroke-width="3.2"/>
-      <circle cx="64" cy="104" r="3.6" fill="none" stroke="#f4f4f5" stroke-width="3.2"/>
-      <circle cx="104" cy="64" r="3.6" fill="none" stroke="#f4f4f5" stroke-width="3.2"/>
-      <circle cx="24" cy="64" r="3.6" fill="none" stroke="#f4f4f5" stroke-width="3.2"/>
-      <circle cx="96" cy="50" r="3.6"/><circle cx="78" cy="32" r="3.6"/>
-      <circle cx="32" cy="50" r="3.6"/><circle cx="50" cy="32" r="3.6"/>
-      <circle cx="96" cy="78" r="3.6"/><circle cx="78" cy="96" r="3.6"/>
-      <circle cx="32" cy="78" r="3.6"/><circle cx="50" cy="96" r="3.6"/>
+    <g fill="none" stroke="#f4f4f5" stroke-width="4">
+      <circle cx="64" cy="18" r="5.5"/>
+      <circle cx="28" cy="34" r="5.5"/>
+      <circle cx="100" cy="34" r="5.5"/>
+      <circle cx="18" cy="70" r="5.5"/>
+      <circle cx="110" cy="70" r="5.5"/>
+      <circle cx="18" cy="84" r="5.5"/>
+      <circle cx="110" cy="84" r="5.5"/>
     </g>
   </svg>`;
 }
