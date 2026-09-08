@@ -38,7 +38,15 @@ export function isBrokenReactAppSource(appSource: string | undefined | null): bo
   if (isEmptyReactAppShell(appSource)) return true;
   const s = String(appSource || '');
   // Endless SVG path / attribute loops (local-model failure mode).
-  if (s.length >= 8000 && new Set(s).size < 100) return true;
+  // Require path-like content — large real games can sit under 100 unique chars.
+  if (
+    s.length >= 8000
+    && new Set(s).size < 80
+    && /(?:\bd\s*=\s*["']|viewBox|path\s|\.arcTo\b)/i.test(s)
+    && (s.match(/[-\d.]{4,}/g) || []).length > 180
+  ) {
+    return true;
+  }
   if (s.length >= 5000) {
     const start = Math.floor(s.length / 3);
     for (let len = 28; len <= 48; len += 4) {
@@ -53,12 +61,13 @@ export function isBrokenReactAppSource(appSource: string | undefined | null): bo
   if (/onClick=\{[^}]+\}\s*\n\s*[A-Za-z][A-Za-z ]{0,24}\s*\n\s*<\//.test(s)) return true;
   // Unclosed opening tag before nested tag: onClick={...}\n  <img
   if (/onClick=\{[^}]+\}\s*\n\s*</.test(s)) return true;
+  // Default export may be App, FPS_Arena, Game, etc. — main.jsx binds it as App either way.
   const hasAppComponent =
-    /export\s+default\s+function\s+App\b/i.test(s)
-    || /export\s+default\s+(?:function\s*)?\(\s*\)\s*=>/i.test(s)
+    /export\s+default\s+function\s+[A-Za-z_$][\w$]*/i.test(s)
+    || /export\s+default\s+(?:async\s*)?(?:function\s*)?\(/i.test(s)
+    || /export\s+default\s+[A-Za-z_$][\w$]*\b/i.test(s)
     || /function\s+App\s*\(/i.test(s)
-    || /(?:const|let|var)\s+App\s*=\s*(?:async\s*)?(?:\(|function)/i.test(s)
-    || /export\s+default\s+App\b/i.test(s);
+    || /(?:const|let|var)\s+App\s*=\s*(?:async\s*)?(?:\(|function)/i.test(s);
   const tagCount = (s.match(/<[A-Za-z]/g) || []).length;
   if (s.length < 400) {
     // Allow intentionally tiny exact UIs (black screen + icon) when App exports real JSX.
@@ -153,10 +162,15 @@ export function looksLikePlayableCanvasGame(summary: string, title = ''): boolea
     return false;
   }
   return (
-    /\b(?:playable|arcade|canvas\s+game|html5\s+game|browser\s+game|asteroid|space\s+shooter)\b/.test(t)
+    /\b(?:playable|arcade|canvas\s+game|html5\s+game|browser\s+game|asteroid|space\s+shooter|fps|first[\s-]?person|shooter)\b/.test(t)
     || (
       /\bgame\b/.test(t)
-      && /\b(?:score|lives?|shoot|hud|game\s*over|play\s+again|arrow\s+keys?|space\s*bar|player\s+ship)\b/.test(t)
+      && /\b(?:score|lives?|shoot(?:ing)?|hud|game\s*over|play\s+again|arrow\s+keys?|space\s*bar|player\s+ship|weapons?|enemies|hitscan|crosshair|muzzle)\b/.test(t)
+    )
+    // Rebuild briefs often list mechanics without the word "game".
+    || (
+      /\b(?:hitscan|pointer[\s-]?lock|crosshair|requestAnimationFrame)\b/.test(t)
+      && /\b(?:wasd|mousedown|canvas|shoot|enemy|crates?)\b/.test(t)
     )
   );
 }

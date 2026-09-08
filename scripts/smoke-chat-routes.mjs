@@ -109,6 +109,18 @@ const CASES = [
     expectImplementGo: true,
   },
   {
+    name: 'lets start building is implement-go',
+    text: 'ok lets start building, take ur time do not rush building the game',
+    expectNotReadFile: true,
+    expectImplementGo: true,
+  },
+  {
+    name: 'build it is implement-go',
+    text: 'build it',
+    expectNotReadFile: true,
+    expectImplementGo: true,
+  },
+  {
     name: 'gaming PC is chat not create',
     text: 'If I build a mid-range gaming PC in 2026 for about $900, what CPU and GPU pair would you pick and why?',
     expectNotReadFile: true,

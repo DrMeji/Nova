@@ -153,3 +153,51 @@ export function isPreviewReady(files: Record<string, string>): PreviewReadyResul
 
   return { ok: reasons.length === 0, reasons };
 }
+
+/**
+ * Playable FPS / canvas games must ship real controls — not a static CSS mock of walls/crates.
+ * Used before claiming Ready on game creates.
+ */
+export function isPlayableGameReady(files: Record<string, string>): PreviewReadyResult {
+  const base = isPreviewReady(files);
+  const reasons = [...base.reasons];
+  const app = files['src/App.jsx'] || files['src/App.tsx'] || files['js/app.js'] || '';
+  const blob = `${app}\n${files['src/App.css'] || ''}\n${files['js/app.js'] || ''}`;
+
+  if (app.length < 900) reasons.push('game App.jsx too thin for playable mechanics');
+  if (!/\bgetContext\s*\(|<canvas\b/i.test(blob)) {
+    reasons.push('no canvas');
+  }
+  if (!/\brequestAnimationFrame\b/i.test(blob)) {
+    reasons.push('no requestAnimationFrame game loop');
+  }
+  // Prefer WASD / pointer-lock — arrow-only stubs are not FPS Ready.
+  if (!/\b(?:KeyW|KeyA|KeyS|KeyD|keys\.KeyW|code\s*===\s*['"]Key[WASD]|wasd)\b/i.test(blob)
+    && !/\b(?:event\.key\s*===\s*['"][wasd]['"])/i.test(blob)) {
+    reasons.push('no WASD movement');
+  }
+  if (!/\b(?:requestPointerLock|pointerLockElement|movementX)\b/i.test(blob)) {
+    reasons.push('no pointer-lock look');
+  }
+  // Require real shoot input — bare "click" alone matches score UIs and false-passes.
+  if (!/\b(?:mousedown|mouseup|pointerdown|shoot|fire|hitscan|raycast|isShooting|gunfire)\b/i.test(blob)) {
+    reasons.push('no shooting input');
+  }
+  // FPS briefs should not ship arrow-key top-down stubs as Ready.
+  if (
+    /\b(?:ArrowUp|ArrowDown|ArrowLeft|ArrowRight)\b/.test(blob)
+    && !/\b(?:KeyW|KeyA|KeyS|KeyD|event\.key\s*===\s*['"][wasd]['"])\b/i.test(blob)
+  ) {
+    reasons.push('arrow-key stub without WASD');
+  }
+  // Classic thin fail: decorative .floor/.wall/.crate/.enemy divs with no loop.
+  if (
+    /\b(?:floor|wall|crate|enemy|crosshair)\b/i.test(blob)
+    && !/\brequestAnimationFrame\b/i.test(blob)
+    && app.length < 2500
+  ) {
+    reasons.push('CSS mock arena without a playable game loop');
+  }
+
+  return { ok: reasons.length === 0, reasons: [...new Set(reasons)] };
+}

@@ -122,11 +122,14 @@ function cleanIdeaName(raw: string): string | null {
   s = s.replace(/\s+(?:with|that|which|where|when|so|for|but|and|if|featuring|including|—|–|-)\b.*$/i, '').trim();
   if (s.length < 2 || s.length > 48) return null;
   if (/^(if|the|a|an)$/i.test(s)) return null;
+  // Sentence fragments mistaken for names (“game can oyu help me”).
+  if (/\b(?:help|please|can|oyu|want|would|like|build|create|make|start)\b/i.test(s)) return null;
+  if (/\s/.test(s) && s.split(/\s+/).length >= 4) return null;
   const lower = s.toLowerCase();
   if (BLOCKED_NAME_WORDS.has(lower)) return null;
   const first = lower.split(/\s+/)[0];
   if (first && BLOCKED_NAME_WORDS.has(first)) return null;
-  if (/^(this|the|that|a|an|new|my|our)$/i.test(s)) return null;
+  if (/^(this|the|that|a|an|new|my|our|game|fps)$/i.test(s)) return null;
   return s;
 }
 
@@ -161,6 +164,8 @@ export function inferGreenfieldName(text: string): string | null {
     if (/\b(?:build|create|make)\s+(?:a\s+)?(?:booking|appointment)\b/i.test(t)) return 'Booking App';
     if (/\b(?:build|create|make)\s+(?:a\s+)?website\b/i.test(t)) return 'My Website';
     if (/\b(?:build|create|make)\s+(?:a\s+)?web\s*app\b/i.test(t)) return 'My Web App';
+    if (/\bfps\b/i.test(t) || /\bfirst[\s-]?person\s+shooter\b/i.test(t)) return 'FPS Arena';
+    if (/\b(?:build|create|make)\s+(?:a\s+)?(?:browser\s+)?game\b/i.test(t)) return 'Arcade Game';
   }
 
   return null;
@@ -185,7 +190,7 @@ export function extractGreenfieldName(text: string): string | null {
     /\bcreate\s+([A-Z][A-Za-z0-9]{1,40})\s+(?:as|restaurant|website|site|kanban|notes?|utility)\b/i,
     /\b(?:build|create|scaffold)\s+([A-Z][A-Za-z0-9]{1,40})\s+on\s+disk\b/,
     /\b(?:build|create|scaffold)\s+([A-Z][A-Za-z0-9]{1,40})\b(?=[\s\S]{0,80}\bon\s+disk\b)/,
-    /\bi\s+want\s+to\s+(?:work\s+on|build|create|make)\s+(?:a\s+)?(?:project\s+)?(?:called\s+)?([A-Za-z][A-Za-z0-9 _-]{2,40})/i,
+    /\bi\s+want\s+to\s+(?:work\s+on|build|create|make)\s+(?:a\s+)?(?:project\s+)?(?:called\s+)([A-Za-z][A-Za-z0-9 _-]{2,40})/i,
     /\b(?:build|create|make)\s+([A-Za-z][A-Za-z0-9 _-]{2,40})\s+(?:app|system|platform|product)\b/i,
     /\bbuild\s+([A-Z][A-Za-z0-9]{2,40})\s+(?:website|site|web\s*app)\b/,
   ];
@@ -479,7 +484,8 @@ export function looksLikeGreenfieldCreateGo(text: string): boolean {
     /\bcreate\s+(?:project\s+)?["“']?[A-Za-z]/i.test(t)
     || /\b(?:yes|yeah|sure|ok(?:ay)?)[\s,]*create\b/i.test(t)
     || /\bscaffold\s+(?:project\s+)?["“']?[A-Za-z]/i.test(t)
-    || /\bstart\s+building\s+(?:project\s+)?["“']?[A-Za-z]/i.test(t)
+    || /\bstart\s+building\b/i.test(t)
+    || /\bbuild\s+it(?:\s+now)?\b/i.test(t)
     || looksLikeGreenfieldStartWorkGo(t)
   );
 }
@@ -494,9 +500,15 @@ export function looksLikeGreenfieldStartWorkGo(text: string): boolean {
     && !/\bstart\s+work(?:ing)?\s+on\s+(?:this|the|a|my|our)\s+project\b/i.test(t)) {
     return false;
   }
+  if (/\b(?:don'?t|do\s+not|never)\s+(?:build|create|implement|scaffold)\b/i.test(t)
+    || /\b(?:not\s+yet|just\s+plan|keep\s+planning)\b/i.test(t)) {
+    return false;
+  }
   return (
     /\bgo\s+ahead\s+and\s+(?:create|build|scaffold)\b/i.test(t)
-    || /\b(?:lets?\s+build\s+(?:this|that|it)|build\s+this|build\s+that|go\s+implement|go\s+build)\b/i.test(t)
+    || /\b(?:lets?\s+build\s+(?:this|that|it)|build\s+this|build\s+that|build\s+it(?:\s+now)?|go\s+implement|go\s+build)\b/i.test(t)
+    || /\blets?\s+start\s+building\b/i.test(t)
+    || /\bstart\s+building(?:\s+the)?(?:\s+(?:game|app|project|site|ui|fps))?\b/i.test(t)
     || /\blets?\s+go(?:\s+ahead)?\s+and\s+(?:start\s+)?build\b/i.test(t)
     || /\bready\s+to\s+build(?:\s+this)?\b/i.test(t)
     || /\bcreate\s+(?:the\s+)?(?:files|project)\s+now\b/i.test(t)

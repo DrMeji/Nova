@@ -376,6 +376,18 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.205',
+    channel: 'stable' as const,
+    date: 'Sep 8, 2026',
+    title: 'Playable FPS / game creates',
+    notes: [
+      'Fix: game creates no longer ship CSS mocks or empty shells as Ready',
+      'Stricter playable-game gate (canvas loop, WASD, pointer-lock, real shooting)',
+      'FPS scrap/rebuild installs a real raycast arena and force-writes it to disk',
+      '“lets start building” / “build it” greenfield go + FPS Arena naming fixes',
+    ],
+  },
+  {
     version: '0.1.204',
     channel: 'stable' as const,
     date: 'Sep 8, 2026',

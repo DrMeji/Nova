@@ -242,6 +242,7 @@ import {
 import {
   ensureViteReactProjectFiles,
   isPreviewReady,
+  isPlayableGameReady,
   stripModelProseFromSource,
 } from '@/lib/createBuildQuality';
 import { classifyErrorMessage, isLikelyErrorMessage } from '@/lib/errors';
@@ -4066,28 +4067,81 @@ export function AIChat() {
     }
 
     // In-place scrap/rebuild of the bound workspace. never catalog Desktop or create sibling folders.
-    if (
-      (mode === 'general' || mode === 'code')
-      && looksLikeInPlaceRebuildAsk(intentText)
-      && hasActiveWorkspace({
-        files: resolvedStudio.files,
-        projectId: resolvedStudio.projectId || chatStudioProjectIdRef.current,
-        diskRoot: resolvedStudio.diskRoot || chatStudioDiskRootRef.current,
-      })
-    ) {
+    if ((mode === 'general' || mode === 'code') && looksLikeInPlaceRebuildAsk(intentText)) {
+      let rebuildFiles = resolvedStudio.files;
+      let rebuildProjectId = resolvedStudio.projectId || chatStudioProjectIdRef.current;
+      let rebuildDiskRoot = resolvedStudio.diskRoot || chatStudioDiskRootRef.current;
+      let rebuildName = resolvedStudio.name || loadRecentChats().find(c => c.id === activeChatId)?.title || 'App';
+
+      if (!hasActiveWorkspace({ files: rebuildFiles, projectId: rebuildProjectId, diskRoot: rebuildDiskRoot })) {
+        const title = loadRecentChats().find(c => c.id === activeChatId)?.title || rebuildName;
+        const healed = await resolveChatProjectRoot({ chatId: activeChatId, chatTitle: title });
+        if (healed.diskRoot || Object.keys(healed.files || {}).length) {
+          applyStudioBinding(activeChatId, healed);
+          rebuildFiles = healed.files || {};
+          rebuildProjectId = healed.projectId;
+          rebuildDiskRoot = healed.diskRoot;
+          rebuildName = healed.name || title || rebuildName;
+          resolvedStudio.files = rebuildFiles;
+          resolvedStudio.projectId = rebuildProjectId;
+          resolvedStudio.diskRoot = rebuildDiskRoot;
+          resolvedStudio.name = rebuildName;
+        }
+        // Last chance: open known fps / project folder under NOVA sandbox by name.
+        if (!hasActiveWorkspace({ files: rebuildFiles, projectId: rebuildProjectId, diskRoot: rebuildDiskRoot })) {
+          const blob = `${title || ''} ${intentText || ''}`;
+          const guess = blob.match(/\b(fps[\s_-]?arena)\b/i)?.[1]
+            || (/\bfps\b/i.test(blob) ? 'fps-arena' : '');
+          const slug = String(guess || '')
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, '-')
+            .replace(/^-+|-+$/g, '');
+          if (slug && window.arkDesktop?.workspaceSandboxRoot) {
+            const sand = await window.arkDesktop.workspaceSandboxRoot();
+            if (sand?.ok && sand.path) {
+              const sep = sand.path.includes('\\') ? '\\' : '/';
+              const candidate = `${sand.path.replace(/[/\\]+$/, '')}${sep}${slug}`;
+              const opened = await openFolderInChat(candidate, { mode: 'path' });
+              if (opened.ok) {
+                rebuildFiles = opened.files || chatStudioFilesRef.current || {};
+                rebuildProjectId = opened.projectId || chatStudioProjectIdRef.current;
+                rebuildDiskRoot = opened.root || chatStudioDiskRootRef.current;
+                rebuildName = opened.name || rebuildName;
+                resolvedStudio.files = rebuildFiles;
+                resolvedStudio.projectId = rebuildProjectId;
+                resolvedStudio.diskRoot = rebuildDiskRoot;
+                resolvedStudio.name = rebuildName;
+              }
+            }
+          }
+        }
+      }
+
+      if (!hasActiveWorkspace({
+        files: rebuildFiles,
+        projectId: rebuildProjectId,
+        diskRoot: rebuildDiskRoot,
+      })) {
+        await finishPlainReply(
+          'I need the project folder bound first. Click the **fps-arena** chip under the chat (or **+ → Open folder**), then ask me to scrap and rebuild again.',
+        );
+        return;
+      }
+
       const { wipeProjectUiFiles, apologyRebuildLead, extractCorrectionProductName } = await import('@/lib/inPlaceRebuild');
       const { looksLikePlayableCanvasGame, isBrokenReactAppSource } = await import('@/lib/freshSpaFromBrief');
+      const { isPlayableGameReady } = await import('@/lib/createBuildQuality');
 
-      const diskRoot = resolvedStudio.diskRoot || chatStudioDiskRootRef.current;
-      const projectId = resolvedStudio.projectId || chatStudioProjectIdRef.current;
-      const priorName = resolvedStudio.name || 'App';
+      const diskRoot = rebuildDiskRoot;
+      const projectId = rebuildProjectId;
+      const priorName = rebuildName || 'App';
       const productName = cleanProductTitle(extractCorrectionProductName(intentText, priorName));
       const briefForBuild = String(content || intentText || '').trim();
       const kind = resolveProjectKindForCreate(briefForBuild, 'vite-react', 'vite-react');
 
       pushAssistantStatus(`Scrapping previous UI — rebuilding ${productName}…`);
       let filesNow = wipeProjectUiFiles({
-        files: { ...resolvedStudio.files },
+        files: { ...rebuildFiles },
         name: productName,
         summary: briefForBuild,
         kind,
@@ -4112,13 +4166,51 @@ export function AIChat() {
         }
       }
 
-      const gameBrief = looksLikePlayableCanvasGame(briefForBuild, productName);
+      const gameBrief = looksLikePlayableCanvasGame(briefForBuild, productName)
+        || /\bfps[\s_-]?arena\b/i.test(`${productName} ${briefForBuild} ${diskRoot || ''}`);
       const spatialBrief = looksLikeSpatialApp(briefForBuild, productName);
       filesNow = mergeBriefNpmDependencies({ ...filesNow }, briefForBuild);
+      const sticky = pinnedModel.source === 'auto' ? threadBrainRef.current : null;
+
+      // FPS / canvas games: install a playable core immediately (local models routinely ship non-running stubs).
+      if (gameBrief) {
+        pushAssistantStatus(`Installing playable FPS core for ${productName}…`);
+        const { buildPlayableFpsScaffold } = await import('@/lib/playableFpsScaffold');
+        const scaffold = buildPlayableFpsScaffold(productName);
+        filesNow = {
+          ...filesNow,
+          'src/App.jsx': scaffold['src/App.jsx'],
+          'src/App.css': scaffold['src/App.css'],
+        };
+        filesNow = ensureViteReactProjectFiles(filesNow, productName).files;
+        const scaffoldPaths = ['src/App.jsx', 'src/App.css', 'src/main.jsx', 'src/index.css', 'index.html']
+          .filter((p) => filesNow[p]);
+        const scaffoldReply = scaffoldPaths.map((p) => `@@@FILE ${p}\n${filesNow[p]}`).join('\n');
+        await applyChatReplyEdits({
+          reply: scaffoldReply,
+          projectId,
+          projectName: productName,
+          files: filesNow,
+          userMessage: briefForBuild,
+          diskRoot,
+        });
+        // Always force disk write — apply can report ok with zero updated paths after a wipe.
+        if (diskRoot && window.arkDesktop?.workspaceWriteFile) {
+          const sep = diskRoot.includes('\\') ? '\\' : '/';
+          const root = diskRoot.replace(/[/\\]+$/, '');
+          for (const rel of scaffoldPaths) {
+            await window.arkDesktop.workspaceWriteFile({
+              targetPath: `${root}${sep}${rel.replace(/\//g, sep)}`,
+              content: filesNow[rel],
+            });
+          }
+        }
+      }
 
       let modelReply = '';
+      // Non-game rebuilds still use the model. Games already have a playable core above.
+      if (!gameBrief) {
       try {
-        const sticky = pinnedModel.source === 'auto' ? threadBrainRef.current : null;
         const engineResult = await answerStudio(
           {
             userMessage: [
@@ -4126,9 +4218,6 @@ export function AIChat() {
               'Write complete project files with @@@FILE blocks (or SEARCH/REPLACE).',
               'You MUST rewrite App.jsx / App.css (or index.html + css + js) together.',
               'Do not preserve the old marketing layout, Buy now buttons, or prior product type.',
-              gameBrief
-                ? 'This must be a REAL playable canvas game: start screen, controls, score/lives, game over. Not a marketing website.'
-                : '',
               spatialBrief
                 ? 'This is a spatial / 3D editor app: real WebGL viewport. Do not build a marketing website.'
                 : '',
@@ -4159,6 +4248,7 @@ export function AIChat() {
       } catch {
         modelReply = '';
       }
+      }
       if (mySeq !== genSeqRef.current) return;
 
       const applied = modelReply
@@ -4179,12 +4269,14 @@ export function AIChat() {
       const stillLooksLikeGame = /getContext\(['"]2d['"]\)|requestAnimationFrame|Play again|asteroid|frightened|pelletsLeft/i.test(appSrc);
       const stillLooksLikeMarketing = /Buy now|Your bag|FEATURE/i.test(appSrc) && !/frightened|pelletsLeft|requestAnimationFrame/i.test(appSrc);
       const stillLooksLikeWorkspaceShell = /Ask NOVA in chat to add pages|Local demo from your brief|Main view/i.test(appSrc);
-      const needsUniqueRewrite = isBrokenReactAppSource(appSrc)
+      // Game rebuilds already installed a playable FPS core — don't let a model retry wipe it.
+      const needsUniqueRewrite = !gameBrief && (
+        isBrokenReactAppSource(appSrc)
         || stillLooksLikeWorkspaceShell
         || (marketingBrief && stillLooksLikeGame)
-        || (gameBrief && stillLooksLikeMarketing)
         || !applied.ok
-        || !applied.updated.length;
+        || !applied.updated.length
+      );
 
       if (needsUniqueRewrite) {
         pushAssistantStatus(`Rewriting ${productName} from your correction…`);
@@ -4196,7 +4288,11 @@ export function AIChat() {
                 'Output full @@@FILE blocks for App.jsx / App.css / index.css (or html+css+js).',
                 'Do not reuse the previous UI. Do not emit placeholder workspace shells.',
                 gameBrief
-                  ? 'Must be a real playable game for THIS brief — not a marketing site.'
+                  ? [
+                      'Must be a REAL playable FPS / canvas game for THIS brief — not a marketing site and not a static CSS mock.',
+                      'Mandatory: fullscreen <canvas>, requestAnimationFrame loop, WASD + pointer-lock look, left-click hitscan, crosshair, HP HUD, chasing enemy, win/lose + R restart.',
+                      'export default is fine as App or any PascalCase name. Include shooting + movement code, not just drawRect props.',
+                    ].join(' ')
                   : '',
                 marketingBrief
                   ? 'Must be a real product marketing page for THIS brief — not a leftover game.'
@@ -4244,6 +4340,52 @@ export function AIChat() {
         }
       }
 
+      // Game rebuilds: keep / restore playable FPS core (never leave a non-running stub).
+      if (gameBrief) {
+        filesNow = ensureViteReactProjectFiles(filesNow, productName).files;
+        appSrc = filesNow['src/App.jsx'] || filesNow['src/App.tsx'] || '';
+        let gameGate = isPlayableGameReady(filesNow);
+        if (!gameGate.ok && mySeq === genSeqRef.current && !stopRequestedRef.current) {
+          pushAssistantStatus(`Restoring playable FPS core for ${productName}…`);
+          const { buildPlayableFpsScaffold } = await import('@/lib/playableFpsScaffold');
+          const scaffold = buildPlayableFpsScaffold(productName);
+          filesNow = {
+            ...filesNow,
+            'src/App.jsx': scaffold['src/App.jsx'],
+            'src/App.css': scaffold['src/App.css'],
+          };
+          filesNow = ensureViteReactProjectFiles(filesNow, productName).files;
+          appSrc = filesNow['src/App.jsx'] || '';
+          const scaffoldPaths = ['src/App.jsx', 'src/App.css', 'src/main.jsx', 'src/index.css', 'index.html']
+            .filter((p) => filesNow[p]);
+          const scaffoldReply = scaffoldPaths
+            .map((p) => `@@@FILE ${p}\n${filesNow[p]}`)
+            .join('\n');
+          const scaffoldApplied = await applyChatReplyEdits({
+            reply: scaffoldReply,
+            projectId,
+            projectName: productName,
+            files: filesNow,
+            userMessage: briefForBuild,
+            diskRoot,
+          });
+          if (scaffoldApplied.ok && scaffoldApplied.updated.length) {
+            filesNow = scaffoldApplied.files;
+            appSrc = filesNow['src/App.jsx'] || filesNow['src/App.tsx'] || '';
+          }
+          if (diskRoot && window.arkDesktop?.workspaceWriteFile) {
+            const sep = diskRoot.includes('\\') ? '\\' : '/';
+            const root = diskRoot.replace(/[/\\]+$/, '');
+            for (const rel of scaffoldPaths) {
+              await window.arkDesktop.workspaceWriteFile({
+                targetPath: `${root}${sep}${rel.replace(/\//g, sep)}`,
+                content: filesNow[rel],
+              });
+            }
+          }
+        }
+      }
+
       setChatStudioFiles(filesNow);
       chatStudioFilesRef.current = filesNow;
       persistStudioSnapshot(activeChatId, {
@@ -4261,11 +4403,21 @@ export function AIChat() {
         preview: previewFromText(content),
       });
 
-      if (isBrokenReactAppSource(appSrc)) {
+      const gameGateFinal = gameBrief ? isPlayableGameReady(filesNow) : { ok: true, reasons: [] as string[] };
+      if (isBrokenReactAppSource(appSrc) || !gameGateFinal.ok) {
+        const gameFail = gameBrief && !gameGateFinal.ok;
         await finishPlainReply(
           `${apologyRebuildLead(productName)}\n\n`
-          + 'I’m having an issue — I can’t provide the UI you’re asking for from that rebuild pass.\n\n'
-          + 'No template was substituted. Tell me one clearer detail to polish (hero, sections, motion, or copy) and I’ll try again from your brief.',
+          + (gameFail
+            ? (
+                'I’m having an issue — that rebuild still isn’t a playable game.\n\n'
+                + `Missing: ${gameGateFinal.reasons.slice(0, 4).join('; ') || 'canvas controls / shooting'}.\n\n`
+                + 'Ask me again to scrap and rebuild with WASD, mouse look, and shooting — I’ll keep working in this same folder.'
+              )
+            : (
+                'I’m having an issue — I can’t provide the UI you’re asking for from that rebuild pass.\n\n'
+                + 'No usable App.jsx landed. Tell me one clearer detail and I’ll try again from your brief.'
+              )),
         );
         return;
       }
@@ -4775,7 +4927,18 @@ export function AIChat() {
               : spatialBrief
                 ? 'This is a spatial / 3D editor app: real WebGL viewport, grid, add cube/sphere, orbit with mouse, select and drag meshes. Use the three npm package (already in package.json). Do not build a marketing website.'
                 : looksLikePlayableCanvasGame(briefForBuild, buildIntent.name)
-                  ? 'This must be a REAL playable canvas game with start screen, controls, score/lives, and game over. Prefer <canvas> + requestAnimationFrame. Do not build a marketing website with Buy now or Bag.'
+                  ? [
+                      'This must be a REAL playable first-person / canvas game — not a static CSS mock of walls and crates.',
+                      'REQUIREMENTS (all mandatory):',
+                      '- Fullscreen <canvas> (or Three.js) with requestAnimationFrame game loop',
+                      '- Pointer lock look (mouse) + WASD movement on a gray box arena (floor + 4 walls)',
+                      '- Cover crates the player can hide behind; left-click hitscan ray; muzzle flash; center crosshair',
+                      '- Crates flash or disappear when hit',
+                      '- One enemy cube that walks toward the player; touch = lose 1 HP (start at 3); HP HUD top-left',
+                      '- Kill enemy to win; HP 0 = game over; R restarts; Esc pauses',
+                      '- App.jsx must be substantial (typically 200+ lines) with real game state — decorative div.floor/div.crate alone is a FAIL',
+                      'Take your time. Do not mark done until those mechanics work in Preview.',
+                    ].join('\n')
                   : '',
             '',
             briefForBuild,
@@ -4783,8 +4946,12 @@ export function AIChat() {
         };
 
         try {
-          const skipMulti = /\b(?:exact(?:ly)?|precisely|follow precisely|pure black|#000000|#1e1f22|near-black|centered icon|nothing else|no other|ONLY this piece|ONLY add)\b/i.test(briefForBuild)
-            || /ONLY this piece|Stop after the black shell|black shell only/i.test(briefForBuild);
+          const skipMulti = (
+            /\b(?:exact(?:ly)?|precisely|follow precisely|pure black|#000000|#1e1f22|near-black|centered icon|nothing else|no other|ONLY this piece)\b/i.test(briefForBuild)
+            || /ONLY this piece|Stop after the black shell|black shell only/i.test(briefForBuild)
+          )
+            // Game briefs often say "ONLY add shooting" — that must NOT skip a full playable build.
+            && !looksLikePlayableCanvasGame(briefForBuild, buildIntent.name);
           const cloudForTeam = CLOUD_CHAT_WHEN_KEYED.filter(
             (m) => hasProviderApiKey(m.keyId) && isCloudProviderEnabled(m.keyId),
           );
@@ -5361,12 +5528,51 @@ export function AIChat() {
               if (repairedWrite.ok) filesNow = repairedWrite.files;
             }
           }
-          let ready = isPreviewReady(filesNow);
+          let ready = looksLikePlayableCanvasGame(briefForBuild, buildIntent.name)
+            ? isPlayableGameReady(filesNow)
+            : isPreviewReady(filesNow);
           if (!ready.ok) {
             noteThought(`Preview check failed (${ready.reasons.slice(0, 2).join('; ')}) — adjusting files…`);
             const ensured2 = ensureViteReactProjectFiles(filesNow, buildIntent.name);
             filesNow = ensured2.files;
-            ready = isPreviewReady(filesNow);
+            ready = looksLikePlayableCanvasGame(briefForBuild, buildIntent.name)
+              ? isPlayableGameReady(filesNow)
+              : isPreviewReady(filesNow);
+          }
+          if (!ready.ok && looksLikePlayableCanvasGame(briefForBuild, buildIntent.name)) {
+            noteThought('Model draft wasn’t playable — installing FPS Arena core mechanics…');
+            const { buildPlayableFpsScaffold } = await import('@/lib/playableFpsScaffold');
+            const scaffold = buildPlayableFpsScaffold(buildIntent.name);
+            filesNow = {
+              ...filesNow,
+              'src/App.jsx': scaffold['src/App.jsx'],
+              'src/App.css': scaffold['src/App.css'],
+            };
+            filesNow = ensureViteReactProjectFiles(filesNow, buildIntent.name).files;
+            const scaffoldPaths = ['src/App.jsx', 'src/App.css', 'src/main.jsx', 'src/index.css', 'index.html']
+              .filter((p) => filesNow[p]);
+            const diskRootCreate = created.projectPath || chatStudioDiskRootRef.current;
+            const scaffoldWrite = await applyChatReplyEdits({
+              reply: scaffoldPaths.map((p) => `@@@FILE ${p}\n${filesNow[p]}`).join('\n'),
+              projectId: pid,
+              projectName: buildIntent.name,
+              files: filesNow,
+              userMessage: briefForBuild,
+              diskRoot: diskRootCreate,
+            });
+            if (scaffoldWrite.ok) {
+              filesNow = scaffoldWrite.files;
+            } else if (diskRootCreate && window.arkDesktop?.workspaceWriteFile) {
+              const sep = diskRootCreate.includes('\\') ? '\\' : '/';
+              const root = diskRootCreate.replace(/[/\\]+$/, '');
+              for (const rel of scaffoldPaths) {
+                await window.arkDesktop.workspaceWriteFile({
+                  targetPath: `${root}${sep}${rel.replace(/\//g, sep)}`,
+                  content: filesNow[rel],
+                });
+              }
+            }
+            ready = isPlayableGameReady(filesNow);
           }
           if (ready.ok) {
             uiBuilt = true;
@@ -5376,7 +5582,9 @@ export function AIChat() {
             uiBuilt = false;
             noteThought(`Still not Preview-ready: ${ready.reasons.slice(0, 3).join('; ')}`);
             followNote = `\n\n**UI not Preview-ready yet.** ${ready.reasons.slice(0, 3).join('; ')}. `
-              + 'Tell me what to fix and I’ll adjust only the broken parts.';
+              + (looksLikePlayableCanvasGame(briefForBuild, buildIntent.name)
+                ? 'I still need a real playable canvas loop (WASD + look + shooting + enemy) — say **keep building** and I’ll finish the game mechanics.'
+                : 'Tell me what to fix and I’ll adjust only the broken parts.');
           }
         }
         const pkgKey = Object.keys(filesNow).find((p) => /(^|\/)package\.json$/i.test(p.replace(/\\/g, '/')));

@@ -1,10 +1,14 @@
 /** Plan → implement gating for Chat (Step 6). */
 
 const IMPLEMENT_GO_RE =
-  /\b(go build|go implement|implement it|build it now|make it happen|do it now|yes build|yes implement|ship it|let'?s\s+build\s+(?:this|that|it)|lets\s+build\s+(?:this|that|it)|build\s+this|build\s+that|create\s+(?:the\s+)?(?:files|project)\s+now|create\s+(?:the\s+)?[A-Za-z][\w.\s-]{0,40}\s+project\s+on\s+disk|go ahead and create|stop\s+planning.{0,40}(?:build|create|implement)|done\s+planning.{0,40}(?:build|create|implement)|lets?\s+go(?:\s+ahead)?\s+and\s+(?:start\s+)?build|okay[,.]?\s+lets?\s+go(?:\s+ahead)?\s+and\s+(?:start\s+)?build|ready\s+to\s+build(?:\s+this)?|i(?:'m| am)\s+ready\s+to\s+build)\b/i;
+  /\b(go build|go implement|implement it|build it now|build\s+it|make it happen|do it now|yes build|yes implement|ship it|let'?s\s+build\s+(?:this|that|it)|lets\s+build\s+(?:this|that|it)|let'?s\s+start\s+building|lets\s+start\s+building|start\s+building(?:\s+the)?(?:\s+(?:game|app|project|site|ui|fps))?|build\s+this|build\s+that|create\s+(?:the\s+)?(?:files|project)\s+now|create\s+(?:the\s+)?[A-Za-z][\w.\s-]{0,40}\s+project\s+on\s+disk|go ahead and create|stop\s+planning.{0,40}(?:build|create|implement)|done\s+planning.{0,40}(?:build|create|implement)|lets?\s+go(?:\s+ahead)?\s+and\s+(?:start\s+)?build|okay[,.]?\s+lets?\s+go(?:\s+ahead)?\s+and\s+(?:start\s+)?build|ready\s+to\s+build(?:\s+this)?)\b/i;
 
 const GO_AHEAD_BUILD_RE =
   /\bgo ahead(?:\s+and)?\s+(?:start\s+)?(?:building|build|implement|create|scaffold|write|code)\b/i;
+
+/** Soft “not yet” / “don’t build” so bare “build it” is not forced. */
+const IMPLEMENT_GO_NEG_RE =
+  /\b(?:don'?t|do\s+not|never|not\s+yet|later|just\s+plan|keep\s+planning|don'?t\s+build|do\s+not\s+build)\b/i;
 
 export function isPlanPrefixedMessage(message: string): boolean {
   return /^\[Plan\]\s*/i.test(String(message || '').trim());
@@ -14,11 +18,18 @@ export function looksLikeImplementGo(message: string): boolean {
   const t = String(message || '').trim();
   if (!t) return false;
   if (/\b(delete|remove|trash|wipe|uninstall)\b/i.test(t)) return false;
+  if (IMPLEMENT_GO_NEG_RE.test(t) && !/\b(?:still|please|now)\s+build\b/i.test(t) && !/\blets?\s+start\s+building\b/i.test(t)) {
+    // "do not rush building" is still a go — only block clear refuse-to-build.
+    if (/\b(?:don'?t|do\s+not|never)\s+(?:build|create|implement|scaffold)\b/i.test(t)
+      || /\b(?:not\s+yet|just\s+plan|keep\s+planning)\b/i.test(t)) {
+      return false;
+    }
+  }
   // Chip: "Create project <Name>". always execute, never re-plan.
   // (Do not hard-code sample app names — every create stays fresh.)
   if (/^create\s+project\s+[A-Za-z]/i.test(t) && t.length < 80) return true;
   if (IMPLEMENT_GO_RE.test(t)) return true;
-  if (/\bbuild\s+it\s+now\b/i.test(t)) return true;
+  if (/\bbuild\s+it(?:\s+now)?\b/i.test(t)) return true;
   // Human: "build EmberOak on disk" / "create QuietStreak on disk"
   if (/\b(?:build|create|scaffold)\s+[A-Za-z][A-Za-z0-9.]{1,40}\b/i.test(t) && /\bon\s+disk\b/i.test(t)) {
     return true;

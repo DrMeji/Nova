@@ -1,5 +1,20 @@
 # NOVA changelog
 
+## 0.1.205 — 2026-09-08
+
+Playable FPS / canvas game creates and scrap/rebuild so Ready means a real game, not a CSS mock.
+
+**Windows installer:** [NOVA-Setup.exe](https://github.com/DrMeji/Nova/releases/download/v0.1.205/NOVA-Setup.exe) · [Release notes](https://github.com/DrMeji/Nova/releases/tag/v0.1.205)
+
+### Games / create
+- Stricter playable-game Preview gate (canvas loop, WASD, pointer-lock look, real shooting)
+- FPS scrap/rebuild installs a raycast arena core and force-writes App.jsx/css to disk
+- Greenfield go recognizes “lets start building” / “build it”; FPS briefs name **FPS Arena**
+
+### Rebuild
+- In-place rebuild re-binds the project folder when workspace dropped after restart
+- Local stubs no longer false-pass Ready via bare `click` handlers
+
 ## 0.1.198 — 2026-09-07
 
 Auth, onboarding/game, and installer branding polish so both GitHub feeds ship the same NOVA build.

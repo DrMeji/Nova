@@ -13,6 +13,7 @@ import {
   buildGreenfieldPlanReply,
   wantsPlanningOnly,
   extractGreenfieldName,
+  inferGreenfieldName,
   type GreenfieldIdeaIntent,
 } from './chatIdeaIntent';
 import { looksLikeFolderCatalogAsk } from '@/lib/folderCatalog';
@@ -126,7 +127,7 @@ export function recoverOriginalUserBrief(
 
 /** Best product brief from recent user turns (for "lets build this" after planning). */
 export function findBestProductBrief(recentUserLines: string[]): string | null {
-  const CHIP_RE = /^(?:keep planning|create project|add more features|let'?s build|lets build|build this|go implement|go build)\b/i;
+  const CHIP_RE = /^(?:keep planning|create project|add more features|let'?s build|lets build|build this|build it|lets?\s+start\s+building|go implement|go build|ok\s+lets?\s+start\s+building)\b/i;
   const scored = recentUserLines
     .map(t => String(t || '').trim())
     .filter(t => t && !CHIP_RE.test(t) && !t.startsWith('__generating__:'))
@@ -134,6 +135,8 @@ export function findBestProductBrief(recentUserLines: string[]): string | null {
       let score = t.length;
       if (/\b(?:called|named)\s+[A-Za-z]/i.test(t)) score += 200;
       if (/\b(?:landing|festival|lineup|ticket|restaurant|dashboard|kanban|tracker)\b/i.test(t)) score += 120;
+      if (/\b(?:fps|first[\s-]?person|shooter|arena|hitscan|crosshair|enemy|crate|muzzle)\b/i.test(t)) score += 180;
+      if (/\b(?:game|playable|arcade)\b/i.test(t) && t.length > 120) score += 100;
       if (/\b(?:plan|planning|mvp|week one)\b/i.test(t)) score += 40;
       if (t.length < 40) score -= 200;
       return { t, score };
@@ -271,19 +274,29 @@ export function resolveCreateIntentFromThread(
     recentUserLines,
     opts?.pendingGreenfield || null,
   );
-  if (greenfield && (looksLikeGreenfieldCreateGo(message) || looksLikeImplementGo(message) || /\bcreate\s+it\b/i.test(message))) {
+  if (greenfield && (looksLikeGreenfieldCreateGo(message) || looksLikeImplementGo(message) || /\b(?:create|build)\s+it\b/i.test(message))) {
     const payload = greenfieldToCreateIntent(greenfield);
+    const bestBrief = findBestProductBrief(recentUserLines);
+    const summary = bestBrief && bestBrief.length > (payload.summary?.length || 0)
+      ? bestBrief
+      : payload.summary;
+    const name = /^(My App|New App|App|Game)$/i.test(payload.name) && bestBrief
+      ? (parseGreenfieldIdea(bestBrief)?.name
+        || extractGreenfieldName(bestBrief)
+        || inferGreenfieldName(bestBrief)
+        || payload.name)
+      : payload.name;
     return {
-      name: payload.name,
-      slug: payload.slug,
-      kind: payload.kind,
-      summary: payload.summary,
+      name,
+      slug: slugifyProjectName(name),
+      kind: resolveProjectKindForCreate(summary, payload.kind, payload.kind),
+      summary,
       preferPlan: false,
     };
   }
 
   if (!looksLikeImplementGo(message)
-    && !/\bcreate\s+it\b/i.test(message)
+    && !/\b(?:create|build)\s+it\b/i.test(message)
     && !/^create\s+project\s+/i.test(message.trim())
     && !(looksLikeProjectBuildAsk(message) && /\bon\s+disk\b/i.test(message))
   ) {
@@ -343,7 +356,7 @@ export function resolveCreateIntentFromThread(
   }
 
   const stripped = String(message || '')
-    .replace(/\b(go ahead|go build|go implement|implement it|build it now|create it|let'?s build(?:\s+(?:this|that|it))?|build this|build that)\b/gi, '')
+    .replace(/\b(go ahead|go build|go implement|implement it|build it now|build it|create it|let'?s start building|lets start building|start building|let'?s build(?:\s+(?:this|that|it))?|build this|build that)\b/gi, '')
     .trim();
   return parseNewProjectIntent(stripped);
 }
