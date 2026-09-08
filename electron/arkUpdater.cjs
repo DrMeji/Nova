@@ -1330,8 +1330,9 @@ async function checkForUpdate() {
 
     const tag = bestNewerRelease.tag_name || '';
     const assets = Array.isArray(bestNewerRelease.assets) ? bestNewerRelease.assets : [];
-    const setup = assets.find((a) => /^NOVA-Setup(\.|-).*\.exe$/i.test(a.name || ''))
-      || assets.find((a) => /ARK-Setup\.exe$/i.test(a.name || ''));
+    const setup = assets.find((a) => /^NOVA-Setup\.exe$/i.test(a.name || ''))
+      || assets.find((a) => /^NOVA-Setup(\.|-).+\.exe$/i.test(a.name || '') && !/\.blockmap$/i.test(a.name || ''))
+      || assets.find((a) => /^(?:NOVA|ARK)-Setup\.exe$/i.test(a.name || ''));
     const hasLatestYml = assets.some((a) => /^latest\.yml$/i.test(a.name || ''));
     const hasBlockmap = assets.some((a) => /\.blockmap$/i.test(a.name || ''));
     const setupUrl = setup?.browser_download_url || null;
