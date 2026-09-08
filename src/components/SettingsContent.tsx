@@ -14,7 +14,7 @@ import {
   type LocalPrefs,
 } from '@/lib/localPrefs';
 import { clearSetupCompleted } from '@/lib/setup';
-import { syncWorkspaceGrantsFromPrefs } from '@/lib/workspaceGrants';
+import { hydratePrefsFromWorkspaceGrants, syncWorkspaceGrantsFromPrefs } from '@/lib/workspaceGrants';
 import { formatArkId } from '@/lib/arkUserId';
 import { isArkDevEmail } from '@/lib/arkDevAccount';
 import {
@@ -305,6 +305,21 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
     };
   }, []);
 
+  // Security grants live in Electron main + local prefs. Re-read both when opening Security
+  // so Full PC / Run everything cannot desync after a prefs wipe.
+  useEffect(() => {
+    if (activeSection !== 'security') return;
+    let cancelled = false;
+    void hydratePrefsFromWorkspaceGrants().then(() => {
+      if (!cancelled) setPrefs(getLocalPrefs());
+    }).catch(() => {
+      if (!cancelled) setPrefs(getLocalPrefs());
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSection]);
+
   const patchPrefs = (patch: Partial<LocalPrefs>) => {
     const next = setLocalPrefs(patch);
     setPrefs(next);
@@ -312,7 +327,9 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
     window.setTimeout(() => setSavedFlash(''), 2200);
     if ('allowDesktopFolderAccess' in patch || 'allowDocumentsFolderAccess' in patch
       || 'allowFullPcAccess' in patch || 'agentExecutionMode' in patch) {
-      void syncWorkspaceGrantsFromPrefs();
+      void syncWorkspaceGrantsFromPrefs().then(() => {
+        setPrefs(getLocalPrefs());
+      });
     }
   };
 
@@ -2424,9 +2441,10 @@ function ToggleRow({
         type="button"
         disabled={disabled}
         onClick={() => onChange(!value)}
-        className={`relative rounded-full transition-colors shrink-0 disabled:cursor-not-allowed ${value ? 'bg-content-primary' : 'bg-ark-navy-700'}`}
+        className={`relative rounded-full transition-colors shrink-0 disabled:cursor-not-allowed ${value ? 'bg-sky-500' : 'bg-ark-navy-700'}`}
         style={{ height: '22px', width: '40px' }}
         aria-pressed={value}
+        aria-label={label}
       >
         <div
           className={`absolute top-0.5 bg-white rounded-full transition-transform ${value ? 'translate-x-5' : 'translate-x-0.5'}`}

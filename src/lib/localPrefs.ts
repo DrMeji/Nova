@@ -1,7 +1,8 @@
 /** Local sticky prefs for guest / offline UI (no cloud required). */
 
 const PREFS_KEY = 'ark:local-prefs';
-const PREFS_KEY_LEGACY_NOVA = 'ark:local-prefs';
+/** Older NOVA-prefixed key from the rebrand. Must stay distinct from PREFS_KEY. */
+const PREFS_KEY_LEGACY_NOVA = 'NOVA:local-prefs';
 const API_KEYS_KEY = 'ark:provider-api-keys';
 const API_KEYS_KEY_LEGACY_NOVA = 'NOVA:provider-api-keys';
 
@@ -188,6 +189,15 @@ export function getLocalPrefs(): LocalPrefs {
   }
 }
 
+/** True when a prefs blob is actually stored (not just in-memory defaults). */
+export function hasStoredLocalPrefs(): boolean {
+  try {
+    return Boolean(localStorage.getItem(PREFS_KEY) || localStorage.getItem(PREFS_KEY_LEGACY_NOVA));
+  } catch {
+    return false;
+  }
+}
+
 export function setLocalPrefs(patch: Partial<LocalPrefs>): LocalPrefs {
   const next = { ...getLocalPrefs(), ...patch } as LocalPrefs;
   for (const [key, value] of Object.entries(patch)) {
@@ -195,10 +205,15 @@ export function setLocalPrefs(patch: Partial<LocalPrefs>): LocalPrefs {
       delete (next as Record<string, unknown>)[key];
     }
   }
-  localStorage.setItem(PREFS_KEY, JSON.stringify(next));
   try {
-    localStorage.removeItem(PREFS_KEY_LEGACY_NOVA);
-  } catch { /* ignore */ }
+    localStorage.setItem(PREFS_KEY, JSON.stringify(next));
+    // Only drop the legacy key when it is a different string (rebrand migrate).
+    if (PREFS_KEY_LEGACY_NOVA !== PREFS_KEY) {
+      localStorage.removeItem(PREFS_KEY_LEGACY_NOVA);
+    }
+  } catch {
+    /* quota / private mode — still return next so UI can update this session */
+  }
   try {
     window.dispatchEvent(new CustomEvent('ark:prefs-changed', { detail: next }));
   } catch {
@@ -360,6 +375,17 @@ export function clearPluginToken(pluginId: string) {
 
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
+  {
+    version: '0.1.202',
+    channel: 'stable' as const,
+    date: 'Sep 8, 2026',
+    title: 'Security toggles stick',
+    notes: [
+      'Fix: Full PC access and Run everything no longer turn each other off',
+      'Settings → Security prefs persist after closing and reopening',
+      'Folder grants sync to the desktop app without wiping on save',
+    ],
+  },
   {
     version: '0.1.191',
     channel: 'stable' as const,

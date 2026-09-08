@@ -1,4 +1,4 @@
-import { getLocalPrefs, setLocalPrefs, type LocalPrefs } from '@/lib/localPrefs';
+import { getLocalPrefs, setLocalPrefs, hasStoredLocalPrefs, type LocalPrefs } from '@/lib/localPrefs';
 import { GRANT_OFF_FOLDER_MSG } from '@/lib/folderPathAsk';
 
 export type WorkspaceGrants = {
@@ -21,14 +21,22 @@ export function grantsFromPrefs(): WorkspaceGrants {
   };
 }
 
-/** Push Settings grants to the Electron main process (no-op in browser). Also heal prefs from main. */
+function grantsLookEnabled(g: WorkspaceGrants): boolean {
+  return Boolean(
+    g.desktop
+    || g.documents
+    || g.fullPc
+    || g.executionMode === 'run_all'
+    || g.executionMode === 'auto_review',
+  );
+}
+
+/**
+ * Push Settings grants to Electron main (no-op in browser).
+ * If renderer storage is missing but main still has grants, heal prefs first
+ * so a prefs-changed sync never wipes a good grants file with all-off defaults.
+ */
 export async function syncWorkspaceGrantsFromPrefs(): Promise<void> {
-  const grants = grantsFromPrefs();
-  try {
-    await window.arkDesktop?.workspaceSetGrants?.(grants);
-  } catch {
-    /* ignore */
-  }
   try {
     const remote = await window.arkDesktop?.workspaceGetGrants?.();
     if (remote?.ok && remote.grants) {
@@ -38,11 +46,13 @@ export async function syncWorkspaceGrantsFromPrefs(): Promise<void> {
         fullPc: Boolean(remote.grants.fullPc),
         executionMode: remote.grants.executionMode || 'allowlist',
       };
-      const p = getLocalPrefs();
-      const prefsOff = !p.allowDesktopFolderAccess && !p.allowDocumentsFolderAccess && !p.allowFullPcAccess;
-      const mainOn = cachedMainGrants.desktop || cachedMainGrants.documents || cachedMainGrants.fullPc;
-      // Main process file can be ON while renderer localStorage drifted OFF (common after reinstall/rename).
-      if (prefsOff && mainOn) {
+      const local = grantsFromPrefs();
+      const prefsOff = !local.desktop && !local.documents && !local.fullPc
+        && (local.executionMode === 'allowlist' || !local.executionMode);
+      const mainOn = grantsLookEnabled(cachedMainGrants);
+      // Only auto-heal when nothing is stored yet (rebrand wipe / fresh partition).
+      // If the user intentionally turned everything off, storage exists and we push that.
+      if (!hasStoredLocalPrefs() && prefsOff && mainOn) {
         setLocalPrefs({
           allowDesktopFolderAccess: cachedMainGrants.desktop,
           allowDocumentsFolderAccess: cachedMainGrants.documents,
@@ -54,6 +64,27 @@ export async function syncWorkspaceGrantsFromPrefs(): Promise<void> {
   } catch {
     /* ignore */
   }
+
+  const grants = grantsFromPrefs();
+  try {
+    const written = await window.arkDesktop?.workspaceSetGrants?.(grants);
+    if (written?.ok && written.grants) {
+      cachedMainGrants = {
+        desktop: Boolean(written.grants.desktop),
+        documents: Boolean(written.grants.documents),
+        fullPc: Boolean(written.grants.fullPc),
+        executionMode: written.grants.executionMode || 'allowlist',
+      };
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Load main-process grants into local prefs + return them (for Settings UI). */
+export async function hydratePrefsFromWorkspaceGrants(): Promise<WorkspaceGrants> {
+  await syncWorkspaceGrantsFromPrefs();
+  return grantsFromPrefs();
 }
 
 export function hasFolderAccessGrant(): boolean {
