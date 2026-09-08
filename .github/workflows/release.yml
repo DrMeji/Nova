@@ -50,6 +50,7 @@ jobs:
         run: npx electron-builder --win --publish never
 
       - name: Upload installer artifacts
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: nova-windows-installer
@@ -59,6 +60,7 @@ jobs:
             release/latest.yml
             release/NOVA-Portable.exe
           if-no-files-found: error
+          retention-days: 7
 
       - name: Resolve release tag
         id: tag
