@@ -41,7 +41,7 @@ export function TitleBar() {
 
   return (
     <div
-      className="ark-titlebar absolute top-0 inset-x-0 z-50 h-8 flex items-stretch select-none bg-transparent"
+      className="ark-titlebar absolute top-0 inset-x-0 z-40 h-8 flex items-stretch select-none bg-transparent"
       style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
     >
       {/* Intentionally blank: you only want sidebar icons/search at the top-left. */}

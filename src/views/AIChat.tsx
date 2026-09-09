@@ -815,6 +815,19 @@ function deletePrepareErrorReply(err: unknown): string {
   return msg || 'Could not prepare delete. Try again.';
 }
 
+/** Don't steal focus from Settings/Search/API fields into the chat composer. */
+function focusComposerIfSafe(el: HTMLTextAreaElement | null | undefined) {
+  if (!el) return;
+  if (el.closest('[aria-hidden="true"], .hidden')) return;
+  if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
+  const active = document.activeElement as HTMLElement | null;
+  if (active && active !== el && active !== document.body) {
+    const tag = active.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || active.isContentEditable) return;
+  }
+  el.focus();
+}
+
 export function AIChat() {
   const { user } = useAuth();
   const { route, navigate } = useRouter();
@@ -858,6 +871,7 @@ export function AIChat() {
     }
     return true;
   });
+  const [threadSwitching, setThreadSwitching] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>(() => {
     if (route.name === 'chat' && effectiveChatId) {
       try {
@@ -1723,7 +1737,7 @@ export function AIChat() {
         tab === 'video' ? 'video' : tab === 'image' ? 'image' : 'chat',
       ));
       setLoading(false);
-      requestAnimationFrame(() => textareaRef.current?.focus());
+      requestAnimationFrame(() => focusComposerIfSafe(textareaRef.current));
     })();
 
     return () => {
@@ -1809,9 +1823,20 @@ export function AIChat() {
       setEditingQueueId(null);
       setEditingQueueText('');
       const hadPreview = Boolean(previewUrlRef.current);
-      setLoading(true);
-      messagesRef.current = [];
-      setMessages([]);
+      let nextMsgs: ChatMessage[] = [];
+      try {
+        const raw = localStorage.getItem(chatThreadKey(switchChatId));
+        const loaded = raw ? JSON.parse(raw) as ChatMessage[] : [];
+        nextMsgs = Array.isArray(loaded) ? loaded : [];
+      } catch {
+        nextMsgs = [];
+      }
+      messagesRef.current = nextMsgs;
+      messagesChatIdRef.current = switchChatId;
+      setMessages(nextMsgs);
+      setThreadBrain(loadThreadBrain(switchChatId, kind));
+      setThreadSwitching(true);
+      setLoading(false);
       stickToBottomRef.current = true;
       userDetachScrollRef.current = false;
       setShowJumpToBottom(false);
@@ -1827,25 +1852,13 @@ export function AIChat() {
       previewUrlRef.current = null;
       setPendingAttaches([]);
       setCodePillSticky(false);
+      pinMessagesToBottom('auto');
 
       void (async () => {
         try {
-          const raw = localStorage.getItem(chatThreadKey(switchChatId));
-          const loaded = raw ? JSON.parse(raw) as ChatMessage[] : [];
-          const nextMsgs = Array.isArray(loaded) ? loaded : [];
           if (routeChatIdRef.current && routeChatIdRef.current !== switchChatId) return;
-          messagesRef.current = nextMsgs;
-          messagesChatIdRef.current = switchChatId;
-          setMessages(nextMsgs);
-          setThreadBrain(loadThreadBrain(switchChatId, kind));
-          pinMessagesToBottom('auto');
         } catch {
           if (routeChatIdRef.current && routeChatIdRef.current !== switchChatId) return;
-          messagesRef.current = [];
-          messagesChatIdRef.current = switchChatId;
-          setMessages([]);
-          setThreadBrain(null);
-          pinMessagesToBottom('auto');
         }
 
         const liveGenHere = Boolean(
@@ -1937,7 +1950,8 @@ export function AIChat() {
         }
         setGenerating(Boolean(generatingRef.current && activeGenChatIdRef.current === switchChatId));
         setLoading(false);
-        requestAnimationFrame(() => textareaRef.current?.focus());
+        setThreadSwitching(false);
+        requestAnimationFrame(() => focusComposerIfSafe(textareaRef.current));
       })();
       return;
     }
@@ -2804,7 +2818,7 @@ export function AIChat() {
         try {
           const result = await resolveChatDrop(snapshot);
           applyDropResult(result);
-          requestAnimationFrame(() => textareaRef.current?.focus());
+          requestAnimationFrame(() => focusComposerIfSafe(textareaRef.current));
         } finally {
           setAttachUploading(null);
         }
@@ -2982,7 +2996,7 @@ export function AIChat() {
         } catch { /* ignore */ }
       }
       ignoreEnterUntilRef.current = Date.now() + 600;
-      requestAnimationFrame(() => textareaRef.current?.focus());
+      requestAnimationFrame(() => focusComposerIfSafe(textareaRef.current));
       return {
         ok: true,
         files: chatStudioFilesRef.current,
@@ -3119,7 +3133,7 @@ export function AIChat() {
     }
     if (action === 'plan' || action === 'ask' || action === 'agent' || action === 'debug' || action === 'multitask') {
       setComposerMode(action);
-      requestAnimationFrame(() => textareaRef.current?.focus());
+      requestAnimationFrame(() => focusComposerIfSafe(textareaRef.current));
     }
   };
 
@@ -9500,7 +9514,7 @@ export function AIChat() {
         dictationBaseRef.current = next;
         requestAnimationFrame(() => {
           resizeComposer();
-          textareaRef.current?.focus();
+          focusComposerIfSafe(textareaRef.current);
         });
       },
       onError: (error) => {
@@ -9524,7 +9538,7 @@ export function AIChat() {
 
   const applyIdea = (label: string) => {
     setInput(label);
-    textareaRef.current?.focus();
+    focusComposerIfSafe(textareaRef.current);
   };
 
   const viewingChatId = route.name === 'chat' ? route.chatId : undefined;
@@ -9960,6 +9974,16 @@ export function AIChat() {
             </div>
           )}
           <div className="flex gap-2 min-w-0 items-end">
+          <div className="flex flex-col items-center justify-end shrink-0 self-end w-[1.25rem] select-none pb-1.5">
+            {threadSwitching ? (
+              <span title="Loading chat" className="inline-flex">
+                <Loader2
+                  className="w-3.5 h-3.5 text-content-tertiary animate-spin"
+                  aria-label="Loading chat"
+                />
+              </span>
+            ) : null}
+          </div>
           <div
             data-ark-composer="1"
             className={`flex-1 min-w-0 flex flex-col border border-surface-border bg-ark-navy-900 shadow-lg shadow-black/20 overflow-hidden ${

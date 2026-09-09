@@ -45,12 +45,20 @@ export function Modal({
   useEffect(() => {
     if (!isOpen) return;
     const root = dialogRef.current;
-    const focusable = root?.querySelectorAll<HTMLElement>(
-      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
-    );
-    focusable?.[0]?.focus();
+    const getFocusable = () =>
+      root?.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      );
+    const firstPass = getFocusable();
+    // Prefer the first text field over the back button so typing works immediately.
+    const preferred =
+      root?.querySelector<HTMLElement>('input:not([type="hidden"]):not([disabled]), textarea:not([disabled])')
+      || firstPass?.[0];
+    preferred?.focus();
     const trap = (e: KeyboardEvent) => {
-      if (e.key !== 'Tab' || !focusable?.length) return;
+      if (e.key !== 'Tab' || !root) return;
+      const focusable = getFocusable();
+      if (!focusable?.length) return;
       const first = focusable[0];
       const last = focusable[focusable.length - 1];
       if (e.shiftKey && document.activeElement === first) {
@@ -87,7 +95,7 @@ export function Modal({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 animate-fade-in">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 animate-fade-in">
       <div
         className="absolute inset-0 bg-ark-navy-950/70 backdrop-blur-md"
         onClick={requestClose}

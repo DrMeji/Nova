@@ -163,10 +163,10 @@ function AppContent() {
     return <AuthScreen />;
   }
 
-  // Machine install flag is source of truth (sign-in and sign-up).
-  // setupTick forces re-check after onboarding marks complete.
+  // Machine install flag is source of truth. Sign-out must not re-force setup when
+  // brains are already on this PC — cloud onboarding_completed is synced separately.
   void setupTick;
-  if (needsFirstRunSetup() || !profile?.onboarding_completed) {
+  if (needsFirstRunSetup()) {
     return <OnboardingScreen />;
   }
 

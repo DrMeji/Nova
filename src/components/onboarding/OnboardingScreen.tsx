@@ -157,6 +157,7 @@ function queueSetupBrainDownloads(opts: {
   hw: HardwareInfo | null;
 }) {
   void import('@/lib/engineDownloads').then(({ startEngineDownload }) => {
+    // Chat brain first so Enter NOVA unlocks conversation ASAP.
     void startEngineDownload({
       id: opts.chatId,
       name: opts.chatName || opts.chatId,
@@ -165,10 +166,23 @@ function queueSetupBrainDownloads(opts: {
     }).catch(() => undefined);
     if (!opts.hw) return;
     const coder = getRecommendedCoderModel(opts.hw);
+    // Coding (+ any extra recommended) continue in the background Jobs strip.
     if (coder && coder.id !== opts.chatId) {
       void startEngineDownload({
         id: coder.id,
         name: coder.name,
+        source: 'local-ai',
+        forceUnknownDisk: true,
+      }).catch(() => undefined);
+    }
+    const extras = recommendationsFor(opts.hw)
+      .map(m => m.id)
+      .filter(id => id !== opts.chatId && id !== coder?.id);
+    for (const id of extras.slice(0, 1)) {
+      const hit = recommendationsFor(opts.hw).find(m => m.id === id);
+      void startEngineDownload({
+        id,
+        name: hit?.name || id,
         source: 'local-ai',
         forceUnknownDisk: true,
       }).catch(() => undefined);
@@ -227,7 +241,7 @@ export function OnboardingScreen() {
     saveHardwareSnapshot(detected);
     const recs = recommendationsFor(detected);
     setHw(detected);
-    setModels(recs.slice(0, 2));
+    setModels(recs);
     const chatId = recs.find(m => m.recommended)?.id ?? recs[0]?.id ?? null;
     setSelectedId(chatId);
     setHwScanning(false);
@@ -911,22 +925,22 @@ export function OnboardingScreen() {
             <div className="space-y-5">
               <div className="text-center">
                 <p className="text-sm font-medium text-content-primary mb-1">
-                  {finishReady ? 'Local brain ready' : 'Installing your local brain'}
+                  {finishReady ? 'Chat brain ready' : 'Installing chat brain'}
                 </p>
                 <p className="text-xs text-content-tertiary">
-                  {selected?.name || 'Qwen2.5 1.5B'} · llama-cli + GGUF into NOVA Engine
-                  {connectedCount > 0 ? ` · ${connectedCount} cloud provider${connectedCount === 1 ? '' : 's'}` : ''}
+                  {selected?.name || 'Qwen2.5 1.5B'}
+                  {connectedCount > 0 ? ` · ${connectedCount} cloud key${connectedCount === 1 ? '' : 's'}` : ''}
                 </p>
               </div>
               <div className="space-y-2">
                 <div className="flex justify-between text-xs text-content-secondary">
                   <span>
                     {finishReady
-                      ? 'Ready to enter NOVA'
+                      ? 'Enter NOVA — coding models keep installing in the background'
                       : progress < 25
                         ? 'Installing runtime…'
                         : progress < 100
-                          ? 'Downloading model weights…'
+                          ? 'Downloading chat model…'
                           : 'Finishing…'}
                   </span>
                   <span>{Math.min(100, Math.round(progress))}%</span>

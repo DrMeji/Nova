@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect, useRef } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { useRouter } from '@/context/RouterContext';
 import { useRecentProjects } from '@/context/RecentProjectsContext';
 import { fetchProjects, createProject } from '@/lib/api';
@@ -65,7 +65,7 @@ export function ProjectsView() {
   const [openingFolder, setOpeningFolder] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
-  const selectAllRef = useRef<HTMLInputElement>(null);
+
 
   useEffect(() => {
     setLoading(true);
@@ -123,12 +123,6 @@ export function ProjectsView() {
   const selectedCount = selectedIds.size;
   const allFilteredSelected = filtered.length > 0 && filtered.every(item => selectedIds.has(item.id));
   const someFilteredSelected = filtered.some(item => selectedIds.has(item.id));
-
-  useEffect(() => {
-    if (selectAllRef.current) {
-      selectAllRef.current.indeterminate = someFilteredSelected && !allFilteredSelected;
-    }
-  }, [someFilteredSelected, allFilteredSelected]);
 
   useEffect(() => {
     if (selectedCount === 0) return;
@@ -379,20 +373,26 @@ export function ProjectsView() {
               )}
               <div className="grid grid-cols-[1fr_6rem_7.5rem] gap-4 px-1 pb-2 text-xs text-content-tertiary">
                 <span className="flex items-center gap-2 min-w-0">
-                  <label
-                    className="inline-flex items-center gap-1.5 shrink-0 cursor-pointer select-none"
+                  <button
+                    type="button"
+                    onClick={toggleSelectAllFiltered}
                     title="Select all"
+                    aria-label="Select all"
+                    aria-pressed={allFilteredSelected}
+                    className="inline-flex items-center gap-2 shrink-0 cursor-pointer select-none text-xs text-content-tertiary hover:text-content-secondary"
                   >
-                    <input
-                      ref={selectAllRef}
-                      type="checkbox"
-                      checked={allFilteredSelected}
-                      onChange={toggleSelectAllFiltered}
-                      aria-label="Select all"
-                      className="rounded border-surface-border"
+                    <span
+                      className={`w-4 h-4 rounded-full border transition-colors ${
+                        allFilteredSelected
+                          ? 'border-sky-400 bg-sky-400'
+                          : someFilteredSelected
+                            ? 'border-sky-400/80 bg-sky-400/35'
+                            : 'border-content-tertiary/50 bg-transparent'
+                      }`}
+                      aria-hidden
                     />
                     <span>Select all</span>
-                  </label>
+                  </button>
                 </span>
                 <span>Where</span>
                 <span className="text-right">Modified</span>
@@ -419,24 +419,44 @@ export function ProjectsView() {
               </p>
             </div>
           ) : (
-            <div className="flex flex-col">
-              {filtered.map(item => (
+            <div className="flex flex-col gap-0.5">
+              {filtered.map(item => {
+                const selected = selectedIds.has(item.id);
+                return (
                 <div
                   key={item.id}
-                  className="w-full grid grid-cols-[1fr_6rem_7.5rem] gap-4 items-center px-1 py-3 rounded-xl hover:bg-surface-hover/70 transition-colors group"
+                  role="button"
+                  tabIndex={0}
+                  aria-pressed={selected}
+                  aria-label={`${selected ? 'Deselect' : 'Select'} ${item.name}`}
+                  onClick={() => toggleSelect(item.id)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      toggleSelect(item.id);
+                    }
+                  }}
+                  className={`w-full grid grid-cols-[1fr_6rem_7.5rem] gap-4 items-center px-2 py-3 rounded-xl transition-colors group cursor-pointer ${
+                    selected
+                      ? 'bg-sky-500/15 ring-1 ring-sky-500/30'
+                      : 'hover:bg-surface-hover/70'
+                  }`}
                 >
                   <span className="flex items-center gap-3 min-w-0">
-                    <input
-                      type="checkbox"
-                      checked={selectedIds.has(item.id)}
-                      onChange={() => toggleSelect(item.id)}
-                      onClick={e => e.stopPropagation()}
-                      aria-label={`Select ${item.name}`}
-                      className="rounded border-surface-border shrink-0"
+                    <span
+                      className={`w-4 h-4 rounded-full border shrink-0 transition-colors ${
+                        selected
+                          ? 'border-sky-400 bg-sky-400'
+                          : 'border-content-tertiary/50 bg-transparent group-hover:border-content-tertiary'
+                      }`}
+                      aria-hidden
                     />
                     <button
                       type="button"
-                      onClick={() => void openListItem(item)}
+                      onClick={e => {
+                        e.stopPropagation();
+                        void openListItem(item);
+                      }}
                       className="flex items-center gap-3 min-w-0 flex-1 text-left"
                     >
                       <span className="w-9 h-9 rounded-lg bg-surface-hover flex items-center justify-center shrink-0">
@@ -479,7 +499,8 @@ export function ProjectsView() {
                           <button
                             type="button"
                             className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-content-secondary hover:bg-surface-hover"
-                            onClick={() => {
+                            onClick={e => {
+                              e.stopPropagation();
                               setRenamingId(item.id);
                               setRenameValue(item.name);
                               setMenuId(null);
@@ -491,7 +512,8 @@ export function ProjectsView() {
                           <button
                             type="button"
                             className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-rose-300 hover:bg-rose-500/10"
-                            onClick={() => {
+                            onClick={e => {
+                              e.stopPropagation();
                               void (async () => {
                                 const label = item.name;
                                 if (!window.confirm(`Remove “${label}” from this list and delete its folder if it still exists?`)) {
@@ -525,7 +547,8 @@ export function ProjectsView() {
                     {formatModified(item.modified)}
                   </span>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -533,7 +556,7 @@ export function ProjectsView() {
 
       {showCreate && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ark-navy-950/70 backdrop-blur-md animate-fade-in"
+          className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-ark-navy-950/70 backdrop-blur-md animate-fade-in"
           onClick={() => setShowCreate(false)}
         >
           <div
