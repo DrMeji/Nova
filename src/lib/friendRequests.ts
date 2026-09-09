@@ -249,8 +249,16 @@ export async function respondFriendRequest(
           .eq('id', requestId);
         if (error) throw error;
       }
-    } catch {
-      if (!local) return null;
+    } catch (err) {
+      // Do not mark accepted/declined locally when the server rejected the change.
+      const msg = err && typeof err === 'object' && 'message' in err
+        ? String((err as { message?: string }).message || '').trim()
+        : '';
+      throw new Error(
+        msg || (decision === 'accepted'
+          ? 'Could not accept that friend request on the server. Try again.'
+          : 'Could not decline that friend request on the server. Try again.'),
+      );
     }
   }
 

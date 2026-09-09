@@ -834,7 +834,10 @@ export function NetworkingView() {
             {discussionOpen && selected.allowDiscussion !== false && (
               <div className="w-[min(100%,20rem)] shrink-0 flex flex-col min-h-0 bg-ark-navy-950/30 pl-1">
                 <div className="shrink-0 px-4 pt-4 pb-2 flex items-center justify-between gap-2">
-                  <p className="text-xs font-medium text-content-primary">Post chat</p>
+                  <div className="min-w-0">
+                    <p className="text-xs font-medium text-content-primary">Post chat</p>
+                    <p className="text-[10px] text-content-tertiary mt-0.5">On this device only</p>
+                  </div>
                   <button
                     type="button"
                     onClick={() => setDiscussionOpen(false)}

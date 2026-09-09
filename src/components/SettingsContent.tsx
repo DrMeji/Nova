@@ -340,10 +340,10 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
     patchPrefs({ displayName: name });
     if (user && user.id !== 'guest-local') {
       try {
+        // Do not wipe avatar_url on rename — only update the display name.
         await supabase.from('profiles').upsert({
           id: user.id,
           display_name: name,
-          avatar_url: null,
         });
         await pushProfileToFriends();
         await refreshProfile();

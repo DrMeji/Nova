@@ -15,6 +15,7 @@ Owner checklist before inviting testers. Mark each row after it is **Run** in th
 | [ ] | `supabase/migrations/20260827130000_harden_friend_messages.sql` | DMs only if mutual friends |
 | [ ] | `supabase/migrations/20260828140000_avatars_storage.sql` | Avatar Storage bucket |
 | [ ] | `supabase/migrations/20260828150000_rls_core_audit.sql` | Re-assert DM / posts RLS |
+| [ ] | `supabase/migrations/20260909120000_rls_friend_request_tighten.sql` | Recipient-only friend-request UPDATE (#11) |
 
 ## Account delete RPCs
 
@@ -40,12 +41,21 @@ Owner checklist before inviting testers. Mark each row after it is **Run** in th
 | [ ] | Website deploy has `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY` |
 | [ ] | Forgot password → real inbox → `/account/reset` → sign in on desktop |
 
+## Auth / SMTP (#12) + hard-fail (#13)
+
+| Applied? | Action |
+|----------|--------|
+| [ ] | Prefer **custom SMTP** (Project Settings → Auth → SMTP) so signup/reset mail is not capped by Supabase built-in (~2 emails/hour) |
+| [ ] | Or disable **Confirm email** for invite-only testing, and tell users to Sign in if the account already exists after a rate-limit error |
+| [ ] | Desktop shows clear config screen when `VITE_SUPABASE_*` missing (`supabaseConfigError` / App hard-fail) — verify with a broken build once |
+
 ## Quick verify
 
-1. Two accounts: add friend → accept → DM both ways.
+1. Two accounts: add friend → accept → DM both ways (#15). Accept/DM failures must show an error toast, not silent success.
 2. Non-friends cannot DM.
-3. Settings → delete account path returns success (or clear “migration missing” if not applied).
-4. Name/photo change broadcasts to a friend contact list.
-5. Forgot password email lands when origin is configured.
+3. Networking: create post → see it → post chat (device-only label) → delete own post (#16).
+4. Settings → delete account path returns success (or clear “migration missing” if not applied).
+5. Name change broadcasts to a friend contact list without wiping avatar (#17).
+6. Forgot password email lands when origin is configured.
 
 **Done when:** every box above is checked on the hosted project (this repo cannot prove live DB state by itself).

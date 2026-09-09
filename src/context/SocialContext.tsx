@@ -31,7 +31,7 @@ type SocialContextValue = {
   refreshBlocked: () => Promise<void>;
   inviteByArkId: (arkId: string, displayName?: string) => Promise<ArkContact | null>;
   acceptFriendRequest: (requestId: string) => Promise<ArkContact | null>;
-  declineFriendRequest: (requestId: string) => void;
+  declineFriendRequest: (requestId: string) => Promise<void>;
   removeFriend: (arkId: string) => Promise<void>;
   deleteContact: (arkId: string) => Promise<void>;
   blockFriend: (arkId: string, displayName?: string) => Promise<void>;
@@ -142,14 +142,14 @@ export function SocialProvider({ children }: { children: ReactNode }) {
 
   const acceptFriendRequest = async (requestId: string) => {
     const req = await respondFriendRequest(requestId, 'accepted', { userId: user?.id, myArkId });
-    if (!req) return null;
+    if (!req) throw new Error('Could not accept that friend request.');
     const list = await listContacts(user?.id);
     setContacts(list);
     return list.find(c => c.arkId === req.fromArkId) || null;
   };
 
-  const declineFriendRequest = (requestId: string) => {
-    void respondFriendRequest(requestId, 'declined', { userId: user?.id, myArkId });
+  const declineFriendRequest = async (requestId: string) => {
+    await respondFriendRequest(requestId, 'declined', { userId: user?.id, myArkId });
   };
 
   const removeFriend = async (arkId: string) => {

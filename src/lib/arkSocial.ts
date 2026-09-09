@@ -646,16 +646,19 @@ export async function sendDirectMessage(opts: {
   };
   saveLocalMessages([...loadLocalMessages(), msg]);
   if (canUseCloud(opts.userId) && !opts.attachment) {
-    try {
-      await supabase.from('ark_direct_messages').insert({
-        id: msg.id,
-        sender_id: opts.userId,
-        sender_ark_id: msg.senderArkId,
-        recipient_ark_id: msg.recipientArkId,
-        body: msg.body,
-      });
-    } catch {
-      /* keep local */
+    const { error } = await supabase.from('ark_direct_messages').insert({
+      id: msg.id,
+      sender_id: opts.userId,
+      sender_ark_id: msg.senderArkId,
+      recipient_ark_id: msg.recipientArkId,
+      body: msg.body,
+    });
+    if (error) {
+      // Keep local draft for retry, but do not pretend the peer got it.
+      throw new Error(
+        error.message?.trim()
+          || 'Couldn’t deliver that message to the server. Check your connection and that you’re still friends, then try again.',
+      );
     }
   }
   return msg;

@@ -19,10 +19,12 @@ Run each file in **SQL → New → paste → Run** (or `npx supabase db push` if
 | 9 | `migrations/20260828130000_schedule_account_deletion.sql` | 24h scheduled account delete |
 | 10 | `migrations/20260828140000_avatars_storage.sql` | Avatar files in Storage (not giant data URLs) |
 | 11 | `migrations/20260828150000_rls_core_audit.sql` | Re-assert DM / posts / call RLS (safe to re-run) |
+| 12 | `migrations/20260909120000_rls_friend_request_tighten.sql` | Recipient-only accept/decline (#11) |
 
 Then **Database → Replication**: enable Realtime for `ark_direct_messages`, `ark_friend_requests` (and `ark_call_signals` if you test Call on bat/dev).
 
 Full printable checklist (including Auth / email reset): **`docs/SUPABASE-APPLY-CHECKLIST.md`**.
+RLS audit note: **`docs/RLS-AUDIT.md`**.
 
 ## Auth + email reset (desktop + website)
 
@@ -31,7 +33,8 @@ Full printable checklist (including Auth / email reset): **`docs/SUPABASE-APPLY-
    - Add `https://YOUR-SITE/account/reset` to **Redirect URLs**
    - Add `https://YOUR-SITE/**` (or localhost `http://localhost:5180/**` for dev)
 3. Set `VITE_ARK_WEBSITE_ORIGIN=https://YOUR-SITE` in `.env.production` before `npm run build` (desktop forgot-password uses Supabase `resetPasswordForEmail` with redirect to `/account/reset`).
-4. **Optional — custom SMTP** (higher email volume, branded sender): Supabase → Project Settings → Auth → SMTP. Built-in mail works at low volume for MVP.
+4. **Custom SMTP (recommended before invites)** — Project Settings → Auth → SMTP. Built-in Supabase mail is ~2 messages/hour; signup rate-limit errors tell users to wait, disable Confirm email for testing, or Sign in if the account already exists (`AuthContext.signUp`).
+5. **Auth hard-fail** — a desktop build without `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` must show the “NOVA could not start” screen (`supabaseConfigError`), not a blank shell.
 
 ## Quick verify
 

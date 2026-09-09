@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Search, Plus, Check, Download, Loader2, Cpu, Cloud, Monitor,
   Code, Boxes, Brain, Eye, Zap, Image as ImageIcon, Video, Gauge, Sparkles, Rocket, X, KeyRound, Globe, RefreshCw, Trash2, ExternalLink,
@@ -27,6 +27,7 @@ import {
   setLocalPrefs,
   setProviderApiKey,
 } from '@/lib/localPrefs';
+import { clearAllThreadBrains } from '@/lib/threadBrain';
 import {
   addEnabledCloudModels,
   isCloudModelEnabled,
@@ -513,6 +514,36 @@ export function ModelsView() {
     detail?: string;
     hunt?: HuntedModel;
   } | null>(null);
+  const prevInstalledRef = useRef<Set<string>>(new Set());
+
+  const pinOnEngineReady = useCallback((id: string) => {
+    if (id === 'NOVA-core' || id === 'NOVA-image-core' || id === 'NOVA-video-core') return;
+    const model = LOCAL_MODELS.find(m => m.id === id);
+    const cat = model?.category;
+    if (cat === 'image' || cat === 'video' || cat === 'vision') return;
+    if (cat === 'coding') {
+      setLocalPrefs({ defaultCodeModelId: id });
+    } else {
+      setLocalPrefs({ defaultModelId: id, lastChatModelId: id });
+    }
+    clearAllThreadBrains();
+    setOllamaNote(`${model?.name || id} is ready — Chat will use it on the next message.`);
+    try {
+      window.dispatchEvent(new CustomEvent('NOVA:local-model-ready', { detail: { id } }));
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const applyReadySet = useCallback((ready: Set<string>) => {
+    const prev = prevInstalledRef.current;
+    for (const id of ready) {
+      if (!prev.has(id)) pinOnEngineReady(id);
+    }
+    prevInstalledRef.current = ready;
+    setInstalled(ready);
+  }, [pinOnEngineReady]);
+
   const pcClass = useMemo(() => getHardwareClass(hw), [hw]);
   const ramGb = useMemo(() => parseRamGb(hw), [hw]);
   const fitLists = useMemo(() => buildFitLists(pcClass, ramGb), [pcClass, ramGb]);
@@ -566,6 +597,8 @@ export function ModelsView() {
             )
             .map(m => m.id),
         );
+        // First hydrate: seed prev so we don't re-pin every already-installed model.
+        prevInstalledRef.current = ready;
         setInstalled(ready);
       } catch {
         /* ignore */
@@ -585,10 +618,10 @@ export function ModelsView() {
             )
             .map(m => m.id),
         );
-        setInstalled(ready);
+        applyReadySet(ready);
       }).catch(() => undefined);
     });
-  }, []);
+  }, [applyReadySet]);
 
   useEffect(() => {
     const onHw = () => {
@@ -612,6 +645,7 @@ export function ModelsView() {
           )
           .map(m => m.id),
       );
+      prevInstalledRef.current = ready;
       setInstalled(ready);
     }).catch(() => undefined);
     return () => {
@@ -1251,7 +1285,6 @@ export function ModelsView() {
                       <cat.icon className="w-4 h-4 text-content-secondary" />
                       <h2 className="text-base font-semibold text-content-primary">{cat.title}</h2>
                     </div>
-                    {cat.id === 'vision' && null}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1">
                       {cat.models.map(model => {
                         const isOn = installed.has(model.id);

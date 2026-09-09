@@ -38,6 +38,8 @@
     "smoke:thread-brain": "node scripts/smoke-thread-brain.cjs",
     "smoke:cloud-wiring": "tsx --tsconfig tsconfig.app.json scripts/smoke-cloud-wiring.mjs",
     "smoke:followup": "tsx --tsconfig tsconfig.app.json scripts/smoke-followup-intent.mjs",
+    "smoke:social-demo": "tsx --tsconfig tsconfig.app.json scripts/smoke-social-demo-packaged.mjs",
+    "smoke:failover-matrix": "tsx --tsconfig tsconfig.app.json scripts/smoke-failover-matrix.mjs",
     "website:dev": "npm --prefix website run dev",
     "website:build": "npm --prefix website run build"
   },

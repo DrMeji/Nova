@@ -17,6 +17,7 @@ import { getLocalPrefs } from '@/lib/localPrefs';
 import { clearActivity } from '@/lib/activityIndicators';
 import { isArkDevEmail } from '@/lib/arkDevAccount';
 import { useRouter } from '@/context/RouterContext';
+import { pushSidebarToast } from '@/lib/sidebarToast';
 import { formatActivityAge } from '@/lib/presenceStatus';
 
 type Notice = DemoNotification | LocalNotification;
@@ -130,6 +131,9 @@ export function NotificationsView() {
     try {
       await acceptFriendRequest(n.friendRequestId);
       setLocalTick(t => t + 1);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Could not accept that friend request.';
+      pushSidebarToast(msg, { ttlMs: 8_000, id: 'friend-accept-fail' });
     } finally {
       setBusyId(null);
     }
@@ -137,8 +141,14 @@ export function NotificationsView() {
 
   const onDecline = (n: LocalNotification) => {
     if (!n.friendRequestId) return;
-    declineFriendRequest(n.friendRequestId);
-    setLocalTick(t => t + 1);
+    setBusyId(n.id);
+    void declineFriendRequest(n.friendRequestId)
+      .then(() => setLocalTick(t => t + 1))
+      .catch(err => {
+        const msg = err instanceof Error ? err.message : 'Could not decline that friend request.';
+        pushSidebarToast(msg, { ttlMs: 8_000, id: 'friend-decline-fail' });
+      })
+      .finally(() => setBusyId(null));
   };
 
   let lastSection: 'new' | 'earlier' | null = null;

@@ -100,6 +100,22 @@ export function clearThreadBrain(scopeId: string, kind?: ThreadBrainKind) {
   }
 }
 
+/** Drop sticky Chat attribution so the next turn picks up a newly ready local model. */
+export function clearAllThreadBrains() {
+  try {
+    const keys: string[] = [];
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const k = localStorage.key(i);
+      if (k && (k.startsWith('NOVA:chat-thread:brain:') || k.startsWith('ARK:chat-thread:brain:'))) {
+        keys.push(k);
+      }
+    }
+    for (const k of keys) localStorage.removeItem(k);
+  } catch {
+    /* ignore */
+  }
+}
+
 export function tierToPinnedSource(tier: RouterTier): ThreadBrainPinnedSource {
   if (tier === 'local-free' || tier === 'no-key-free') return 'local';
   if (tier === 'optional') return 'optional';

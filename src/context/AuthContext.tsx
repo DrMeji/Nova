@@ -306,7 +306,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (/rate limit|too many requests|email rate limit/i.test(msg)) {
         return {
           error:
-            'Email rate limit hit (Supabase built-in mail is ~2/hour). Disable Confirm email in the dashboard, wait, or Sign in if the account already exists.',
+            'Email rate limit hit (Supabase built-in mail is ~2/hour). Fix: add custom SMTP in Supabase Auth settings, temporarily disable Confirm email for testing, wait, or Sign in if the account already exists.',
         };
       }
       return { error: msg };
