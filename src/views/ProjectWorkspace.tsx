@@ -164,7 +164,7 @@ type CodeModel = {
 };
 
 const CODE_MODELS: CodeModel[] = [
-  { id: 'NOVA-auto', name: 'NOVA', source: 'auto', detail: '' },
+  { id: 'NOVA-auto', name: 'Nova Multimodal', source: 'auto', detail: '' },
 ];
 
 const CLOUD_CODE_WHEN_KEYED: (CodeModel & { keyId: string })[] = [
@@ -4170,9 +4170,9 @@ export function ProjectWorkspace() {
                     ref={modelButtonRef}
                     type="button"
                     onClick={() => setModelMenuOpen(o => !o)}
-                    className="inline-flex items-center gap-1 rounded-full border border-surface-border/80 bg-surface-hover/60 hover:bg-surface-hover px-2 py-1 text-[11px] text-content-primary transition-colors max-w-[8.5rem]"
+                    className="inline-flex items-center gap-1 rounded-full border border-surface-border/80 bg-surface-hover/60 hover:bg-surface-hover px-2 py-1 text-[11px] text-content-primary transition-colors max-w-[11rem]"
                     title={activeModel.source === 'auto'
-                      ? (threadBrain ? autoEquippedCaption(threadBrain) : 'NOVA Auto · picks best coder')
+                      ? (threadBrain ? autoEquippedCaption(threadBrain) : 'Nova Multimodal · multi-model routing')
                       : activeModel.name}
                     aria-label="Select model"
                     aria-expanded={modelMenuOpen}
@@ -4217,10 +4217,10 @@ export function ProjectWorkspace() {
                           }}
                           className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-surface-hover"
                         >
-                          <span className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${
-                            model.source === 'auto' ? 'bg-sky-500/15 text-sky-400'
-                              : model.source === 'local' ? 'bg-emerald-500/15 text-emerald-400'
-                                : 'bg-sky-500/15 text-sky-400'
+                          <span className={`w-7 h-7 flex items-center justify-center shrink-0 ${
+                            model.source === 'auto' ? 'text-sky-400'
+                              : model.source === 'local' ? 'text-emerald-400'
+                                : 'text-sky-400'
                           }`}>
                             {model.source === 'auto' ? <Zap className="w-3.5 h-3.5" />
                               : model.source === 'local' ? <Cpu className="w-3.5 h-3.5" />

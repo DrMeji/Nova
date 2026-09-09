@@ -40,6 +40,14 @@ if defined CSC_LINK (
   echo  Signing: CSC_LINK not set — unsigned build ^(Windows SmartScreen may warn^).
 )
 
+echo Typechecking...
+call npm run typecheck
+if errorlevel 1 (
+  echo ERROR: Typecheck failed. Fix errors before packaging.
+  pause
+  exit /b 1
+)
+
 echo Building Windows installer to release\ ...
 call npm run electron:build
 if errorlevel 1 (

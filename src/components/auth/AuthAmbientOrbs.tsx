@@ -10,18 +10,19 @@ type OrbSpec = {
 };
 
 const ORB_SETUP: Array<{ size: number; colorClass: string }> = [
-  { size: 420, colorClass: 'auth-orb-tone-a' },
-  { size: 300, colorClass: 'auth-orb-tone-b' },
-  { size: 240, colorClass: 'auth-orb-tone-c' },
-  { size: 170, colorClass: 'auth-orb-tone-d' },
-  { size: 210, colorClass: 'auth-orb-tone-e' },
-  { size: 140, colorClass: 'auth-orb-tone-f' },
-  { size: 190, colorClass: 'auth-orb-tone-g' },
-  { size: 260, colorClass: 'auth-orb-tone-h' },
-  { size: 155, colorClass: 'auth-orb-tone-i' },
+  { size: 280, colorClass: 'auth-orb-tone-a' },
+  { size: 220, colorClass: 'auth-orb-tone-b' },
+  { size: 200, colorClass: 'auth-orb-tone-c' },
+  { size: 160, colorClass: 'auth-orb-tone-d' },
+  { size: 190, colorClass: 'auth-orb-tone-e' },
+  { size: 150, colorClass: 'auth-orb-tone-f' },
+  { size: 175, colorClass: 'auth-orb-tone-g' },
+  { size: 210, colorClass: 'auth-orb-tone-h' },
+  { size: 165, colorClass: 'auth-orb-tone-i' },
 ];
 
-const APP_ORB_SETUP = ORB_SETUP.slice(0, 7);
+/** App shell uses all nine solid bouncing circles. */
+const APP_ORB_SETUP = ORB_SETUP;
 
 const SPEED_MIN = 0.28;
 const SPEED_MAX = 0.5;

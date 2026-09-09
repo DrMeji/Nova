@@ -518,7 +518,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     return (
       <div
         key={item.key}
-        className={`group relative rounded-full transition-colors ${
+        className={`group relative rounded-none transition-colors ${
           active ? 'bg-surface-active' : 'hover:bg-surface-hover'
         }`}
       >
@@ -541,73 +541,79 @@ export function AppShell({ children }: { children: ReactNode }) {
             className="flex-1 min-w-0 mx-2 my-0.5 rounded-md bg-ark-navy-950 border border-surface-border px-2 py-1 text-xs text-content-primary outline-none focus:border-sky-500/50"
           />
         ) : (
-          <button
-            type="button"
-            onClick={() => openRecent(item)}
-            onDoubleClick={(e) => {
-              e.preventDefault();
-              setRenamingId(renameKey);
-              setRenameDraft(item.title);
-            }}
-            className={`ark-nav-item w-full !bg-transparent hover:!bg-transparent ${
-              active ? '!text-content-primary' : ''
-            }`}
-            title={`${item.title} · double-click to rename`}
-          >
-            <span className="ark-nav-icon">
-              <Icon strokeWidth={1.75} />
-            </span>
-            <span className="min-w-0 flex-1 text-left truncate pr-16">{item.title}</span>
-          </button>
-        )}
-        {!editing && doneAway ? (
-          <span className="pointer-events-none absolute top-1/2 right-[4.75rem] -translate-y-1/2 w-1.5 h-1.5 rounded-full bg-emerald-400" aria-hidden title="Updated" />
-        ) : null}
-        {!editing && (
-          <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
+          <div className="flex items-center min-w-0 w-full">
             <button
               type="button"
-              title={item.pinned ? 'Unpin' : 'Pin'}
-              aria-label={item.pinned ? `Unpin ${item.title}` : `Pin ${item.title}`}
-              onClick={(e) => {
-                e.stopPropagation();
-                if (item.kind === 'chat') pinChat(item.id);
-                else pinProject(item.id);
-              }}
-              className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 transition-opacity ${
-                item.pinned
-                  ? 'opacity-100 text-amber-300'
-                  : 'opacity-0 group-hover:opacity-100 focus:opacity-100 text-content-tertiary hover:text-amber-300 hover:bg-white/5'
-              }`}
-            >
-              <Star className={`w-3.5 h-3.5 ${item.pinned ? 'fill-amber-300 text-amber-300' : ''}`} />
-            </button>
-            <button
-              type="button"
-              title="Rename"
-              aria-label={`Rename ${item.title}`}
-              onClick={(e) => {
-                e.stopPropagation();
+              onClick={() => openRecent(item)}
+              onDoubleClick={(e) => {
+                e.preventDefault();
                 setRenamingId(renameKey);
                 setRenameDraft(item.title);
               }}
-              className="opacity-0 group-hover:opacity-100 focus:opacity-100 w-7 h-7 rounded-full flex items-center justify-center text-content-tertiary hover:text-content-primary hover:bg-white/5 shrink-0 transition-opacity"
+              className={`ark-nav-item min-w-0 flex-1 !bg-transparent hover:!bg-transparent ${
+                active ? '!text-content-primary' : ''
+              }`}
+              title={`${item.title} · double-click to rename`}
             >
-              <Pencil className="w-3.5 h-3.5" />
+              <span className="ark-nav-icon">
+                <Icon strokeWidth={1.75} />
+              </span>
+              <span className="min-w-0 flex-1 text-left truncate">{item.title}</span>
+              {!editing && doneAway ? (
+                <span className="pointer-events-none w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0 mr-1" aria-hidden title="Updated" />
+              ) : null}
             </button>
-            <button
-              type="button"
-              title="Delete forever"
-              aria-label={`Delete ${item.title}`}
-              onClick={(e) => {
-                e.stopPropagation();
-                setDeleteTarget({ id: item.id, title: item.title, kind: item.kind });
-                setWipeProjectDisk(false);
-              }}
-              className="opacity-0 group-hover:opacity-100 focus:opacity-100 w-7 h-7 rounded-full flex items-center justify-center text-content-tertiary hover:text-rose-400 hover:bg-white/5 shrink-0 transition-opacity"
+            <div
+              className={`flex items-center gap-0.5 shrink-0 pr-1 transition-opacity ${
+                item.pinned
+                  ? 'opacity-100'
+                  : 'opacity-0 group-hover:opacity-100 focus-within:opacity-100'
+              }`}
             >
-              <Trash2 className="w-3.5 h-3.5" />
-            </button>
+              <button
+                type="button"
+                title={item.pinned ? 'Unpin' : 'Pin'}
+                aria-label={item.pinned ? `Unpin ${item.title}` : `Pin ${item.title}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (item.kind === 'chat') pinChat(item.id);
+                  else pinProject(item.id);
+                }}
+                className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${
+                  item.pinned
+                    ? 'text-amber-300'
+                    : 'text-content-tertiary hover:text-amber-300 hover:bg-white/5'
+                }`}
+              >
+                <Star className={`w-3.5 h-3.5 ${item.pinned ? 'fill-amber-300 text-amber-300' : ''}`} />
+              </button>
+              <button
+                type="button"
+                title="Rename"
+                aria-label={`Rename ${item.title}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setRenamingId(renameKey);
+                  setRenameDraft(item.title);
+                }}
+                className="w-7 h-7 rounded-full flex items-center justify-center text-content-tertiary hover:text-content-primary hover:bg-white/5 shrink-0"
+              >
+                <Pencil className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                title="Delete forever"
+                aria-label={`Delete ${item.title}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setDeleteTarget({ id: item.id, title: item.title, kind: item.kind });
+                  setWipeProjectDisk(false);
+                }}
+                className="w-7 h-7 rounded-full flex items-center justify-center text-content-tertiary hover:text-rose-400 hover:bg-white/5 shrink-0"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            </div>
           </div>
         )}
       </div>
@@ -707,7 +713,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <AuthAmbientOrbs variant="app" />
       <aside
         className={`relative z-10 shrink-0 m-2 mr-0 flex flex-col min-w-0 overflow-hidden rounded-2xl border border-surface-border bg-ark-navy-900 shadow-[0_8px_32px_rgba(0,0,0,0.35)] ark-sidebar-panel ${
-          collapsed ? 'w-16' : 'w-64'
+          collapsed ? 'is-collapsed' : ''
         }`}
         onMouseEnter={openSidebarHover}
         onMouseLeave={scheduleSidebarClose}
@@ -849,7 +855,6 @@ export function AppShell({ children }: { children: ReactNode }) {
             <div
               className={`mt-auto flex-none shrink-0 relative ${collapsed ? 'p-2 pb-3' : 'p-3 pt-2 pb-3'}`}
               data-status-menu
-              data-nova-status-bar
             >
             <JobsStrip variant="sidebar" />
             {statusMenuOpen && (
@@ -902,20 +907,11 @@ export function AppShell({ children }: { children: ReactNode }) {
                   type="button"
                   onClick={() => setStatusMenuOpen(v => !v)}
                   title="Change status"
-                  className={`w-9 h-9 rounded-xl border bg-ark-navy-900/80 flex items-center justify-center overflow-hidden hover:bg-surface-hover transition-colors ${presenceRingClass(presence)}`}
+                  className={`w-9 h-9 border flex items-center justify-center overflow-hidden hover:bg-surface-hover transition-colors rounded-full ${presenceRingClass(presence)}`}
                   aria-label="Change status"
                   aria-expanded={statusMenuOpen}
                 >
                   <NovaMark className="w-4 h-4 text-content-primary" title="NOVA" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => openSettings('account')}
-                  title="Open Settings"
-                  className="w-9 h-9 rounded-xl border border-surface-border bg-ark-navy-900/80 flex items-center justify-center text-content-secondary hover:text-content-primary hover:bg-surface-hover transition-colors"
-                  aria-label="Open Settings"
-                >
-                  <Settings className="w-4 h-4" />
                 </button>
               </div>
             ) : (
@@ -948,7 +944,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                   <button
                     type="button"
                     onClick={() => setStatusMenuOpen(v => !v)}
-                    className={`w-8 h-8 shrink-0 rounded-lg bg-surface-hover border flex items-center justify-center text-sm font-semibold overflow-hidden ${presenceRingClass(presence)}`}
+                    className={`w-8 h-8 shrink-0 rounded-full border flex items-center justify-center overflow-hidden ${presenceRingClass(presence)}`}
                     title="Change status"
                     aria-label="Change status"
                     aria-expanded={statusMenuOpen}

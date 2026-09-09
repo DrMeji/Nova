@@ -144,9 +144,9 @@ export function threadBrainFromResult(
   };
 }
 
-/** Pill label when NOVA Auto has a sticky brain for this thread. */
+/** Compact pill label when Nova Multimodal is selected. */
 export function autoPillLabel(_brain?: ThreadBrain | null): string {
-  return 'NOVA';
+  return 'Multimodal';
 }
 
 /** Short line for the Auto menu row. Auto stays selected; this is the brain it picked. */
@@ -160,7 +160,7 @@ export function autoEquippedCaption(brain: ThreadBrain | null): string {
     .replace(/ · switched$/i, '')
     .trim();
   const name = short.length > 28 ? `${short.slice(0, 26).trim()}…` : short;
-  if (!name) return 'NOVA';
+  if (!name) return 'Nova Multimodal';
   if (brain.pinnedSource === 'local') return `Local · ${name}`;
   if (brain.tier === 'free-key' || brain.tier === 'no-key-free' || brain.pinnedSource === 'optional') {
     return `${name} · free`;

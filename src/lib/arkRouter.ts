@@ -129,7 +129,7 @@ function askCloudRetryReply(attempted: string[]): ArkRouterResult {
       '',
       '**Retry with cloud?** Choose a cloud model, then resend your message.',
     ].join('\n'),
-    modelName: 'NOVA Auto',
+    modelName: 'Nova Multimodal',
     source: 'none',
     tier: 'local-free',
     attempted,
@@ -936,7 +936,7 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
 
     return {
       reply: honestNoLiveChatReply(),
-      modelName: 'NOVA Auto',
+      modelName: 'Nova Multimodal',
       source: 'none',
       tier: 'local-free',
       attempted,
@@ -1009,7 +1009,7 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
   // Never return NOVA Core template as a finished answer. be honest.
   return {
     reply: honestNoLiveChatReply(),
-    modelName: 'NOVA Auto',
+    modelName: 'Nova Multimodal',
     source: 'none',
     tier: 'local-free',
     attempted,

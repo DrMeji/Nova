@@ -57,10 +57,10 @@ import {
 type Size = 'xs' | 'sm' | 'md' | 'lg';
 
 const SIZE_CLASS: Record<Size, string> = {
-  xs: 'w-3.5 h-3.5 rounded',
-  sm: 'w-9 h-9 rounded-xl',
-  md: 'w-10 h-10 rounded-xl',
-  lg: 'w-11 h-11 rounded-xl',
+  xs: 'w-3.5 h-3.5',
+  sm: 'w-9 h-9',
+  md: 'w-10 h-10',
+  lg: 'w-11 h-11',
 };
 
 const TEXT_CLASS: Record<Size, string> = {
@@ -460,7 +460,7 @@ export function BrandMark({
     const Icon = dev.Icon;
     return (
       <span
-        className={`${SIZE_CLASS[size]} ${dev.bg} flex items-center justify-center shrink-0 overflow-hidden ${dev.monoWhite ? 'text-white' : ''} ${className}`}
+        className={`${SIZE_CLASS[size]} bg-transparent flex items-center justify-center shrink-0 overflow-hidden ${dev.monoWhite ? 'text-content-primary' : ''} ${className}`}
         title={name || id}
       >
         <Icon
@@ -477,7 +477,7 @@ export function BrandMark({
   if (fallback) {
     return (
       <span
-        className={`${SIZE_CLASS[size]} ${TEXT_CLASS[size]} ${fallback.bg} flex items-center justify-center shrink-0 overflow-hidden text-white ${className}`}
+        className={`${SIZE_CLASS[size]} ${TEXT_CLASS[size]} bg-transparent flex items-center justify-center shrink-0 overflow-hidden text-content-primary ${className}`}
         title={name || id}
       >
         {fallback.node}
@@ -485,11 +485,11 @@ export function BrandMark({
     );
   }
 
-  // Unknown brand — solid slate lettermark (no rainbow gradient diamonds).
+  // Unknown brand — plain lettermark, no tile behind the glyph.
   const label = (initial || (name || id).replace(/[^a-zA-Z0-9]/g, '').slice(0, 2) || '?').slice(0, 2);
   return (
     <span
-      className={`${SIZE_CLASS[size]} bg-zinc-800 flex items-center justify-center ${TEXT_CLASS[size]} font-semibold text-white shrink-0 ${className}`}
+      className={`${SIZE_CLASS[size]} bg-transparent flex items-center justify-center ${TEXT_CLASS[size]} font-semibold text-content-primary shrink-0 ${className}`}
       title={name || id}
     >
       {label}

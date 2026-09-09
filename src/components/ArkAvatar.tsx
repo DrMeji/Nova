@@ -29,7 +29,7 @@ export function ArkAvatar({
   const mark = MARK[size];
   return (
     <span
-      className={`${dim} rounded-full bg-white/5 border border-white/10 flex items-center justify-center shrink-0 ${className}`}
+      className={`${dim} flex items-center justify-center shrink-0 ${className}`}
       title={name || 'NOVA'}
       aria-label={name || 'NOVA'}
     >

@@ -19,6 +19,7 @@ export function applyLocalAppearancePrefs(): void {
   root.dataset.accent = prefs.accent;
   root.dataset.reduceMotion = prefs.reduceMotion ? '1' : '0';
   root.classList.toggle('reduce-motion', Boolean(prefs.reduceMotion));
-  root.dataset.showStatusBar = prefs.showStatusBar ? '1' : '0';
   root.dataset.chatFirst = prefs.chatFirst ? '1' : '0';
+  const blur = Math.max(0, Math.min(24, Math.round(Number(prefs.orbBlurPx) || 0)));
+  root.style.setProperty('--auth-orb-blur', `${blur}px`);
 }

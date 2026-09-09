@@ -25,7 +25,7 @@ function Face({ title }: { person: Person; title: string }) {
   return (
     <span
       title={title}
-      className="w-7 h-7 rounded-full border-2 border-ark-navy-950 bg-white/5 flex items-center justify-center"
+      className="w-7 h-7 flex items-center justify-center"
     >
       <NovaMark className="w-3.5 h-3.5 text-content-primary" title={title} />
     </span>

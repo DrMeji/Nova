@@ -50,10 +50,12 @@ export function Modal({
         'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
       );
     const firstPass = getFocusable();
-    // Prefer the first text field over the back button so typing works immediately.
+    // Focus the dialog chrome (back button), not the first text field — opening
+    // Settings should not start editing Display Name until the user clicks it.
     const preferred =
-      root?.querySelector<HTMLElement>('input:not([type="hidden"]):not([disabled]), textarea:not([disabled])')
-      || firstPass?.[0];
+      root?.querySelector<HTMLElement>('button[aria-label="Back"]')
+      || firstPass?.[0]
+      || root;
     preferred?.focus();
     const trap = (e: KeyboardEvent) => {
       if (e.key !== 'Tab' || !root) return;

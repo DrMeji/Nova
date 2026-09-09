@@ -4,7 +4,7 @@
  */
 
 export const ARK_TIPS: string[] = [
-  'Tip: NOVA Auto means “try free stuff first, panic later.”',
+  'Tip: Nova Multimodal routes across models; pin one model to stay on that brain only.',
   'Joke: Your model is downloading. The AI is stretching. Be polite.',
   'Tip: Cloud keys stay on this PC — NOVA isn’t stealing your Groq vibes.',
   'Joke: Local brains don’t need Wi‑Fi. They do need patience. And disk.',

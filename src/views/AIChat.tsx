@@ -450,16 +450,16 @@ type ChatModelOption = {
 
 const CHAT_MODELS: ChatModelOption[] = [
   // Chat. only Auto by default; keyed clouds + Ollama added at runtime
-  { id: 'NOVA-auto', name: 'NOVA', source: 'auto', detail: '', kind: 'chat' },
+  { id: 'NOVA-auto', name: 'Nova Multimodal', source: 'auto', detail: '', kind: 'chat' },
   // Image. paths that generate today
-  { id: 'NOVA-auto', name: 'NOVA', source: 'auto', detail: '', kind: 'image' },
+  { id: 'NOVA-auto', name: 'Nova Multimodal', source: 'auto', detail: '', kind: 'image' },
   { id: 'NOVA-image-core', name: 'NOVA Image Core', source: 'local', detail: '', kind: 'image' },
   { id: 'sd15-local', name: 'SD 1.5 Local', source: 'local', detail: '', kind: 'image' },
   { id: 'sdxl-turbo-local', name: 'SDXL Turbo Local', source: 'local', detail: '', kind: 'image' },
   { id: 'flux-schnell-local', name: 'FLUX Schnell Local', source: 'local', detail: '', kind: 'image' },
   { id: 'dall-e-3', name: 'DALL·E 3', source: 'cloud', detail: '', kind: 'image' },
   // Video. NOVA Engine only (Pollinations / HF / motion-still). Not Kling or Sora.
-  { id: 'NOVA-auto', name: 'NOVA', source: 'auto', detail: '', kind: 'video' },
+  { id: 'NOVA-auto', name: 'Nova Multimodal', source: 'auto', detail: '', kind: 'video' },
   { id: 'NOVA-video-core', name: 'NOVA Video Core', source: 'local', detail: '', kind: 'video' },
 ];
 
@@ -3474,7 +3474,7 @@ export function AIChat() {
     const providerLabel = pluginId
       ? `${chatPlugins.find(p => p.id === pluginId)?.name ?? 'Plugin'}${pluginState?.accountLabel ? ` · @${pluginState.accountLabel}` : ' · live'}`
       : pinnedModel.source === 'auto'
-        ? 'NOVA Auto'
+        ? 'Nova Multimodal'
         : `${pinnedModel.source === 'local' ? 'Local' : 'Cloud'} · ${pinnedModel.name}`;
 
     const assistantId = crypto.randomUUID();
@@ -9010,8 +9010,11 @@ export function AIChat() {
                 );
               const liveClean = live && !looksLikePromptEcho(live) ? live : '';
               if (liveClean) {
-                // Prefer the longest clean draft this turn (don’t shrink when sanitize flickers).
-                if (liveClean.length >= lastGoodLive.length) {
+                // Keep the first solid streamed answer stable across failover hops.
+                // Only grow lastGoodLive when the new text continues the same reply.
+                if (!lastGoodLive) {
+                  lastGoodLive = liveClean;
+                } else if (liveClean.startsWith(lastGoodLive.slice(0, Math.min(40, lastGoodLive.length)))) {
                   lastGoodLive = liveClean;
                 }
                 sawToken = true;
@@ -9115,6 +9118,20 @@ export function AIChat() {
           const candidate = String(rawReply || streamedPartial || lastGoodLive || '').trim();
           if (!response && candidate && !looksLikePromptEcho(candidate)) {
             response = candidate;
+          }
+          // Continuity: if the user already read a solid streamed reply, don't swap it for an
+          // unrelated failover/sanitize draft (that is the hello→wipe→different-hello flicker).
+          {
+            const live = String(lastGoodLive || '').trim();
+            const final = String(response || '').trim();
+            if (live.length >= 24 && final && final !== live && !looksLikePromptEcho(live)) {
+              const prefixLen = Math.min(48, live.length, final.length);
+              const sameFamily = prefixLen >= 12
+                && (final.startsWith(live.slice(0, prefixLen)) || live.startsWith(final.slice(0, prefixLen)));
+              if (!sameFamily) {
+                response = live;
+              }
+            }
           }
           if (looksLikeThreadSummaryAsk(content)) {
             // Prefer persisted thread for THIS chat — messagesRef can lag right after a Recent switch.
@@ -9401,6 +9418,28 @@ export function AIChat() {
         }
       }
 
+      // Final continuity lock: never flash a different paragraph over what already streamed
+      // unless this turn deliberately rewrote for disk apply / coding dump cleanup.
+      {
+        const live = String(lastGoodLive || '').trim();
+        const final = String(response || '').trim();
+        const intentionalRewrite = /I applied those updates on disk|Updating your project files on disk|I updated the project files/i.test(final);
+        if (
+          !isMediaMode
+          && !pluginId
+          && !intentionalRewrite
+          && live.length >= 24
+          && final
+          && final !== live
+          && !looksLikePromptEcho(live)
+        ) {
+          const prefixLen = Math.min(48, live.length, final.length);
+          const sameFamily = prefixLen >= 12
+            && (final.startsWith(live.slice(0, prefixLen)) || live.startsWith(final.slice(0, prefixLen)));
+          if (!sameFamily) response = live;
+        }
+      }
+
       chatTurnCtlRef.current.finalizeAssistant(response, resolvedProvider, lastLibraryId);
 
       if (mode === 'general') {
@@ -9431,16 +9470,23 @@ export function AIChat() {
     return () => window.removeEventListener('NOVA:agent-continue', onContinue);
   }, []);
 
-  /** Grow textarea only — never remount + / NOVA (that remount caused flicker + clipped text). */
+  /** Grow textarea without collapsing to auto (that flash draws a seam above the toolbar). */
   const resizeComposer = useCallback(() => {
     const el = textareaRef.current;
     if (!el) return;
     const max = Math.round(window.innerHeight * 0.4);
-    const minPx = 22;
-    el.style.height = 'auto';
+    // Must clear room for line-height + vertical padding (pt-2.5 / pb-1 ≈ 14px).
+    const minPx = 44;
+    const prevHeight = el.style.height;
+    const locked = el.offsetHeight;
+    el.style.height = `${minPx}px`;
     const raw = el.scrollHeight;
     const next = Math.max(minPx, Math.min(raw, max));
-    el.style.height = `${next}px`;
+    if (Math.abs(next - locked) <= 1 && prevHeight) {
+      el.style.height = prevHeight;
+    } else {
+      el.style.height = `${next}px`;
+    }
     el.style.overflowY = raw > max ? 'auto' : 'hidden';
   }, []);
 
@@ -9609,13 +9655,13 @@ export function AIChat() {
                 }}
                 className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-surface-hover"
               >
-                <span className="w-7 h-7 flex items-center justify-center shrink-0">
+                <span className="w-7 h-7 flex items-center justify-center shrink-0 text-content-primary">
                   <ArkMark className="w-6 h-6" />
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="block text-sm text-content-primary truncate">{model.name}</span>
                   <span className="block text-[11px] text-content-tertiary truncate">
-                    {autoEquippedCaption(threadBrain)}
+                    {autoEquippedCaption(threadBrain) || 'Multi-model · including vision for builds'}
                   </span>
                 </span>
                 {activeModel.id === model.id && <Check className="w-4 h-4 text-ark-accent-green shrink-0" />}
@@ -9648,7 +9694,7 @@ export function AIChat() {
                 }}
                 className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-surface-hover"
               >
-                <span className="w-7 h-7 rounded-lg bg-emerald-500/15 text-emerald-400 flex items-center justify-center shrink-0">
+                <span className="w-7 h-7 flex items-center justify-center shrink-0 text-emerald-400">
                   <Cpu className="w-3.5 h-3.5" />
                 </span>
                 <span className="min-w-0 flex-1">
@@ -9671,7 +9717,7 @@ export function AIChat() {
                 key={model.id}
                 className="w-full flex items-center gap-2.5 px-3 py-2 text-left opacity-80"
               >
-                <span className="w-7 h-7 rounded-lg bg-amber-500/15 text-amber-400 flex items-center justify-center shrink-0">
+                <span className="w-7 h-7 flex items-center justify-center shrink-0 text-amber-400">
                   <Loader2 className="w-3.5 h-3.5 animate-spin" />
                 </span>
                 <span className="min-w-0 flex-1">
@@ -9702,7 +9748,7 @@ export function AIChat() {
                   key={model.id}
                   className="w-full flex items-center gap-2.5 px-3 py-2 text-left opacity-90"
                 >
-                  <span className="w-7 h-7 rounded-lg bg-surface-hover text-content-tertiary flex items-center justify-center shrink-0">
+                  <span className="w-7 h-7 flex items-center justify-center shrink-0 text-content-tertiary">
                     <Cpu className="w-3.5 h-3.5" />
                   </span>
                   <span className="min-w-0 flex-1">
@@ -9750,7 +9796,7 @@ export function AIChat() {
                 }}
                 className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-surface-hover"
               >
-                <span className="w-7 h-7 rounded-lg bg-sky-500/15 text-sky-400 flex items-center justify-center shrink-0">
+                <span className="w-7 h-7 flex items-center justify-center shrink-0 text-sky-400">
                   <Cloud className="w-3.5 h-3.5" />
                 </span>
                 <span className="min-w-0 flex-1">
@@ -9883,53 +9929,6 @@ export function AIChat() {
               {dictationHint}
             </p>
           ) : null}
-          {pathBindOpen && (
-            <div className="mb-2 max-w-full rounded-xl border border-surface-border bg-ark-navy-900/90 px-2 py-1.5">
-              <div className="flex items-center gap-1.5 min-w-0">
-                <Folder className="w-3.5 h-3.5 shrink-0 text-amber-300/90" />
-                <input
-                  ref={pathBindInputRef}
-                  type="text"
-                  value={pathBindDraft}
-                  onChange={(e) => setPathBindDraft(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      void bindTypedPath();
-                    }
-                    if (e.key === 'Escape') {
-                      setPathBindOpen(false);
-                      setPathBindDraft('');
-                    }
-                  }}
-                  placeholder="Folder path…"
-                  className="min-w-0 flex-1 bg-transparent border-none px-1 py-1 text-xs text-content-primary placeholder:text-content-tertiary focus:outline-none"
-                />
-                <button
-                  type="button"
-                  onClick={() => void browseBindFolder()}
-                  className="shrink-0 rounded-md px-2 py-1 text-[11px] text-content-secondary hover:bg-surface-hover hover:text-content-primary"
-                >
-                  Browse
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void bindTypedPath()}
-                  className="shrink-0 rounded-md bg-amber-500/90 px-2.5 py-1 text-[11px] font-medium text-ark-navy-950 hover:bg-amber-400"
-                >
-                  Bind
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { setPathBindOpen(false); setPathBindDraft(''); }}
-                  className="shrink-0 rounded-md p-1 text-content-tertiary hover:text-content-secondary hover:bg-surface-hover"
-                  aria-label="Close"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            </div>
-          )}
           {pendingImages.length > 0 && (
             <div className="mb-2 flex flex-wrap items-center gap-1.5 px-1">
               {pendingImages.map(img => (
@@ -9984,9 +9983,57 @@ export function AIChat() {
               </span>
             ) : null}
           </div>
+          <div className="flex-1 min-w-0 flex flex-col">
+          {pathBindOpen && (
+            <div className="mb-2 w-full min-w-0 box-border rounded-xl border border-surface-border bg-ark-navy-900/90 px-2 py-1.5">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <Folder className="w-3.5 h-3.5 shrink-0 text-amber-300/90" />
+                <input
+                  ref={pathBindInputRef}
+                  type="text"
+                  value={pathBindDraft}
+                  onChange={(e) => setPathBindDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      void bindTypedPath();
+                    }
+                    if (e.key === 'Escape') {
+                      setPathBindOpen(false);
+                      setPathBindDraft('');
+                    }
+                  }}
+                  placeholder="Folder path…"
+                  className="min-w-0 flex-1 bg-transparent border-none px-1 py-1 text-xs text-content-primary placeholder:text-content-tertiary focus:outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => void browseBindFolder()}
+                  className="shrink-0 rounded-md px-2 py-1 text-[11px] text-content-secondary hover:bg-surface-hover hover:text-content-primary"
+                >
+                  Browse
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void bindTypedPath()}
+                  className="shrink-0 rounded-md bg-amber-500/90 px-2.5 py-1 text-[11px] font-medium text-ark-navy-950 hover:bg-amber-400"
+                >
+                  Bind
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setPathBindOpen(false); setPathBindDraft(''); }}
+                  className="shrink-0 rounded-md p-1 text-content-tertiary hover:text-content-secondary hover:bg-surface-hover"
+                  aria-label="Close"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+          )}
           <div
             data-ark-composer="1"
-            className={`flex-1 min-w-0 flex flex-col border border-surface-border bg-ark-navy-900 shadow-lg shadow-black/20 overflow-hidden ${
+            className={`w-full min-w-0 flex flex-col border border-surface-border bg-ark-navy-900 shadow-lg shadow-black/20 overflow-hidden ${
               mode === 'voice' ? 'rounded-2xl' : 'rounded-xl'
             }`}
           >
@@ -10132,11 +10179,11 @@ export function AIChat() {
             rows={1}
             title="Enter to send · Shift+Enter for a new line · Ctrl+V pastes screenshots"
             aria-label="Message. Enter to send, Shift+Enter for a new line"
-            className="w-full bg-transparent border-none resize-none text-sm text-content-primary placeholder:text-content-tertiary focus:outline-none leading-5 min-h-[1.25rem] px-3 pt-2.5 pb-1"
+            className="w-full bg-transparent border-none resize-none text-sm text-content-primary placeholder:text-content-tertiary focus:outline-none leading-5 min-h-[2.75rem] px-3 pt-2.5 pb-1"
             style={{ overflowY: 'hidden' }}
           />
 
-          <div className="flex items-center gap-1.5 px-2 pb-1.5 pt-0.5 shrink-0">
+          <div className="flex items-center gap-1.5 px-2 pb-1.5 pt-0.5 shrink-0 border-t border-transparent">
             {mode === 'image' && (
               <button
                 type="button"
@@ -10227,10 +10274,10 @@ export function AIChat() {
                 ref={modelButtonRef}
                 type="button"
                 onClick={() => setModelMenuOpen(o => !o)}
-                className="inline-flex items-center gap-1 rounded-full border border-surface-border bg-ark-navy-800 hover:bg-surface-hover px-2.5 py-1 text-xs text-content-primary transition-colors max-w-[9rem]"
+                className="inline-flex items-center gap-1 rounded-full border border-surface-border bg-ark-navy-800 hover:bg-surface-hover px-2.5 py-1 text-xs text-content-primary transition-colors max-w-[11.5rem]"
                 title={`Active model · ${
                   activeModel.source === 'auto'
-                    ? (threadBrain ? autoEquippedCaption(threadBrain) : 'NOVA Auto · picks best brain')
+                    ? (threadBrain ? autoEquippedCaption(threadBrain) : 'Nova Multimodal · multi-model routing')
                     : activeModel.name
                 }`}
                 aria-label="Select model"
@@ -10266,6 +10313,7 @@ export function AIChat() {
                 </button>
               )}
             </div>
+          </div>
           </div>
           </div>
 
@@ -10683,40 +10731,59 @@ export function AIChat() {
                         />
                       );
                     })()}
-                    {msg.role === 'assistant'
-                      && !String(msg.content || '').startsWith('__generating__:')
-                      && String(msg.content || '').trim() ? (
+                    {(() => {
+                      const isAssistant = msg.role === 'assistant';
+                      const isLast = msg.id === messages[messages.length - 1]?.id;
+                      const raw = String(msg.content || '').trim();
+                      const isLiveStreaming = Boolean(
+                        isAssistant
+                        && isLast
+                        && generating
+                        && !raw.startsWith('__generating__:'),
+                      );
+                      // Copy + time + model only after this bubble is finished — never mid-stream.
+                      const showReplyMeta = isAssistant
+                        && !isLiveStreaming
+                        && !raw.startsWith('__generating__:')
+                        && Boolean(raw)
+                        && !isLikelyErrorMessage(raw)
+                        && (
+                          typeof msg.elapsed_ms === 'number'
+                          || (!generating && Boolean(msg.provider_used))
+                          || (!generating && !isLast)
+                        );
+                      if (!showReplyMeta) return null;
+                      const copied = copiedMsgId === msg.id;
+                      const timeBit = typeof msg.elapsed_ms === 'number' && msg.elapsed_ms >= 0
+                        ? `Responded in ${formatReplyElapsed(msg.elapsed_ms)}`
+                        : 'Responded';
+                      const modelBit = String(msg.provider_used || '').trim() || 'NOVA';
+                      return (
                         <div className="mt-2 flex items-center gap-2 text-[11px] text-content-tertiary tabular-nums">
-                          {(() => {
-                            const raw = String(msg.content || '').trim();
-                            const copied = copiedMsgId === msg.id;
-                            return (
-                              <button
-                                type="button"
-                                title={copied ? 'Copied' : 'Copy response'}
-                                aria-label={copied ? 'Copied' : 'Copy response'}
-                                className="inline-flex items-center justify-center rounded-md p-0.5 text-content-tertiary hover:text-content-secondary"
-                                onClick={() => {
-                                  void navigator.clipboard.writeText(raw).then(() => {
-                                    setCopiedMsgId(msg.id);
-                                    window.setTimeout(() => {
-                                      setCopiedMsgId(prev => (prev === msg.id ? null : prev));
-                                    }, 1600);
-                                  }).catch(() => undefined);
-                                }}
-                              >
-                                {copied ? <Check className="w-3.5 h-3.5 text-ark-accent-green" /> : <Copy className="w-3.5 h-3.5" />}
-                              </button>
-                            );
-                          })()}
-                          {typeof msg.elapsed_ms === 'number' && msg.elapsed_ms >= 0 && !isLikelyErrorMessage(msg.content) ? (
-                            <span>
-                              Responded in {formatReplyElapsed(msg.elapsed_ms)}
-                              {msg.provider_used ? ` · ${msg.provider_used}` : ''}
-                            </span>
-                          ) : null}
+                          <button
+                            type="button"
+                            title={copied ? 'Copied' : 'Copy response'}
+                            aria-label={copied ? 'Copied' : 'Copy response'}
+                            className="inline-flex items-center justify-center rounded-md p-0.5 text-content-tertiary hover:text-content-secondary"
+                            onClick={() => {
+                              void navigator.clipboard.writeText(raw).then(() => {
+                                setCopiedMsgId(msg.id);
+                                window.setTimeout(() => {
+                                  setCopiedMsgId(prev => (prev === msg.id ? null : prev));
+                                }, 1600);
+                              }).catch(() => undefined);
+                            }}
+                          >
+                            {copied ? <Check className="w-3.5 h-3.5 text-ark-accent-green" /> : <Copy className="w-3.5 h-3.5" />}
+                          </button>
+                          <span>
+                            {timeBit}
+                            {' · '}
+                            {modelBit}
+                          </span>
                         </div>
-                      ) : null}
+                      );
+                    })()}
                     {msg.role === 'assistant' && /Stopped at length limit/i.test(msg.content) ? (
                       <button
                         type="button"

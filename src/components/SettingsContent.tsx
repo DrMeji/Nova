@@ -77,7 +77,7 @@ const AI_MODES = [
 ];
 
 const DEFAULT_MODELS = [
-  { id: 'NOVA-auto', label: 'NOVA Auto', detail: '', source: 'auto' },
+  { id: 'NOVA-auto', label: 'Nova Multimodal', detail: '', source: 'auto' },
   { id: 'qwen25-coder-14b', label: 'Qwen2.5 Coder 14B', detail: '', source: 'local' },
   { id: 'qwen25-coder-7b', label: 'Qwen2.5 Coder 7B', detail: '', source: 'local' },
   { id: 'llama32-3b', label: 'Llama 3.2 3B', detail: '', source: 'local' },
@@ -558,7 +558,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
             <SettingsSection title="Account">
               <div className="space-y-5">
                 <div className="flex items-start gap-4">
-                  <div className="relative shrink-0 w-16 h-16 rounded-full overflow-hidden bg-ark-blue-500/15 border border-ark-blue-500/30 flex items-center justify-center">
+                  <div className="relative shrink-0 w-16 h-16 flex items-center justify-center">
                     <NovaMark className="w-8 h-8 text-content-primary" title="NOVA" />
                   </div>
                   <div className="min-w-0 flex-1">
@@ -621,16 +621,6 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                 <div className="flex flex-wrap gap-2 pt-1 items-center">
                   <button type="button" onClick={signOut} className="ark-btn-secondary !text-ark-accent-red">
                     Sign Out
-                  </button>
-                  <button
-                    type="button"
-                    className="ark-btn-secondary"
-                    onClick={() => {
-                      patchPrefs({ displayName: 'Guest' });
-                      setDisplayName('Guest');
-                    }}
-                  >
-                    Reset profile labels
                   </button>
                   {user?.id && user.id !== 'guest-local' ? (
                     profile?.delete_scheduled_at ? (
@@ -805,18 +795,32 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <ToggleRow
-                  label="Show status bar"
-                  value={prefs.showStatusBar}
-                  onChange={v => patchPrefs({ showStatusBar: v })}
-                />
+                <div>
+                  <div className="flex items-baseline justify-between gap-3 mb-2">
+                    <label className="block text-xs font-medium text-content-secondary">Background circle blur</label>
+                    <span className="text-xs text-content-tertiary tabular-nums">{prefs.orbBlurPx}px</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={0}
+                    max={24}
+                    step={1}
+                    value={prefs.orbBlurPx}
+                    onChange={e => patchPrefs({ orbBlurPx: Number(e.target.value) })}
+                    className="w-full accent-ark-blue-400"
+                    aria-label="Background circle blur"
+                  />
+                  <div className="flex justify-between text-[10px] text-content-tertiary uppercase tracking-wide mt-1">
+                    <span>Sharp (0)</span>
+                    <span>Soft (7+)</span>
+                  </div>
+                </div>
+
                 <ToggleRow
                   label="Reduce motion"
                   value={prefs.reduceMotion}
                   onChange={v => patchPrefs({ reduceMotion: v })}
                 />
-                </div>
               </div>
             </SettingsSection>
           )}

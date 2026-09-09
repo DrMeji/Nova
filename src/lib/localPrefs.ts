@@ -35,6 +35,11 @@ export type LocalPrefs = {
   density: DensityPref;
   accent: AccentPref;
   reduceMotion: boolean;
+  /**
+   * Softness of the floating background color circles (px).
+   * 0 = sharp discs; 7 = current default soft edge.
+   */
+  orbBlurPx: number;
   compactSidebar: boolean;
   /** Expanded sidebar width in px (remembered per this PC). */
   sidebarWidth: number;
@@ -125,6 +130,7 @@ const DEFAULT_PREFS: LocalPrefs = {
   density: 'comfortable',
   accent: 'sky',
   reduceMotion: false,
+  orbBlurPx: 7,
   compactSidebar: false,
   sidebarWidth: 256,
   showStatusBar: true,
@@ -180,6 +186,11 @@ export function getLocalPrefs(): LocalPrefs {
     if (merged.defaultModelId === 'ark-image-core') merged.defaultModelId = 'NOVA-image-core';
     if (merged.defaultModelId === 'ark-video-core') merged.defaultModelId = 'NOVA-video-core';
     if (merged.defaultModelId === 'ark-core') merged.defaultModelId = 'NOVA-core';
+    if (typeof merged.orbBlurPx !== 'number' || Number.isNaN(merged.orbBlurPx)) {
+      merged.orbBlurPx = 7;
+    } else {
+      merged.orbBlurPx = Math.max(0, Math.min(24, Math.round(merged.orbBlurPx)));
+    }
     return merged;
   } catch {
     return { ...DEFAULT_PREFS };

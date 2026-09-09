@@ -13,7 +13,7 @@ export function NovaMark({
       role="img"
       aria-label={title}
       title={title}
-      className={`inline-block shrink-0 object-contain bg-current ${className}`}
+      className={`inline-block shrink-0 ${className}`}
       style={{
         WebkitMaskImage: `url(${MARK_SRC})`,
         maskImage: `url(${MARK_SRC})`,
@@ -23,6 +23,7 @@ export function NovaMark({
         maskRepeat: 'no-repeat',
         WebkitMaskPosition: 'center',
         maskPosition: 'center',
+        backgroundColor: 'currentColor',
       }}
     />
   );
