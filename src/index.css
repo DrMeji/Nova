@@ -221,6 +221,22 @@
   .ark-nav-activity:hover {
     color: rgb(167 243 208);
   }
+  /* Settings modal rail — independent from main sidebar icon-plate layout */
+  .settings-nav-item {
+    @apply flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] font-medium transition-all duration-150 cursor-pointer min-w-0;
+    color: rgb(var(--color-content-secondary));
+  }
+  .settings-nav-item:hover {
+    color: rgb(var(--color-content-primary));
+    background-color: rgb(var(--color-surface-hover));
+  }
+  .settings-nav-item.active {
+    background-color: rgb(var(--color-surface-active));
+    color: rgb(var(--color-content-primary));
+  }
+  .settings-nav-item-compact {
+    @apply !px-2 !gap-0 !justify-center w-10;
+  }
 }
 
 @layer utilities {

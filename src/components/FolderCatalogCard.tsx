@@ -108,6 +108,8 @@ export function FolderCatalogCard({ data }: { data: FolderCatalogData }) {
         </div>
       ) : null}
 
+      ) : null}
+
       <ItemTable title="Files at this level" items={data.rootFiles} />
 
       {data.desktopSiblings.length ? (
@@ -116,12 +118,6 @@ export function FolderCatalogCard({ data }: { data: FolderCatalogData }) {
           items={data.desktopSiblings}
         />
       ) : null}
-
-      <p className="pt-1 text-[11px] text-content-tertiary leading-snug">
-        To work in one project, say{' '}
-        <span className="text-content-secondary">“Let’s work on MyApp”</span>
-        {' '}— this chat will switch to that folder and rename on the left.
-      </p>
     </div>
   );
 }

@@ -123,9 +123,7 @@ export function PinLockGate({ children }: { children: ReactNode }) {
           <p className="text-sm font-medium">{step === '2fa' ? 'Second factor' : 'Unlock NOVA'}</p>
         </div>
         <p className="text-xs text-content-tertiary">
-          {step === '2fa'
-            ? 'Enter your security code for this PC.'
-            : 'Enter your local PIN. This locks the app UI on this PC; it does not encrypt your keys.'}
+          {step === '2fa' ? 'Enter your security code.' : 'Enter your local PIN.'}
         </p>
         {step === 'pin' ? (
           <input

@@ -2,7 +2,6 @@ import { useMemo, useState } from 'react';
 import { UserPlus, X } from 'lucide-react';
 import { githubPermissionToAccess, type GitHubCollaborator } from '@/lib/github';
 import {
-  accessDetail,
   accessLabel,
   AREA_SUGGESTIONS,
   type TeamAccess,
@@ -97,11 +96,8 @@ export function TeammateBar({
               <X className="w-3.5 h-3.5" />
             </button>
           </div>
-          <p className="text-[10px] text-content-tertiary mb-2 leading-relaxed">
-            Each person works in their own NOVA. GitHub is how work meets. You assign an area so nobody collides.
-          </p>
           {people.length === 0 && (
-            <p className="text-[11px] text-content-tertiary mb-2">No teammates yet. Invite a GitHub username.</p>
+            <p className="text-[11px] text-content-tertiary mb-2">No teammates yet.</p>
           )}
           <ul className="space-y-2 max-h-48 overflow-auto mb-2">
             {people.map(p => (
@@ -143,21 +139,13 @@ export function TeammateBar({
               Invite teammate
             </button>
           )}
-          {myAccess === 'read' && (
-            <p className="mt-2 text-[10px] text-amber-300/90 leading-relaxed">
-              You have Read on this repo. you can look and discuss, not edit or push.
-            </p>
-          )}
         </div>
       )}
 
       {inviteOpen && (
         <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 p-4">
           <div className="w-full max-w-sm rounded-2xl border border-surface-border bg-ark-navy-950 p-4 shadow-xl">
-            <p className="text-sm font-medium text-content-primary mb-1">Invite a teammate</p>
-            <p className="text-[11px] text-content-tertiary mb-3 leading-relaxed">
-              Add them with their 7-digit NOVA ID (Settings → Account). GitHub usernames still work if the project is on GitHub.
-            </p>
+            <p className="text-sm font-medium text-content-primary mb-3">Invite a teammate</p>
             <input
               value={username}
               onChange={e => setUsername(e.target.value.replace(/^@/, ''))}
@@ -183,7 +171,6 @@ export function TeammateBar({
                 </button>
               ))}
             </div>
-            <p className="text-[10px] text-content-tertiary mb-2">{accessDetail(access)}</p>
             {needsTrust && (
               <label className="flex items-start gap-2 text-[11px] text-content-secondary mb-3">
                 <input type="checkbox" checked={trust} onChange={e => setTrust(e.target.checked)} className="mt-0.5" />

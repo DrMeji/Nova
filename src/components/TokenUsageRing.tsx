@@ -1,8 +1,7 @@
-/** Circular dual-ring: turn context (inner) + model freshness (outer). */
+/** Combined usage badge: context + model pressure as one percent (detail on click). */
 
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ggufCtxCapacityLabel } from '@/lib/ggufContext';
 import { displayUsagePercent } from '@/lib/tokenUsage';
 
 type Props = {
@@ -20,30 +19,26 @@ type Props = {
 export function TokenUsageRing({
   contextRatio,
   modelRatio = 0,
-  size = 18,
+  size: _size = 18,
   className = '',
   title,
   modelName,
-  modelDetail,
+  modelDetail: _modelDetail,
 }: Props) {
   const ctx = Math.max(0, Math.min(1, contextRatio));
   const mdl = Math.max(0, Math.min(1, modelRatio));
-  const stroke = 2.1;
-  const gap = 2.4;
-  const outerR = (size - stroke) / 2;
-  const innerR = Math.max(3, outerR - stroke - gap);
-  const outerC = 2 * Math.PI * outerR;
-  const innerC = 2 * Math.PI * innerR;
   const ctxPct = displayUsagePercent(ctx);
   const mdlPct = displayUsagePercent(mdl);
+  /** Combined load — average of context + model pressure. */
+  const combinedPct = displayUsagePercent(Math.min(1, (ctx + mdl) / 2));
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ left: number; bottom: number } | null>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
   const popRef = useRef<HTMLDivElement>(null);
 
-  const label = modelName?.trim() || 'NOVA Auto';
-  const detail = modelDetail?.trim() || 'Session';
-  const isLocal = /\blocal\b|on-device/i.test(detail);
+  const label = modelName?.trim() || 'NOVA';
+  const hot = combinedPct >= 85;
+  const warm = combinedPct >= 55;
 
   useEffect(() => {
     if (!open) return;
@@ -89,83 +84,46 @@ export function TokenUsageRing({
         ref={btnRef}
         type="button"
         onClick={() => setOpen(o => !o)}
-        className={`inline-flex items-center justify-center shrink-0 rounded-full hover:opacity-90 transition-opacity focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/40 ${className}`}
-        title={title || `${label} · context ${ctxPct}% · model ${mdlPct}%`}
-        aria-label={`${label}, context ${ctxPct} percent, model ${mdlPct} percent`}
+        className={`inline-flex items-center justify-center shrink-0 min-w-[1.75rem] h-5 px-0.5 rounded-md tabular-nums text-[11px] font-semibold tracking-tight hover:opacity-90 transition-opacity focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/40 ${
+          hot
+            ? 'text-rose-300'
+            : warm
+              ? 'text-amber-300'
+              : 'text-content-secondary'
+        } ${className}`}
+        title={title || `${label} · ${combinedPct}%`}
+        aria-label={`${label}, ${combinedPct} percent`}
         aria-expanded={open}
       >
-        <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="-rotate-90" aria-hidden>
-          {/* Always-visible outer track so the control isn’t invisible at 0% */}
-          <circle
-            cx={size / 2}
-            cy={size / 2}
-            r={outerR}
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={stroke}
-            className="text-white/25"
-          />
-          {/* Always-visible inner track */}
-          <circle
-            cx={size / 2}
-            cy={size / 2}
-            r={innerR}
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={stroke}
-            className="text-white/18"
-          />
-          {/* Outer. model freshness */}
-          {mdl > 0.008 && (
-            <circle
-              cx={size / 2}
-              cy={size / 2}
-              r={outerR}
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={stroke}
-              strokeLinecap="round"
-              strokeDasharray={`${outerC * mdl} ${outerC}`}
-              className={mdl > 0.85 ? 'text-rose-500' : mdl > 0.55 ? 'text-amber-500' : 'text-violet-500'}
-            />
-          )}
-          {/* Inner. turn context */}
-          {ctx > 0.008 && (
-            <circle
-              cx={size / 2}
-              cy={size / 2}
-              r={innerR}
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={stroke}
-              strokeLinecap="round"
-              strokeDasharray={`${innerC * ctx} ${innerC}`}
-              className={ctx > 0.85 ? 'text-amber-500' : 'text-sky-500'}
-            />
-          )}
-        </svg>
+        {combinedPct}%
       </button>
 
       {open && pos && createPortal(
         <div
           ref={popRef}
-          className="fixed z-[80] w-[220px] rounded-xl border border-surface-border bg-surface-panel shadow-xl backdrop-blur-md p-3"
+          className="fixed z-[80] w-[200px] rounded-xl border border-surface-border bg-surface-panel shadow-xl backdrop-blur-md p-3"
           style={{ left: pos.left, bottom: pos.bottom }}
           role="dialog"
-          aria-label="Usage rings"
+          aria-label="Usage details"
         >
           <p className="text-[10px] uppercase tracking-wider text-content-tertiary font-semibold">Using now</p>
           <p className="text-sm font-medium text-content-primary mt-1 truncate" title={label}>{label}</p>
-          <p className="text-[11px] text-content-tertiary mt-0.5 truncate">{detail}</p>
+
+          <div className="mt-3 flex items-center justify-between text-[11px]">
+            <span className="text-content-secondary">Combined</span>
+            <span className={`font-semibold tabular-nums ${hot ? 'text-rose-300' : warm ? 'text-amber-300' : 'text-content-primary'}`}>
+              {combinedPct}%
+            </span>
+          </div>
 
           <div className="mt-3 space-y-3">
             <div>
               <div className="flex items-center justify-between text-[11px] mb-1.5">
                 <span className="inline-flex items-center gap-1.5 text-content-secondary">
                   <span className="w-2 h-2 rounded-full bg-sky-500 dark:bg-sky-300 shrink-0" aria-hidden />
-                  {isLocal ? 'Context budget' : 'Turn context'}
+                  Context
                 </span>
-                <span className={`font-medium ${ctx > 0.85 ? 'text-amber-600 dark:text-amber-300' : 'text-content-primary'}`}>{ctxPct}%</span>
+                <span className={`font-medium tabular-nums ${ctx > 0.85 ? 'text-amber-600 dark:text-amber-300' : 'text-content-primary'}`}>{ctxPct}%</span>
               </div>
               <div className="h-1.5 rounded-full bg-surface-active border border-surface-border overflow-hidden">
                 <div
@@ -173,20 +131,15 @@ export function TokenUsageRing({
                   style={{ width: `${ctxPct}%` }}
                 />
               </div>
-              <p className="text-[10px] text-content-tertiary mt-1">
-                {isLocal
-                  ? `How full this turn’s prompt is · ${ggufCtxCapacityLabel()}`
-                  : 'How full this turn’s prompt is.'}
-              </p>
             </div>
 
             <div>
               <div className="flex items-center justify-between text-[11px] mb-1.5">
                 <span className="inline-flex items-center gap-1.5 text-content-secondary">
                   <span className={`w-2 h-2 rounded-full shrink-0 ${mdl > 0.85 ? 'bg-rose-500' : 'bg-violet-500 dark:bg-violet-300'}`} aria-hidden />
-                  Model freshness
+                  Model
                 </span>
-                <span className={`font-medium ${mdl > 0.85 ? 'text-rose-600 dark:text-rose-300' : mdl > 0.55 ? 'text-amber-600 dark:text-amber-300' : 'text-content-primary'}`}>{mdlPct}%</span>
+                <span className={`font-medium tabular-nums ${mdl > 0.85 ? 'text-rose-600 dark:text-rose-300' : mdl > 0.55 ? 'text-amber-600 dark:text-amber-300' : 'text-content-primary'}`}>{mdlPct}%</span>
               </div>
               <div className="h-1.5 rounded-full bg-surface-active border border-surface-border overflow-hidden">
                 <div
@@ -196,9 +149,6 @@ export function TokenUsageRing({
                   style={{ width: `${mdlPct}%` }}
                 />
               </div>
-              <p className="text-[10px] text-content-tertiary mt-1">
-                How hard this brain has been worked. High = may slow down; Auto can rotate.
-              </p>
             </div>
           </div>
         </div>,

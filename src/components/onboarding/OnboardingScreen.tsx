@@ -38,7 +38,7 @@ import { RotatingTip } from '@/components/RotatingTip';
 import { PlayGameButton, PlayWhileDownloading } from '@/components/fun/PlayWhileDownloading';
 import {
   Loader2, Cpu, MemoryStick, HardDrive, Zap, CheckCircle2, Download,
-  Monitor, MonitorCog, Check, Gauge, KeyRound, Shield, ExternalLink, Wifi, FolderOpen,
+  Monitor, MonitorCog, Check, Gauge, Shield, ExternalLink, Wifi, FolderOpen,
   FolderKanban, HardDriveDownload, Sparkles,
 } from 'lucide-react';
 
@@ -66,7 +66,7 @@ const CONNECT_PROVIDERS: ConnectProvider[] = [
   {
     id: 'groq',
     name: 'Groq',
-    blurb: 'Fast free Llama chat & coding.',
+    blurb: '',
     signupUrl: 'https://console.groq.com/keys',
     free: true,
     tone: 'from-orange-500 to-red-700',
@@ -75,7 +75,7 @@ const CONNECT_PROVIDERS: ConnectProvider[] = [
   {
     id: 'google',
     name: 'Google AI Studio',
-    blurb: 'Gemini free tier. One key.',
+    blurb: '',
     signupUrl: 'https://aistudio.google.com/apikey',
     free: true,
     tone: 'from-blue-500 to-sky-700',
@@ -84,7 +84,7 @@ const CONNECT_PROVIDERS: ConnectProvider[] = [
   {
     id: 'openrouter',
     name: 'OpenRouter',
-    blurb: 'Many free routes · good backup.',
+    blurb: '',
     signupUrl: 'https://openrouter.ai/keys',
     free: true,
     tone: 'from-violet-500 to-purple-800',
@@ -93,7 +93,7 @@ const CONNECT_PROVIDERS: ConnectProvider[] = [
   {
     id: 'huggingface',
     name: 'Hugging Face',
-    blurb: 'Free chat + FLUX images.',
+    blurb: '',
     signupUrl: 'https://huggingface.co/settings/tokens',
     free: true,
     tone: 'from-yellow-500 to-amber-700',
@@ -102,7 +102,7 @@ const CONNECT_PROVIDERS: ConnectProvider[] = [
   {
     id: 'nvidia',
     name: 'NVIDIA NIM',
-    blurb: 'Free NIM endpoints for chat.',
+    blurb: '',
     signupUrl: 'https://build.nvidia.com/',
     free: true,
     tone: 'from-lime-500 to-green-800',
@@ -111,7 +111,7 @@ const CONNECT_PROVIDERS: ConnectProvider[] = [
   {
     id: 'openai',
     name: 'OpenAI',
-    blurb: 'Optional paid GPT / DALL·E path.',
+    blurb: '',
     signupUrl: 'https://platform.openai.com/api-keys',
     free: false,
     tone: 'from-emerald-400 to-green-800',
@@ -131,23 +131,23 @@ function recommendationsFor(hw: HardwareInfo): RecModel[] {
 
   if (pc === 'strong') {
     return [
-      { id: primary.id, name: primary.name, size: primary.size, detail: 'Best chat brain for this PC', recommended: true },
-      { id: 'qwen25-coder-7b', name: 'Qwen2.5-Coder 7B', size: '4.7 GB', detail: 'Coding · build apps in NOVA' },
-      { id: 'llama32-3b', name: 'Llama 3.2 3B Instruct', size: '2.0 GB', detail: 'Lighter general use' },
+      { id: primary.id, name: primary.name, size: primary.size, detail: '', recommended: true },
+      { id: 'qwen25-coder-7b', name: 'Qwen2.5-Coder 7B', size: '4.7 GB', detail: '' },
+      { id: 'llama32-3b', name: 'Llama 3.2 3B Instruct', size: '2.0 GB', detail: '' },
     ];
   }
 
   if (pc === 'standard') {
     return [
-      { id: primary.id, name: primary.name, size: primary.size, detail: 'Best chat brain for this PC', recommended: true },
-      { id: 'qwen25-coder-7b', name: 'Qwen2.5-Coder 7B', size: '4.7 GB', detail: 'Coding · larger download' },
-      { id: 'qwen25-15b', name: 'Qwen2.5 1.5B Instruct', size: '1.0 GB', detail: 'Fastest install' },
+      { id: primary.id, name: primary.name, size: primary.size, detail: '', recommended: true },
+      { id: 'qwen25-coder-7b', name: 'Qwen2.5-Coder 7B', size: '4.7 GB', detail: '' },
+      { id: 'qwen25-15b', name: 'Qwen2.5 1.5B Instruct', size: '1.0 GB', detail: '' },
     ];
   }
 
   return [
-    { id: primary.id, name: primary.name, size: primary.size, detail: 'Default local brain for this PC', recommended: true },
-    { id: 'llama32-3b', name: 'Llama 3.2 3B Instruct', size: '2.0 GB', detail: 'Stronger general chat' },
+    { id: primary.id, name: primary.name, size: primary.size, detail: '', recommended: true },
+    { id: 'llama32-3b', name: 'Llama 3.2 3B Instruct', size: '2.0 GB', detail: '' },
   ];
 }
 
@@ -466,13 +466,6 @@ export function OnboardingScreen() {
                 ? 'Connect free capacity'
                 : "Let's optimize your computer"}
           </h1>
-          <p className="text-sm text-content-secondary mt-2 max-w-md mx-auto">
-            {phase === 'access'
-              ? 'Let NOVA explore your Desktop, list projects, find games, and run installs when you ask. You can change this anytime in Settings → Security.'
-              : phase === 'connect'
-                ? 'Add free keys once (Groq, Google, OpenRouter). NOVA Auto fails over between them and your local brain so chat keeps going.'
-                : 'NOVA checks your hardware and download speed, installs a fitting local brain, then helps you connect free cloud capacity.'}
-          </p>
         </div>
 
         <div className="rounded-2xl border border-surface-border bg-ark-navy-900/90 backdrop-blur-sm p-6 sm:p-7 shadow-2xl animate-slide-up">
@@ -505,28 +498,6 @@ export function OnboardingScreen() {
 
           {phase === 'intro' && (
             <div className="space-y-5">
-              <div className="space-y-3 text-sm text-content-secondary">
-                <p className="flex items-start gap-2.5">
-                  <MonitorCog className="w-4 h-4 mt-0.5 shrink-0 text-content-tertiary" />
-                  Scan this PC and match models that fit your hardware.
-                </p>
-                <p className="flex items-start gap-2.5">
-                  <Wifi className="w-4 h-4 mt-0.5 shrink-0 text-content-tertiary" />
-                  Measure download speed so NOVA knows when to preload the next brain.
-                </p>
-                <p className="flex items-start gap-2.5">
-                  <KeyRound className="w-4 h-4 mt-0.5 shrink-0 text-content-tertiary" />
-                  Optionally connect free providers once. Keys stay encrypted on this device.
-                </p>
-                <p className="flex items-start gap-2.5">
-                  <FolderOpen className="w-4 h-4 mt-0.5 shrink-0 text-content-tertiary" />
-                  Choose Desktop or full PC access so NOVA can explore folders and answer “what’s on my PC?” without templates.
-                </p>
-                <p className="flex items-start gap-2.5">
-                  <Shield className="w-4 h-4 mt-0.5 shrink-0 text-content-tertiary" />
-                  API keys never leave this PC except to the provider you connected.
-                </p>
-              </div>
               <button type="button" onClick={runHardware} className="ark-btn-primary w-full h-11 rounded-xl">
                 Start optimization
               </button>
@@ -547,9 +518,11 @@ export function OnboardingScreen() {
                   <p className="text-sm font-medium text-content-primary">
                     {hwScanning ? 'Scanning your hardware…' : 'Hardware profile ready'}
                   </p>
-                  <p className="text-xs text-content-tertiary mt-0.5">
-                    {pcClass ? hardwareLabel(pcClass) : 'Figuring out what this PC can run'}
-                  </p>
+                  {pcClass ? (
+                    <p className="text-xs text-content-tertiary mt-0.5">
+                      {hardwareLabel(pcClass)}
+                    </p>
+                  ) : null}
                 </div>
               </div>
 
@@ -604,13 +577,11 @@ export function OnboardingScreen() {
                   <p className="text-sm font-medium text-content-primary">
                     {speedTesting ? 'Measuring download speed…' : speedPlan ? 'Speed profile ready' : 'Speed test'}
                   </p>
-                  <p className="text-xs text-content-tertiary mt-0.5">
-                    {speedTesting
-                      ? 'Hugging Face, HF Mirror, and ModelScope, plus any API keys already plugged in'
-                      : speedPlan
-                        ? speedPlan.ratingLabel
-                        : 'NOVA uses this to start a backup brain earlier on slow Wi-Fi'}
-                  </p>
+                  {!speedTesting && speedPlan ? (
+                    <p className="text-xs text-content-tertiary mt-0.5">
+                      {speedPlan.ratingLabel}
+                    </p>
+                  ) : null}
                 </div>
               </div>
               {speedPlan && speedMbps != null && (
@@ -686,9 +657,6 @@ export function OnboardingScreen() {
                 </span>
                 <div>
                   <p className="text-sm font-medium text-content-primary">Recommended for this PC</p>
-                  <p className="text-xs text-content-tertiary mt-0.5">
-                    Choose a local preference. Chat still defaults to NOVA Auto for failover.
-                  </p>
                 </div>
               </div>
 
@@ -714,7 +682,7 @@ export function OnboardingScreen() {
                           )}
                         </span>
                         <span className="block text-xs text-content-tertiary mt-0.5">
-                          {model.detail} · {model.size}
+                          {model.size}
                         </span>
                       </span>
                       <span className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${
@@ -756,11 +724,11 @@ export function OnboardingScreen() {
                 </span>
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium text-content-primary">PC permissions</p>
-                  <p className="text-xs text-content-tertiary mt-0.5">
-                    {accessEnabledCount > 0
-                      ? `${accessEnabledCount} permission${accessEnabledCount === 1 ? '' : 's'} enabled. NOVA can answer folder and project asks`
-                      : 'Skip for now if you prefer. Enable later in Settings → Security'}
-                  </p>
+                  {accessEnabledCount > 0 ? (
+                    <p className="text-xs text-content-tertiary mt-0.5">
+                      {accessEnabledCount} permission{accessEnabledCount === 1 ? '' : 's'} enabled
+                    </p>
+                  ) : null}
                 </div>
               </div>
 
@@ -777,7 +745,6 @@ export function OnboardingScreen() {
                 <AccessPermissionCard
                   icon={FolderOpen}
                   title="Desktop folder access"
-                  detail="Projects, games, and folders on your Desktop"
                   enabled={desktopAccess}
                   onToggle={toggleDesktopAccess}
                   accent="sky"
@@ -785,7 +752,6 @@ export function OnboardingScreen() {
                 <AccessPermissionCard
                   icon={FolderKanban}
                   title="Documents folder access"
-                  detail="Open and list projects under Documents"
                   enabled={documentsAccess}
                   onToggle={toggleDocumentsAccess}
                   accent="violet"
@@ -793,7 +759,6 @@ export function OnboardingScreen() {
                 <AccessPermissionCard
                   icon={HardDriveDownload}
                   title="Full PC access (files)"
-                  detail="Installed apps, Steam libraries, profile-wide search"
                   enabled={fullPcAccess}
                   onToggle={toggleFullPcAccess}
                   accent="emerald"
@@ -805,9 +770,9 @@ export function OnboardingScreen() {
                 <p className="text-xs font-medium text-content-secondary mb-2">Execution &amp; approvals</p>
                 <div className="grid grid-cols-1 gap-1.5">
                   {([
-                    { id: 'allowlist' as const, label: 'Confirm each command', hint: 'Safest. npm, pip, and git ask first' },
-                    { id: 'auto_review' as const, label: 'Auto-review', hint: 'Known tools after one confirm' },
-                    { id: 'run_all' as const, label: 'Run everything', hint: 'Allowlisted tools run when you ask' },
+                    { id: 'allowlist' as const, label: 'Confirm each command' },
+                    { id: 'auto_review' as const, label: 'Auto-review' },
+                    { id: 'run_all' as const, label: 'Run everything' },
                   ]).map(opt => {
                     const on = executionMode === opt.id;
                     return (
@@ -828,7 +793,6 @@ export function OnboardingScreen() {
                         </span>
                         <span className="min-w-0 flex-1">
                           <span className="block text-sm text-content-primary">{opt.label}</span>
-                          <span className="block text-[11px] text-content-tertiary">{opt.hint}</span>
                         </span>
                       </button>
                     );
@@ -879,9 +843,6 @@ export function OnboardingScreen() {
                               <span className="text-[10px] text-sky-400">Saved</span>
                             )}
                           </div>
-                          {!open && (
-                            <p className="text-xs text-content-tertiary mt-0.5 truncate">{p.blurb}</p>
-                          )}
                         </div>
                         <button
                           type="button"
@@ -977,16 +938,8 @@ export function OnboardingScreen() {
                   />
                 </div>
               </div>
-              <p className="text-[11px] text-content-tertiary text-center leading-relaxed">
-                {finishReady
-                  ? 'Your chat brain is ready — enter NOVA whenever you want. An optional coding model may keep downloading in the background (you’ll see it above your profile).'
-                  : 'This is a one-time download for your chat brain. Stay here until it finishes so Chat has something real to talk to.'}
-              </p>
               {!finishError ? (
                 <div className="flex flex-col items-center gap-2">
-                  {!finishReady ? (
-                    <p className="text-[11px] text-content-tertiary">Slow connection? Pass the time.</p>
-                  ) : null}
                   <PlayGameButton onClick={() => setPlayOpen(true)} />
                 </div>
               ) : null}
@@ -1043,7 +996,6 @@ export function OnboardingScreen() {
 function AccessPermissionCard({
   icon: Icon,
   title,
-  detail,
   enabled,
   onToggle,
   accent,
@@ -1051,7 +1003,6 @@ function AccessPermissionCard({
 }: {
   icon: React.ComponentType<{ className?: string }>;
   title: string;
-  detail: string;
   enabled: boolean;
   onToggle: () => void;
   accent: 'sky' | 'violet' | 'emerald';
@@ -1090,7 +1041,6 @@ function AccessPermissionCard({
             </span>
           ) : null}
         </span>
-        <span className="mt-0.5 block text-xs text-content-tertiary leading-snug">{detail}</span>
       </span>
       <span
         className={`relative h-7 w-12 shrink-0 rounded-full transition-colors ${

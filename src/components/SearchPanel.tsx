@@ -232,7 +232,6 @@ export function SearchPanel({ onClose, onOpenSettings }: SearchPanelProps) {
       </span>
       <span className="min-w-0 flex-1">
         <span className="block text-sm font-medium text-content-primary truncate">{item.label}</span>
-        <span className="block text-xs text-content-tertiary truncate">{item.description}</span>
       </span>
     </button>
   );
@@ -266,16 +265,12 @@ export function SearchPanel({ onClose, onOpenSettings }: SearchPanelProps) {
             <span className="text-[10px] text-content-tertiary shrink-0 hidden sm:inline">Ctrl+K · ↑↓ Enter</span>
           </div>
         </div>
-        <p className="px-12 pt-2 text-[10px] text-content-tertiary">
-          App search is Ctrl+K. In Code, Ctrl+F finds in project files.
-        </p>
       </div>
 
       <div className="flex-1 overflow-auto px-3 py-3 min-h-0">
         {results.length === 0 ? (
           <div className="px-3 py-10 text-center">
             <p className="text-sm text-content-secondary">No results</p>
-            <p className="text-xs text-content-tertiary mt-1">Try a chat, project, model, or setting</p>
           </div>
         ) : (
           <div className="space-y-4">

@@ -1383,11 +1383,10 @@ export function ModelsView() {
               <section className="mb-10">
                 <h2 className="text-base font-semibold text-content-primary mb-4">Free sources</h2>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1">
-                  {FREE_SOURCES.filter(src => src.wired && (!q || src.name.toLowerCase().includes(q) || src.detail.toLowerCase().includes(q))).map(src => (
+                  {FREE_SOURCES.filter(src => src.wired && (!q || src.name.toLowerCase().includes(q))).map(src => (
                     <div
                       key={src.id}
                       className="flex items-center gap-3 py-3 rounded-xl px-1 hover:bg-surface-hover/50 transition-colors"
-                      title={src.detail}
                     >
                       <BrandMark id={src.id} name={src.name} initial={src.initial} tone={src.tone} />
                       <span className="min-w-0 flex-1">
@@ -1477,12 +1476,12 @@ export function ModelsView() {
                               provider.availability !== 'live' && provider.id !== 'ollama'
                                 ? 'Coming soon'
                                 : isOn
-                                  ? 'On for Chat. click to turn off (your key stays saved)'
+                                  ? 'On'
                                   : keyedProviders.has(provider.id)
-                                    ? 'Turn on for Chat'
+                                    ? 'Turn on'
                                     : providerNeedsKey(provider.id)
-                                      ? 'Add API key to use in Chat'
-                                      : 'Turn on for Chat'
+                                      ? 'Add API key'
+                                      : 'Turn on'
                             }
                             aria-label={isOn ? `Disconnect ${provider.name}` : `Connect ${provider.name}`}
                           >
@@ -1570,7 +1569,7 @@ export function ModelsView() {
                                     ? 'bg-surface-hover text-ark-accent-green'
                                     : 'text-content-secondary hover:text-content-primary hover:bg-surface-hover'
                               }`}
-                              title={avail !== 'live' ? 'Not wired in NOVA yet' : isOn ? 'On in Chat. click to turn off' : 'Enable in Chat'}
+                              title={avail !== 'live' ? 'Coming soon' : isOn ? 'On' : 'Enable'}
                               aria-label={isOn ? `Disable ${model.name}` : `Enable ${model.name}`}
                             >
                               {isOn ? <Check className="w-4 h-4" /> : <Plus className="w-4 h-4" />}

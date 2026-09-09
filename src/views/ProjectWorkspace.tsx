@@ -164,16 +164,16 @@ type CodeModel = {
 };
 
 const CODE_MODELS: CodeModel[] = [
-  { id: 'NOVA-auto', name: 'NOVA', source: 'auto', detail: 'Best coder · stays on for this project' },
+  { id: 'NOVA-auto', name: 'NOVA', source: 'auto', detail: '' },
 ];
 
 const CLOUD_CODE_WHEN_KEYED: (CodeModel & { keyId: string })[] = [
-  { id: 'groq-llama', name: 'Llama 3.3 70B', source: 'cloud', detail: 'Groq', keyId: 'groq' },
-  { id: 'gemini-flash', name: 'Gemini 2.0 Flash', source: 'cloud', detail: 'Google', keyId: 'google' },
-  { id: 'openrouter-free', name: 'OpenRouter', source: 'cloud', detail: 'Free routes', keyId: 'openrouter' },
-  { id: 'gpt-4o', name: 'GPT-4o', source: 'cloud', detail: 'OpenAI', keyId: 'openai' },
-  { id: 'claude-sonnet', name: 'Claude Sonnet', source: 'cloud', detail: 'Anthropic', keyId: 'anthropic' },
-  { id: 'deepseek-chat', name: 'DeepSeek Chat', source: 'cloud', detail: 'DeepSeek', keyId: 'deepseek' },
+  { id: 'groq-llama', name: 'Llama 3.3 70B', source: 'cloud', detail: '', keyId: 'groq' },
+  { id: 'gemini-flash', name: 'Gemini 2.0 Flash', source: 'cloud', detail: '', keyId: 'google' },
+  { id: 'openrouter-free', name: 'OpenRouter', source: 'cloud', detail: '', keyId: 'openrouter' },
+  { id: 'gpt-4o', name: 'GPT-4o', source: 'cloud', detail: '', keyId: 'openai' },
+  { id: 'claude-sonnet', name: 'Claude Sonnet', source: 'cloud', detail: '', keyId: 'anthropic' },
+  { id: 'deepseek-chat', name: 'DeepSeek Chat', source: 'cloud', detail: '', keyId: 'deepseek' },
 ];
 
 const COMPOSER_MODE_PREFIX: Record<'plan' | 'ask' | 'agent' | 'debug' | 'multitask', string> = {
@@ -3321,7 +3321,6 @@ export function ProjectWorkspace() {
       >
         <div className="rounded-2xl border border-sky-400/40 bg-ark-navy-900/95 px-6 py-4 text-center shadow-xl">
           <p className="text-sm font-medium text-content-primary">Drop folder or files</p>
-          <p className="text-[11px] text-content-tertiary mt-1">They open in Explorer for this Code project</p>
         </div>
       </div>
       {/* Header */}
@@ -3570,9 +3569,7 @@ export function ProjectWorkspace() {
               <div className="flex-1 overflow-auto p-2">
                 {explorerTree.length === 0 ? (
                   myAccess === 'read' ? (
-                    <p className="text-[11px] text-content-tertiary px-2 py-6 leading-relaxed text-center">
-                      You have Read on this project. You can inspect and discuss in chat. you cannot add files.
-                    </p>
+                    <p className="text-[11px] text-content-tertiary px-2 py-6 text-center">Read only</p>
                   ) : (
                   <StudioEmptyState />
                   )
@@ -3704,11 +3701,8 @@ export function ProjectWorkspace() {
           <div className="flex-1 overflow-auto px-4 py-4 space-y-3">
             {messages.length === 0 && !buildLive && (
               <div className="text-center py-10 px-4">
-                <p className="text-sm text-content-secondary mb-1">Start building with chat</p>
-                <p className="text-xs text-content-tertiary max-w-sm mx-auto">
-                  {canEdit
-                    ? 'Ask NOVA to add a page, fix a bug, or build an iPhone / Android app. Fresh builds show progress briefly, then in History.'
-                    : 'You have Read on this project. you can inspect and discuss the code, but you cannot edit or push.'}
+                <p className="text-sm text-content-secondary">
+                  {canEdit ? 'Start building with chat' : 'Read only'}
                 </p>
               </div>
             )}
@@ -4440,9 +4434,6 @@ export function ProjectWorkspace() {
                     <div className="h-full flex flex-col items-center justify-center text-center px-8 gap-2">
                       <Smartphone className="w-5 h-5 text-sky-400" />
                       <p className="text-sm text-content-secondary">Native project</p>
-                      <p className="text-xs text-content-tertiary max-w-sm leading-relaxed">
-                        Pick a device in chat to see a sized preview here. Ship from Xcode or Android Studio after you push to GitHub.
-                      </p>
                     </div>
                     )
                   ) : livePreviewUrl && !livePreviewUrl.includes('127.0.0.1:0') ? (
@@ -4465,16 +4456,13 @@ export function ProjectWorkspace() {
                         sandbox="allow-scripts"
                       />
                     <p className="absolute bottom-2 left-2 right-2 text-[10px] text-content-tertiary pointer-events-none">
-                      Sandbox preview: scripts allowed, no same-origin APIs or popups.
+                      Sandbox preview
                     </p>
                     </div>
                   ) : (
                     <div className="h-full flex flex-col items-center justify-center text-center px-6 gap-2">
                       <Play className="w-5 h-5 text-sky-400" />
-                      <p className="text-sm text-content-secondary">No static preview yet</p>
-                      <p className="text-xs text-content-tertiary max-w-xs">
-                        Ask NOVA in chat to create the page, then open Preview. This is static HTML in a sandbox (scripts only. no forms posting out). It is not a running npm server.
-                      </p>
+                      <p className="text-sm text-content-secondary">No preview yet</p>
                     </div>
                   )}
                 </div>

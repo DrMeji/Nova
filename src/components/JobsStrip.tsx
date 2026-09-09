@@ -118,12 +118,7 @@ export function JobsStrip({ variant = 'footer' }: { variant?: 'footer' | 'sideba
       ))}
       {downloading.length > 0 ? (
         <div className="flex items-center justify-between gap-3">
-          <div className="min-w-0">
-            <p className="text-[11px] text-content-secondary leading-tight">Pass the time</p>
-            <p className="text-[10px] text-content-tertiary leading-tight mt-0.5">
-              Extra models can finish in the background
-            </p>
-          </div>
+          <p className="text-[11px] text-content-secondary leading-tight truncate min-w-0">Downloading…</p>
           <PlayGameButton onClick={() => setPlayOpen(true)} className="shrink-0" />
         </div>
       ) : null}

@@ -306,7 +306,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         { pinnedAt: a.pinned ? '1' : undefined, updatedAt: a.updatedAt },
         { pinnedAt: b.pinned ? '1' : undefined, updatedAt: b.updatedAt },
       );
-    const sorted = [...chats].sort(byPin).slice(0, 5);
+    const sorted = [...chats].sort(byPin).slice(0, 7);
     return {
       chats: sorted,
       projects: [] as typeof sorted,
@@ -784,7 +784,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             </div>
 
             {/* Recent only scrolls */}
-            <div className="mt-4 min-h-0 flex-1 flex flex-col pt-2 border-t border-surface-border">
+            <div className="mt-1.5 min-h-0 flex-1 flex flex-col pt-1 border-t border-surface-border">
               <button
                 type="button"
                 onClick={() => setRecentOpen(o => !o)}
@@ -806,10 +806,10 @@ export function AppShell({ children }: { children: ReactNode }) {
               </button>
 
               {recentOpen && !collapsed && (
-                <div className="mt-1 min-h-0 flex-1 overflow-y-auto overscroll-contain flex flex-col gap-0.5">
+                <div className="mt-1 min-h-0 flex-1 max-h-[15.5rem] overflow-y-auto overscroll-contain flex flex-col gap-0.5 pr-0.5">
                   {recentFeed.mixed.length === 0 ? (
                     <p className="px-3 py-2 text-[11px] text-content-tertiary leading-snug">
-                      Chats you start will show up here.
+                      No recent chats
                     </p>
                   ) : (
                     recentFeed.mixed.map(renderRecentRow)
@@ -818,7 +818,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               )}
 
               {collapsed && recentOpen && (
-                <div className="mt-1 min-h-0 flex-1 overflow-y-auto overscroll-contain flex flex-col gap-0.5">
+                <div className="mt-1 min-h-0 flex-1 max-h-[15.5rem] overflow-y-auto overscroll-contain flex flex-col gap-0.5">
                   {recentFeed.mixed.map(item => {
                     const active = item.kind === 'chat'
                       ? activeChatId === item.id
@@ -874,9 +874,6 @@ export function AppShell({ children }: { children: ReactNode }) {
                       <span className={`mt-1 shrink-0 h-3.5 w-3.5 rounded-full ${presenceDotClass(opt.id)}`} />
                       <span className="min-w-0 flex-1">
                         <span className="block text-sm text-content-primary">{opt.label}</span>
-                        {opt.hint && (
-                          <span className="block text-[11px] text-content-tertiary leading-snug mt-0.5">{opt.hint}</span>
-                        )}
                       </span>
                     </button>
                   );

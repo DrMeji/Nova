@@ -186,29 +186,6 @@ export function PlayWhileDownloading({
               </div>
             </div>
 
-            <ul className="space-y-2 text-[12px] text-content-tertiary leading-relaxed">
-              <li className="flex gap-2">
-                <span className="text-content-secondary shrink-0">·</span>
-                <span>
-                  {complete
-                    ? 'Weights are on this PC — Chat can use this brain without waiting.'
-                    : 'NOVA Engine is pulling GGUF weights in the background while you play.'}
-                </span>
-              </li>
-              <li className="flex gap-2">
-                <span className="text-content-secondary shrink-0">·</span>
-                <span>This mini-game is built into NOVA — it does not add to the download.</span>
-              </li>
-              <li className="flex gap-2">
-                <span className="text-content-secondary shrink-0">·</span>
-                <span>
-                  {complete
-                    ? 'Close when you’re done, then continue setup with Enter NOVA.'
-                    : 'You can close this anytime — the install keeps going.'}
-                </span>
-              </li>
-            </ul>
-
             <button
               type="button"
               className="ark-btn-primary h-10 px-5 rounded-xl text-sm w-full mt-1"

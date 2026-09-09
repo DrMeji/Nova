@@ -1106,7 +1106,7 @@ export function LocalAI() {
                     </p>
                   ) : installed.length > 0 ? (
                     <p className="mt-3 text-xs text-content-secondary">
-                      {installed.length} model{installed.length === 1 ? '' : 's'} already installed — pick one from Overview or Storage.
+                      {installed.length} installed
                     </p>
                   ) : (
                     <>
@@ -1271,9 +1271,6 @@ export function LocalAI() {
                   <FolderOpen className="w-4 h-4 text-content-secondary" />
                   <h2 className="text-base font-semibold text-content-primary">Models folder</h2>
                 </div>
-                <p className="text-xs text-content-tertiary mb-3 leading-relaxed">
-                  GGUF weights download and load from this folder. Change it if you want models on another drive.
-                </p>
                 <p className="text-xs text-content-primary font-mono break-all mb-3 px-1">
                   {engineMeta?.modelsDir ?? '—'}
                 </p>
@@ -1325,12 +1322,6 @@ export function LocalAI() {
                     </button>
                   )}
                 </div>
-                <p className="text-[11px] text-content-tertiary mt-3 leading-relaxed">
-                  Existing downloads stay where they are. New GGUF installs go to the folder above.
-                  {engineMeta?.modelsDirIsCustom
-                    ? ` Default was ${engineMeta.modelsDirDefault ?? 'app data'}.`
-                    : ' Using the default NOVA Engine location.'}
-                </p>
               </section>
 
               <section>

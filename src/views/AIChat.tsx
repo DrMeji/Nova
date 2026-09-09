@@ -289,6 +289,7 @@ import {
   buildThreadSummaryFromMessages,
   sanitizeAssistantReply,
   usableAssistantText,
+  isCannedGreetingReply,
   historyWasCompacted,
 } from '@/lib/chatHistory';
 import {
@@ -449,34 +450,34 @@ type ChatModelOption = {
 
 const CHAT_MODELS: ChatModelOption[] = [
   // Chat. only Auto by default; keyed clouds + Ollama added at runtime
-  { id: 'NOVA-auto', name: 'NOVA', source: 'auto', detail: 'Best brain · stays on for this chat', kind: 'chat' },
+  { id: 'NOVA-auto', name: 'NOVA', source: 'auto', detail: '', kind: 'chat' },
   // Image. paths that generate today
-  { id: 'NOVA-auto', name: 'NOVA', source: 'auto', detail: 'Best path · stays on for this chat', kind: 'image' },
-  { id: 'NOVA-image-core', name: 'NOVA Image Core', source: 'local', detail: 'Free · Pollinations · local SD when installed', kind: 'image' },
-  { id: 'sd15-local', name: 'SD 1.5 Local', source: 'local', detail: 'On-device · install from Local AI', kind: 'image' },
-  { id: 'sdxl-turbo-local', name: 'SDXL Turbo Local', source: 'local', detail: 'Fast on-device · install from Local AI', kind: 'image' },
-  { id: 'flux-schnell-local', name: 'FLUX Schnell Local', source: 'local', detail: 'On-device FLUX · ~13 GB · Local AI', kind: 'image' },
-  { id: 'dall-e-3', name: 'DALL·E 3', source: 'cloud', detail: 'Cloud image · OpenAI key', kind: 'image' },
+  { id: 'NOVA-auto', name: 'NOVA', source: 'auto', detail: '', kind: 'image' },
+  { id: 'NOVA-image-core', name: 'NOVA Image Core', source: 'local', detail: '', kind: 'image' },
+  { id: 'sd15-local', name: 'SD 1.5 Local', source: 'local', detail: '', kind: 'image' },
+  { id: 'sdxl-turbo-local', name: 'SDXL Turbo Local', source: 'local', detail: '', kind: 'image' },
+  { id: 'flux-schnell-local', name: 'FLUX Schnell Local', source: 'local', detail: '', kind: 'image' },
+  { id: 'dall-e-3', name: 'DALL·E 3', source: 'cloud', detail: '', kind: 'image' },
   // Video. NOVA Engine only (Pollinations / HF / motion-still). Not Kling or Sora.
-  { id: 'NOVA-auto', name: 'NOVA', source: 'auto', detail: 'Best path · stays on for this chat', kind: 'video' },
-  { id: 'NOVA-video-core', name: 'NOVA Video Core', source: 'local', detail: 'Free MP4 when the host answers · motion still otherwise', kind: 'video' },
+  { id: 'NOVA-auto', name: 'NOVA', source: 'auto', detail: '', kind: 'video' },
+  { id: 'NOVA-video-core', name: 'NOVA Video Core', source: 'local', detail: '', kind: 'video' },
 ];
 
 /** Cloud chat options. only shown in the picker when that provider key exists. */
 const CLOUD_CHAT_WHEN_KEYED: (ChatModelOption & { keyId: string })[] = [
-  { id: 'groq-llama', name: 'Llama 3.3 (Groq)', source: 'cloud', detail: 'Free-key · fast', kind: 'chat', keyId: 'groq' },
-  { id: 'gemini-flash', name: 'Gemini 2.0 Flash', source: 'cloud', detail: 'Free-key · Google', kind: 'chat', keyId: 'google' },
-  { id: 'openrouter-free', name: 'OpenRouter Free', source: 'cloud', detail: 'Free routes', kind: 'chat', keyId: 'openrouter' },
-  { id: 'hf-llama', name: 'Llama 3.1 (HF)', source: 'cloud', detail: 'Free-key · Hugging Face', kind: 'chat', keyId: 'huggingface' },
-  { id: 'nvidia-llama', name: 'Llama 3.1 (NIM)', source: 'cloud', detail: 'Free-key · NVIDIA', kind: 'chat', keyId: 'nvidia' },
-  { id: 'together-llama', name: 'Llama 3.1 (Together)', source: 'cloud', detail: 'Free-key · Together', kind: 'chat', keyId: 'together' },
-  { id: 'fireworks-llama', name: 'Llama 3.1 (Fireworks)', source: 'cloud', detail: 'Free-key · Fireworks', kind: 'chat', keyId: 'fireworks' },
-  { id: 'deepseek-chat', name: 'DeepSeek Chat', source: 'cloud', detail: 'Free-key · DeepSeek', kind: 'chat', keyId: 'deepseek' },
-  { id: 'mistral-small', name: 'Mistral Small', source: 'cloud', detail: 'Free-key · Mistral', kind: 'chat', keyId: 'mistral' },
-  { id: 'cerebras-llama', name: 'Llama 3.1 (Cerebras)', source: 'cloud', detail: 'Free-key · ultra-fast', kind: 'chat', keyId: 'cerebras' },
-  { id: 'sambanova-llama', name: 'Llama 3.1 (SambaNova)', source: 'cloud', detail: 'Free-key · SambaNova', kind: 'chat', keyId: 'sambanova' },
-  { id: 'gpt-4o', name: 'GPT-4o', source: 'cloud', detail: 'Cloud chat and code', kind: 'chat', keyId: 'openai' },
-  { id: 'claude-sonnet', name: 'Claude Sonnet', source: 'cloud', detail: 'Cloud long context', kind: 'chat', keyId: 'anthropic' },
+  { id: 'groq-llama', name: 'Llama 3.3 (Groq)', source: 'cloud', detail: '', kind: 'chat', keyId: 'groq' },
+  { id: 'gemini-flash', name: 'Gemini 2.0 Flash', source: 'cloud', detail: '', kind: 'chat', keyId: 'google' },
+  { id: 'openrouter-free', name: 'OpenRouter Free', source: 'cloud', detail: '', kind: 'chat', keyId: 'openrouter' },
+  { id: 'hf-llama', name: 'Llama 3.1 (HF)', source: 'cloud', detail: '', kind: 'chat', keyId: 'huggingface' },
+  { id: 'nvidia-llama', name: 'Llama 3.1 (NIM)', source: 'cloud', detail: '', kind: 'chat', keyId: 'nvidia' },
+  { id: 'together-llama', name: 'Llama 3.1 (Together)', source: 'cloud', detail: '', kind: 'chat', keyId: 'together' },
+  { id: 'fireworks-llama', name: 'Llama 3.1 (Fireworks)', source: 'cloud', detail: '', kind: 'chat', keyId: 'fireworks' },
+  { id: 'deepseek-chat', name: 'DeepSeek Chat', source: 'cloud', detail: '', kind: 'chat', keyId: 'deepseek' },
+  { id: 'mistral-small', name: 'Mistral Small', source: 'cloud', detail: '', kind: 'chat', keyId: 'mistral' },
+  { id: 'cerebras-llama', name: 'Llama 3.1 (Cerebras)', source: 'cloud', detail: '', kind: 'chat', keyId: 'cerebras' },
+  { id: 'sambanova-llama', name: 'Llama 3.1 (SambaNova)', source: 'cloud', detail: '', kind: 'chat', keyId: 'sambanova' },
+  { id: 'gpt-4o', name: 'GPT-4o', source: 'cloud', detail: '', kind: 'chat', keyId: 'openai' },
+  { id: 'claude-sonnet', name: 'Claude Sonnet', source: 'cloud', detail: '', kind: 'chat', keyId: 'anthropic' },
 ];
 
 function kindForMode(mode: ChatMode): ModelKind {
@@ -8579,7 +8580,7 @@ export function AIChat() {
               id: 'NOVA-image-core',
               name: 'NOVA Image Core',
               source: 'local',
-              detail: 'Free · Pollinations · local SD when installed',
+              detail: '',
               kind: 'image',
             };
           const rewritten = rewriteImagePrompt(promptForGen);
@@ -8959,30 +8960,40 @@ export function AIChat() {
             stickyPinnedSource: useChatBrain ? undefined : sticky?.pinnedSource,
             history,
             onAttemptReset: () => {
-              // Silent local retries must clear the bubble so a shorter second draft
-              // cannot flash-over a longer outline, then finalize the worse one.
+              // Reset stream buffers for the next attempt, but keep the last good
+              // visible reply so deepen/retry does not wipe the bubble (flicker).
               streamedPartial = '';
-              lastGoodLive = '';
-              sawToken = false;
+              sawToken = Boolean(lastGoodLive);
               if (idleTimer) window.clearTimeout(idleTimer);
-              setMessages(prev => {
-                if (routeChatIdRef.current !== activeChatId) return prev;
-                const next = prev.map(m => (
-                  m.id === assistantId
-                    ? { ...m, content: `__generating__:chat:${statusLabel}` }
-                    : m
-                ));
-                messagesRef.current = next;
-                return next;
-              });
+              if (!lastGoodLive) {
+                setMessages(prev => {
+                  if (routeChatIdRef.current !== activeChatId) return prev;
+                  const next = prev.map(m => (
+                    m.id === assistantId
+                      ? { ...m, content: `__generating__:chat:${statusLabel}` }
+                      : m
+                  ));
+                  messagesRef.current = next;
+                  return next;
+                });
+              }
             },
             onChunk: prefs.streamResponses
               ? (piece) => {
               if (abandoned || stopRequestedRef.current || mySeq !== genSeqRef.current) return;
               if (!piece) return;
               streamedPartial += piece;
-              const live = usableAssistantText(streamedPartial, content, previousAssistant)
-                || streamedPartial.trim();
+              const usable = usableAssistantText(streamedPartial, content, previousAssistant);
+              const rawTrim = streamedPartial.trim();
+              // Never fall back to a canned greeting flash on a non-greeting ask.
+              const live = usable
+                || (
+                  rawTrim
+                  && !isCannedGreetingReply(rawTrim, content)
+                  && !looksLikePromptEcho(rawTrim)
+                    ? rawTrim
+                    : ''
+                );
               const liveClean = live && !looksLikePromptEcho(live) ? live : '';
               if (liveClean) {
                 // Prefer the longest clean draft this turn (don’t shrink when sanitize flickers).
@@ -9628,7 +9639,7 @@ export function AIChat() {
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="block text-sm text-content-primary truncate">{model.name}</span>
-                  <span className="block text-[11px] text-content-tertiary truncate">{model.detail}</span>
+                  {model.detail ? <span className="block text-[11px] text-content-tertiary truncate">{model.detail}</span> : null}
                 </span>
                 {activeModel.id === model.id && <Check className="w-4 h-4 text-ark-accent-green shrink-0" />}
               </button>
@@ -9651,7 +9662,7 @@ export function AIChat() {
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="block text-sm text-content-primary truncate">{model.name}</span>
-                  <span className="block text-[11px] text-content-tertiary truncate">{model.detail}</span>
+                  {model.detail ? <span className="block text-[11px] text-content-tertiary truncate">{model.detail}</span> : null}
                 </span>
               </div>
             ))}
@@ -9682,7 +9693,7 @@ export function AIChat() {
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="block text-sm text-content-primary truncate">{model.name}</span>
-                    <span className="block text-[11px] text-content-tertiary truncate">{model.detail}</span>
+                    {model.detail ? <span className="block text-[11px] text-content-tertiary truncate">{model.detail}</span> : null}
                   </span>
                   <button
                     type="button"
@@ -9730,7 +9741,7 @@ export function AIChat() {
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="block text-sm text-content-primary truncate">{model.name}</span>
-                  <span className="block text-[11px] text-content-tertiary truncate">{model.detail}</span>
+                  {model.detail ? <span className="block text-[11px] text-content-tertiary truncate">{model.detail}</span> : null}
                 </span>
                 {activeModel.id === model.id && <Check className="w-4 h-4 text-ark-accent-green shrink-0" />}
               </button>
@@ -9738,9 +9749,7 @@ export function AIChat() {
           </>
         )}
         {kind === 'chat' && keyedCloud.length === 0 && ollamaModels.length === 0 && engineLocalModels.length === 0 && (
-          <p className="px-3 py-2 text-[11px] text-content-tertiary leading-relaxed">
-            Install a local brain in Models, or connect a free key in Settings.
-          </p>
+          null
         )}
         {activeModel.source !== 'auto' && activeModel.kind === 'chat' && (
           <div className="border-t border-surface-border mt-1 pt-1 px-2 pb-1">
@@ -9947,7 +9956,7 @@ export function AIChat() {
                   {sec}s
                 </button>
               ))}
-              <span className="text-[10px] text-content-tertiary">Max 30s · quality render may take up to ~30s</span>
+              
             </div>
           )}
           <div className="flex gap-2 min-w-0 items-end">
@@ -10239,9 +10248,9 @@ export function AIChat() {
           {(() => {
             const parts = generating ? stackedLiveTurnParts(liveTurnMs) : null;
             return (
-              <div className="flex flex-col items-center justify-end shrink-0 self-end mb-2 w-[1.35rem] select-none">
+              <div className="flex flex-col items-center justify-end shrink-0 self-end gap-1.5 w-[2rem] select-none pb-0.5">
                 <div
-                  className="h-[1.7rem] w-full flex flex-col items-center justify-end tabular-nums leading-none pointer-events-none"
+                  className="min-h-[1.55rem] w-full flex flex-col items-center justify-end tabular-nums leading-none pointer-events-none"
                   title={parts ? `Working · ${parts.label}` : undefined}
                   aria-label={parts ? `Working ${parts.label}` : undefined}
                   aria-live="polite"
@@ -10257,8 +10266,7 @@ export function AIChat() {
                 <TokenUsageRing
                   contextRatio={tokenRatio}
                   modelRatio={modelRatio}
-                  size={20}
-                  className="text-content-primary shrink-0"
+                  className="shrink-0"
                   modelName={
                     activeModel.source === 'auto'
                       ? autoModelLabel
@@ -10416,7 +10424,6 @@ export function AIChat() {
       >
         <div className="rounded-2xl border border-sky-400/40 bg-ark-navy-900/95 px-6 py-4 text-center shadow-xl">
           <p className="text-sm font-medium text-content-primary">Drop folder or files</p>
-          <p className="text-[11px] text-content-tertiary mt-1">Add as many as you need. press Enter to read</p>
         </div>
       </div>
       {mode === 'voice' && !isVoiceTabEnabled() ? (
@@ -10439,9 +10446,6 @@ export function AIChat() {
           brainHint={
             capacity && !capacity.liveChat ? (
               <div className="rounded-xl border border-amber-500/25 bg-amber-500/10 px-4 py-3 text-center space-y-2.5">
-                <p className="text-xs text-amber-100/90 leading-relaxed">
-                  Voice needs a brain to answer. Connect a free API key in Models, or install a local brain in Local AI.
-                </p>
                 <div className="flex flex-wrap items-center justify-center gap-2">
                   <button
                     type="button"
@@ -10468,13 +10472,6 @@ export function AIChat() {
             <h1 className="text-2xl sm:text-3xl font-semibold text-content-primary tracking-tight mb-3 text-center">
               {greeting}
             </h1>
-            <p className="text-xs text-content-tertiary mb-4 text-center max-w-lg">
-              {capacity && !capacity.liveChat
-                ? (engineInstallingModels.length
-                  ? `Installing ${engineInstallingModels[0]?.name || 'local brain'}… Chat unlocks when it’s ready (or connect a free key).`
-                  : 'No live model yet. Connect a free key or install a local brain, then send a message.')
-                : null}
-            </p>
             {capacity && !capacity.liveChat && engineInstallingModels.length > 0 && (
               <div className="mb-6 max-w-md w-full px-2">
                 <RotatingTip />
@@ -10541,14 +10538,7 @@ export function AIChat() {
                 )}
               </>
             )}
-            {mode === 'video' && (
-              <>
-                <p className="text-[11px] text-content-tertiary text-center mt-4 max-w-md mx-auto">
-                  Pick clip length (10 / 20 / 30s) above the composer before you send. NOVA renders quality frames. expect ~15–30s.
-                </p>
-                {ideaGrid(VIDEO_IDEAS)}
-              </>
-            )}
+            {mode === 'video' && ideaGrid(VIDEO_IDEAS)}
             {mode === 'code' && (!capacity || !capacity.liveChat) && ideaGrid(CODE_IDEAS)}
           </div>
         )
@@ -10564,7 +10554,7 @@ export function AIChat() {
             <div className="max-w-6xl mx-auto w-full space-y-5">
               {messages.length === 0 && showOpenThread && (
                 <p className="text-center text-xs text-content-tertiary py-8">
-                  This chat is empty. Send a message to continue here.
+                  No messages yet
                 </p>
               )}
               {messages.map(msg => (

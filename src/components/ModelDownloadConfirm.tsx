@@ -45,7 +45,6 @@ export function ModelDownloadConfirm({
             <X className="w-4 h-4" />
           </button>
         </div>
-        <p className="text-sm text-content-secondary leading-relaxed">{purpose}</p>
         <div className="flex gap-2 mt-6">
           <button type="button" onClick={onCancel} className="ark-btn-secondary flex-1" disabled={busy}>
             Cancel

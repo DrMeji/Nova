@@ -574,9 +574,6 @@ export function MessageView() {
               </div>
               <div>
                 <h1 className="text-2xl font-semibold text-content-primary tracking-tight">Add a friend</h1>
-                <p className="text-sm text-content-tertiary mt-2 leading-relaxed">
-                  Enter their 7-digit NOVA ID. You’ll see them on the left when you have people to message.
-                </p>
               </div>
               <div className="flex items-center gap-2 rounded-full bg-ark-navy-900/80 border border-white/10 p-1.5 pl-4">
                 <input

@@ -108,15 +108,12 @@ export function VoiceSettingsPanel({ onSaved }: VoiceSettingsPanelProps) {
     <div className="space-y-4 pb-20">
       {isArkDevSession() && (
         <div className="rounded-xl border border-sky-500/25 bg-sky-500/10 p-3 text-xs text-sky-100/90">
-          Dev build · Voice tab is on here. Retail installs need the toggle below.
+          Dev build · Voice tab always on
         </div>
       )}
 
       <div className="rounded-xl border border-surface-border bg-ark-navy-900/40 p-4 space-y-3">
         <p className="text-sm font-medium text-content-primary">Voice chat</p>
-        <p className="text-xs text-content-tertiary leading-relaxed">
-          Talk with NOVA back and forth — questions, stories, chit-chat only. No builds, file edits, or PC control.
-        </p>
         <div className="flex items-center justify-between gap-4">
           <p className="text-sm text-content-primary">Enable Voice tab in Chat</p>
           <button
@@ -134,11 +131,6 @@ export function VoiceSettingsPanel({ onSaved }: VoiceSettingsPanelProps) {
             />
           </button>
         </div>
-        {voiceLive ? (
-          <p className="text-[11px] text-emerald-400">Voice tab is available in Chat.</p>
-        ) : (
-          <p className="text-[11px] text-content-tertiary">Turn on to show the Voice tab next to Chat.</p>
-        )}
       </div>
 
       <div className="rounded-xl border border-surface-border bg-ark-navy-900/40 p-4 space-y-3">
@@ -157,9 +149,6 @@ export function VoiceSettingsPanel({ onSaved }: VoiceSettingsPanelProps) {
             <RefreshCw className={`w-3 h-3 ${loadingDevices ? 'animate-spin' : ''}`} />
           </button>
         </div>
-        <p className="text-[11px] text-content-tertiary -mt-1">
-          NOVA picks your active mic automatically. Choose a device below to override.
-        </p>
         <select
           value={prefs.voiceInputAuto ? VOICE_DEVICE_AUTO : (prefs.voiceInputDeviceId || '')}
           onChange={e => {
@@ -195,9 +184,6 @@ export function VoiceSettingsPanel({ onSaved }: VoiceSettingsPanelProps) {
           <Volume2 className="w-4 h-4 text-content-secondary" />
           Headphones / speakers
         </p>
-        <p className="text-[11px] text-content-tertiary -mt-1">
-          NOVA follows your Windows default output. Override here if you want a specific device.
-        </p>
         <select
           value={prefs.voiceOutputAuto ? VOICE_DEVICE_AUTO : (prefs.voiceOutputDeviceId || '')}
           onChange={e => {
@@ -230,11 +216,6 @@ export function VoiceSettingsPanel({ onSaved }: VoiceSettingsPanelProps) {
 
       <div className="rounded-xl border border-surface-border bg-ark-navy-900/40 p-4 space-y-3">
         <p className="text-sm font-medium text-content-primary">Spoken voice</p>
-        <p className="text-xs text-content-tertiary leading-relaxed">
-          {neuralTts
-            ? 'Female or Male neural speech (natural voice, needs internet). Answers still come from your chat brain in Models.'
-            : 'Spoken voice falls back to your PC system voice. Use the NOVA desktop app for neural speech.'}
-        </p>
         <select
           value={spokenVoice}
           onChange={e => patch({ voiceTtsVoiceUri: e.target.value })}

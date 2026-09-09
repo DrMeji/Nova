@@ -70,40 +70,40 @@ const SECTIONS: { id: string; label: string; icon: typeof User; disabled?: boole
 ];
 
 const AI_MODES = [
-  { value: 'automatic', label: 'Automatic', description: 'NOVA Router: local → free keys → paid' },
-  { value: 'local_only', label: 'Local Only', description: 'Always use local AI, never use cloud' },
-  { value: 'cloud_when_available', label: 'Cloud When Available', description: 'Prefer free/paid cloud, local as backup' },
-  { value: 'local_fallback', label: 'Local Fallback', description: 'Try cloud first, then NOVA Engine' },
+  { value: 'automatic', label: 'Automatic' },
+  { value: 'local_only', label: 'Local Only' },
+  { value: 'cloud_when_available', label: 'Cloud When Available' },
+  { value: 'local_fallback', label: 'Local Fallback' },
 ];
 
 const DEFAULT_MODELS = [
-  { id: 'NOVA-auto', label: 'NOVA Auto', detail: 'Free-first · silent failover', source: 'auto' },
-  { id: 'qwen25-coder-14b', label: 'Qwen2.5 Coder 14B', detail: 'Local · coding', source: 'local' },
-  { id: 'qwen25-coder-7b', label: 'Qwen2.5 Coder 7B', detail: 'Local · balanced', source: 'local' },
-  { id: 'llama32-3b', label: 'Llama 3.2 3B', detail: 'Local · fast', source: 'local' },
-  { id: 'gpt-4o', label: 'GPT-4o', detail: 'Cloud · chat and code', source: 'cloud' },
-  { id: 'claude-sonnet', label: 'Claude Sonnet', detail: 'Cloud · long context', source: 'cloud' },
-  { id: 'deepseek-chat', label: 'DeepSeek Chat', detail: 'Cloud · coding + chat', source: 'cloud' },
-  { id: 'gemini-flash', label: 'Gemini 2.0 Flash', detail: 'Cloud · fast', source: 'cloud' },
+  { id: 'NOVA-auto', label: 'NOVA Auto', detail: '', source: 'auto' },
+  { id: 'qwen25-coder-14b', label: 'Qwen2.5 Coder 14B', detail: '', source: 'local' },
+  { id: 'qwen25-coder-7b', label: 'Qwen2.5 Coder 7B', detail: '', source: 'local' },
+  { id: 'llama32-3b', label: 'Llama 3.2 3B', detail: '', source: 'local' },
+  { id: 'gpt-4o', label: 'GPT-4o', detail: '', source: 'cloud' },
+  { id: 'claude-sonnet', label: 'Claude Sonnet', detail: '', source: 'cloud' },
+  { id: 'deepseek-chat', label: 'DeepSeek Chat', detail: '', source: 'cloud' },
+  { id: 'gemini-flash', label: 'Gemini 2.0 Flash', detail: '', source: 'cloud' },
 ];
 
 const PROVIDER_ROWS = [
-  { id: 'openai', name: 'OpenAI', hint: 'GPT models', keyUrl: 'https://platform.openai.com/api-keys' },
-  { id: 'anthropic', name: 'Anthropic', hint: 'Claude models', keyUrl: 'https://console.anthropic.com/settings/keys' },
-  { id: 'google', name: 'Google AI Studio', hint: 'Gemini models', keyUrl: 'https://aistudio.google.com/apikey' },
-  { id: 'groq', name: 'Groq', hint: 'Fast inference', keyUrl: 'https://console.groq.com/keys' },
-  { id: 'openrouter', name: 'OpenRouter', hint: 'Many models, one key', keyUrl: 'https://openrouter.ai/keys' },
-  { id: 'huggingface', name: 'Hugging Face', hint: 'Chat via Inference API', keyUrl: 'https://huggingface.co/settings/tokens' },
-  { id: 'nvidia', name: 'NVIDIA NIM', hint: 'Free NIM endpoints', keyUrl: 'https://build.nvidia.com/settings/api-keys' },
-  { id: 'together', name: 'Together AI', hint: 'Open model hosting', keyUrl: 'https://api.together.xyz/settings/api-keys' },
-  { id: 'fireworks', name: 'Fireworks', hint: 'Fast serverless open models', keyUrl: 'https://fireworks.ai/account/api-keys' },
-  { id: 'deepseek', name: 'DeepSeek', hint: 'Coding + chat API', keyUrl: 'https://platform.deepseek.com/api_keys' },
-  { id: 'mistral', name: 'Mistral', hint: 'Mistral + Codestral', keyUrl: 'https://console.mistral.ai/api-keys' },
-  { id: 'cerebras', name: 'Cerebras', hint: 'Ultra-fast Llama free tier', keyUrl: 'https://cloud.cerebras.ai' },
-  { id: 'sambanova', name: 'SambaNova', hint: 'SambaNova Cloud open models', keyUrl: 'https://cloud.sambanova.ai' },
-  { id: 'perplexity', name: 'Perplexity', hint: 'Sonar chat + search', keyUrl: 'https://www.perplexity.ai/settings/api' },
-  { id: 'xai', name: 'xAI', hint: 'Grok models', keyUrl: 'https://console.x.ai' },
-  { id: 'github-models', name: 'GitHub Models', hint: 'Retired. use Groq / Google / OpenRouter' },
+  { id: 'openai', name: 'OpenAI', keyUrl: 'https://platform.openai.com/api-keys' },
+  { id: 'anthropic', name: 'Anthropic', keyUrl: 'https://console.anthropic.com/settings/keys' },
+  { id: 'google', name: 'Google AI Studio', keyUrl: 'https://aistudio.google.com/apikey' },
+  { id: 'groq', name: 'Groq', keyUrl: 'https://console.groq.com/keys' },
+  { id: 'openrouter', name: 'OpenRouter', keyUrl: 'https://openrouter.ai/keys' },
+  { id: 'huggingface', name: 'Hugging Face', keyUrl: 'https://huggingface.co/settings/tokens' },
+  { id: 'nvidia', name: 'NVIDIA NIM', keyUrl: 'https://build.nvidia.com/settings/api-keys' },
+  { id: 'together', name: 'Together AI', keyUrl: 'https://api.together.xyz/settings/api-keys' },
+  { id: 'fireworks', name: 'Fireworks', keyUrl: 'https://fireworks.ai/account/api-keys' },
+  { id: 'deepseek', name: 'DeepSeek', keyUrl: 'https://platform.deepseek.com/api_keys' },
+  { id: 'mistral', name: 'Mistral', keyUrl: 'https://console.mistral.ai/api-keys' },
+  { id: 'cerebras', name: 'Cerebras', keyUrl: 'https://cloud.cerebras.ai' },
+  { id: 'sambanova', name: 'SambaNova', keyUrl: 'https://cloud.sambanova.ai' },
+  { id: 'perplexity', name: 'Perplexity', keyUrl: 'https://www.perplexity.ai/settings/api' },
+  { id: 'xai', name: 'xAI', keyUrl: 'https://console.x.ai' },
+  { id: 'github-models', name: 'GitHub Models' },
 ];
 
 const ACCENTS: { id: AccentPref; label: string; swatch: string }[] = [
@@ -507,8 +507,8 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
 
   return (
     <div ref={settingsRootRef} className="flex h-full min-h-0 min-w-0 animate-fade-in bg-ark-navy-900">
-      <div className={`${navCompact ? 'w-14' : 'w-56'} shrink-0 border-r border-surface-border flex flex-col min-h-0 min-w-0 bg-ark-navy-900`}>
-        <nav className={`flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-2 sm:p-3 flex flex-col gap-0.5 ${navCompact ? 'items-center' : ''}`}>
+      <div className={`${navCompact ? 'w-14' : 'w-60'} shrink-0 border-r border-surface-border flex flex-col min-h-0 min-w-0 bg-ark-navy-900`}>
+        <nav className={`flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-2.5 sm:p-3 flex flex-col gap-1 ${navCompact ? 'items-center' : ''}`}>
           {navSections.map(section => (
             <button
               key={section.id}
@@ -518,17 +518,17 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                 if (section.disabled || section.comingSoon) return;
                 setActiveSection(section.id);
               }}
-              className={`ark-nav-item w-full ${navCompact ? '!px-2 !gap-0 !justify-center w-10' : ''} ${activeSection === section.id ? 'active' : ''} ${
+              className={`settings-nav-item w-full ${navCompact ? 'settings-nav-item-compact' : ''} ${activeSection === section.id ? 'active' : ''} ${
                 section.disabled || section.comingSoon ? 'opacity-45 cursor-not-allowed pointer-events-none' : ''
               }`}
               title={section.comingSoon ? `${section.label} · coming soon` : section.disabled ? 'Locked' : section.label}
             >
-              <section.icon className="w-4 h-4 shrink-0" />
-              {!navCompact && <span className="flex-1 text-left truncate">{section.label}</span>}
+              <section.icon className="w-[1.125rem] h-[1.125rem] shrink-0" strokeWidth={1.75} />
+              {!navCompact && <span className="flex-1 text-left truncate text-[13px] leading-snug">{section.label}</span>}
               {!navCompact && section.comingSoon ? (
                 <span className="text-[9px] uppercase tracking-wide text-content-tertiary">Coming soon</span>
               ) : !navCompact && section.disabled ? (
-                <Lock className="w-3 h-3 ml-auto shrink-0 opacity-70" />
+                <Lock className="w-3.5 h-3.5 ml-auto shrink-0 opacity-70" />
               ) : null}
             </button>
           ))}
@@ -771,8 +771,8 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                   <label className="block text-xs font-medium text-content-secondary mb-2">Density</label>
                   <div className="grid grid-cols-1 min-[420px]:grid-cols-2 gap-2">
                     {([
-                      { id: 'comfortable' as DensityPref, label: 'Comfortable', hint: 'More spacing' },
-                      { id: 'compact' as DensityPref, label: 'Compact', hint: 'Tighter layout' },
+                      { id: 'comfortable' as DensityPref, label: 'Comfortable' },
+                      { id: 'compact' as DensityPref, label: 'Compact' },
                     ]).map(d => (
                       <button
                         key={d.id}
@@ -1268,9 +1268,6 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                   value={prefs.shareUsageStats}
                   onChange={v => patchPrefs({ shareUsageStats: v })}
                 />
-                <p className="text-[11px] text-content-tertiary -mt-1 px-0.5">
-                  When off (default), NOVA does not send usage pings. Cloud chat history also stays off unless Allow optional cloud sync is on.
-                </p>
                 <ToggleRow
                   label="Clear clipboard after image paste"
                   value={prefs.clearClipboardAfterPaste}
@@ -1807,17 +1804,11 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                   value={prefs.agentLoopEnabled !== false}
                   onChange={v => patchPrefs({ agentLoopEnabled: v })}
                 />
-                <p className="text-[11px] text-content-tertiary -mt-2 px-0.5">
-                  When on, Agent / Debug on a bound project search, read, edit, run, and verify in a loop (Stop anytime).
-                </p>
                 <ToggleRow
                   label="Commit after green verify"
                   value={Boolean(prefs.agentLoopCommitOnSuccess)}
                   onChange={v => patchPrefs({ agentLoopCommitOnSuccess: v })}
                 />
-                <p className="text-[11px] text-content-tertiary -mt-2 px-0.5">
-                  Optional. after a successful verify, run allowlisted git commit on the bound folder.
-                </p>
 
                 <ToggleRow
                   label="Allow Desktop folder access"
@@ -1956,11 +1947,6 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                       )}
                     </div>
                   </div>
-                  {updateInfo?.newerAvailable && updateInfo.setupAssetUrl && !downloadingUpdate ? (
-                    <p className="text-[11px] text-amber-200/90 leading-relaxed">
-                      A newer NOVA is ready. Install it now for the latest fixes and features.
-                    </p>
-                  ) : null}
                   {signingStatus ? (
                     <p className="text-[11px] text-content-tertiary leading-relaxed">
                       {signingStatus}

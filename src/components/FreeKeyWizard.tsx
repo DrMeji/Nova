@@ -8,52 +8,16 @@ type FreeKeyProvider = {
   id: string;
   name: string;
   signupUrl: string;
-  blurb: string;
 };
 
 const FREE_KEYS: FreeKeyProvider[] = [
-  {
-    id: 'groq',
-    name: 'Groq',
-    signupUrl: 'https://console.groq.com/keys',
-    blurb: 'Fast free Llama. best first free key.',
-  },
-  {
-    id: 'google',
-    name: 'Google AI Studio',
-    signupUrl: 'https://aistudio.google.com/apikey',
-    blurb: 'Gemini free tier. One key.',
-  },
-  {
-    id: 'openrouter',
-    name: 'OpenRouter',
-    signupUrl: 'https://openrouter.ai/keys',
-    blurb: 'Many free routes · good backup.',
-  },
-  {
-    id: 'huggingface',
-    name: 'Hugging Face',
-    signupUrl: 'https://huggingface.co/settings/tokens',
-    blurb: 'Free chat + FLUX images.',
-  },
-  {
-    id: 'together',
-    name: 'Together AI',
-    signupUrl: 'https://api.together.xyz/settings/api-keys',
-    blurb: 'Open model hosting.',
-  },
-  {
-    id: 'cerebras',
-    name: 'Cerebras',
-    signupUrl: 'https://cloud.cerebras.ai/',
-    blurb: 'Ultra-fast free Llama.',
-  },
-  {
-    id: 'sambanova',
-    name: 'SambaNova',
-    signupUrl: 'https://cloud.sambanova.ai/',
-    blurb: 'SambaNova Cloud free key.',
-  },
+  { id: 'groq', name: 'Groq', signupUrl: 'https://console.groq.com/keys' },
+  { id: 'google', name: 'Google AI Studio', signupUrl: 'https://aistudio.google.com/apikey' },
+  { id: 'openrouter', name: 'OpenRouter', signupUrl: 'https://openrouter.ai/keys' },
+  { id: 'huggingface', name: 'Hugging Face', signupUrl: 'https://huggingface.co/settings/tokens' },
+  { id: 'together', name: 'Together AI', signupUrl: 'https://api.together.xyz/settings/api-keys' },
+  { id: 'cerebras', name: 'Cerebras', signupUrl: 'https://cloud.cerebras.ai/' },
+  { id: 'sambanova', name: 'SambaNova', signupUrl: 'https://cloud.sambanova.ai/' },
 ];
 
 export function FreeKeyWizard({
@@ -94,7 +58,7 @@ export function FreeKeyWizard({
       await setProviderApiKey(id, value);
       setSaved(prev => ({ ...prev, [id]: Boolean(value) }));
       if (value) setDrafts(prev => ({ ...prev, [id]: '' }));
-      setValidation(prev => ({ ...prev, [id]: 'Saved · ready in Chat' }));
+      setValidation(prev => ({ ...prev, [id]: 'Saved' }));
     } catch (err) {
       setValidation(prev => ({
         ...prev,
@@ -128,10 +92,7 @@ export function FreeKeyWizard({
         <div className="sticky top-0 flex items-center justify-between gap-3 px-5 py-4 border-b border-surface-border bg-ark-navy-950/95 backdrop-blur">
           <div className="flex items-center gap-2 min-w-0">
             <KeyRound className="w-4 h-4 text-sky-400 shrink-0" />
-            <div>
-              <h2 className="text-base font-semibold text-content-primary">Connect a free key</h2>
-              <p className="text-[11px] text-content-tertiary">Unlock NOVA Auto failover. keys stay on this device.</p>
-            </div>
+            <h2 className="text-base font-semibold text-content-primary">Connect a free key</h2>
           </div>
           <button type="button" className="w-8 h-8 rounded-lg hover:bg-surface-hover flex items-center justify-center" onClick={onClose}>
             <X className="w-4 h-4 text-content-tertiary" />
@@ -142,10 +103,7 @@ export function FreeKeyWizard({
           {ordered.map(p => (
             <div key={p.id} className="rounded-xl border border-surface-border bg-surface-hover/20 p-3.5 space-y-2.5">
               <div className="flex items-start justify-between gap-2">
-                <div>
-                  <p className="text-sm font-medium text-content-primary">{p.name}</p>
-                  <p className="text-[11px] text-content-tertiary mt-0.5">{p.blurb}</p>
-                </div>
+                <p className="text-sm font-medium text-content-primary">{p.name}</p>
                 {saved[p.id] && (
                   <span className="inline-flex items-center gap-1 text-[10px] text-emerald-400 shrink-0">
                     <Check className="w-3 h-3" /> Connected
@@ -180,7 +138,7 @@ export function FreeKeyWizard({
               {saved[p.id] ? (
                 <div className="flex items-center justify-between gap-2">
                   <span className={`text-[11px] ${validation[p.id]?.startsWith('Failed') ? 'text-rose-400' : 'text-content-tertiary'}`}>
-                    {validation[p.id] || 'Probe the saved key without replacing it.'}
+                    {validation[p.id] || ''}
                   </span>
                   <button
                     type="button"

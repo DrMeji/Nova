@@ -384,9 +384,6 @@ export function NetworkingView() {
         <div className="h-full min-h-0 flex flex-col rounded-2xl border border-surface-border bg-ark-navy-900 shadow-[0_8px_32px_rgba(0,0,0,0.35)] overflow-hidden">
           <div className="shrink-0 px-5 sm:px-8 pt-5 pb-3">
             <GuestSocialBanner feature="networking" />
-            <p className="text-[10px] text-content-tertiary mt-2 text-center">
-              Posts sync for signed-in accounts. Post chat, code-view requests, and reports are currently saved on this device only.
-            </p>
             {/* Centered toolbar. Search and filter pill match size */}
             <div className="mt-3 flex items-center justify-center gap-2.5 flex-wrap">
               <div className="h-10 w-56 flex items-center gap-2 rounded-full bg-ark-navy-950/70 border border-white/10 px-3">
@@ -836,7 +833,6 @@ export function NetworkingView() {
                 <div className="shrink-0 px-4 pt-4 pb-2 flex items-center justify-between gap-2">
                   <div className="min-w-0">
                     <p className="text-xs font-medium text-content-primary">Post chat</p>
-                    <p className="text-[10px] text-content-tertiary mt-0.5">On this device only</p>
                   </div>
                   <button
                     type="button"
@@ -955,9 +951,6 @@ export function NetworkingView() {
                   e.target.value = '';
                 }}
               />
-              <p className="text-[10px] text-content-tertiary leading-relaxed">
-                If you claim theft, attach your original project so we can compare. Reviews usually take up to 24 hours.
-              </p>
             </div>
 
             <button
@@ -1070,7 +1063,6 @@ export function NetworkingView() {
             >
               <span className="min-w-0">
                 <span className="block text-sm text-content-primary">Willing to pay for help</span>
-                <span className="block text-[11px] text-content-tertiary mt-0.5">Shows a $ badge. payments come later</span>
               </span>
               <span className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
                 paying ? 'bg-emerald-500 text-white' : 'border border-white/15 text-content-tertiary'
@@ -1091,9 +1083,6 @@ export function NetworkingView() {
           >
             <span className="min-w-0">
               <span className="block text-sm text-content-primary">Allow messages on this post</span>
-              <span className="block text-[11px] text-content-tertiary mt-0.5">
-                People can chat on the post without DMing you
-              </span>
             </span>
             <span className={`text-[11px] shrink-0 ${allowDiscussionPost ? 'text-sky-300' : 'text-content-tertiary'}`}>
               {allowDiscussionPost ? 'On' : 'Off'}

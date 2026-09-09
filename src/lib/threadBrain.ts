@@ -151,7 +151,7 @@ export function autoPillLabel(_brain?: ThreadBrain | null): string {
 
 /** Short line for the Auto menu row. Auto stays selected; this is the brain it picked. */
 export function autoEquippedCaption(brain: ThreadBrain | null): string {
-  if (!brain?.modelName) return 'Picks the best brain for this chat';
+  if (!brain?.modelName) return '';
   const short = brain.modelName
     .replace(/^Local · /i, '')
     .replace(/^Free · /i, '')
@@ -160,7 +160,7 @@ export function autoEquippedCaption(brain: ThreadBrain | null): string {
     .replace(/ · switched$/i, '')
     .trim();
   const name = short.length > 28 ? `${short.slice(0, 26).trim()}…` : short;
-  if (!name) return 'Picks the best brain for this chat';
+  if (!name) return 'NOVA';
   if (brain.pinnedSource === 'local') return `Local · ${name}`;
   if (brain.tier === 'free-key' || brain.tier === 'no-key-free' || brain.pinnedSource === 'optional') {
     return `${name} · free`;
@@ -169,12 +169,7 @@ export function autoEquippedCaption(brain: ThreadBrain | null): string {
 }
 
 export function autoRingDetail(brain: ThreadBrain | null, kind?: ThreadBrainKind): string {
-  if (!brain) {
-    if (kind === 'image') return 'Picks best image path · stays on for this chat';
-    if (kind === 'video') return 'Picks best video path · stays on for this chat';
-    if (kind === 'coding') return 'Picks best coder · stays on for this chat';
-    return 'Picks best brain · stays on for this chat';
-  }
+  if (!brain) return '';
   if (brain.pinnedSource === 'local') return `Local · ${brain.modelName}`;
   if (brain.pinnedSource === 'optional') return `Optional · ${brain.modelName}`;
   return `Cloud · ${brain.modelName}`;
