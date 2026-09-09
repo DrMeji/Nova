@@ -47,6 +47,14 @@ if not exist "%ELECTRON_EXE%" (
 echo Stopping any old Electron window...
 taskkill /F /IM electron.exe >nul 2>&1
 
+echo Typechecking...
+call npm run typecheck
+if errorlevel 1 (
+  echo ERROR: Typecheck failed. Fix errors before launching.
+  pause
+  exit /b 1
+)
+
 echo Building...
 call npm run build
 if errorlevel 1 (
