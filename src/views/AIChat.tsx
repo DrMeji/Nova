@@ -5658,10 +5658,16 @@ export function AIChat() {
               filesNow = firstPassFiles;
             }
             filesNow = mergeBriefNpmDependencies(filesNow, briefForBuild);
-            uiBuilt = true;
+            // Marketing / rich briefs: a mid-size draft is NOT "built" — Ready gate decides.
+            const draftOnly = briefLooksLikeMarketingLanding(briefForBuild)
+              || isThinProductUiSource(filesNow['src/App.jsx'] || filesNow['src/App.tsx'] || '', briefForBuild)
+              || looksLikeFillerStubAppSource(filesNow['src/App.jsx'] || filesNow['src/App.tsx'] || '');
+            if (!draftOnly) uiBuilt = true;
             const changed = Object.keys(filesNow).filter((p) => /(?:^|\/)App\.(jsx|tsx|css)$|index\.css$/i.test(p.replace(/\\/g, '/')));
-            followNote = `\n\nDraft UI kept (${changed.slice(0, 8).join(', ')}) — this pass is lighter than the full brief.`
-              + '\n\nTell me what you want next — layout, sections, motion, or polish — and I’ll expand that.';
+            followNote = draftOnly
+              ? `\n\nDraft UI on disk (${changed.slice(0, 8).join(', ')}) — still too light for the brief; continuing Preview checks…`
+              : `\n\nDraft UI kept (${changed.slice(0, 8).join(', ')}) — this pass is lighter than the full brief.`
+                + '\n\nTell me what you want next — layout, sections, motion, or polish — and I’ll expand that.';
           } else {
           // Keep the empty scaffold on disk — do not leave a half-stub UI that looks "done".
           filesNow = { ...seedFiles, ...mergeBriefNpmDependencies(seedFiles, briefForBuild) };

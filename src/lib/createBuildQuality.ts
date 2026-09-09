@@ -494,13 +494,19 @@ export function isPreviewReady(
 
   // Landing / restaurant / marketing: brand + one paragraph is never Ready.
   if (briefLooksLikeMarketingLanding(brief)) {
-    const hasStructure = /<(?:section|header|footer|nav|main|article)\b/i.test(app);
+    const hasStructure = /<(?:section|header|footer|nav|main|article)\b/i.test(app)
+      || /className=["'][^"']*\b(?:hero|menu|footer|nav|header)\b/i.test(app);
     const hasCta = /<(?:button|a)\b/i.test(app)
       || /\b(?:cta|order|reserve|book|explore|menu)\b/i.test(app);
     const cssLen = cssBlob.replace(/\s+/g, '').length;
-    if (app.length < 800) reasons.push('landing App.jsx too thin for a real page');
+    if (app.length < 1200) reasons.push('landing App.jsx too thin for a real page');
     if (!hasStructure) reasons.push('landing App missing sections (hero/menu/footer)');
-    if (cssLen < 400) reasons.push('landing CSS too thin');
+    if (cssLen < 800) reasons.push('landing CSS too thin');
+    if (/\b(?:restaurant|bistro|dishes?)\b/i.test(brief)
+      && /\b(?:coffee|cafe|latte|espresso|mocha|roast)\b/i.test(app)
+      && !/\b(?:restaurant|seafood|dish|entree|dinner|kitchen|galley)\b/i.test(app)) {
+      reasons.push('restaurant brief built as a coffee shop instead');
+    }
     if (/\b(?:restaurant|menu|dishes?|cafe|bistro)\b/i.test(brief) && !/\b(?:menu|dish|price|\$\d)/i.test(app)) {
       reasons.push('restaurant/menu brief missing menu content');
     }
