@@ -167,19 +167,34 @@ export function ensureViteReactProjectFiles(
     const tsxBroken = looksLikeReactEntrypointSource(next['src/App.tsx'] || '');
     const jsxEmpty = (() => {
       const body = next['src/App.jsx'] || '';
-      if (!body || body.length >= 500) return false;
+      // Missing App.jsx counts as empty when we only have a broken/missing twin situation.
+      if (!body) return true;
+      if (body.length >= 500 && !looksLikeFillerStubAppSource(body)) return false;
+      if (looksLikeFillerStubAppSource(body)) return true;
       if (/return\s*\(\s*<div className=["']app["']\s*\/>\s*\)/i.test(body)) return true;
       if (body.length < 280 && !/<h1\b|<section\b|<header\b/i.test(body)) return true;
       return false;
     })();
     const tsxEmpty = (() => {
       const body = next['src/App.tsx'] || '';
-      if (!body || body.length >= 500) return false;
+      if (!body) return true;
+      if (body.length >= 500 && !looksLikeFillerStubAppSource(body)) return false;
+      if (looksLikeFillerStubAppSource(body)) return true;
       if (/return\s*\(\s*<div className=["']app["']\s*\/>\s*\)/i.test(body)) return true;
       if (body.length < 280 && !/<h1\b|<section\b|<header\b/i.test(body)) return true;
       return false;
     })();
-    if (jsxBroken || tsxBroken || (jsxEmpty && tsxEmpty) || (jsxBroken && tsxEmpty) || (tsxBroken && jsxEmpty)) {
+    // Only one App.* present: empty if that one is empty (don't require both).
+    const onlyJsx = Boolean(next['src/App.jsx']) && next['src/App.tsx'] == null;
+    const onlyTsx = Boolean(next['src/App.tsx']) && next['src/App.jsx'] == null;
+    const bothMissingOrEmpty = (jsxEmpty && tsxEmpty)
+      || (onlyJsx && jsxEmpty)
+      || (onlyTsx && tsxEmpty);
+    // Filler stubs with an <h1> must NOT be replaced by the canned cafe shell —
+    // Ready should fail and create flow retries / honest failure instead.
+    const fillerOnly = looksLikeFillerStubAppSource(next['src/App.jsx'] || '')
+      || looksLikeFillerStubAppSource(next['src/App.tsx'] || '');
+    if (!fillerOnly && (jsxBroken || tsxBroken || bothMissingOrEmpty || (jsxBroken && tsxEmpty) || (tsxBroken && jsxEmpty))) {
       const shell = buildLastResortMarketingApp(projectName);
       next['src/App.jsx'] = shell.app;
       next['src/App.css'] = shell.css;
@@ -228,6 +243,7 @@ export function scoreAppSource(body: string): number {
   if (!s.trim()) return -1;
   let n = s.length;
   if (looksLikeReactEntrypointSource(s)) n -= 8000;
+  if (looksLikeFillerStubAppSource(s)) n -= 6000;
   if (/return\s*\(\s*<div className=["']app["']\s*\/>\s*\)/i.test(s)) n -= 5000;
   if (/return\s*\(\s*<div className=["']app["']\s*>\s*<\/div>\s*\)/i.test(s)) n -= 5000;
   if (/NOVA-search|Ask NOVA/i.test(s)) n -= 3000;
@@ -241,10 +257,28 @@ export function scoreAppSource(body: string): number {
   return n;
 }
 
+/** Filler / demo copy the Free model often ships instead of a real product UI. */
+export function looksLikeFillerStubAppSource(body: string): boolean {
+  const s = String(body || '');
+  if (!s.trim()) return false;
+  if (/\b(?:this is a sample text|sample text|lorem ipsum|placeholder text|coming soon|hello world|your (?:app|site|content) here)\b/i.test(s)) {
+    return true;
+  }
+  // Title + one short paragraph, no real landing structure.
+  const tags = s.match(/<[A-Za-z]/g) || [];
+  const hasBrandTitle = /<h1\b/i.test(s);
+  const hasStructure = /<(?:section|header|footer|nav|main|article)\b/i.test(s);
+  if (hasBrandTitle && !hasStructure && s.length < 700 && tags.length <= 6) {
+    return true;
+  }
+  return false;
+}
+
 export function isEmptyOrStubAppSource(body: string): boolean {
   const s = String(body || '');
   if (!s.trim()) return true;
   if (looksLikeReactEntrypointSource(s)) return true;
+  if (looksLikeFillerStubAppSource(s)) return true;
   if (/return\s*\(\s*<div className=["']app["']\s*\/>\s*\)/i.test(s)) return true;
   if (/return\s*\(\s*<div className=["']app["']\s*>\s*<\/div>\s*\)/i.test(s)) return true;
   if (s.length < 280 && !/<h1\b|<section\b|<header\b|<main\b|<nav\b|<canvas\b/i.test(s)) return true;
@@ -259,6 +293,17 @@ export function isEmptyOrStubAppSource(body: string): boolean {
     return true;
   }
   return false;
+}
+
+/** Marketing / restaurant / landing briefs need real page depth before Preview Ready. */
+export function briefLooksLikeMarketingLanding(brief: string): boolean {
+  const t = String(brief || '');
+  if (!t.trim()) return false;
+  if (/\b(?:dashboard|kanban|inbox|workspace|transactions?|accounts?|todo|tracker|application)\b/i.test(t)
+    && !/\b(?:landing|restaurant|cafe|menu|marketing)\b/i.test(t)) {
+    return false;
+  }
+  return /\b(?:landing(?:\s+page)?|marketing\s+site|restaurant|bistro|bakery|cafe|coffee\s+shop|roaster|menu\s+highlights|hero|tagline|dishes?|website)\b/i.test(t);
 }
 
 /**
@@ -389,7 +434,7 @@ body { margin: 0; font-family: "Iowan Old Style", "Palatino Linotype", Palatino,
 /** True when Preview/Localhost should show a real product shell, not a black empty window. */
 export function isPreviewReady(
   files: Record<string, string>,
-  opts?: { productName?: string; requireInteractive?: boolean },
+  opts?: { productName?: string; requireInteractive?: boolean; brief?: string },
 ): PreviewReadyResult {
   const reasons: string[] = [];
   const jsx = files['src/App.jsx'] || '';
@@ -403,8 +448,11 @@ export function isPreviewReady(
   };
   const app = scoreApp(jsx) >= scoreApp(tsx) ? jsx : tsx;
   const css = files['src/App.css'] || '';
+  const indexCss = files['src/index.css'] || '';
+  const cssBlob = `${css}\n${indexCss}`;
   const html = files['index.html'] || '';
   const pkg = files['package.json'] || '';
+  const brief = String(opts?.brief || '');
 
   if (!pkg || !/"vite"/i.test(pkg)) reasons.push('missing Vite package.json');
   if (!isValidViteIndexHtml(html)) reasons.push('index.html is not a Vite entry');
@@ -419,6 +467,9 @@ export function isPreviewReady(
   // Empty shell only
   if (/return\s*\(\s*<div className=["']app["']\s*\/>\s*\)/i.test(app) && app.length < 200) {
     reasons.push('App is still an empty shell');
+  }
+  if (looksLikeFillerStubAppSource(app)) {
+    reasons.push('App is still a filler stub (sample/placeholder text)');
   }
   if (/NOVA-search/i.test(app) || /NOVA-search/i.test(html)) {
     reasons.push('App still looks like a search chrome stub');
@@ -439,6 +490,23 @@ export function isPreviewReady(
     && !/<(?:section|nav|header|main|canvas|button)/i.test(app)
   ) {
     reasons.push('App is a thin placeholder shell');
+  }
+
+  // Landing / restaurant / marketing: brand + one paragraph is never Ready.
+  if (briefLooksLikeMarketingLanding(brief)) {
+    const hasStructure = /<(?:section|header|footer|nav|main|article)\b/i.test(app);
+    const hasCta = /<(?:button|a)\b/i.test(app)
+      || /\b(?:cta|order|reserve|book|explore|menu)\b/i.test(app);
+    const cssLen = cssBlob.replace(/\s+/g, '').length;
+    if (app.length < 800) reasons.push('landing App.jsx too thin for a real page');
+    if (!hasStructure) reasons.push('landing App missing sections (hero/menu/footer)');
+    if (cssLen < 400) reasons.push('landing CSS too thin');
+    if (/\b(?:restaurant|menu|dishes?|cafe|bistro)\b/i.test(brief) && !/\b(?:menu|dish|price|\$\d)/i.test(app)) {
+      reasons.push('restaurant/menu brief missing menu content');
+    }
+    if (!hasCta && /\b(?:cta|button|order|reserve|explore)\b/i.test(brief)) {
+      reasons.push('landing App missing a primary CTA');
+    }
   }
 
   const wantName = String(opts?.productName || '').trim();

@@ -250,11 +250,13 @@ import {
   type MultiModelPartResult,
 } from '@/lib/chatMultiModelBuild';
 import {
+  briefLooksLikeMarketingLanding,
   briefRequiresInteractiveApp,
   ensureViteReactProjectFiles,
   isPreviewReady,
   isPlayableGameReady,
   isPlayableArcadeGameReady,
+  looksLikeFillerStubAppSource,
   stripModelProseFromSource,
   ensureProductBrandInApp,
 } from '@/lib/createBuildQuality';
@@ -5217,13 +5219,13 @@ export function AIChat() {
                 '}',
                 '```',
               ].join('\n')
-              : 'App.jsx must be a real interactive product UI matching the brief — not an empty shell, not a single search box, not a description.',
+              : 'App.jsx must be a real interactive product UI matching the brief — not an empty shell, not a single search box, not a description, not “This is a sample text”, not lorem/placeholder filler.',
             exactMinimal
               ? 'If the brief specifies exact text (e.g. NOVA SIGNAL), that string MUST appear in App.jsx. Background and icon sizes must match.'
               : 'Take the time needed (up to several minutes for a full replica site). For a rich site/app expect App.jsx well over 200 lines and substantial CSS with layout, typography, motion, and multiple sections (hero, nav, content, footer as appropriate). Prefer quality over speed.',
             exactMinimal
               ? ''
-              : 'Do not stop at a minimal form+list stub when the brief asks for a polished product experience.',
+              : 'Do not stop at a minimal form+list stub when the brief asks for a polished product experience. Restaurant/landing briefs MUST include a full-bleed hero, brand as the hero signal, a primary CTA, real menu/content sections, and a footer — never a centered title on a blank page.',
             exactMinimal
               ? ''
               : spatialBrief
@@ -5475,9 +5477,9 @@ export function AIChat() {
         };
         const cssTooThin = (() => {
           if (exactMinimalAsk) return false;
-          if (!/\b(?:twitch|streaming|live\s*stream|landing|marketing|hero|multi-?section|apple\.com|replica)\b/i.test(briefForBuild)) return false;
+          if (!/\b(?:twitch|streaming|live\s*stream|landing|marketing|hero|multi-?section|apple\.com|replica|restaurant|bistro|bakery|cafe|menu|dishes?)\b/i.test(briefForBuild)) return false;
           const css = `${filesNow['src/App.css'] || ''}\n${filesNow['src/index.css'] || ''}`;
-          return css.replace(/\s+/g, '').length < 200;
+          return css.replace(/\s+/g, '').length < 400;
         })();
         const needsUiRetry = (
           (
@@ -5677,7 +5679,7 @@ export function AIChat() {
             /* ignore */
           }
           // Wipe any stub App the model left on disk so Preview matches the honest failure.
-          const revertBlocks = ['src/App.jsx', 'src/App.css', 'src/index.css']
+          const revertBlocks = ['src/App.jsx', 'src/App.tsx', 'src/App.css', 'src/index.css', 'src/main.tsx']
             .filter((p) => filesNow[p] != null)
             .map((p) => `@@@FILE ${p}\n${filesNow[p]}`)
             .join('\n');
@@ -5868,17 +5870,38 @@ export function AIChat() {
               }
             }
           }
-          const marketingLanding = /\b(?:landing|marketing\s+site|coffee|cafe|roaster|menu\s+highlights|cafe\s+hours|website)\b/i.test(briefForBuild)
-            && !/\b(?:dashboard|kanban|inbox|workspace|transactions?|accounts?|todo|tracker|app|application)\b/i.test(briefForBuild);
+          const marketingLanding = briefLooksLikeMarketingLanding(briefForBuild)
+            && !/\b(?:dashboard|kanban|inbox|workspace|transactions?|accounts?|todo|tracker|application)\b/i.test(briefForBuild);
           const previewOpts = {
             productName: buildIntent.name,
             requireInteractive: !marketingLanding && briefRequiresInteractiveApp(briefForBuild),
+            brief: briefForBuild,
           };
           let ready = looksLikePlayableCanvasGame(briefForBuild, buildIntent.name)
             ? (looksLikeFpsGame(briefForBuild, buildIntent.name)
               ? isPlayableGameReady(filesNow)
               : isPlayableArcadeGameReady(filesNow))
             : isPreviewReady(filesNow, previewOpts);
+          // Never ship a thin / filler landing as Ready even if older gates were soft.
+          {
+            const curApp = filesNow['src/App.jsx'] || filesNow['src/App.tsx'] || '';
+            if (
+              ready.ok
+              && !looksLikePlayableCanvasGame(briefForBuild, buildIntent.name)
+              && (
+                looksLikeFillerStubAppSource(curApp)
+                || isThinProductUiSource(curApp, briefForBuild)
+              )
+            ) {
+              ready = {
+                ok: false,
+                reasons: [
+                  ...(looksLikeFillerStubAppSource(curApp) ? ['App is still a filler stub'] : []),
+                  ...(isThinProductUiSource(curApp, briefForBuild) ? ['App still too thin for the brief'] : []),
+                ],
+              };
+            }
+          }
           if (!ready.ok) {
             noteThought(`Preview check failed (${ready.reasons.slice(0, 2).join('; ')}) — adjusting files…`);
             // Strip prose leaks then re-check before giving up.
@@ -5895,6 +5918,78 @@ export function AIChat() {
                 ? isPlayableGameReady(filesNow)
                 : isPlayableArcadeGameReady(filesNow))
               : isPreviewReady(filesNow, previewOpts);
+          }
+          // Marketing / restaurant landings: rebuild when Ready fails on thin/filler stubs.
+          if (
+            !ready.ok
+            && marketingLanding
+            && mySeq === genSeqRef.current
+            && !stopRequestedRef.current
+            && ready.reasons.some((r) => /filler|thin|landing|menu|CSS|sections|CTA|stub/i.test(r))
+          ) {
+            noteThought('Draft wasn’t a real landing page — rebuilding hero, menu, and footer…');
+            try {
+              const rebuild = await Promise.race([
+                answerStudio(
+                  {
+                    userMessage: [
+                      buildUiPrompt('retry'),
+                      '',
+                      `CRITICAL: Brand name "${buildIntent.name}" must be the hero-level signal.`,
+                      'CRITICAL: Full-bleed hero + one tagline + one primary CTA + real content sections + footer.',
+                      'CRITICAL: If this is a restaurant/menu brief, include exactly the dishes/items requested with prices.',
+                      'CRITICAL: Distinctive non-generic CSS (not purple-on-white, not cream+terracotta). No sample/placeholder text.',
+                      'Emit complete @@@FILE blocks for src/App.jsx (or src/App.tsx), src/App.css, and src/index.css.',
+                    ].join('\n'),
+                    files: seedFiles,
+                    projectName: buildIntent.name,
+                    mode: 'code',
+                    preferredModelId: pinnedModel.id,
+                    preferredModelName: pinnedModel.name,
+                    preferredSource: pinnedModel.source,
+                    planOnly: false,
+                    allowFileEdits: true,
+                    shouldAbort: () => mySeq !== genSeqRef.current || stopRequestedRef.current,
+                  },
+                  (live) => {
+                    if (mySeq !== genSeqRef.current || stopRequestedRef.current) return;
+                    const text = String(live || '').trim();
+                    if (text.length < 2) return;
+                    pushAssistantStatus(liveCodingStatusText(text));
+                  },
+                ),
+                new Promise<null>((resolve) => { window.setTimeout(() => resolve(null), 300_000); }),
+              ]);
+              const rebuildReply = String(rebuild?.text || '').trim();
+              if (rebuildReply) {
+                const rebuilt = await applyChatReplyEdits({
+                  reply: rebuildReply,
+                  projectId: pid,
+                  projectName: buildIntent.name,
+                  files: seedFiles,
+                  userMessage: briefForBuild,
+                  diskRoot: originDiskRoot,
+                });
+                if (rebuilt.ok && rebuilt.updated.length) {
+                  filesNow = rebuilt.files;
+                  for (const key of Object.keys(filesNow)) {
+                    const cleaned = stripModelProseFromSource(key, filesNow[key]);
+                    if (cleaned !== filesNow[key]) filesNow = { ...filesNow, [key]: cleaned };
+                  }
+                  filesNow = ensureViteReactProjectFiles(filesNow, buildIntent.name).files;
+                  ready = isPreviewReady(filesNow, previewOpts);
+                  const rebuiltApp = filesNow['src/App.jsx'] || filesNow['src/App.tsx'] || '';
+                  if (
+                    ready.ok
+                    && (looksLikeFillerStubAppSource(rebuiltApp) || isThinProductUiSource(rebuiltApp, briefForBuild))
+                  ) {
+                    ready = { ok: false, reasons: ['Rebuilt App still too thin / filler'] };
+                  }
+                }
+              }
+            } catch {
+              /* keep prior ready state */
+            }
           }
           // Interactive workspace briefs: static HTML-in-JSX shells must be rebuilt with real state.
           if (

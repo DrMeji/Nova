@@ -73,4 +73,43 @@ const hit = isPreviewReady({
 }, { productName: 'Copper Mug Roasters' });
 console.log(JSON.stringify({ missOk: miss.ok, missReasons: miss.reasons, hitOk: hit.ok, hitReasons: hit.reasons }));
 if (miss.ok || !hit.ok) process.exit(5);
+
+// HarborGlow-style Free-model stub must NEVER be Preview-ready for a restaurant landing brief.
+const harborBrief = 'Create a Vite + React site named HarborGlow. Restaurant landing page with full-bleed hero, tagline, CTA, Menu with 3 dishes, footer.';
+const harborStub = {
+  'src/App.tsx': `import './App.css';
+
+export default function App() {
+  return (
+    <div className="app">
+      <h1>HarborGlow</h1>
+      <p>This is a sample text.</p>
+    </div>
+  );
+}
+`,
+  'src/App.css': `.app {
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background-color: #f7f7f7;
+}
+
+h1 { font-size: 48px; font-weight: bold; color: #333; }
+p { font-size: 24px; color: #666; }
+`,
+  'package.json': JSON.stringify({ dependencies: { vite: '5', react: '18' } }),
+  'index.html': '<!doctype html><html><body><div id="root"></div><script type="module" src="/src/main.jsx"></script></body></html>',
+  'src/main.jsx': 'import App from "./App.tsx"',
+};
+const harborReady = isPreviewReady(harborStub, {
+  productName: 'HarborGlow',
+  brief: harborBrief,
+});
+console.log(JSON.stringify({ harborOk: harborReady.ok, harborReasons: harborReady.reasons }));
+if (harborReady.ok) {
+  console.error('FAIL: HarborGlow sample stub must not be Preview-ready');
+  process.exit(6);
+}
 console.log('OK');

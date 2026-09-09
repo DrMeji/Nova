@@ -1043,7 +1043,7 @@ export function isThinProductUiSource(
   ) {
     return s.length < 80 || tags.length < 1;
   }
-  const richBrief = /\b(?:landing|marketing|museum|store|shop|portfolio|animation|hero|multi-?section|fully built|premium|cinematic|gallery|editorial|twitch|streaming|live\s*stream|streamer|netflix|watch\s*page|browse|apple\.com|replica|exact\s+replica|pac-?man|game|three\.?js|3d)\b/i.test(ask)
+  const richBrief = /\b(?:landing|marketing|museum|store|shop|portfolio|animation|hero|multi-?section|fully built|premium|cinematic|gallery|editorial|twitch|streaming|live\s*stream|streamer|netflix|watch\s*page|browse|apple\.com|replica|exact\s+replica|pac-?man|game|three\.?js|3d|restaurant|bistro|bakery|cafe|menu|dishes?)\b/i.test(ask)
     || /\b(?:first real ui|from this brief|product UI matching)\b/i.test(ask);
   if (!richBrief) {
     // Simple tools/trackers: only reject truly tiny shells.

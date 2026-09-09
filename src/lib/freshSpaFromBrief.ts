@@ -40,6 +40,10 @@ export function isBrokenReactAppSource(appSource: string | undefined | null): bo
   if (/\bcreateRoot\s*\(/.test(s) && /\bimport\s+App\b/.test(s)) return true;
   if (/\bReactDOM\.(?:createRoot|render)\s*\(/.test(s) && /\bimport\s+App\b/.test(s)) return true;
   if (/from\s+['"]\.\/App['"]/.test(s) && /\brender\s*\(/.test(s)) return true;
+  // Free-model filler: title + "sample text" / lorem — never a product UI.
+  if (/\b(?:this is a sample text|sample text|lorem ipsum|placeholder text|coming soon|hello world)\b/i.test(s)) {
+    return true;
+  }
   // Endless SVG path / attribute loops (local-model failure mode).
   // Require path-like content — large real games can sit under 100 unique chars.
   if (
@@ -72,10 +76,13 @@ export function isBrokenReactAppSource(appSource: string | undefined | null): bo
     || /function\s+App\s*\(/i.test(s)
     || /(?:const|let|var)\s+App\s*=\s*(?:async\s*)?(?:\(|function)/i.test(s);
   const tagCount = (s.match(/<[A-Za-z]/g) || []).length;
+  const hasRealStructure = /<(?:section|header|footer|nav|main|article|canvas)\b/i.test(s);
   if (s.length < 400) {
-    // Allow intentionally tiny exact UIs (black screen + icon) when App exports real JSX.
-    if (s.length >= 160 && hasAppComponent && tagCount >= 2) {
+    // Allow intentionally tiny exact UIs when App exports real JSX — but not title+filler.
+    if (s.length >= 160 && hasAppComponent && tagCount >= 2 && hasRealStructure) {
       /* ok */
+    } else if (s.length >= 160 && hasAppComponent && tagCount >= 3 && /<(?:button|a)\b/i.test(s) && /<h1\b/i.test(s)) {
+      /* ok — minimal branded hero + CTA */
     } else {
       return true;
     }
