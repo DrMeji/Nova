@@ -1,15 +1,41 @@
 /**
- * Smoke packaged win-unpacked NOVA.exe — must show Auth UI, not blank root.
+ * Smoke packaged NOVA.exe — must show Auth UI, not blank root.
+ *
+ * Resolution order:
+ *   1) NOVA_SMOKE_EXE env (installed Start Menu path or custom)
+ *   2) release/win-unpacked/NOVA.exe (dir build)
+ *   3) Common installed paths after Setup.exe
+ *
+ * Installer itself is not silent-automated here; after you run NOVA-Setup.exe once,
+ * point this smoke at the installed exe via NOVA_SMOKE_EXE or let path #3 find it.
  */
 const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
+const os = require('os');
 
 const root = path.join(__dirname, '..');
-const exe = path.join(root, 'release', 'win-unpacked', 'NOVA.exe');
 const port = 9444;
 const logFile = path.join(process.env.TEMP || root, 'NOVA-smoke-packaged.log');
+
+function resolveExe() {
+  const fromEnv = (process.env.NOVA_SMOKE_EXE || '').trim();
+  if (fromEnv && fs.existsSync(fromEnv)) return fromEnv;
+
+  const candidates = [
+    path.join(root, 'release', 'win-unpacked', 'NOVA.exe'),
+    path.join(process.env.LOCALAPPDATA || '', 'Programs', 'NOVA', 'NOVA.exe'),
+    path.join(process.env.LOCALAPPDATA || '', 'Programs', 'nova', 'NOVA.exe'),
+    path.join(os.homedir(), 'AppData', 'Local', 'Programs', 'NOVA', 'NOVA.exe'),
+  ];
+  for (const c of candidates) {
+    if (c && fs.existsSync(c)) return c;
+  }
+  return null;
+}
+
+const exe = resolveExe();
 
 fs.writeFileSync(logFile, '');
 function log(msg) {
@@ -17,10 +43,14 @@ function log(msg) {
   console.log(msg);
 }
 
-if (!fs.existsSync(exe)) {
-  console.error('Missing ' + exe);
+if (!exe) {
+  console.error(
+    'Missing packaged NOVA.exe. Build with `npm run electron:build:dir`, install NOVA-Setup.exe, or set NOVA_SMOKE_EXE.',
+  );
   process.exit(1);
 }
+
+log('using exe ' + exe);
 
 function fetchJson(url) {
   return new Promise((resolve, reject) => {

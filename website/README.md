@@ -39,6 +39,9 @@ Without env keys, the site still runs; forgot-password shows a clear “not conf
    then `npm run build` so Forgot password can email a real reset link.
 5. Test: Auth screen → Forgot password → inbox → set new password → desktop sign-in.
 
+Full ship checklist (signing, packaged smoke, updates): **`docs/SHIP-OPS.md`**.
+
+
 Without `VITE_ARK_WEBSITE_ORIGIN`, the desktop app shows a clear “not configured” error and offers local recovery on this PC.
 
 ## Download CTA

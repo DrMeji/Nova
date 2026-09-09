@@ -138,6 +138,10 @@ import { listenOnce, speakText, stopSpeaking, voiceSupported, scrubVoiceConstrai
 import { voiceChatRoute } from '@/lib/voiceRoute';
 import { syncAutoVoiceDevices } from '@/lib/voiceAudio';
 import type { VoiceSessionPhase } from '@/lib/voiceMode';
+import {
+  looksLikeVoiceBuildOrEditAsk,
+  voiceBuildEditRefuseReply,
+} from '@/lib/voiceMode';
 import { VoiceModeLayout } from '@/components/VoiceModeLayout';
 import {
   formatMcpToolsHelp,
@@ -3165,6 +3169,11 @@ export function AIChat() {
       return;
     }
 
+    if (typed && looksLikeVoiceBuildOrEditAsk(typed)) {
+      await finishVoice('idle', voiceBuildEditRefuseReply());
+      return;
+    }
+
     if (!voiceSupported()) {
       await finishVoice('idle', 'Voice needs speech recognition and text-to-speech in this browser.');
       return;
@@ -3206,6 +3215,11 @@ export function AIChat() {
 
       if (looksLikeArkSelfHarmAsk(voiceMsg)) {
         await finishVoice('idle', arkSelfHarmBlockedReply());
+        return;
+      }
+
+      if (looksLikeVoiceBuildOrEditAsk(voiceMsg)) {
+        await finishVoice('idle', voiceBuildEditRefuseReply());
         return;
       }
 

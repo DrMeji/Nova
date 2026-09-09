@@ -108,8 +108,10 @@ async function routeVoiceReply(userText: string, model?: VoiceRouteModel): Promi
   const message = voiceBrainPrompt(userText);
   const history: RouterChatTurn[] = [{ role: 'user', content: message }];
   const attempted: string[] = [];
+  // Cloud path uses generic routerSystemPrompt — prepend Voice identity for this turn only.
+  const cloudMessage = `${voiceConversationSystemPrompt()}\n\nUser said: ${message}`;
 
-  const cloud = await tryCloudRoute(message, history, attempted, model);
+  const cloud = await tryCloudRoute(cloudMessage, history, attempted, model);
   if (cloud) return scrubVoiceConstraintEcho(cloud);
 
   const prefs = getLocalPrefs();

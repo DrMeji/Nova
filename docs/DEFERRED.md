@@ -15,8 +15,8 @@ Master list of things not done yet, half-done, or parked.
 | **3** | Plugins UX polish | ✅ Done (clarity pass, not full redesign) |
 | **4** | Auth (local recovery note + PIN lockout) | ✅ Temp local recovery; real email reset still later |
 | **5** | Ship slice (CSP packaged, signed-out update, SQL migrations) | ✅ Partial — signing cert still needs purchase |
-| — | Image / Video / Call / Testers / Beta | ✅ Removed from product UI |
-| — | Voice chat | Live (dev always on; retail via Settings → Voice) |
+| — | Image / Video / Call / Testers / Beta | ✅ Removed from product UI; Call source deleted |
+| — | Voice chat | Live (dev always on; retail via Settings → Voice); refuses builds/edits |
 | — | Profile photos / avatar cloud Storage | ✅ Cancelled — everyone uses the Nova logo |
 
 ---
