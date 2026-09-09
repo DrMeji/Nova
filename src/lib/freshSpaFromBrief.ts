@@ -103,7 +103,9 @@ export function isChecklistMetaSpa(appSource: string | undefined | null): boolea
 export function stripSkillNoise(summary: string): string {
   return String(summary || '')
     .replace(/\n*##\s*NOVA design skills[\s\S]*/i, '')
+    .replace(/\n*##\s*NOVA skills[\s\S]*/i, '')
     .replace(/\n*NOVA design skills\s*\(follow these\)[\s\S]*/i, '')
+    .replace(/\n*NOVA skills\s*\(follow these[^)]*\)[\s\S]*/i, '')
     .replace(/\n*Infer a distinct design language[\s\S]*/i, '')
     .trim();
 }

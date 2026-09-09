@@ -98,8 +98,8 @@ export function VoiceSettingsPanel({ onSaved }: VoiceSettingsPanelProps) {
   };
 
   const voiceLive = isVoiceTabEnabled();
-  const autoInputLabel = autoLabels.input ? `Auto — ${autoLabels.input}` : 'Auto-detect microphone';
-  const autoOutputLabel = autoLabels.output ? `Auto — ${autoLabels.output}` : 'Auto-detect headphones / speakers';
+  const autoInputLabel = autoLabels.input ? `Auto: ${autoLabels.input}` : 'Auto-detect microphone';
+  const autoOutputLabel = autoLabels.output ? `Auto: ${autoLabels.output}` : 'Auto-detect headphones / speakers';
   const spokenVoice = prefs.voiceTtsVoiceUri === VOICE_TTS_CHOICES[1].id
     ? VOICE_TTS_CHOICES[1].id
     : VOICE_TTS_FEMALE_ID;

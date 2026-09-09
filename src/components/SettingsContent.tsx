@@ -38,6 +38,12 @@ import { hasPinSet, setPin, clearPin } from '@/lib/pinLock';
 import { hasSecondFactorSet, setSecondFactor, clearSecondFactor } from '@/lib/twoFactor';
 import { probeProviderKey } from '@/lib/providerSpeed';
 import { setCloudProviderEnabled } from '@/lib/cloudSources';
+import {
+  getEnabledSkillIds,
+  listBuiltinSkillPacks,
+  toggleSkillEnabled,
+  type BuiltinNovaSkillId,
+} from '@/lib/novaSkills';
 import { isArkDevSession } from '@/lib/arkRuntime';
 import { getBrainUrl } from '@/lib/brainUrl';
 import { SettingsSystemHealth } from '@/components/SettingsSystemHealth';
@@ -138,6 +144,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
     setActiveSection(initialSection);
   }, [initialSection]);
   const [prefs, setPrefs] = useState<LocalPrefs>(() => getLocalPrefs());
+  const [enabledSkills, setEnabledSkills] = useState<BuiltinNovaSkillId[]>(() => getEnabledSkillIds());
   const [displayName, setDisplayName] = useState(
     () => getLocalPrefs().displayName || profile?.display_name || 'Guest',
   );
@@ -213,6 +220,13 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
     void getEngineStatus().then(setEngineStatus).catch(() => undefined);
     void engineDiskSpace().then(setDiskSpace).catch(() => undefined);
   }, [activeSection]);
+
+  useEffect(() => {
+    const syncSkills = () => setEnabledSkills(getEnabledSkillIds());
+    syncSkills();
+    window.addEventListener('NOVA:skills-changed', syncSkills);
+    return () => window.removeEventListener('NOVA:skills-changed', syncSkills);
+  }, []);
 
   useEffect(() => {
     void window.arkDesktop?.appMeta?.()
@@ -689,7 +703,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                 </p>
                 <p className="text-[12px] text-content-tertiary leading-relaxed">
                   We&apos;ll send an email to <span className="text-content-secondary">{user?.email || 'your inbox'}</span>{' '}
-                  confirming the schedule (email delivery ships with SMTP — the notice is prepared on this PC for now).
+                  confirming the schedule (email delivery ships with SMTP. The notice is prepared on this PC for now).
                 </p>
                 <div className="flex flex-wrap gap-2 justify-end pt-1">
                   <button
@@ -798,7 +812,9 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                 <div>
                   <div className="flex items-baseline justify-between gap-3 mb-2">
                     <label className="block text-xs font-medium text-content-secondary">Background circle blur</label>
-                    <span className="text-xs text-content-tertiary tabular-nums">{prefs.orbBlurPx}px</span>
+                    <span className="text-xs text-content-tertiary tabular-nums">
+                      {prefs.reduceMotion ? '24px (Reduce motion)' : `${prefs.orbBlurPx}px`}
+                    </span>
                   </div>
                   <input
                     type="range"
@@ -811,13 +827,19 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                     aria-label="Background circle blur"
                   />
                   <div className="flex justify-between text-[10px] text-content-tertiary uppercase tracking-wide mt-1">
-                    <span>Sharp (0)</span>
-                    <span>Soft (7+)</span>
+                    <span>Sharp / bright</span>
+                    <span>Soft / dim</span>
                   </div>
+                  <p className="text-[11px] text-content-tertiary mt-1.5 leading-relaxed">
+                    {prefs.reduceMotion
+                      ? `Circles stay at maximum soft blur while Reduce motion is on. Your saved level is ${prefs.orbBlurPx}px and comes back when you turn Reduce motion off.`
+                      : 'Drag left for brighter sharp circles. Drag right for softer dimmer circles.'}
+                  </p>
                 </div>
 
                 <ToggleRow
                   label="Reduce motion"
+                  hint="Freezes the bouncing circles and switches them to maximum soft blur. Turn off to restore movement and your blur setting."
                   value={prefs.reduceMotion}
                   onChange={v => patchPrefs({ reduceMotion: v })}
                 />
@@ -893,13 +915,15 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                 </SettingsGroup>
 
                 <SettingsGroup title="Failover & cloud">
-                  <div className="grid grid-cols-1 gap-3">
+                  <div className="rounded-xl border border-surface-border px-3 divide-y divide-white/[0.06]">
                     <ToggleRow
+                      bare
                       label="Auto failover"
                       value={prefs.autoFailover}
                       onChange={v => patchPrefs({ autoFailover: v })}
                     />
                     <ToggleRow
+                      bare
                       label="Ask before cloud failover"
                       value={prefs.askBeforeCloudFailover}
                       onChange={v => patchPrefs({ askBeforeCloudFailover: v })}
@@ -909,13 +933,15 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
 
                 {/* Chat behavior */}
                 <SettingsGroup title="Chat behavior">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="rounded-xl border border-surface-border px-3 divide-y divide-white/[0.06]">
                     <ToggleRow
+                      bare
                       label="Stream responses"
                       value={prefs.streamResponses}
                       onChange={v => patchPrefs({ streamResponses: v })}
                     />
                     <ToggleRow
+                      bare
                       label="Remember chat context"
                       value={prefs.rememberContext}
                       onChange={v => patchPrefs({ rememberContext: v })}
@@ -923,15 +949,48 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                   </div>
                 </SettingsGroup>
 
+                <SettingsGroup title="Skills">
+                  <p className="text-[11px] text-content-tertiary leading-relaxed mb-3">
+                    NOVA skills are build contracts injected into create and edit prompts so Multimodal builds stay Preview-ready.
+                    Drop custom packs in a bound project at <span className="font-mono text-content-secondary">.nova/skills/packName/SKILL.md</span>.
+                    Preview contract stays on for every create/build.
+                  </p>
+                  <div className="rounded-xl border border-surface-border px-3 divide-y divide-white/[0.06]">
+                    {listBuiltinSkillPacks().map(pack => {
+                      const locked = Boolean(pack.alwaysOnCreate);
+                      const on = locked || enabledSkills.includes(pack.id as BuiltinNovaSkillId);
+                      return (
+                        <ToggleRow
+                          key={pack.id}
+                          bare
+                          disabled={locked}
+                          label={locked ? `${pack.name} (always on)` : pack.name}
+                          hint={pack.summary}
+                          value={on}
+                          onChange={v => {
+                            if (locked) return;
+                            toggleSkillEnabled(pack.id as BuiltinNovaSkillId, v);
+                            setEnabledSkills(getEnabledSkillIds());
+                            setSavedFlash('Saved on this device');
+                            window.setTimeout(() => setSavedFlash(''), 2200);
+                          }}
+                        />
+                      );
+                    })}
+                  </div>
+                </SettingsGroup>
+
                 {/* Model discovery */}
                 <SettingsGroup title="Model discovery">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="rounded-xl border border-surface-border px-3 divide-y divide-white/[0.06]">
                     <ToggleRow
+                      bare
                       label="Hunt new models online"
                       value={prefs.huntInternetModels}
                       onChange={v => patchPrefs({ huntInternetModels: v })}
                     />
                     <ToggleRow
+                      bare
                       label="Download next when a model runs out"
                       value={prefs.autoInstallHuntModels}
                       onChange={v => patchPrefs({ autoInstallHuntModels: v })}
@@ -2219,12 +2278,14 @@ function GgufSliderRow({
 
 function ToggleRow({
   label,
+  hint,
   value,
   onChange,
   disabled,
   bare,
 }: {
   label: string;
+  hint?: string;
   value: boolean;
   onChange: (v: boolean) => void;
   disabled?: boolean;
@@ -2232,22 +2293,29 @@ function ToggleRow({
   bare?: boolean;
 }) {
   return (
-    <div className={`flex items-center justify-between gap-4 min-w-0 ${bare ? '' : 'p-4 ark-card'} ${disabled ? 'opacity-70' : ''}`}>
-      <div className="flex-1 min-w-0 pr-2">
-        <p className="text-sm font-medium text-content-primary">{label}</p>
+    <div
+      className={`flex items-center justify-between gap-4 min-w-0 ${
+        bare ? 'py-2.5 px-1' : 'p-4 ark-card'
+      } ${disabled ? 'opacity-55' : ''}`}
+    >
+      <div className="flex-1 min-w-0 pr-3">
+        <p className="text-sm font-medium text-content-primary leading-snug">{label}</p>
+        {hint ? <p className="text-[11px] text-content-tertiary mt-1 leading-relaxed">{hint}</p> : null}
       </div>
       <button
         type="button"
         disabled={disabled}
         onClick={() => onChange(!value)}
-        className={`relative rounded-full transition-colors shrink-0 disabled:cursor-not-allowed ${value ? 'bg-sky-500' : 'bg-ark-navy-700'}`}
-        style={{ height: '22px', width: '40px' }}
+        className={`relative inline-flex h-[22px] w-10 shrink-0 items-center rounded-full px-0.5 transition-colors disabled:cursor-not-allowed ${
+          value ? 'bg-sky-500' : 'bg-white/15'
+        }`}
         aria-pressed={value}
         aria-label={label}
       >
-        <div
-          className={`absolute top-0.5 bg-white rounded-full transition-transform ${value ? 'translate-x-5' : 'translate-x-0.5'}`}
-          style={{ width: '18px', height: '18px' }}
+        <span
+          className={`pointer-events-none block h-[18px] w-[18px] rounded-full bg-white shadow-sm transition-transform duration-150 ${
+            value ? 'translate-x-[18px]' : 'translate-x-0'
+          }`}
         />
       </button>
     </div>

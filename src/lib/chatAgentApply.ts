@@ -16,7 +16,7 @@ import {
 } from '@/lib/projectCodeEdit';
 import { finalizeWebEdits, reactUiMicroAskEdits, isNovaSearchStub } from '@/lib/webProjectCanon';
 import { safeProjectWrite } from '@/lib/projectWriteSafe';
-import { skillPromptAppendix } from '@/lib/arkSkills';
+import { skillPromptAppendix } from '@/lib/novaSkills';
 import { detectProjectKind } from '@/lib/projectKind';
 import { verifyProjectAfterPatch } from '@/lib/postPatchVerify';
 import { applyAgentPatches, parseAgentPatches } from '@/lib/arkAgentPatch';
@@ -133,10 +133,11 @@ export async function applyChatReplyEdits(opts: {
   const kind = detectProjectKind(rawUser);
   const appendix = skillPromptAppendix(rawUser, kind, {
     isEdit: Object.keys(opts.files || {}).length > 0,
+    forCreateBuild: Object.keys(opts.files || {}).length === 0,
     hasReferenceImage: /unsplash|https?:\/\/\S+\.(?:png|jpe?g|webp)|ark-media:/i.test(rawUser),
   });
   // Keep the original ask for micro-patches. the skills appendix is only for model scaffolding.
-  const userMessageForParse = appendix && !rawUser.includes('NOVA design skills')
+  const userMessageForParse = appendix && !/NOVA skills/i.test(rawUser)
     ? `${rawUser}\n\n${appendix}`
     : rawUser;
   let baseFiles = normalizeStudioFileKeys(opts.files, opts.diskRoot);

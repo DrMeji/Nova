@@ -50,7 +50,7 @@ import {
   Cpu, MemoryStick, HardDrive, Zap, Monitor, MonitorCog,
   Power, Activity, Check, Download, Shield,
   Gauge, Boxes, Wifi, Loader2, FolderOpen, FileBox,
-  Code, Brain, Globe, Trash2,
+  Code, Brain, Globe, Trash2, Eye,
 } from 'lucide-react';
 
 import {
@@ -91,6 +91,7 @@ const LOCAL_CATEGORY_META: Record<CatalogModel['category'], { title: string; ico
   coding: { title: 'Coding', icon: Code },
   reasoning: { title: 'Reasoning', icon: Brain },
   fast: { title: 'Fast', icon: Zap },
+  vision: { title: 'Vision', icon: Eye },
 };
 
 function LocalDownloadControl({

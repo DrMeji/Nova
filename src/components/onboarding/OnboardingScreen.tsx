@@ -936,7 +936,7 @@ export function OnboardingScreen() {
                 <div className="flex justify-between text-xs text-content-secondary">
                   <span>
                     {finishReady
-                      ? 'Enter NOVA — coding models keep installing in the background'
+                      ? 'Enter NOVA. Coding models keep installing in the background'
                       : progress < 25
                         ? 'Installing runtime…'
                         : progress < 100

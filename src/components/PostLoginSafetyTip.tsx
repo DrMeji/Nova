@@ -41,7 +41,7 @@ export function PostLoginSafetyTip() {
       kind: 'system',
       title: "You're signed in",
       body:
-        'If Windows shows a firewall, SmartScreen, or similar warning for NOVA or the local brain, you can minimize that window and keep using the app. Those prompts are normal on first run — they are not a failed login.',
+        'If Windows shows a firewall, SmartScreen, or similar warning for NOVA or the local brain, you can minimize that window and keep using the app. Those prompts are normal on first run. They are not a failed login.',
       forArkId,
       unread: true,
     });

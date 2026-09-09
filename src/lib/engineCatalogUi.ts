@@ -2,7 +2,7 @@
 
 import { sortModelsByCategoryThenSizeDesc } from '@/lib/modelSort';
 
-export type EngineUiCategory = 'general' | 'coding' | 'reasoning' | 'fast';
+export type EngineUiCategory = 'general' | 'coding' | 'reasoning' | 'fast' | 'vision';
 
 export type EngineUiModel = {
   id: string;
@@ -27,5 +27,5 @@ export const ENGINE_UI_CATALOG: EngineUiModel[] = sortModelsByCategoryThenSizeDe
   { id: 'gemma2-2b', name: 'Gemma 2 2B Instruct', category: 'fast', sizeGb: 1.6, tone: 'from-teal-400 to-cyan-700', initial: 'G2' },
   { id: 'phi3-mini', name: 'Phi-3 Mini Instruct', category: 'fast', sizeGb: 2.3, tone: 'from-cyan-400 to-sky-700', initial: 'Φ3' },
   { id: 'deepseek-r1-distill-8b', name: 'DeepSeek-R1 Distill 8B', category: 'reasoning', sizeGb: 5.2, tone: 'from-fuchsia-500 to-purple-800', initial: 'R1' },
-  { id: 'qwen2-vl-7b', name: 'Qwen2-VL 7B Instruct', category: 'general', sizeGb: 7.4, tone: 'from-teal-500 to-emerald-800', initial: 'VL' },
+  { id: 'qwen2-vl-7b', name: 'Qwen2-VL 7B Instruct', category: 'vision', sizeGb: 7.4, tone: 'from-teal-500 to-emerald-800', initial: 'VL' },
 ]);

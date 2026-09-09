@@ -356,7 +356,7 @@ export function AuthScreen() {
                 onClick={() => bypassLogin({ skipSetup: false })}
                 disabled={loading}
                 className="ark-btn-secondary h-11 rounded-xl px-2"
-                title="Dev only — sign in as guest, then run hardware setup"
+                title="Dev only: sign in as guest, then run hardware setup"
               >
                 <Zap className="w-3.5 h-3.5 text-ark-accent-amber shrink-0" />
                 <span className="text-xs leading-tight text-left">Bypass + Setup</span>
@@ -366,7 +366,7 @@ export function AuthScreen() {
                 onClick={() => bypassLogin({ skipSetup: true })}
                 disabled={loading}
                 className="ark-btn-secondary h-11 rounded-xl px-2"
-                title="Dev only — skip setup and go straight to the main app"
+                title="Dev only: skip setup and go straight to the main app"
               >
                 <Zap className="w-3.5 h-3.5 text-sky-400 shrink-0" />
                 <span className="text-xs leading-tight text-left">Bypass to App</span>

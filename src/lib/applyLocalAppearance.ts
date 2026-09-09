@@ -10,6 +10,9 @@ const ACCENT_RGB: Record<AccentPref, string> = {
   rose: '251 113 133',
 };
 
+/** Max soft blur while Reduce motion is on (user's orbBlurPx is preserved for restore). */
+export const REDUCE_MOTION_ORB_BLUR_PX = 24;
+
 export function applyLocalAppearancePrefs(): void {
   if (typeof document === 'undefined') return;
   const prefs = getLocalPrefs();
@@ -20,6 +23,15 @@ export function applyLocalAppearancePrefs(): void {
   root.dataset.reduceMotion = prefs.reduceMotion ? '1' : '0';
   root.classList.toggle('reduce-motion', Boolean(prefs.reduceMotion));
   root.dataset.chatFirst = prefs.chatFirst ? '1' : '0';
-  const blur = Math.max(0, Math.min(24, Math.round(Number(prefs.orbBlurPx) || 0)));
+
+  // User's slider value is always stored in prefs.orbBlurPx.
+  // Reduce motion forces max soft/dim blur on screen without overwriting that choice.
+  const stored = Math.max(0, Math.min(24, Math.round(Number(prefs.orbBlurPx) || 0)));
+  const blur = prefs.reduceMotion ? REDUCE_MOTION_ORB_BLUR_PX : stored;
+  const soft = blur / 24;
+  const authOpacity = (0.78 - soft * 0.5).toFixed(3);
+  const appOpacity = (0.62 - soft * 0.42).toFixed(3);
   root.style.setProperty('--auth-orb-blur', `${blur}px`);
+  root.style.setProperty('--auth-orb-opacity', authOpacity);
+  root.style.setProperty('--auth-orb-app-opacity', appOpacity);
 }

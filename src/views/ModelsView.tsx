@@ -117,7 +117,7 @@ const LOCAL_MODELS: LocalModel[] = [
   { id: 'phi4-reasoning', name: 'Phi-4 Reasoning', description: 'Compact reasoning model for local use.', size: '8.5 GB', category: 'reasoning', tiers: ['free'], tone: 'from-sky-500 to-indigo-800', initial: 'Φ4' },
 
   // Vision (understand images, not generate)
-  { id: 'qwen2-vl-7b', name: 'Qwen2-VL 7B', description: 'Vision bundle (~7.4 GB). On-device image chat when both GGUF + mmproj are installed — NOVA hops vision → your chat/coder brain automatically.', size: '7.4 GB', category: 'vision', tiers: ['free'], recommended: true, tone: 'from-teal-500 to-emerald-800', initial: 'VL' },
+  { id: 'qwen2-vl-7b', name: 'Qwen2-VL 7B', description: 'Vision bundle (~7.4 GB). On-device image chat when both GGUF + mmproj are installed. NOVA hops vision to your chat/coder brain automatically.', size: '7.4 GB', category: 'vision', tiers: ['free'], recommended: true, tone: 'from-teal-500 to-emerald-800', initial: 'VL' },
   { id: 'llava-13b', name: 'LLaVA 13B', description: 'Image chat and visual Q&A (local VL — coming to Engine downloads).', size: '7.8 GB', category: 'vision', tiers: ['free'], tone: 'from-lime-500 to-green-800', initial: 'Lv' },
   { id: 'minicpm-v', name: 'MiniCPM-V', description: 'Efficient multimodal model for vision tasks (local VL — coming soon).', size: '5.1 GB', category: 'vision', tiers: ['free'], tone: 'from-green-500 to-teal-800', initial: 'Mv' },
   { id: 'llama32-vision-11b', name: 'Llama 3.2 Vision 11B', description: 'Meta multimodal model for image understanding (local VL — coming soon).', size: '7.9 GB', category: 'vision', tiers: ['free'], tone: 'from-indigo-400 to-violet-800', initial: 'LV' },
@@ -797,13 +797,26 @@ export function ModelsView() {
   };
   const q = query.trim().toLowerCase();
 
+  /** Normalize so "qwen2-vl-7b", "qwen2 vl 7b", "Qwen2-VL 7B" all match. */
+  const normalizeModelSearch = (s: string) =>
+    s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
+
+  const modelMatchesQuery = (m: { id: string; name: string; description: string; category: string; tiers: string[] }, rawQ: string) => {
+    if (!rawQ) return true;
+    const nq = normalizeModelSearch(rawQ);
+    const hay = normalizeModelSearch(
+      [m.id, m.name, m.description, CATEGORY_LABEL[m.category] || m.category, ...m.tiers].join(' '),
+    );
+    if (hay.includes(nq) || m.id.toLowerCase().includes(rawQ) || m.name.toLowerCase().includes(rawQ)) {
+      return true;
+    }
+    // Token match: every query token must appear somewhere in the haystack.
+    const tokens = nq.split(' ').filter(Boolean);
+    return tokens.length > 0 && tokens.every(t => hay.includes(t));
+  };
+
   const filteredFit = useMemo(() => {
-    const match = (m: LocalModel) =>
-      !q ||
-      m.name.toLowerCase().includes(q) ||
-      m.description.toLowerCase().includes(q) ||
-      CATEGORY_LABEL[m.category]?.toLowerCase().includes(q) ||
-      m.tiers.some(t => t.includes(q));
+    const match = (m: LocalModel) => modelMatchesQuery(m, q);
 
     // Default: only hardware-fit installable models. Searching also surfaces discovery-only.
     if (q) {
@@ -847,12 +860,7 @@ export function ModelsView() {
           // Default list: only real Engine downloads. Search surfaces discovery-only.
           if (!q && !isEngineDownloadable(m.id)) return false;
           if (!q) return true;
-          return (
-            m.name.toLowerCase().includes(q) ||
-            m.description.toLowerCase().includes(q) ||
-            cat.title.toLowerCase().includes(q) ||
-            m.tiers.some(t => t.includes(q))
-          );
+          return modelMatchesQuery(m, q);
         }),
       ),
     })).filter(cat => cat.models.length > 0);

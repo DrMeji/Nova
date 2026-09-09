@@ -4,7 +4,12 @@
  */
 
 import { applyChatReplyEdits } from '@/lib/chatAgentApply';
-import { selectSkillsForBrief, formatSkillsForPrompt } from '@/lib/arkSkills';
+import {
+  selectSkillsForBrief,
+  formatSkillsForPrompt,
+  loadProjectSkills,
+  skillNamesLabel,
+} from '@/lib/novaSkills';
 import { detectProjectKind } from '@/lib/projectKind';
 
 export type MultiAgentWorkerId = 'design' | 'code' | 'verify';
@@ -43,10 +48,12 @@ export async function runProjectMultiAgent(opts: {
   const kind = detectProjectKind(opts.brief);
   let files = { ...opts.files };
 
-  // --- Design worker: pick skills + enriched brief ---
+  const projectSkills = await loadProjectSkills(opts.diskRoot);
   const skills = selectSkillsForBrief(opts.brief, kind, {
     isEdit: Object.keys(files).length > 0,
+    forCreateBuild: Object.keys(files).length === 0,
     hasReferenceImage: /unsplash|https?:\/\/\S+\.(?:png|jpe?g|webp)/i.test(opts.brief),
+    extras: projectSkills,
   });
   const skillBlock = formatSkillsForPrompt(skills);
   const designBrief = [
@@ -54,14 +61,14 @@ export async function runProjectMultiAgent(opts: {
     '',
     skillBlock,
     '',
-    'Apply these skills while editing the project files. Prefer unique visual direction over templates.',
+    'Apply these NOVA skills while editing the project files. Prefer unique visual direction over templates. Emit real @@@FILE blocks when writing UI.',
   ].join('\n');
   workers.push({
     id: 'design',
     label: 'Design',
     ok: skills.length > 0,
     note: skills.length
-      ? `Equipped ${skills.map(s => s.name).join(', ')}`
+      ? `Equipped ${skillNamesLabel(skills)}`
       : 'No skills enabled. using brief only',
   });
 

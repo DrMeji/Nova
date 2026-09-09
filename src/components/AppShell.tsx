@@ -552,16 +552,13 @@ export function AppShell({ children }: { children: ReactNode }) {
               }}
               className={`ark-nav-item min-w-0 flex-1 !bg-transparent hover:!bg-transparent ${
                 active ? '!text-content-primary' : ''
-              }`}
+              } ${doneAway ? 'ark-nav-attention' : ''}`}
               title={`${item.title} · double-click to rename`}
             >
-              <span className="ark-nav-icon">
+              <span className={`ark-nav-icon ${doneAway ? 'text-sky-400' : ''}`}>
                 <Icon strokeWidth={1.75} />
               </span>
-              <span className="min-w-0 flex-1 text-left truncate">{item.title}</span>
-              {!editing && doneAway ? (
-                <span className="pointer-events-none w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0 mr-1" aria-hidden title="Updated" />
-              ) : null}
+              <span className={`min-w-0 flex-1 text-left truncate ${doneAway ? 'text-sky-300' : ''}`}>{item.title}</span>
             </button>
             <div
               className={`flex items-center gap-0.5 shrink-0 pr-1 transition-opacity ${
@@ -646,6 +643,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     const notifAttention = isNotifications && (notifUnread > 0 || Boolean(activity.notifications));
     const busy = Boolean(item.activity && activity[item.activity]) && !notifAttention;
     const unreadCount = item.label === 'Message' && !item.comingSoon ? unreadFrom.length : 0;
+    const attention = notifAttention || busy || unreadCount > 0;
     if (item.comingSoon) {
       return (
         <button
@@ -679,31 +677,21 @@ export function AppShell({ children }: { children: ReactNode }) {
         }
         onClick={() => handleNavClick(item)}
         title={collapsed ? item.label : undefined}
-        className={`ark-nav-item w-full relative ${collapsed ? 'ark-nav-item-rail' : ''} ${active ? 'active' : ''}`}
+        className={`ark-nav-item w-full relative ${collapsed ? 'ark-nav-item-rail' : ''} ${active ? 'active' : ''} ${
+          attention && !active ? 'ark-nav-attention' : ''
+        }`}
       >
-        <span className="ark-nav-icon">
+        <span className={`ark-nav-icon ${attention ? 'text-sky-400' : ''}`}>
           <item.icon />
         </span>
-        <span className={`truncate ark-nav-label ${collapsed ? 'ark-nav-label-hide' : ''}`}>
+        <span className={`truncate ark-nav-label ${collapsed ? 'ark-nav-label-hide' : ''} ${attention ? 'text-sky-300' : ''}`}>
           {item.label}
         </span>
         {unreadCount > 0 ? (
-          <span className={`text-[10px] font-semibold rounded-full bg-sky-500/20 text-sky-300 px-1.5 py-0.5 min-w-[1.25rem] text-center ark-nav-label ${collapsed ? 'ark-nav-label-hide' : ''}`}>
+          <span className={`text-[10px] font-semibold tabular-nums text-sky-300 ark-nav-label ${collapsed ? 'ark-nav-label-hide' : ''}`}>
             {unreadCount > 9 ? '9+' : unreadCount}
           </span>
         ) : null}
-        {notifAttention && (
-          <span
-            className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-sky-400 ring-2 ring-ark-navy-900"
-            aria-hidden
-          />
-        )}
-        {busy && (
-          <span
-            className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-emerald-400"
-            aria-hidden
-          />
-        )}
       </button>
     );
   };
@@ -753,15 +741,12 @@ export function AppShell({ children }: { children: ReactNode }) {
                       className={`relative rounded-lg !p-1.5 transition-colors ${
                         updateBusy
                           ? 'opacity-60'
-                          : 'bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25 hover:text-emerald-200'
+                          : 'text-sky-400 hover:bg-sky-500/10'
                       }`}
                       title={`Update available (${updateInfo.latestTag}). Click to download.`}
                       aria-label="Download update"
                     >
                       <Download className={`w-4 h-4 ${updateBusy ? 'text-content-tertiary' : ''}`} />
-                      {!updateBusy ? (
-                        <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-400" aria-hidden />
-                      ) : null}
                     </button>
                   ) : null}
                 </div>
@@ -837,13 +822,12 @@ export function AppShell({ children }: { children: ReactNode }) {
                         type="button"
                         aria-label={item.title}
                         onClick={() => openRecent(item)}
-                        className={`ark-nav-item ark-nav-item-rail relative ${active ? 'active' : ''}`}
+                        className={`ark-nav-item ark-nav-item-rail relative ${active ? 'active' : ''} ${doneAway ? 'ark-nav-attention' : ''}`}
                         title={item.title}
                       >
-                        <span className="ark-nav-icon">
+                        <span className={`ark-nav-icon ${doneAway ? 'text-sky-400' : ''}`}>
                           <Icon strokeWidth={1.75} />
                         </span>
-                        {doneAway ? <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-emerald-400" aria-hidden /> : null}
                       </button>
                     );
                   })}
@@ -856,7 +840,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               className={`mt-auto flex-none shrink-0 relative ${collapsed ? 'p-2 pb-3' : 'p-3 pt-2 pb-3'}`}
               data-status-menu
             >
-            <JobsStrip variant="sidebar" />
+            <JobsStrip variant="sidebar" collapsed={collapsed} />
             {statusMenuOpen && (
               <div
                 className={`absolute z-50 rounded-xl border border-white/10 bg-ark-navy-900 shadow-2xl shadow-black/50 overflow-hidden min-w-[14rem] p-0 ${

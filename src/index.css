@@ -189,6 +189,18 @@
     background-color: rgb(var(--color-surface-active));
     color: rgb(var(--color-content-primary));
   }
+  /* Single attention color: sky. Lit icon means unread / finished / needs a look. */
+  .ark-nav-item.ark-nav-attention {
+    color: rgb(56 189 248);
+  }
+  .ark-nav-item.ark-nav-attention .ark-nav-icon,
+  .ark-nav-item.ark-nav-attention .ark-nav-icon svg {
+    color: rgb(56 189 248);
+  }
+  .ark-nav-icon.text-sky-400,
+  .ark-nav-icon.text-sky-400 svg {
+    color: rgb(56 189 248);
+  }
   /*
    * Icon plate matches collapsed rail width (4rem). Glyph is centered in that plate
    * open or closed, so icons never shift when the sidebar stretches.
@@ -282,10 +294,10 @@
     top: 0;
     left: 0;
     border-radius: 9999px;
-    /* Softness from Settings → Appearance (0 = sharp, default 7px) */
+    /* Softness + brightness from Settings → Appearance (0 = sharp/bright) */
     filter: blur(var(--auth-orb-blur, 7px));
-    opacity: 0.55;
-    will-change: transform, background-color, filter;
+    opacity: var(--auth-orb-opacity, 0.55);
+    will-change: transform, background-color, filter, opacity;
   }
   .auth-orb-interactive {
     pointer-events: auto;
@@ -302,7 +314,7 @@
     filter: blur(var(--auth-orb-blur, 7px)) brightness(1.12);
   }
   .auth-orb-app {
-    opacity: 0.42;
+    opacity: var(--auth-orb-app-opacity, 0.42);
     filter: blur(var(--auth-orb-blur, 7px));
   }
   .auth-orb-tone-a {
@@ -666,13 +678,18 @@
 .ark-status-dot-2 { animation-delay: 0.18s; }
 .ark-status-dot-3 { animation-delay: 0.36s; }
 
-html.reduce-motion *,
-html.reduce-motion *::before,
-html.reduce-motion *::after {
+/* Kill UI motion, but leave ambient orbs alone so hue doesn't snap/restart. */
+html.reduce-motion *:not(.auth-orb),
+html.reduce-motion *:not(.auth-orb)::before,
+html.reduce-motion *:not(.auth-orb)::after {
   animation-duration: 0.01ms !important;
   animation-iteration-count: 1 !important;
   transition-duration: 0.01ms !important;
   scroll-behavior: auto !important;
+}
+
+html.reduce-motion .auth-orb {
+  animation-play-state: paused !important;
 }
 
 /* (Show status bar toggle removed — footer with profile/settings always stays visible.) */

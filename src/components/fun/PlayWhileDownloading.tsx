@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { ArkRunnerGame } from '@/components/fun/ArkRunnerGame';
 import {
@@ -20,8 +21,8 @@ type Props = {
 };
 
 /**
- * Two separate panels on a blurred backdrop:
- * left = runner, right = download — with clear space between.
+ * Full-screen play-while-download: game left, install status right.
+ * Portaled to document.body so sidebar transforms cannot trap position:fixed.
  */
 export function PlayWhileDownloading({
   open,
@@ -57,7 +58,7 @@ export function PlayWhileDownloading({
           setProgress(100);
           if (!notified.current) {
             notified.current = true;
-            pushSidebarToast('Download complete — close the game when you’re ready.', {
+            pushSidebarToast('Download complete. Close the game when you are ready.', {
               id: 'download-play-complete',
               ttlMs: 14_000,
             });
@@ -85,7 +86,7 @@ export function PlayWhileDownloading({
         setProgress(100);
         if (!notified.current) {
           notified.current = true;
-          pushSidebarToast('Download complete — close the game when you’re ready.', {
+          pushSidebarToast('Download complete. Close the game when you are ready.', {
             id: 'download-play-complete',
             ttlMs: 14_000,
           });
@@ -97,7 +98,25 @@ export function PlayWhileDownloading({
     return subscribeEngineDownloads(sync);
   }, [open, contextLabel, externalProgress, externalComplete]);
 
-  if (!open) return null;
+  useEffect(() => {
+    if (!open) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      window.removeEventListener('keydown', onKey, true);
+    };
+  }, [open, onClose]);
+
+  if (!open || typeof document === 'undefined') return null;
 
   const pct = Math.min(100, Math.round(complete ? 100 : progress));
   const label = jobName || contextLabel || 'Local brain';
@@ -109,38 +128,38 @@ export function PlayWhileDownloading({
         ? 'Downloading model weights'
         : 'Finalizing install';
 
-  return (
-    <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 sm:p-8">
-      {/* Blurred backdrop */}
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[200] flex items-center justify-center p-4 sm:p-8 overflow-hidden"
+      role="presentation"
+    >
       <button
         type="button"
-        className="absolute inset-0 border-0 cursor-default bg-black/55 backdrop-blur-md"
-        aria-label="Close"
+        className="absolute inset-0 border-0 cursor-default bg-black/70 backdrop-blur-xl"
+        aria-label="Close game"
         onClick={onClose}
       />
 
-      {/* Two separate panels — left / gap / right */}
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby="NOVA-play-title"
-        className="relative z-10 w-full max-w-6xl grid grid-cols-1 md:grid-cols-[minmax(0,1.25fr)_minmax(0,0.95fr)] gap-4 sm:gap-6 items-stretch"
+        className="relative z-10 w-full max-w-6xl grid grid-cols-1 md:grid-cols-[minmax(0,1.25fr)_minmax(0,0.95fr)] gap-4 sm:gap-6 items-stretch pointer-events-auto"
+        onClick={e => e.stopPropagation()}
       >
-        {/* LEFT — runner */}
-        <section className="rounded-2xl border border-surface-border bg-ark-navy-900 shadow-2xl overflow-hidden flex flex-col min-h-[24rem] h-[min(30rem,calc(100vh-4rem))]">
-          <div className="flex items-center px-4 h-11 border-b border-white/[0.06] shrink-0">
+        <section className="rounded-2xl border border-white/10 bg-ark-navy-950 shadow-2xl overflow-hidden flex flex-col min-h-[24rem] h-[min(30rem,calc(100vh-4rem))]">
+          <div className="flex items-center px-4 h-11 border-b border-white/[0.08] shrink-0 bg-ark-navy-950">
             <h2 id="NOVA-play-title" className="text-[13px] font-medium text-content-primary">
               NOVA Runner
             </h2>
           </div>
-          <div className="flex-1 min-h-0 px-3 pb-3 pt-2">
+          <div className="flex-1 min-h-0 px-3 pb-3 pt-2 bg-ark-navy-950">
             <ArkRunnerGame active={open} compact />
           </div>
         </section>
 
-        {/* RIGHT — download */}
-        <section className="rounded-2xl border border-surface-border bg-ark-navy-900 shadow-2xl overflow-hidden flex flex-col min-h-[24rem] h-[min(30rem,calc(100vh-4rem))]">
-          <div className="flex items-center justify-between px-4 h-11 border-b border-white/[0.06] shrink-0">
+        <section className="rounded-2xl border border-white/10 bg-ark-navy-950 shadow-2xl overflow-hidden flex flex-col min-h-[24rem] h-[min(30rem,calc(100vh-4rem))]">
+          <div className="flex items-center justify-between px-4 h-11 border-b border-white/[0.08] shrink-0 bg-ark-navy-950">
             <p className="text-[13px] font-medium text-content-primary">
               {complete ? 'Install complete' : 'Background install'}
             </p>
@@ -154,7 +173,7 @@ export function PlayWhileDownloading({
             </button>
           </div>
 
-          <div className="flex-1 flex flex-col justify-center px-5 sm:px-6 py-6 gap-5">
+          <div className="flex-1 flex flex-col justify-center px-5 sm:px-6 py-6 gap-5 bg-ark-navy-950">
             <div className="space-y-1.5">
               <p className={`text-[11px] font-medium ${complete ? 'text-emerald-300/90' : 'text-sky-300/90'}`}>
                 {phaseLabel}
@@ -191,12 +210,16 @@ export function PlayWhileDownloading({
               className="ark-btn-primary h-10 px-5 rounded-xl text-sm w-full mt-1"
               onClick={onClose}
             >
-              {complete ? 'Back to setup' : 'Close game'}
+              {complete ? 'Back to Models' : 'Close game'}
             </button>
+            <p className="text-[11px] text-content-tertiary text-center">
+              Press Esc to close
+            </p>
           </div>
         </section>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -207,7 +230,7 @@ export function PlayGameButton({ onClick, className = '' }: { onClick: () => voi
       onClick={onClick}
       className={`inline-flex items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] px-2.5 py-1.5 text-[11px] font-medium text-sky-200 hover:bg-white/[0.07] hover:border-sky-500/30 transition-colors ${className}`}
     >
-      Play game
+      Play
     </button>
   );
 }

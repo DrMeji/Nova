@@ -110,6 +110,12 @@ import { runCodeStudioCommand } from '@/lib/studioCommands';
 import { applyChatReplyEdits } from '@/lib/chatAgentApply';
 import { runProjectMultiAgent, wantsMultiAgentTurn } from '@/lib/arkMultiAgent';
 import {
+  formatSkillsForPrompt,
+  resolveSkillsForBrief,
+  skillNamesLabel,
+  type NovaSkillPack,
+} from '@/lib/novaSkills';
+import {
   runArkAgentLoop,
   shouldRunAgentLoop,
   agentLoopPreferCloud,
@@ -411,7 +417,7 @@ function ChatModeTabs() {
     <div className="relative z-30 shrink-0 flex items-center justify-center gap-1 pt-3 pb-1 pointer-events-auto">
       {tabs.map(t => {
         const parked = t.id === 'voice' && !isVoiceTabEnabled();
-        const soonTitle = 'Voice · coming soon (conversation only — no PC control or builds)';
+        const soonTitle = 'Voice · coming soon (conversation only, no PC control or builds)';
         return (
           <button
             key={t.id}
@@ -579,7 +585,7 @@ const PLACEHOLDERS: Record<ChatMode, string[]> = {
     'Ask NOVA to generate a short clip...',
   ],
   voice: [
-    'Tap send, then speak — NOVA will listen and reply aloud.',
+    'Tap send, then speak. NOVA will listen and reply aloud.',
     'Ask a question or request a short story…',
   ],
   code: [
@@ -5165,6 +5171,20 @@ export function AIChat() {
         const sticky = pinnedModel.source === 'auto' ? threadBrainRef.current : null;
         let modelReply = '';
         let multiAppliedFiles: Record<string, string> | null = null;
+        const buildKind = resolveProjectKindForCreate(
+          briefForBuild,
+          detectProjectKind(briefForBuild),
+          detectProjectKind(briefForBuild),
+        );
+        const equippedSkills: NovaSkillPack[] = await resolveSkillsForBrief(briefForBuild, buildKind, {
+          forCreateBuild: true,
+          hasReferenceImage: /unsplash|https?:\/\/\S+\.(?:png|jpe?g|webp)|ark-media:/i.test(briefForBuild),
+          diskRoot: originDiskRoot || chatStudioDiskRootRef.current || null,
+        });
+        const skillBlock = formatSkillsForPrompt(equippedSkills);
+        if (equippedSkills.length) {
+          noteThought(`Equipped: ${skillNamesLabel(equippedSkills)}`);
+        }
         const buildUiPrompt = (pass: 'first' | 'retry' | 'polish') => {
           const exactMinimal = /\b(?:exact(?:ly)?|precisely|follow precisely|pure black|#000000|#1e1f22|near-black|centered icon|nothing else|no other|ONLY this piece|ONLY add)\b/i.test(briefForBuild);
           return [
@@ -5224,6 +5244,7 @@ export function AIChat() {
                   : '',
             '',
             briefForBuild,
+            skillBlock ? `\n${skillBlock}` : '',
           ].filter(Boolean).join('\n');
         };
 
@@ -5265,6 +5286,7 @@ export function AIChat() {
                 siteImageGuidanceForBrief(briefForBuild, buildIntent.name),
                 '',
                 briefForBuild,
+                skillBlock ? `\n${skillBlock}` : '',
               ].filter(Boolean).join('\n');
               let partReply = '';
               try {
@@ -7570,9 +7592,32 @@ export function AIChat() {
         }
       }
 
+      let studioUserMessage = editUserMessage;
+      if (allowEdits && !/##\s*NOVA skills/i.test(editUserMessage)) {
+        try {
+          const editSkills = await resolveSkillsForBrief(editUserMessage, detectProjectKind(editUserMessage), {
+            isEdit: true,
+            forCreateBuild: false,
+            hasReferenceImage: messageHasImages(content) || /unsplash|https?:\/\/\S+\.(?:png|jpe?g|webp)|ark-media:/i.test(editUserMessage),
+            diskRoot: chatStudioDiskRootRef.current || null,
+          });
+          const editBlock = formatSkillsForPrompt(editSkills);
+          if (editBlock) {
+            studioUserMessage = `${editUserMessage}\n\n${editBlock}`;
+            setMessages(prev => prev.map(m => (
+              m.id === assistantId
+                ? { ...m, content: `__generating__:chat:Equipped: ${skillNamesLabel(editSkills)}` }
+                : m
+            )));
+          }
+        } catch {
+          /* skills are best-effort on edit */
+        }
+      }
+
       const result = await answerStudio(
         {
-          userMessage: editUserMessage,
+          userMessage: studioUserMessage,
           files: stickyFiles,
           projectName: projectLabel,
           lastIntent: lastStudioIntentRef.current,

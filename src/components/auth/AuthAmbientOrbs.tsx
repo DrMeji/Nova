@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useRef } from 'react';
 
+function isReduceMotionOn(): boolean {
+  if (typeof document === 'undefined') return false;
+  const root = document.documentElement;
+  return root.dataset.reduceMotion === '1' || root.classList.contains('reduce-motion');
+}
+
 type OrbSpec = {
   size: number;
   colorClass: string;
@@ -138,7 +144,12 @@ function bouncePair(a: OrbSpec, b: OrbSpec, speedMin: number, speedMax: number) 
   }
 }
 
-function paintOrbs(orbs: OrbSpec[], orbEls: (HTMLButtonElement | HTMLDivElement | null)[]) {
+function paintOrbs(
+  orbs: OrbSpec[],
+  orbEls: (HTMLButtonElement | HTMLDivElement | null)[],
+  reduceMotion: boolean,
+) {
+  const play = reduceMotion ? 'paused' : 'running';
   for (let i = 0; i < orbs.length; i++) {
     const el = orbEls[i];
     if (!el) continue;
@@ -146,6 +157,7 @@ function paintOrbs(orbs: OrbSpec[], orbEls: (HTMLButtonElement | HTMLDivElement 
     el.style.width = `${orb.size}px`;
     el.style.height = `${orb.size}px`;
     el.style.transform = `translate3d(${orb.x - orb.size / 2}px, ${orb.y - orb.size / 2}px, 0)`;
+    el.style.animationPlayState = play;
   }
 }
 
@@ -163,8 +175,10 @@ export function AuthAmbientOrbs({ variant = 'auth' }: AuthAmbientOrbsProps) {
   const orbRefs = useRef<(HTMLButtonElement | HTMLDivElement | null)[]>([]);
   const stateRef = useRef<OrbSpec[] | null>(null);
   const rafRef = useRef(0);
+  const reduceMotionRef = useRef(isReduceMotionOn());
 
   const kickOrb = useCallback((index: number, clientX: number, clientY: number) => {
+    if (isReduceMotionOn()) return;
     const layer = layerRef.current;
     const orbs = stateRef.current;
     if (!layer || !orbs?.[index]) return;
@@ -188,6 +202,19 @@ export function AuthAmbientOrbs({ variant = 'auth' }: AuthAmbientOrbsProps) {
   }, []);
 
   useEffect(() => {
+    const syncReduceMotion = () => {
+      reduceMotionRef.current = isReduceMotionOn();
+      const play = reduceMotionRef.current ? 'paused' : 'running';
+      for (const el of orbRefs.current) {
+        if (el) el.style.animationPlayState = play;
+      }
+    };
+    syncReduceMotion();
+    window.addEventListener('ark:prefs-changed', syncReduceMotion);
+    return () => window.removeEventListener('ark:prefs-changed', syncReduceMotion);
+  }, []);
+
+  useEffect(() => {
     const layer = layerRef.current;
     if (!layer) return;
 
@@ -202,11 +229,15 @@ export function AuthAmbientOrbs({ variant = 'auth' }: AuthAmbientOrbsProps) {
           bounceWalls(orb, w, h);
         }
       }
-      paintOrbs(stateRef.current, orbRefs.current);
+      paintOrbs(stateRef.current, orbRefs.current, isReduceMotionOn());
       return true;
     };
 
     const tick = () => {
+      // Re-read every frame so blur/slider prefs never accidentally unfreeze motion.
+      const frozen = isReduceMotionOn();
+      reduceMotionRef.current = frozen;
+
       const w = layer.clientWidth;
       const h = layer.clientHeight;
       const orbs = stateRef.current;
@@ -216,29 +247,31 @@ export function AuthAmbientOrbs({ variant = 'auth' }: AuthAmbientOrbsProps) {
         return;
       }
 
-      for (const orb of orbs) {
-        const s = Math.hypot(orb.vx, orb.vy);
-        if (s > speedMax * 1.2) {
-          orb.vx *= 0.992;
-          orb.vy *= 0.992;
-        }
-        orb.x += orb.vx;
-        orb.y += orb.vy;
-        bounceWalls(orb, w, h);
-      }
-
-      for (let pass = 0; pass < 4; pass++) {
-        for (let i = 0; i < orbs.length; i++) {
-          for (let j = i + 1; j < orbs.length; j++) {
-            bouncePair(orbs[i], orbs[j], speedMin, speedMax);
-          }
-        }
+      if (!frozen) {
         for (const orb of orbs) {
+          const s = Math.hypot(orb.vx, orb.vy);
+          if (s > speedMax * 1.2) {
+            orb.vx *= 0.992;
+            orb.vy *= 0.992;
+          }
+          orb.x += orb.vx;
+          orb.y += orb.vy;
           bounceWalls(orb, w, h);
         }
+
+        for (let pass = 0; pass < 4; pass++) {
+          for (let i = 0; i < orbs.length; i++) {
+            for (let j = i + 1; j < orbs.length; j++) {
+              bouncePair(orbs[i], orbs[j], speedMin, speedMax);
+            }
+          }
+          for (const orb of orbs) {
+            bounceWalls(orb, w, h);
+          }
+        }
       }
 
-      paintOrbs(orbs, orbRefs.current);
+      paintOrbs(orbs, orbRefs.current, frozen);
       rafRef.current = requestAnimationFrame(tick);
     };
 
@@ -252,6 +285,8 @@ export function AuthAmbientOrbs({ variant = 'auth' }: AuthAmbientOrbsProps) {
     return () => {
       cancelAnimationFrame(rafRef.current);
       ro.disconnect();
+      // Keep seeded positions across Soft remounts from parent re-renders.
+      // Only drop state when the layer truly unmounts with variant change handled by deps.
       stateRef.current = null;
     };
   }, [variant]);
