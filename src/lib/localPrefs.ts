@@ -404,6 +404,18 @@ export function clearPluginToken(pluginId: string) {
 /** App changelog shown in Settings → Updates (UI shows only the installed version). */
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.206',
+    channel: 'stable' as const,
+    date: 'Sep 9, 2026',
+    title: 'Cleaner UI copy + safer builds',
+    notes: [
+      'Remove teaching helper blurbs across Chat, Settings, Models, and onboarding (MCP + Brain kept)',
+      'Usage popover shows labels and percents only — no filler descriptions',
+      'Typecheck gates local bat launches and release CI before packaging',
+      'Fix FolderCatalogCard JSX that broke source builds',
+    ],
+  },
+  {
     version: '0.1.205',
     channel: 'stable' as const,
     date: 'Sep 8, 2026',
