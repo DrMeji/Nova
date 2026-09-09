@@ -41,6 +41,12 @@
     "smoke:social-demo": "tsx --tsconfig tsconfig.app.json scripts/smoke-social-demo-packaged.mjs",
     "smoke:failover-matrix": "tsx --tsconfig tsconfig.app.json scripts/smoke-failover-matrix.mjs",
     "smoke:voice-refuse": "tsx --tsconfig tsconfig.app.json scripts/smoke-voice-refuse.mjs",
+    "smoke:app-twins": "tsx --tsconfig tsconfig.app.json scripts/smoke-app-twins.mjs",
+    "smoke:interactive-depth": "tsx --tsconfig tsconfig.app.json scripts/smoke-interactive-depth.mjs",
+    "smoke:midbuild-switch": "tsx --tsconfig tsconfig.app.json scripts/smoke-midbuild-switch.mjs",
+    "smoke:no-brain-nudge": "tsx --tsconfig tsconfig.app.json scripts/smoke-no-brain-nudge.mjs",
+    "smoke:ready-gates": "tsx --tsconfig tsconfig.app.json scripts/smoke-ready-gates.mjs",
+    "smoke:create-quality": "tsx --tsconfig tsconfig.app.json scripts/smoke-create-quality.mjs",
     "website:dev": "npm --prefix website run dev",
     "website:build": "npm --prefix website run build"
   },

@@ -2037,12 +2037,8 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                             </p>
                             <p className="text-[11px] text-content-tertiary mt-0.5">{entry.date}</p>
                           </div>
-                          <span className={`text-[10px] rounded-full px-2 py-0.5 ${
-                            entry.channel === 'beta'
-                              ? 'bg-amber-500/15 text-amber-300'
-                              : 'bg-emerald-500/15 text-emerald-400'
-                          }`}>
-                            {entry.channel}
+                          <span className="text-[10px] rounded-full px-2 py-0.5 bg-emerald-500/15 text-emerald-400">
+                            {entry.channel === 'beta' ? 'stable' : entry.channel}
                           </span>
                         </div>
                         <ul className="space-y-1.5">

@@ -10,6 +10,8 @@ node_modules
 dist
 dist-ssr
 release
+scripts/_tmp-*
+scripts/_tmp*.*
 tmp-media/
 tmp-*
 *.local

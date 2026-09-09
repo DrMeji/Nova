@@ -288,11 +288,7 @@ function cloudModelAvailability(model: CloudModel): 'live' | 'coming_soon' | 're
     return 'coming_soon';
   }
   if (model.category === 'image') {
-    if (
-      model.provider === 'Pollinations'
-      || model.provider === 'Hugging Face'
-      || model.id === 'dall-e-3'
-    ) return 'live';
+    // Image product removed — catalog discovery only, never "live".
     return 'coming_soon';
   }
   if (model.category === 'vision') {

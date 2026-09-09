@@ -9,7 +9,6 @@ const API_KEYS_KEY_LEGACY_NOVA = 'NOVA:provider-api-keys';
 export type AiModePref = 'automatic' | 'local_only' | 'cloud_when_available' | 'local_fallback';
 export type DensityPref = 'comfortable' | 'compact';
 export type AccentPref = 'sky' | 'emerald' | 'amber' | 'rose';
-export type UpdateChannel = 'stable' | 'beta';
 export type PresenceStatusPref = 'online' | 'idle' | 'dnd' | 'inactive';
 
 export type LocalPrefs = {
@@ -106,7 +105,6 @@ export type LocalPrefs = {
   /** speechSynthesis voiceURI for NOVA spoken replies. */
   voiceTtsVoiceUri?: string;
   // Updates
-  updateChannel: UpdateChannel;
   autoCheckUpdates: boolean;
   notifyOnUpdate: boolean;
   launchOnStartup: boolean;
@@ -160,7 +158,6 @@ const DEFAULT_PREFS: LocalPrefs = {
   voiceChatEnabled: false,
   voiceInputAuto: true,
   voiceOutputAuto: true,
-  updateChannel: 'stable',
   autoCheckUpdates: true,
   notifyOnUpdate: true,
   launchOnStartup: true,
@@ -728,7 +725,7 @@ export const ARK_CHANGELOG = [
       'Friends list and chat refresh live display names and profile photos from Settings',
       'DEV account labels correctly on friend requests and contacts',
       'Sign up includes a single Name field (NOVA ID still auto-assigned)',
-      'Call stays parked until tomorrow; see docs/DEFERRED.md',
+      'Call was parked at the time of this build; Call has since been removed from the product',
     ],
   },
   {
@@ -849,7 +846,7 @@ export const ARK_CHANGELOG = [
     version: '0.1.93',
     channel: 'stable' as const,
     date: 'Aug 19, 2026',
-    title: 'Chat reply polish: no false red errors, fresh Image/Video, response timer',
+    title: 'Chat reply polish: no false red errors, Image/Video reset, response timer',
     notes: [
       'Normal assistant answers no longer show as red error boxes (fixed false “port/space” matches)',
       'Image and Video tabs always open a fresh canvas instead of jumping to the last Recent thread',
@@ -1224,7 +1221,7 @@ export const ARK_CHANGELOG = [
     date: 'Aug 17, 2026',
     title: 'Networking marked Coming soon (update splash test)',
     notes: [
-      'Networking is disabled in the sidebar with Coming soon. Message and Call stay available',
+      'Networking is disabled in the sidebar with Coming soon. Message stays available (Call later removed)',
       'Use this build to confirm the Updating screen stays until NOVA reopens',
     ],
   },
@@ -1865,7 +1862,7 @@ export const ARK_CHANGELOG = [
   },
   {
     version: '0.0.9',
-    channel: 'beta' as const,
+    channel: 'stable' as const,
     date: 'Aug 13, 2026',
     title: 'First run optimize',
     notes: [

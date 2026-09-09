@@ -66,4 +66,4 @@ Master list of things not done yet, half-done, or parked.
 
 1. **Remaining hard items:** Windows signing cert (purchase), mark `docs/SUPABASE-APPLY-CHECKLIST.md` applied on hosted Supabase, deploy `website/` + set `VITE_ARK_WEBSITE_ORIGIN` for live email reset, optional custom SMTP
 2. **Create / edit:** keep live-regressing cafe → Preview → micro-edit → second-chat isolation → interactive depth → App twins → mid-build switch → no-brain honesty
-3. **Later (optional revive):** Image / Video / Call — code may still exist on disk but is unreachable from UI
+3. **Do not revive (unless product asks):** Image generation, Video generation, Call/WebRTC, Testers/Beta settings, custom profile photo upload — keep removed. Code leftovers stay unreachable; prefer delete over revive.

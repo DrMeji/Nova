@@ -132,7 +132,7 @@ export function SocialProvider({ children }: { children: ReactNode }) {
     const result = await sendFriendRequest({
       fromArkId: myArkId,
       fromName,
-      fromAvatarUrl: prefs.avatarDataUrl || profile?.avatar_url || undefined,
+      fromAvatarUrl: profile?.avatar_url || undefined,
       toArkIdRaw: arkId,
       userId: user?.id,
     });

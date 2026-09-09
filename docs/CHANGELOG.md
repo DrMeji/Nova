@@ -138,7 +138,7 @@ Splash progress polish, Projects ghost cleanup, Image SOON for retail.
 - Create auto-picks a free name when an old folder is still present
 
 ### Image
-- Image tab is SOON on packaged installs (same idea as Video); bat/DEV still has Image
+- Image tab was SOON on packaged installs; Image/Video/Call have since been **removed** from the product UI (see `docs/DEFERRED.md`)
 
 ## 0.1.178 � 2026-09-03
 

@@ -39,6 +39,15 @@ jobs:
       - run: npm run smoke:self-guard
       - run: npm run smoke:cloud-wiring
       - run: npm run smoke:followup
+      - run: npm run smoke:voice-refuse
+      - run: npm run smoke:social-demo
+      - run: npm run smoke:failover-matrix
+      - run: npm run smoke:app-twins
+      - run: npm run smoke:interactive-depth
+      - run: npm run smoke:midbuild-switch
+      - run: npm run smoke:no-brain-nudge
+      - run: npm run smoke:ready-gates
+      - run: npm run smoke:create-quality
       # Brain HTTP smoke only when a local brain is running (desktop app).
       - name: Brain API smoke (optional)
         env:
