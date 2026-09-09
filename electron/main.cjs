@@ -922,8 +922,24 @@ ipcMain.handle('NOVA:voice-neural-speak', async (_e, payload) =>
 ipcMain.handle('NOVA:engine-status', async () => arkEngine.getStatus());
 ipcMain.handle('NOVA:engine-start', async () => arkEngine.start());
 ipcMain.handle('NOVA:engine-stop', async () => arkEngine.stop());
-ipcMain.handle('NOVA:engine-set-model', async (_e, id) => arkEngine.setActiveModel(id));
-ipcMain.handle('NOVA:engine-download', async (_e, id) => arkEngine.beginDownload(id));
+ipcMain.handle('NOVA:engine-set-model', async (_e, id) => {
+  try {
+    if (!id || typeof id !== 'string') throw new Error('Missing model id');
+    return arkEngine.setActiveModel(id);
+  } catch (err) {
+    console.warn('[NOVA] engine-set-model', err instanceof Error ? err.message : err);
+    try { return arkEngine.getStatus(); } catch { return { phase: 'offline', models: [] }; }
+  }
+});
+ipcMain.handle('NOVA:engine-download', async (_e, id) => {
+  try {
+    if (!id || typeof id !== 'string') throw new Error('Missing model id');
+    return arkEngine.beginDownload(id);
+  } catch (err) {
+    console.warn('[NOVA] engine-download', err instanceof Error ? err.message : err);
+    try { return arkEngine.getStatus(); } catch { return { phase: 'offline', models: [] }; }
+  }
+});
 ipcMain.handle('NOVA:engine-register-hunt', async (_e, meta) => {
   try {
     const model = arkEngine.registerHunt(meta);

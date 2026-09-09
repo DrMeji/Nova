@@ -104,11 +104,11 @@ export function SearchPanel({ onClose, onOpenSettings }: SearchPanelProps) {
         icon: MessageSquare,
         route: {
           name: 'chat' as const,
-          mode: c.mode === 'voice'
+          mode: (c.mode === 'voice'
             ? 'voice'
-            : c.mode === 'general' || c.mode === 'image' || c.mode === 'video'
-              ? undefined
-              : c.mode,
+            : c.mode === 'code'
+              ? 'code'
+              : undefined) as import('@/context/RouterContext').ChatMode | undefined,
           chatId: c.id,
         },
       })),

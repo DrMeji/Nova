@@ -244,7 +244,7 @@ export function LocalAI() {
   const availableByCategory = useMemo(() => {
     const installedIds = new Set(installed.map(m => m.id));
     return LOCAL_CATEGORY_ORDER
-      .filter(id => id in LOCAL_CATEGORY_META && id !== 'image' && id !== 'video')
+      .filter(id => id in LOCAL_CATEGORY_META)
       .map(id => {
         const meta = LOCAL_CATEGORY_META[id as CatalogModel['category']];
         return {

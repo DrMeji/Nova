@@ -38,6 +38,7 @@ import { hasPinSet, setPin, clearPin } from '@/lib/pinLock';
 import { hasSecondFactorSet, setSecondFactor, clearSecondFactor } from '@/lib/twoFactor';
 import { probeProviderKey } from '@/lib/providerSpeed';
 import { setCloudProviderEnabled } from '@/lib/cloudSources';
+import { isArkDevSession } from '@/lib/arkRuntime';
 import { getBrainUrl } from '@/lib/brainUrl';
 import { SettingsSystemHealth } from '@/components/SettingsSystemHealth';
 import { BrandMark, StatusCheck } from '@/components/BrandMark';
@@ -2038,7 +2039,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                             <p className="text-[11px] text-content-tertiary mt-0.5">{entry.date}</p>
                           </div>
                           <span className="text-[10px] rounded-full px-2 py-0.5 bg-emerald-500/15 text-emerald-400">
-                            {entry.channel === 'beta' ? 'stable' : entry.channel}
+                            {entry.channel}
                           </span>
                         </div>
                         <ul className="space-y-1.5">

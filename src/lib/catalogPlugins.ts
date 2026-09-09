@@ -563,7 +563,14 @@ async function runProductDesignLive(_token: string, userText: string) {
 }
 
 export const CATALOG_PLUGIN_HANDLERS: Record<string, CatalogPluginEntry> = {
-  github: { verify: verifyGitHubToken, runLive: (t, u, o) => runGitHubLive(t, u, o), mention: /github|repo|pull request|\bpr\b|issue/i },
+  github: {
+    verify: async (token: string) => {
+      const user = await verifyGitHubToken(token);
+      return { label: user.login || user.name || 'GitHub' };
+    },
+    runLive: (t, u, o) => runGitHubLive(t, u, o),
+    mention: /github|repo|pull request|\bpr\b|issue/i,
+  },
   notion: { verify: verifyNotionToken, runLive: (t, u, o) => runNotionLive(t, u, o), mention: /notion|spec|brief|workspace/i },
   gmail: { verify: verifyGmailToken, runLive: (t, u, o) => runGmailLive(t, u, o), mention: /gmail|inbox|email|mail|unread/i },
   // Do NOT match bare "channel" / "dm" — those fire on YouTube "channel + views", UI DMs, etc.

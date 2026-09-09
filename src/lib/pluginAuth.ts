@@ -85,7 +85,7 @@ const AUTH_LINKS: Record<string, PluginAuthLink> = {
   salesforce: {
     label: 'Salesforce connected apps',
     url: 'https://help.salesforce.com/s/articleView?id=sf.connected_app_create.htm',
-    hint: 'Create a connected app, then paste an access token.',
+    hint: 'Paste as https://instance.my.salesforce.com|access_token.',
   },
   vercel: {
     label: 'Vercel tokens',
@@ -117,20 +117,10 @@ const AUTH_LINKS: Record<string, PluginAuthLink> = {
     url: 'https://developer.monday.com/api-reference/docs/authentication',
     hint: 'Paste your Monday API v2 token.',
   },
-  asana: {
-    label: 'Asana developer console',
-    url: 'https://app.asana.com/0/my-apps',
-    hint: 'Create a personal access token and paste it below.',
-  },
   atlassian: {
     label: 'Atlassian API tokens',
     url: 'https://id.atlassian.com/manage-profile/security/api-tokens',
     hint: 'Paste as site.atlassian.net|email@you.com|api_token.',
-  },
-  salesforce: {
-    label: 'Salesforce connected apps',
-    url: 'https://help.salesforce.com/s/articleView?id=sf.connected_app_create.htm',
-    hint: 'Paste as https://instance.my.salesforce.com|access_token.',
   },
   apollo: {
     label: 'Apollo.io API',

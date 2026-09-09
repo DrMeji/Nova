@@ -3,7 +3,7 @@
  * Local GGUF is last-resort with a tiny token cap so voice does not freeze the PC.
  */
 
-import { loadHardwareSnapshot, parseRamGb } from '@/lib/api';
+import { loadHardwareSnapshot, parseRamGb, detectHardware } from '@/lib/api';
 import { engineGenerate, getEngineStatus } from '@/lib/arkEngine';
 import { packHistoryPrompt, usableAssistantText, type RouterChatTurn } from '@/lib/chatHistory';
 import {
@@ -85,7 +85,7 @@ async function tryLocalVoiceRoute(
   let ranked: string[] = [];
   try {
     const status = await getEngineStatus();
-    const ramGb = parseRamGb(loadHardwareSnapshot() || '') || 8;
+    const ramGb = parseRamGb(loadHardwareSnapshot() || detectHardware()) || 8;
     ranked = rankedReadyEngineIds(status.models, 'chat', ramGb);
   } catch {
     return null;

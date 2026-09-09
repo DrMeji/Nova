@@ -330,8 +330,11 @@ export function MessageView() {
       setListTick(t => t + 1);
     } catch (err) {
       setDraft(body);
-      setSendError(err instanceof Error ? err.message : MSG_NEED_FRIEND);
-      setCanChat(false);
+      const msg = err instanceof Error ? err.message : 'Could not send.';
+      setSendError(msg);
+      if (msg === MSG_NEED_FRIEND || /friend request|still friends|need to add/i.test(msg)) {
+        setCanChat(false);
+      }
     }
   };
 
@@ -384,8 +387,11 @@ export function MessageView() {
         setThread(prev => [...prev, msg]);
         setListTick(t => t + 1);
       } catch (err) {
-        setSendError(err instanceof Error ? err.message : MSG_NEED_FRIEND);
-        setCanChat(false);
+        const msg = err instanceof Error ? err.message : 'Could not send.';
+        setSendError(msg);
+        if (msg === MSG_NEED_FRIEND || /friend request|still friends|need to add/i.test(msg)) {
+          setCanChat(false);
+        }
       }
       return;
     }
@@ -414,8 +420,11 @@ export function MessageView() {
         setThread(prev => [...prev, msg]);
         setListTick(t => t + 1);
       } catch (err) {
-        setSendError(err instanceof Error ? err.message : MSG_NEED_FRIEND);
-        setCanChat(false);
+        const msg = err instanceof Error ? err.message : 'Could not send.';
+        setSendError(msg);
+        if (msg === MSG_NEED_FRIEND || /friend request|still friends|need to add/i.test(msg)) {
+          setCanChat(false);
+        }
         break;
       }
     }

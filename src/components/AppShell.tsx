@@ -810,7 +810,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                       ? activeChatId === item.id
                       : activeRecentId === item.id;
                     const doneAway = item.kind === 'chat' && doneChats.has(item.id) && !active;
-                    const Icon = item.kind === 'project' ? Code2 : chatIcon(item.mode || 'general');
+                    const Icon = chatIcon(item.mode || 'general');
                     return (
                       <button
                         key={item.key}

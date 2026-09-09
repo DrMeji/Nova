@@ -5,6 +5,7 @@ import { VoiceArkFace } from '@/components/VoiceArkFace';
 const PHASE_LABEL: Record<VoiceSessionPhase, string> = {
   idle: 'Tap NOVA or type below',
   listening: 'Listening…',
+  transcribing: 'Got it…',
   thinking: 'Thinking…',
   speaking: 'Speaking…',
   error: 'Tap NOVA to try again',

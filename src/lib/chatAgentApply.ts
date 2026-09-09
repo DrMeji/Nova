@@ -86,10 +86,11 @@ async function hydrateFilesFromDiskRoot(diskRoot: string): Promise<ProjectFileMa
   // Pull one level of components so Ready/edit see more than App.jsx.
   try {
     const listing = await window.arkDesktop.listDir?.(joinDisk(diskRoot, 'src/components'));
-    const entries = Array.isArray((listing as { items?: unknown[] })?.items)
-      ? (listing as { items: { name?: string }[] }).items
-      : Array.isArray((listing as { entries?: unknown[] })?.entries)
-        ? (listing as { entries: { name?: string }[] }).entries
+    const raw = listing as { items?: { name?: string }[]; entries?: { name?: string }[] } | undefined;
+    const entries = Array.isArray(raw?.items)
+      ? raw!.items!
+      : Array.isArray(raw?.entries)
+        ? raw!.entries!
         : [];
     for (const ent of entries.slice(0, 40)) {
       const name = String(ent?.name || '');

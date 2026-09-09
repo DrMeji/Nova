@@ -230,7 +230,7 @@ export async function openVoiceInputStream(): Promise<MediaStream | null> {
   const prefs = getLocalPrefs();
   if (prefs.voiceInputAuto) await syncAutoVoiceDevices();
   const deviceId = getVoiceInputDeviceId();
-  const audio: MediaTrackConstraints = deviceId
+  const audio: boolean | MediaTrackConstraints = deviceId
     ? { deviceId: { exact: deviceId } }
     : true;
   try {

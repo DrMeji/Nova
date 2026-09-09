@@ -1615,7 +1615,7 @@ export function AIChat() {
     setMessages([]);
     messagesRef.current = [];
     persistChatIdRef.current = null;
-    routeChatIdRef.current = null;
+    routeChatIdRef.current = undefined;
     activeGenChatIdRef.current = null;
     setGenerating(false);
     generatingRef.current = false;
@@ -3618,6 +3618,17 @@ export function AIChat() {
       endTurnAndFlush(mySeq);
     };
 
+    const stopIfSuperseded = async (note?: string) => {
+      if (mySeq === genSeqRef.current && !stopRequestedRef.current) return false;
+      await finishPlainReply(
+        note
+        || (stopRequestedRef.current
+          ? 'Stopped.'
+          : 'Stopped — another message started while this was still running.'),
+      );
+      return true;
+    };
+
     if (looksLikeHarmfulContentAsk(content)) {
       // Brief pause so the reply reads like a normal answer, not a 1 ms stub.
       await new Promise<void>(r => window.setTimeout(r, 480 + Math.floor(Math.random() * 220)));
@@ -4899,7 +4910,7 @@ export function AIChat() {
         .filter(m => m.role === 'user')
         .map(m => extractGreenfieldName(String(m.content || '')))
         .filter(Boolean)
-        .at(-1)
+        .slice(-1)[0]
       || null;
     const createIntent = createIntentRaw && renameFromAsk && !/^(My App|New App|App)$/i.test(renameFromAsk)
       ? {
@@ -5031,18 +5042,18 @@ export function AIChat() {
 
       pushAssistantStatus(`Reading your brief for ${buildIntent.name}…`);
       await new Promise<void>(r => { window.setTimeout(r, Math.max(800, briefReadDelayMs(buildIntent.summary) / 2)); });
-      if (mySeq !== genSeqRef.current) return;
+      if (await stopIfSuperseded()) return;
 
       pushAssistantStatus(`Creating folder in NOVA Projects (${buildIntent.slug})…`);
       try {
       await syncWorkspaceGrantsFromPrefs();
       await new Promise<void>(r => { window.setTimeout(r, 200); });
-      if (mySeq !== genSeqRef.current) return;
+      if (await stopIfSuperseded()) return;
 
       pushAssistantStatus('Writing project files from your brief…');
       const newProjectId = `proj-${crypto.randomUUID().slice(0, 8)}`;
       const created = await runCreateProjectFlow(buildIntent, newProjectId);
-      if (mySeq !== genSeqRef.current) return;
+      if (await stopIfSuperseded()) return;
 
       if (!created.ok) {
         await finishPlainReply(created.error || 'Could not create the project.');
@@ -5377,7 +5388,7 @@ export function AIChat() {
         } catch {
           modelReply = '';
         }
-        if (mySeq !== genSeqRef.current) return;
+        if (await stopIfSuperseded()) return;
 
         const applied = multiAppliedFiles
           ? { ok: true as const, updated: Object.keys(multiAppliedFiles), files: multiAppliedFiles }
@@ -10504,7 +10515,11 @@ export function AIChat() {
                         <button
                           key={c.id}
                           type="button"
-                          onClick={() => navigate({ name: 'creation', id: c.id })}
+                          onClick={() => navigate({
+                            name: 'chat',
+                            mode: 'image',
+                            creationId: c.id,
+                          })}
                           className="aspect-square rounded-xl overflow-hidden border border-surface-border bg-ark-navy-900"
                           title={c.title || c.prompt}
                         >

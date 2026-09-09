@@ -227,9 +227,11 @@ export function setLocalPrefs(patch: Partial<LocalPrefs>): LocalPrefs {
       }
     }
     localStorage.setItem(PREFS_KEY, JSON.stringify(toStore));
-    // Only drop the legacy key when it is a different string (rebrand migrate).
-    if (PREFS_KEY_LEGACY_NOVA !== PREFS_KEY) {
+    // Drop the legacy rebrand key if it still exists.
+    try {
       localStorage.removeItem(PREFS_KEY_LEGACY_NOVA);
+    } catch {
+      /* ignore */
     }
   } catch {
     /* quota / private mode — still return next so UI can update this session */

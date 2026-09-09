@@ -644,8 +644,14 @@ export async function sendDirectMessage(opts: {
     createdAt: new Date().toISOString(),
     attachment: opts.attachment,
   };
+  // Attachments are device-local only until cloud upload exists — don't pretend the peer got them.
+  if (canUseCloud(opts.userId) && opts.attachment) {
+    throw new Error(
+      'File attachments stay on this device for now. Send text to deliver over the network, or share the file another way.',
+    );
+  }
   saveLocalMessages([...loadLocalMessages(), msg]);
-  if (canUseCloud(opts.userId) && !opts.attachment) {
+  if (canUseCloud(opts.userId)) {
     const { error } = await supabase.from('ark_direct_messages').insert({
       id: msg.id,
       sender_id: opts.userId,
@@ -654,7 +660,8 @@ export async function sendDirectMessage(opts: {
       body: msg.body,
     });
     if (error) {
-      // Keep local draft for retry, but do not pretend the peer got it.
+      // Roll back local so we do not leave an undelivered ghost in the thread.
+      saveLocalMessages(loadLocalMessages().filter(m => m.id !== msg.id));
       throw new Error(
         error.message?.trim()
           || 'Couldn’t deliver that message to the server. Check your connection and that you’re still friends, then try again.',

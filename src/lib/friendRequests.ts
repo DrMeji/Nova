@@ -232,7 +232,7 @@ export async function sendFriendRequest(opts: {
 export async function respondFriendRequest(
   requestId: string,
   decision: 'accepted' | 'declined',
-  opts?: { userId?: string | null; myArkId?: string },
+  opts?: { userId?: string | null; myArkId?: string; _retried?: boolean },
 ): Promise<FriendRequest | null> {
   const all = readLocal();
   const idx = all.findIndex(r => r.id === requestId);
@@ -263,9 +263,9 @@ export async function respondFriendRequest(
   }
 
   if (idx < 0 && !local) {
-    if (opts?.myArkId && canUseCloud(opts.userId)) {
+    if (!opts?._retried && opts?.myArkId && canUseCloud(opts.userId)) {
       await syncFriendRequests(opts.myArkId, opts.userId);
-      return respondFriendRequest(requestId, decision, opts);
+      return respondFriendRequest(requestId, decision, { ...opts, _retried: true });
     }
     return null;
   }
