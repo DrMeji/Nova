@@ -3774,7 +3774,7 @@ export function AIChat() {
     }) => {
       pushAssistantStatus('Thinking…');
       await new Promise<void>(r => { window.setTimeout(r, 120); });
-      if (mySeq !== genSeqRef.current) return;
+      if (await stopIfSuperseded()) return;
 
       if (opts.resolvedFromDesktop) {
         pushAssistantStatus('Exploring your Desktop…');
@@ -3782,11 +3782,11 @@ export function AIChat() {
       } else {
         pushAssistantStatus(`Exploring ${opts.displayName}…`);
       }
-      if (mySeq !== genSeqRef.current) return;
+      if (await stopIfSuperseded()) return;
 
       pushAssistantStatus(`Found ${opts.displayName}. ${opts.targetPath}`);
       await new Promise<void>(r => { window.setTimeout(r, 100); });
-      if (mySeq !== genSeqRef.current) return;
+      if (await stopIfSuperseded()) return;
 
       pushAssistantStatus('Reading project summaries…');
       const roots = await window.arkDesktop?.browseRoots?.();
@@ -3795,7 +3795,7 @@ export function AIChat() {
         desktopPath,
         showDesktopSiblings: opts.resolvedFromDesktop,
       });
-      if (mySeq !== genSeqRef.current) return;
+      if (await stopIfSuperseded()) return;
 
       pushAssistantStatus('Preparing answer…');
       await new Promise<void>(r => { window.setTimeout(r, 60); });
@@ -3832,17 +3832,17 @@ export function AIChat() {
       // One status label only — cycling many labels mid-reply looked like flickering messages.
       pushAssistantStatus(stages[0] || 'Looking around…');
       await new Promise<void>(r => { window.setTimeout(r, 80); });
-      if (mySeq !== genSeqRef.current) return;
+      if (await stopIfSuperseded()) return;
 
       if (mode === 'installed_apps' || mode === 'games') {
         await syncWorkspaceGrantsFromPrefs();
       } else {
         await syncWorkspaceGrantsFromPrefs();
       }
-      if (mySeq !== genSeqRef.current) return;
+      if (await stopIfSuperseded()) return;
 
       const data = await buildPcExploreData(userMessage, mode);
-      if (mySeq !== genSeqRef.current) return;
+      if (await stopIfSuperseded()) return;
 
       pushAssistantStatus(stages[stages.length - 1] || 'Preparing answer…');
       await new Promise<void>(r => { window.setTimeout(r, 50); });
@@ -4066,7 +4066,7 @@ export function AIChat() {
           stickyTarget: stickyDiskTarget,
           lastListedFolder: getLastListedFolder(activeChatId),
         });
-        if (mySeq !== genSeqRef.current) return;
+        if (await stopIfSuperseded()) return;
 
         if (addOutcome.kind === 'reply') {
           if (diskIntent.name) {
@@ -4475,7 +4475,7 @@ export function AIChat() {
         modelReply = '';
       }
       }
-      if (mySeq !== genSeqRef.current) return;
+      if (await stopIfSuperseded()) return;
 
       const applied = modelReply
         ? await applyChatReplyEdits({
@@ -6857,7 +6857,7 @@ export function AIChat() {
         userMessage: content,
         history: visionHistory,
       });
-      if (mySeq !== genSeqRef.current) return;
+      if (await stopIfSuperseded()) return;
       if (hop.ok && hop.notes) {
         editUserMessage = composeVisionToCoderBrief(hop.notes, content);
         visionHopMeta = hop.providerLabel;
@@ -6888,7 +6888,7 @@ export function AIChat() {
           : m
       )));
       await new Promise<void>(r => { window.setTimeout(r, 40); });
-      if (mySeq !== genSeqRef.current) return;
+      if (await stopIfSuperseded()) return;
 
       const projectLabel = studioPathBasename(chatStudioDiskRootRef.current || '')
         || resolvedStudio.name
@@ -7424,7 +7424,7 @@ export function AIChat() {
             };
           },
         });
-        if (mySeq !== genSeqRef.current) return;
+        if (await stopIfSuperseded()) return;
         if (loop.updated.length || loop.ok || loop.steps.some(s => s.tool === 'write' || s.tool === 'patch' || s.tool === 'done')) {
           setChatStudioFiles(loop.files);
           chatStudioFilesRef.current = loop.files;
@@ -7591,7 +7591,7 @@ export function AIChat() {
         },
       );
 
-      if (mySeq !== genSeqRef.current) return;
+      if (await stopIfSuperseded()) return;
 
       lastStudioIntentRef.current = result.intent;
       if (result.findings?.length) lastFindingsRef.current = result.findings;
