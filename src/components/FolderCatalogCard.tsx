@@ -108,8 +108,6 @@ export function FolderCatalogCard({ data }: { data: FolderCatalogData }) {
         </div>
       ) : null}
 
-      ) : null}
-
       <ItemTable title="Files at this level" items={data.rootFiles} />
 
       {data.desktopSiblings.length ? (
