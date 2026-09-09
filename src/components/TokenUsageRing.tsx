@@ -95,7 +95,27 @@ export function TokenUsageRing({
         aria-expanded={open}
       >
         <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="-rotate-90" aria-hidden>
-          {/* Outer. model freshness (color only when used; no white donut) */}
+          {/* Always-visible outer track so the control isn’t invisible at 0% */}
+          <circle
+            cx={size / 2}
+            cy={size / 2}
+            r={outerR}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={stroke}
+            className="text-white/25"
+          />
+          {/* Always-visible inner track */}
+          <circle
+            cx={size / 2}
+            cy={size / 2}
+            r={innerR}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={stroke}
+            className="text-white/18"
+          />
+          {/* Outer. model freshness */}
           {mdl > 0.008 && (
             <circle
               cx={size / 2}

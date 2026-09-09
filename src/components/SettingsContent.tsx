@@ -807,11 +807,6 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <ToggleRow
-                  label="Compact sidebar"
-                  value={prefs.compactSidebar}
-                  onChange={v => patchPrefs({ compactSidebar: v })}
-                />
-                <ToggleRow
                   label="Show status bar"
                   value={prefs.showStatusBar}
                   onChange={v => patchPrefs({ showStatusBar: v })}

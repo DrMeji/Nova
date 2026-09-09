@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo, useState, useEffect, useRef } from 'react';
 import { useRouter } from '@/context/RouterContext';
 import { useRecentProjects } from '@/context/RecentProjectsContext';
 import { fetchProjects, createProject } from '@/lib/api';
@@ -64,6 +64,8 @@ export function ProjectsView() {
   const [renameValue, setRenameValue] = useState('');
   const [openingFolder, setOpeningFolder] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const selectAllRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setLoading(true);
@@ -117,6 +119,63 @@ export function ProjectsView() {
       return true;
     });
   }, [items, query, tab]);
+
+  const selectedCount = selectedIds.size;
+  const allFilteredSelected = filtered.length > 0 && filtered.every(item => selectedIds.has(item.id));
+  const someFilteredSelected = filtered.some(item => selectedIds.has(item.id));
+
+  useEffect(() => {
+    if (selectAllRef.current) {
+      selectAllRef.current.indeterminate = someFilteredSelected && !allFilteredSelected;
+    }
+  }, [someFilteredSelected, allFilteredSelected]);
+
+  useEffect(() => {
+    if (selectedCount === 0) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setSelectedIds(new Set());
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [selectedCount]);
+
+  const clearSelection = () => setSelectedIds(new Set());
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAllFiltered = () => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (allFilteredSelected) {
+        for (const item of filtered) next.delete(item.id);
+      } else {
+        for (const item of filtered) next.add(item.id);
+      }
+      return next;
+    });
+  };
+
+  const deleteListItem = async (item: ListItem) => {
+    if (item.diskPath && window.arkDesktop?.workspaceDeleteFolder) {
+      await window.arkDesktop.workspaceDeleteFolder({ targetPath: item.diskPath });
+    } else if (item.id.startsWith('ark-folder:')) {
+      const disk = item.id.slice('ark-folder:'.length);
+      await window.arkDesktop?.workspaceDeleteFolder?.({ targetPath: disk });
+    }
+    if (!item.id.startsWith('ark-folder:')) {
+      removeRecent(item.id);
+    }
+    setArkFolders(prev => prev.filter(f => f.id !== item.id && f.path !== item.diskPath));
+  };
 
   const handleCreate = async () => {
     const name = newName.trim() || 'Untitled';
@@ -213,6 +272,24 @@ export function ProjectsView() {
     setRenameValue('');
   };
 
+  const handleBulkDelete = async () => {
+    const toDelete = items.filter(item => selectedIds.has(item.id));
+    if (!toDelete.length) return;
+    const n = toDelete.length;
+    if (!window.confirm(
+      `Remove ${n} project${n === 1 ? '' : 's'} from this list and delete their folders if they still exist?`,
+    )) {
+      return;
+    }
+    for (const item of toDelete) {
+      await deleteListItem(item);
+    }
+    clearSelection();
+    setMenuId(null);
+    setNotice(`Removed ${n} project${n === 1 ? '' : 's'}.`);
+    window.setTimeout(() => setNotice(null), 3000);
+  };
+
   return (
     <div className="h-full min-w-0 flex flex-col overflow-hidden animate-fade-in bg-transparent">
       <div className="shrink-0 px-4 sm:px-6 pt-[min(12vh,6rem)] bg-transparent">
@@ -279,10 +356,47 @@ export function ProjectsView() {
           </div>
 
           {!loading && filtered.length > 0 && (
-            <div className="grid grid-cols-[1fr_6rem_7.5rem] gap-4 px-1 pb-2 text-xs text-content-tertiary">
-              <span>Name</span>
-              <span>Where</span>
-              <span className="text-right">Modified</span>
+            <div className="flex flex-col gap-2 mb-1">
+              {selectedCount > 0 && (
+                <div className="flex items-center gap-2 px-1">
+                  <span className="text-xs text-content-secondary">{selectedCount} selected</span>
+                  <button
+                    type="button"
+                    onClick={clearSelection}
+                    className="h-7 rounded-full px-2.5 text-xs font-medium text-content-secondary hover:text-content-primary hover:bg-surface-hover"
+                  >
+                    Clear
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleBulkDelete()}
+                    className="h-7 rounded-full px-2.5 inline-flex items-center gap-1.5 text-xs font-medium text-rose-300 hover:bg-rose-500/10"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                    Delete ({selectedCount})
+                  </button>
+                </div>
+              )}
+              <div className="grid grid-cols-[1fr_6rem_7.5rem] gap-4 px-1 pb-2 text-xs text-content-tertiary">
+                <span className="flex items-center gap-2 min-w-0">
+                  <label
+                    className="inline-flex items-center gap-1.5 shrink-0 cursor-pointer select-none"
+                    title="Select all"
+                  >
+                    <input
+                      ref={selectAllRef}
+                      type="checkbox"
+                      checked={allFilteredSelected}
+                      onChange={toggleSelectAllFiltered}
+                      aria-label="Select all"
+                      className="rounded border-surface-border"
+                    />
+                    <span>Select all</span>
+                  </label>
+                </span>
+                <span>Where</span>
+                <span className="text-right">Modified</span>
+              </div>
             </div>
           )}
         </div>
@@ -312,6 +426,14 @@ export function ProjectsView() {
                   className="w-full grid grid-cols-[1fr_6rem_7.5rem] gap-4 items-center px-1 py-3 rounded-xl hover:bg-surface-hover/70 transition-colors group"
                 >
                   <span className="flex items-center gap-3 min-w-0">
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(item.id)}
+                      onChange={() => toggleSelect(item.id)}
+                      onClick={e => e.stopPropagation()}
+                      aria-label={`Select ${item.name}`}
+                      className="rounded border-surface-border shrink-0"
+                    />
                     <button
                       type="button"
                       onClick={() => void openListItem(item)}
@@ -328,7 +450,10 @@ export function ProjectsView() {
                           onClick={e => e.stopPropagation()}
                           onKeyDown={e => {
                             if (e.key === 'Enter') commitRename(item.id);
-                            if (e.key === 'Escape') setRenamingId(null);
+                            if (e.key === 'Escape') {
+                              e.stopPropagation();
+                              setRenamingId(null);
+                            }
                           }}
                           onBlur={() => commitRename(item.id)}
                           className="flex-1 min-w-0 bg-transparent border-b border-surface-border text-sm text-content-primary outline-none"
@@ -373,16 +498,13 @@ export function ProjectsView() {
                                   setMenuId(null);
                                   return;
                                 }
-                                if (item.diskPath && window.arkDesktop?.workspaceDeleteFolder) {
-                                  await window.arkDesktop.workspaceDeleteFolder({ targetPath: item.diskPath });
-                                } else if (item.id.startsWith('ark-folder:')) {
-                                  const disk = item.id.slice('ark-folder:'.length);
-                                  await window.arkDesktop?.workspaceDeleteFolder?.({ targetPath: disk });
-                                }
-                                if (!item.id.startsWith('ark-folder:')) {
-                                  removeRecent(item.id);
-                                }
-                                setArkFolders(prev => prev.filter(f => f.id !== item.id && f.path !== item.diskPath));
+                                await deleteListItem(item);
+                                setSelectedIds(prev => {
+                                  if (!prev.has(item.id)) return prev;
+                                  const next = new Set(prev);
+                                  next.delete(item.id);
+                                  return next;
+                                });
                                 setMenuId(null);
                                 setNotice(`Removed “${label}”.`);
                                 window.setTimeout(() => setNotice(null), 3000);

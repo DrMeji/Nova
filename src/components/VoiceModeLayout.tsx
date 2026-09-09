@@ -1,6 +1,6 @@
 import { type ReactNode } from 'react';
 import type { VoiceSessionPhase } from '@/lib/voiceMode';
-import { VoiceArkFace } from '@/components/VoiceArkFace';
+import { VoiceNovaBeacon } from '@/components/VoiceNovaBeacon';
 
 const PHASE_LABEL: Record<VoiceSessionPhase, string> = {
   idle: 'Tap NOVA or type below',
@@ -38,7 +38,7 @@ export function VoiceFace({ phase, onActivate, activateBlocked }: VoiceFaceProps
       aria-label={PHASE_LABEL[phase]}
       aria-busy={activateBlocked || undefined}
     >
-      <VoiceArkFace
+      <VoiceNovaBeacon
         phase={phase}
         className="w-56 h-56 sm:w-72 sm:h-72 lg:w-80 lg:h-80 transition-transform duration-300 group-hover:scale-[1.02]"
       />
@@ -55,7 +55,7 @@ type VoiceModeLayoutProps = {
   brainHint?: ReactNode;
 };
 
-/** Voice tab — face raised in the viewport, composer lifted off the bottom edge. */
+/** Voice tab — Nova beacon raised in the viewport, composer lifted off the bottom edge. */
 export function VoiceModeLayout({ phase, onActivate, busy, composer, brainHint }: VoiceModeLayoutProps) {
   return (
     <div className="flex-1 flex flex-col min-h-0 w-full">

@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useRouter, type Route } from '@/context/RouterContext';
 import {
   SquarePen, Briefcase, Blocks, Database,
-  Settings, Search, PanelLeft, ChevronDown, History, Clock3,
+  Settings, Search, ChevronDown, History, Clock3,
   MessageSquare, Trash2, Code2, Pencil, Mic,
   Globe, Bell, Copy, Star, Download, Brain, Cable, Bot,
 } from 'lucide-react';
@@ -17,9 +17,7 @@ import { getLocalPrefs, setLocalPrefs } from '@/lib/localPrefs';
 import {
   PRESENCE_OPTIONS,
   presenceDotClass,
-  presenceIdClass,
   presenceRingClass,
-  presenceTextClass,
   type PresenceStatus,
 } from '@/lib/presenceStatus';
 import { probeLiveCapacity, type LiveCapacity } from '@/lib/arkCapacity';
@@ -112,8 +110,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   const { route, navigate } = useRouter();
   const { user, profile } = useAuth();
   const { recent, activeChats, archiveChat, deleteChatForever, renameRecent, renameChat, removeRecent, pinChat, pinProject } = useRecentProjects();
-  const [collapsed, setCollapsed] = useState(() => getLocalPrefs().compactSidebar);
-  const [narrowForced, setNarrowForced] = useState(false);
+  /** Hover-expanded main nav. Collapsed by default; no sticky toggle. */
+  const [hoverOpen, setHoverOpen] = useState(false);
+  const hoverLeaveTimer = useRef<number | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsSection, setSettingsSection] = useState('account');
   const [searchOpen, setSearchOpen] = useState(false);
@@ -121,6 +120,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [prefsName, setPrefsName] = useState(() => getLocalPrefs().displayName);
   const [presence, setPresence] = useState<PresenceStatus>(() => getLocalPrefs().presenceStatus || 'online');
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
+  const statusMenuOpenRef = useRef(false);
+  statusMenuOpenRef.current = statusMenuOpen;
+  const collapsed = !hoverOpen;
   const [capacity, setCapacity] = useState<LiveCapacity | null>(null);
   const [modeLabel, setModeLabel] = useState<AiModeLabel | null>(null);
   const [updateInfo, setUpdateInfo] = useState<ArkUpdateInfo | null>(null);
@@ -166,23 +168,35 @@ export function AppShell({ children }: { children: ReactNode }) {
       const next = getLocalPrefs();
       setPrefsName(next.displayName);
       setPresence(next.presenceStatus || 'online');
-      if (!narrowForced) setCollapsed(next.compactSidebar);
     };
     window.addEventListener('ark:prefs-changed', onPrefs);
     return () => window.removeEventListener('ark:prefs-changed', onPrefs);
-  }, [narrowForced]);
+  }, []);
+
+  const clearHoverLeave = () => {
+    if (hoverLeaveTimer.current != null) {
+      window.clearTimeout(hoverLeaveTimer.current);
+      hoverLeaveTimer.current = null;
+    }
+  };
+
+  const openSidebarHover = () => {
+    clearHoverLeave();
+    setHoverOpen(true);
+  };
+
+  const scheduleSidebarClose = () => {
+    clearHoverLeave();
+    hoverLeaveTimer.current = window.setTimeout(() => {
+      hoverLeaveTimer.current = null;
+      // Keep open while the presence menu is up so the user can pick a status.
+      if (statusMenuOpenRef.current) return;
+      setHoverOpen(false);
+    }, 220);
+  };
 
   useEffect(() => {
-    const mq = window.matchMedia('(max-width: 980px)');
-    const apply = () => {
-      const narrow = mq.matches;
-      setNarrowForced(narrow);
-      if (narrow) setCollapsed(true);
-      else setCollapsed(getLocalPrefs().compactSidebar);
-    };
-    apply();
-    mq.addEventListener('change', apply);
-    return () => mq.removeEventListener('change', apply);
+    return () => clearHoverLeave();
   }, []);
 
   useEffect(() => {
@@ -191,9 +205,13 @@ export function AppShell({ children }: { children: ReactNode }) {
       const t = e.target as HTMLElement | null;
       if (t?.closest('[data-status-menu]')) return;
       setStatusMenuOpen(false);
+      setHoverOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setStatusMenuOpen(false);
+      if (e.key === 'Escape') {
+        setStatusMenuOpen(false);
+        setHoverOpen(false);
+      }
     };
     document.addEventListener('mousedown', onDoc);
     document.addEventListener('keydown', onKey);
@@ -288,7 +306,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         { pinnedAt: a.pinned ? '1' : undefined, updatedAt: a.updatedAt },
         { pinnedAt: b.pinned ? '1' : undefined, updatedAt: b.updatedAt },
       );
-    const sorted = [...chats].sort(byPin).slice(0, 20);
+    const sorted = [...chats].sort(byPin).slice(0, 5);
     return {
       chats: sorted,
       projects: [] as typeof sorted,
@@ -500,7 +518,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     return (
       <div
         key={item.key}
-        className={`group relative flex items-center gap-0.5 rounded-lg transition-colors ${
+        className={`group relative rounded-full transition-colors ${
           active ? 'bg-surface-active' : 'hover:bg-surface-hover'
         }`}
       >
@@ -520,7 +538,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 setRenameDraft('');
               }
             }}
-            className="flex-1 min-w-0 mx-1 my-0.5 rounded-md bg-ark-navy-950 border border-surface-border px-2 py-1 text-xs text-content-primary outline-none focus:border-sky-500/50"
+            className="flex-1 min-w-0 mx-2 my-0.5 rounded-md bg-ark-navy-950 border border-surface-border px-2 py-1 text-xs text-content-primary outline-none focus:border-sky-500/50"
           />
         ) : (
           <button
@@ -531,22 +549,22 @@ export function AppShell({ children }: { children: ReactNode }) {
               setRenamingId(renameKey);
               setRenameDraft(item.title);
             }}
-            className={`ark-nav-item !py-1.5 !gap-2.5 flex-1 min-w-0 !bg-transparent hover:!bg-transparent ${
+            className={`ark-nav-item w-full !bg-transparent hover:!bg-transparent ${
               active ? '!text-content-primary' : ''
             }`}
             title={`${item.title} · double-click to rename`}
           >
-            <Icon className="w-3.5 h-3.5 shrink-0 text-content-tertiary" strokeWidth={1.75} />
-            <span className="min-w-0 flex-1 text-left truncate">{item.title}</span>
+            <span className="ark-nav-icon">
+              <Icon strokeWidth={1.75} />
+            </span>
+            <span className="min-w-0 flex-1 text-left truncate pr-16">{item.title}</span>
           </button>
         )}
         {!editing && doneAway ? (
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0 mr-1" aria-hidden title="Updated" />
-        ) : !editing ? (
-          <span className="w-1.5 h-1.5 shrink-0 mr-1" aria-hidden />
+          <span className="pointer-events-none absolute top-1/2 right-[4.75rem] -translate-y-1/2 w-1.5 h-1.5 rounded-full bg-emerald-400" aria-hidden title="Updated" />
         ) : null}
         {!editing && (
-          <>
+          <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
             <button
               type="button"
               title={item.pinned ? 'Unpin' : 'Pin'}
@@ -556,7 +574,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 if (item.kind === 'chat') pinChat(item.id);
                 else pinProject(item.id);
               }}
-              className={`w-7 h-7 rounded-md flex items-center justify-center shrink-0 transition-opacity ${
+              className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 transition-opacity ${
                 item.pinned
                   ? 'opacity-100 text-amber-300'
                   : 'opacity-0 group-hover:opacity-100 focus:opacity-100 text-content-tertiary hover:text-amber-300 hover:bg-white/5'
@@ -573,7 +591,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 setRenamingId(renameKey);
                 setRenameDraft(item.title);
               }}
-              className="opacity-0 group-hover:opacity-100 focus:opacity-100 w-7 h-7 rounded-md flex items-center justify-center text-content-tertiary hover:text-content-primary hover:bg-white/5 shrink-0 transition-opacity"
+              className="opacity-0 group-hover:opacity-100 focus:opacity-100 w-7 h-7 rounded-full flex items-center justify-center text-content-tertiary hover:text-content-primary hover:bg-white/5 shrink-0 transition-opacity"
             >
               <Pencil className="w-3.5 h-3.5" />
             </button>
@@ -586,11 +604,11 @@ export function AppShell({ children }: { children: ReactNode }) {
                 setDeleteTarget({ id: item.id, title: item.title, kind: item.kind });
                 setWipeProjectDisk(false);
               }}
-              className="opacity-0 group-hover:opacity-100 focus:opacity-100 w-7 h-7 rounded-md flex items-center justify-center text-content-tertiary hover:text-rose-400 hover:bg-white/5 shrink-0 transition-opacity mr-0.5"
+              className="opacity-0 group-hover:opacity-100 focus:opacity-100 w-7 h-7 rounded-full flex items-center justify-center text-content-tertiary hover:text-rose-400 hover:bg-white/5 shrink-0 transition-opacity"
             >
               <Trash2 className="w-3.5 h-3.5" />
             </button>
-          </>
+          </div>
         )}
       </div>
     );
@@ -608,18 +626,6 @@ export function AppShell({ children }: { children: ReactNode }) {
       return;
     }
     if (item.route) navigate(item.route);
-  };
-
-  const toggleMainSidebar = () => {
-    setCollapsed(c => {
-      const next = !c;
-      // On Message / Networking / Call the people/filter rail stays visible;
-      // collapsing the main nav only compacts that rail to icons.
-      if (next && (route.name === 'message' || route.name === 'networking')) {
-        window.dispatchEvent(new CustomEvent('NOVA:compact-connect-rail'));
-      }
-      return next;
-    });
   };
 
   const renderNavItem = (item: {
@@ -644,13 +650,15 @@ export function AppShell({ children }: { children: ReactNode }) {
           onClick={() => handleNavClick(item)}
           className={`ark-nav-item w-full opacity-55 ${collapsed ? 'ark-nav-item-rail' : ''}`}
         >
-          <item.icon className="w-4 h-4 shrink-0" />
-          {!collapsed && (
-            <>
-              <span className="flex-1 text-left">{item.label}</span>
-              <span className="text-[9px] uppercase tracking-wide text-content-tertiary">Soon</span>
-            </>
-          )}
+          <span className="ark-nav-icon">
+            <item.icon />
+          </span>
+          <span className={`flex-1 text-left ark-nav-label ${collapsed ? 'ark-nav-label-hide' : ''}`}>
+            {item.label}
+          </span>
+          <span className={`text-[9px] uppercase tracking-wide text-content-tertiary ark-nav-label ${collapsed ? 'ark-nav-label-hide' : ''}`}>
+            Soon
+          </span>
         </button>
       );
     }
@@ -667,22 +675,26 @@ export function AppShell({ children }: { children: ReactNode }) {
         title={collapsed ? item.label : undefined}
         className={`ark-nav-item w-full relative ${collapsed ? 'ark-nav-item-rail' : ''} ${active ? 'active' : ''}`}
       >
-        <item.icon className="w-4 h-4 shrink-0" />
-        {!collapsed && <span>{item.label}</span>}
-        {!collapsed && unreadCount > 0 ? (
-          <span className="text-[10px] font-semibold rounded-full bg-sky-500/20 text-sky-300 px-1.5 py-0.5 min-w-[1.25rem] text-center">
+        <span className="ark-nav-icon">
+          <item.icon />
+        </span>
+        <span className={`truncate ark-nav-label ${collapsed ? 'ark-nav-label-hide' : ''}`}>
+          {item.label}
+        </span>
+        {unreadCount > 0 ? (
+          <span className={`text-[10px] font-semibold rounded-full bg-sky-500/20 text-sky-300 px-1.5 py-0.5 min-w-[1.25rem] text-center ark-nav-label ${collapsed ? 'ark-nav-label-hide' : ''}`}>
             {unreadCount > 9 ? '9+' : unreadCount}
           </span>
         ) : null}
         {notifAttention && (
           <span
-            className={`absolute w-2 h-2 rounded-full bg-sky-400 ring-2 ring-ark-navy-900 ${collapsed ? 'top-1.5 right-1.5' : 'top-2 right-2'}`}
+            className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-sky-400 ring-2 ring-ark-navy-900"
             aria-hidden
           />
         )}
         {busy && (
           <span
-            className={`absolute w-1.5 h-1.5 rounded-full bg-emerald-400 ${collapsed ? 'top-1.5 right-1.5' : 'top-2 right-2'}`}
+            className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-emerald-400"
             aria-hidden
           />
         )}
@@ -694,29 +706,31 @@ export function AppShell({ children }: { children: ReactNode }) {
     <div className="h-full min-w-0 flex overflow-hidden relative bg-ark-navy-950">
       <AuthAmbientOrbs variant="app" />
       <aside
-        className={`relative z-10 shrink-0 m-2 mr-0 flex flex-col min-w-0 rounded-2xl border border-surface-border bg-ark-navy-900 shadow-[0_8px_32px_rgba(0,0,0,0.35)] ${
+        className={`relative z-10 shrink-0 m-2 mr-0 flex flex-col min-w-0 overflow-hidden rounded-2xl border border-surface-border bg-ark-navy-900 shadow-[0_8px_32px_rgba(0,0,0,0.35)] ark-sidebar-panel ${
           collapsed ? 'w-16' : 'w-64'
         }`}
+        onMouseEnter={openSidebarHover}
+        onMouseLeave={scheduleSidebarClose}
       >
-          <div className={`flex-none ${collapsed ? 'px-2 pt-3 pb-2' : 'px-3 pt-3 pb-3'}`}>
-            <div className={`flex items-center gap-2 ${collapsed ? 'flex-col w-full' : 'justify-between'}`}>
-              {!collapsed && (
-                <div className="flex items-center gap-2 min-w-0 pl-0.5">
+          <div className="flex-none pt-3 pb-2">
+            {collapsed ? (
+              <button
+                type="button"
+                onClick={() => setSearchOpen(true)}
+                className="ark-nav-item w-full ark-nav-item-rail"
+                title="Search (Ctrl+K)"
+                aria-label="Search"
+              >
+                <span className="ark-nav-icon">
+                  <Search />
+                </span>
+              </button>
+            ) : (
+              <div className="flex items-center justify-between gap-2 min-w-0 pr-2">
+                <span className="ark-nav-icon">
                   <NovaMark className="w-7 h-7 text-content-primary" title="NOVA" />
-                </div>
-              )}
-              {collapsed ? (
-                <button
-                  type="button"
-                  onClick={toggleMainSidebar}
-                  className="ark-nav-item w-full ark-nav-item-rail"
-                  title="Expand sidebar"
-                  aria-label="Expand sidebar"
-                >
-                  <PanelLeft className="w-4 h-4" />
-                </button>
-              ) : (
-                <div className="flex items-center gap-0.5">
+                </span>
+                <div className="flex items-center gap-0.5 shrink-0">
                   <button
                     type="button"
                     onClick={() => setSearchOpen(true)}
@@ -744,27 +758,25 @@ export function AppShell({ children }: { children: ReactNode }) {
                       ) : null}
                     </button>
                   ) : null}
-                  <button
-                    type="button"
-                    onClick={toggleMainSidebar}
-                    className="ark-btn-ghost !p-1.5"
-                    title="Toggle sidebar"
-                    aria-label="Toggle sidebar"
-                  >
-                    <PanelLeft className="w-4 h-4" />
-                  </button>
                 </div>
-              )}
-            </div>
+              </div>
+            )}
           </div>
 
-          <nav className={`flex-1 min-h-0 flex flex-col gap-1 ${collapsed ? 'px-2 pt-3' : 'px-3 pt-4'}`}>
+          <nav className="flex-1 min-h-0 flex flex-col gap-1 pt-3">
             {/* Locked primary nav — Chat / Work / Tools / Connect never scroll away */}
             <div className="flex-none shrink-0 flex flex-col gap-1">
               {NAV_GROUPS.map(group => (
-                <div key={group.id} className={group.label ? (collapsed ? 'mt-2 first:mt-0' : 'mt-3 first:mt-0') : ''}>
-                  {group.label && !collapsed ? (
-                    <p className="px-2 pb-1 text-[10px] uppercase tracking-wider text-content-tertiary">{group.label}</p>
+                <div key={group.id} className={group.label ? 'mt-2 first:mt-0' : ''}>
+                  {group.label ? (
+                    <p
+                      className={`pb-1 text-[10px] uppercase tracking-wider text-content-tertiary whitespace-nowrap pl-4 pr-2 ark-nav-label ${
+                        collapsed ? 'ark-nav-label-hide' : ''
+                      }`}
+                      aria-hidden={collapsed || undefined}
+                    >
+                      {group.label}
+                    </p>
                   ) : null}
                   {group.items.map(renderNavItem)}
                 </div>
@@ -772,7 +784,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             </div>
 
             {/* Recent only scrolls */}
-            <div className={`mt-4 min-h-0 flex-1 flex flex-col ${collapsed ? '' : 'pt-2 border-t border-surface-border'}`}>
+            <div className="mt-4 min-h-0 flex-1 flex flex-col pt-2 border-t border-surface-border">
               <button
                 type="button"
                 onClick={() => setRecentOpen(o => !o)}
@@ -780,19 +792,21 @@ export function AppShell({ children }: { children: ReactNode }) {
                 aria-label="Recent"
                 className={`ark-nav-item w-full flex-none ${collapsed ? 'ark-nav-item-rail' : ''}`}
               >
-                <Clock3 className="w-4 h-4 shrink-0" />
-                {!collapsed && (
-                  <>
-                    <span className="flex-1 text-left">Recent</span>
-                    <ChevronDown
-                      className={`w-3.5 h-3.5 text-content-tertiary transition-transform ${recentOpen ? '' : '-rotate-90'}`}
-                    />
-                  </>
-                )}
+                <span className="ark-nav-icon">
+                  <Clock3 />
+                </span>
+                <span className={`flex-1 text-left ark-nav-label ${collapsed ? 'ark-nav-label-hide' : ''}`}>
+                  Recent
+                </span>
+                <ChevronDown
+                  className={`w-3.5 h-3.5 text-content-tertiary transition-transform ark-nav-label ${
+                    collapsed ? 'ark-nav-label-hide' : ''
+                  } ${recentOpen ? '' : '-rotate-90'}`}
+                />
               </button>
 
               {recentOpen && !collapsed && (
-                <div className="mt-1 min-h-0 flex-1 overflow-y-auto overscroll-contain flex flex-col gap-0.5 pl-1 pr-0.5">
+                <div className="mt-1 min-h-0 flex-1 overflow-y-auto overscroll-contain flex flex-col gap-0.5">
                   {recentFeed.mixed.length === 0 ? (
                     <p className="px-3 py-2 text-[11px] text-content-tertiary leading-snug">
                       Chats you start will show up here.
@@ -805,7 +819,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
               {collapsed && recentOpen && (
                 <div className="mt-1 min-h-0 flex-1 overflow-y-auto overscroll-contain flex flex-col gap-0.5">
-                  {recentFeed.mixed.slice(0, 12).map(item => {
+                  {recentFeed.mixed.map(item => {
                     const active = item.kind === 'chat'
                       ? activeChatId === item.id
                       : activeRecentId === item.id;
@@ -820,7 +834,9 @@ export function AppShell({ children }: { children: ReactNode }) {
                         className={`ark-nav-item ark-nav-item-rail relative ${active ? 'active' : ''}`}
                         title={item.title}
                       >
-                        <Icon className="w-4 h-4 shrink-0" strokeWidth={1.75} />
+                        <span className="ark-nav-icon">
+                          <Icon strokeWidth={1.75} />
+                        </span>
                         {doneAway ? <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-emerald-400" aria-hidden /> : null}
                       </button>
                     );
@@ -893,7 +909,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                   aria-label="Change status"
                   aria-expanded={statusMenuOpen}
                 >
-                  <NovaMark className={`w-4 h-4 ${presenceTextClass(presence)}`} title="NOVA" />
+                  <NovaMark className="w-4 h-4 text-content-primary" title="NOVA" />
                 </button>
                 <button
                   type="button"
@@ -940,7 +956,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                     aria-label="Change status"
                     aria-expanded={statusMenuOpen}
                   >
-                    <NovaMark className={`w-4 h-4 ${presenceTextClass(presence)}`} title="NOVA" />
+                    <NovaMark className="w-4 h-4 text-content-primary" title="NOVA" />
                   </button>
                   <button
                     type="button"
@@ -952,7 +968,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                       {displayName}
                     </span>
                     {(profile?.ark_id || isArkDevEmail(user?.email)) ? (
-                      <span className={`block text-[10px] font-mono tracking-[0.22em] truncate mt-0.5 ${presenceIdClass(presence)}`}>
+                      <span className="block text-[10px] font-mono tracking-[0.22em] truncate mt-0.5 text-content-tertiary">
                         {isArkDevEmail(user?.email)
                           ? 'DEV'
                           : formatArkId(profile!.ark_id!)}

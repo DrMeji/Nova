@@ -10236,47 +10236,53 @@ export function AIChat() {
           </div>
           </div>
 
-          {generating ? (() => {
-            const parts = stackedLiveTurnParts(liveTurnMs);
+          {(() => {
+            const parts = generating ? stackedLiveTurnParts(liveTurnMs) : null;
             return (
-              <div
-                className="flex flex-col items-center justify-center shrink-0 self-end mb-2 min-w-[1.15rem] select-none tabular-nums leading-none pointer-events-none"
-                title={`Working · ${parts.label}`}
-                aria-label={`Working ${parts.label}`}
-                aria-live="polite"
-              >
-                <span className="text-[10px] font-medium text-content-secondary">{parts.top}</span>
-                <span className="text-[10px] text-content-tertiary mt-0.5">{parts.bottom}</span>
+              <div className="flex flex-col items-center justify-end shrink-0 self-end mb-2 w-[1.35rem] select-none">
+                <div
+                  className="h-[1.7rem] w-full flex flex-col items-center justify-end tabular-nums leading-none pointer-events-none"
+                  title={parts ? `Working · ${parts.label}` : undefined}
+                  aria-label={parts ? `Working ${parts.label}` : undefined}
+                  aria-live="polite"
+                  aria-hidden={!parts || undefined}
+                >
+                  {parts ? (
+                    <>
+                      <span className="text-[10px] font-medium text-content-secondary">{parts.top}</span>
+                      <span className="text-[10px] text-content-tertiary mt-0.5">{parts.bottom}</span>
+                    </>
+                  ) : null}
+                </div>
+                <TokenUsageRing
+                  contextRatio={tokenRatio}
+                  modelRatio={modelRatio}
+                  size={20}
+                  className="text-content-primary shrink-0"
+                  modelName={
+                    activeModel.source === 'auto'
+                      ? autoModelLabel
+                      : activeModel.name
+                  }
+                  modelDetail={
+                    mode === 'image'
+                      ? activeModel.source === 'auto'
+                        ? autoRingDetail(threadBrain, 'image')
+                        : 'Image · session budget'
+                      : mode === 'video'
+                        ? activeModel.source === 'auto'
+                          ? autoRingDetail(threadBrain, 'video')
+                          : 'Video · session budget'
+                        : activeModel.source === 'auto'
+                          ? autoRingDetail(threadBrain, threadKind)
+                          : activeModel.source === 'local'
+                            ? 'On-device · no cloud quota'
+                            : 'Cloud · connected key'
+                  }
+                />
               </div>
             );
-          })() : null}
-
-          <TokenUsageRing
-            contextRatio={tokenRatio}
-            modelRatio={modelRatio}
-            size={20}
-            className="text-content-primary shrink-0 mb-2 self-end"
-            modelName={
-              activeModel.source === 'auto'
-                ? autoModelLabel
-                : activeModel.name
-            }
-            modelDetail={
-              mode === 'image'
-                ? activeModel.source === 'auto'
-                  ? autoRingDetail(threadBrain, 'image')
-                  : 'Image · session budget'
-                : mode === 'video'
-                  ? activeModel.source === 'auto'
-                    ? autoRingDetail(threadBrain, 'video')
-                    : 'Video · session budget'
-                  : activeModel.source === 'auto'
-                    ? autoRingDetail(threadBrain, threadKind)
-                    : activeModel.source === 'local'
-                      ? 'On-device · no cloud quota'
-                      : 'Cloud · connected key'
-            }
-          />
+          })()}
 
           </div>
         </div>
@@ -10553,9 +10559,9 @@ export function AIChat() {
               ref={messagesScrollRef}
               onScroll={onMessagesScroll}
               onWheel={onMessagesWheel}
-              className="flex-1 min-h-0 overflow-auto px-4 sm:px-8 py-6 NOVA-scroll-quiet"
+              className="flex-1 min-h-0 overflow-auto px-3 sm:px-5 lg:px-8 py-6 NOVA-scroll-quiet"
             >
-            <div className="max-w-5xl mx-auto w-full space-y-5">
+            <div className="max-w-6xl mx-auto w-full space-y-5">
               {messages.length === 0 && showOpenThread && (
                 <p className="text-center text-xs text-content-tertiary py-8">
                   This chat is empty. Send a message to continue here.
@@ -10571,7 +10577,7 @@ export function AIChat() {
                   <div
                     className={`text-sm text-content-primary overflow-hidden min-w-0 ${
                       msg.role === 'user'
-                        ? 'max-w-[min(42rem,78%)] min-w-0 break-words [overflow-wrap:anywhere] flex flex-col items-end gap-1'
+                        ? 'max-w-[min(48rem,88%)] min-w-0 break-words [overflow-wrap:anywhere] flex flex-col items-end gap-1'
                         : isMediaOnlyContent(msg.content)
                           || (
                             msg.content.startsWith('__generating__:image:')
@@ -10583,8 +10589,8 @@ export function AIChat() {
                             && msg.id === messages[messages.length - 1]?.id
                             && (mode === 'image' || mode === 'video')
                           )
-                          ? 'shrink-0 max-w-[min(44rem,92%)]'
-                          : 'max-w-[min(44rem,92%)] min-w-0 break-words [overflow-wrap:anywhere]'
+                          ? 'shrink-0 max-w-[min(56rem,94%)]'
+                          : 'max-w-[min(56rem,94%)] min-w-0 break-words [overflow-wrap:anywhere]'
                     }`}
                   >
                     {msg.role === 'user' ? (

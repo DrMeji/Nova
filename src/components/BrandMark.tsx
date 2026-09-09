@@ -1,6 +1,7 @@
 import type { ComponentType, ReactNode, SVGProps } from 'react';
 import { Check } from 'lucide-react';
 import {
+  Apollo,
   Atlassian,
   ClaudeIcon,
   CohereIcon,
@@ -16,17 +17,21 @@ import {
   GoogleGeminiIcon,
   GoogleGmail,
   GoogleIcon,
+  GradioIcon,
   GrokIcon,
   Groq,
   HuggingFaceIcon,
   Hubspot,
   IntercomIcon,
   LinearIcon,
+  LmStudioIcon,
   MetaIcon,
   MicrosoftIcon,
   MicrosoftTeams,
+  Midjourney,
   MistralAiIcon,
   MondayIcon,
+  McpIcon,
   NeonIcon,
   NotionIcon,
   Nvidia,
@@ -96,6 +101,7 @@ const DEVICONS: Record<string, DevMark> = {
   nvidia: { bg: 'bg-black', Icon: Nvidia, scale: 'w-[90%] h-[90%]' },
   ollama: { bg: 'bg-[#1a1a1a]', Icon: OllamaIcon, monoWhite: true, scale: 'w-[72%] h-[72%]' },
   meta: { bg: 'bg-white', Icon: MetaIcon },
+  llama: { bg: 'bg-white', Icon: MetaIcon },
   mistral: { bg: 'bg-white', Icon: MistralAiIcon },
   deepseek: { bg: 'bg-white', Icon: Deepseek },
   github: { bg: 'bg-white', Icon: GithubIcon },
@@ -132,9 +138,34 @@ const DEVICONS: Record<string, DevMark> = {
   intercom: { bg: 'bg-white', Icon: IntercomIcon },
   wix: { bg: 'bg-white', Icon: Wix },
   neon: { bg: 'bg-black', Icon: NeonIcon },
+  apollo: { bg: 'bg-[#FC521F]', Icon: Apollo, monoWhite: true },
+  mcp: { bg: 'bg-[#1a1a1a]', Icon: McpIcon, monoWhite: true },
+  midjourney: { bg: 'bg-black', Icon: Midjourney, monoWhite: true },
+  lmstudio: { bg: 'bg-[#1a1a1a]', Icon: LmStudioIcon, monoWhite: true },
+  gradio: { bg: 'bg-white', Icon: GradioIcon },
 };
 
 type FallbackMark = { bg: string; node: ReactNode };
+
+/** Clean lettermark tile when no official Devicon exists. */
+function Letter({
+  text,
+  color = '#fff',
+}: {
+  text: string;
+  color?: string;
+}) {
+  const short = text.slice(0, 2);
+  return (
+    <span
+      className="font-semibold tracking-tight leading-none select-none"
+      style={{ color, fontSize: short.length > 1 ? '0.7em' : '0.95em' }}
+      aria-hidden
+    >
+      {short}
+    </span>
+  );
+}
 
 function Svg({ children, viewBox = '0 0 24 24' }: { children: ReactNode; viewBox?: string }) {
   return (
@@ -144,70 +175,35 @@ function Svg({ children, viewBox = '0 0 24 24' }: { children: ReactNode; viewBox
   );
 }
 
-/** Brands not in Devicons (or better as compact glyphs). */
+/** Brands not in Devicons — professional lettermarks / compact glyphs (not geometric placeholders). */
 const FALLBACKS: Record<string, FallbackMark> = {
   openrouter: {
     bg: 'bg-[#6566F1]',
-    node: (
-      <Svg>
-        <path fill="#fff" d="M6.5 5.5h4v13h-4zm7.2 0 6.3 6.5-6.3 6.5h-4.3l6.3-6.5-6.3-6.5h4.3z" />
-      </Svg>
-    ),
+    node: <Letter text="OR" />,
   },
   pollinations: {
     bg: 'bg-[#EC4899]',
-    node: (
-      <Svg>
-        <circle cx="12" cy="12" r="3.2" fill="#fff" />
-        <circle cx="12" cy="5.2" r="1.6" fill="#fff" opacity=".9" />
-        <circle cx="12" cy="18.8" r="1.6" fill="#fff" opacity=".9" />
-        <circle cx="5.2" cy="12" r="1.6" fill="#fff" opacity=".9" />
-        <circle cx="18.8" cy="12" r="1.6" fill="#fff" opacity=".9" />
-      </Svg>
-    ),
+    node: <Letter text="Po" />,
   },
   qwen: {
-    bg: 'bg-[#6366F1]',
-    node: (
-      <Svg>
-        <path fill="#fff" d="M12 3.5 19.5 8v8L12 20.5 4.5 16V8L12 3.5zm0 3.2L7.8 9.1v5.8L12 17.3l4.2-2.4V9.1L12 6.7z" />
-      </Svg>
-    ),
+    bg: 'bg-[#6A5ACD]',
+    node: <Letter text="Qw" />,
   },
   gemma: {
     bg: 'bg-[#4285F4]',
-    node: (
-      <Svg>
-        <path fill="#fff" d="M12 4 18.5 8v8L12 20 5.5 16V8L12 4zm0 2.6L7.8 9.1v5.8L12 17.4l4.2-2.5V9.1L12 6.6z" />
-      </Svg>
-    ),
+    node: <Letter text="Ge" />,
   },
   phi: {
     bg: 'bg-[#00A4EF]',
-    node: (
-      <Svg>
-        <path fill="#fff" d="M10.2 4.5h2.6c3.4 0 5.6 2.1 5.6 5.3S16.2 15 12.8 15H12v4.5h-2.8V4.5zm2.6 7.7c1.6 0 2.6-.9 2.6-2.4s-1-2.4-2.6-2.4h-.8v4.8h.8z" />
-      </Svg>
-    ),
+    node: <Letter text="Φ" />,
   },
   cerebras: {
     bg: 'bg-[#F97316]',
-    node: (
-      <Svg>
-        <path fill="#fff" d="M12 3.5A8.5 8.5 0 1 0 20.5 12 8.5 8.5 0 0 0 12 3.5zm0 13.2A4.7 4.7 0 1 1 16.7 12 4.7 4.7 0 0 1 12 16.7z" />
-      </Svg>
-    ),
+    node: <Letter text="Ce" />,
   },
   sambanova: {
     bg: 'bg-[#EE3A8C]',
-    node: (
-      <Svg viewBox="0 0 24 24">
-        <path
-          fill="#fff"
-          d="M14.2 6.2c-2.1 0-3.6 1.1-4.4 2.8-.6-1.5-1.9-2.8-4-2.8-2.6 0-4.4 2-4.4 4.8 0 2.9 1.9 4.9 4.5 4.9 1.8 0 3.1-.8 3.9-2.1.8 1.3 2.1 2.1 3.9 2.1 2.6 0 4.5-2 4.5-4.9 0-2.8-1.8-4.8-4.4-4.8zm-8.3 7.4c-1.4 0-2.3-1.1-2.3-2.6s.9-2.6 2.3-2.6c1.3 0 2.1.9 2.4 2.1h-2.1v1.1h3.3c0 .1 0 .2 0 .3 0 1.5-.9 2.7-2.7 2.7zm8.2 0c-1.4 0-2.4-1-2.6-2.4h5.1c-.2 1.4-1.2 2.4-2.5 2.4z"
-        />
-      </Svg>
-    ),
+    node: <Letter text="Sn" />,
   },
   outlook: {
     bg: 'bg-[#0078D4]',
@@ -221,11 +217,7 @@ const FALLBACKS: Record<string, FallbackMark> = {
   },
   canva: {
     bg: 'bg-[#00C4CC]',
-    node: (
-      <Svg>
-        <path fill="#fff" d="M12 3.5c-4.7 0-8.5 3.8-8.5 8.5S7.3 20.5 12 20.5s8.5-3.8 8.5-8.5S16.7 3.5 12 3.5zm1.8 12.2c-1.1.7-2.6.8-3.8.2-1.6-.8-2.3-2.7-1.6-4.4.6-1.4 2-2.2 3.5-2.2.7 0 1.4.2 2 .5l-.7 1.6c-.3-.2-.7-.3-1.1-.3-.8 0-1.5.5-1.8 1.2-.3.8.1 1.7.9 2.1.5.2 1.1.2 1.5-.1.3-.2.5-.5.5-.9h-1.4V12h3.1c0 1.6-.8 3-2.1 3.7z" />
-      </Svg>
-    ),
+    node: <Letter text="Ca" />,
   },
   asana: {
     bg: 'bg-[#F06A6A]',
@@ -237,6 +229,36 @@ const FALLBACKS: Record<string, FallbackMark> = {
       </Svg>
     ),
   },
+  quickbooks: {
+    bg: 'bg-[#2CA01C]',
+    node: <Letter text="Qb" />,
+  },
+  superhuman: {
+    bg: 'bg-[#6E5BFF]',
+    node: <Letter text="Su" />,
+  },
+  llava: { bg: 'bg-[#0EA5E9]', node: <Letter text="Lv" /> },
+  moondream: { bg: 'bg-[#F59E0B]', node: <Letter text="Md" /> },
+  minicpm: { bg: 'bg-[#10B981]', node: <Letter text="Mv" /> },
+  smollm: { bg: 'bg-[#84CC16]', node: <Letter text="Sm" /> },
+  playground: { bg: 'bg-[#F43F5E]', node: <Letter text="Pg" /> },
+  cogvideo: { bg: 'bg-[#06B6D4]', node: <Letter text="Cv" /> },
+  wan: { bg: 'bg-[#6366F1]', node: <Letter text="Wn" /> },
+  ltx: { bg: 'bg-[#14B8A6]', node: <Letter text="LT" /> },
+  granola: { bg: 'bg-[#059669]', node: <Letter text="Gr" /> },
+  plaud: { bg: 'bg-[#7C3AED]', node: <Letter text="Pl" /> },
+  otter: { bg: 'bg-[#0D9488]', node: <Letter text="Ot" /> },
+  fireflies: { bg: 'bg-[#EA580C]', node: <Letter text="Ff" /> },
+  heygen: { bg: 'bg-[#4F46E5]', node: <Letter text="Hy" /> },
+  magnific: { bg: 'bg-[#65A30D]', node: <Letter text="Mg" /> },
+  higgsfield: { bg: 'bg-[#C026D3]', node: <Letter text="Hf" /> },
+  mobbin: { bg: 'bg-[#27272A]', node: <Letter text="Mb" /> },
+  zoho: { bg: 'bg-[#E42527]', node: <Letter text="Zo" /> },
+  context7: { bg: 'bg-[#D97706]', node: <Letter text="C7" /> },
+  exa: { bg: 'bg-[#1D4ED8]', node: <Letter text="Ex" /> },
+  productdesign: { bg: 'bg-[#BE185D]', node: <Letter text="PD" /> },
+  devpost: { bg: 'bg-[#003E54]', node: <Letter text="Dp" /> },
+  gguf: { bg: 'bg-[#0F766E]', node: <Letter text="GG" /> },
   nova: {
     bg: 'bg-transparent',
     node: (
@@ -279,6 +301,13 @@ function resolveBrand(id: string, name?: string): string | null {
   const bare = id.toLowerCase().trim();
   if (DEVICONS[bare] || FALLBACKS[bare]) return bare;
   if (bare === 'github-models') return 'github';
+  if (bare === 'outlook-mail' || bare === 'outlook-cal') return 'outlook';
+  if (bare === 'product-design') return 'productdesign';
+  if (bare === 'gguf-local') return 'gguf';
+  if (bare.startsWith('ark-engine') || bare === 'nova-core' || bare === 'nova-image-core' || bare === 'nova-video-core') {
+    return 'nova';
+  }
+
   const raw = `${id} ${name || ''}`.toLowerCase();
   const hay = raw.replace(/[^a-z0-9]+/g, ' ');
   const checks: [string, string][] = [
@@ -312,14 +341,25 @@ function resolveBrand(id: string, name?: string): string | null {
     ['nvidia', 'nvidia'],
     ['nim', 'nvidia'],
     ['ollama', 'ollama'],
+    ['lm studio', 'lmstudio'],
+    ['lmstudio', 'lmstudio'],
     ['openrouter', 'openrouter'],
     ['pollinations', 'pollinations'],
     ['qwen', 'qwen'],
     ['qwq', 'qwen'],
-    ['llama', 'meta'],
+    ['llava', 'llava'],
+    ['moondream', 'moondream'],
+    ['minicpm', 'minicpm'],
+    ['smollm', 'smollm'],
+    ['playground', 'playground'],
+    ['cogvideo', 'cogvideo'],
+    ['wan 2', 'wan'],
+    ['wan-', 'wan'],
+    ['ltx', 'ltx'],
+    ['llama', 'llama'],
     ['meta', 'meta'],
-    ['codellama', 'meta'],
-    ['tinyllama', 'meta'],
+    ['codellama', 'llama'],
+    ['tinyllama', 'llama'],
     ['mistral', 'mistral'],
     ['codestral', 'mistral'],
     ['deepseek', 'deepseek'],
@@ -334,6 +374,24 @@ function resolveBrand(id: string, name?: string): string | null {
     ['supabase', 'supabase'],
     ['datadog', 'datadog'],
     ['canva', 'canva'],
+    ['granola', 'granola'],
+    ['plaud', 'plaud'],
+    ['otter', 'otter'],
+    ['fireflies', 'fireflies'],
+    ['heygen', 'heygen'],
+    ['magnific', 'magnific'],
+    ['higgsfield', 'higgsfield'],
+    ['mobbin', 'mobbin'],
+    ['zoho', 'zoho'],
+    ['context7', 'context7'],
+    ['exa', 'exa'],
+    ['apollo', 'apollo'],
+    ['product design', 'productdesign'],
+    ['devpost', 'devpost'],
+    ['midjourney', 'midjourney'],
+    ['gradio', 'gradio'],
+    ['mcp', 'mcp'],
+    ['gguf', 'gguf'],
     ['nova-', 'nova'],
     ['nova engine', 'nova'],
     ['nova image', 'nova'],
@@ -357,6 +415,9 @@ function resolveBrand(id: string, name?: string): string | null {
     ['hubspot', 'hubspot'],
     ['salesforce', 'salesforce'],
     ['asana', 'asana'],
+    ['quickbooks', 'quickbooks'],
+    ['intuit', 'quickbooks'],
+    ['superhuman', 'superhuman'],
     ['atlassian', 'atlassian'],
     ['jira', 'atlassian'],
     ['monday', 'monday'],
@@ -379,7 +440,7 @@ export function BrandMark({
   id,
   name,
   initial,
-  tone,
+  tone: _tone,
   size = 'md',
   className = '',
   glyph: _glyph,
@@ -416,7 +477,7 @@ export function BrandMark({
   if (fallback) {
     return (
       <span
-        className={`${SIZE_CLASS[size]} ${fallback.bg} flex items-center justify-center shrink-0 overflow-hidden ${className}`}
+        className={`${SIZE_CLASS[size]} ${TEXT_CLASS[size]} ${fallback.bg} flex items-center justify-center shrink-0 overflow-hidden text-white ${className}`}
         title={name || id}
       >
         {fallback.node}
@@ -424,12 +485,14 @@ export function BrandMark({
     );
   }
 
+  // Unknown brand — solid slate lettermark (no rainbow gradient diamonds).
+  const label = (initial || (name || id).replace(/[^a-zA-Z0-9]/g, '').slice(0, 2) || '?').slice(0, 2);
   return (
     <span
-      className={`${SIZE_CLASS[size]} bg-gradient-to-br ${tone || 'from-zinc-600 to-zinc-900'} flex items-center justify-center ${TEXT_CLASS[size]} font-bold text-white shrink-0 ${className}`}
+      className={`${SIZE_CLASS[size]} bg-zinc-800 flex items-center justify-center ${TEXT_CLASS[size]} font-semibold text-white shrink-0 ${className}`}
       title={name || id}
     >
-      {(initial || (name || id).slice(0, 2)).slice(0, 2)}
+      {label}
     </span>
   );
 }

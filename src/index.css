@@ -178,7 +178,7 @@
   }
 
   .ark-nav-item {
-    @apply flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150 cursor-pointer min-w-0;
+    @apply flex items-center gap-2 py-2 rounded-full text-sm font-medium transition-all duration-150 cursor-pointer min-w-0 pl-0 pr-2;
     color: rgb(var(--color-content-secondary));
   }
   .ark-nav-item:hover {
@@ -189,12 +189,31 @@
     background-color: rgb(var(--color-surface-active));
     color: rgb(var(--color-content-primary));
   }
-  /* Collapsed rail: same tap targets + icon size as expanded sidebar */
-  .ark-nav-item-rail {
-    @apply !justify-center !py-2 !px-2 !min-h-[2.25rem];
+  /*
+   * Icon plate matches collapsed rail width (4rem). Glyph is centered in that plate
+   * open or closed, so icons never shift when the sidebar stretches.
+   */
+  .ark-nav-icon {
+    @apply w-16 h-8 flex items-center justify-center shrink-0;
   }
-  .ark-nav-item-rail svg {
+  .ark-nav-icon svg {
     @apply w-4 h-4 shrink-0;
+  }
+  .ark-nav-item-rail {
+    @apply !justify-start !px-0 !py-2 !min-h-[2.25rem] !gap-2 !pr-0;
+  }
+  .ark-nav-label {
+    @apply truncate transition-opacity duration-200 ease-out;
+  }
+  .ark-nav-label-hide {
+    @apply opacity-0 pointer-events-none;
+  }
+  .ark-sidebar-panel {
+    transition: width 280ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .reduce-motion .ark-sidebar-panel,
+  .reduce-motion .ark-nav-label {
+    transition: none !important;
   }
   .ark-nav-activity {
     color: rgb(110 231 183);
