@@ -113,7 +113,8 @@ async function startPreview({ projectId, projectName, files }) {
       const urlPath = decodeURIComponent((req.url || '/').split('?')[0]);
       let rel = urlPath === '/' ? '/index.html' : urlPath;
       const full = path.normalize(path.join(root, rel));
-      if (!full.startsWith(root)) {
+      const rootWithSep = root.endsWith(path.sep) ? root : `${root}${path.sep}`;
+      if (full !== root && !full.startsWith(rootWithSep)) {
         res.writeHead(403);
         res.end('Forbidden');
         return;

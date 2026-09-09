@@ -68,7 +68,14 @@ export { slugifyProjectName } from '@/lib/projectNames';
 
 export function extractProjectName(text: string): string | null {
   const t = String(text || '').trim();
+  // Prefer explicit called/named titles before "create the project on disk" (which used to
+  // capture the junk name "on disk").
   const patterns = [
+    /\b(?:called|named|name(?:d)?\s+it|call\s+it)\s+["“']([^"”']{2,48})["”']/i,
+    /\b(?:called|named|name(?:d)?\s+it|call\s+it)\s+([A-Z][A-Za-z0-9]*(?:\s+[A-Z][A-Za-z0-9]*){0,3})\b/,
+    /\b(?:called|named|name(?:d)?\s+it|call\s+it)\s+([A-Za-z][A-Za-z0-9._\s-]{1,48})/i,
+    /\b(?:app|application|website|site)\s+named\s+["“']?([A-Za-z][A-Za-z0-9._\s-]{1,48})/i,
+    /\b(?:project|app|product|system)\s+(?:called|named)\s+["“']?([A-Za-z][A-Za-z0-9._\s-]{1,40})/i,
     // "Create the project apple.com on disk" / "Create project Peach"
     /\bcreate\s+(?:the\s+)?project\s+["“']?([A-Za-z][A-Za-z0-9][A-Za-z0-9._\s-]{0,48})/i,
     // "Create the Ledger Bay project on disk"
@@ -80,9 +87,6 @@ export function extractProjectName(text: string): string | null {
     /\bcreate\s+(?:a\s+)?(?:new\s+)?project\s+["“']?([A-Za-z][A-Za-z0-9._\s-]{1,48})/i,
     /\bcreate\s+([A-Z][A-Za-z0-9.]{1,40})\s*[—–\-:]/,
     /\bcreate\s+([A-Z][A-Za-z0-9.]{1,40})\s+as\b/i,
-    /\b(?:app|application)\s+named\s+["“']?([A-Za-z][A-Za-z0-9._\s-]{1,48})/i,
-    /\b(?:called|named|name(?:d)?\s+it|call\s+it)\s+["“']([^"”']{2,48})["”']/i,
-    /\b(?:called|named|name(?:d)?\s+it|call\s+it)\s+([A-Za-z][A-Za-z0-9._\s-]{1,48})/i,
     /\b(?:app|project|website|site)\s+["“']([^"”']{2,48})["”']/i,
     /\bnew\s+(?:web\s+)?(?:app|project|website|site)\s+([A-Za-z][A-Za-z0-9._-]{1,40})/i,
     /\bkeep\s+the\s+folder\s+name\s+([A-Za-z][A-Za-z0-9._\s-]{1,40})/i,
@@ -91,11 +95,13 @@ export function extractProjectName(text: string): string | null {
     const m = t.match(re);
     if (m?.[1]) {
       let raw = m[1].trim().replace(/[?.!,;:]+$/g, '');
+      // "NexusLink. Team chat with…" → NexusLink (stop at sentence break).
+      raw = raw.replace(/\.\s+.*$/, '').trim();
       // "ReefLog and build a reef…" → ReefLog (never the whole sentence as the product name).
       raw = raw.replace(/\s+(?:and|with|that|which|where|when|so|for|but|featuring|including|—|–|-)\b.*$/i, '').trim();
       raw = raw.replace(/\s+(?:app|project|website|site|on|for|with)\b.*$/i, '').trim();
-      // Reject ultra-generic leftovers from older chats ("My", "New", "App").
-      if (/^(my|new|app|project|the|this|that|ok|yeah|cool|sure)$/i.test(raw)) continue;
+      // Reject ultra-generic leftovers from older chats / "create the project on disk".
+      if (/^(my|new|app|project|the|this|that|ok|yeah|cool|sure|on|disk|on[\s-]?disk|folder|files?|ready|ui|site|website)$/i.test(raw)) continue;
       if (raw.length >= 2 && raw.length <= 48) return raw;
     }
   }
@@ -202,11 +208,17 @@ export function parseNewProjectIntent(message: string): NewProjectIntent | null 
   const wantsImmediateBuild = !richReplicaBrief && (
     /\bon\s+disk\b/i.test(t)
     || /\b(?:files?\s+on\s+disk|scaffold\s+now|build\s+it\s+now|open\s+preview|and\s+open\s+preview)\b/i.test(t)
+    || /\bkeep\s+building\s+until\s+ready\b/i.test(t)
     || /\bcreate\s+(?:a\s+)?(?:brand[- ]?new\s+)?project\s+folder\b/i.test(t)
     || /\bcreate\s+(?:the\s+)?project\s+[A-Za-z]/i.test(t)
+    // "Create a new project: … called Nightcord" (colon or dash after project)
+    || /\bcreate\s+(?:a\s+)?(?:brand[- ]?new\s+)?(?:new\s+)?project\b/i.test(t)
     // "Create a brand-new website project called X" / "Create a new website called X"
-    || /\bcreate\s+(?:a\s+)?(?:brand[- ]?new\s+)?(?:website|site|web\s*app)\b/i.test(t)
+    || /\bcreate\s+(?:a\s+)?(?:brand[- ]?new\s+)?(?:website|site|web\s*app|home\s*page|landing)\b/i.test(t)
     || /\bbrand[- ]?new\s+(?:website|site|project|app)\b/i.test(t)
+    || (/\b(?:create|build)\b/i.test(t)
+      && /\b(?:called|named)\b/i.test(t)
+      && /\b(?:website|site|project|app|page|homepage)\b/i.test(t))
     || (/\bcreate\b/i.test(t) && /\b(?:called|named)\b/i.test(t) && /\b(?:website|site|project|app)\b/i.test(t) && /\bsrc\/app\.(jsx|tsx|css)\b/i.test(t))
   );
   const preferPlan = !shortChip

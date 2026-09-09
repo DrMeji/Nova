@@ -203,7 +203,7 @@ export function getPluginAuthLink(pluginId: string): PluginAuthLink {
   return (
     AUTH_LINKS[pluginId] || {
       label: 'Open provider site',
-      url: 'https://ark.local',
+      url: 'https://nova.local',
       hint: 'Open the provider site, create a token or OAuth access token, then paste it here. NOVA stores it in the OS vault.',
     }
   );

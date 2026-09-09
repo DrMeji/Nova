@@ -20,7 +20,7 @@ export const ARK_TIPS: string[] = [
   'Joke: “It works on my machine” — NOVA, installing on your machine.',
   'Tip: Settings → MCP is for tool servers. Settings → Providers is for API keys.',
   'Joke: Please do not pet the GGUF while it is downloading.',
-  'Tip: Image tab ≠ Chat tab. Different tools, same NOVA attitude.',
+  'Tip: Drop a project folder into Chat when you want NOVA to edit files on disk.',
   'Joke: Waiting builds character. Also builds a 1.5B parameter roommate.',
   'Tip: PIN lock is optional. Losing your laptop is not.',
   'Joke: NOVA is offline-friendly. Your impatience is less so.',

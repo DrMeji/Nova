@@ -22,12 +22,14 @@ export function parseAgentPatches(raw: string, fallbackPath?: string): AgentPatc
   const text = String(raw || '');
   const out: AgentPatch[] = [];
 
-  // JSON: {"tool":"patch","path":"...","search":"...","replace":"..."}
-  // or {"patches":[{path,search,replace},...]}
-  const jsonBlocks = text.match(/\{[\s\S]*?\}/g) || [];
-  for (const block of jsonBlocks) {
+  // JSON patches only from fenced ```json / ``` blocks or TOOL: patch lines — never scrape prose braces.
+  const fenceRe = /```(?:json|js|javascript)?\s*\n([\s\S]*?)```/gi;
+  let fenceMatch: RegExpExecArray | null;
+  while ((fenceMatch = fenceRe.exec(text))) {
+    const body = String(fenceMatch[1] || '').trim();
+    if (!body.startsWith('{') && !body.startsWith('[')) continue;
     try {
-      const obj = JSON.parse(block) as Record<string, unknown>;
+      const obj = JSON.parse(body) as Record<string, unknown>;
       if (Array.isArray(obj.patches)) {
         for (const p of obj.patches) {
           if (!p || typeof p !== 'object') continue;
@@ -38,7 +40,7 @@ export function parseAgentPatches(raw: string, fallbackPath?: string): AgentPatc
           if (path && search) out.push({ path, search, replace });
         }
       }
-      if ((obj.tool === 'patch' || obj.search != null) && (obj.search != null || obj.old != null)) {
+      if ((obj.tool === 'patch' || obj.search != null || obj.old != null) && (obj.search != null || obj.old != null)) {
         const path = String(obj.path || fallbackPath || '').trim();
         const search = String(obj.search ?? obj.old ?? '');
         const replace = String(obj.replace ?? obj.new ?? '');
@@ -49,24 +51,48 @@ export function parseAgentPatches(raw: string, fallbackPath?: string): AgentPatc
     }
   }
 
-  // SEARCH / REPLACE blocks
-  const pathHint = text.match(/^\s*PATH:\s*(.+)$/im)?.[1]?.trim() || fallbackPath || '';
-  const pairRe = /<<<<<<<\s*SEARCH\s*\n([\s\S]*?)=======\s*\n([\s\S]*?)>>>>>>>\s*REPLACE/gi;
-  let m: RegExpExecArray | null;
-  while ((m = pairRe.exec(text))) {
-    if (pathHint) out.push({ path: pathHint, search: m[1], replace: m[2] });
+  // Single-line TOOL JSON (no fence)
+  for (const line of text.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!/"tool"\s*:\s*"patch"/i.test(trimmed) || !trimmed.startsWith('{')) continue;
+    try {
+      const obj = JSON.parse(trimmed) as Record<string, unknown>;
+      const path = String(obj.path || fallbackPath || '').trim();
+      const search = String(obj.search ?? obj.old ?? '');
+      const replace = String(obj.replace ?? obj.new ?? '');
+      if (path && search) out.push({ path, search, replace });
+    } catch {
+      /* ignore */
+    }
   }
 
-  const srRe = /SEARCH:\s*\n([\s\S]*?)\nREPLACE:\s*\n([\s\S]*?)(?=\nSEARCH:|\nTOOL:|\nPATH:|$)/gi;
-  while ((m = srRe.exec(text))) {
-    if (pathHint) out.push({ path: pathHint, search: m[1].replace(/\n$/, ''), replace: m[2].replace(/\n$/, '') });
+  // SEARCH / REPLACE blocks — PATH can appear before each pair
+  const pairRe = /(?:^\s*PATH:\s*(.+)\s*$\s*)?<<<<<<<\s*SEARCH\s*\n([\s\S]*?)=======\s*\n([\s\S]*?)>>>>>>>\s*REPLACE/gim;
+  let m: RegExpExecArray | null;
+  let lastPath = text.match(/^\s*PATH:\s*(.+)$/im)?.[1]?.trim() || fallbackPath || '';
+  while ((m = pairRe.exec(text))) {
+    const pathFromBlock = String(m[1] || '').trim();
+    if (pathFromBlock) lastPath = pathFromBlock;
+    const path = lastPath || fallbackPath || '';
+    if (path) out.push({ path, search: m[2], replace: m[3] });
+  }
+
+  // Also accept interleaved PATH: lines before SEARCH:/REPLACE: sections
+  const srChunkRe = /(?:PATH:\s*(.+)\s*\n)?SEARCH:\s*\n([\s\S]*?)\nREPLACE:\s*\n([\s\S]*?)(?=\n(?:PATH:|SEARCH:|TOOL:)|$)/gi;
+  while ((m = srChunkRe.exec(text))) {
+    const pathFromBlock = String(m[1] || '').trim();
+    if (pathFromBlock) lastPath = pathFromBlock;
+    const path = lastPath || fallbackPath || '';
+    if (path && m[2]) {
+      out.push({ path, search: m[2].replace(/\n$/, ''), replace: String(m[3] || '').replace(/\n$/, '') });
+    }
   }
 
   // TOOL: patch with fenced old/new
-  if (/^\s*TOOL:\s*patch\b/im.test(text) && pathHint) {
+  if (/^\s*TOOL:\s*patch\b/im.test(text) && lastPath) {
     const fences = [...text.matchAll(/```(?:[\w.-]*)?\n([\s\S]*?)```/g)].map(x => x[1]);
     if (fences.length >= 2 && !out.length) {
-      out.push({ path: pathHint, search: fences[0], replace: fences[1] });
+      out.push({ path: lastPath, search: fences[0], replace: fences[1] });
     }
   }
 
@@ -120,7 +146,21 @@ export function applyAgentPatch(
     if (!normBody.includes(normSearch)) {
       return { ok: false, path, error: 'Search text not found in file' };
     }
-    const next = normBody.replace(normSearch, String(patch.replace).replace(/\r\n/g, '\n'));
+    const next = (() => {
+      const replaceOnce = (hay: string, needle: string, rep: string) => {
+        const idx = hay.indexOf(needle);
+        if (idx < 0) return hay;
+        return hay.slice(0, idx) + rep + hay.slice(idx + needle.length);
+      };
+      const count = normBody.split(normSearch).length - 1;
+      if (count > 1) {
+        return null;
+      }
+      return replaceOnce(normBody, normSearch, String(patch.replace).replace(/\r\n/g, '\n'));
+    })();
+    if (next == null) {
+      return { ok: false, path, error: 'Search text matches multiple places — make the SEARCH block unique' };
+    }
     return {
       ok: true,
       path,
@@ -128,13 +168,20 @@ export function applyAgentPatch(
       diff: buildDiffSnippet(path, normBody, next),
     };
   }
-  const next = body.replace(search, String(patch.replace));
-  return {
-    ok: true,
-    path,
-    content: next,
-    diff: buildDiffSnippet(path, body, next),
-  };
+  {
+    const count = body.split(search).length - 1;
+    if (count > 1) {
+      return { ok: false, path, error: 'Search text matches multiple places — make the SEARCH block unique' };
+    }
+    const idx = body.indexOf(search);
+    const next = body.slice(0, idx) + String(patch.replace) + body.slice(idx + search.length);
+    return {
+      ok: true,
+      path,
+      content: next,
+      diff: buildDiffSnippet(path, body, next),
+    };
+  }
 }
 
 export function applyAgentPatches(

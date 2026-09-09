@@ -3,6 +3,7 @@ import { useCall, formatCallElapsed, type CallSession } from '@/context/CallCont
 import { SOCIAL_DEMO_ENABLED } from '@/lib/socialDemo';
 import { isCallUiEnabled, isRevealed } from '@/lib/featurePark';
 import { useRouter } from '@/context/RouterContext';
+import { ArkAvatar } from '@/components/ArkAvatar';
 
 export type CallRingMode = 'idle' | 'outgoing' | 'incoming' | 'live';
 
@@ -31,13 +32,6 @@ export function callRingBorderClass(mode: CallRingMode): string {
   }
 }
 
-function initials(name: string) {
-  const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
-  if (!parts.length) return '?';
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return `${parts[0][0] || ''}${parts[1][0] || ''}`.toUpperCase();
-}
-
 function StackedAvatars({ names, max = 4 }: { names: string[]; max?: number }) {
   const shown = names.slice(0, max);
   return (
@@ -45,11 +39,11 @@ function StackedAvatars({ names, max = 4 }: { names: string[]; max?: number }) {
       {shown.map((name, i) => (
         <span
           key={`${name}-${i}`}
-          className="h-7 w-7 rounded-full bg-white/10 border-2 border-ark-navy-950 flex items-center justify-center text-[9px] font-semibold text-content-primary"
+          className="relative"
           style={{ zIndex: shown.length - i }}
           title={name}
         >
-          {initials(name)}
+          <ArkAvatar name={name} size="sm" className="!border-2 !border-ark-navy-950" />
         </span>
       ))}
       {names.length > max && (
@@ -334,9 +328,7 @@ export function SidebarCallDock() {
         {session?.participants && session.participants.length > 1 ? (
           <StackedAvatars names={avatarNames} max={3} />
         ) : (
-          <span className="h-8 w-8 shrink-0 rounded-full bg-white/10 border border-white/10 flex items-center justify-center text-[10px] font-semibold">
-            {initials(avatarNames[0] || '?')}
-          </span>
+          <ArkAvatar name={avatarNames[0] || 'NOVA'} size="sm" />
         )}
         <div className="min-w-0 flex-1">
           <p className="text-[11px] font-medium text-content-primary truncate">{title}</p>

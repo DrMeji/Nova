@@ -22,7 +22,7 @@ function log(msg) {
 // Patch: use a tiny preload probe via env that main already supports —
 // instead inject via --require won't work for Electron. Use CDP debugger port.
 const port = 9333 + Math.floor(Math.random() * 200);
-const args = ['.', `--remote-debugging-port=${port}`];
+const args = ['.', `--remote-debugging-port=${port}`, '--remote-allow-origins=*'];
 
 log(`spawning ${electronPath} ${args.join(' ')} debug=${port}`);
 const child = spawn(electronPath, args, {

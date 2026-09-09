@@ -5,6 +5,11 @@ export function accountWebsiteOrigin(): string {
   return typeof v === 'string' ? v.trim().replace(/\/$/, '') : '';
 }
 
+/** True when this desktop build can email a real Forgot-password link to the hosted site. */
+export function isAccountWebsiteConfigured(): boolean {
+  return Boolean(accountWebsiteOrigin());
+}
+
 export function accountResetRedirectUrl(): string {
   const origin = accountWebsiteOrigin();
   return origin ? `${origin}/account/reset` : '';

@@ -9,6 +9,7 @@ import {
   type TeammateAssignment,
 } from '@/lib/arkTeam';
 import { formatArkId, isArkUserId, normalizeArkId } from '@/lib/arkUserId';
+import { NovaMark } from '@/components/NovaMark';
 
 type Person = GitHubCollaborator & { arkId?: string; displayName?: string };
 
@@ -21,24 +22,13 @@ type Props = {
   onAssign: (login: string, area: string) => void;
 };
 
-function Face({ person, title }: { person: Person; title: string }) {
-  if (person.avatar_url) {
-    return (
-      <img
-        src={person.avatar_url}
-        alt={person.login}
-        title={title}
-        className="w-7 h-7 rounded-full border-2 border-ark-navy-950 object-cover"
-      />
-    );
-  }
-  const label = (person.arkId || person.login).slice(-2);
+function Face({ title }: { person: Person; title: string }) {
   return (
     <span
       title={title}
-      className="w-7 h-7 rounded-full border-2 border-ark-navy-950 bg-sky-500/20 text-[10px] font-mono text-sky-200 flex items-center justify-center"
+      className="w-7 h-7 rounded-full border-2 border-ark-navy-950 bg-white/5 flex items-center justify-center"
     >
-      {label}
+      <NovaMark className="w-3.5 h-3.5 text-content-primary" title={title} />
     </span>
   );
 }

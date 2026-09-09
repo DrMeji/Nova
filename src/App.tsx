@@ -15,22 +15,19 @@ import { BuildRun } from '@/views/BuildRun';
 import { LocalAI } from '@/views/LocalAI';
 import { McpView } from '@/views/McpView';
 import { BrainView } from '@/views/BrainView';
-import { CreationViewer } from '@/views/CreationViewer';
 import { Settings } from '@/views/Settings';
 import { NetworkingView } from '@/views/NetworkingView';
 import { MessageView } from '@/views/MessageView';
-import { CallView } from '@/views/CallView';
 import { NotificationsView } from '@/views/NotificationsView';
 import { SocialProvider } from '@/context/SocialContext';
-import { CallProvider } from '@/context/CallContext';
 import { ParkedNotice } from '@/components/ParkedNotice';
 import { PinLockGate } from '@/components/PinLockGate';
-import { isSocialParked, isRevealed, setRevealed, isCodeTabEnabled } from '@/lib/featurePark';
+import { isSocialParked, isCodeTabEnabled } from '@/lib/featurePark';
 import { requestOpenChatCode } from '@/lib/openChatCode';
 import { runCleanBootIfNeeded } from '@/lib/clearSession';
 import { runSocialReleaseCleanIfNeeded, runArkIdRotationIfNeeded } from '@/lib/socialCleanBoot';
-import { isArkDevSession } from '@/lib/arkRuntime';
 import { getLocalPrefs } from '@/lib/localPrefs';
+import { applyLocalAppearancePrefs } from '@/lib/applyLocalAppearance';
 import { startModelHuntCycle } from '@/lib/arkHuntBootstrap';
 import { needsFirstRunSetup } from '@/lib/setup';
 import { supabaseConfigError } from '@/lib/supabase';
@@ -42,12 +39,6 @@ import { RotatingTip } from '@/components/RotatingTip';
 runCleanBootIfNeeded();
 runArkIdRotationIfNeeded();
 runSocialReleaseCleanIfNeeded();
-
-function ensureDevFeatureAccess() {
-  if (!isArkDevSession()) return;
-  if (!isRevealed('call')) setRevealed('call', true);
-}
-ensureDevFeatureAccess();
 
 /** Old Code / Project workspace routes redirect into Chat + Code pill. */
 function LegacyCodeRedirect({ projectId }: { projectId?: string }) {
@@ -85,7 +76,10 @@ function AppRoutes() {
           ? <ProjectWorkspace />
           : <LegacyCodeRedirect projectId={route.id} />;
         break;
-      case 'creation': other = <CreationViewer />; break;
+      case 'creation':
+        // Legacy image/video creations — History only.
+        other = <Dashboard />;
+        break;
       case 'models': other = <ModelsView />; break;
       case 'build': other = <BuildRun />; break;
       case 'local-ai': other = <LocalAI />; break;
@@ -99,7 +93,8 @@ function AppRoutes() {
         break;
       case 'notifications': other = <NotificationsView />; break;
       case 'call':
-        other = isSocialParked('call') ? <ParkedNotice feature="call" /> : <CallView />;
+        // Call removed from product — bounce to Message.
+        other = isSocialParked('message') ? <ParkedNotice feature="message" /> : <MessageView />;
         break;
       case 'settings': other = <Settings />; break;
       default: other = <Dashboard />; break;
@@ -178,15 +173,14 @@ function AppContent() {
   return (
     <RecentProjectsProvider>
       <SocialProvider>
-        <CallProvider>
         <PinLockGate>
         <AppShell>
           <HuntOnLaunch />
+          <AppearancePrefsSync />
           <OpenLastProjectOnLaunch />
           <AppRoutes />
         </AppShell>
         </PinLockGate>
-        </CallProvider>
       </SocialProvider>
     </RecentProjectsProvider>
   );
@@ -194,6 +188,16 @@ function AppContent() {
 
 function HuntOnLaunch() {
   useEffect(() => startModelHuntCycle(), []);
+  return null;
+}
+
+function AppearancePrefsSync() {
+  useEffect(() => {
+    applyLocalAppearancePrefs();
+    const onPrefs = () => applyLocalAppearancePrefs();
+    window.addEventListener('ark:prefs-changed', onPrefs);
+    return () => window.removeEventListener('ark:prefs-changed', onPrefs);
+  }, []);
   return null;
 }
 

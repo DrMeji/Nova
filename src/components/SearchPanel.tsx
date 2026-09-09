@@ -1,18 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type ComponentType, type KeyboardEvent } from 'react';
 import {
   Search, Clock3, Settings, Briefcase, Database, Bot, Blocks, SquarePen, ArrowLeft,
-  ImageIcon, Video, MessageSquare, Globe, Bell, Mic, Cable,
+  MessageSquare, Globe, Bell, Cable, Mic,
 } from 'lucide-react';
 import { useRouter, type Route } from '@/context/RouterContext';
 import { useRecentProjects } from '@/context/RecentProjectsContext';
 import { CLOUD_MODELS } from '@/views/ModelsView';
-import {
-  isRevealed,
-  isTestersSettingsEnabled,
-  isVideoTabEnabled,
-  isImageTabEnabled,
-  isVoiceTabEnabled,
-} from '@/lib/featurePark';
+import { isRevealed, isVoiceTabEnabled } from '@/lib/featurePark';
 import { getEngineStatus } from '@/lib/arkEngine';
 
 type SearchItem = {
@@ -28,9 +22,7 @@ type SearchItem = {
 
 const CATALOG: SearchItem[] = [
   { id: 'new-chat', label: 'Chat', group: 'Navigate', description: 'Start a conversation', icon: SquarePen, route: { name: 'chat' } },
-  { id: 'image', label: 'Image', group: 'Navigate', description: 'Generate a picture', icon: ImageIcon, route: { name: 'chat', mode: 'image' } },
-  { id: 'video', label: 'Video', group: 'Navigate', description: 'Generate a short clip', icon: Video, route: { name: 'chat', mode: 'video' } },
-  { id: 'voice', label: 'Voice', group: 'Navigate', description: 'Talk with NOVA — conversation only', icon: Mic, route: { name: 'chat', mode: 'voice' } },
+  { id: 'voice', label: 'Voice', group: 'Navigate', description: 'Talk with NOVA (conversation only)', icon: Mic, route: { name: 'chat', mode: 'voice' } },
   { id: 'projects', label: 'Projects', group: 'Navigate', description: 'Browse your projects', icon: Briefcase, route: { name: 'projects' } },
   { id: 'history', label: 'History', group: 'Navigate', description: 'Recent chats and creations', icon: Clock3, route: { name: 'dashboard' } },
   { id: 'plugins', label: 'Plugins', group: 'Navigate', description: 'Integrations and tools', icon: Blocks, route: { name: 'build' } },
@@ -41,20 +33,16 @@ const CATALOG: SearchItem[] = [
   { id: 'settings', label: 'Settings', group: 'Settings', description: 'Account, appearance, AI preferences', icon: Settings, action: 'settings', settingsSection: 'account' },
   { id: 'appearance', label: 'Appearance', group: 'Settings', description: 'Theme and display options', icon: Settings, action: 'settings', settingsSection: 'appearance' },
   { id: 'ai', label: 'AI', group: 'Settings', description: 'Routing and failover', icon: Settings, action: 'settings', settingsSection: 'ai' },
-  { id: 'voice-settings', label: 'Voice', group: 'Settings', description: 'Microphone, headphones, spoken chat', icon: Settings, action: 'settings', settingsSection: 'voice' },
+  { id: 'voice-settings', label: 'Voice', group: 'Settings', description: 'Microphone and headphones', icon: Settings, action: 'settings', settingsSection: 'voice' },
   { id: 'providers', label: 'Providers', group: 'Settings', description: 'Cloud AI connections', icon: Settings, action: 'settings', settingsSection: 'providers' },
   { id: 'privacy', label: 'Privacy', group: 'Settings', description: 'What stays on this PC', icon: Settings, action: 'settings', settingsSection: 'privacy' },
   { id: 'security', label: 'Security', group: 'Settings', description: 'PIN, auto-lock, sandbox', icon: Settings, action: 'settings', settingsSection: 'security' },
   { id: 'updates', label: 'Updates', group: 'Settings', description: 'Check for new NOVA builds', icon: Settings, action: 'settings', settingsSection: 'updates' },
-  { id: 'testers', label: 'Testers', group: 'Settings', description: 'Reveal parked features, feedback', icon: Settings, action: 'settings', settingsSection: 'testers' },
 ];
 
 function navigateCatalog(): SearchItem[] {
   return CATALOG.filter(item => {
-    if (item.id === 'image' && !isImageTabEnabled()) return false;
-    if (item.id === 'video' && !isVideoTabEnabled()) return false;
     if (item.id === 'voice' && !isVoiceTabEnabled()) return false;
-    if (item.id === 'testers' && !isTestersSettingsEnabled()) return false;
     return true;
   });
 }
@@ -78,7 +66,7 @@ interface SearchPanelProps {
 
 export function SearchPanel({ onClose, onOpenSettings }: SearchPanelProps) {
   const { navigate } = useRouter();
-  const { recent, chats, creations } = useRecentProjects();
+  const { recent, chats } = useRecentProjects();
   const [query, setQuery] = useState('');
   const [featureTick, setFeatureTick] = useState(0);
   const [selected, setSelected] = useState(0);
@@ -112,11 +100,15 @@ export function SearchPanel({ onClose, onOpenSettings }: SearchPanelProps) {
         id: `chat:${c.id}`,
         label: c.title || 'Chat',
         group: 'Recent' as const,
-        description: c.mode === 'image' ? 'Image chat' : c.mode === 'video' ? 'Video chat' : 'Chat',
-        icon: c.mode === 'image' ? ImageIcon : c.mode === 'video' ? Video : MessageSquare,
+        description: 'Chat',
+        icon: MessageSquare,
         route: {
           name: 'chat' as const,
-          mode: c.mode === 'general' ? undefined : c.mode,
+          mode: c.mode === 'voice'
+            ? 'voice'
+            : c.mode === 'general' || c.mode === 'image' || c.mode === 'video'
+              ? undefined
+              : c.mode,
           chatId: c.id,
         },
       })),
@@ -128,17 +120,9 @@ export function SearchPanel({ onClose, onOpenSettings }: SearchPanelProps) {
         icon: Briefcase,
         route: { name: 'project' as const, id: p.id },
       })),
-      ...creations.slice(0, 8).map(c => ({
-        id: `creation:${c.id}`,
-        label: c.title || c.prompt || 'Creation',
-        group: 'Recent' as const,
-        description: c.kind === 'video' ? 'Video' : 'Image',
-        icon: c.kind === 'video' ? Video : ImageIcon,
-        route: { name: 'creation' as const, id: c.id },
-      })),
     ];
     return [...recents, ...navigateCatalog(), ...socialSearchItems()];
-  }, [chats, recent, creations, featureTick]);
+  }, [chats, recent]);
 
   const results = useMemo(() => {
     const q = query.trim().toLowerCase();

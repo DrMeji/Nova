@@ -1,8 +1,10 @@
 /**
 
- * Soft chat nudge when Auto has no cloud provider keys.
+ * Soft chat nudge when Auto has no cloud provider keys but a local brain is ready.
 
  * Does not block the turn — local can still run.
+
+ * Never show this when there is no live chat path at all (that uses honestNoLiveChatReply).
 
  */
 
@@ -78,9 +80,17 @@ export function shouldOfferCloudKeyNudge(opts: {
 
   message: string;
 
+  /** Local GGUF (or Ollama) is ready — without this, show setup CTA instead of soft nudge. */
+
+  hasLocalBrain?: boolean;
+
 }): boolean {
 
   if (hasAnyCloudChatKey()) return false;
+
+  // Fresh install with nothing connected: never pretend we will "continue with what's available".
+
+  if (!opts.hasLocalBrain) return false;
 
   const mode = getLocalPrefs().aiMode;
 
@@ -110,7 +120,7 @@ export function cloudKeyNudgeReply(): string {
 
     '',
 
-    'I will continue with what is available now…',
+    'I will continue with your local brain for now…',
 
   ].join('\n');
 
@@ -132,4 +142,4 @@ export function cloudKeyNudgeAfterEmptyBuild(): string {
 
 }
 
-
+

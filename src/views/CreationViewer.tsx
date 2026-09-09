@@ -45,13 +45,12 @@ export function CreationViewer() {
   }
 
   const Icon = creation.kind === 'video' ? Video : ImageIcon;
-  const editMode = creation.kind === 'video' ? 'video' : 'image';
 
   const continueInChat = () => {
     const thread = chats.find(c => c.creationId === creation.id);
+    // Image / Video modes are retired — open plain Chat.
     navigate({
       name: 'chat',
-      mode: editMode,
       chatId: thread?.id,
       creationId: creation.id,
     });

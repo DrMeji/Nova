@@ -592,11 +592,45 @@ export function ProjectWorkspace() {
   const refreshLivePreview = useCallback(async (
     files?: Record<string, string>,
     device?: PhoneDevice | null,
-  ) => {
+  ): Promise<boolean> => {
     const pid = project?.id || projectId;
-    if (!pid || !window.arkDesktop?.previewStart) return;
+    if (!pid) return false;
     const nextFiles = files || fileContentsRef.current;
     const native = isNativeMobileTree(nextFiles);
+    const d = device
+      ?? previewDeviceRef.current
+      ?? (native
+        ? (resolveDevices(inferMobileTargetFromFiles(nextFiles) || 'ios', '').ios || null)
+        : null);
+    if (d) {
+      previewDeviceRef.current = d;
+      setPreviewDevice(d);
+    }
+
+    // Prefer live Vite/npm for on-disk projects — never serve raw JSX via static previewStart.
+    if (diskRoot && window.arkDesktop?.agentStartFolderPreview) {
+      try {
+        const { ensureBoundFolderPreview } = await import('@/lib/projectPreview');
+        const live = await ensureBoundFolderPreview({
+          root: diskRoot,
+          projectId: pid,
+          title: project?.name,
+          files: nextFiles,
+          device: d || undefined,
+        });
+        if (live.ok && live.url) {
+          const bust = `${live.url}${live.url.includes('?') ? '&' : '?'}t=${Date.now()}`;
+          setLivePreviewUrl(bust);
+          setPreviewUrl(bust);
+          setPreviewReady(true);
+          return true;
+        }
+      } catch {
+        /* fall through to static */
+      }
+    }
+
+    if (!window.arkDesktop?.previewStart) return false;
     const payloadFiles = packDiskFiles(nextFiles, messagesRef.current);
     const composed = composePreviewHtml(nextFiles);
     if (!payloadFiles['index.html'] && composed) payloadFiles['index.html'] = composed;
@@ -608,20 +642,11 @@ export function ProjectWorkspace() {
       projectName: project?.name,
       files: payloadFiles,
     });
-    if (!res?.url) return;
+    if (!res?.url) return false;
     const bust = `${res.url}${res.url.includes('?') ? '&' : '?'}t=${Date.now()}`;
     setLivePreviewUrl(bust);
     setPreviewUrl(bust);
     setPreviewReady(true);
-    const d = device
-      ?? previewDeviceRef.current
-      ?? (native
-        ? (resolveDevices(inferMobileTargetFromFiles(nextFiles) || 'ios', '').ios || null)
-        : null);
-    if (d) {
-      previewDeviceRef.current = d;
-      setPreviewDevice(d);
-    }
     if (window.arkDesktop.previewOpenWindow) {
       await window.arkDesktop.previewOpenWindow({
         projectId: pid,
@@ -633,7 +658,8 @@ export function ProjectWorkspace() {
           : undefined,
       });
     }
-  }, [project?.id, project?.name, projectId]);
+    return true;
+  }, [diskRoot, project?.id, project?.name, projectId]);
 
   const applyWorkspaceEdits = useCallback((edits: { path: string; content: string }[]) => {
     if (!canEdit || !edits.length) return { changedPaths: [] as string[] };
@@ -2945,7 +2971,7 @@ export function ProjectWorkspace() {
       setMessages(prev => {
         const next = prev.map(m => (
           m.id === assistantId
-            ? { ...m, content: replyText || '(no response)', provider_used: provider }
+            ? { ...m, content: replyText || honestNoLiveChatReply(), provider_used: provider }
             : m
         ));
         persistLocalThread(next);
@@ -3058,7 +3084,12 @@ export function ProjectWorkspace() {
             ? (resolveDevices(inferMobileTargetFromFiles(fileContents) || 'ios', '').ios || null)
             : null);
         if (window.arkDesktop?.previewStart && project) {
-          await refreshLivePreview(fileContents, device);
+          const ok = await refreshLivePreview(fileContents, device);
+          if (!ok) {
+            setBuildProgress(0);
+            setBuildRunning(false);
+            return;
+          }
           setBuildProgress(100);
           return;
         }

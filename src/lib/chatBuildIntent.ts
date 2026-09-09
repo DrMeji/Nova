@@ -2,14 +2,37 @@
  * High-priority intent: user wants to CREATE / BUILD an app. never list Desktop folders.
  */
 
+/** Disk file/folder deletes must never be treated as product scrap/rebuild. */
+function looksLikeDiskDeleteAsk(text: string): boolean {
+  const t = String(text || '').trim();
+  if (!/\b(?:delete|remove|trash|wipe|get\s+rid\s+of)\b/i.test(t)) return false;
+  // "delete the file…", "delete Starbucks inside pictures", "delete that folder"
+  if (/\bfiles?\b/i.test(t)) return true;
+  if (/\b(?:delete|remove|trash|wipe)\b[\s\S]{0,64}\b(?:inside|in|from|within)\b[\s\S]{0,48}\b(?:folder|pictures?|photos?|desktop|documents|downloads)\b/i.test(t)) {
+    return true;
+  }
+  if (/\b(?:delete|remove|trash|wipe)\b[\s\S]{0,40}\b(?:that|this|the)\s+(?:file|folder|directory)\b/i.test(t)) {
+    return true;
+  }
+  // Named item + location without the word "file"
+  if (/\b(?:delete|remove|trash|wipe)\s+(?:the\s+)?[A-Za-z][A-Za-z0-9 _.-]{1,40}\s+(?:inside|in|from|within)\b/i.test(t)) {
+    return true;
+  }
+  return false;
+}
+
 /** Same-chat “you built the wrong thing — rebuild as X” (bound workspace). */
 export function looksLikeProductCorrectionAsk(text: string): boolean {
   const t = String(text || '').trim();
   if (!t || t.length < 12) return false;
+  // Never steal Desktop disk deletes into wipeProjectUiFiles.
+  if (looksLikeDiskDeleteAsk(t)) return false;
 
   // Explicit scrap / start over / rebuild as…
+  // Do NOT treat bare "delete it/this/the project" as product wipe — those are disk intents.
   if (
-    /\b(?:scrap|scratch|trash|throw\s+away|delete|wipe)\b[\s\S]{0,60}\b(?:everything|it|this|all|the\s+(?:ui|app|site|page|project|files?))\b/i.test(t)
+    /\b(?:scrap|scratch|trash|throw\s+away|wipe)\b[\s\S]{0,60}\b(?:everything|it|this|all|the\s+(?:ui|app|site|page|project|files?))\b/i.test(t)
+    || /\bdelete\b[\s\S]{0,48}\b(?:everything|all\s+(?:of\s+)?(?:it|this)|the\s+(?:entire\s+)?(?:ui|app|site|page)|all\s+the\s+files)\b/i.test(t)
     || /\b(?:start\s+over|from\s+scratch|redo\s+(?:everything|it|this)|rebuild\s+(?:everything|it|this|as|from))\b/i.test(t)
     || /\b(?:replace\s+(?:the\s+)?(?:entire|whole|all)|completely\s+wrong|totally\s+wrong)\b/i.test(t)
   ) {
@@ -19,7 +42,8 @@ export function looksLikeProductCorrectionAsk(text: string): boolean {
   // “Not what I asked / wrong product type”
   if (
     /\b(?:not\s+what\s+i\s+(?:asked|wanted|meant)|that(?:'s| is)\s+not\s+what\s+i\s+(?:asked|wanted)|wrong\s+(?:app|site|game|product|build|thing|ui|page|website))\b/i.test(t)
-    || /\bi\s+asked\s+for\s+(?:a|an)\b/i.test(t) && /\b(?:not\s+a|instead\s+of|not\s+an?)\b/i.test(t)
+    || (/\bi\s+asked\s+for\s+(?:a|an)\b/i.test(t) && /\b(?:not\s+a|instead\s+of|not\s+an?)\b/i.test(t)
+      && /\b(?:game|app|site|website|store|shop|product|canvas|playable|landing|dashboard|ui)\b/i.test(t))
     || /\byou\s+(?:built|made|created)\b[\s\S]{0,80}\b(?:wrong|instead|marketing|landing|website)\b/i.test(t)
   ) {
     return true;

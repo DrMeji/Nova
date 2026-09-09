@@ -40,12 +40,6 @@ export function listLocalMcpTools(): ArkMcpTool[] {
       status: 'ready',
     },
     {
-      name: 'NOVA.media.image',
-      description: 'Generate or recreate an image via NOVA Image Core',
-      local: true,
-      status: 'ready',
-    },
-    {
       name: 'NOVA.brain.generate',
       description: 'Run a chat/coding turn through NOVA Engine / Auto',
       local: true,
@@ -242,7 +236,6 @@ export function formatArkCapabilitiesHelp(opts?: {
     '',
     '**Built-in tools**',
     '• **NOVA.project.read / write**: read and update granted folders',
-    '• **NOVA.media.image**: Image tab',
     '• **NOVA.brain.generate**: your pinned local or cloud model',
     '• **NOVA.mcp.connect**: external MCP servers in **MCP**',
     '',

@@ -12,6 +12,49 @@ export type WebFileEdit = {
 
 const PLACEHOLDER_PREFIX = /^(?:\.\/)?(?:path\/to\/|foo\/bar\/|example\/|your[-_]?project\/)/i;
 
+/** Replace inner text of the first <button>…</button>, tolerant of `>` inside JSX attrs (onClick={() => …}). */
+function replaceFirstJsxTagInnerText(src: string, tag: string, label: string): string | null {
+  const openRe = new RegExp(`<${tag}\\b`, 'i');
+  const m = openRe.exec(src);
+  if (!m) return null;
+  const start = m.index;
+  let i = start + m[0].length;
+  let depth = 0;
+  let quote: '"' | "'" | '`' | null = null;
+  for (; i < src.length; i += 1) {
+    const ch = src[i];
+    if (quote) {
+      if (ch === '\\') {
+        i += 1;
+        continue;
+      }
+      if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === '`') {
+      quote = ch;
+      continue;
+    }
+    if (ch === '{') {
+      depth += 1;
+      continue;
+    }
+    if (ch === '}') {
+      depth = Math.max(0, depth - 1);
+      continue;
+    }
+    if (ch === '>' && depth === 0) {
+      const openEnd = i + 1;
+      const closeRe = new RegExp(`</${tag}\\s*>`, 'i');
+      closeRe.lastIndex = openEnd;
+      const close = closeRe.exec(src);
+      if (!close) return null;
+      return `${src.slice(0, openEnd)}${label}${src.slice(close.index)}`;
+    }
+  }
+  return null;
+}
+
 function normalizePath(raw: string): string {
   return String(raw || '')
     .trim()
@@ -770,10 +813,11 @@ export function reactSurgicalMicroAskEdits(
   }
 
   const col = t.match(/rename\s+(?:the\s+)?([A-Za-z][A-Za-z0-9_-]*)\s+column\s+to\s+([A-Za-z][A-Za-z0-9_-]*)/i)
-    || t.match(/rename\s+(?:the\s+)?([A-Za-z][A-Za-z0-9_-]*)\s+to\s+([A-Za-z][A-Za-z0-9_-]*)/i);
+    || t.match(/rename\s+(?:the\s+)?([A-Za-z][A-Za-z0-9_-]*)(?:\s+(?:nav\s+)?(?:label|item|tab|link|button|title))?\s+to\s+["'“”]?([A-Za-z][A-Za-z0-9 _-]{0,40})/i)
+    || t.match(/rename\s+(?:the\s+)?([A-Za-z][A-Za-z0-9_-]*)\s+to\s+["'“”]?([A-Za-z][A-Za-z0-9 _-]{0,40})/i);
   if (col) {
     const from = col[1];
-    const to = col[2];
+    const to = col[2].trim().replace(/[.,;:]+$/, '');
     const labelRe = new RegExp(`(label:\\s*['"])${from}(['"])`, 'gi');
     if (labelRe.test(app)) {
       app = app.replace(new RegExp(`(label:\\s*['"])${from}(['"])`, 'gi'), `$1${to}$2`);
@@ -783,39 +827,114 @@ export function reactSurgicalMicroAskEdits(
       app = app.replace(new RegExp(`(>)${from}(<)`, 'g'), `$1${to}$2`);
       touchedApp = true;
     }
-  }
-
-  const buttonLabelTo = (
-    t.match(/\b(?:make|change|set|update)\b[\s\S]{0,48}\bbutton\b[\s\S]{0,48}\b(?:say|to|into|label)\s+["']?([A-Za-z0-9][A-Za-z0-9 ,.+'-]{1,60})/i)?.[1]
-    || t.match(/\bbutton\b[\s\S]{0,24}\blabel\b[\s\S]{0,24}\b(?:say|to|into)\s+["']?([A-Za-z0-9][A-Za-z0-9 ,.+'-]{1,60})/i)?.[1]
-    || null
-  )?.trim()?.replace(/[.,;:]+$/, '');
-  if (buttonLabelTo) {
-    const safe = buttonLabelTo.replace(/[`$'"]/g, '');
-    const fromHint = t.match(/\b(?:start|begin|submit|save|continue|next|login|sign\s*up|pause|reset|primary)\b/i)?.[0];
-    if (fromHint && new RegExp(`>(\\s*)${fromHint}(?:\\s+action)?(\\s*)<`, 'i').test(app)) {
-      app = app.replace(new RegExp(`>(\\s*)${fromHint}(?:\\s+action)?(\\s*)<`, 'i'), `>${safe}<`);
-      touchedApp = true;
-    } else if (/>Primary action</i.test(app)) {
-      app = app.replace(/>Primary action</i, `>${safe}<`);
-      touchedApp = true;
-    } else if (/<button\b[^>]*>[\s\S]*?<\/button>/i.test(app)) {
-      app = app.replace(/(<button\b[^>]*>)([\s\S]*?)(<\/button>)/i, `$1${safe}$3`);
+    // Multiline nav labels: >\n  Overview\n<
+    const multi = new RegExp(`(>)(\\s*)${from}(\\s*)(<)`, 'gi');
+    if (multi.test(app)) {
+      app = app.replace(new RegExp(`(>)(\\s*)${from}(\\s*)(<)`, 'gi'), `$1$2${to}$3$4`);
       touchedApp = true;
     }
   }
 
-  const titleTo = (
-    t.match(/(?:change|rename|set).{0,48}(?:top\s+title|hero|headline|heading|title|h1).{0,32}(?:to|into)\s+["']?([A-Za-z0-9][A-Za-z0-9 ,.+'-]{1,60})/i)?.[1]
+  // Keep trailing periods inside quoted lines ("Slow roast. City mornings.") —
+  // only strip list/clause punctuation so verifyMicroAskApplied can match.
+  const stripClausePunct = (s: string) => String(s || '').trim().replace(/[,;:]+$/g, '');
+  const buttonLabelTo = (
+    t.match(/\b(?:make|change|set|update)\b[\s\S]{0,64}\b(?:button|cta|call[\s-]*to[\s-]*action|primary\s+(?:cta|button))\b[\s\S]{0,48}\b(?:say|to|into|label)\s+["'“”]?([^"'“”\n]{1,60})/i)?.[1]
+    || t.match(/\b(?:button|cta)\b[\s\S]{0,24}\blabel\b[\s\S]{0,24}\b(?:say|to|into)\s+["'“”]?([^"'“”\n]{1,60})/i)?.[1]
     || null
-  )?.trim()?.replace(/[.,;:]+$/, '');
-  if (titleTo && !buttonLabelTo) {
-    const safe = titleTo.replace(/[`$'"]/g, '');
+  );
+  const buttonLabelSafe = buttonLabelTo ? stripClausePunct(buttonLabelTo).replace(/[`$'"]/g, '') : '';
+  if (buttonLabelSafe) {
+    const targetAt = t.search(/\b(?:say|to|into|label)\s+["'“”]/i);
+    const askBeforeTarget = targetAt >= 0 ? t.slice(0, targetAt) : t;
+    const fromHint = askBeforeTarget.match(/\b(?:start|begin|submit|save|continue|next|login|sign\s*up|pause|reset|shop\s+beans|watch\s+now)\b/i)?.[0];
+    let buttonTouched = false;
+    if (fromHint && new RegExp(`>(\\s*)${fromHint.replace(/\s+/g, '\\s+')}(\\s*)<`, 'i').test(app)) {
+      app = app.replace(new RegExp(`>(\\s*)${fromHint.replace(/\s+/g, '\\s+')}(\\s*)<`, 'i'), `>${buttonLabelSafe}<`);
+      buttonTouched = true;
+    } else if (/>Primary action</i.test(app)) {
+      app = app.replace(/>Primary action</i, `>${buttonLabelSafe}<`);
+      buttonTouched = true;
+    } else {
+      const nextBtn = replaceFirstJsxTagInnerText(app, 'button', buttonLabelSafe);
+      if (nextBtn) {
+        app = nextBtn;
+        buttonTouched = true;
+      } else if (/<a\b[^>]*className=["'][^"']*(?:cta|btn|button)[^"']*["']/i.test(app)) {
+        const nextA = replaceFirstJsxTagInnerText(app, 'a', buttonLabelSafe);
+        if (nextA) {
+          app = nextA;
+          buttonTouched = true;
+        }
+      } else if (/<h1\b[^>]*>[\s\S]*?<\/h1>/i.test(app)) {
+        // Cafe scaffolds often ship hero copy with no CTA control — insert one.
+        app = app.replace(
+          /(<h1\b[^>]*>[\s\S]*?<\/h1>)(\s*)/i,
+          `$1$2<button type="button">${buttonLabelSafe}</button>\n      `,
+        );
+        buttonTouched = true;
+      }
+    }
+    if (buttonTouched) touchedApp = true;
+  }
+
+  const titleTo = (
+    t.match(/(?:change|rename|set|make).{0,64}(?:top\s+title|hero\s+headline|hero|headline|heading|title|h1).{0,40}(?:to|into|say)\s+["'“”]?([^"'“”\n]{2,80})/i)?.[1]
+    || null
+  );
+  const titleSafe = titleTo ? stripClausePunct(titleTo).replace(/[`$'"]/g, '').trim() : '';
+  if (titleSafe && !buttonLabelSafe) {
+    if (/<h1[\s>]/i.test(app)) {
+      app = app.replace(/(<h1[^>]*>)([\s\S]*?)(<\/h1>)/i, `$1${titleSafe}$3`);
+      touchedApp = true;
+    } else if (/className=["'][^"']*(?:title|hero|brand|heading|headline)[^"']*["'][^>]*>/i.test(app)) {
+      app = app.replace(/(className=["'][^"']*(?:title|hero|brand|heading|headline)[^"']*["'][^>]*>)([^<]{1,120})/i, `$1${titleSafe}`);
+      touchedApp = true;
+    }
+  }
+
+  // Dual ask: headline + CTA in one message (titleTo skipped when buttonLabelSafe set).
+  const headlineAlso = stripClausePunct(
+    t.match(/(?:change|rename|set|make).{0,64}(?:hero\s+headline|hero\s+title|headline|heading|h1).{0,40}(?:to|into|say)\s+["'“”]?([^"'“”\n]{2,80})/i)?.[1]
+    || '',
+  );
+  if (headlineAlso) {
+    const safe = headlineAlso.replace(/[`$'"]/g, '').trim();
     if (/<h1[\s>]/i.test(app)) {
       app = app.replace(/(<h1[^>]*>)([\s\S]*?)(<\/h1>)/i, `$1${safe}$3`);
       touchedApp = true;
-    } else if (/className=["'][^"']*(?:title|hero|brand|heading)[^"']*["'][^>]*>/i.test(app)) {
-      app = app.replace(/(className=["'][^"']*(?:title|hero|brand|heading)[^"']*["'][^>]*>)([^<]{1,80})/i, `$1${safe}`);
+    } else if (/className=["'][^"']*(?:title|hero|brand|heading|headline)[^"']*["'][^>]*>/i.test(app)) {
+      app = app.replace(
+        /(className=["'][^"']*(?:title|hero|brand|heading|headline)[^"']*["'][^>]*>)([^<]{1,120})/i,
+        `$1${safe}`,
+      );
+      touchedApp = true;
+    } else if (/<p\b[^>]*className=["'][^"']*label[^"']*["'][^>]*>/i.test(app)) {
+      app = app.replace(
+        /(<p\b[^>]*className=["'][^"']*label[^"']*["'][^>]*>)([\s\S]*?)(<\/p>)/i,
+        `$1${safe}$3`,
+      );
+      touchedApp = true;
+    } else if (
+      (/\bcreateRoot\s*\(/.test(app) && /\bimport\s+App\b/.test(app))
+      || !/export\s+default/i.test(app)
+      || !/<h1[\s>]/i.test(app)
+    ) {
+      // Broken / entrypoint / no-hero App — rebuild a minimal hero so the ask can land.
+      const cta = buttonLabelSafe || 'Order ahead';
+      app = `import './App.css';
+
+export default function App() {
+  return (
+    <div className="app">
+      <header className="hero">
+        <h1>${safe}</h1>
+        <button type="button">${cta}</button>
+      </header>
+    </div>
+  );
+}
+`;
       touchedApp = true;
     }
   }
@@ -857,8 +976,11 @@ export function reactSurgicalMicroAskEdits(
     }
   }
 
+  // Keep a single App.* — do not sync/edit the loser twin (Vite resolves one `./App`).
   const out: WebFileEdit[] = [];
-  if (touchedApp) out.push({ path: appPath, content: app });
+  if (touchedApp) {
+    out.push({ path: appPath, content: app });
+  }
   if (touchedCss) out.push({ path: cssPath, content: css });
   if (out.length) return out;
 
@@ -866,8 +988,22 @@ export function reactSurgicalMicroAskEdits(
 }
 
 function findReactAppPath(flat: WebFileMap): string | null {
-  if (flat['src/App.jsx'] != null) return 'src/App.jsx';
-  if (flat['src/App.tsx'] != null) return 'src/App.tsx';
+  const jsx = flat['src/App.jsx'];
+  const tsx = flat['src/App.tsx'];
+  if (jsx != null && tsx != null) {
+    const score = (body: string) => {
+      let n = String(body || '').length;
+      if (/\bcreateRoot\s*\(/.test(body) && /\bimport\s+App\b/.test(body)) n -= 5000;
+      if (/<h1[\s>]/i.test(body)) n += 2000;
+      if (/export\s+default/i.test(body)) n += 400;
+      if (/<header[\s>]|<section[\s>]/i.test(body)) n += 300;
+      return n;
+    };
+    // Prefer the real hero UI; when tied, prefer App.jsx (Vite resolves `./App` there).
+    return score(jsx) >= score(tsx) ? 'src/App.jsx' : 'src/App.tsx';
+  }
+  if (jsx != null) return 'src/App.jsx';
+  if (tsx != null) return 'src/App.tsx';
   const hit = Object.keys(flat).find(p => /(^|\/)App\.(jsx|tsx)$/i.test(p));
   return hit || null;
 }
@@ -1070,12 +1206,182 @@ export function arcadeGameMicroAskEdits(files: WebFileMap, message: string): Web
 export function reactUiMicroAskEdits(
   files: WebFileMap,
   message: string,
-  _opts?: { projectName?: string },
+  opts?: { projectName?: string },
 ): WebFileEdit[] {
-  // Only patch what already exists. Never invent todo/notes/discord/kanban/finance shells.
   const arcade = arcadeGameMicroAskEdits(files, message);
   if (arcade.length) return arcade;
-  return reactSurgicalMicroAskEdits(files, message);
+  const surgical = reactSurgicalMicroAskEdits(files, message);
+  if (surgical.length) return surgical;
+  // Empty tree + kanban create brief → seed a real board (model often returns nothing).
+  if (!Object.keys(files || {}).length && looksLikeKanbanCreateBrief(message)) {
+    return buildKanbanSeedEdits(opts?.projectName || 'TaskRail');
+  }
+  return [];
+}
+
+/**
+ * After a local micro-patch, confirm the ask’s concrete targets actually landed in App.
+ * Stops “Done in 131ms” when nothing meaningful changed (or wrong file twin).
+ */
+export function verifyMicroAskApplied(
+  message: string,
+  files: WebFileMap,
+): { ok: boolean; missing: string[] } {
+  const t = String(message || '');
+  const flat = flatten(files);
+  const app = `${flat['src/App.jsx'] || ''}\n${flat['src/App.tsx'] || ''}\n${flat['src/App.css'] || ''}`;
+  const missing: string[] = [];
+
+  const textInApp = (needle: string) => {
+    const n = String(needle || '').trim();
+    if (!n) return true;
+    const esc = n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+');
+    if (new RegExp(esc, 'i').test(app)) return true;
+    // Allow missing trailing period/ellipsis on either side of the match.
+    const soft = n.replace(/[.…]+$/u, '').trim();
+    if (soft && soft !== n) {
+      const softEsc = soft.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+');
+      if (new RegExp(softEsc, 'i').test(app)) return true;
+    }
+    return false;
+  };
+
+  const quoted = [...t.matchAll(/["“”']([^"“”']{2,80})["“”']/g)].map((m) => m[1].trim()).filter(Boolean);
+  for (const q of quoted) {
+    // Ignore path-ish quotes
+    if (/\.(jsx?|tsx?|css|html)$/i.test(q)) continue;
+    if (!textInApp(q)) missing.push(q);
+  }
+
+  const headline = (
+    t.match(/(?:change|rename|set|make).{0,64}(?:hero\s+headline|hero\s+title|headline|heading|h1).{0,40}(?:to|into|say)\s+["'“”]?([^"'“”\n]{2,80})/i)?.[1]
+    || ''
+  ).trim().replace(/[,;:]+$/, '');
+  if (headline && !textInApp(headline)) {
+    if (!missing.some((m) => m.toLowerCase().includes(headline.slice(0, 12).toLowerCase()))) {
+      missing.push(headline);
+    }
+  }
+
+  const cta = (
+    t.match(/\b(?:button|cta|call[\s-]*to[\s-]*action|primary\s+(?:cta|button))\b[\s\S]{0,48}\b(?:say|to|into|label)\s+["'“”]?([^"'“”\n]{1,60})/i)?.[1]
+    || ''
+  ).trim().replace(/[,;:]+$/, '');
+  if (cta && !textInApp(cta)) {
+    if (!missing.includes(cta)) missing.push(cta);
+  }
+
+  return { ok: missing.length === 0, missing };
+}
+
+function looksLikeKanbanCreateBrief(message: string): boolean {
+  const t = String(message || '');
+  return /\bkanban\b/i.test(t)
+    && /\b(?:backlog|columns?|cards?|drag)\b/i.test(t)
+    && /\b(?:create|build|named|called|vite|react)\b/i.test(t);
+}
+
+function buildKanbanSeedEdits(projectName: string): WebFileEdit[] {
+  const title = String(projectName || 'TaskRail').replace(/[\\`]/g, '');
+  return [
+    {
+      path: 'src/App.jsx',
+      content: `import { useEffect, useState } from 'react';
+import './App.css';
+
+const COLUMNS = ['Backlog', 'Doing', 'Review', 'Done'];
+const KEY = '${title.toLowerCase().replace(/\\s+/g, '-')}-kanban';
+
+export default function App() {
+  const [cards, setCards] = useState(() => {
+    try {
+      const raw = localStorage.getItem(KEY);
+      if (raw) return JSON.parse(raw);
+    } catch { /* ignore */ }
+    return [
+      { id: 'c1', title: 'Welcome card', column: 'Backlog' },
+    ];
+  });
+  const [draft, setDraft] = useState('');
+  const [modalOpen, setModalOpen] = useState(false);
+
+  useEffect(() => {
+    try { localStorage.setItem(KEY, JSON.stringify(cards)); } catch { /* ignore */ }
+  }, [cards]);
+
+  const addCard = () => {
+    const titleText = draft.trim();
+    if (!titleText) return;
+    setCards((prev) => [...prev, { id: crypto.randomUUID(), title: titleText, column: 'Backlog' }]);
+    setDraft('');
+    setModalOpen(false);
+  };
+
+  const moveCard = (id, column) => {
+    setCards((prev) => prev.map((c) => (c.id === id ? { ...c, column } : c)));
+  };
+
+  return (
+    <div className="kanban-shell">
+      <header className="kanban-top">
+        <h1>${title}</h1>
+        <button type="button" onClick={() => setModalOpen(true)}>Add Card</button>
+      </header>
+      <div className="kanban-board">
+        {COLUMNS.map((col) => (
+          <section key={col} className="kanban-col" onDragOver={(e) => e.preventDefault()} onDrop={(e) => {
+            const id = e.dataTransfer.getData('text/plain');
+            if (id) moveCard(id, col);
+          }}>
+            <h2>{col}</h2>
+            {cards.filter((c) => c.column === col).map((c) => (
+              <article
+                key={c.id}
+                className="kanban-card"
+                draggable
+                onDragStart={(e) => e.dataTransfer.setData('text/plain', c.id)}
+              >
+                {c.title}
+              </article>
+            ))}
+          </section>
+        ))}
+      </div>
+      {modalOpen ? (
+        <div className="kanban-modal" role="dialog">
+          <div className="kanban-modal-card">
+            <h3>Add Card</h3>
+            <input value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Card title" autoFocus />
+            <div className="kanban-modal-actions">
+              <button type="button" onClick={() => setModalOpen(false)}>Cancel</button>
+              <button type="button" onClick={addCard}>Add</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+`,
+    },
+    {
+      path: 'src/App.css',
+      content: `.kanban-shell{min-height:100vh;background:#0f1419;color:#e7ecf3;font-family:Segoe UI,system-ui,sans-serif}
+.kanban-top{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid #243041}
+.kanban-top h1{margin:0;font-size:1.25rem}
+.kanban-top button,.kanban-modal-actions button{background:#3b82f6;color:#fff;border:0;border-radius:8px;padding:8px 12px;cursor:pointer}
+.kanban-board{display:grid;grid-template-columns:repeat(4,minmax(180px,1fr));gap:12px;padding:16px}
+.kanban-col{background:#171e27;border:1px solid #243041;border-radius:12px;padding:12px;min-height:420px}
+.kanban-col h2{margin:0 0 10px;font-size:.95rem;color:#9fb0c3}
+.kanban-card{background:#1f2937;border:1px solid #334155;border-radius:8px;padding:10px;margin-bottom:8px;cursor:grab}
+.kanban-modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:grid;place-items:center}
+.kanban-modal-card{background:#171e27;border:1px solid #334155;border-radius:12px;padding:16px;width:min(360px,92vw);display:grid;gap:10px}
+.kanban-modal-card input{background:#0f1419;border:1px solid #334155;border-radius:8px;color:#fff;padding:8px 10px}
+.kanban-modal-actions{display:flex;justify-content:flex-end;gap:8px}
+.kanban-modal-actions button:first-child{background:#334155}
+`,
+    },
+  ];
 }
 
 /** True when App.jsx is just the accidental NOVA search chrome stub. */

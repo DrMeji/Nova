@@ -209,7 +209,7 @@ async function chatOpenRouter(
   onChunk?: (text: string) => void,
 ) {
   return openaiCompatible('https://openrouter.ai/api/v1/chat/completions', key, model, history, {
-    'HTTP-Referer': 'https://ark.local',
+    'HTTP-Referer': 'https://nova.local',
     'X-Title': 'NOVA',
   }, onChunk, 'openrouter');
 }

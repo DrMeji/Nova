@@ -16,6 +16,16 @@ export function detectProjectKind(text: string): ProjectKind {
   if (/\b(watchlist|trading\s+cockpit|trade\s*rail)\b/.test(lower) && /\b(tab|orders|settings)\b/.test(lower)) {
     return 'static-web';
   }
+  // Explicit static HTML wins over React/landing defaults.
+  if (
+    /\b(?:static\s+html\s+ok|plain\s+html|simple\s+site|static\s+site)\b/i.test(t)
+    && !/\bno\s+static\s+html\b/i.test(t)
+  ) {
+    return 'static-web';
+  }
+  if (/\bstatic\s+html\b/i.test(t) && !/\bno\s+static\s+html\b/i.test(t) && !/\b(?:react|vite)\b/i.test(t)) {
+    return 'static-web';
+  }
   if (prefersReactAppScaffold(t)) return 'vite-react';
   if (/\bno\s+static\s+html\b/i.test(t) && /\b(react|vite)\b/i.test(t)) return 'vite-react';
   // Desktop website / cafe / landing with App.jsx language → Vite (Preview needs npm).
@@ -33,14 +43,15 @@ export function detectProjectKind(text: string): ProjectKind {
       )
     )
   ) {
-    // Prefer Vite for product-style landings so Preview is a real app window, not blank static HTML.
-    return 'vite-react';
+    // Marketing landings stay static HTML unless the brief asked for React/Vite/SPA.
+    return 'static-web';
   }
   if (/\b(html|simple\s+site|static\s+site|plain\s+html|static\s+html)\b/.test(lower) && !/\bno\s+static\s+html\b/i.test(t)) {
     return 'static-web';
   }
   if (/images\.unsplash\.com|unsplash\.com/.test(lower) && /\b(website|site|create|build)\b/.test(lower)) {
-    return 'vite-react';
+    // Unsplash marketing sites are static unless React/Vite was requested above.
+    return 'static-web';
   }
   if (/\b(node\s+cli|command\s+line\s+tool|cli\s+tool)\b/.test(lower)) return 'node-cli';
   // Interactive product / game apps (including spatial / WebGL / canvas runners) → Vite React.
@@ -67,6 +78,6 @@ export function resolveProjectKindForCreate(
   // Interactive premium marketing sites stay on Vite React (animated SPA), not blank static HTML.
   if (wantsInteractiveSpaScaffold(summary)) return 'vite-react';
   if (storedKind && storedKind !== 'unknown') return storedKind;
-  if (looksLikeLandingBrief(summary)) return 'vite-react';
+  if (looksLikeLandingBrief(summary)) return 'static-web';
   return parsedKind || 'vite-react';
 }

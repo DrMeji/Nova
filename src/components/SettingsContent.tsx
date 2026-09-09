@@ -28,28 +28,22 @@ import { getGgufCtx, ggufCtxCapacityLabel } from '@/lib/ggufContext';
 import {
   User, Palette, Zap, Boxes, Cloud, Shield, HardDrive,
   FolderKanban, Lock, RefreshCw, Check, Cpu, KeyRound,
-  Sparkles, FlaskConical,
+  Sparkles,
   Mail, BadgeCheck, Trash2, Download, Info, Monitor, Copy, X, FolderOpen, Github, Mic,
 } from 'lucide-react';
 import { clearLocalAppCaches, clearLocalChatCache } from '@/lib/clearSession';
 import { deleteEngineModel, engineDiskSpace, getEngineStatus, type ArkEngineModel, type ArkEngineStatus } from '@/lib/arkEngine';
-import { isRevealed, setRevealed, type ParkId } from '@/lib/featurePark';
+import { NovaMark } from '@/components/NovaMark';
 import { hasPinSet, setPin, clearPin } from '@/lib/pinLock';
 import { hasSecondFactorSet, setSecondFactor, clearSecondFactor } from '@/lib/twoFactor';
 import { probeProviderKey } from '@/lib/providerSpeed';
 import { setCloudProviderEnabled } from '@/lib/cloudSources';
 import { getBrainUrl } from '@/lib/brainUrl';
 import { SettingsSystemHealth } from '@/components/SettingsSystemHealth';
-import { isArkDevSession } from '@/lib/arkRuntime';
-import { isBetaSettingsEnabled, isTestersSettingsEnabled } from '@/lib/featurePark';
 import { BrandMark, StatusCheck } from '@/components/BrandMark';
 import { VoiceSettingsPanel } from '@/components/VoiceSettingsPanel';
 import { useSocial } from '@/context/SocialContext';
 import { supabase } from '@/lib/supabase';
-
-const REVEAL_FEATURES: { id: ParkId; label: string; description: string }[] = [
-  { id: 'call', label: 'Call', description: 'Voice calls (microphone + WebRTC). Parked on retail builds until signaling is hardened — enable here on bat/dev only.' },
-];
 
 const AUTO_LOCK_OPTIONS = [
   { value: 0, label: 'Off' },
@@ -72,8 +66,6 @@ const SECTIONS: { id: string; label: string; icon: typeof User; disabled?: boole
   { id: 'projects', label: 'Projects', icon: FolderKanban },
   { id: 'security', label: 'Security', icon: Lock },
   { id: 'updates', label: 'Update', icon: RefreshCw },
-  { id: 'testers', label: 'Testers', icon: FlaskConical },
-  { id: 'beta', label: 'Beta', icon: Sparkles },
 ];
 
 const AI_MODES = [
@@ -100,7 +92,7 @@ const PROVIDER_ROWS = [
   { id: 'google', name: 'Google AI Studio', hint: 'Gemini models', keyUrl: 'https://aistudio.google.com/apikey' },
   { id: 'groq', name: 'Groq', hint: 'Fast inference', keyUrl: 'https://console.groq.com/keys' },
   { id: 'openrouter', name: 'OpenRouter', hint: 'Many models, one key', keyUrl: 'https://openrouter.ai/keys' },
-  { id: 'huggingface', name: 'Hugging Face', hint: 'Chat + FLUX images', keyUrl: 'https://huggingface.co/settings/tokens' },
+  { id: 'huggingface', name: 'Hugging Face', hint: 'Chat via Inference API', keyUrl: 'https://huggingface.co/settings/tokens' },
   { id: 'nvidia', name: 'NVIDIA NIM', hint: 'Free NIM endpoints', keyUrl: 'https://build.nvidia.com/settings/api-keys' },
   { id: 'together', name: 'Together AI', hint: 'Open model hosting', keyUrl: 'https://api.together.xyz/settings/api-keys' },
   { id: 'fireworks', name: 'Fireworks', hint: 'Fast serverless open models', keyUrl: 'https://fireworks.ai/account/api-keys' },
@@ -127,8 +119,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
   const { navigate } = useRouter();
   const [activeSection, setActiveSection] = useState(() => {
     const s = initialSection && initialSection !== 'mcp' ? initialSection : 'account';
-    if (s === 'testers' && !isTestersSettingsEnabled()) return 'account';
-    if (s === 'beta' && !isBetaSettingsEnabled()) return 'account';
+    if (s === 'testers' || s === 'beta') return 'account';
     return s;
   });
   useEffect(() => {
@@ -139,11 +130,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
   }, [initialSection, navigate, onClose]);
   useEffect(() => {
     if (!initialSection || initialSection === 'mcp') return;
-    if (initialSection === 'testers' && !isTestersSettingsEnabled()) {
-      setActiveSection('account');
-      return;
-    }
-    if (initialSection === 'beta' && !isBetaSettingsEnabled()) {
+    if (initialSection === 'testers' || initialSection === 'beta') {
       setActiveSection('account');
       return;
     }
@@ -333,10 +320,10 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
     }
   };
 
-  const aiMode = (settings?.ai_mode as AiModePref | undefined) ?? prefs.aiMode;
-  const keepLocal = settings?.keep_files_local ?? prefs.keepFilesLocal;
-  const allowSync = settings?.allow_cloud_sync ?? prefs.allowCloudSync;
-  const diagnostics = settings?.send_diagnostics ?? prefs.sendDiagnostics;
+  const aiMode = prefs.aiMode;
+  const keepLocal = prefs.keepFilesLocal;
+  const allowSync = prefs.allowCloudSync;
+  const diagnostics = prefs.sendDiagnostics;
 
   const keyedCount = useMemo(() => Object.keys(providerKeys).length, [providerKeys]);
 
@@ -356,50 +343,13 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
         await supabase.from('profiles').upsert({
           id: user.id,
           display_name: name,
-          // Prefer existing cloud URL (https) over huge local data URLs.
-          avatar_url: (profile?.avatar_url && /^https?:\/\//i.test(profile.avatar_url))
-            ? profile.avatar_url
-            : (prefs.avatarDataUrl || null),
+          avatar_url: null,
         });
         await pushProfileToFriends();
         await refreshProfile();
       } catch {
         /* local prefs still saved */
       }
-    }
-  };
-
-  const syncAvatarToCloud = async (dataUrl: string | undefined) => {
-    if (!user || user.id === 'guest-local') return;
-    try {
-      const { persistProfileAvatarUrl, removeAvatarFromStorage, uploadAvatarDataUrl } = await import('@/lib/avatarStorage');
-      if (!dataUrl) {
-        await removeAvatarFromStorage(user.id);
-        await persistProfileAvatarUrl(user.id, null);
-        await refreshProfile();
-        return;
-      }
-      const uploaded = await uploadAvatarDataUrl(user.id, dataUrl);
-      if (uploaded.ok) {
-        // Keep a local cache for fast sidebar paint; cloud stores HTTPS URL.
-        await persistProfileAvatarUrl(user.id, uploaded.url);
-        await refreshProfile();
-        return;
-      }
-      // Storage bucket not applied yet — fall back to previous inline behavior.
-      if (uploaded.error.startsWith('storage_unavailable:')) {
-        await supabase.from('profiles').upsert({
-          id: user.id,
-          avatar_url: dataUrl,
-        });
-        await pushProfileToFriends();
-        await refreshProfile();
-        return;
-      }
-      setSavedFlash(uploaded.error || 'Avatar upload failed');
-      window.setTimeout(() => setSavedFlash(''), 2800);
-    } catch {
-      /* keep local */
     }
   };
 
@@ -547,16 +497,12 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
   };
 
   const visibleChangelog = ARK_CHANGELOG.filter(entry => {
-    if (prefs.updateChannel !== 'beta' && entry.channel !== 'stable') return false;
-    // Only show the entry for the version this install is running.
+    // Beta channel removed from Settings — stable entries only.
+    if (entry.channel !== 'stable') return false;
     return entry.version === appVersion;
   }).slice(0, 1);
 
-  const navSections = useMemo(() => SECTIONS.filter(section => {
-    if (section.id === 'testers' && !isTestersSettingsEnabled()) return false;
-    if (section.id === 'beta' && !isBetaSettingsEnabled()) return false;
-    return true;
-  }), []);
+  const navSections = useMemo(() => SECTIONS, []);
 
   return (
     <div ref={settingsRootRef} className="flex h-full min-h-0 min-w-0 animate-fade-in bg-ark-navy-900">
@@ -611,66 +557,8 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
             <SettingsSection title="Account">
               <div className="space-y-5">
                 <div className="flex items-start gap-4">
-                  <div className="relative shrink-0">
-                    <label className="relative w-16 h-16 rounded-full overflow-hidden bg-ark-blue-500/20 border border-ark-blue-500/30 flex items-center justify-center text-xl font-bold text-ark-blue-300 cursor-pointer block">
-                      {prefs.avatarDataUrl
-                        ? <img src={prefs.avatarDataUrl} alt="" className="w-full h-full object-cover" />
-                        : (displayName || profile?.display_name || user?.email || '?')[0].toUpperCase()}
-                      <input
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        onChange={e => {
-                          const file = e.target.files?.[0];
-                          if (!file) return;
-                          const reader = new FileReader();
-                          reader.onload = () => {
-                            const url = typeof reader.result === 'string' ? reader.result : '';
-                            if (!url) return;
-                            // Center-crop to square and resize to 256px for a clean profile photo.
-                            const img = new Image();
-                            img.onload = () => {
-                              const side = Math.min(img.width, img.height);
-                              const sx = (img.width - side) / 2;
-                              const sy = (img.height - side) / 2;
-                              const canvas = document.createElement('canvas');
-                              canvas.width = 256;
-                              canvas.height = 256;
-                              const ctx = canvas.getContext('2d');
-                              if (!ctx) {
-                                patchPrefs({ avatarDataUrl: url });
-                                void syncAvatarToCloud(url);
-                                return;
-                              }
-                              ctx.drawImage(img, sx, sy, side, side, 0, 0, 256, 256);
-                              const cropped = canvas.toDataURL('image/jpeg', 0.85);
-                              patchPrefs({ avatarDataUrl: cropped });
-                              void syncAvatarToCloud(cropped);
-                            };
-                            img.onerror = () => {
-                              patchPrefs({ avatarDataUrl: url });
-                              void syncAvatarToCloud(url);
-                            };
-                            img.src = url;
-                          };
-                          reader.readAsDataURL(file);
-                          e.target.value = '';
-                        }}
-                      />
-                    </label>
-                    {prefs.avatarDataUrl && (
-                      <button
-                        type="button"
-                        title="Remove photo"
-                        onClick={() => {
-                          patchPrefs({ avatarDataUrl: undefined });
-                          void syncAvatarToCloud(undefined);
-                        }}
-                        className="absolute -bottom-1 -right-1 w-7 h-7 rounded-full bg-surface-panel border border-surface-border text-content-secondary hover:text-rose-400 flex items-center justify-center shadow"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    )}
+                  <div className="relative shrink-0 w-16 h-16 rounded-full overflow-hidden bg-ark-blue-500/15 border border-ark-blue-500/30 flex items-center justify-center">
+                    <NovaMark className="w-8 h-8 text-content-primary" title="NOVA" />
                   </div>
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-medium text-content-primary truncate">{displayName || 'Guest'}</p>
@@ -1001,18 +889,6 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                         </div>
                       </button>
                     ))}
-                  </div>
-                </SettingsGroup>
-
-                {/* Content safety. NSFW in one self-contained card */}
-                <SettingsGroup title="Content safety (Image)">
-                  <div className="ark-card p-4 space-y-3">
-                    <ToggleRow
-                      label="Allow NSFW content"
-                      value={prefs.allowNsfw}
-                      onChange={v => patchPrefs({ allowNsfw: v })}
-                      bare
-                    />
                   </div>
                 </SettingsGroup>
 
@@ -1396,8 +1272,11 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                   value={prefs.shareUsageStats}
                   onChange={v => patchPrefs({ shareUsageStats: v })}
                 />
+                <p className="text-[11px] text-content-tertiary -mt-1 px-0.5">
+                  When off (default), NOVA does not send usage pings. Cloud chat history also stays off unless Allow optional cloud sync is on.
+                </p>
                 <ToggleRow
-                  label="Clear clipboard after paste"
+                  label="Clear clipboard after image paste"
                   value={prefs.clearClipboardAfterPaste}
                   onChange={v => patchPrefs({ clearClipboardAfterPaste: v })}
                 />
@@ -1688,7 +1567,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                   onChange={v => patchPrefs({ projectLocation: v })}
                 />
                 <Field
-                  label="Preferred language"
+                  label="Preferred language (scaffold hint)"
                   value={prefs.preferredLanguage}
                   onChange={v => patchPrefs({ preferredLanguage: v })}
                 />
@@ -2179,68 +2058,6 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                     )}
                   </div>
                 </div>
-              </div>
-            </SettingsSection>
-          )}
-
-          {activeSection === 'testers' && (
-            <SettingsSection title="Testers">
-              {isArkDevSession() && (
-                <div className="rounded-xl border border-sky-500/25 bg-sky-500/10 p-3 mb-3 text-xs text-sky-100/90">
-                  Dev profile · separate AppData from retail NOVA
-                </div>
-              )}
-              <div className="space-y-3">
-                <div className="rounded-xl border border-surface-border p-4 space-y-3">
-                  <p className="text-sm font-medium text-content-primary">Experimental</p>
-                  {REVEAL_FEATURES.map(opt => {
-                    void featureTick;
-                    return (
-                      <ToggleRow
-                        key={opt.id}
-                        label={opt.label}
-                        value={isRevealed(opt.id)}
-                        onChange={v => setRevealed(opt.id, v)}
-                      />
-                    );
-                  })}
-                </div>
-                <div className="rounded-xl border border-surface-border p-4 space-y-2">
-                  <p className="text-sm font-medium text-content-primary">Feedback</p>
-                  <button
-                    type="button"
-                    className="ark-btn-secondary text-xs"
-                    onClick={() => void window.arkDesktop?.openExternal?.('https://github.com/DrMeji/Nova/issues/new')}
-                  >
-                    Open feedback issue
-                  </button>
-                </div>
-                <div className="rounded-xl border border-surface-border p-4 space-y-2">
-                  <p className="text-sm font-medium text-content-primary">Re-run setup</p>
-                  <button
-                    type="button"
-                    className="ark-btn-secondary text-xs"
-                    onClick={() => {
-                      clearSetupCompleted();
-                      setSavedFlash('Setup cleared. restart NOVA to see onboarding');
-                      window.setTimeout(() => setSavedFlash(''), 2500);
-                    }}
-                  >
-                    Reset setup flag
-                  </button>
-                </div>
-              </div>
-            </SettingsSection>
-          )}
-
-          {activeSection === 'beta' && (
-            <SettingsSection title="Beta channel">
-              <div className="space-y-4">
-                <ToggleRow
-                  label="Beta updates"
-                  value={prefs.updateChannel === 'beta'}
-                  onChange={v => patchPrefs({ updateChannel: v ? 'beta' : 'stable' })}
-                />
               </div>
             </SettingsSection>
           )}

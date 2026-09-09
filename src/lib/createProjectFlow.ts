@@ -13,8 +13,11 @@ import { slugifyProjectName } from '@/lib/projectNames';
 
 export type ProjectBootstrapResult = {
   npmInstalled: boolean;
+  /** Set only when the Vite/dev server answered HTTP (localhost live). */
   devServerUrl?: string;
   bootstrapNote?: string;
+  /** True when a localhost Preview probe succeeded for this create. */
+  previewLive?: boolean;
 };
 
 export type CreateProjectResult = {
@@ -38,6 +41,38 @@ export async function resolveNewProjectParent(
 ): Promise<{ parentPath: string; source: string; grantHint?: string }> {
   await syncWorkspaceGrantsFromPrefs();
   const grants = grantsFromPrefs();
+
+  // Honor Settings → Projects → Default project location when it looks like a real path
+  // AND folder grants allow writing there. Never force Documents/Desktop without grants
+  // (that produced instant "Path is outside an approved NOVA workspace" on create).
+  try {
+    const { getLocalPrefs } = await import('@/lib/localPrefs');
+    const locRaw = String(getLocalPrefs().projectLocation || '').trim();
+    let loc = locRaw;
+    if (loc.startsWith('~/') || loc === '~') {
+      const roots = await window.arkDesktop?.browseRoots?.();
+      const docs = roots?.roots?.find(r => r.id === 'documents')?.path;
+      const desk = roots?.roots?.find(r => r.id === 'desktop')?.path;
+      const base = (grants.documents && docs) || (grants.desktop && desk) || '';
+      if (base) {
+        const rest = loc === '~' ? 'NOVA Projects' : loc.replace(/^~[/\\]?/, '');
+        loc = joinPath(base, rest.replace(/^NOVA\/Projects$/i, 'NOVA Projects'));
+      } else {
+        loc = '';
+      }
+    }
+    if (
+      loc
+      && !loc.startsWith('~')
+      && (/^[A-Za-z]:[\\/]/.test(loc) || loc.startsWith('/'))
+      && (grants.fullPc || grants.documents || grants.desktop || hasFolderAccessGrant())
+    ) {
+      const parentPath = joinPath(loc.replace(/[/\\]+$/, ''), intent.slug);
+      return { parentPath, source: loc };
+    }
+  } catch {
+    /* fall through */
+  }
 
   if (intent.explicitPath) {
     const parent = intent.explicitPath.replace(/[/\\][^/\\]+$/, '');
@@ -158,7 +193,16 @@ export async function runCreateProjectFlow(
 
   const scaffoldKind = resolveProjectKindForCreate(cleaned.summary, cleaned.kind, cleaned.kind);
   // Skills are for LLM prompts only — never bake "NOVA design skills" copy into App.jsx.
-  const scaffold = buildScaffoldFiles(scaffoldKind, { name: cleaned.name, summary: cleaned.summary });
+  let preferredLanguage = 'TypeScript';
+  try {
+    const { getLocalPrefs } = await import('@/lib/localPrefs');
+    preferredLanguage = getLocalPrefs().preferredLanguage || preferredLanguage;
+  } catch { /* defaults */ }
+  const scaffold = buildScaffoldFiles(scaffoldKind, {
+    name: cleaned.name,
+    summary: cleaned.summary,
+    preferredLanguage,
+  });
   const fileMap = Object.fromEntries(scaffold.map(f => [f.path.replace(/\\/g, '/'), f.content]));
 
   const write = await safeProjectWrite({
@@ -223,11 +267,30 @@ async function folderHasPackageJson(projectPath: string): Promise<boolean> {
 function sanitizeBootstrapNote(raw: string | undefined): string | undefined {
   const t = String(raw || '').trim();
   if (!t) return undefined;
-  // Never surface raw npm ENOENT / stack dumps to end users.
-  if (/ENOENT|package\.json|npm error|could not run\s*`?npm install/i.test(t)) {
+  // Drop raw stack / path dumps; keep a short human line when possible.
+  if (/at\s+\S+\s+\(|node:internal\/|Error:\s*ENOENT:.*\\/i.test(t) && t.length > 180) {
+    if (/node|npm|not recognized|not found|eresolve|peer dep/i.test(t)) {
+      return 'npm install failed (Node/npm missing or dependency conflict).';
+    }
     return undefined;
   }
-  return t.slice(0, 280);
+  return t.replace(/\s+/g, ' ').slice(0, 280);
+}
+
+function npmInstallLooksFailed(outcome: { ok?: boolean; reply?: string; handled?: boolean }): boolean {
+  // Prefer the shell exit flag from runAgentCommand.
+  if (outcome.ok === true) return false;
+  if (outcome.ok === false) return true;
+  if (!outcome.handled) return true;
+  const r = String(outcome.reply || '');
+  if (/could not run|ENOENT|npm\s*err|ERESOLVE|not recognized|is not recognized|command failed/i.test(r)) {
+    return true;
+  }
+  if (/dependencies installed successfully|added \d+ package|up to date|audited \d+ package/i.test(r)) {
+    return false;
+  }
+  // Unknown outcome without ok:true — treat as failed so we never fake Ready.
+  return true;
 }
 
 /** npm install + dev server. only when the project actually uses npm. */
@@ -257,7 +320,7 @@ export async function bootstrapProjectWorkspace(
     skipConfirm: true,
   });
 
-  if (!install.handled || (install.reply && /could not run|ENOENT|npm error|not recognized|not found/i.test(install.reply))) {
+  if (npmInstallLooksFailed(install)) {
     // Fresh machines often lack Node — try a silent winget install once, then retry npm.
     const nodeOk = await window.arkDesktop?.agentRun?.({
       command: 'node -v',
@@ -277,9 +340,10 @@ export async function bootstrapProjectWorkspace(
         cwd: projectPath,
         skipConfirm: true,
       });
-      if (!retry.handled || (retry.reply && /could not run|ENOENT|npm error/i.test(retry.reply))) {
+      if (npmInstallLooksFailed(retry)) {
         return {
           npmInstalled: false,
+          previewLive: false,
           bootstrapNote: sanitizeBootstrapNote(retry.reply || install.reply)
             || 'Could not install npm dependencies. Install Node.js LTS, then say **install npm dependencies**.',
         };
@@ -287,6 +351,7 @@ export async function bootstrapProjectWorkspace(
     } else {
       return {
         npmInstalled: false,
+        previewLive: false,
         bootstrapNote: sanitizeBootstrapNote(install.reply)
           || 'Could not install npm dependencies automatically. Say **install npm dependencies** to retry, or open the folder and run `npm install` once.',
       };
@@ -295,15 +360,16 @@ export async function bootstrapProjectWorkspace(
 
   const dev = await window.arkDesktop?.agentStartDevServer?.({ cwd: projectPath });
   if (dev?.ok && dev.url) {
-    return { npmInstalled: true, devServerUrl: dev.url };
+    return { npmInstalled: true, devServerUrl: dev.url, previewLive: true };
   }
 
   return {
     npmInstalled: true,
+    previewLive: false,
     bootstrapNote: sanitizeBootstrapNote(
       dev?.error
-        ? `Dependencies installed. Dev server did not start (${dev.error}). say **run dev server** or use **Preview**.`
-        : undefined,
+        ? `Dependencies installed. Dev server did not start (${dev.error}). Say **run Preview** or **run dev server**.`
+        : 'Dependencies installed, but the live Preview server did not respond yet. Say **run Preview** to retry.',
     ),
   };
 }
@@ -318,8 +384,35 @@ export function formatCreateProjectReply(
   }
 
   const displayName = cleanProductTitle(intent.name);
+  const hasPackageJson = Boolean(
+    result.files && Object.keys(result.files).some(p => /package\.json$/i.test(p.replace(/\\/g, '/'))),
+  );
   const isStatic = intent.kind === 'static-web'
-    || (!bootstrap?.devServerUrl && result.files && !Object.keys(result.files).some(p => /package\.json$/i.test(p)));
+    || (!hasPackageJson && intent.kind !== 'vite-react' && intent.kind !== 'python');
+  const livePreview = Boolean(bootstrap?.previewLive && bootstrap?.devServerUrl);
+
+  let statusLine: string;
+  if (bootstrap?.npmInstalled === false) {
+    statusLine = [
+      '**Not Ready yet.** **npm install failed.**',
+      bootstrap.bootstrapNote || 'Dependencies need a one-time install before Preview can run.',
+      '',
+      'Say **install npm dependencies** to retry (or install Node.js LTS, then retry).',
+    ].join('\n');
+  } else if (intent.kind === 'python') {
+    statusLine = '**Ready**. edit `app/main.py` and say what to build next.';
+  } else if (isStatic) {
+    statusLine = '**Ready**. use **Preview** under the chat box to open the site, or **Code** to edit files. Tell me what to add.';
+  } else if (livePreview) {
+    statusLine = `**Ready**. Live Preview is up at **${bootstrap!.devServerUrl}**. Click **Preview** under the chat box to open it.\n\nTell me what to build next (layout, pages, features) and I will edit the files here.`;
+  } else if (hasPackageJson || projectUsesNpm(intent.kind)) {
+    // Vite / npm projects must not claim Ready without a responding localhost.
+    statusLine = `**Not Ready yet.** Files are on disk, but live Preview did not start.${
+      bootstrap?.bootstrapNote ? `\n\n${bootstrap.bootstrapNote}` : ''
+    }\n\nSay **run Preview** after Node/npm is working, or **keep building** if the UI still needs work.`;
+  } else {
+    statusLine = '**Ready**. use **Preview** under the chat box, or **Code** to edit files.';
+  }
 
   const lines = [
     `**Created ${displayName}**`,
@@ -331,16 +424,10 @@ export function formatCreateProjectReply(
     ...result.written.slice(0, 12).map(p => `- \`${p}\``),
     result.written.length > 12 ? `- …and ${result.written.length - 12} more` : '',
     '',
-    bootstrap?.npmInstalled === false
-      ? `**Setup:** ${bootstrap.bootstrapNote || 'Dependencies need a one-time install.'}`
-      : intent.kind === 'python'
-        ? '**Ready**. edit `app/main.py` and say what to build next.'
-        : isStatic || intent.kind === 'static-web'
-          ? '**Ready**. use **Preview** under the chat box to open the site, or **Code** to edit files. Tell me what to add.'
-          : bootstrap?.devServerUrl
-            ? `**Ready**. dependencies installed. Dev server is at **${bootstrap.devServerUrl}**. Click **Preview** under the chat box to open it (same window as localhost).\n\nTell me what to build (layout, pages, features) and I will edit the files here.`
-            : '**Ready**. dependencies installed. Click **Preview** under the chat box when you want to open the live window.',
-    bootstrap?.bootstrapNote && bootstrap.npmInstalled ? `\n${bootstrap.bootstrapNote}` : '',
+    statusLine,
+    bootstrap?.bootstrapNote && bootstrap.npmInstalled && livePreview
+      ? `\n${bootstrap.bootstrapNote}`
+      : '',
     '',
     'This chat is bound to that folder.',
     result.grantHint || '',
@@ -348,3 +435,4 @@ export function formatCreateProjectReply(
 
   return lines.join('\n');
 }
+

@@ -4,7 +4,6 @@ import { useRouter } from '@/context/RouterContext';
 import { useAuth } from '@/context/AuthContext';
 import { titleForRoute } from '@/lib/routeTitle';
 import { needsFirstRunSetup } from '@/lib/setup';
-import { getLocalPrefs } from '@/lib/localPrefs';
 
 /** Overlay window chrome. does not push layout down (even sidebar padding). */
 export function TitleBar() {
@@ -18,8 +17,6 @@ export function TitleBar() {
     : (needsFirstRunSetup() || !profile?.onboarding_completed)
       ? 'Setup'
       : titleForRoute(route);
-
-  const [channel, setChannel] = useState(() => getLocalPrefs().updateChannel);
 
   useEffect(() => {
     if (!desktop?.windowControls) {
@@ -35,12 +32,6 @@ export function TitleBar() {
       unsub?.();
     };
   }, [desktop]);
-
-  useEffect(() => {
-    const onPrefs = () => setChannel(getLocalPrefs().updateChannel);
-    window.addEventListener('ark:prefs-changed', onPrefs);
-    return () => window.removeEventListener('ark:prefs-changed', onPrefs);
-  }, []);
 
   useEffect(() => {
     document.title = (!context || context === 'NOVA') ? 'NOVA' : `NOVA · ${context}`;

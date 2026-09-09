@@ -198,6 +198,13 @@ export function hasStoredLocalPrefs(): boolean {
   }
 }
 
+const GRANT_PREF_KEYS = [
+  'allowDesktopFolderAccess',
+  'allowDocumentsFolderAccess',
+  'allowFullPcAccess',
+  'agentExecutionMode',
+] as const;
+
 export function setLocalPrefs(patch: Partial<LocalPrefs>): LocalPrefs {
   const next = { ...getLocalPrefs(), ...patch } as LocalPrefs;
   for (const [key, value] of Object.entries(patch)) {
@@ -206,7 +213,23 @@ export function setLocalPrefs(patch: Partial<LocalPrefs>): LocalPrefs {
     }
   }
   try {
-    localStorage.setItem(PREFS_KEY, JSON.stringify(next));
+    // Do not invent grant keys from DEFAULT_PREFS — writing false would wipe Electron grants
+    // on the next sync. Only persist grants when already stored or explicitly patched.
+    let existing: Record<string, unknown> = {};
+    try {
+      const raw = localStorage.getItem(PREFS_KEY)
+        || localStorage.getItem(PREFS_KEY_LEGACY_NOVA);
+      if (raw) existing = JSON.parse(raw) as Record<string, unknown>;
+    } catch {
+      existing = {};
+    }
+    const toStore = { ...next } as Record<string, unknown>;
+    for (const key of GRANT_PREF_KEYS) {
+      if (!(key in patch) && !(key in existing)) {
+        delete toStore[key];
+      }
+    }
+    localStorage.setItem(PREFS_KEY, JSON.stringify(toStore));
     // Only drop the legacy key when it is a different string (rebrand migrate).
     if (PREFS_KEY_LEGACY_NOVA !== PREFS_KEY) {
       localStorage.removeItem(PREFS_KEY_LEGACY_NOVA);
@@ -253,12 +276,18 @@ async function persistProviderKeys(map: ProviderKeyMap) {
     }
     try {
       localStorage.removeItem(API_KEYS_KEY);
+      localStorage.removeItem(API_KEYS_KEY_LEGACY_NOVA);
     } catch {
       /* ignore */
     }
     return;
   }
   writeLegacyLocalKeys(map);
+  try {
+    localStorage.removeItem(API_KEYS_KEY_LEGACY_NOVA);
+  } catch {
+    /* ignore */
+  }
 }
 
 /** Load keys from OS-encrypted vault (or migrate legacy localStorage). Call once at app start. */
@@ -384,7 +413,7 @@ export const ARK_CHANGELOG = [
       'Fix: game creates no longer ship CSS mocks or empty shells as Ready',
       'Stricter playable-game gate (canvas loop, WASD, pointer-lock, real shooting)',
       'FPS scrap/rebuild installs a real raycast arena and force-writes it to disk',
-      '“lets start building” / “build it” greenfield go + FPS Arena naming fixes',
+      '“lets start building” / “build it” greenfield go + playable FPS scaffold naming fixes',
     ],
   },
   {

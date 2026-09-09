@@ -164,7 +164,9 @@ export function inferGreenfieldName(text: string): string | null {
     if (/\b(?:build|create|make)\s+(?:a\s+)?(?:booking|appointment)\b/i.test(t)) return 'Booking App';
     if (/\b(?:build|create|make)\s+(?:a\s+)?website\b/i.test(t)) return 'My Website';
     if (/\b(?:build|create|make)\s+(?:a\s+)?web\s*app\b/i.test(t)) return 'My Web App';
-    if (/\bfps\b/i.test(t) || /\bfirst[\s-]?person\s+shooter\b/i.test(t)) return 'FPS Arena';
+    if (/\bfps\b/i.test(t) || /\bfirst[\s-]?person\s+shooter\b/i.test(t)) {
+      return extractGreenfieldName(t) || 'FPS Arena';
+    }
     if (/\b(?:build|create|make)\s+(?:a\s+)?(?:browser\s+)?game\b/i.test(t)) return 'Arcade Game';
   }
 
@@ -175,6 +177,8 @@ export function extractGreenfieldName(text: string): string | null {
   const t = String(text || '').trim();
   const patterns = [
     /\b(?:called|named|name(?:d)?\s+it|call\s+it)\s+["“']([^"”']{2,48})["”']/i,
+    // Multi-word product titles first ("Ring System") — single-token patterns used to stop at Ring.
+    /\b(?:called|named|name(?:d)?\s+it|call\s+it)\s+([A-Z][A-Za-z0-9]*(?:\s+[A-Z][A-Za-z0-9]*){1,3})\b/,
     /\bname\s+it\s+([A-Za-z][A-Za-z0-9_-]{2,40})\b/i,
     /\b(?:called|named|name(?:d)?\s+it|call\s+it)\s+([A-Za-z][A-Za-z0-9_-]{2,40})\b/i,
     /\bname\s+it\s+something\s+like\s+([A-Za-z][A-Za-z0-9_-]{2,40})/i,
@@ -191,7 +195,9 @@ export function extractGreenfieldName(text: string): string | null {
     /\b(?:build|create|scaffold)\s+([A-Z][A-Za-z0-9]{1,40})\s+on\s+disk\b/,
     /\b(?:build|create|scaffold)\s+([A-Z][A-Za-z0-9]{1,40})\b(?=[\s\S]{0,80}\bon\s+disk\b)/,
     /\bi\s+want\s+to\s+(?:work\s+on|build|create|make)\s+(?:a\s+)?(?:project\s+)?(?:called\s+)([A-Za-z][A-Za-z0-9 _-]{2,40})/i,
-    /\b(?:build|create|make)\s+([A-Za-z][A-Za-z0-9 _-]{2,40})\s+(?:app|system|platform|product)\b/i,
+    // "build Ring System" — keep Title Case multi-word names; do not treat System as a type noun.
+    /\b(?:build|create|make)\s+([A-Z][A-Za-z0-9]*(?:\s+[A-Z][A-Za-z0-9]+)+)\b/,
+    /\b(?:build|create|make)\s+([A-Za-z][A-Za-z0-9 _-]{2,40})\s+(?:app|platform|product)\b/i,
     /\bbuild\s+([A-Z][A-Za-z0-9]{2,40})\s+(?:website|site|web\s*app)\b/,
   ];
   for (const re of patterns) {
@@ -310,11 +316,11 @@ function mvpPlan(summary: string, kind: ProjectKind, name: string): MvpPlan {
   if (/\b(restaurant|dining|cafe)\b/i.test(t) || (/\bmenu\b/i.test(t) && /\b(hero|booking|reserve|unsplash)\b/i.test(t))) {
     return {
       steps: [
-        '1. **Hero**. full-bleed restaurant photo, brand name, Reserve / View menu CTAs',
-        '2. **Menu**. dish cards with real Unsplash images, names, and short descriptions',
+        '1. **Hero**. full-bleed unique photo for THIS brand (generated, not a reused stock cafe), name, Reserve / View menu CTAs',
+        '2. **Menu**. dish cards with fresh brand-specific images, names, and short descriptions',
         '3. **Booking CTA**. hours / reserve strip so the page feels finished',
       ],
-      stackNote: 'Landing page with your Unsplash images baked in. open **Preview** under chat when ready.',
+      stackNote: 'Landing page with unique generative imagery (download an image model in Models if you want on-device heroes). open **Preview** under chat when ready.',
     };
   }
 
@@ -322,10 +328,10 @@ function mvpPlan(summary: string, kind: ProjectKind, name: string): MvpPlan {
     return {
       steps: [
         '1. **Black canvas + logo**. FrameLab-style header and Work / About / Contact nav',
-        '2. **Photo gallery**. responsive grid with your Unsplash images loading for real',
+        '2. **Photo gallery**. responsive grid with unique generative images for this brand',
         '3. **About blurb**. short story under the gallery, then polish spacing and mobile',
       ],
-      stackNote: 'Static HTML/CSS/JS site. open index.html or localhost preview; images are real URLs.',
+      stackNote: 'Static HTML/CSS/JS site. open index.html or localhost preview; images are unique per project.',
     };
   }
 
@@ -947,7 +953,7 @@ export function buildPlanExpansionSection(
       lines.push(
         '- Hero with restaurant photo + Reserve / View menu buttons',
         '- Menu grid: each dish = photo + name + short description + price',
-        hasImages ? '- Wire your Unsplash URLs into dish cards (no placeholders)' : '- Add real dish photos next',
+        hasImages ? '- Wire unique brand image URLs into dish cards (no stock Unsplash reuse, no placeholders)' : '- Add unique dish photos next (generate fresh — do not reuse a shared cafe stock photo)',
         '- Fake Book / Order buttons (non-functional is fine for v1)',
       );
     } else {

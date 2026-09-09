@@ -164,13 +164,12 @@ const LOCAL_CATEGORIES: { id: LocalModel['category']; title: string; icon: typeo
 
 const CLOUD_PROVIDERS: CloudProvider[] = [
   { id: 'ollama', name: 'Ollama', description: 'Optional plug-in. Connect any Ollama models the same way you connect other sources. NOVA never requires it.', tiers: ['free'], tone: 'from-zinc-400 to-zinc-700', initial: 'Ol', health: 'available', availability: 'live' },
-  { id: 'pollinations', name: 'Pollinations', description: 'Free images via Flux / GPT Image (NOVA Image Core). Avoids Sana default.', tiers: ['free'], tone: 'from-pink-500 to-rose-700', initial: 'Po', health: 'available', availability: 'live' },
   { id: 'openrouter', name: 'OpenRouter', description: 'Free + paid routes used by NOVA Router.', tiers: ['free', 'pro'], tone: 'from-violet-500 to-purple-800', initial: 'OR', health: 'available', availability: 'live' },
   { id: 'google', name: 'Google AI Studio', description: 'Gemini free tier. Wired into NOVA Router.', tiers: ['free', 'pro'], tone: 'from-blue-500 to-sky-700', initial: 'G', health: 'available', availability: 'live' },
   { id: 'groq', name: 'Groq', description: 'Fast Llama free tier. Wired into NOVA Router.', tiers: ['free', 'pro'], tone: 'from-orange-500 to-red-700', initial: 'Gq', health: 'available', availability: 'live' },
-  { id: 'openai', name: 'OpenAI', description: 'GPT models for chat, code, and DALL·E.', tiers: ['pro'], tone: 'from-emerald-400 to-green-800', initial: 'OA', health: 'available', availability: 'live' },
+  { id: 'openai', name: 'OpenAI', description: 'GPT models for chat and code.', tiers: ['pro'], tone: 'from-emerald-400 to-green-800', initial: 'OA', health: 'available', availability: 'live' },
   { id: 'anthropic', name: 'Anthropic', description: 'Claude models for long context work.', tiers: ['pro'], tone: 'from-amber-500 to-orange-800', initial: 'An', health: 'available', availability: 'live' },
-  { id: 'huggingface', name: 'Hugging Face', description: 'Chat + FLUX images via Inference. Wired into NOVA Router.', tiers: ['free', 'pro'], tone: 'from-yellow-500 to-amber-700', initial: 'HF', health: 'available', availability: 'live' },
+  { id: 'huggingface', name: 'Hugging Face', description: 'Chat via Inference API. Wired into NOVA Router.', tiers: ['free', 'pro'], tone: 'from-yellow-500 to-amber-700', initial: 'HF', health: 'available', availability: 'live' },
   { id: 'nvidia', name: 'NVIDIA NIM', description: 'NVIDIA hosted inference. free-key hop in NOVA Router.', tiers: ['free', 'pro'], tone: 'from-lime-500 to-green-800', initial: 'NV', health: 'available', availability: 'live' },
   { id: 'together', name: 'Together AI', description: 'Open model hosting. Wired into NOVA Router.', tiers: ['free', 'pro'], tone: 'from-indigo-500 to-blue-800', initial: 'To', health: 'available', availability: 'live' },
   { id: 'fireworks', name: 'Fireworks AI', description: 'Fast serverless inference. Wired into NOVA Router.', tiers: ['free', 'pro'], tone: 'from-rose-500 to-orange-700', initial: 'Fw', health: 'available', availability: 'live' },
@@ -259,8 +258,6 @@ const CLOUD_MODEL_CATEGORIES: { id: CloudModel['category']; title: string; icon:
   { id: 'reasoning', title: 'Reasoning', icon: Brain },
   { id: 'fast', title: 'Fast', icon: Zap },
   { id: 'vision', title: 'Vision', icon: Eye },
-  { id: 'image', title: 'Image', icon: ImageIcon },
-  { id: 'video', title: 'Video', icon: Video },
 ];
 
 /** Providers NOVA Router / media can actually call today. */
@@ -815,6 +812,7 @@ export function ModelsView() {
       ...cat,
       models: sortModelsByCategoryThenSizeDesc(
         LOCAL_MODELS.filter(m => {
+          if (m.category === 'image' || m.category === 'video') return false;
           if (m.category !== cat.id) return false;
           // Default list: only real Engine downloads. Search surfaces discovery-only.
           if (!q && !isEngineDownloadable(m.id)) return false;
@@ -831,7 +829,9 @@ export function ModelsView() {
   }, [q]);
 
   const installedModels = useMemo(
-    () => sortModelsByCategoryThenSizeDesc(LOCAL_MODELS.filter(m => installed.has(m.id))),
+    () => sortModelsByCategoryThenSizeDesc(
+      LOCAL_MODELS.filter(m => installed.has(m.id) && m.category !== 'image' && m.category !== 'video'),
+    ),
     [installed],
   );
 
@@ -873,6 +873,7 @@ export function ModelsView() {
 
   const comingSoonCloudModels = useMemo(() => {
     return CLOUD_MODELS.filter(m => {
+      if (m.category === 'image' || m.category === 'video') return false;
       if (cloudModelAvailability(m) !== 'coming_soon') return false;
       if (!q) return true;
       return (

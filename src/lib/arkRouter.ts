@@ -117,7 +117,7 @@ function modeAllowsCloud(mode: AiModePref) {
 }
 
 function shouldAskBeforeCloud(prefs: ReturnType<typeof getLocalPrefs>) {
-  return Boolean(prefs.askBeforeCloudFailover && !prefs.autoFailover);
+  return Boolean(prefs.askBeforeCloudFailover);
 }
 
 function askCloudRetryReply(attempted: string[]): ArkRouterResult {
@@ -202,6 +202,7 @@ async function tryLocalChat(
         && prevAsst
         && looksLikeRestatedPriorAnswer(cleaned || rawText, prevAsst)
       ) {
+        const firstDraft = String(cleaned || rawText || '').trim();
         onAttemptReset?.();
         const deepenPrompt = [
           packHistoryPrompt(history, message),
@@ -211,10 +212,16 @@ async function tryLocalChat(
         const retry = onChunk
           ? await brainGenerateStream(deepenPrompt, id, onChunk, kind)
           : await brainGenerate(deepenPrompt, id, kind);
-        cleaned = usableAssistantText(retry.reply, message, prevAsst);
-        rawText = String(retry.reply || '').trim();
-        if (cleaned || rawText) {
+        const retryClean = usableAssistantText(retry.reply, message, prevAsst);
+        const retryRaw = String(retry.reply || '').trim();
+        // Never replace a solid first draft with an empty/shorter retry.
+        if ((retryClean || retryRaw) && String(retryClean || retryRaw).trim().length >= firstDraft.length) {
+          cleaned = retryClean || retryRaw;
+          rawText = retryRaw;
           Object.assign(result, retry);
+        } else if (firstDraft) {
+          cleaned = firstDraft;
+          rawText = firstDraft;
         }
       }
       // Local models often restate “I want to build…” — strip first; only regenerate if still echo-only.
@@ -494,7 +501,12 @@ async function tryOllama(
     const prevAsst = [...history].reverse().find(t => t.role === 'assistant')?.content;
     const packed = packHistoryPrompt(history, message);
     const reply = await ollamaChat(model, history, packed);
-    const cleaned = sanitizeAssistantReply(reply, message, prevAsst);
+    // Keep raw coding dumps for disk apply — sanitize strips @@@FILE / fences.
+    const looksCoding = /@@@FILE|SEARCH:|<<<<<<<\s*SEARCH|export\s+default\s+function/i.test(reply)
+      || /\b(?:App\.jsx|index\.html|create\s+(?:a\s+)?(?:project|app))\b/i.test(message);
+    const cleaned = looksCoding
+      ? String(reply || '').trim()
+      : sanitizeAssistantReply(reply, message, prevAsst);
     return {
       reply: cleaned || reply,
       modelName: model,
@@ -739,6 +751,7 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
       return withContinued({
         reply: free.reply,
         modelName: `${free.provider} · ${free.model}`,
+        modelId: free.model,
         source: hitSource(free.provider),
         tier: 'free-key',
         attempted,
@@ -749,6 +762,7 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
       return withContinued({
         reply: paid.reply,
         modelName: `${paid.provider} · ${paid.model}`,
+        modelId: paid.model,
         source: hitSource(paid.provider),
         tier: 'paid',
         attempted,
@@ -793,6 +807,7 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
         return withContinued({
           reply: freeCloud.reply,
           modelName: `${freeCloud.provider} · ${freeCloud.model}`,
+          modelId: freeCloud.model,
           source: hitSource(freeCloud.provider),
           tier: 'free-key',
           attempted,
@@ -803,6 +818,7 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
         return withContinued({
           reply: paidCloud.reply,
           modelName: `${paidCloud.provider} · ${paidCloud.model}`,
+          modelId: paidCloud.model,
           source: hitSource(paidCloud.provider),
           tier: 'paid',
           attempted,
@@ -865,6 +881,7 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
         return withContinued({
           reply: free.reply,
           modelName: `${free.provider} · ${free.model}`,
+          modelId: free.model,
           source: hitSource(free.provider),
           tier: 'free-key',
           attempted,
@@ -894,6 +911,7 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
           return withContinued({
             reply: free.reply,
             modelName: `${free.provider} · ${free.model}`,
+            modelId: free.model,
             source: hitSource(free.provider),
             tier: 'free-key',
             attempted,
@@ -905,6 +923,7 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
         return withContinued({
           reply: paid.reply,
           modelName: `${paid.provider} · ${paid.model}`,
+          modelId: paid.model,
           source: hitSource(paid.provider),
           tier: 'paid',
           attempted,
@@ -965,6 +984,7 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
       return withContinued({
         reply: free.reply,
         modelName: `${free.provider} · ${free.model}`,
+        modelId: free.model,
         source: hitSource(free.provider),
         tier: 'free-key',
         attempted,
@@ -975,6 +995,7 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
       return withContinued({
         reply: paid.reply,
         modelName: `${paid.provider} · ${paid.model}`,
+        modelId: paid.model,
         source: hitSource(paid.provider),
         tier: 'paid',
         attempted,
@@ -1358,8 +1379,16 @@ async function routeVideo(opts: ArkRouteOpts): Promise<ArkRouterResult> {
  */
 export async function arkRoute(opts: ArkRouteOpts): Promise<ArkRouterResult> {
   const kind = opts.kind === 'coding' ? 'chat' : opts.kind;
-  if (kind === 'image') return routeImage(opts);
-  if (kind === 'video') return routeVideo(opts);
+  // Image / Video product surfaces are removed — refuse at the router entry.
+  if (kind === 'image' || kind === 'video') {
+    return {
+      reply: 'Image and Video generation are not available in NOVA right now. Use Chat for text, code, and projects.',
+      source: 'none',
+      modelName: 'NOVA',
+      tier: 'local-free',
+      attempted: [],
+    };
+  }
   return routeChat(opts);
 }
 

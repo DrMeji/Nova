@@ -69,17 +69,37 @@ async function writeViaDiskRoot(
 async function hydrateFilesFromDiskRoot(diskRoot: string): Promise<ProjectFileMap> {
   if (!window.arkDesktop?.readTextFile) return {};
   const rels = [
-    'src/App.jsx', 'src/App.tsx', 'src/App.css', 'src/index.css',
+    'src/App.jsx', 'src/App.tsx', 'src/App.css', 'src/index.css', 'src/main.jsx', 'src/main.tsx',
     'index.html', 'css/styles.css', 'js/app.js', 'package.json',
+    'vite.config.js', 'vite.config.ts', 'src/components',
   ];
   const out: ProjectFileMap = {};
   for (const rel of rels) {
+    if (rel === 'src/components') continue;
     try {
       const read = await window.arkDesktop.readTextFile({ path: joinDisk(diskRoot, rel) });
       if (read?.ok && typeof read.text === 'string') out[rel] = read.text;
     } catch {
       /* missing */
     }
+  }
+  // Pull one level of components so Ready/edit see more than App.jsx.
+  try {
+    const listing = await window.arkDesktop.listDir?.(joinDisk(diskRoot, 'src/components'));
+    const entries = Array.isArray((listing as { items?: unknown[] })?.items)
+      ? (listing as { items: { name?: string }[] }).items
+      : Array.isArray((listing as { entries?: unknown[] })?.entries)
+        ? (listing as { entries: { name?: string }[] }).entries
+        : [];
+    for (const ent of entries.slice(0, 40)) {
+      const name = String(ent?.name || '');
+      if (!/\.(jsx?|tsx?|css)$/i.test(name)) continue;
+      const rel = `src/components/${name}`;
+      const read = await window.arkDesktop.readTextFile?.({ path: joinDisk(diskRoot, rel) });
+      if (read?.ok && typeof read.text === 'string') out[rel] = read.text;
+    }
+  } catch {
+    /* optional */
   }
   return out;
 }
@@ -122,11 +142,8 @@ export async function applyChatReplyEdits(opts: {
   if (opts.diskRoot) {
     const fromDisk = await hydrateFilesFromDiskRoot(opts.diskRoot);
     if (Object.keys(fromDisk).length) {
+      // Prefer in-memory base (wipe/scaffold/edits) over longer stale disk bytes.
       const merged: ProjectFileMap = { ...fromDisk, ...baseFiles };
-      for (const [rel, text] of Object.entries(fromDisk)) {
-        const cur = merged[rel];
-        if (!cur || String(text).length > String(cur).length) merged[rel] = text;
-      }
       baseFiles = normalizeStudioFileKeys(merged, opts.diskRoot);
     }
   }
@@ -137,6 +154,7 @@ export async function applyChatReplyEdits(opts: {
   const patches = parseAgentPatches(replyForParse);
   if (patches.length) {
     const patched = applyAgentPatches(baseFiles, patches);
+    const failed = patched.results.filter((r) => !r.ok);
     if (patched.updated.length) {
       const fromPatches = patched.updated.map((p) => ({ path: p, content: patched.files[p]! }));
       // Prefer patches when they applied; keep any @@@FILE creates that patches did not cover.
@@ -145,6 +163,15 @@ export async function applyChatReplyEdits(opts: {
         ...fromPatches,
         ...edits.filter((e) => !patchedPaths.has(e.path)),
       ];
+    } else if (failed.length && !edits.length) {
+      return {
+        ok: false,
+        updated: [],
+        deleted: [],
+        files: baseFiles,
+        reply: failed[0]?.error || 'Patch could not be applied',
+        error: failed[0]?.error || 'patch_failed',
+      };
     }
   }
   if (!edits.length) {
@@ -187,6 +214,15 @@ export async function applyChatReplyEdits(opts: {
   }
 
   const next = { ...applied.files };
+  let twinRemoved: string[] = [];
+  // #6 — never leave App.jsx + App.tsx fighting after an edit apply.
+  {
+    const { cleanupAppTwins } = await import('@/lib/createBuildQuality');
+    const twin = cleanupAppTwins(next);
+    twinRemoved = twin.removed;
+    for (const key of Object.keys(next)) delete next[key];
+    Object.assign(next, twin.files);
+  }
   // Hard reject accidental NOVA search-chrome stubs on Vite App.jsx (piece builds / black shell).
   {
     const searchWanted = /\bsearch\s*bar\b/i.test(rawUser)
@@ -215,14 +251,27 @@ export async function applyChatReplyEdits(opts: {
       }
     }
   }
-  const payloadFiles = Object.fromEntries(changed.map((p: string) => [p, next[p]]));
+  const payloadFiles = Object.fromEntries(
+    changed.filter((p: string) => typeof next[p] === 'string').map((p: string) => [p, next[p]]),
+  );
 
   let wroteOk = false;
   let writeError: string | undefined;
+  let autoSaveNote = '';
+
+  let autoSave = true;
+  try {
+    const { getLocalPrefs } = await import('@/lib/localPrefs');
+    autoSave = getLocalPrefs().autoSaveProjects !== false;
+  } catch { /* default on */ }
 
   // Prefer the live disk folder when bound. projectId sandbox alone can "succeed"
   // while Desktop\Projects\… never changes (Localhost then looks unchanged).
-  if (opts.diskRoot) {
+  if (!autoSave) {
+    // Memory-only: chat still shows the edit; disk stays until Auto-save is on or user rebuilds.
+    wroteOk = true;
+    autoSaveNote = '\n\n_(Auto-save is off in Settings → Projects — changes stayed in this chat.)_';
+  } else if (opts.diskRoot) {
     const disk = await writeViaDiskRoot(opts.diskRoot, payloadFiles);
     if (!disk.ok) {
       return {
@@ -263,22 +312,58 @@ export async function applyChatReplyEdits(opts: {
     };
   }
 
+  // Guarantee disk bytes for every claimed update (apply can report ok with a thinned map).
+  if (autoSave && opts.diskRoot && changed.length && window.arkDesktop?.workspaceWriteFile) {
+    for (const rel of changed) {
+      const body = next[rel];
+      if (typeof body !== 'string') continue;
+      try {
+        await window.arkDesktop.workspaceWriteFile({
+          targetPath: joinDisk(opts.diskRoot, rel),
+          content: body,
+        });
+      } catch {
+        /* best-effort; primary writeViaDiskRoot already ran */
+      }
+    }
+  }
+
+  // #6 — remove losing App twin from disk so Vite can't keep resolving the empty shell.
+  const deleted: string[] = [];
+  if (autoSave && twinRemoved.length) {
+    const { deleteFileOnDisk } = await import('@/lib/chatDiskOps');
+    for (const rel of twinRemoved) {
+      try {
+        const del = await deleteFileOnDisk({
+          filePath: opts.diskRoot ? joinDisk(opts.diskRoot, rel) : rel,
+          projectId: opts.projectId,
+          relPath: rel,
+        });
+        if (del.ok) deleted.push(rel);
+      } catch {
+        /* best-effort */
+      }
+    }
+  }
+
   const spoken = formatCodeChatReply(
     rawUser,
     changed,
     stripFileBlocks(opts.reply),
     { surface: 'chat' },
   );
-  const verify = await verifyProjectAfterPatch({
-    diskRoot: opts.diskRoot,
-    files: next,
-    changedPaths: changed,
-  });
-  const reply = verify.summary ? `${spoken}${verify.summary}` : spoken;
+  const verify = autoSave
+    ? await verifyProjectAfterPatch({
+      diskRoot: opts.diskRoot,
+      files: next,
+      changedPaths: changed,
+    })
+    : { summary: '' as string };
+  const reply = `${verify.summary ? `${spoken}${verify.summary}` : spoken}${autoSaveNote}`;
   return {
     ok: true,
     updated: changed,
-    deleted: [],
+    deleted,
     files: next,
     reply,
   };

@@ -14,13 +14,7 @@ import { GuestSocialBanner } from '@/components/GuestSocialBanner';
 import { ConnectShell } from '@/components/ConnectShell';
 import { buildDemoContacts, buildDemoThread } from '@/lib/socialDemo';
 import { threadPreview } from '@/lib/arkSocial';
-
-function initials(name: string) {
-  const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
-  if (!parts.length) return '?';
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return `${parts[0][0] || ''}${parts[1][0] || ''}`.toUpperCase();
-}
+import { ArkAvatar } from '@/components/ArkAvatar';
 
 export function CallView() {
   const { profile } = useAuth();
@@ -122,9 +116,7 @@ export function CallView() {
                   railCompact ? 'justify-center py-2' : 'px-2.5 py-3'
                 } ${activePeer === c.arkId ? 'bg-surface-hover' : 'hover:bg-surface-hover/60'}`}
               >
-                <span className="h-9 w-9 shrink-0 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-[11px] font-semibold text-content-primary">
-                  {initials(c.displayName)}
-                </span>
+                <ArkAvatar name={c.displayName} size="md" />
                 {!railCompact && (
                   <span className="min-w-0 flex-1">
                     <span className="block text-sm text-content-primary truncate">{c.displayName}</span>
@@ -144,10 +136,10 @@ export function CallView() {
           </p>
         ) : (
           <>
-            <div className={`w-20 h-20 rounded-2xl border flex items-center justify-center text-2xl font-semibold text-content-primary mb-4 ${
+            <div className={`w-20 h-20 rounded-2xl border flex items-center justify-center mb-4 ${
               phase === 'live' ? 'border-rose-400/40 bg-rose-500/10' : phase === 'outgoing' ? 'border-amber-400/40 bg-amber-500/10 animate-pulse' : 'bg-surface-hover border-surface-border'
             }`}>
-              {initials(person?.displayName || activePeer)}
+              <ArkAvatar name={person?.displayName || activePeer || 'NOVA'} size="lg" className="!h-14 !w-14 !border-0 !bg-transparent" />
             </div>
             <p className="text-lg font-medium text-content-primary">{person?.displayName || formatArkId(activePeer)}</p>
             <p className="text-xs font-mono tracking-wider text-content-tertiary mt-1">{formatArkId(activePeer)}</p>

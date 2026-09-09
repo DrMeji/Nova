@@ -12,7 +12,7 @@ import { looksLikeInPlaceRebuildAsk, looksLikeProductCorrectionAsk } from '@/lib
 export const NO_WORKSPACE_MSG =
   'No workspace yet. Use **+ → Open folder** or name a folder on your Desktop (turn on access in **Settings → Security**).\n\nIf you want to talk through an app idea first, just keep chatting. say **lets build this** only when you want files on disk.';
 
-/** Bare “keep building” / continue — recommend next polish, don’t rebuild the whole app. */
+/** Bare “keep building” / continue — polish the open project on disk (not chat-only planning). */
 export function looksLikeKeepBuildingAsk(text: string): boolean {
   const t = String(text || '').replace(/^\[(?:Plan|Ask|Debug|Tasks)\]\s*/i, '').trim();
   if (!t || t.length > 120) return false;
@@ -28,15 +28,15 @@ export function looksLikeKeepBuildingAsk(text: string): boolean {
 
 export type ComposerAgentMode = 'ask' | 'plan' | 'agent' | 'debug' | 'multitask' | null;
 
+/** Bound only when we have a disk folder or real file map — bare projectId is not enough. */
 export function hasActiveWorkspace(opts: {
   files: Record<string, string>;
   projectId: string | null;
   diskRoot: string | null;
 }): boolean {
   return Boolean(
-    opts.projectId
-    || opts.diskRoot
-    || Object.keys(opts.files).length > 0,
+    opts.diskRoot
+    || Object.keys(opts.files || {}).length > 0,
   );
 }
 
@@ -93,8 +93,9 @@ export function modeBlocksExec(mode: 'ask' | 'plan' | 'agent'): boolean {
 export function looksLikeCodeEditAsk(text: string): boolean {
   const t = String(text || '').trim();
   if (!t) return false;
-  // Bare continue signals — recommend next steps; do not treat as a full disk rebuild.
-  if (looksLikeKeepBuildingAsk(t)) return false;
+  // Keep building is a disk polish ask when a folder is bound (handled by callers with workspace).
+  // Still treat the bare phrase as an edit intent so Ready retries actually write files.
+  if (looksLikeKeepBuildingAsk(t)) return true;
   // Planning / MVP sequencing. not a disk edit.
   if (wantsPlanningOnly(t)) return false;
   if (/\b(?:mvp\s+order|what\s+should\s+i\s+build|build\s+first|sequence\s+the\s+work|week\s+one)\b/i.test(t)) return false;

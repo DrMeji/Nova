@@ -11,6 +11,8 @@ const SELF_HARM_PATTERNS: RegExp[] = [
   /\b(?:read|open|list|scan|search|grep|cat)\b[\s\S]{0,24}\b(?:your|NOVA'?s?|own)\b[\s\S]{0,24}\b(?:source|codebase|electron|app\.asar|main\.cjs|preload)\b/i,
   /\bapp\.asar\b/i,
   /\bDrMeji\/Ark-Source\b/i,
+  /\bDrMeji\/(?:Nova-Source|NOVA-Source|Ark-Source)\b/i,
+  /\b(?:git\s+clone|clone)\b[\s\S]{0,64}\b(?:DrMeji\/(?:Nova-Source|NOVA-Source|Ark(?:-Source)?)|NOVA-Source|NOVA-source)\b/i,
   /\b(?:git\s+clone|clone\s+(?:the\s+)?(?:repo|repository|source))\b[\s\S]{0,48}\b(?:DrMeji\/Ark|NOVA-Source|NOVA-source)\b/i,
   /\b(?:how\s+are\s+you\s+built|how\s+was\s+NOVA\s+built|what\s+is\s+inside\s+NOVA)\b/i,
 ];

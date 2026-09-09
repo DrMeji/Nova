@@ -37,6 +37,9 @@ export function isBlankProjectScaffold(files: Record<string, string> | null | un
 export function isBrokenReactAppSource(appSource: string | undefined | null): boolean {
   if (isEmptyReactAppShell(appSource)) return true;
   const s = String(appSource || '');
+  if (/\bcreateRoot\s*\(/.test(s) && /\bimport\s+App\b/.test(s)) return true;
+  if (/\bReactDOM\.(?:createRoot|render)\s*\(/.test(s) && /\bimport\s+App\b/.test(s)) return true;
+  if (/from\s+['"]\.\/App['"]/.test(s) && /\brender\s*\(/.test(s)) return true;
   // Endless SVG path / attribute loops (local-model failure mode).
   // Require path-like content — large real games can sit under 100 unique chars.
   if (
@@ -117,6 +120,11 @@ export function cleanProductTitle(name: string): string {
   }
   s = s.replace(/\s+(?:and|with|that|which|where|when|so|for|but|featuring|including|—|–|-)\b.*$/i, '').trim();
   s = s.replace(/\s+(?:app|application|project|product|platform|website|site)\b.*$/i, '').trim();
+  if (/^(on[\s-]?disk|disk|on|folder|files?|ready|ui)$/i.test(s)) {
+    const called = String(name || '').match(/\b(?:called|named|name\s+it|call\s+it)\s+["“']?([A-Z][A-Za-z0-9][A-Za-z0-9 _-]{0,40})/i);
+    if (called?.[1]) return called[1].trim();
+    return 'New App';
+  }
   if (
     /^(add|make|fix|update|bigger|please|help|create\s+the|scaffold|build\s+me|is|that|this|not|scrap)\b/i.test(s)
     || s.split(/\s+/).length > 4
@@ -154,10 +162,23 @@ export function looksLikeSnakeGame(summary: string, title = ''): boolean {
     || (/\bgrows?\b/.test(t) && /\b(?:food|eat|meals?)\b/.test(t) && /\b(?:game|arcade)\b/.test(t));
 }
 
+/** First-person / raycast shooter — only these get the FPS Arena scaffold. */
+export function looksLikeFpsGame(summary: string, title = ''): boolean {
+  const t = `${stripSkillNoise(summary)} ${title}`.toLowerCase();
+  if (looksLikePacManGame(summary, title) || looksLikeSnakeGame(summary, title) || looksLikeChromeDinoGame(summary, title)) {
+    return false;
+  }
+  return (
+    /\b(?:fps|first[\s-]?person|raycast|hitscan|pointer[\s-]?lock|wasd)\b/.test(t)
+    && /\b(?:shoot(?:er|ing)?|gun|crosshair|arena|enemy|enemies|crates?)\b/.test(t)
+  ) || /\bfps[\s_-]?arena\b/.test(t);
+}
+
 /** Playable canvas / arcade games (shooters, runners, score+lives). Not marketing sites. */
 export function looksLikePlayableCanvasGame(summary: string, title = ''): boolean {
   const t = `${stripSkillNoise(summary)} ${title}`.toLowerCase();
   if (looksLikeChromeDinoGame(summary, title) || looksLikePacManGame(summary, title) || looksLikeSnakeGame(summary, title)) return true;
+  if (looksLikeFpsGame(summary, title)) return true;
   if (/\b(?:buy\s+now|shopping\s+bag|storefront|landing\s+page)\b/.test(t) && !/\b(?:game|playable|arcade|canvas)\b/.test(t)) {
     return false;
   }

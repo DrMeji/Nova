@@ -50,7 +50,7 @@ import {
   Cpu, MemoryStick, HardDrive, Zap, Monitor, MonitorCog,
   Power, Activity, Check, Download, Shield,
   Gauge, Boxes, Wifi, Loader2, FolderOpen, FileBox,
-  Code, Brain, Image as ImageIcon, Globe, Trash2,
+  Code, Brain, Globe, Trash2,
 } from 'lucide-react';
 
 import {
@@ -91,7 +91,6 @@ const LOCAL_CATEGORY_META: Record<CatalogModel['category'], { title: string; ico
   coding: { title: 'Coding', icon: Code },
   reasoning: { title: 'Reasoning', icon: Brain },
   fast: { title: 'Fast', icon: Zap },
-  image: { title: 'Image', icon: ImageIcon },
 };
 
 function LocalDownloadControl({
@@ -245,7 +244,7 @@ export function LocalAI() {
   const availableByCategory = useMemo(() => {
     const installedIds = new Set(installed.map(m => m.id));
     return LOCAL_CATEGORY_ORDER
-      .filter(id => id in LOCAL_CATEGORY_META)
+      .filter(id => id in LOCAL_CATEGORY_META && id !== 'image' && id !== 'video')
       .map(id => {
         const meta = LOCAL_CATEGORY_META[id as CatalogModel['category']];
         return {

@@ -468,7 +468,7 @@ export function routerSystemPrompt(history: RouterChatTurn[]): string {
   if (isSoftContinuityAsk(latest.trim())) {
     return `${BASE_SYSTEM}${todayNote}\n\n${topicLine}\n`
       + 'The user asked to continue / deepen (yes, more, overall, full detail). '
-      + 'Read the previous assistant answer carefully. Then write a LONGER follow-up with NEW facts, numbers, examples, or angles that were NOT already said. '
+      + 'Deepen the previous answer with NEW facts, numbers, examples, or angles that were NOT already said. '
       + 'Do not paraphrase the same temperatures, precip totals, or summary. Do not restart with Hello. '
       + 'Take your time. Prefer thorough, useful detail over a short restatement. '
       + 'For weather: add week-by-week feel, humidity, wind, sunshine vs rain days, packing/clothing, how it compares to adjacent months, and tourist tips. '

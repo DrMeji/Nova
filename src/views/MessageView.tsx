@@ -1,13 +1,11 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import {
-  Download, File, Folder, Image as ImageIcon, Loader2, PanelLeft,
+  Ban, Download, File, Folder, Image as ImageIcon, Loader2, PanelLeft,
   Plus, Send, Trash2, UserMinus, UserPlus, UsersRound,
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useRouter } from '@/context/RouterContext';
 import { useSocial } from '@/context/SocialContext';
-import { useCall } from '@/context/CallContext';
-import { MessageDmCallPill, MessageGroupCallPill } from '@/components/CallRingUI';
 import {
   areMutualFriends,
   isBlockedArkId,
@@ -126,7 +124,6 @@ export function MessageView() {
   const { user, profile } = useAuth();
   const { route, navigate } = useRouter();
   const { contacts, inviteByArkId, refreshContacts, removeFriend, deleteContact, blockFriend, unreadFrom } = useSocial();
-  const { demoSimulateIncoming } = useCall();
   const myArkId = isArkDevEmail(user?.email) ? 'DEV' : (profile?.ark_id || '');
   const peer = route.name === 'message' ? route.peer : undefined;
   const groupId = route.name === 'message' ? route.groupId : undefined;
@@ -797,18 +794,20 @@ export function MessageView() {
       ) : activeGroup ? (
         <>
           <div className="shrink-0 px-5 pt-3 pb-3 flex items-center justify-center">
-            <MessageGroupCallPill
-              groupId={activeGroup.id}
-              groupName={activeGroup.name}
-              memberArkIds={activeGroup.memberArkIds}
-              memberNames={activeGroup.memberArkIds.map(id =>
-                people.find(p => p.arkId === id)?.displayName || id,
-              )}
-              onOpenDetails={() => {
-                setEditGroupName(activeGroup.name);
-                setGroupPanelOpen(true);
-              }}
-            />
+            <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-ark-navy-950/80 pl-3 pr-1.5 py-1 shadow-sm">
+              <button
+                type="button"
+                onClick={() => {
+                  setEditGroupName(activeGroup.name);
+                  setGroupPanelOpen(true);
+                }}
+                className="inline-flex items-center gap-1.5 min-w-0 hover:opacity-90"
+              >
+                <UsersRound className="w-3.5 h-3.5 text-sky-300 shrink-0" />
+                <p className="text-sm font-medium text-content-primary truncate max-w-[10rem]">{activeGroup.name}</p>
+                <span className="text-[10px] text-content-tertiary shrink-0">{activeGroup.memberArkIds.length}</span>
+              </button>
+            </div>
           </div>
           <div className="flex-1 overflow-y-auto px-5 pt-6 pb-4 space-y-2.5">
             {thread.map(m => {
@@ -923,17 +922,15 @@ export function MessageView() {
       ) : (
         <>
           <div className="shrink-0 px-5 pt-3 pb-3 flex items-center justify-center">
-            <MessageDmCallPill
-              displayName={active!.displayName}
-              peerArkId={active!.arkId}
-              onUnadd={unaddActive}
-              onBlock={blockActive}
-              onDemoRing={
-                SOCIAL_DEMO_ENABLED
-                  ? () => demoSimulateIncoming(active!.arkId, active!.displayName)
-                  : undefined
-              }
-            />
+            <div className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-ark-navy-950/80 pl-4 pr-1.5 py-1 shadow-sm">
+              <p className="text-sm font-medium text-content-primary truncate max-w-[11rem]">{active!.displayName}</p>
+              <button type="button" onClick={unaddActive} title="Unadd" aria-label="Unadd" className="h-7 w-7 shrink-0 rounded-full flex items-center justify-center text-content-tertiary hover:text-content-primary hover:bg-white/5">
+                <UserMinus className="w-3.5 h-3.5" />
+              </button>
+              <button type="button" onClick={blockActive} title="Block" aria-label="Block" className="h-7 w-7 shrink-0 rounded-full flex items-center justify-center text-rose-300/90 hover:text-rose-200 hover:bg-rose-500/15">
+                <Ban className="w-3.5 h-3.5" />
+              </button>
+            </div>
           </div>
 
           <div className="flex-1 overflow-y-auto px-5 pt-6 pb-4 space-y-2.5">

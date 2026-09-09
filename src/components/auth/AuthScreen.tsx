@@ -109,29 +109,34 @@ export function AuthScreen() {
     setError(null);
     setInfo(null);
     const trimmed = email.trim();
-    if (trimmed) {
-      setLoading(true);
-      try {
-        const res = await resetPassword(trimmed);
-        if (!res.error) {
-          setInfo(`If an account exists for ${trimmed}, check your email for a reset link.`);
-          return;
-        }
-        setError(res.error);
-      } finally {
-        setLoading(false);
-      }
-    }
-    const forgotUrl = accountForgotPageUrl();
-    if (forgotUrl && window.arkDesktop?.openExternal) {
-      void window.arkDesktop.openExternal(forgotUrl);
-      setInfo('Opened the NOVA account site. Use Forgot password there if email reset is not configured in this build.');
+    if (!trimmed || !trimmed.includes('@')) {
+      setError('Enter your account email first, then tap Forgot password.');
       return;
     }
-    const recovery = await getLocalLoginRecoveryInfo();
-    setInfo(formatForgotPasswordHelp(recovery));
-    if (recovery.exists || recovery.folder) {
-      void revealLocalLoginRecovery();
+    setLoading(true);
+    try {
+      const res = await resetPassword(trimmed);
+      if (!res.error) {
+        setInfo(`If an account exists for ${trimmed}, check your email for a reset link.`);
+        return;
+      }
+      // Configured email path failed — show that error only (do not stack local recovery unless unconfigured).
+      const unconfigured = /VITE_ARK_WEBSITE_ORIGIN|not configured/i.test(res.error);
+      setError(res.error);
+      if (!unconfigured) return;
+      const forgotUrl = accountForgotPageUrl();
+      if (forgotUrl && window.arkDesktop?.openExternal) {
+        void window.arkDesktop.openExternal(forgotUrl);
+        setInfo('Opened the NOVA account site so you can reset there.');
+        return;
+      }
+      const recovery = await getLocalLoginRecoveryInfo();
+      setInfo(formatForgotPasswordHelp(recovery));
+      if (recovery.exists || recovery.folder) {
+        void revealLocalLoginRecovery();
+      }
+    } finally {
+      setLoading(false);
     }
   };
 

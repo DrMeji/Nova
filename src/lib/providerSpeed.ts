@@ -40,7 +40,7 @@ const PROBES: Record<string, ProbeSpec> = {
   openrouter: {
     name: 'OpenRouter',
     run: openaiModels('https://openrouter.ai/api/v1/models', {
-      'HTTP-Referer': 'https://ark.local',
+      'HTTP-Referer': 'https://nova.local',
       'X-Title': 'NOVA',
     }),
   },

@@ -33,8 +33,9 @@ function grantsLookEnabled(g: WorkspaceGrants): boolean {
 
 /**
  * Push Settings grants to Electron main (no-op in browser).
- * If renderer storage is missing but main still has grants, heal prefs first
+ * If renderer storage is missing grant keys (legacy blob) or empty, heal from main
  * so a prefs-changed sync never wipes a good grants file with all-off defaults.
+ * Intentional all-off still works when the prefs JSON explicitly stores false.
  */
 export async function syncWorkspaceGrantsFromPrefs(): Promise<void> {
   try {
@@ -46,19 +47,26 @@ export async function syncWorkspaceGrantsFromPrefs(): Promise<void> {
         fullPc: Boolean(remote.grants.fullPc),
         executionMode: remote.grants.executionMode || 'allowlist',
       };
+      try {
+        (window as unknown as { __NOVA_MAIN_GRANTS__?: WorkspaceGrants }).__NOVA_MAIN_GRANTS__ = cachedMainGrants;
+      } catch { /* ignore */ }
       const local = grantsFromPrefs();
       const prefsOff = !local.desktop && !local.documents && !local.fullPc
         && (local.executionMode === 'allowlist' || !local.executionMode);
       const mainOn = grantsLookEnabled(cachedMainGrants);
-      // Only auto-heal when nothing is stored yet (rebrand wipe / fresh partition).
-      // If the user intentionally turned everything off, storage exists and we push that.
-      if (!hasStoredLocalPrefs() && prefsOff && mainOn) {
+      const missingGrantKeys = !prefsHaveExplicitGrantKeys();
+      // Heal only when prefs never recorded grant toggles (or storage empty).
+      // Do NOT auto-heal when keys exist as false — that blocks intentional disable.
+      if ((missingGrantKeys || !hasStoredLocalPrefs()) && prefsOff && mainOn) {
         setLocalPrefs({
           allowDesktopFolderAccess: cachedMainGrants.desktop,
           allowDocumentsFolderAccess: cachedMainGrants.documents,
           allowFullPcAccess: cachedMainGrants.fullPc,
           agentExecutionMode: cachedMainGrants.executionMode,
         });
+      } else if (prefsOff && mainOn && !missingGrantKeys) {
+        // Prefs explicitly all-off while main is on: still push (user disabled in Settings).
+        // Non-grant setLocalPrefs must not invent false grant keys — see localPrefs.ts.
       }
     }
   } catch {
@@ -66,6 +74,15 @@ export async function syncWorkspaceGrantsFromPrefs(): Promise<void> {
   }
 
   const grants = grantsFromPrefs();
+  // Don't push all-off defaults over an enabled main grant file when keys were never stored.
+  if (
+    cachedMainGrants
+    && grantsLookEnabled(cachedMainGrants)
+    && !grants.desktop && !grants.documents && !grants.fullPc
+    && !prefsHaveExplicitGrantKeys()
+  ) {
+    return;
+  }
   try {
     const written = await window.arkDesktop?.workspaceSetGrants?.(grants);
     if (written?.ok && written.grants) {
@@ -75,9 +92,29 @@ export async function syncWorkspaceGrantsFromPrefs(): Promise<void> {
         fullPc: Boolean(written.grants.fullPc),
         executionMode: written.grants.executionMode || 'allowlist',
       };
+      try {
+        (window as unknown as { __NOVA_MAIN_GRANTS__?: WorkspaceGrants }).__NOVA_MAIN_GRANTS__ = cachedMainGrants;
+      } catch { /* ignore */ }
     }
   } catch {
     /* ignore */
+  }
+}
+
+function prefsHaveExplicitGrantKeys(): boolean {
+  try {
+    const raw = localStorage.getItem('ark:local-prefs')
+      || localStorage.getItem('NOVA:local-prefs');
+    if (!raw) return false;
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    return (
+      'allowDesktopFolderAccess' in parsed
+      || 'allowDocumentsFolderAccess' in parsed
+      || 'allowFullPcAccess' in parsed
+      || 'agentExecutionMode' in parsed
+    );
+  } catch {
+    return false;
   }
 }
 
@@ -112,8 +149,17 @@ function scoreFolderMatch(dirName: string, want: string): number {
   const bn = normalizeFolderToken(want);
   if (a === b) return 100;
   if (an === bn && an.length >= 2) return 95;
-  if (a.includes(b) || b.includes(a)) return 80;
-  if (an.includes(bn) || bn.includes(an)) return 70;
+  if (a.includes(b) || b.includes(a)) {
+    // Require near-equal length so "app" does not bind "MyApp" / "Mapping".
+    if (Math.min(a.length, b.length) < 4) return 0;
+    if (Math.min(a.length, b.length) / Math.max(a.length, b.length) < 0.7) return 0;
+    return 80;
+  }
+  if (an.includes(bn) || bn.includes(an)) {
+    if (Math.min(an.length, bn.length) < 4) return 0;
+    if (Math.min(an.length, bn.length) / Math.max(an.length, bn.length) < 0.7) return 0;
+    return 70;
+  }
   return 0;
 }
 
@@ -134,7 +180,7 @@ async function findFolderInRoot(
 
   for (const dir of dirs) {
     const score = scoreFolderMatch(dir.name, wantName);
-    if (score >= 70) {
+    if (score >= 95) {
       const full = joinPath(rootPath, dir.name);
       // Prefer real project roots (package.json / src) over nested name/name clones.
       let bonus = 0;
@@ -280,7 +326,7 @@ export async function resolveWorkFolderPath(
       for (const item of listing.items || []) {
         if (item.kind !== 'dir') continue;
         const score = scoreFolderMatch(item.name, wantName);
-        if (score >= 70 && (!best || score > best.score)) {
+        if (score >= 95 && (!best || score > best.score)) {
           best = { name: item.name, path: item.path, score };
         }
       }

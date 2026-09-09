@@ -1357,6 +1357,18 @@ ipcMain.handle('NOVA:git-clone-open', async (event, payload) => {
       }
       const repoName = url.replace(/\.git$/i, '').split('/').pop() || 'repo';
       dest = path.join(result.filePaths[0], repoName);
+    } else {
+      const resolvedDest = path.resolve(String(dest));
+      const parent = path.dirname(resolvedDest);
+      if (
+        !arkProjects.isAllowedExternalPath(resolvedDest)
+        && !arkProjects.isAllowedExternalPath(parent)
+      ) {
+        return {
+          ok: false,
+          error: 'Clone destination is outside NOVA access. Enable Desktop/Documents/Full PC or pick a folder.',
+        };
+      }
     }
     const cloned = await arkGit.cloneToPath(url, dest, payload?.token);
     if (!cloned.ok) return cloned;

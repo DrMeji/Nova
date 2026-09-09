@@ -118,28 +118,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
       const arkId = await ensureArkId(userId, accountEmail);
       setProfile(prev => prev ? { ...prev, ark_id: arkId } : prev);
-      if (display || p.avatar_url) {
+      if (display) {
         try {
           const { getLocalPrefs, setLocalPrefs } = await import('@/lib/localPrefs');
           const prefs = getLocalPrefs();
-          const patch: { displayName?: string; avatarDataUrl?: string } = {};
           if (display && (!prefs.displayName || prefs.displayName === 'Guest')) {
-            patch.displayName = display;
+            setLocalPrefs({ displayName: display });
           }
-          if (p.avatar_url && !prefs.avatarDataUrl) {
-            patch.avatarDataUrl = p.avatar_url;
-          }
-          if (Object.keys(patch).length) setLocalPrefs(patch);
         } catch {
           /* ignore */
         }
-      }
-      if (p.avatar_url?.startsWith('data:image')) {
-        void import('@/lib/avatarStorage').then(({ migrateInlineAvatarToStorage }) =>
-          migrateInlineAvatarToStorage(userId, p.avatar_url).then(url => {
-            if (url) setProfile(prev => prev ? { ...prev, avatar_url: url } : prev);
-          }),
-        );
       }
     } else {
       setProfile({

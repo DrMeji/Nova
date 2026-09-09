@@ -148,6 +148,8 @@ function looksLikeDeleteProjectAsk(text: string): boolean {
   const t = String(text || '').trim();
   if (!DELETE_RE.test(t)) return false;
   if (looksLikeDeleteFileAsk(t)) return false;
+  // "delete Starbucks inside a picture folder" is a named file, not project wipe.
+  if (extractDeleteNamedTarget(t)) return false;
   // UI edits in a bound workspace: "remove the panel… edit this project" is NOT folder delete.
   if (
     /\b(?:remove|delete)\b[\s\S]{0,80}\b(?:panel|sidebar|clutter|hud|ui|section|button|text|header|footer|nav|menu|indicator|label)\b/i.test(t)
@@ -160,9 +162,17 @@ function looksLikeDeleteProjectAsk(text: string): boolean {
     && !/\bremove\s+(?:the\s+)?(?:entire\s+)?(?:project|folder|workspace|directory)\b/i.test(t)) {
     return false;
   }
+  // "delete that folder" after creating a file → sticky file delete, not project.
+  if (
+    /\b(?:delete|remove|trash|wipe)\b[\s\S]{0,24}\b(?:that|this|the)\s+folder\b/i.test(t)
+    && !/\b(?:project|workspace|repo|repository)\b/i.test(t)
+  ) {
+    return false;
+  }
   // Require the delete verb to be close to a project/folder target.
   return (
-    /\b(?:delete|remove|trash|wipe|get rid of)\b[\s\S]{0,48}\b(?:project|workspace|repo|repository|folder|directory)\b/i.test(t)
+    /\b(?:delete|remove|trash|wipe|get rid of)\b[\s\S]{0,48}\b(?:project|workspace|repo|repository)\b/i.test(t)
+    || /\b(?:delete|remove|trash|wipe|get rid of)\s+(?:the\s+)?(?:entire\s+)?(?:folder|directory)\b/i.test(t)
     || /\b(?:project|workspace|repo|repository|folder|directory)\b[\s\S]{0,24}\b(?:delete|trash|wipe|get rid of)\b/i.test(t)
   );
 }
@@ -425,10 +435,10 @@ export function classifyDiskIntent(
 ): DiskIntent {
   const t = String(message || '').trim();
   if (isProjectCreateBrief(t)) return { type: 'none' };
-  // Bound-workspace scrap/rebuild must never become add_file / delete_project.
-  if (looksLikeInPlaceRebuildAsk(t)) return { type: 'none' };
   // UI/code edits on the open project are never "create a loose file on Desktop".
-  if (looksLikeCodeEditAsk(t) && !looksLikeAddFileAsk(t)) return { type: 'none' };
+  // Disk deletes are checked before scrap/rebuild so "delete the file in project folder"
+  // is never swallowed as an in-place UI wipe.
+  if (looksLikeCodeEditAsk(t) && !looksLikeAddFileAsk(t) && !DELETE_RE.test(t)) return { type: 'none' };
   const recent = opts?.recentUserMessages || [];
   const pendingAddFile = opts?.pendingAddFile || null;
   const stickyDiskTarget = opts?.stickyDiskTarget || null;
@@ -455,7 +465,7 @@ export function classifyDiskIntent(
   }
 
   // "delete Starbucks in picture folder". location + name, no "file" word
-  if (looksLikeDeleteNamedItemAsk(t)) {
+  if (looksLikeDeleteNamedItemAsk(t) || Boolean(extractDeleteNamedTarget(t))) {
     const parsed = parseDeleteFileTarget(t);
     const name = parsed.fileName || extractDeleteNamedTarget(t);
     return {
@@ -464,6 +474,23 @@ export function classifyDiskIntent(
       parentHint: parsed.parentHint || extractDeleteFileParentHint(t),
     };
   }
+
+  // After creating a file: "delete that folder" → delete the sticky file, not a project.
+  if (
+    DELETE_RE.test(t)
+    && stickyDiskTarget?.kind === 'file'
+    && /\b(?:that|this|the)\s+folder\b/i.test(t)
+    && !/\b(?:project|workspace|repo|repository)\b/i.test(t)
+  ) {
+    return {
+      type: 'delete_file',
+      name: stickyDiskTarget.name || nameFromThread(recent, true),
+      parentHint: extractDeleteFileParentHint(t),
+    };
+  }
+
+  // Bound-workspace scrap/rebuild must never become add_file / delete_project.
+  if (looksLikeInPlaceRebuildAsk(t)) return { type: 'none' };
 
   // After creating/touching a file: "delete it", "delete that folder" → delete the file
   if (
@@ -481,8 +508,16 @@ export function classifyDiskIntent(
 
   if (looksLikeDeleteProjectAsk(t) || looksLikeDeleteFollowUp(t)) {
     if (looksLikeDeleteFollowUp(t) && !looksLikeDeleteProjectAsk(t)) {
+      // Ambiguous "delete it" only wipes a folder when sticky target is a folder
+      // or the thread clearly named a project — never invent a wipe from thin context.
+      if (stickyDiskTarget?.kind === 'folder') {
+        return { type: 'delete_project', name: stickyDiskTarget.name || nameFromThread(recent, false) };
+      }
       const fromMsg = extractNamedDiskTarget(t) || extractProjectName(t);
       const fromThread = nameFromThread(recent, false);
+      if (!fromMsg && !fromThread && !/\b(?:project|folder|workspace|directory)\b/i.test(t)) {
+        return { type: 'none' };
+      }
       return { type: 'delete_project', name: fromMsg || fromThread };
     }
     const name = extractProjectName(t) || extractNamedDiskTarget(t);

@@ -4,10 +4,7 @@ export function titleForRoute(route: Route, extras?: { projectName?: string; cha
   switch (route.name) {
     case 'chat': {
       // Don't show "NOVA · Chat" in the title bar. just "NOVA" is cleaner.
-      const mode = route.mode === 'image' ? 'Image'
-        : route.mode === 'video' ? 'Video'
-        : route.mode === 'voice' ? 'Voice'
-        : '';
+      const mode = route.mode === 'voice' ? 'Voice' : '';
       const thread = extras?.chatTitle?.trim();
       if (!mode && !thread) return '';
       return thread ? (mode ? `${mode} · ${thread}` : thread) : mode;
@@ -29,7 +26,7 @@ export function titleForRoute(route: Route, extras?: { projectName?: string; cha
     case 'build':
       return 'Plugins';
     case 'creation':
-      return 'Creation';
+      return 'History';
     case 'networking':
       return 'Networking';
     case 'message':
@@ -37,7 +34,7 @@ export function titleForRoute(route: Route, extras?: { projectName?: string; cha
     case 'notifications':
       return 'Notifications';
     case 'call':
-      return 'Call';
+      return 'Message';
     case 'settings':
       return 'Settings';
     default:

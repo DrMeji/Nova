@@ -1,22 +1,18 @@
 /**
- * Voice mode (Chat tab) — parked like Video until STT/TTS + conversation loop ship.
+ * Voice mode (Chat tab) — spoken conversation only (no PC control / builds).
  *
- * Product rules (when enabled later):
- * - Back-and-forth spoken conversation only (ChatGPT-style voice).
+ * Live on bat/dev builds, or when the user turns it on in Settings → Voice.
+ *
+ * Product rules:
+ * - Back-and-forth spoken conversation only.
  * - MUST NOT take over the PC, install software, build/scaffold apps, write/delete
  *   project files, or run agent/disk tools. Those stay in text Chat / Code.
- * - Plugins that are conversation-safe (weather facts, etc.) may be wired later;
- *   agentic / PC-control plugins stay off in Voice.
- *
- * Wiring stubs below so enabling the tab is mostly flipping isVoiceTabEnabled
- * and filling in the session hooks — not rediscovering architecture.
  */
 
 import type { ChatMode } from '@/context/RouterContext';
 import { isArkDevSession } from '@/lib/arkRuntime';
 import { getLocalPrefs } from '@/lib/localPrefs';
 
-/** Live on bat/dev builds, or when the user turns it on in Settings → Voice. */
 export function isVoiceTabEnabled(): boolean {
   if (isArkDevSession()) return true;
   return getLocalPrefs().voiceChatEnabled === true;

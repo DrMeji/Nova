@@ -3,7 +3,7 @@ import { useRouter, type Route } from '@/context/RouterContext';
 import {
   SquarePen, Briefcase, Blocks, Database,
   Settings, Search, PanelLeft, ChevronDown, History, Clock3,
-  ImageIcon, Video, MessageSquare, Trash2, Code2, Pencil, Mic,
+  MessageSquare, Trash2, Code2, Pencil, Mic,
   Globe, Bell, Copy, Star, Download, Brain, Cable, Bot,
 } from 'lucide-react';
 import { Modal } from './Modal';
@@ -11,9 +11,8 @@ import { SettingsContent } from './SettingsContent';
 import { SearchPanel } from './SearchPanel';
 import { useRecentProjects } from '@/context/RecentProjectsContext';
 import { useAuth } from '@/context/AuthContext';
-import { isSocialParked, isRevealed, isCodeTabEnabled, isVideoTabEnabled, isImageTabEnabled } from '@/lib/featurePark';
+import { isSocialParked, isCodeTabEnabled } from '@/lib/featurePark';
 import { useSocial } from '@/context/SocialContext';
-import { SidebarCallDock } from '@/components/CallRingUI';
 import { getLocalPrefs, setLocalPrefs } from '@/lib/localPrefs';
 import {
   PRESENCE_OPTIONS,
@@ -65,18 +64,6 @@ function getNavGroups(): {
       id: 'create',
       items: [
         { label: 'Chat', icon: SquarePen, route: { name: 'chat' }, activity: 'chat' },
-        {
-          label: 'Image',
-          icon: ImageIcon,
-          route: { name: 'chat', mode: 'image' },
-          comingSoon: !isImageTabEnabled(),
-        },
-        {
-          label: 'Video',
-          icon: Video,
-          route: { name: 'chat', mode: 'video' },
-          comingSoon: !isVideoTabEnabled(),
-        },
       ],
     },
     {
@@ -132,7 +119,6 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [recentOpen, setRecentOpen] = useState(true);
   const [prefsName, setPrefsName] = useState(() => getLocalPrefs().displayName);
-  const [avatarUrl, setAvatarUrl] = useState(() => getLocalPrefs().avatarDataUrl);
   const [presence, setPresence] = useState<PresenceStatus>(() => getLocalPrefs().presenceStatus || 'online');
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
   const [capacity, setCapacity] = useState<LiveCapacity | null>(null);
@@ -179,7 +165,6 @@ export function AppShell({ children }: { children: ReactNode }) {
     const onPrefs = () => {
       const next = getLocalPrefs();
       setPrefsName(next.displayName);
-      setAvatarUrl(next.avatarDataUrl);
       setPresence(next.presenceStatus || 'online');
       if (!narrowForced) setCollapsed(next.compactSidebar);
     };
@@ -258,11 +243,8 @@ export function AppShell({ children }: { children: ReactNode }) {
     if (item.label === 'Chat') {
       return route.name === 'chat' && !route.chatId && !route.mode;
     }
-    if (item.label === 'Image') {
-      return route.name === 'chat' && route.mode === 'image' && !route.chatId;
-    }
-    if (item.label === 'Video') {
-      return route.name === 'chat' && route.mode === 'video' && !route.chatId;
+    if (item.label === 'Voice') {
+      return route.name === 'chat' && route.mode === 'voice' && !route.chatId;
     }
     if (item.label === 'Code') {
       return route.name === 'code';
@@ -421,6 +403,10 @@ export function AppShell({ children }: { children: ReactNode }) {
     };
 
     const maybeCheck = async () => {
+      if (!getLocalPrefs().autoCheckUpdates) {
+        if (alive) setUpdateInfo(null);
+        return;
+      }
       const currentVersion = await window.arkDesktop?.appMeta?.().then((m) => m?.version).catch(() => undefined);
       const cached = readCache();
       if (cached && Date.now() - cached.at < CACHE_MS && currentVersion && cached.info.currentVersion === currentVersion) {
@@ -432,6 +418,22 @@ export function AppShell({ children }: { children: ReactNode }) {
       if (!alive || !info) return;
       setUpdateInfo(info);
       writeCache(info);
+      if (info.newerAvailable && getLocalPrefs().notifyOnUpdate) {
+        try {
+          // Lightweight in-app toast via existing update indicator — Notification when permitted.
+          if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+            new Notification('NOVA update available', {
+              body: info.latestTag
+                ? `Version ${info.latestTag} is ready to install.`
+                : (info.message || 'A newer NOVA build is available.'),
+            });
+          } else if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+            void Notification.requestPermission();
+          }
+        } catch {
+          /* ignore */
+        }
+      }
     };
 
     void maybeCheck();
@@ -454,8 +456,6 @@ export function AppShell({ children }: { children: ReactNode }) {
   }, []);
 
   const chatIcon = (mode: string) => {
-    if (mode === 'image') return ImageIcon;
-    if (mode === 'video') return Video;
     if (mode === 'voice') return Mic;
     if (mode === 'code') return Code2;
     return MessageSquare;
@@ -475,9 +475,14 @@ export function AppShell({ children }: { children: ReactNode }) {
   const openRecent = (item: RecentRow) => {
     if (item.kind === 'chat') {
       clearChatDone(item.id);
+      const mode = item.mode === 'voice'
+        ? 'voice' as const
+        : item.mode === 'code'
+          ? 'code' as const
+          : undefined;
       navigate({
         name: 'chat',
-        mode: item.mode === 'general' ? undefined : (item.mode as 'image' | 'video' | 'code' | undefined),
+        mode,
         chatId: item.id,
       });
       return;
@@ -610,7 +615,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       const next = !c;
       // On Message / Networking / Call the people/filter rail stays visible;
       // collapsing the main nav only compacts that rail to icons.
-      if (next && (route.name === 'message' || route.name === 'networking' || route.name === 'call')) {
+      if (next && (route.name === 'message' || route.name === 'networking')) {
         window.dispatchEvent(new CustomEvent('NOVA:compact-connect-rail'));
       }
       return next;
@@ -825,7 +830,11 @@ export function AppShell({ children }: { children: ReactNode }) {
             </div>
           </nav>
 
-          <div className={`mt-auto flex-none shrink-0 relative ${collapsed ? 'p-2 pb-3' : 'p-3 pt-2 pb-3'}`} data-status-menu>
+            <div
+              className={`mt-auto flex-none shrink-0 relative ${collapsed ? 'p-2 pb-3' : 'p-3 pt-2 pb-3'}`}
+              data-status-menu
+              data-nova-status-bar
+            >
             <JobsStrip variant="sidebar" />
             {statusMenuOpen && (
               <div
@@ -876,20 +885,15 @@ export function AppShell({ children }: { children: ReactNode }) {
                     <Download className="w-4 h-4" />
                   </button>
                 ) : null}
-                <SidebarCallDock />
                 <button
                   type="button"
                   onClick={() => setStatusMenuOpen(v => !v)}
                   title="Change status"
-                  className={`w-9 h-9 rounded-xl border bg-ark-navy-900/80 flex items-center justify-center text-sm font-semibold overflow-hidden hover:bg-surface-hover transition-colors ${presenceRingClass(presence)}`}
+                  className={`w-9 h-9 rounded-xl border bg-ark-navy-900/80 flex items-center justify-center overflow-hidden hover:bg-surface-hover transition-colors ${presenceRingClass(presence)}`}
                   aria-label="Change status"
                   aria-expanded={statusMenuOpen}
                 >
-                  {avatarUrl ? (
-                    <img src={avatarUrl} alt="" className="w-full h-full object-cover" />
-                  ) : (
-                    <span className={presenceTextClass(presence)}>{initial}</span>
-                  )}
+                  <NovaMark className={`w-4 h-4 ${presenceTextClass(presence)}`} title="NOVA" />
                 </button>
                 <button
                   type="button"
@@ -927,7 +931,6 @@ export function AppShell({ children }: { children: ReactNode }) {
                     </span>
                   </button>
                 ) : null}
-                <SidebarCallDock />
                 <div className="flex items-center gap-2 rounded-xl border border-surface-border bg-ark-navy-900 px-2.5 py-2">
                   <button
                     type="button"
@@ -937,11 +940,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                     aria-label="Change status"
                     aria-expanded={statusMenuOpen}
                   >
-                    {avatarUrl ? (
-                      <img src={avatarUrl} alt="" className="w-full h-full object-cover" />
-                    ) : (
-                      <span className={presenceTextClass(presence)}>{initial}</span>
-                    )}
+                    <NovaMark className={`w-4 h-4 ${presenceTextClass(presence)}`} title="NOVA" />
                   </button>
                   <button
                     type="button"

@@ -1,7 +1,7 @@
 # NOVA backlog (open work)
 
-Master list of things not done yet, half-done, or parked.  
-**Core product first** — Call / Voice / Video are side add-ons for later.
+Master list of things not done yet, half-done, or parked.
+**Core product first.** Image / Video / Call / Testers / Beta are **removed** from the product UI (not parked). Voice chat remains.
 
 ---
 
@@ -14,56 +14,56 @@ Master list of things not done yet, half-done, or parked.
 | **2** | MCP **tools/call** in Chat | ✅ Done |
 | **3** | Plugins UX polish | ✅ Done (clarity pass, not full redesign) |
 | **4** | Auth (local recovery note + PIN lockout) | ✅ Temp local recovery; real email reset still later |
-| **5** | Ship slice (CSP packaged, signed-out update, SQL migrations) | ✅ Partial — signing cert still needs purchase; avatar Storage + RLS SQL ready to apply |
-| — | Call / Video / Voice | Parked side add-ons — later |
+| **5** | Ship slice (CSP packaged, signed-out update, SQL migrations) | ✅ Partial — signing cert still needs purchase |
+| — | Image / Video / Call / Testers / Beta | ✅ Removed from product UI |
+| — | Voice chat | Live (dev always on; retail via Settings → Voice) |
+| — | Profile photos / avatar cloud Storage | ✅ Cancelled — everyone uses the Nova logo |
 
 ---
 
 ## Open list (full)
 
 ### Networking / social
-1. ~~Delete own post~~ ✅  
-2–3. Call / Voice / signaling — later  
-4. Live name/avatar sync — re-test  
+1. ~~Delete own post~~ ✅
+2. ~~Call~~ ✅ Removed from product
+3. Voice chat — live (conversation only)
+4. Live name sync — re-test when inviting
 
 ### Chat / AI
-5–13. ~~Prior chat items~~ ✅ (incl. MCP register + call, Update 504)  
-14. ~~Update 504~~ ✅  
+5–14. ~~Prior chat / MCP / Update items~~ ✅
 
 ### Onboarding / Settings UX
-15–19. ~~Prior onboarding~~ ✅  
-20. ~~Plugins “half-finished” UX~~ ✅ (copy / empty state / how-to clarity)  
+15–20. ~~Prior onboarding / plugins~~ ✅
 
 ### Auth / backend
-21. Real email password reset (hosted redirect site) — **still needed**; temp = local recovery note on PC  
-22. Sign-up email rate limits — needs custom SMTP in Supabase  
-23. ~~PIN lockout re-enable~~ ✅ (5 fails → 1 min)  
-24. ~~SQL migrations for `delete_own_account` / `broadcast_my_profile`~~ ✅ (copied into `supabase/migrations/`) — **apply in Supabase dashboard if not already**  
+21. Real email password reset (hosted redirect site) — **still needed**; temp = local recovery note on PC
+22. Sign-up email rate limits — needs custom SMTP in Supabase
+23. ~~PIN lockout re-enable~~ ✅
+24. ~~SQL migrations~~ ✅ (apply in Supabase dashboard if not already)
 
 ### Security / platform
-25. Authenticode / Windows code-signing certificate — **needs purchased cert** (can’t fake in code)  
-26. ~~CSP~~ ✅ (packaged Electron builds)  
-27. Supabase RLS re-audit before large invite — still open  
-28. Avatar Storage bucket (not data URLs) — still open  
-29. Video generation — later  
-30. ~~In-app update while signed out~~ ✅ (Auth screen Check for update)  
+25. Authenticode / Windows code-signing certificate — **needs purchased cert**
+26. ~~CSP~~ ✅
+27. Supabase RLS re-audit before large invite — still open
+28. ~~Avatar Storage bucket~~ ❌ Cancelled (Nova logo for all profiles)
+29. ~~Video / Image generation~~ ❌ Removed from product UI for now
+30. ~~In-app update while signed out~~ ✅
 
 ---
 
 ## Done recently
 
-- MCP registration + tools/call  
-- Update GitHub 504 retry + honest UI  
-- Boot/setup tips  
-- **Temp local login recovery note** (email+password on this PC only)  
-- Plugins clarity pass  
-- PIN lockout restored  
-- Packaged CSP  
-- Signed-out update check on Auth  
+- Image / Video / Call / Testers / Beta removed from product UI
+- Nova logo for every profile picture
+- Voice chat restored
+- MCP registration + tools/call
+- Update GitHub 504 retry + honest UI
+- Create Ready gate + empty App twin cleanup
 
 ---
 
 ## Rule of thumb
 
-1. **Remaining hard items:** Windows signing cert (purchase), Supabase dashboard apply (avatars + RLS migrations), deploy `website/` + set `VITE_ARK_WEBSITE_ORIGIN`, optional custom SMTP  
-2. **Later (side add-ons):** Call, Voice, Video  
+1. **Remaining hard items:** Windows signing cert (purchase), mark `docs/SUPABASE-APPLY-CHECKLIST.md` applied on hosted Supabase, deploy `website/` + set `VITE_ARK_WEBSITE_ORIGIN` for live email reset, optional custom SMTP
+2. **Create / edit:** keep live-regressing cafe → Preview → micro-edit → second-chat isolation → interactive depth → App twins → mid-build switch → no-brain honesty
+3. **Later (optional revive):** Image / Video / Call — code may still exist on disk but is unreachable from UI

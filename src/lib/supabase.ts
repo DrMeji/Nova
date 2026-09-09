@@ -18,57 +18,81 @@ export const supabaseConfigError =
  */
 const LOCAL_FALLBACK_PREFIX = 'NOVA-auth-fallback:';
 
+const hasBrowserWindow = typeof globalThis !== 'undefined'
+  && typeof (globalThis as { window?: unknown }).window !== 'undefined';
+
+function browserLocalStorage(): Storage | null {
+  if (!hasBrowserWindow) return null;
+  try {
+    return globalThis.window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+function arkDesktopAuth() {
+  if (!hasBrowserWindow) return undefined;
+  try {
+    return globalThis.window.arkDesktop;
+  } catch {
+    return undefined;
+  }
+}
+
 const arkAuthStorage: SupportedStorage = {
   getItem: (key) => {
-    if (window.arkDesktop?.authStorageGet) {
-      return window.arkDesktop.authStorageGet(key).then((v) => {
+    const desktop = arkDesktopAuth();
+    if (desktop?.authStorageGet) {
+      return desktop.authStorageGet(key).then((v) => {
         if (typeof v === 'string') return v;
         try {
-          return localStorage.getItem(LOCAL_FALLBACK_PREFIX + key);
+          return browserLocalStorage()?.getItem(LOCAL_FALLBACK_PREFIX + key) ?? null;
         } catch {
           return null;
         }
       });
     }
-    return localStorage.getItem(key);
+    return browserLocalStorage()?.getItem(key) ?? null;
   },
   setItem: (key, value) => {
-    if (window.arkDesktop?.authStorageSet) {
-      return window.arkDesktop
+    const desktop = arkDesktopAuth();
+    if (desktop?.authStorageSet) {
+      return desktop
         .authStorageSet(key, value)
         .then(() => undefined)
         .catch(() => {
           // If OS encryption is unavailable, still allow sign-in via local fallback.
           try {
-            localStorage.setItem(LOCAL_FALLBACK_PREFIX + key, value);
+            browserLocalStorage()?.setItem(LOCAL_FALLBACK_PREFIX + key, value);
           } catch {
             /* ignore */
           }
         });
     }
-    localStorage.setItem(key, value);
+    browserLocalStorage()?.setItem(key, value);
   },
   removeItem: (key) => {
-    if (window.arkDesktop?.authStorageRemove) {
-      return window.arkDesktop
+    const desktop = arkDesktopAuth();
+    if (desktop?.authStorageRemove) {
+      return desktop
         .authStorageRemove(key)
         .then(() => undefined)
         .catch(() => {
           try {
-            localStorage.removeItem(LOCAL_FALLBACK_PREFIX + key);
+            browserLocalStorage()?.removeItem(LOCAL_FALLBACK_PREFIX + key);
           } catch {
             /* ignore */
           }
         })
         .finally(() => {
           try {
-            localStorage.removeItem(LOCAL_FALLBACK_PREFIX + key);
+            browserLocalStorage()?.removeItem(LOCAL_FALLBACK_PREFIX + key);
           } catch {
             /* ignore */
           }
         });
     }
-    localStorage.removeItem(key);
+    browserLocalStorage()?.removeItem(key);
   },
 };
 

@@ -58,7 +58,14 @@ function namesRoughlyMatch(a: string, b: string): boolean {
 
 function hasFolderAccessGrant(): boolean {
   const p = readPrefs();
-  return Boolean(p.allowDesktopFolderAccess || p.allowDocumentsFolderAccess || p.allowFullPcAccess);
+  if (p.allowDesktopFolderAccess || p.allowDocumentsFolderAccess || p.allowFullPcAccess) return true;
+  try {
+    const g = (window as unknown as { __NOVA_MAIN_GRANTS__?: {
+      desktop?: boolean; documents?: boolean; fullPc?: boolean;
+    } }).__NOVA_MAIN_GRANTS__;
+    if (g && (g.desktop || g.documents || g.fullPc)) return true;
+  } catch { /* ignore */ }
+  return false;
 }
 
 function parseCatalogSnapshot(content: string): CatalogSnapshot | null {

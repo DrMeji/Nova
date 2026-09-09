@@ -355,6 +355,12 @@ export async function fetchChatMessages(projectId: string | null) {
 }
 
 export async function saveChatMessage(projectId: string | null, role: string, content: string, providerUsed?: string) {
+  try {
+    const { maySyncToCloud } = await import('@/lib/privacyGates');
+    if (!maySyncToCloud()) return null;
+  } catch {
+    /* fall through to insert */
+  }
   const { data, error } = await supabase
     .from('chat_messages')
     .insert({

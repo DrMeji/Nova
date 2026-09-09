@@ -9,7 +9,10 @@ const root = path.join(__dirname, '..');
 const electronBin = path.join(root, 'node_modules', 'electron', 'dist', 'electron.exe');
 const cdpPort = String(process.env.ARK_CDP_PORT || '').trim();
 const args = ['.'];
-if (cdpPort) args.push(`--remote-debugging-port=${cdpPort}`);
+if (cdpPort) {
+  args.push(`--remote-debugging-port=${cdpPort}`);
+  args.push('--remote-allow-origins=*');
+}
 const child = spawn(electronBin, args, {
   cwd: root,
   env: { ...process.env, ARK_DEV: '1' },

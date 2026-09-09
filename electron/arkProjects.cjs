@@ -239,20 +239,59 @@ function isUnderFullPcGrant(absPath) {
   return true;
 }
 
+function knownUserFolder(...candidates) {
+  const out = [];
+  const seen = new Set();
+  for (const c of candidates) {
+    const p = path.resolve(String(c || ''));
+    if (!p || seen.has(p.toLowerCase())) continue;
+    seen.add(p.toLowerCase());
+    out.push(p);
+  }
+  return out;
+}
+
+function desktopRoots() {
+  const home = os.homedir();
+  try {
+    return knownUserFolder(app.getPath('desktop'), path.join(home, 'Desktop'), path.join(home, 'OneDrive', 'Desktop'));
+  } catch {
+    return knownUserFolder(path.join(home, 'Desktop'), path.join(home, 'OneDrive', 'Desktop'));
+  }
+}
+
+function documentsRoots() {
+  const home = os.homedir();
+  try {
+    return knownUserFolder(app.getPath('documents'), path.join(home, 'Documents'), path.join(home, 'OneDrive', 'Documents'));
+  } catch {
+    return knownUserFolder(path.join(home, 'Documents'), path.join(home, 'OneDrive', 'Documents'));
+  }
+}
+
+function picturesRoots() {
+  const home = os.homedir();
+  try {
+    return knownUserFolder(app.getPath('pictures'), path.join(home, 'Pictures'), path.join(home, 'OneDrive', 'Pictures'));
+  } catch {
+    return knownUserFolder(path.join(home, 'Pictures'), path.join(home, 'OneDrive', 'Pictures'));
+  }
+}
+
 function isUnderGrantedScope(absPath) {
   const grants = loadWorkspaceGrants();
   if (!grants.desktop && !grants.documents) return false;
-  const home = os.homedir();
   const p = path.resolve(String(absPath || ''));
   if (grants.desktop) {
-    const desk = path.resolve(path.join(home, 'Desktop'));
-    if (isPathUnderRoot(p, desk)) return true;
-    const pictures = path.resolve(path.join(home, 'Pictures'));
-    if (isPathUnderRoot(p, pictures)) return true;
+    for (const desk of desktopRoots()) {
+      if (isPathUnderRoot(p, desk)) return true;
+    }
+    // Pictures is a separate consent in the UI; do not piggyback on Desktop.
   }
   if (grants.documents) {
-    const docs = path.resolve(path.join(home, 'Documents'));
-    if (isPathUnderRoot(p, docs)) return true;
+    for (const docs of documentsRoots()) {
+      if (isPathUnderRoot(p, docs)) return true;
+    }
   }
   return false;
 }
@@ -276,9 +315,13 @@ function saveApprovedRoot(entry) {
 
 /** True when child is inside root (no .. escape). */
 function isPathUnderRoot(child, root) {
-  const c = path.resolve(String(child || ''));
-  const r = path.resolve(String(root || ''));
+  let c = path.resolve(String(child || ''));
+  let r = path.resolve(String(root || ''));
   if (!c || !r) return false;
+  if (process.platform === 'win32') {
+    c = c.toLowerCase();
+    r = r.toLowerCase();
+  }
   if (c === r) return true;
   const rel = path.relative(r, c);
   return Boolean(rel) && !rel.startsWith('..') && !path.isAbsolute(rel);
@@ -378,7 +421,19 @@ function writeProjectFiles(projectId, projectName, files, sandbox) {
       continue;
     }
     const full = path.join(root, ...safe.split('/'));
-    const resolved = path.resolve(full);
+    let resolved = path.resolve(full);
+    try {
+      // Resolve junctions/symlinks so writes cannot escape the project root.
+      const parentReal = fs.existsSync(path.dirname(full))
+        ? fs.realpathSync(path.dirname(full))
+        : path.dirname(full);
+      resolved = path.resolve(parentReal, path.basename(full));
+      if (fs.existsSync(full)) {
+        resolved = fs.realpathSync(full);
+      }
+    } catch {
+      resolved = path.resolve(full);
+    }
     if (!isPathUnderRoot(resolved, rootResolved)) {
       blocked.push(safe);
       continue;
@@ -641,6 +696,22 @@ async function openWorkspaceRoot(projectId, projectName, sourceDir, onProgress, 
     const src = resolved.path;
     const selfBlock = blockArkSelfPath(src);
     if (selfBlock) return selfBlock;
+    // Require Desktop/Documents/Full PC grant, sandbox projects root, or a prior approval.
+    // Do not sticky-approve arbitrary absolute paths from renderer sourceDir.
+    const alreadyApproved = loadApprovedRoots().some(
+      (r) => isPathUnderRoot(src, path.resolve(String(r.path || ''))),
+    );
+    if (
+      !alreadyApproved
+      && !isPathUnderRoot(src, path.resolve(projectsRoot()))
+      && !isUnderFullPcGrant(src)
+      && !isUnderGrantedScope(src)
+    ) {
+      return {
+        ok: false,
+        error: 'Path is outside NOVA access. Enable Desktop, Documents, or Full PC in Settings → Security.',
+      };
+    }
     const folderName = resolved.name || path.basename(src);
     const hint = String(projectName || '').trim();
     const placeholder = /^(inspect|opened folder|new project|code project|code)$/i.test(hint);
@@ -895,9 +966,22 @@ function writeGrantedFile(targetPath, content = '') {
     return { ok: false, error: 'Path is outside an approved NOVA workspace.' };
   }
   try {
-    fs.mkdirSync(path.dirname(full), { recursive: true });
-    fs.writeFileSync(full, typeof content === 'string' ? content : String(content ?? ''), 'utf8');
-    return { ok: true, path: full };
+    let realTarget = full;
+    try {
+      const parent = path.dirname(full);
+      if (fs.existsSync(parent)) {
+        realTarget = path.resolve(fs.realpathSync(parent), path.basename(full));
+      }
+      if (fs.existsSync(full)) realTarget = fs.realpathSync(full);
+    } catch {
+      realTarget = full;
+    }
+    if (!isAllowedExternalPath(realTarget)) {
+      return { ok: false, error: 'Path is outside an approved NOVA workspace.' };
+    }
+    fs.mkdirSync(path.dirname(realTarget), { recursive: true });
+    fs.writeFileSync(realTarget, typeof content === 'string' ? content : String(content ?? ''), 'utf8');
+    return { ok: true, path: realTarget };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'Write failed' };
   }
@@ -965,9 +1049,24 @@ function deleteWorkspaceRelPath(projectId, relPath) {
   }
   if (!fs.existsSync(full)) return { ok: false, error: 'Path not found' };
   try {
-    const st = fs.statSync(full);
-    if (st.isDirectory()) fs.rmSync(full, { recursive: true, force: true });
-    else fs.unlinkSync(full);
+    let realTarget = full;
+    try { realTarget = fs.realpathSync(full); } catch { /* keep */ }
+    let realRoot = rootResolved;
+    try { realRoot = fs.realpathSync(rootResolved); } catch { /* keep */ }
+    if (!isPathUnderRoot(realTarget, realRoot)) {
+      return { ok: false, error: 'Path escapes the workspace folder (symlink).' };
+    }
+    if (!isAllowedExternalPath(realTarget)) {
+      return { ok: false, error: 'Path is outside an approved NOVA workspace.' };
+    }
+    const lst = fs.lstatSync(full);
+    if (lst.isSymbolicLink()) {
+      fs.unlinkSync(full);
+    } else if (lst.isDirectory()) {
+      fs.rmSync(full, { recursive: true, force: true });
+    } else {
+      fs.unlinkSync(full);
+    }
     return { ok: true, path: full };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'Delete failed' };
@@ -1085,12 +1184,14 @@ function listDir(dirPath) {
 }
 
 function browseRoots() {
-  const os = require('os');
   const home = os.homedir();
+  const desk = desktopRoots()[0] || path.join(home, 'Desktop');
+  const docs = documentsRoots()[0] || path.join(home, 'Documents');
+  const pics = picturesRoots()[0] || path.join(home, 'Pictures');
   const candidates = [
-    { id: 'pictures', label: 'Pictures', path: path.join(home, 'Pictures') },
-    { id: 'desktop', label: 'Desktop', path: path.join(home, 'Desktop') },
-    { id: 'documents', label: 'Documents', path: path.join(home, 'Documents') },
+    { id: 'pictures', label: 'Pictures', path: pics },
+    { id: 'desktop', label: 'Desktop', path: desk },
+    { id: 'documents', label: 'Documents', path: docs },
     { id: 'downloads', label: 'Downloads', path: path.join(home, 'Downloads') },
     { id: 'home', label: 'Home', path: home },
   ];

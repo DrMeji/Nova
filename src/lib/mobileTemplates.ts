@@ -14,7 +14,7 @@ import {
 
 type ParsedFileEdit = { path: string; content: string };
 
-function productName(message: string, fallback = 'ArkApp', files?: Record<string, string>) {
+function productName(message: string, fallback = 'NovaApp', files?: Record<string, string>) {
   const existing = files
     ? Object.keys(files).find(p => /ios\/[^/]+\/ContentView\.swift$/i.test(p))?.split('/')[1]
     : undefined;
@@ -27,7 +27,7 @@ function productName(message: string, fallback = 'ArkApp', files?: Record<string
     .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
     .join('')
     .replace(/[^A-Za-z0-9]/g, '')
-    .slice(0, 40) || 'ArkApp';
+    .slice(0, 40) || 'NovaApp';
   return /^[0-9]/.test(pascal) ? `App${pascal}` : pascal;
 }
 

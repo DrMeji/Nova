@@ -15,21 +15,22 @@ function pkgName(name: string): string {
 
 export function buildScaffoldFiles(
   kind: ProjectKind,
-  opts: { name: string; summary?: string },
+  opts: { name: string; summary?: string; preferredLanguage?: string },
 ): ScaffoldFile[] {
   const title = opts.name.trim() || 'New Project';
   const pkg = pkgName(title);
   const summary = String(opts.summary || '');
+  const preferTs = /typescript|\.tsx?\b|^ts$/i.test(String(opts.preferredLanguage || ''));
 
   // Interactive SPA / React briefs → Vite scaffold (empty App shell).
   if (kind === 'vite-react' || prefersReactAppScaffold(summary)) {
-    return viteReactScaffold(title, pkg);
+    return viteReactScaffold(title, pkg, preferTs);
   }
 
   if (kind === 'python') return pythonScaffold(title);
   if (kind === 'static-web') return staticWebScaffold(title);
   if (kind === 'node-cli') return nodeCliScaffold(title, pkg);
-  return viteReactScaffold(title, pkg);
+  return viteReactScaffold(title, pkg, preferTs);
 }
 
 function gitignore(kind: 'node' | 'python' | 'web'): string {
@@ -81,8 +82,10 @@ html, body {
   ];
 }
 
-function viteReactScaffold(title: string, pkg: string): ScaffoldFile[] {
-  return [
+function viteReactScaffold(title: string, pkg: string, preferTs = false): ScaffoldFile[] {
+  const mainExt = preferTs ? 'tsx' : 'jsx';
+  const appExt = preferTs ? 'tsx' : 'jsx';
+  const files: ScaffoldFile[] = [
     {
       path: 'package.json',
       content: JSON.stringify({
@@ -102,11 +105,12 @@ function viteReactScaffold(title: string, pkg: string): ScaffoldFile[] {
         devDependencies: {
           '@vitejs/plugin-react': '^4.3.4',
           vite: '^5.4.11',
+          ...(preferTs ? { typescript: '^5.6.3' } : {}),
         },
       }, null, 2) + '\n',
     },
     {
-      path: 'vite.config.js',
+      path: preferTs ? 'vite.config.ts' : 'vite.config.js',
       content: `import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
@@ -126,19 +130,19 @@ export default defineConfig({
 </head>
 <body>
   <div id="root"></div>
-  <script type="module" src="/src/main.jsx"></script>
+  <script type="module" src="/src/main.${mainExt}"></script>
 </body>
 </html>
 `,
     },
     {
-      path: 'src/main.jsx',
+      path: `src/main.${mainExt}`,
       content: `import React from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
 import './index.css';
 
-createRoot(document.getElementById('root')).render(
+createRoot(document.getElementById('root')${preferTs ? '!' : ''}).render(
   <React.StrictMode>
     <App />
   </React.StrictMode>,
@@ -146,7 +150,7 @@ createRoot(document.getElementById('root')).render(
 `,
     },
     {
-      path: 'src/App.jsx',
+      path: `src/App.${appExt}`,
       content: `import './App.css';
 
 export default function App() {
@@ -166,6 +170,29 @@ export default function App() {
     },
     { path: '.gitignore', content: gitignore('node') },
   ];
+  if (preferTs) {
+    files.push({
+      path: 'tsconfig.json',
+      content: JSON.stringify({
+        compilerOptions: {
+          target: 'ES2020',
+          useDefineForClassFields: true,
+          lib: ['ES2020', 'DOM', 'DOM.Iterable'],
+          module: 'ESNext',
+          skipLibCheck: true,
+          moduleResolution: 'bundler',
+          allowImportingTsExtensions: true,
+          isolatedModules: true,
+          moduleDetection: 'force',
+          noEmit: true,
+          jsx: 'react-jsx',
+          strict: true,
+        },
+        include: ['src'],
+      }, null, 2) + '\n',
+    });
+  }
+  return files;
 }
 
 function pythonScaffold(title: string): ScaffoldFile[] {

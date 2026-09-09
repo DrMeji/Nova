@@ -12,6 +12,8 @@ import { classifyGitAsk } from '@/lib/arkGitClient';
 
 export type AgentRunOutcome = {
   handled: boolean;
+  /** False when the shell command failed (exit / missing binary). */
+  ok?: boolean;
   reply?: string;
   needsConfirm?: { command: string; cwd: string; label: string };
 };
@@ -112,8 +114,15 @@ function sanitizeAgentOutput(raw: string, command: string): string {
       return 'Dependencies installed successfully.';
     }
     const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
-    const useful = lines.filter(l => /^(added|removed|changed|up to date|audited)\b/i.test(l));
-    return useful.slice(-4).join('\n') || 'Dependencies installed successfully.';
+    const useful = lines.filter(l =>
+      /^(added|removed|changed|up to date|audited)\b/i.test(l)
+      || /npm\s*err/i.test(l)
+      || /err!/i.test(l)
+      || /eresolve|enoent|not found|cannot find/i.test(l),
+    );
+    if (useful.length) return useful.slice(-6).join('\n');
+    // Never invent success when the installer did not report it.
+    return text.slice(0, 500) || 'npm install finished with no success marker.';
   }
 
   if (/^pip\s+install\b/i.test(cmd)) {
@@ -159,10 +168,13 @@ export async function runAgentCommand(opts: {
     userConfirmed: true,
   });
   const out = sanitizeAgentOutput(ran.output?.trim() || '', command);
-  const reply = ran.ok
-    ? out
-    : [`Could not run \`${command}\`.`, ran.error || out || 'Command failed.'].filter(Boolean).join('\n\n');
-  return { handled: true, reply };
+  if (ran.ok) {
+    return { handled: true, ok: true, reply: out };
+  }
+  const reply = [`Could not run \`${command}\`.`, ran.error || out || 'Command failed.']
+    .filter(Boolean)
+    .join('\n\n');
+  return { handled: true, ok: false, reply };
 }
 
 export function looksLikeAgentCommandAsk(message: string, hasPackageJson: boolean): boolean {

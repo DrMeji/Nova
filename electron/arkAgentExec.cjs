@@ -152,7 +152,12 @@ async function agentRun(payload) {
   const command = String(payload?.command || '').trim();
   // Never trust renderer-supplied mode.
   const mode = loadExecutionMode();
-  const userConfirmed = payload?.userConfirmed === true || payload?.skipConfirm === true;
+  // Never trust renderer skipConfirm alone for arbitrary shell.
+  // skipConfirm only counts for allowlisted package-manager / git status-style cmds.
+  const skipOk = payload?.skipConfirm === true
+    && onAllowlist(command)
+    && !isPowerfulInterpreter(command);
+  const userConfirmed = payload?.userConfirmed === true || skipOk;
   const allowed = commandAllowed(command, mode, userConfirmed);
   if (!allowed.ok) return allowed;
 
@@ -173,8 +178,10 @@ async function agentRun(payload) {
 function httpProbePort(port, host = '127.0.0.1', timeoutMs = 800) {
   return new Promise((resolve) => {
     const req = http.get({ host, port, path: '/', timeout: timeoutMs, family: host === '::1' ? 6 : 4 }, (res) => {
+      const code = Number(res.statusCode || 0);
       res.resume();
-      resolve(true);
+      // Treat connection as up for 2xx–4xx (Vite may 404 /); reject hard 5xx / invalid.
+      resolve(code >= 200 && code < 500);
     });
     req.on('error', () => resolve(false));
     req.on('timeout', () => {
@@ -250,10 +257,12 @@ function spawnHiddenDevServer(cwd, port) {
 /** Ensure node_modules exists before Vite — blank Localhost is usually a missing install. */
 async function ensureNodeModules(cwd) {
   const nm = path.join(cwd, 'node_modules');
-  if (fs.existsSync(nm)) {
+  const viteBin = path.join(nm, 'vite');
+  const reactBin = path.join(nm, 'react');
+  if (fs.existsSync(nm) && (fs.existsSync(viteBin) || fs.existsSync(reactBin))) {
     try {
       const entries = fs.readdirSync(nm);
-      if (entries.length > 0) return { ok: true };
+      if (entries.length > 2) return { ok: true };
     } catch {
       /* fall through to install */
     }
@@ -364,28 +373,24 @@ async function agentStartFolderPreview(payload) {
     devServersByCwd.delete(cwdKey);
   }
 
-  // Reuse a server the user (or run.bat) already started.
-  for (const hit of readBatUrls(cwd)) {
-    if (await httpProbePortAny(hit.port, 500)) {
-      const url = `http://127.0.0.1:${hit.port}/`;
-      devServersByCwd.set(cwdKey, { url });
-      return { ok: true, cwd, url };
-    }
-  }
-
+  // Reuse a server only when THIS cwd already owns it in our map (checked above).
+  // Do not attach to arbitrary localhost ports listed in run.bat — those may belong
+  // to another project or a leftover process.
   const pkgPath = path.join(cwd, 'package.json');
   if (fs.existsSync(pkgPath)) {
     return agentStartDevServer({ cwd });
   }
 
-  const fastapi = fs.existsSync(path.join(cwd, 'app', 'main.py'))
-    || fs.existsSync(path.join(cwd, 'requirements.txt'));
+  const fastapi = fs.existsSync(path.join(cwd, 'app', 'main.py'));
   if (fastapi) {
-    const preferred = readBatUrls(cwd)[0]?.port || 8000;
+    let preferred = readBatUrls(cwd)[0]?.port || 8000;
+    // Never attach to a foreign live port — pick a free port if preferred is busy.
     if (await httpProbePortAny(preferred, 400)) {
-      const url = `http://127.0.0.1:${preferred}/`;
-      devServersByCwd.set(cwdKey, { url });
-      return { ok: true, cwd, url };
+      const free = await findFreeDevPort();
+      if (!free) {
+        return { ok: false, error: 'No free port for the Python preview server.' };
+      }
+      preferred = free;
     }
     try {
       const child = spawnHiddenUvicorn(cwd, preferred);

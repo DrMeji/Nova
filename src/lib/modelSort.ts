@@ -56,8 +56,6 @@ export const LOCAL_CATEGORY_ORDER = [
   'reasoning',
   'fast',
   'vision',
-  'image',
-  'video',
 ] as const;
 
 export function categoryDisplayLabel(category: string | undefined, modelId?: string): string {

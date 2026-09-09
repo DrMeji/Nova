@@ -53,11 +53,11 @@ export async function verifyProjectAfterPatch(opts: {
   let command = '';
   if (hasScripts && hasTs && /"typecheck"/.test(pkg)) {
     command = 'npm run typecheck';
-  } else if (hasScripts && /"build"/.test(pkg) && isViteProject(files)) {
-    command = 'npm run build';
-  } else if (hasScripts && /"lint"/.test(pkg)) {
+  } else if (hasScripts && /"lint"/.test(pkg) && !isViteProject(files)) {
     command = 'npm run lint';
   }
+  // Never auto-run `npm run build` here — Vite build on every chat edit hangs Generating for minutes.
+  // Preview/Localhost already proves the tree; build stays a user/Build action.
 
   if (!command) {
     // Static HTML sites: light structure check instead of silent skip.

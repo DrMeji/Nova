@@ -41,6 +41,27 @@ export async function openInAppPreview(
   return true;
 }
 
+/** True when a localhost Preview URL answers HTTP (dev server is actually up). */
+export async function verifyLivePreviewUrl(url: string | null | undefined): Promise<boolean> {
+  const raw = String(url || '').trim();
+  if (!raw || !/localhost|127\.0\.0\.1|\[::1\]/i.test(raw)) return false;
+  try {
+    const ctrl = new AbortController();
+    const timer = window.setTimeout(() => ctrl.abort(), 5000);
+    const res = await fetch(raw, {
+      method: 'GET',
+      signal: ctrl.signal,
+      cache: 'no-store',
+      mode: 'cors',
+    });
+    window.clearTimeout(timer);
+    // Vite may return 200/304; some configs briefly 404 the root before HMR — treat 2xx–4xx as "server up".
+    return res.status > 0 && res.status < 500;
+  } catch {
+    return false;
+  }
+}
+
 /** Start / refresh the static preview server and open (or reload) the NOVA preview window. */
 export async function ensureInAppPreview(opts: {
   projectId: string;
@@ -251,7 +272,7 @@ export async function ensureBoundFolderPreview(opts: {
 
   // Prefer a live project server when the folder has one (Vite / run.bat / FastAPI).
   // Never fall through to static HTML for Vite — serving raw JSX is a blank black window.
-  const viteLike = isViteProject(files) || Boolean(files['package.json']);
+  const viteLike = isViteProject(files);
   if (window.arkDesktop?.agentStartFolderPreview) {
     const live = await window.arkDesktop.agentStartFolderPreview({ cwd: root });
     if (live?.ok && live.url) {
