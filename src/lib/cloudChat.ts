@@ -496,6 +496,45 @@ const FREE_KEY_PROVIDERS: ProviderAttempt[] = [
   },
 ];
 
+/** Coding create/edit: prefer coder routes before generic chat Free models. */
+const FREE_KEY_CODING_PROVIDERS: ProviderAttempt[] = [
+  {
+    id: 'openrouter',
+    label: 'OpenRouter Qwen Coder',
+    cost: 'free-key',
+    model: 'qwen/qwen-2.5-coder-32b-instruct',
+    run: chatOpenRouter,
+  },
+  {
+    id: 'deepseek',
+    label: 'DeepSeek',
+    cost: 'free-key',
+    model: 'deepseek-chat',
+    run: chatDeepSeek,
+  },
+  {
+    id: 'google',
+    label: 'Google AI Studio',
+    cost: 'free-key',
+    model: 'gemini-2.0-flash',
+    run: chatGoogle,
+  },
+  {
+    id: 'groq',
+    label: 'Groq',
+    cost: 'free-key',
+    model: 'llama-3.3-70b-versatile',
+    run: chatGroq,
+  },
+  {
+    id: 'openrouter',
+    label: 'OpenRouter free',
+    cost: 'free-key',
+    model: 'meta-llama/llama-3.3-70b-instruct:free',
+    run: chatOpenRouter,
+  },
+];
+
 const PAID_PROVIDERS: ProviderAttempt[] = [
   {
     id: 'openai',
@@ -768,17 +807,20 @@ export async function cloudChatFreeKeys(
   opts?: {
     acceptReply?: (reply: string) => boolean;
     onHop?: () => void;
+    /** Prefer coder-capable free routes (create / build / agent). */
+    preferCoding?: boolean;
   },
 ): Promise<CloudChatHit | null> {
   const keys = getProviderApiKeys();
   const turns = ensureHistory(history, message);
   const hasVision = turns.some(t => t.images?.length);
+  const base = opts?.preferCoding ? FREE_KEY_CODING_PROVIDERS : FREE_KEY_PROVIDERS;
   const providers = hasVision
     ? [
-        ...FREE_KEY_PROVIDERS.filter(p => p.id === 'google'),
-        ...FREE_KEY_PROVIDERS.filter(p => p.id !== 'google'),
+        ...base.filter(p => p.id === 'google'),
+        ...base.filter(p => p.id !== 'google'),
       ]
-    : FREE_KEY_PROVIDERS;
+    : base;
   for (const attempt of providers) {
     if (attempted.length) opts?.onHop?.();
     attempted.push(attempt.label);

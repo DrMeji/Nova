@@ -611,7 +611,11 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
     attempted,
     history,
     opts.onChunk,
-    { acceptReply: acceptCodingReply, onHop: opts.onAttemptReset },
+    {
+      acceptReply: acceptCodingReply,
+      onHop: opts.onAttemptReset,
+      preferCoding: brainKind === 'coding' || Boolean(opts.preferCloudCoding),
+    },
   );
 
   // ── Multi-model vision hop (before text-only local brains invent from blindness) ──
