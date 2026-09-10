@@ -1,7 +1,7 @@
 {
   "name": "nova",
   "private": true,
-  "version": "0.1.210",
+  "version": "0.1.211",
   "type": "module",
   "main": "electron/main.cjs",
   "description": "NOVA — AI Creation Studio desktop app",
