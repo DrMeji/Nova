@@ -114,6 +114,19 @@ export function pickReadyEngineId(
   return rankedReadyEngineIds(models, intent, ramGb)[0];
 }
 
+/** Prefer a ready local coder GGUF from the chat model menu (id/name rows). */
+export function pickLocalCoderModel(
+  models: Array<{ id: string; name: string; source?: string }>,
+): { id: string; name: string } | null {
+  const local = models.filter((m) => !m.source || m.source === 'local');
+  for (const id of CODER_ENGINE_RANK) {
+    const hit = local.find((m) => m.id === id || m.id.endsWith(id));
+    if (hit) return { id: hit.id, name: hit.name };
+  }
+  const fuzzy = local.find((m) => /coder|starcoder|codestral|deepseek-coder/i.test(`${m.id} ${m.name}`));
+  return fuzzy ? { id: fuzzy.id, name: fuzzy.name } : null;
+}
+
 const IMAGE_BACKUP_RANK = ['sd15-local', 'sdxl-turbo-local', 'flux-schnell-local'] as const;
 
 /** Ready GGUF to hot-swap onto when the current thread is near context capacity. */

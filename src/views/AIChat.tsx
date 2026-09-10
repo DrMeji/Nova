@@ -260,7 +260,7 @@ import {
   stripModelProseFromSource,
   ensureProductBrandInApp,
 } from '@/lib/createBuildQuality';
-import { pickLocalCoderModel, runCreateBuildUntilDone } from '@/lib/createBuildUntilDone';
+import { pickLocalCoderModel } from '@/lib/enginePick';
 import { shouldPaintStudioLive } from '@/lib/chatTurnIsolation';
 import { classifyErrorMessage, isLikelyErrorMessage } from '@/lib/errors';
 import { isVideoTabEnabled, isImageTabEnabled, isVoiceTabEnabled } from '@/lib/featurePark';
@@ -6074,75 +6074,6 @@ export function AIChat() {
               }
             } catch {
               /* keep prior ready state */
-            }
-          }
-          // Keep working until Preview-ready + build passes (terminal-class loop, chat UI only).
-          {
-            const stillNeedsWork = !ready.ok
-              || looksLikeFillerStubAppSource(filesNow['src/App.jsx'] || filesNow['src/App.tsx'] || '')
-              || isThinProductUiSource(filesNow['src/App.jsx'] || filesNow['src/App.tsx'] || '', briefForBuild);
-            if (
-              stillNeedsWork
-              && mySeq === genSeqRef.current
-              && !stopRequestedRef.current
-              && !looksLikePlayableCanvasGame(briefForBuild, buildIntent.name) // games use FPS scaffold path below
-            ) {
-              noteThought('Keeping at it until the site is actually built…');
-              const coderPick = pickLocalCoderModel([
-                ...engineLocalModels.map((m) => ({ id: m.id, name: m.name, source: 'local' as const })),
-                ...ollamaModels.map((m) => ({ id: m.id, name: m.name, source: 'local' as const })),
-              ]);
-              if (coderPick) {
-                try { await setEngineModel(coderPick.id); } catch { /* best-effort */ }
-                noteThought(`Using ${coderPick.name} to finish the build…`);
-              }
-              const until = await runCreateBuildUntilDone({
-                brief: briefForBuild,
-                productName: buildIntent.name,
-                files: filesNow,
-                projectId: pid,
-                diskRoot: originDiskRoot,
-                maxRounds: 8,
-                shouldAbort: () => mySeq !== genSeqRef.current || stopRequestedRef.current,
-                onStatus: (st) => {
-                  if (mySeq !== genSeqRef.current || stopRequestedRef.current) return;
-                  noteThought(st.message);
-                  pushAssistantStatus(st.message);
-                },
-                callRepairModel: async (prompt, currentFiles) => {
-                  const repair = await Promise.race([
-                    answerStudio(
-                      {
-                        userMessage: prompt,
-                        files: currentFiles,
-                        projectName: buildIntent.name,
-                        mode: 'code',
-                        preferredModelId: coderPick?.id || pinnedModel.id,
-                        preferredModelName: coderPick?.name || pinnedModel.name,
-                        preferredSource: coderPick ? 'local' : pinnedModel.source,
-                        planOnly: false,
-                        allowFileEdits: true,
-                        shouldAbort: () => mySeq !== genSeqRef.current || stopRequestedRef.current,
-                      },
-                      (live) => {
-                        if (mySeq !== genSeqRef.current || stopRequestedRef.current) return;
-                        const text = String(live || '').trim();
-                        if (text.length < 2) return;
-                        pushAssistantStatus(liveCodingStatusText(text));
-                      },
-                    ),
-                    new Promise<null>((resolve) => { window.setTimeout(() => resolve(null), 300_000); }),
-                  ]);
-                  return String(repair?.text || '');
-                },
-              });
-              filesNow = until.files;
-              ready = until.ready;
-              if (until.ok) {
-                noteThought(`Build loop finished in ${until.rounds} pass${until.rounds === 1 ? '' : 'es'} — Preview ready.`);
-              } else if (!until.stopped) {
-                noteThought(`Build loop stopped after ${until.rounds} passes — still not Ready.`);
-              }
             }
           }
           if (!ready.ok && looksLikeFpsGame(briefForBuild, buildIntent.name)) {
