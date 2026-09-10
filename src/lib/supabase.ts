@@ -13,10 +13,65 @@ export const supabaseConfigError =
     : null;
 
 /**
+ * auth-js builds sessions as `{ expires_at: now+expires_in, ...data }` and the
+ * spread lets the server's expires_at win. When Windows Time is stopped / skewed,
+ * that server timestamp is already in the past → perpetual refresh → 429 → kickout.
+ * Re-base expires_at on every token response using local now + expires_in.
+ */
+const skewSafeFetch: typeof fetch = async (input, init) => {
+  const res = await fetch(input, init);
+  try {
+    const url = String(
+      typeof input === 'string'
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : (input as Request).url || '',
+    );
+    if (!/\/auth\/v1\/token/i.test(url) || !res.ok) return res;
+    const data = await res.clone().json();
+    if (!data || typeof data !== 'object') return res;
+    const expiresIn = Number((data as { expires_in?: unknown }).expires_in);
+    if (!Number.isFinite(expiresIn) || expiresIn <= 0) return res;
+    const next = {
+      ...(data as Record<string, unknown>),
+      expires_at: Math.round(Date.now() / 1000) + Math.floor(expiresIn),
+    };
+    return new Response(JSON.stringify(next), {
+      status: res.status,
+      statusText: res.statusText,
+      headers: res.headers,
+    });
+  } catch {
+    return res;
+  }
+};
+
+/**
  * Prefer Electron userData for the auth session so upgrades keep you signed in.
  * Falls back to localStorage in the browser.
  */
 const LOCAL_FALLBACK_PREFIX = 'NOVA-auth-fallback:';
+
+/** Clear mirrored auth keys (call on intentional Sign out only). */
+export function clearAuthLocalFallback() {
+  try {
+    const ls = browserLocalStorage();
+    if (!ls) return;
+    const keys: string[] = [];
+    for (let i = 0; i < ls.length; i++) {
+      const k = ls.key(i);
+      if (k) keys.push(k);
+    }
+    for (const k of keys) {
+      if (k.startsWith(LOCAL_FALLBACK_PREFIX) || /auth-token/i.test(k)) {
+        ls.removeItem(k);
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+}
 
 const hasBrowserWindow = typeof globalThis !== 'undefined'
   && typeof (globalThis as { window?: unknown }).window !== 'undefined';
@@ -39,60 +94,107 @@ function arkDesktopAuth() {
   }
 }
 
+/**
+ * Supabase stores expires_at in server-second epoch. If the OS clock is skewed
+ * (common when Windows Time is stopped), every fresh token looks already expired
+ * → auth-js refresh-storms → 429 → SIGNED_OUT within seconds of login.
+ * Re-base expires_at from local now + expires_in whenever we persist.
+ */
+function normalizeSessionExpires(raw: string): string {
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const session =
+      parsed && typeof parsed === 'object' && parsed.currentSession && typeof parsed.currentSession === 'object'
+        ? (parsed.currentSession as Record<string, unknown>)
+        : parsed;
+    if (!session || typeof session !== 'object') return raw;
+    const expiresIn = Number(session.expires_in);
+    if (!Number.isFinite(expiresIn) || expiresIn <= 0) return raw;
+    const nextExpires = Math.floor(Date.now() / 1000) + Math.floor(expiresIn);
+    if (session.expires_at === nextExpires) return raw;
+    session.expires_at = nextExpires;
+    if (parsed.currentSession && parsed.currentSession !== session) {
+      (parsed.currentSession as Record<string, unknown>).expires_at = nextExpires;
+    }
+    return JSON.stringify(parsed);
+  } catch {
+    return raw;
+  }
+}
+
 const arkAuthStorage: SupportedStorage = {
   getItem: (key) => {
     const desktop = arkDesktopAuth();
+    const readFallback = () => {
+      try {
+        return browserLocalStorage()?.getItem(LOCAL_FALLBACK_PREFIX + key) ?? null;
+      } catch {
+        return null;
+      }
+    };
+    const healExpires = (v: string | null) => {
+      if (typeof v !== 'string' || !v) return v;
+      const normalized = normalizeSessionExpires(v);
+      // Persist healed expiry so the next auto-refresh tick does not re-storm.
+      if (normalized !== v) {
+        try {
+          browserLocalStorage()?.setItem(LOCAL_FALLBACK_PREFIX + key, normalized);
+        } catch {
+          /* ignore */
+        }
+        if (desktop?.authStorageSet) {
+          void desktop.authStorageSet(key, normalized).catch(() => undefined);
+        }
+      }
+      return normalized;
+    };
     if (desktop?.authStorageGet) {
       return desktop.authStorageGet(key).then((v) => {
-        if (typeof v === 'string') return v;
-        try {
-          return browserLocalStorage()?.getItem(LOCAL_FALLBACK_PREFIX + key) ?? null;
-        } catch {
-          return null;
+        if (typeof v === 'string' && v.length > 0) return healExpires(v);
+        const fallback = readFallback();
+        // Heal encrypted store from local mirror after decrypt/glitch empties it.
+        if (fallback && desktop.authStorageSet) {
+          void desktop.authStorageSet(key, fallback).catch(() => undefined);
         }
+        return healExpires(fallback);
       });
     }
-    return browserLocalStorage()?.getItem(key) ?? null;
+    return healExpires(browserLocalStorage()?.getItem(key) ?? null);
   },
   setItem: (key, value) => {
+    const normalized = normalizeSessionExpires(String(value ?? ''));
+    // Always mirror locally so a brief OS-encryption/decrypt failure cannot wipe the session.
+    try {
+      browserLocalStorage()?.setItem(LOCAL_FALLBACK_PREFIX + key, normalized);
+    } catch {
+      /* ignore */
+    }
     const desktop = arkDesktopAuth();
     if (desktop?.authStorageSet) {
       return desktop
-        .authStorageSet(key, value)
+        .authStorageSet(key, normalized)
         .then(() => undefined)
-        .catch(() => {
-          // If OS encryption is unavailable, still allow sign-in via local fallback.
-          try {
-            browserLocalStorage()?.setItem(LOCAL_FALLBACK_PREFIX + key, value);
-          } catch {
-            /* ignore */
-          }
-        });
+        .catch(() => undefined);
     }
-    browserLocalStorage()?.setItem(key, value);
+    browserLocalStorage()?.setItem(key, normalized);
   },
   removeItem: (key) => {
+    // Soft-delete on the Electron store only. Keep the local mirror so a
+    // spurious _removeSession (token refresh / getUser race) can be recovered
+    // by AuthContext. Intentional Sign out calls clearAuthLocalFallback().
     const desktop = arkDesktopAuth();
     if (desktop?.authStorageRemove) {
       return desktop
         .authStorageRemove(key)
         .then(() => undefined)
-        .catch(() => {
-          try {
-            browserLocalStorage()?.removeItem(LOCAL_FALLBACK_PREFIX + key);
-          } catch {
-            /* ignore */
-          }
-        })
-        .finally(() => {
-          try {
-            browserLocalStorage()?.removeItem(LOCAL_FALLBACK_PREFIX + key);
-          } catch {
-            /* ignore */
-          }
-        });
+        .catch(() => undefined);
     }
-    browserLocalStorage()?.removeItem(key);
+    try {
+      browserLocalStorage()?.removeItem(key);
+    } catch {
+      /* ignore */
+    }
+    return undefined;
   },
 };
 
@@ -107,6 +209,9 @@ export const supabase = createClient(
       detectSessionInUrl: false,
       storage: arkAuthStorage,
       storageKey: 'ark-auth-token',
+    },
+    global: {
+      fetch: skewSafeFetch,
     },
   },
 );

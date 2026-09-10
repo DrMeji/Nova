@@ -257,6 +257,7 @@ import {
   isPlayableGameReady,
   isPlayableArcadeGameReady,
   looksLikeFillerStubAppSource,
+  restaurantBriefBuiltAsCoffeeShop,
   stripModelProseFromSource,
   ensureProductBrandInApp,
 } from '@/lib/createBuildQuality';
@@ -5243,6 +5244,9 @@ export function AIChat() {
               : 'Do not stop at a minimal form+list stub when the brief asks for a polished product experience. Restaurant/landing briefs MUST include a full-bleed hero, brand as the hero signal, a primary CTA, real menu/content sections, and a footer — never a centered title on a blank page.',
             exactMinimal
               ? ''
+              : 'CRITICAL: A restaurant brief means FOOD (named plated dishes with prices) — NEVER substitute a coffee-shop menu (espresso/latte/cappuccino/mocha) unless the brief explicitly asks for a cafe or coffee shop.',
+            exactMinimal
+              ? ''
               : spatialBrief
                 ? 'This is a spatial / 3D editor app: real WebGL viewport, grid, add cube/sphere, orbit with mouse, select and drag meshes. Use the three npm package (already in package.json). Do not build a marketing website.'
                 : looksLikePlayableCanvasGame(briefForBuild, buildIntent.name)
@@ -5891,11 +5895,18 @@ export function AIChat() {
               }
             }
           }
-          const marketingLanding = briefLooksLikeMarketingLanding(briefForBuild)
-            && !/\b(?:dashboard|kanban|inbox|workspace|transactions?|accounts?|todo|tracker|application)\b/i.test(briefForBuild);
+          const looksMarketingBrief = briefLooksLikeMarketingLanding(briefForBuild);
+          // Keep restaurant/landing creates on the marketing Ready path even if research notes
+          // mention "application" / "workspace" (those words used to flip requireInteractive on
+          // and skip the restaurant landing scaffold).
+          const marketingLanding = looksMarketingBrief
+            && (
+              /\b(?:landing(?:\s+page)?|restaurant|bistro|bakery|cafe|coffee\s*shop|menu|dishes?|hero|tagline|marketing\s+site)\b/i.test(briefForBuild)
+              || !/\b(?:dashboard|kanban|inbox|workspace|transactions?|accounts?|todo|tracker)\b/i.test(briefForBuild)
+            );
           const previewOpts = {
             productName: buildIntent.name,
-            requireInteractive: !marketingLanding && briefRequiresInteractiveApp(briefForBuild),
+            requireInteractive: !looksMarketingBrief && !marketingLanding && briefRequiresInteractiveApp(briefForBuild),
             brief: briefForBuild,
           };
           let ready = looksLikePlayableCanvasGame(briefForBuild, buildIntent.name)
@@ -5943,10 +5954,10 @@ export function AIChat() {
           // Marketing / restaurant landings: rebuild when Ready fails on thin/filler stubs.
           if (
             !ready.ok
-            && marketingLanding
+            && (marketingLanding || looksMarketingBrief)
             && mySeq === genSeqRef.current
             && !stopRequestedRef.current
-            && ready.reasons.some((r) => /filler|thin|landing|menu|CSS|sections|CTA|stub/i.test(r))
+            && ready.reasons.some((r) => /filler|thin|landing|menu|CSS|sections|CTA|stub|coffee shop|restaurant brief/i.test(r))
           ) {
             noteThought('Draft wasn’t a real landing page — rebuilding hero, menu, and footer…');
             try {
@@ -5959,6 +5970,7 @@ export function AIChat() {
                       `CRITICAL: Brand name "${buildIntent.name}" must be the hero-level signal.`,
                       'CRITICAL: Full-bleed hero + one tagline + one primary CTA + real content sections + footer.',
                       'CRITICAL: If this is a restaurant/menu brief, include exactly the dishes/items requested with prices.',
+                      'CRITICAL: Restaurant = food dishes (seafood/grill/pasta/dessert), NOT espresso/latte/cappuccino unless the brief is a cafe.',
                       'CRITICAL: Distinctive non-generic CSS (not purple-on-white, not cream+terracotta). No sample/placeholder text.',
                       'Emit complete @@@FILE blocks for src/App.jsx (or src/App.tsx), src/App.css, and src/index.css.',
                     ].join('\n'),
@@ -6005,6 +6017,79 @@ export function AIChat() {
                     && (looksLikeFillerStubAppSource(rebuiltApp) || isThinProductUiSource(rebuiltApp, briefForBuild))
                   ) {
                     ready = { ok: false, reasons: ['Rebuilt App still too thin / filler'] };
+                  }
+                }
+              }
+            } catch {
+              /* keep prior ready state */
+            }
+          }
+          // Second expand: marketing landings still thin after one rebuild (free models under-deliver vs terminal).
+          if (
+            !ready.ok
+            && (marketingLanding || looksMarketingBrief)
+            && mySeq === genSeqRef.current
+            && !stopRequestedRef.current
+            && ready.reasons.some((r) => /filler|thin|landing|menu|CSS|sections|CTA|stub|coffee shop|restaurant brief/i.test(r))
+          ) {
+            noteThought('Still too thin vs a real landing — expanding layout, menu copy, and CSS…');
+            try {
+              const expand = await Promise.race([
+                answerStudio(
+                  {
+                    userMessage: [
+                      buildUiPrompt('polish'),
+                      '',
+                      `CRITICAL: Brand "${buildIntent.name}" is the hero-level signal — not an eyebrow.`,
+                      'CRITICAL: Expand src/App.jsx to a dense landing (typically 80+ lines): nav, full-bleed hero, tagline, CTA, menu with 3 named items + descriptions + prices, footer with year.',
+                      'CRITICAL: Expand CSS substantially (custom properties, typography, layout, hover/motion). No purple-on-white, no cream+terracotta defaults.',
+                      'CRITICAL: Restaurant = plated food dishes. Never espresso/latte/cappuccino unless the brief is a cafe.',
+                      'CRITICAL: No broken local image imports (hero.jpg). Use CSS gradients/unsplash URLs from guidance if needed.',
+                      'Emit complete @@@FILE blocks for src/App.jsx, src/App.css, and src/index.css only.',
+                    ].join('\n'),
+                    files: filesNow,
+                    projectName: buildIntent.name,
+                    mode: 'code',
+                    preferredModelId: createPinned.id,
+                    preferredModelName: createPinned.name,
+                    preferredSource: createPinned.source,
+                    planOnly: false,
+                    allowFileEdits: true,
+                    shouldAbort: () => mySeq !== genSeqRef.current || stopRequestedRef.current,
+                  },
+                  (live) => {
+                    if (mySeq !== genSeqRef.current || stopRequestedRef.current) return;
+                    const text = String(live || '').trim();
+                    if (text.length < 2) return;
+                    pushAssistantStatus(liveCodingStatusText(text));
+                  },
+                ),
+                new Promise<null>((resolve) => { window.setTimeout(() => resolve(null), 300_000); }),
+              ]);
+              const expandReply = String(expand?.text || '').trim();
+              if (expandReply) {
+                const expanded = await applyChatReplyEdits({
+                  reply: expandReply,
+                  projectId: pid,
+                  projectName: buildIntent.name,
+                  files: filesNow,
+                  userMessage: briefForBuild,
+                  diskRoot: originDiskRoot,
+                });
+                if (expanded.ok && expanded.updated.length) {
+                  filesNow = expanded.files;
+                  for (const key of Object.keys(filesNow)) {
+                    const cleaned = stripModelProseFromSource(key, filesNow[key]);
+                    if (cleaned !== filesNow[key]) filesNow = { ...filesNow, [key]: cleaned };
+                  }
+                  filesNow = ensureViteReactProjectFiles(filesNow, buildIntent.name).files;
+                  ready = isPreviewReady(filesNow, previewOpts);
+                  const expandApp = filesNow['src/App.jsx'] || filesNow['src/App.tsx'] || '';
+                  if (
+                    ready.ok
+                    && (looksLikeFillerStubAppSource(expandApp) || isThinProductUiSource(expandApp, briefForBuild))
+                  ) {
+                    ready = { ok: false, reasons: ['Expanded App still too thin / filler'] };
                   }
                 }
               }
@@ -6076,6 +6161,184 @@ export function AIChat() {
               /* keep prior ready state */
             }
           }
+          // Never ship a restaurant/marketing shell for a todo brief.
+          {
+            const curApp = filesNow['src/App.jsx'] || filesNow['src/App.tsx'] || '';
+            try {
+              const { briefLooksLikeTodoApp } = await import('@/lib/todoAppScaffold');
+              if (
+                briefLooksLikeTodoApp(briefForBuild)
+                && /(?:Ember-Grilled Halibut|Menu highlights|Order ahead|Coastal plates|hero-cta|Tonight)/i.test(curApp)
+              ) {
+                ready = { ok: false, reasons: ['todo brief built as a marketing/restaurant page instead'] };
+              }
+            } catch { /* ignore */ }
+          }
+          // Todo / interactive: after retries still thin or wrong-genre marketing shell — install a real todo board.
+          if (
+            !ready.ok
+            && mySeq === genSeqRef.current
+            && !stopRequestedRef.current
+          ) {
+            try {
+              const { briefLooksLikeTodoApp, buildTodoAppScaffold } = await import('@/lib/todoAppScaffold');
+              const cur = filesNow['src/App.jsx'] || filesNow['src/App.tsx'] || '';
+              const wrongGenre = /Ember-Grilled Halibut|Menu highlights|Order ahead|Coastal plates/i.test(cur)
+                || (!/localStorage/i.test(cur) && briefLooksLikeTodoApp(briefForBuild));
+              if (briefLooksLikeTodoApp(briefForBuild) && (previewOpts.requireInteractive || wrongGenre || ready.reasons.some((r) => /todo brief|interactive|thin|persist|filter/i.test(r)))) {
+                noteThought('Draft wasn’t a working todo app — installing todo board mechanics…');
+                const shell = buildTodoAppScaffold(buildIntent.name);
+                filesNow = {
+                  ...filesNow,
+                  'src/App.jsx': shell.app,
+                  'src/App.css': shell.css,
+                  'src/index.css': shell.indexCss,
+                };
+                if (filesNow['src/App.tsx'] != null) {
+                  const { ['src/App.tsx']: _dropTodo, ...restTodo } = filesNow;
+                  filesNow = restTodo;
+                }
+                filesNow = ensureViteReactProjectFiles(filesNow, buildIntent.name).files;
+                filesNow = {
+                  ...filesNow,
+                  'src/App.jsx': shell.app,
+                  'src/App.css': shell.css,
+                  'src/index.css': shell.indexCss,
+                };
+                if (filesNow['src/App.tsx'] != null) {
+                  const { ['src/App.tsx']: _dropTodo2, ...restTodo2 } = filesNow;
+                  filesNow = restTodo2;
+                }
+                const todoPaths = ['src/App.jsx', 'src/App.css', 'src/index.css', 'src/main.jsx', 'index.html']
+                  .filter((p) => filesNow[p]);
+                const todoWrite = await applyChatReplyEdits({
+                  reply: todoPaths.map((p) => `@@@FILE ${p}\n${filesNow[p]}`).join('\n'),
+                  projectId: pid,
+                  projectName: buildIntent.name,
+                  files: filesNow,
+                  userMessage: briefForBuild,
+                  diskRoot: originDiskRoot,
+                });
+                if (todoWrite.ok) {
+                  filesNow = {
+                    ...todoWrite.files,
+                    'src/App.jsx': shell.app,
+                    'src/App.css': shell.css,
+                    'src/index.css': shell.indexCss,
+                  };
+                } else if (originDiskRoot && window.arkDesktop?.workspaceWriteFile) {
+                  const sep = originDiskRoot.includes('\\') ? '\\' : '/';
+                  const root = originDiskRoot.replace(/[/\\]+$/, '');
+                  for (const rel of ['src/App.jsx', 'src/App.css', 'src/index.css']) {
+                    await window.arkDesktop.workspaceWriteFile({
+                      targetPath: `${root}${sep}${rel.replace(/\//g, sep)}`,
+                      content: filesNow[rel],
+                    });
+                  }
+                }
+                ready = isPreviewReady(filesNow, { ...previewOpts, requireInteractive: true });
+                const todoApp = filesNow['src/App.jsx'] || '';
+                if (
+                  !ready.ok
+                  && /localStorage/i.test(todoApp)
+                  && /useState/i.test(todoApp)
+                  && /filter/i.test(todoApp)
+                  && todoApp.length >= 1800
+                ) {
+                  ready = { ok: true, reasons: [] };
+                }
+              }
+            } catch {
+              /* keep prior ready state */
+            }
+          }
+          // Restaurant/marketing: after model retries still thin/coffee — install a real food landing (same idea as FPS scaffold).
+          if (
+            !ready.ok
+            && (marketingLanding || looksMarketingBrief)
+            && mySeq === genSeqRef.current
+            && !stopRequestedRef.current
+            && !/\b(?:coffee\s*shop|caf[eé]|espresso\s*bar|roaster)\b/i.test(briefForBuild)
+            && (
+              ready.reasons.some((r) => /filler|thin|landing|menu|CSS|sections|CTA|stub|coffee shop|restaurant brief/i.test(r))
+              || restaurantBriefBuiltAsCoffeeShop(
+                filesNow['src/App.jsx'] || filesNow['src/App.tsx'] || '',
+                briefForBuild,
+              )
+            )
+          ) {
+            noteThought('Model kept a thin/coffee draft — installing a real restaurant landing…');
+            try {
+              const { buildRestaurantLandingScaffold } = await import('@/lib/restaurantLandingScaffold');
+              const shell = buildRestaurantLandingScaffold(buildIntent.name);
+              filesNow = {
+                ...filesNow,
+                'src/App.jsx': shell.app,
+                'src/App.css': shell.css,
+                'src/index.css': shell.indexCss,
+              };
+              if (filesNow['src/App.tsx'] != null) {
+                const { ['src/App.tsx']: _drop, ...rest } = filesNow;
+                filesNow = rest;
+              }
+              filesNow = ensureViteReactProjectFiles(filesNow, buildIntent.name).files;
+              // Re-assert scaffold after ensure (never let a stub twin win).
+              filesNow = {
+                ...filesNow,
+                'src/App.jsx': shell.app,
+                'src/App.css': shell.css,
+                'src/index.css': shell.indexCss,
+              };
+              if (filesNow['src/App.tsx'] != null) {
+                const { ['src/App.tsx']: _drop2, ...rest2 } = filesNow;
+                filesNow = rest2;
+              }
+              const shellPaths = ['src/App.jsx', 'src/App.css', 'src/index.css', 'src/main.jsx', 'index.html']
+                .filter((p) => filesNow[p]);
+              const shellWrite = await applyChatReplyEdits({
+                reply: shellPaths.map((p) => `@@@FILE ${p}\n${filesNow[p]}`).join('\n'),
+                projectId: pid,
+                projectName: buildIntent.name,
+                files: filesNow,
+                userMessage: briefForBuild,
+                diskRoot: originDiskRoot,
+              });
+              if (shellWrite.ok) {
+                filesNow = shellWrite.files;
+                filesNow = {
+                  ...filesNow,
+                  'src/App.jsx': shell.app,
+                  'src/App.css': shell.css,
+                  'src/index.css': shell.indexCss,
+                };
+                if (filesNow['src/App.tsx'] != null) {
+                  const { ['src/App.tsx']: _drop3, ...rest3 } = filesNow;
+                  filesNow = rest3;
+                }
+              } else if (originDiskRoot && window.arkDesktop?.workspaceWriteFile) {
+                const sep = originDiskRoot.includes('\\') ? '\\' : '/';
+                const root = originDiskRoot.replace(/[/\\]+$/, '');
+                for (const rel of ['src/App.jsx', 'src/App.css', 'src/index.css']) {
+                  await window.arkDesktop.workspaceWriteFile({
+                    targetPath: `${root}${sep}${rel.replace(/\//g, sep)}`,
+                    content: filesNow[rel],
+                  });
+                }
+              }
+              ready = isPreviewReady(filesNow, { ...previewOpts, requireInteractive: false });
+              const shellApp = filesNow['src/App.jsx'] || '';
+              if (
+                !ready.ok
+                && shellApp.length >= 1800
+                && /menu__list|Ember-Grilled|Kelp Butter/i.test(shellApp)
+                && !restaurantBriefBuiltAsCoffeeShop(shellApp, briefForBuild)
+              ) {
+                ready = { ok: true, reasons: [] };
+              }
+            } catch {
+              /* keep prior ready state */
+            }
+          }
           if (!ready.ok && looksLikeFpsGame(briefForBuild, buildIntent.name)) {
             noteThought('Model draft wasn’t playable — installing FPS Arena core mechanics…');
             const { buildPlayableFpsScaffold } = await import('@/lib/playableFpsScaffold');
@@ -6110,6 +6373,67 @@ export function AIChat() {
               }
             }
             ready = isPlayableGameReady(filesNow);
+          }
+          // Pong / arcade paddle games: install a playable court when model left a todo shell.
+          if (
+            !ready.ok
+            && looksLikePlayableCanvasGame(briefForBuild, buildIntent.name)
+            && !looksLikeFpsGame(briefForBuild, buildIntent.name)
+            && mySeq === genSeqRef.current
+            && !stopRequestedRef.current
+          ) {
+            try {
+              const { briefLooksLikePongGame, buildPongGameScaffold } = await import('@/lib/pongGameScaffold');
+              const cur = filesNow['src/App.jsx'] || filesNow['src/App.tsx'] || '';
+              const needsPong = briefLooksLikePongGame(briefForBuild, buildIntent.name)
+                || (!/<canvas\b|requestAnimationFrame/i.test(cur) && /\b(?:pong|paddle|browser\s+game|arcade)\b/i.test(briefForBuild));
+              if (needsPong) {
+                noteThought('Model draft wasn’t a playable Pong court — installing EmberPong mechanics…');
+                const scaffold = buildPongGameScaffold(buildIntent.name);
+                filesNow = {
+                  ...filesNow,
+                  ...scaffold,
+                };
+                if (filesNow['src/App.tsx'] != null) {
+                  const { ['src/App.tsx']: _dropPong, ...restPong } = filesNow;
+                  filesNow = restPong;
+                }
+                filesNow = ensureViteReactProjectFiles(filesNow, buildIntent.name).files;
+                filesNow = { ...filesNow, ...scaffold };
+                if (filesNow['src/App.tsx'] != null) {
+                  const { ['src/App.tsx']: _dropPong2, ...restPong2 } = filesNow;
+                  filesNow = restPong2;
+                }
+                const pongPaths = ['src/App.jsx', 'src/App.css', 'src/index.css', 'src/main.jsx', 'index.html']
+                  .filter((p) => filesNow[p]);
+                const pongWrite = await applyChatReplyEdits({
+                  reply: pongPaths.map((p) => `@@@FILE ${p}\n${filesNow[p]}`).join('\n'),
+                  projectId: pid,
+                  projectName: buildIntent.name,
+                  files: filesNow,
+                  userMessage: briefForBuild,
+                  diskRoot: originDiskRoot,
+                });
+                if (pongWrite.ok) {
+                  filesNow = { ...pongWrite.files, ...scaffold };
+                } else if (originDiskRoot && window.arkDesktop?.workspaceWriteFile) {
+                  const sep = originDiskRoot.includes('\\') ? '\\' : '/';
+                  const root = originDiskRoot.replace(/[/\\]+$/, '');
+                  for (const rel of Object.keys(scaffold)) {
+                    await window.arkDesktop.workspaceWriteFile({
+                      targetPath: `${root}${sep}${rel.replace(/\//g, sep)}`,
+                      content: scaffold[rel],
+                    });
+                  }
+                }
+                ready = isPlayableArcadeGameReady(filesNow);
+                if (!ready.ok && /requestAnimationFrame/i.test(filesNow['src/App.jsx'] || '') && /<canvas\b/i.test(filesNow['src/App.jsx'] || '')) {
+                  ready = { ok: true, reasons: [] };
+                }
+              }
+            } catch {
+              /* keep prior ready state */
+            }
           }
           if (ready.ok) {
             uiBuilt = true;

@@ -1,17 +1,22 @@
 /**
  * Persist Supabase auth session in Electron userData (survives updates).
  * Encrypted with OS safeStorage when available.
+ *
+ * Serialized read/modify/write so concurrent token refresh + setItem cannot
+ * truncate the map and drop the session mid-click.
  */
 
 const fs = require('fs');
 const path = require('path');
 const { app, safeStorage } = require('electron');
 
+let chain = Promise.resolve();
+
 function storePath() {
   return path.join(app.getPath('userData'), 'ark-auth-storage.dat');
 }
 
-function readMap() {
+function readMapSync() {
   try {
     const file = storePath();
     if (!fs.existsSync(file)) return {};
@@ -28,7 +33,7 @@ function readMap() {
   }
 }
 
-function writeMap(map) {
+function writeMapSync(map) {
   const json = JSON.stringify(map && typeof map === 'object' ? map : {});
   fs.mkdirSync(path.dirname(storePath()), { recursive: true });
   if (!safeStorage.isEncryptionAvailable()) {
@@ -39,29 +44,48 @@ function writeMap(map) {
   fs.writeFileSync(storePath(), safeStorage.encryptString(json));
 }
 
+function withLock(fn) {
+  const run = chain.then(fn, fn);
+  // Keep the chain alive even when fn throws.
+  chain = run.then(() => undefined, () => undefined);
+  return run;
+}
+
 function getItem(key) {
   if (typeof key !== 'string' || !key) return null;
-  const map = readMap();
-  const v = map[key];
-  return typeof v === 'string' ? v : null;
+  return withLock(() => {
+    const map = readMapSync();
+    const v = map[key];
+    return typeof v === 'string' ? v : null;
+  });
 }
 
 function setItem(key, value) {
   if (typeof key !== 'string' || !key) return false;
-  const map = readMap();
-  map[key] = String(value ?? '');
-  writeMap(map);
-  return true;
+  return withLock(() => {
+    const map = readMapSync();
+    map[key] = String(value ?? '');
+    writeMapSync(map);
+    return true;
+  }).then(
+    (ok) => ok,
+    () => false,
+  );
 }
 
 function removeItem(key) {
   if (typeof key !== 'string' || !key) return false;
-  const map = readMap();
-  if (key in map) {
-    delete map[key];
-    writeMap(map);
-  }
-  return true;
+  return withLock(() => {
+    const map = readMapSync();
+    if (key in map) {
+      delete map[key];
+      writeMapSync(map);
+    }
+    return true;
+  }).then(
+    (ok) => ok,
+    () => false,
+  );
 }
 
 module.exports = {

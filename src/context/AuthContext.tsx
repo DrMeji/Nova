@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { Session, User } from '@supabase/supabase-js';
-import { supabase } from '@/lib/supabase';
+import { supabase, clearAuthLocalFallback } from '@/lib/supabase';
 import type { Profile, UserSettings } from '@/types';
 import {
   clearSetupCompleted,
@@ -88,16 +88,45 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [packaged, setPackaged] = useState(false);
   const bypassRef = useRef(false);
   bypassRef.current = bypass;
+  /** Last known-good session — used to undo spurious SIGNED_OUT within seconds of login. */
+  const lastGoodSessionRef = useRef<Session | null>(null);
+  const intentionalSignOutRef = useRef(false);
+  const restoringSessionRef = useRef(false);
 
-  const loadProfileAndSettings = async (userId: string) => {
+  const rememberSession = (next: Session | null) => {
+    if (next?.access_token && next.refresh_token) {
+      lastGoodSessionRef.current = next;
+    }
+  };
+
+  const sessionStillUsable = (s: Session | null | undefined) => {
+    if (!s?.access_token || !s.refresh_token) return false;
+    // Prefer JWT exp — stored expires_at can be wrong when the OS clock is skewed
+    // vs Supabase (that skew is what caused the post-login refresh storm).
+    try {
+      const payload = JSON.parse(atob(s.access_token.split('.')[1]!.replace(/-/g, '+').replace(/_/g, '/')));
+      const exp = Number(payload?.exp);
+      if (Number.isFinite(exp) && exp * 1000 > Date.now() + 15_000) return true;
+    } catch {
+      /* fall through */
+    }
+    const expMs = (s.expires_at ?? 0) * 1000;
+    if (expMs > Date.now() + 15_000) return true;
+    // Refresh token can still revive the session even if access looks expired locally.
+    return s.refresh_token.length > 10;
+  };
+
+  // Never call supabase.auth.getUser() here — in auth-js 2.112.x a transient
+  // session_not_found still runs _removeSession() and fires SIGNED_OUT, which
+  // looks like a random sign-out after Code pill / typing / login.
+  const loadProfileAndSettings = async (userId: string, authUser?: User | null) => {
     await ensureFirstRunGate();
     const setupDone = isSetupCompleted();
-    const [profileRes, settingsRes, authUserRes] = await Promise.all([
+    const [profileRes, settingsRes] = await Promise.all([
       supabase.from('profiles').select('*').eq('id', userId).maybeSingle(),
       supabase.from('user_settings').select('*').eq('user_id', userId).maybeSingle(),
-      supabase.auth.getUser(),
     ]);
-    const accountEmail = authUserRes.data.user?.email || null;
+    const accountEmail = authUser?.email || null;
     if (profileRes.data) {
       const p = profileRes.data as Profile;
       const due = await finalizeScheduledDeletionIfDue(p.delete_scheduled_at);
@@ -108,7 +137,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setSettings(null);
         return;
       }
-      const metaName = authUserRes.data.user?.user_metadata?.display_name as string | undefined;
+      const metaName = authUser?.user_metadata?.display_name as string | undefined;
       const display = p.display_name || metaName || null;
       setProfile({
         ...p,
@@ -194,10 +223,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       localStorage.removeItem(BYPASS_KEY);
 
       // Fresh / reinstalled desktop: wipe leftover sessions so AuthScreen is first.
+      // Only once at cold start — never after a live sign-in in this Electron session.
       if (isPackaged && isFreshInstallGate()) {
         localStorage.removeItem(BYPASS_KEY);
         try {
-          await supabase.auth.signOut();
+          await supabase.auth.signOut({ scope: 'local' });
         } catch {
           /* ignore */
         }
@@ -221,36 +251,100 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       const { data } = await supabase.auth.getSession();
       if (cancelled) return;
+      rememberSession(data.session);
       setSession(data.session);
       setUser(data.session?.user ?? null);
       if (data.session?.user) {
-        await loadProfileAndSettings(data.session.user.id);
+        await loadProfileAndSettings(data.session.user.id, data.session.user);
         if (!cancelled) setLoading(false);
       } else {
         setLoading(false);
       }
     })();
 
-    const { data: authListener } = supabase.auth.onAuthStateChange((_event, newSession) => {
+    const { data: authListener } = supabase.auth.onAuthStateChange((event, newSession) => {
       // Guest bypass is in-memory only; ignore sign-out events that clear the real token.
       if (!newSession?.user && bypassRef.current) {
         setLoading(false);
         return;
       }
-      setSession(newSession);
-      setUser(newSession?.user ?? null);
+
       if (newSession?.user) {
-        (async () => {
+        intentionalSignOutRef.current = false;
+        rememberSession(newSession);
+        setSession(newSession);
+        setUser(newSession.user);
+        void (async () => {
           await ensureFirstRunGate();
           if (cancelled) return;
-          await loadProfileAndSettings(newSession.user.id);
+          await loadProfileAndSettings(newSession.user.id, newSession.user);
           if (!cancelled) setLoading(false);
         })();
-      } else {
+        return;
+      }
+
+      // Null session / SIGNED_OUT — ignore non-sign-out noise (refresh races).
+      if (event !== 'SIGNED_OUT') {
+        setLoading(false);
+        return;
+      }
+
+      // Explicit Sign out button — always clear.
+      if (intentionalSignOutRef.current) {
+        lastGoodSessionRef.current = null;
+        setSession(null);
+        setUser(null);
         setProfile(null);
         setSettings(null);
         setLoading(false);
+        return;
       }
+
+      // Spurious kickout (common 5–10s after bat launch / Code click): restore
+      // if we still have a usable access token in memory.
+      void (async () => {
+        if (cancelled || bypassRef.current || restoringSessionRef.current) return;
+
+        try {
+          const { data } = await supabase.auth.getSession();
+          if (data.session?.user) {
+            rememberSession(data.session);
+            setSession(data.session);
+            setUser(data.session.user);
+            setLoading(false);
+            return;
+          }
+        } catch {
+          /* try memory restore next */
+        }
+
+        const last = lastGoodSessionRef.current;
+        if (sessionStillUsable(last)) {
+          restoringSessionRef.current = true;
+          try {
+            // Stay in-app immediately. Prefer getSession (uses storage) over
+            // setSession — setSession treats clock-skewed JWT exp as expired and
+            // forces another refresh (the post-login kickout loop).
+            rememberSession(last!);
+            setSession(last!);
+            setUser(last!.user);
+            setLoading(false);
+            return;
+          } catch {
+            /* fall through */
+          } finally {
+            restoringSessionRef.current = false;
+          }
+        }
+
+        if (cancelled || bypassRef.current) return;
+        lastGoodSessionRef.current = null;
+        setSession(null);
+        setUser(null);
+        setProfile(null);
+        setSettings(null);
+        setLoading(false);
+      })();
     });
 
     return () => {
@@ -261,9 +355,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signIn = async (email: string, password: string) => {
     await ensureFirstRunGate();
+    intentionalSignOutRef.current = false;
     const wasGuest = bypass;
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-    if (!error) {
+    if (!error && data.session) {
+      rememberSession(data.session);
+      setSession(data.session);
+      setUser(data.session.user ?? null);
       localStorage.setItem('ark:last-auth', JSON.stringify({
         method: 'supabase',
         email,
@@ -277,6 +375,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         localStorage.removeItem(BYPASS_KEY);
         setBypass(false);
         void mergeGuestSocialToCloud(data.user.id);
+      }
+      // Force profile load immediately so we don't wait on a flaky auth event.
+      if (data.session.user) {
+        void loadProfileAndSettings(data.session.user.id, data.session.user);
       }
     }
     if (error) {
@@ -402,16 +504,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signOut = async () => {
+    intentionalSignOutRef.current = true;
+    lastGoodSessionRef.current = null;
     localStorage.removeItem(BYPASS_KEY);
+    clearAuthLocalFallback();
     setBypass(false);
     setSession(null);
     setUser(null);
     setProfile(null);
     setSettings(null);
     try {
-      await supabase.auth.signOut();
+      await supabase.auth.signOut({ scope: 'local' });
     } catch {
       // ignore
+    }
+    try {
+      await window.arkDesktop?.authStorageRemove?.('ark-auth-token');
+    } catch {
+      /* ignore */
     }
   };
 
@@ -453,7 +563,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setProfile({ ...guestProfile(), ark_id: id });
       return;
     }
-    if (user) await loadProfileAndSettings(user.id);
+    if (user) await loadProfileAndSettings(user.id, user);
   };
 
   const updateSettings = async (updates: Partial<UserSettings>) => {

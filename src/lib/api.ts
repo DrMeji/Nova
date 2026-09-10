@@ -337,7 +337,10 @@ export async function disconnectProvider(providerId: string) {
 }
 
 export async function completeOnboarding() {
-  const { data: { user } } = await supabase.auth.getUser();
+  // Prefer getSession over getUser — getUser can wipe the local session on
+  // transient session_not_found errors in the current auth-js build.
+  const { data: { session } } = await supabase.auth.getSession();
+  const user = session?.user;
   if (!user) return;
   await supabase.from('profiles').update({ onboarding_completed: true }).eq('id', user.id);
 }

@@ -195,7 +195,8 @@ export function ensureViteReactProjectFiles(
     const fillerOnly = looksLikeFillerStubAppSource(next['src/App.jsx'] || '')
       || looksLikeFillerStubAppSource(next['src/App.tsx'] || '');
     if (!fillerOnly && (jsxBroken || tsxBroken || bothMissingOrEmpty || (jsxBroken && tsxEmpty) || (tsxBroken && jsxEmpty))) {
-      const shell = buildLastResortMarketingApp(projectName);
+      // Neutral interactive shell — never stamp a restaurant/cafe onto todo/app creates.
+      const shell = buildLastResortInteractiveApp(projectName);
       next['src/App.jsx'] = shell.app;
       next['src/App.css'] = shell.css;
       if (next['src/App.tsx'] != null) {
@@ -295,6 +296,40 @@ export function isEmptyOrStubAppSource(body: string): boolean {
   return false;
 }
 
+/**
+ * Restaurant/seafood/dinner briefs often get free-model coffee menus (espresso/latte).
+ * Detect drink-name menus even when the code uses `Dish` / `dishes` identifiers.
+ */
+export function restaurantBriefBuiltAsCoffeeShop(app: string, brief: string): boolean {
+  const b = String(brief || '');
+  const a = String(app || '');
+  if (!b.trim() || !a.trim()) return false;
+  // Brief explicitly wants a cafe → coffee is correct.
+  if (/\b(?:coffee\s*shop|caf[eé]|espresso\s*bar|roastery|roaster)\b/i.test(b)
+    && !/\b(?:restaurant|seafood|dinner|coastal\s+kitchen|bistro)\b/i.test(b)) {
+    return false;
+  }
+  const wantsFoodRestaurant = /\b(?:restaurant|bistro|seafood|dinner|coastal|kitchen|dishes?)\b/i.test(b)
+    || /\b(?:landing\s+page|hero).{0,80}\b(?:menu|dishes?)\b/i.test(b);
+  if (!wantsFoodRestaurant) return false;
+  const coffeeDrinks = (a.match(/\b(?:espresso|cappuccino|latte|mocha|americano|macchiato|flat\s*white|cold\s*brew|cortado)\b/gi) || []).length;
+  const foodSignals = (a.match(
+    /\b(?:halibut|salmon|tuna|oyster|mussel|gnocchi|pasta|steak|entree|entr[eé]e|seafood|grill(?:ed)?|panna\s*cotta|risotto|chowder|bisque|dumpling|brassica|kitchen|dinner|dining)\b/gi,
+  ) || []).length;
+  // Two+ coffee drinks and no food signals = wrong product genre.
+  if (coffeeDrinks >= 2 && foodSignals === 0) return true;
+  // Older heuristic: coffee words without any restaurant-genre language in the App body.
+  if (
+    /\b(?:coffee|cafe|latte|espresso|mocha|roast)\b/i.test(a)
+    && coffeeDrinks >= 1
+    && !/\b(?:restaurant|seafood|entree|entr[eé]e|dinner|kitchen|galley|coastal)\b/i.test(a)
+    && foodSignals === 0
+  ) {
+    return true;
+  }
+  return false;
+}
+
 /** Marketing / restaurant / landing briefs need real page depth before Preview Ready. */
 export function briefLooksLikeMarketingLanding(brief: string): boolean {
   const t = String(brief || '');
@@ -349,6 +384,67 @@ export function looksLikeReactEntrypointSource(appSource: string | undefined | n
   return false;
 }
 
+/** Neutral last-resort App when the model left an unusable shell (not genre-specific). */
+export function buildLastResortInteractiveApp(projectName: string): { app: string; css: string } {
+  const title = String(projectName || 'Studio').replace(/[`$\\]/g, '').trim() || 'Studio';
+  return {
+    app: `import { useState } from 'react';
+import './App.css';
+
+export default function App() {
+  const [items, setItems] = useState([{ id: '1', text: 'First item', done: false }]);
+  const [draft, setDraft] = useState('');
+  return (
+    <main className="app">
+      <header className="hero">
+        <h1>${title}</h1>
+        <p className="lede">Working shell — add items and toggle them.</p>
+      </header>
+      <form
+        className="row"
+        onSubmit={(e) => {
+          e.preventDefault();
+          const text = draft.trim();
+          if (!text) return;
+          setItems((prev) => [{ id: String(Date.now()), text, done: false }, ...prev]);
+          setDraft('');
+        }}
+      >
+        <input value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Add item" aria-label="Add item" />
+        <button type="submit">Add</button>
+      </form>
+      <ul className="list">
+        {items.map((item) => (
+          <li key={item.id}>
+            <button type="button" onClick={() => setItems((prev) => prev.map((x) => x.id === item.id ? { ...x, done: !x.done } : x))}>
+              {item.done ? 'Done' : 'Open'}
+            </button>
+            <span className={item.done ? 'done' : ''}>{item.text}</span>
+            <button type="button" onClick={() => setItems((prev) => prev.filter((x) => x.id !== item.id))}>Remove</button>
+          </li>
+        ))}
+      </ul>
+    </main>
+  );
+}
+`,
+    css: `:root { --bg:#12151c; --ink:#eef2f7; --muted:#9aa6b8; --accent:#6ee0c4; --line:rgba(255,255,255,.12); }
+* { box-sizing: border-box; }
+body { margin: 0; font-family: "Segoe UI", sans-serif; background: var(--bg); color: var(--ink); }
+.app { min-height: 100vh; padding: 2rem 1.25rem; max-width: 40rem; margin: 0 auto; }
+.hero h1 { margin: 0 0 .5rem; font-size: clamp(2rem,5vw,3rem); }
+.lede { color: var(--muted); }
+.row { display: grid; grid-template-columns: 1fr auto; gap: .5rem; margin: 1rem 0; }
+input, button { font: inherit; }
+input { padding: .7rem .8rem; border-radius: .6rem; border: 1px solid var(--line); background: #0e1218; color: var(--ink); }
+button { padding: .7rem .9rem; border-radius: .6rem; border: 0; background: var(--accent); color: #10221c; font-weight: 700; cursor: pointer; }
+.list { list-style: none; padding: 0; margin: 0; display: grid; gap: .45rem; }
+.list li { display: grid; grid-template-columns: auto 1fr auto; gap: .6rem; align-items: center; padding: .65rem .7rem; border: 1px solid var(--line); border-radius: .6rem; }
+.done { text-decoration: line-through; color: var(--muted); }
+`,
+  };
+}
+
 /** Last-resort Vite marketing shell when the model left an unusable App (entrypoint / empty). */
 export function buildLastResortMarketingApp(projectName: string): { app: string; css: string } {
   const title = String(projectName || 'Studio').replace(/[`$\\]/g, '').trim() || 'Studio';
@@ -363,16 +459,16 @@ export default function App() {
       <header className="hero">
         <p className="eyebrow">Welcome</p>
         <h1>${title}</h1>
-        <p className="lede">Crafted for everyday guests — clear story, honest menu, easy next step.</p>
+        <p className="lede">Coastal plates, candlelight, and an easy next step to the table.</p>
         <button type="button" onClick={() => setNote('Thanks — we will see you soon.')}>Order ahead</button>
         {note ? <p className="toast">{note}</p> : null}
       </header>
       <section className="panel">
         <h2>Menu highlights</h2>
         <ul>
-          <li><strong>House drip</strong> — $3.50</li>
-          <li><strong>Flat white</strong> — $4.75</li>
-          <li><strong>Seasonal pour-over</strong> — $5.25</li>
+          <li><strong>Ember-Grilled Halibut</strong> — $34</li>
+          <li><strong>Kelp Butter Gnocchi</strong> — $26</li>
+          <li><strong>Salted Honey Panna Cotta</strong> — $13</li>
         </ul>
       </section>
       <section className="panel">
@@ -499,12 +595,10 @@ export function isPreviewReady(
     const hasCta = /<(?:button|a)\b/i.test(app)
       || /\b(?:cta|order|reserve|book|explore|menu)\b/i.test(app);
     const cssLen = cssBlob.replace(/\s+/g, '').length;
-    if (app.length < 1200) reasons.push('landing App.jsx too thin for a real page');
+    if (app.length < 2000) reasons.push('landing App.jsx too thin for a real page');
     if (!hasStructure) reasons.push('landing App missing sections (hero/menu/footer)');
-    if (cssLen < 800) reasons.push('landing CSS too thin');
-    if (/\b(?:restaurant|bistro|dishes?)\b/i.test(brief)
-      && /\b(?:coffee|cafe|latte|espresso|mocha|roast)\b/i.test(app)
-      && !/\b(?:restaurant|seafood|dish|entree|dinner|kitchen|galley)\b/i.test(app)) {
+    if (cssLen < 1500) reasons.push('landing CSS too thin');
+    if (restaurantBriefBuiltAsCoffeeShop(app, brief)) {
       reasons.push('restaurant brief built as a coffee shop instead');
     }
     if (/\b(?:restaurant|menu|dishes?|cafe|bistro)\b/i.test(brief) && !/\b(?:menu|dish|price|\$\d)/i.test(app)) {

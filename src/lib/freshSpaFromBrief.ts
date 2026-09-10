@@ -192,10 +192,10 @@ export function looksLikePlayableCanvasGame(summary: string, title = ''): boolea
     return false;
   }
   return (
-    /\b(?:playable|arcade|canvas\s+game|html5\s+game|browser\s+game|asteroid|space\s+shooter|fps|first[\s-]?person|shooter)\b/.test(t)
+    /\b(?:playable|arcade|canvas\s+game|html5\s+game|browser\s+game|asteroid|space\s+shooter|fps|first[\s-]?person|shooter|pong|paddle\s+ball)\b/.test(t)
     || (
       /\bgame\b/.test(t)
-      && /\b(?:score|lives?|shoot(?:ing)?|hud|game\s*over|play\s+again|arrow\s+keys?|space\s*bar|player\s+ship|weapons?|enemies|hitscan|crosshair|muzzle)\b/.test(t)
+      && /\b(?:score|lives?|shoot(?:ing)?|hud|game\s*over|play\s+again|arrow\s+keys?|space\s*bar|player\s+ship|weapons?|enemies|hitscan|crosshair|muzzle|paddle|ball|reset)\b/.test(t)
     )
     // Rebuild briefs often list mechanics without the word "game".
     || (
