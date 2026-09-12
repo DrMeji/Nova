@@ -1,6 +1,19 @@
 /**
+ * True only for real food-service / restaurant briefs — never product marketing, watches, apple.com, etc.
+ */
+export function briefLooksLikeRestaurantLanding(brief: string): boolean {
+  const t = String(brief || '');
+  if (!t.trim()) return false;
+  if (/\b(?:apple\.com|product\s+marketing|premium\s+product|marketing\s+homepage|chronograph|product\s+homepage|iphone|macbook|watch\s+brand|alpine)\b/i.test(t)) {
+    return false;
+  }
+  return /\b(?:restaurant|bistro|dining|seafood|steakhouse|brasserie|eatery|plated\s+dishes|tonight'?s\s+(?:menu|table)|food\s+landing|kitchen\s+landing)\b/i.test(t)
+    || (/\bmenu\b/i.test(t) && /\b(?:dish|dishes|entree|entrée|prix\s*fixe)\b/i.test(t));
+}
+
+/**
  * Terminal-class restaurant landing fallback when free models keep shipping coffee stubs.
- * Used only after Ready retries fail for restaurant/marketing briefs.
+ * Used only after Ready retries fail for restaurant briefs — never for product marketing.
  */
 export function buildRestaurantLandingScaffold(projectName: string): { app: string; css: string; indexCss: string } {
   const title = String(projectName || 'Studio').replace(/[`$\\]/g, '').trim() || 'Studio';

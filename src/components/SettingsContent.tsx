@@ -76,10 +76,10 @@ const SECTIONS: { id: string; label: string; icon: typeof User; disabled?: boole
 ];
 
 const AI_MODES = [
-  { value: 'automatic', label: 'Automatic' },
-  { value: 'local_only', label: 'Local Only' },
-  { value: 'cloud_when_available', label: 'Cloud When Available' },
-  { value: 'local_fallback', label: 'Local Fallback' },
+  { value: 'automatic', label: 'Automatic', hint: 'Pick the best path per ask' },
+  { value: 'local_only', label: 'Local Only', hint: 'On-device GGUF / Ollama only' },
+  { value: 'cloud_when_available', label: 'Hybrid', hint: 'Cloud create + local when useful' },
+  { value: 'local_fallback', label: 'Cloud Create', hint: 'Prefer cloud for builds, local backup' },
 ];
 
 const DEFAULT_MODELS = [
@@ -906,6 +906,9 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                             <p className={`text-sm font-medium ${aiMode === mode.value ? 'text-ark-blue-300' : 'text-content-primary'}`}>
                               {mode.label}
                             </p>
+                            {'hint' in mode && mode.hint ? (
+                              <p className="text-xs text-content-tertiary mt-0.5">{mode.hint}</p>
+                            ) : null}
                           </div>
                           {aiMode === mode.value && <Check className="w-4 h-4 text-ark-blue-400 shrink-0" />}
                         </div>

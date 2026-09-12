@@ -959,7 +959,7 @@ function deleteGrantedFolder(targetPath) {
   }
 }
 
-function writeGrantedFile(targetPath, content = '') {
+function resolveGrantedTarget(targetPath) {
   const full = path.resolve(String(targetPath || ''));
   if (!full) return { ok: false, error: 'Invalid path' };
   if (!isAllowedExternalPath(full)) {
@@ -979,11 +979,110 @@ function writeGrantedFile(targetPath, content = '') {
     if (!isAllowedExternalPath(realTarget)) {
       return { ok: false, error: 'Path is outside an approved NOVA workspace.' };
     }
-    fs.mkdirSync(path.dirname(realTarget), { recursive: true });
-    fs.writeFileSync(realTarget, typeof content === 'string' ? content : String(content ?? ''), 'utf8');
     return { ok: true, path: realTarget };
   } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'Path failed' };
+  }
+}
+
+function writeGrantedFile(targetPath, content = '') {
+  const resolved = resolveGrantedTarget(targetPath);
+  if (!resolved.ok) return resolved;
+  try {
+    fs.mkdirSync(path.dirname(resolved.path), { recursive: true });
+    fs.writeFileSync(resolved.path, typeof content === 'string' ? content : String(content ?? ''), 'utf8');
+    return { ok: true, path: resolved.path };
+  } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'Write failed' };
+  }
+}
+
+function writeGrantedBuffer(targetPath, buf) {
+  const resolved = resolveGrantedTarget(targetPath);
+  if (!resolved.ok) return resolved;
+  try {
+    fs.mkdirSync(path.dirname(resolved.path), { recursive: true });
+    fs.writeFileSync(resolved.path, Buffer.isBuffer(buf) ? buf : Buffer.from(buf));
+    return { ok: true, path: resolved.path, bytes: Buffer.byteLength(buf) };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'Write failed' };
+  }
+}
+
+async function saveAssetToGrantedPath(payload = {}) {
+  const dest = String(payload.targetPath || '').trim();
+  if (!dest) return { ok: false, error: 'Missing target path' };
+  try {
+    if (payload.base64) {
+      const raw = String(payload.base64).replace(/^data:[^;]+;base64,/, '');
+      return writeGrantedBuffer(dest, Buffer.from(raw, 'base64'));
+    }
+    const url = String(payload.url || '').trim();
+    if (!url) return { ok: false, error: 'Missing url' };
+    if (!/^https?:\/\//i.test(url) && !url.startsWith('data:')) {
+      return { ok: false, error: 'Only http(s) or data URLs can be imported' };
+    }
+    if (url.startsWith('data:')) {
+      const m = url.match(/^data:[^;]+;base64,(.+)$/);
+      if (!m) return { ok: false, error: 'Invalid data URL' };
+      return writeGrantedBuffer(dest, Buffer.from(m[1], 'base64'));
+    }
+    const ac = new AbortController();
+    const t = setTimeout(() => ac.abort(), Number(payload.timeoutMs) || 45000);
+    try {
+      const res = await fetch(url, {
+        signal: ac.signal,
+        headers: {
+          'User-Agent': 'NOVA-Desktop/1.0 (brand-assets)',
+          Accept: 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*',
+        },
+      });
+      if (!res.ok) return { ok: false, error: `Fetch ${res.status}` };
+      const buf = Buffer.from(await res.arrayBuffer());
+      if (buf.length < 32) return { ok: false, error: 'Empty download' };
+      return writeGrantedBuffer(dest, buf);
+    } finally {
+      clearTimeout(t);
+    }
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'Download failed' };
+  }
+}
+
+async function searchOpenverseImages(query, opts = {}) {
+  const q = String(query || '').trim();
+  if (!q) return { ok: false, results: [] };
+  try {
+    const pageSize = Math.min(12, Math.max(3, Number(opts.pageSize) || 6));
+    const url = `https://api.openverse.org/v1/images/?q=${encodeURIComponent(q)}&page_size=${pageSize}&mature=false`;
+    const ac = new AbortController();
+    const t = setTimeout(() => ac.abort(), 20000);
+    try {
+      const res = await fetch(url, {
+        signal: ac.signal,
+        headers: {
+          'User-Agent': 'NOVA-Desktop/1.0 (brand-assets)',
+          Accept: 'application/json',
+        },
+      });
+      if (!res.ok) return { ok: false, results: [], error: `Openverse ${res.status}` };
+      const data = await res.json();
+      const rows = Array.isArray(data?.results) ? data.results : [];
+      const results = rows
+        .map((r) => ({
+          url: String(r.url || r.thumbnail || ''),
+          title: String(r.title || ''),
+          foreign: String(r.foreign_landing_url || ''),
+          width: Number(r.width) || 0,
+          height: Number(r.height) || 0,
+        }))
+        .filter((r) => /^https?:\/\//i.test(r.url));
+      return { ok: true, results };
+    } finally {
+      clearTimeout(t);
+    }
+  } catch (err) {
+    return { ok: false, results: [], error: err instanceof Error ? err.message : 'search failed' };
   }
 }
 
@@ -1323,6 +1422,9 @@ module.exports = {
   deleteWorkspaceRoot,
   deleteGrantedFolder,
   writeGrantedFile,
+  writeGrantedBuffer,
+  saveAssetToGrantedPath,
+  searchOpenverseImages,
   renameGrantedPath,
   walkProjectFiles,
   walkProjectFilesPaced,

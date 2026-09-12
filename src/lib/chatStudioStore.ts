@@ -135,6 +135,12 @@ export async function resolveChatProjectRoot(opts: {
   );
   const wantName = productName;
   const wantKey = wantName.toLowerCase();
+  const wantSlug = wantName
+    ? wantName
+      .toLowerCase()
+      .replace(/[^a-z0-9._]+/g, '-')
+      .replace(/^[-.]+|[-.]+$/g, '')
+    : '';
 
   const candidates: string[] = [];
   if (last?.path) candidates.push(last.path);
@@ -160,12 +166,17 @@ export async function resolveChatProjectRoot(opts: {
         if (listing?.ok) {
           for (const item of listing.items || []) {
             if (item.kind !== 'dir') continue;
-            if (String(item.name || '').toLowerCase() === wantKey && item.path) {
+            const n = String(item.name || '').toLowerCase();
+            // Keep dotted product folders (apple.com) bound to the chat diskRoot.
+            if ((n === wantKey || (wantSlug && n === wantSlug)) && item.path) {
               candidates.unshift(item.path);
             }
           }
         }
         candidates.push(studioPathJoin(projectsDir, wantName));
+        if (wantSlug && wantSlug !== wantKey) {
+          candidates.push(studioPathJoin(projectsDir, wantSlug));
+        }
       }
     }
   } catch {
@@ -175,7 +186,8 @@ export async function resolveChatProjectRoot(opts: {
   let chosen: string | null = null;
   for (const c of candidates) {
     if (!(await pathLooksReal(c))) continue;
-    if (wantKey && studioPathBasename(c).toLowerCase() === wantKey) {
+    const base = studioPathBasename(c).toLowerCase();
+    if (wantKey && (base === wantKey || (wantSlug && base === wantSlug))) {
       chosen = c;
       break;
     }

@@ -103,10 +103,18 @@ export function planMultiModelWebsiteTeam(
   return parts;
 }
 
-/** Footer label — keep it short and professional. */
-export function formatMultiModelAttribution(_parts: MultiModelPartResult[]): string {
-  void _parts;
-  return 'Multi-model';
+/** Footer label — show the actual brains that owned each part. */
+export function formatMultiModelAttribution(parts: MultiModelPartResult[]): string {
+  const ok = (parts || []).filter((p) => p?.model?.name);
+  if (!ok.length) return 'Multi-model';
+  const roleLabel: Record<MultiModelPartPlan['role'], string> = {
+    structure: 'Layout',
+    style: 'Style',
+    interaction: 'Polish',
+  };
+  return ok
+    .map((p) => `${roleLabel[p.role] || p.label} · ${p.model.name}${p.ok ? '' : ' (retry)'}`)
+    .join(' → ');
 }
 
 export function multiModelStatusLine(part: MultiModelPartPlan, index: number, total: number): string {
@@ -115,5 +123,6 @@ export function multiModelStatusLine(part: MultiModelPartPlan, index: number, to
     style: 'Designing styles (App.css)',
     interaction: 'Polishing interaction + hover states',
   };
-  return `Multi-model ${index + 1}/${total}: ${jobs[part.role]}…`;
+  const brain = part.model?.name ? ` · ${part.model.name}` : '';
+  return `Multi-model ${index + 1}/${total}: ${jobs[part.role]}${brain}…`;
 }

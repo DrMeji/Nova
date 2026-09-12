@@ -97,6 +97,33 @@ export function isBrokenReactAppSource(appSource: string | undefined | null): bo
   const closes = (s.match(/\}/g) || []).length;
   // Allow mild imbalance from `{` inside strings; huge gaps still mean truncated output.
   if (Math.abs(opens - closes) > 6) return true;
+  // Mid-stream / truncated model dumps (ends mid-tag or never closes the component).
+  if (looksLikeTruncatedUiSource(s)) return true;
+  // React.useState without importing React → Preview white-screen.
+  if (
+    /\bReact\.use(?:State|Effect|Memo|Callback|Ref|Reducer)\s*\(/.test(s)
+    && !/\bimport\s+React\b|\bimport\s+\*\s+as\s+React\b|\bimport\s+\{[^}]*\buse(?:State|Effect)/.test(s)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/** True when App/CSS source was cut off mid-write (common local-model failure). */
+export function looksLikeTruncatedUiSource(source: string | undefined | null): boolean {
+  const s = String(source || '').replace(/\s+$/g, '');
+  if (!s || s.length < 80) return false;
+  // Ends inside an opening tag: `<h3` or `<div className="foo`
+  if (/<[A-Za-z][\w.:-]*([^>'"`]|"[^"]*"|'[^']*')*$/.test(s)) return true;
+  // Ends mid-expression / mid-string / mid-JSX prop
+  if (/[=({[,:]\s*$/.test(s)) return true;
+  if (/["'`]\s*$/.test(s) && (s.match(/["'`]/g) || []).length % 2 === 1) return true;
+  // Component file that never closes its outermost function/module brace
+  if (/export\s+default/i.test(s) && !/\}\s*;?\s*$/.test(s)) return true;
+  // Far more open JSX tags than closes (truncated return tree)
+  const openTags = (s.match(/<[A-Za-z][\w.-]*\b[^>]*(?<!\/)\s*>/g) || []).length;
+  const closeTags = (s.match(/<\/[A-Za-z][\w.-]*>/g) || []).length;
+  if (openTags >= 6 && openTags - closeTags >= 4) return true;
   return false;
 }
 

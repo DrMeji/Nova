@@ -13,7 +13,8 @@ export type BuiltinNovaSkillId =
   | 'tool-ui-density'
   | 'redesign-audit'
   | 'image-to-code'
-  | 'motion-presence';
+  | 'motion-presence'
+  | 'brand-assets';
 
 /** Built-in or project-local id (project packs use free-form ids). */
 export type NovaSkillId = BuiltinNovaSkillId | string;
@@ -96,6 +97,20 @@ export const NOVA_SKILL_PACKS: NovaSkillPack[] = [
       'Preserve working structure; change only what the user asked.',
       'Before restyling, note what to keep (brand colors, content, IA).',
       'Prefer surgical CSS/HTML edits over full-file rewrites.',
+    ].join(' '),
+  },
+  {
+    id: 'brand-assets',
+    name: 'Brand assets',
+    summary: 'Fetch logos, icons, and unique photos into public/ on create and chat uploads.',
+    tags: ['landing', 'web', 'brand', 'image'],
+    alwaysOnCreate: true,
+    source: 'builtin',
+    rules: [
+      'NOVA imports real assets into public/ (SVG logos via Iconify, unique CC photos via Openverse, user uploads, pasted Unsplash/Pexels links). Use /logo.svg, /icons/*.svg, /heroes/*.jpg — never hotlink Pollinations, never scrape apple.com CDN, never reuse canned cafe Unsplash IDs.',
+      'If the user pasted image or icon URLs, those URLs win. If they attached one or more photos and said use them for the site/hero/logo/background, save into public/ and point CSS/JSX at those files.',
+      'If they ask for professional icons without a link, use a Lucide/Iconify set under /icons/*.svg. If they paste an Iconify link or lucide:name id, fetch that exact icon.',
+      'Nav logo is a sharp SVG <img>, not generated pixels. Heroes are downloaded files on disk so Preview stays crisp.',
     ].join(' '),
   },
   {
@@ -288,13 +303,20 @@ export function selectSkillsForBrief(
     if (!picked.some(p => p.id === id)) picked.push(pack);
   };
 
-  if (opts?.forCreateBuild) add('preview-contract');
+  if (opts?.forCreateBuild) {
+    add('preview-contract');
+    add('brand-assets');
+  }
 
   if (opts?.isEdit || /\b(redesign|restyle|improve\s+(?:the\s+)?(?:look|ui|design))\b/.test(t)) {
     add('redesign-audit');
   }
   if (opts?.hasReferenceImage || /\b(from\s+(?:this\s+)?(?:image|screenshot|mockup)|image[\s-]?to[\s-]?code)\b/.test(t)) {
     add('image-to-code');
+    add('brand-assets');
+  }
+  if (/\b(?:logo|hero|background\s*image|brand\s*assets?|use this as)\b/.test(t)) {
+    add('brand-assets');
   }
   if (
     kind === 'static-web'

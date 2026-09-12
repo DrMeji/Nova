@@ -101,6 +101,12 @@ function parseRenameFileTarget(text: string): {
 function looksLikeAddFileAsk(text: string): boolean {
   const t = String(text || '').trim();
   if (isProjectCreateBrief(t)) return false;
+  // Attached photos / asset links are not "add a file" to the project tree.
+  if (/!\[[^\]]*]\((?:ark-media:|data:image\/)/i.test(t)) return false;
+  if (/\b(?:use (?:this|these)|for (?:the )?(?:site|hero|logo|background)|professional icons?)\b/i.test(t)
+    && /\b(?:image|photo|icon|unsplash|iconify|pexels)\b/i.test(t)) {
+    return false;
+  }
   if (/\b(?:real|full|actual|component)\s+files\b/i.test(t)) return false;
   if (/\bwith\s+real\s+files\b/i.test(t)) return false;
   if (/\bedit files\b/i.test(t) && !/\b(?:add|create|make|write|put)\s+(?:a\s+|the\s+|new\s+)?files?\b/i.test(t)) {

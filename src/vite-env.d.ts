@@ -474,7 +474,7 @@ declare global {
         error?: string;
         needsConfirm?: boolean;
       }>;
-      agentStartDevServer?: (payload: { cwd?: string }) => Promise<{
+      agentStartDevServer?: (payload: { cwd?: string; depsReady?: boolean }) => Promise<{
         ok: boolean;
         cwd?: string;
         url?: string;
@@ -530,6 +530,20 @@ declare global {
         targetPath: string;
         content?: string;
       }) => Promise<{ ok: boolean; path?: string; error?: string }>;
+      workspaceSaveAsset?: (payload: {
+        targetPath: string;
+        url?: string;
+        base64?: string;
+        timeoutMs?: number;
+      }) => Promise<{ ok: boolean; path?: string; bytes?: number; error?: string }>;
+      brandSearchImages?: (payload: {
+        query: string;
+        pageSize?: number;
+      }) => Promise<{
+        ok: boolean;
+        results?: Array<{ url: string; title?: string; width?: number; height?: number }>;
+        error?: string;
+      }>;
       workspaceRenamePath?: (payload: {
         fromPath: string;
         toPath: string;

@@ -62,6 +62,26 @@ async function writeViaDiskRoot(
     if (!written.ok) {
       return { ok: false, error: written.error || `Could not write ${rel}` };
     }
+    // Confirm bytes landed (dotted folder names / grant paths can silently miss).
+    // IPC returns `{ ok, text }` — NOT `content` (that always failed verify and blocked edits).
+    if (window.arkDesktop.readTextFile && /\.(?:jsx?|tsx?|css|html|json)$/i.test(rel)) {
+      try {
+        const check = await window.arkDesktop.readTextFile({ path: targetPath });
+        const got = typeof check?.text === 'string' ? check.text : '';
+        if (!check?.ok) {
+          return { ok: false, error: `Write verify failed for ${rel}` };
+        }
+        // Soft check: empty read after a non-empty write is a real miss; tiny files are fine.
+        if (content.length > 0 && got.length === 0) {
+          return { ok: false, error: `Write verify failed for ${rel}` };
+        }
+        if (content.length >= 80 && got.length < Math.min(40, Math.floor(content.length * 0.25))) {
+          return { ok: false, error: `Write verify failed for ${rel}` };
+        }
+      } catch {
+        /* best-effort verify — do not fail the write on read races */
+      }
+    }
   }
   return { ok: true };
 }
@@ -229,8 +249,8 @@ export async function applyChatReplyEdits(opts: {
   {
     const searchWanted = /\bsearch\s*bar\b/i.test(rawUser)
       && !/\b(?:no|without|never|skip|omit|don't|do\s+not|dont)\b[\s\S]{0,40}\bsearch(?:\s*bar)?\b/i.test(rawUser);
-    const wantsBlackOnly = /(?:ONLY this piece|full-viewport solid|near-black|#1e1f22)/i.test(rawUser)
-      && /ONLY this piece|Stop after the black shell|black shell only/i.test(rawUser);
+    const wantsBlackOnly = /(?:ONLY this piece|full-viewport solid|near-black|#1e1f22|solid pure black|pure black full-viewport|full-viewport background)/i.test(rawUser)
+      && /(?:ONLY this piece|Stop after the black shell|black shell only|first step ONLY|No nav,\s*no text|no icons yet)/i.test(rawUser);
     for (const key of Object.keys(next)) {
       const norm = key.replace(/\\/g, '/');
       if (/(?:^|\/)App\.(jsx|tsx)$/i.test(norm) && isNovaSearchStub(next[key]) && !searchWanted) {

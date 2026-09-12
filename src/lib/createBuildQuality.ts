@@ -5,6 +5,8 @@
 
 import { buildScaffoldFiles } from '@/lib/projectScaffolds';
 import { upgradePollinationsUrlsInSource } from '@/lib/siteHeroImages';
+import { looksLikeTruncatedUiSource } from '@/lib/freshSpaFromBrief';
+import { blankSolidColorFromAsk } from '@/lib/webProjectCanon';
 
 const PROSE_MARKERS = [
   /the updated file should/i,
@@ -161,50 +163,18 @@ export function ensureViteReactProjectFiles(
       repaired.push(key);
     }
   }
-  // Entrypoint written into App.* (createRoot + import App) — replace with a usable marketing shell.
-  {
+    // Entrypoint written into App.* — drop the broken twin only; never inject canned UI.
+    {
     const jsxBroken = looksLikeReactEntrypointSource(next['src/App.jsx'] || '');
     const tsxBroken = looksLikeReactEntrypointSource(next['src/App.tsx'] || '');
-    const jsxEmpty = (() => {
-      const body = next['src/App.jsx'] || '';
-      // Missing App.jsx counts as empty when we only have a broken/missing twin situation.
-      if (!body) return true;
-      if (body.length >= 500 && !looksLikeFillerStubAppSource(body)) return false;
-      if (looksLikeFillerStubAppSource(body)) return true;
-      if (/return\s*\(\s*<div className=["']app["']\s*\/>\s*\)/i.test(body)) return true;
-      if (body.length < 280 && !/<h1\b|<section\b|<header\b/i.test(body)) return true;
-      return false;
-    })();
-    const tsxEmpty = (() => {
-      const body = next['src/App.tsx'] || '';
-      if (!body) return true;
-      if (body.length >= 500 && !looksLikeFillerStubAppSource(body)) return false;
-      if (looksLikeFillerStubAppSource(body)) return true;
-      if (/return\s*\(\s*<div className=["']app["']\s*\/>\s*\)/i.test(body)) return true;
-      if (body.length < 280 && !/<h1\b|<section\b|<header\b/i.test(body)) return true;
-      return false;
-    })();
-    // Only one App.* present: empty if that one is empty (don't require both).
-    const onlyJsx = Boolean(next['src/App.jsx']) && next['src/App.tsx'] == null;
-    const onlyTsx = Boolean(next['src/App.tsx']) && next['src/App.jsx'] == null;
-    const bothMissingOrEmpty = (jsxEmpty && tsxEmpty)
-      || (onlyJsx && jsxEmpty)
-      || (onlyTsx && tsxEmpty);
-    // Filler stubs with an <h1> must NOT be replaced by the canned cafe shell —
-    // Ready should fail and create flow retries / honest failure instead.
-    const fillerOnly = looksLikeFillerStubAppSource(next['src/App.jsx'] || '')
-      || looksLikeFillerStubAppSource(next['src/App.tsx'] || '');
-    if (!fillerOnly && (jsxBroken || tsxBroken || bothMissingOrEmpty || (jsxBroken && tsxEmpty) || (tsxBroken && jsxEmpty))) {
-      // Neutral interactive shell — never stamp a restaurant/cafe onto todo/app creates.
-      const shell = buildLastResortInteractiveApp(projectName);
-      next['src/App.jsx'] = shell.app;
-      next['src/App.css'] = shell.css;
-      if (next['src/App.tsx'] != null) {
-        // Keep one source of truth — drop the broken twin so Vite resolves App.jsx.
+    if (jsxBroken || tsxBroken) {
+      if (jsxBroken && next['src/App.tsx'] && !looksLikeReactEntrypointSource(next['src/App.tsx'] || '')) {
+        delete next['src/App.jsx'];
+        repaired.push('removed:src/App.jsx');
+      } else if (tsxBroken && next['src/App.jsx'] && !looksLikeReactEntrypointSource(next['src/App.jsx'] || '')) {
         delete next['src/App.tsx'];
         repaired.push('removed:src/App.tsx');
       }
-      repaired.push('src/App.jsx', 'src/App.css');
     }
   }
   // #6 Drop App.jsx / App.tsx twins — keep exactly one real App.* after Ready.
@@ -338,7 +308,7 @@ export function briefLooksLikeMarketingLanding(brief: string): boolean {
     && !/\b(?:landing|restaurant|cafe|menu|marketing)\b/i.test(t)) {
     return false;
   }
-  return /\b(?:landing(?:\s+page)?|marketing\s+site|restaurant|bistro|bakery|cafe|coffee\s+shop|roaster|menu\s+highlights|hero|tagline|dishes?|website)\b/i.test(t);
+  return /\b(?:landing(?:\s+page)?|marketing\s+site|product\s+marketing|premium\s+product|apple\.com|restaurant|bistro|bakery|cafe|coffee\s+shop|roaster|menu\s+highlights|hero|tagline|dishes?|website)\b/i.test(t);
 }
 
 /**
@@ -445,83 +415,132 @@ button { padding: .7rem .9rem; border-radius: .6rem; border: 0; background: var(
   };
 }
 
-/** Last-resort Vite marketing shell when the model left an unusable App (entrypoint / empty). */
+/**
+ * Last-resort Vite marketing shell when the model left an unusable App.
+ * Genre-neutral product homepage — NEVER a restaurant/halibut menu.
+ */
 export function buildLastResortMarketingApp(projectName: string): { app: string; css: string } {
   const title = String(projectName || 'Studio').replace(/[`$\\]/g, '').trim() || 'Studio';
   return {
-    app: `import { useState } from 'react';
-import './App.css';
+    app: `import './App.css';
+
+const features = [
+  { n: '01', title: 'Material', body: 'Machined surfaces finished by hand for a quiet, lasting feel.' },
+  { n: '02', title: 'Presence', body: 'A clear silhouette that holds a room without shouting.' },
+  { n: '03', title: 'Craft', body: 'Every detail chosen for daily use, not display cases alone.' },
+];
 
 export default function App() {
-  const [note, setNote] = useState('');
+  const year = new Date().getFullYear();
   return (
-    <div className="app">
-      <header className="hero">
-        <p className="eyebrow">Welcome</p>
-        <h1>${title}</h1>
-        <p className="lede">Coastal plates, candlelight, and an easy next step to the table.</p>
-        <button type="button" onClick={() => setNote('Thanks — we will see you soon.')}>Order ahead</button>
-        {note ? <p className="toast">{note}</p> : null}
-      </header>
-      <section className="panel">
-        <h2>Menu highlights</h2>
-        <ul>
-          <li><strong>Ember-Grilled Halibut</strong> — $34</li>
-          <li><strong>Kelp Butter Gnocchi</strong> — $26</li>
-          <li><strong>Salted Honey Panna Cotta</strong> — $13</li>
-        </ul>
+    <main className="app">
+      <section className="hero" aria-labelledby="brand-name">
+        <nav className="nav" aria-label="Main navigation">
+          <a className="wordmark" href="#top" id="brand-name">${title}</a>
+          <a className="nav-link" href="#story">Discover</a>
+        </nav>
+        <div className="hero-copy" id="top">
+          <p className="eyebrow">Introducing ${title}</p>
+          <h1>Made to be noticed<br /><em>quietly.</em></h1>
+          <p className="lede">A premium product story with room to breathe.</p>
+          <a className="button" href="#story">Explore ${title}</a>
+        </div>
       </section>
-      <section className="panel">
-        <h2>Hours</h2>
-        <p>Mon–Fri 7am–6pm · Sat–Sun 8am–4pm</p>
+      <section className="story" id="story">
+        <h2>Designed for lasting presence.</h2>
+        <p>Form, material, and motion work together so the first viewport feels intentional.</p>
+      </section>
+      <section className="features" aria-label="${title} details">
+        {features.map((f) => (
+          <article key={f.n}>
+            <span className="n">{f.n}</span>
+            <h3>{f.title}</h3>
+            <p>{f.body}</p>
+          </article>
+        ))}
       </section>
       <footer className="footer">
         <strong>${title}</strong>
-        <span>Visit us · Say hello</span>
+        <span>&copy; {year}</span>
       </footer>
-    </div>
+    </main>
   );
 }
 `,
     css: `:root {
-  --bg: #1a1410;
-  --ink: #f4ebe2;
-  --accent: #c47a3a;
-  --muted: #b7a99a;
-  --panel: #241c16;
+  --bg: #0a0c0f;
+  --ink: #f2f4f7;
+  --muted: #9aa3ad;
+  --accent: #d7e4ff;
+  --panel: #12161c;
+  --display: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  --body: "Segoe UI", "Helvetica Neue", sans-serif;
 }
 * { box-sizing: border-box; }
-body { margin: 0; font-family: "Iowan Old Style", "Palatino Linotype", Palatino, serif; background: var(--bg); color: var(--ink); }
-.app { min-height: 100vh; }
+body { margin: 0; font-family: var(--body); background: var(--bg); color: var(--ink); }
+.app { min-height: 100vh; overflow-x: hidden; }
 .hero {
-  padding: 4.5rem 1.5rem 3rem;
+  min-height: 88vh;
+  padding: 1.5rem 4vw 3rem;
+  display: flex;
+  flex-direction: column;
   background:
-    radial-gradient(900px 420px at 12% -10%, #5a3a22 0%, transparent 55%),
-    linear-gradient(180deg, #2a1d14, var(--bg));
+    radial-gradient(900px 480px at 78% 18%, #2a3548 0%, transparent 55%),
+    linear-gradient(180deg, #10141a, var(--bg));
 }
-.eyebrow { letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); font-size: 0.75rem; }
-.hero h1 { font-size: clamp(2.4rem, 6vw, 4.2rem); margin: 0.4rem 0 0.8rem; line-height: 1.05; }
-.lede { max-width: 34rem; color: var(--muted); font-size: 1.1rem; }
-.hero button {
-  margin-top: 1.4rem;
-  border: 0;
+.nav { display: flex; justify-content: space-between; align-items: center; }
+.wordmark, .nav-link { color: inherit; text-decoration: none; }
+.wordmark { font-weight: 700; letter-spacing: -0.04em; font-size: 1.25rem; }
+.nav-link { color: var(--muted); }
+.hero-copy { margin-top: auto; max-width: 36rem; padding-bottom: 8vh; }
+.eyebrow {
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+.hero h1 {
+  margin: 0.55rem 0 0.9rem;
+  font-family: var(--display);
+  font-weight: 400;
+  font-size: clamp(2.8rem, 8vw, 5.2rem);
+  line-height: 0.95;
+}
+.hero h1 em { font-style: italic; }
+.lede { color: var(--muted); max-width: 28rem; line-height: 1.55; }
+.button {
+  display: inline-flex;
+  margin-top: 1.3rem;
+  padding: 0.85rem 1.2rem;
+  border-radius: 999px;
   background: var(--accent);
-  color: #1a120c;
+  color: #10141a;
+  text-decoration: none;
   font-weight: 700;
-  padding: 0.85rem 1.3rem;
-  cursor: pointer;
 }
-.toast { color: #e7c4a0; }
-.panel { padding: 1.6rem 1.5rem; border-top: 1px solid #3a2c22; background: var(--panel); }
-.panel h2 { margin: 0 0 0.7rem; font-size: 1.15rem; }
-.panel ul { margin: 0; padding-left: 1.1rem; color: var(--muted); }
+.story, .features, .footer { padding: 3.5rem 4vw; }
+.story { background: #e8eaee; color: #12151a; }
+.story h2 { margin: 0 0 0.8rem; font-family: var(--display); font-size: clamp(2rem, 4vw, 3rem); font-weight: 400; }
+.story p { margin: 0; max-width: 34rem; color: #4a5360; line-height: 1.6; }
+.features {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 2rem;
+  background: var(--panel);
+}
+.features article { border-top: 1px solid rgba(255,255,255,.14); padding-top: 1rem; }
+.features .n { color: #9eb6ff; font-size: 0.72rem; letter-spacing: 0.08em; }
+.features h3 { margin: 1.4rem 0 0.6rem; font-family: var(--display); font-weight: 400; font-size: 1.6rem; }
+.features p { margin: 0; color: var(--muted); max-width: 16rem; line-height: 1.55; }
 .footer {
   display: flex;
   justify-content: space-between;
-  gap: 1rem;
-  padding: 1.4rem 1.5rem 2rem;
+  border-top: 1px solid rgba(255,255,255,.1);
   color: var(--muted);
-  border-top: 1px solid #3a2c22;
+  font-size: 0.85rem;
+}
+@media (max-width: 720px) {
+  .features { grid-template-columns: 1fr; }
 }
 `,
   };
@@ -549,6 +568,25 @@ export function isPreviewReady(
   const html = files['index.html'] || '';
   const pkg = files['package.json'] || '';
   const brief = String(opts?.brief || '');
+  const blankSolid = blankSolidColorFromAsk(brief);
+
+  // Intentional blank color shell (e.g. solid brown) — Preview is Ready when the empty
+  // App paints that color. Do not demand a full landing page.
+  if (blankSolid) {
+    if (!pkg || !/"vite"/i.test(pkg)) reasons.push('missing Vite package.json');
+    if (!isValidViteIndexHtml(html)) reasons.push('index.html is not a Vite entry');
+    if (!files['src/main.jsx'] && !files['src/main.tsx']) reasons.push('missing src/main.jsx');
+    if (!/export\s+default/i.test(app)) reasons.push('App.jsx has no default export');
+    if (looksLikeReactEntrypointSource(app)) reasons.push('App.jsx looks like a Vite entry file, not a component');
+    const emptyShell = /className=["']app["']\s*\/>/i.test(app)
+      || /className=["']app["'][^>]*>\s*<\/div>/i.test(app);
+    if (!emptyShell) reasons.push('blank-color ask should keep an empty App shell');
+    const colorEsc = blankSolid.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    if (!new RegExp(`background(?:-color)?\\s*:\\s*${colorEsc}`, 'i').test(cssBlob)) {
+      reasons.push(`blank shell missing background ${blankSolid}`);
+    }
+    return { ok: reasons.length === 0, reasons };
+  }
 
   if (!pkg || !/"vite"/i.test(pkg)) reasons.push('missing Vite package.json');
   if (!isValidViteIndexHtml(html)) reasons.push('index.html is not a Vite entry');
@@ -557,6 +595,9 @@ export function isPreviewReady(
   if (app.length < 120) reasons.push('App.jsx too thin');
   if (!/export\s+default/i.test(app)) reasons.push('App.jsx has no default export');
   if (looksLikeModelProseLeak(app) || looksLikeModelProseLeak(css)) reasons.push('model prose leaked into source');
+  if (looksLikeTruncatedUiSource(app) || looksLikeTruncatedUiSource(css)) {
+    reasons.push('App/CSS source looks truncated mid-write');
+  }
   if (!/<[A-Za-z]|className=/.test(app) && !/getContext\s*\(\s*['"]2d['"]|canvas|requestAnimationFrame/i.test(app)) {
     reasons.push('App.jsx has no JSX UI');
   }
@@ -637,6 +678,22 @@ export function isPreviewReady(
     if (!hasState && /<button[\s>]/i.test(app)) {
       reasons.push('App is a pretty static shell (buttons without state)');
     }
+  }
+
+  // Generic CSS floor — empty / near-empty App.css is never Ready for a product UI.
+  const cssLen = cssBlob.replace(/\s+/g, '').length;
+  if (cssLen < 400 && !/getContext\s*\(\s*['"]2d['"]|canvas|requestAnimationFrame/i.test(app)) {
+    reasons.push('App.css too thin');
+  }
+
+  // Local brand heroes on disk/in map must win over leftover Pollinations URLs.
+  const hasLocalBrandRef = Object.keys(files).some((k) =>
+    /(?:^|\/)public\/(?:logo|icons?|heroes?|hero|bg|photos?)\//i.test(k.replace(/\\/g, '/'))
+  ) || /(?:src=["']\/(?:logo|icons?|heroes?|hero)|url\(['"]?\/(?:logo|icons?|heroes?|hero))/i.test(`${app}\n${cssBlob}`);
+  if (/image\.pollinations\.ai/i.test(`${app}\n${cssBlob}`)) {
+    reasons.push(hasLocalBrandRef
+      ? 'still using Pollinations URLs while local brand assets exist'
+      : 'Pollinations hotlinks are blocked for site creates — use Brand Assets / uploads');
   }
 
   return { ok: reasons.length === 0, reasons };

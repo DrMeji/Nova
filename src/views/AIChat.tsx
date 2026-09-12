@@ -247,8 +247,21 @@ import {
   planMultiModelWebsiteTeam,
   formatMultiModelAttribution,
   multiModelStatusLine,
+  type MultiModelPartPlan,
   type MultiModelPartResult,
 } from '@/lib/chatMultiModelBuild';
+import {
+  createProgressLabel,
+  startProgressHeartbeat,
+  type CreateProgressPhase,
+} from '@/lib/createProgressCopy';
+import {
+  formatHybridAttribution,
+  normalizeHybridAiMode,
+  pickForRole,
+  preferCloudForCreate,
+} from '@/lib/hybridRoleRouting';
+import { smokeCheckPreviewUrl } from '@/lib/previewBrowserSmoke';
 import {
   briefLooksLikeMarketingLanding,
   briefRequiresInteractiveApp,
@@ -357,6 +370,16 @@ import {
   siteImageCapabilityGapReply,
   siteImageGuidanceForBrief,
 } from '@/lib/siteHeroImages';
+import {
+  applyAttachedChatImageAsAsset,
+  applyAttachedChatImagesAsAssets,
+  extractExplicitAssetUrls,
+  formatBrandAssetsForPrompt,
+  looksLikeAssetLinkAsk,
+  looksLikeUseAttachedAsset,
+  materializeBrandAssets,
+  planBrandAssets,
+} from '@/lib/brandAssets';
 
 const COMPOSER_MODE_PREFIX: Record<'plan' | 'ask' | 'agent' | 'debug' | 'multitask', string> = {
   plan: 'Plan this out step by step, then we can build:\n\n',
@@ -1040,6 +1063,8 @@ export function AIChat() {
   /** Always-current route chat id. avoid stale closures when flushing the queue. */
   const routeChatIdRef = useRef<string | undefined>(undefined);
   const ignoreEnterUntilRef = useRef(0);
+  /** Blocks double Enter / click from queueing the same prompt on top of itself. */
+  const lastSendGuardRef = useRef<{ text: string; at: number }>({ text: '', at: 0 });
   const sendMessageRef = useRef<(content: string) => Promise<void>>(async () => {});
   /** Bumps on every new send/stop so late chunks from an old turn cannot stick Stop/queue. */
   const genSeqRef = useRef(0);
@@ -2434,6 +2459,60 @@ export function AIChat() {
     return () => window.removeEventListener('NOVA:open-code-overlay', onOpenCode);
   }, []);
 
+  // CDP / automation: bind a disk folder to the open chat without opening the code overlay.
+  useEffect(() => {
+    const onBind = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ diskPath?: string; name?: string }>).detail || {};
+      const diskPath = String(detail.diskPath || '').trim();
+      if (!diskPath) return;
+      // Set disk root immediately so the next ask does not hit "No workspace yet"
+      // while file hydration is still in flight.
+      setChatStudioDiskRoot(diskPath);
+      chatStudioDiskRootRef.current = diskPath;
+      const chatId = routeChatIdRef.current || persistChatIdRef.current;
+      if (chatId) {
+        studioBoundChatIdRef.current = chatId;
+        persistStudioSnapshot(chatId, {
+          files: chatStudioFilesRef.current,
+          name: detail.name || studioPathBasename(diskPath),
+          diskRoot: diskPath,
+        });
+        setChatCodePill(chatId, true);
+        setCodePillSticky(true);
+      } else {
+        try {
+          sessionStorage.setItem('NOVA:pending-studio-bind', JSON.stringify({
+            files: {},
+            projectId: null,
+            name: detail.name || studioPathBasename(diskPath),
+            diskRoot: diskPath,
+            previewUrl: null,
+          }));
+        } catch { /* ignore */ }
+      }
+      void (async () => {
+        try {
+          const files = await loadPreviewFilesFromDisk(diskPath);
+          if (!Object.keys(files).length) return;
+          setChatStudioFiles(files);
+          chatStudioFilesRef.current = files;
+          const id = routeChatIdRef.current || persistChatIdRef.current;
+          if (id) {
+            persistStudioSnapshot(id, {
+              files,
+              name: detail.name || studioPathBasename(diskPath),
+              diskRoot: diskPath,
+            });
+          }
+        } catch {
+          /* ignore */
+        }
+      })();
+    };
+    window.addEventListener('NOVA:bind-studio-disk', onBind);
+    return () => window.removeEventListener('NOVA:bind-studio-disk', onBind);
+  }, []);
+
   const openProjectFolder = async () => {
     const root = chatStudioDiskRootRef.current;
     if (!root) {
@@ -3358,11 +3437,24 @@ export function AIChat() {
     // thread is busy still starts a new send once the engine is free (sendMessage gates).
     const viewingChatId = route.name === 'chat' ? route.chatId : undefined;
     const genId = activeGenChatIdRef.current;
-    const busyOnThisChat = generatingRef.current && Boolean(genId) && (
-      Boolean(viewingChatId) && viewingChatId === genId
+    // Blank starters have no route chatId yet — still treat in-flight gen as busy so
+    // a double Enter cannot start two creates (or queue the same create on itself).
+    const busyOnThisChat = generatingRef.current && (
+      !genId
+      || !viewingChatId
+      || viewingChatId === genId
     );
+    const sameAsLast = lastSendGuardRef.current.text === content
+      && (Date.now() - lastSendGuardRef.current.at) < 4000;
     if (busyOnThisChat) {
       const qChat = viewingChatId || genId || persistChatIdRef.current || 'pending';
+      const dupQueued = pendingQueueRef.current.some(q => q.chatId === qChat && q.text === content);
+      // Never re-queue the identical prompt that just started (double Enter / CDP click+Enter).
+      if (sameAsLast || dupQueued) {
+        setInput('');
+        if (textareaRef.current) textareaRef.current.style.height = 'auto';
+        return;
+      }
       pendingQueueRef.current.push({
         id: `q-${crypto.randomUUID().slice(0, 8)}`,
         text: content,
@@ -3374,6 +3466,14 @@ export function AIChat() {
       if (textareaRef.current) textareaRef.current.style.height = 'auto';
       return;
     }
+    if (sameAsLast) {
+      setInput('');
+      if (textareaRef.current) textareaRef.current.style.height = 'auto';
+      return;
+    }
+    lastSendGuardRef.current = { text: content, at: Date.now() };
+    // Mark busy before the async send so a second Enter in the same tick queues/dedupes.
+    generatingRef.current = true;
     setInput('');
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
     void sendMessageRef.current(content);
@@ -3393,10 +3493,8 @@ export function AIChat() {
     userDetachScrollRef.current = false;
     // Free a stuck prior GGUF job (timed-out inspect was locking “More details”).
     void engineGenerateCancel();
-    if (generatingRef.current) {
-      generatingRef.current = false;
-      setGenerating(false);
-    }
+    // Do NOT clear generatingRef here — handleSend sets it early to block double Enter
+    // from starting two creates / queueing the same prompt on itself.
     stopRequestedRef.current = false;
     setFailoverNote(null);
     setIpcFallbackDev(false);
@@ -3415,14 +3513,41 @@ export function AIChat() {
       messagesChatIdRef.current = activeChatId;
       const keepFiles = { ...chatStudioFilesRef.current };
       const keepPid = chatStudioProjectIdRef.current;
-      const keepRoot = chatStudioDiskRootRef.current;
+      let keepRoot = chatStudioDiskRootRef.current;
+      if (!keepRoot && !Object.keys(keepFiles).length) {
+        try {
+          const rawPending = sessionStorage.getItem('NOVA:pending-studio-bind');
+          if (rawPending) {
+            const pending = JSON.parse(rawPending) as {
+              files?: Record<string, string>;
+              projectId?: string | null;
+              name?: string;
+              diskRoot?: string | null;
+            };
+            if (pending?.diskRoot || (pending?.files && Object.keys(pending.files).length)) {
+              Object.assign(keepFiles, pending.files || {});
+              if (pending.projectId) chatStudioProjectIdRef.current = pending.projectId;
+              if (pending.diskRoot) {
+                keepRoot = pending.diskRoot;
+                chatStudioDiskRootRef.current = pending.diskRoot;
+                setChatStudioDiskRoot(pending.diskRoot);
+              }
+              if (Object.keys(keepFiles).length) {
+                setChatStudioFiles(keepFiles);
+                chatStudioFilesRef.current = keepFiles;
+              }
+              sessionStorage.removeItem('NOVA:pending-studio-bind');
+            }
+          }
+        } catch { /* ignore */ }
+      }
       const keepName = keepRoot ? studioPathBasename(keepRoot) : undefined;
       studioBoundChatIdRef.current = activeChatId;
       lastStudioIntentRef.current = null;
       if (keepRoot || Object.keys(keepFiles).length) {
         persistStudioSnapshot(activeChatId, {
           files: keepFiles,
-          projectId: keepPid,
+          projectId: keepPid || chatStudioProjectIdRef.current,
           name: keepName,
           diskRoot: keepRoot,
         });
@@ -3770,7 +3895,8 @@ export function AIChat() {
 
     const pushAssistantStatus = (label: string) => {
       if (mySeq !== genSeqRef.current || stopRequestedRef.current) return;
-      const statusContent = `__generating__:chat:${label}`;
+      const clean = String(label || '').trim() || 'Thinking…';
+      const statusContent = `__generating__:chat:${clean}`;
       const viewingThis = Boolean(activeChatId && routeChatIdRef.current === activeChatId);
       if (!viewingThis) {
         try {
@@ -3783,11 +3909,33 @@ export function AIChat() {
         } catch { /* ignore */ }
         return;
       }
-      setMessages(prev => {
-        const next = prev.map(m => (m.id === assistantId ? { ...m, content: statusContent } : m));
-        messagesRef.current = next;
-        return next;
-      });
+      // Throttle status paints — rapid liveCodingStatusText used to re-render the whole
+      // chat every token and freeze the desktop (dots reset + compositor hitch).
+      const now = Date.now();
+      const lastAt = (chatTurnCtlRef.current as { statusAt?: number }).statusAt || 0;
+      const lastLabel = (chatTurnCtlRef.current as { statusLabel?: string }).statusLabel || '';
+      (chatTurnCtlRef.current as { statusLabel?: string }).statusLabel = clean;
+      if (clean === lastLabel && now - lastAt < 80) return;
+      const flush = () => {
+        if (mySeq !== genSeqRef.current || stopRequestedRef.current) return;
+        const latest = (chatTurnCtlRef.current as { statusLabel?: string }).statusLabel || clean;
+        const content = `__generating__:chat:${latest}`;
+        (chatTurnCtlRef.current as { statusAt?: number }).statusAt = Date.now();
+        startTransition(() => {
+          setMessages(prev => {
+            const next = prev.map(m => (m.id === assistantId ? { ...m, content } : m));
+            messagesRef.current = next;
+            return next;
+          });
+        });
+      };
+      if (now - lastAt < 220) {
+        const pending = (chatTurnCtlRef.current as { statusTimer?: number }).statusTimer;
+        if (pending) window.clearTimeout(pending);
+        (chatTurnCtlRef.current as { statusTimer?: number }).statusTimer = window.setTimeout(flush, 220 - (now - lastAt));
+        return;
+      }
+      flush();
     };
     // Rolldown drops the IIFE closure on this name — call via ref inside the async turn.
     chatTurnCtlRef.current.pushStatus = pushAssistantStatus;
@@ -3890,7 +4038,9 @@ export function AIChat() {
       .filter(m => m.role === 'user')
       .map(m => String(m.content || ''));
     const stickyDiskTarget = getLastDiskTarget(activeChatId);
-    const intentText = stripComposerPrefix(content);
+    const intentText = stripComposerPrefix(content)
+      .replace(/!\[[^\]]*]\(data:image\/[^)]+\)/gi, ' ')
+      .replace(/!\[[^\]]*]\(ark-media:[^)]+\)/gi, ' ');
     const diskIntent = classifyDiskIntent(intentText, {
       recentUserMessages: recentUserLines,
       pendingAddFile: getLastPendingAddFile(activeChatId)?.fileName || null,
@@ -3899,6 +4049,74 @@ export function AIChat() {
     const diskRoot = resolvedStudio.diskRoot || chatStudioDiskRootRef.current;
     const diskProjectId = resolvedStudio.projectId || chatStudioProjectIdRef.current || null;
     const diskWorkspaceName = resolvedStudio.name || loadChatStudio(activeChatId)?.name || null;
+
+    // Photo-as-hero/logo must win over "add a file / where should this go?" routing.
+    if (
+      messageHasImages(content)
+      && looksLikeUseAttachedAsset(content)
+      && diskRoot
+    ) {
+      const placed = await applyAttachedChatImagesAsAssets({
+        diskRoot,
+        files: { ...(resolvedStudio.files || chatStudioFilesRef.current || {}) },
+        message: content,
+      });
+      if (placed.ok) {
+        clearLastPendingAddFile(activeChatId);
+        setChatStudioFiles({ ...placed.files });
+        chatStudioFilesRef.current = { ...placed.files };
+        commitStudioForChat(activeChatId, {
+          files: placed.files,
+          projectId: diskProjectId,
+          name: diskWorkspaceName || resolvedStudio.name,
+          diskRoot,
+        });
+        const where = placed.saved.length
+          ? placed.saved.map((p) => p.replace(/^public\//, '/')).join(', ')
+          : 'public/';
+        await finishPlainReply(
+          `Saved your photo${placed.saved.length > 1 ? 's' : ''} into **${where}** and wired ${
+            placed.saved.length > 1 ? 'them' : 'it'
+          } as the **${placed.role || 'hero'}**. Preview should refresh — say if you want a different section.`,
+        );
+        return;
+      }
+    }
+
+    // Pasted icon/image URLs (Iconify, Unsplash, etc.) → download into public/ on the bound project.
+    if (
+      diskRoot
+      && looksLikeAssetLinkAsk(content)
+      && (extractExplicitAssetUrls(content).length > 0 || /lucide:|simple-icons:|iconify/i.test(content))
+    ) {
+      pushAssistantStatus('Importing icons and images from your links…');
+      try {
+        const plan = planBrandAssets(content, diskWorkspaceName || resolvedStudio.name || 'project');
+        const installed = await materializeBrandAssets({
+          diskRoot,
+          files: { ...(resolvedStudio.files || chatStudioFilesRef.current || {}) },
+          plan,
+          brief: content,
+          projectName: diskWorkspaceName || resolvedStudio.name || 'project',
+        });
+        if (installed.saved.length) {
+          setChatStudioFiles({ ...installed.files });
+          chatStudioFilesRef.current = { ...installed.files };
+          commitStudioForChat(activeChatId, {
+            files: installed.files,
+            projectId: diskProjectId,
+            name: diskWorkspaceName || resolvedStudio.name,
+            diskRoot,
+          });
+          await finishPlainReply(
+            `${installed.note}\n\nWired into the project. Open **Preview** to review — say if you want different icons or another photo.`,
+          );
+          return;
+        }
+      } catch {
+        /* fall through to normal edit / chat */
+      }
+    }
 
     const relPathFromDisk = (filePath: string): string | null => {
       if (!diskRoot || !filePath) return null;
@@ -4067,7 +4285,7 @@ export function AIChat() {
         return;
       }
 
-      if (diskIntent.type === 'add_file' && !isProjectCreateBrief(intentText)) {
+      if (diskIntent.type === 'add_file' && !isProjectCreateBrief(intentText) && !looksLikeUseAttachedAsset(content)) {
         // Pure create-file (esp. .md) must hit disk — don't divert to code-edit when it's clearly a new file.
         const pureCreateFile =
           !looksLikeCodeEditAsk(intentText)
@@ -4424,43 +4642,8 @@ export function AIChat() {
       filesNow = mergeBriefNpmDependencies({ ...filesNow }, briefForBuild);
       const sticky = pinnedModel.source === 'auto' ? threadBrainRef.current : null;
 
-      // FPS only — Pac-Man / Snake / Dino must not get the raycast arena core.
-      if (fpsBrief) {
-        pushAssistantStatus(`Installing playable FPS core for ${productName}…`);
-        const { buildPlayableFpsScaffold } = await import('@/lib/playableFpsScaffold');
-        const scaffold = buildPlayableFpsScaffold(productName);
-        filesNow = {
-          ...filesNow,
-          'src/App.jsx': scaffold['src/App.jsx'],
-          'src/App.css': scaffold['src/App.css'],
-        };
-        filesNow = ensureViteReactProjectFiles(filesNow, productName).files;
-        const scaffoldPaths = ['src/App.jsx', 'src/App.css', 'src/main.jsx', 'src/index.css', 'index.html']
-          .filter((p) => filesNow[p]);
-        const scaffoldReply = scaffoldPaths.map((p) => `@@@FILE ${p}\n${filesNow[p]}`).join('\n');
-        await applyChatReplyEdits({
-          reply: scaffoldReply,
-          projectId,
-          projectName: productName,
-          files: filesNow,
-          userMessage: briefForBuild,
-          diskRoot,
-        });
-        if (diskRoot && window.arkDesktop?.workspaceWriteFile) {
-          const sep = diskRoot.includes('\\') ? '\\' : '/';
-          const root = diskRoot.replace(/[/\\]+$/, '');
-          for (const rel of scaffoldPaths) {
-            await window.arkDesktop.workspaceWriteFile({
-              targetPath: `${root}${sep}${rel.replace(/\//g, sep)}`,
-              content: filesNow[rel],
-            });
-          }
-        }
-      }
-
       let modelReply = '';
-      // Non-FPS rebuilds (including arcade games) still use the model.
-      if (!fpsBrief) {
+      // Always ask the model — never inject a canned FPS / game template.
       try {
         const engineResult = await answerStudio(
           {
@@ -4471,7 +4654,9 @@ export function AIChat() {
               'Do not preserve the old marketing layout, Buy now buttons, or prior product type.',
               spatialBrief
                 ? 'This is a spatial / 3D editor app: real WebGL viewport. Do not build a marketing website.'
-                : '',
+                : fpsBrief
+                  ? 'This must be a REAL playable FPS / canvas game with WASD, look, shooting, and an enemy — not a static mock.'
+                  : '',
               '',
               briefForBuild,
             ].filter(Boolean).join('\n'),
@@ -4498,7 +4683,6 @@ export function AIChat() {
         modelReply = String(engineResult?.text || '').trim();
       } catch {
         modelReply = '';
-      }
       }
       if (await stopIfSuperseded()) return;
 
@@ -4591,51 +4775,8 @@ export function AIChat() {
         }
       }
 
-      // FPS rebuilds: keep / restore playable FPS core only (never Pac-Man → FPS).
-      if (fpsBrief) {
-        filesNow = ensureViteReactProjectFiles(filesNow, productName).files;
-        appSrc = filesNow['src/App.jsx'] || filesNow['src/App.tsx'] || '';
-        let gameGate = isPlayableGameReady(filesNow);
-        if (!gameGate.ok && mySeq === genSeqRef.current && !stopRequestedRef.current) {
-          pushAssistantStatus(`Restoring playable FPS core for ${productName}…`);
-          const { buildPlayableFpsScaffold } = await import('@/lib/playableFpsScaffold');
-          const scaffold = buildPlayableFpsScaffold(productName);
-          filesNow = {
-            ...filesNow,
-            'src/App.jsx': scaffold['src/App.jsx'],
-            'src/App.css': scaffold['src/App.css'],
-          };
-          filesNow = ensureViteReactProjectFiles(filesNow, productName).files;
-          appSrc = filesNow['src/App.jsx'] || '';
-          const scaffoldPaths = ['src/App.jsx', 'src/App.css', 'src/main.jsx', 'src/index.css', 'index.html']
-            .filter((p) => filesNow[p]);
-          const scaffoldReply = scaffoldPaths
-            .map((p) => `@@@FILE ${p}\n${filesNow[p]}`)
-            .join('\n');
-          const scaffoldApplied = await applyChatReplyEdits({
-            reply: scaffoldReply,
-            projectId,
-            projectName: productName,
-            files: filesNow,
-            userMessage: briefForBuild,
-            diskRoot,
-          });
-          if (scaffoldApplied.ok && scaffoldApplied.updated.length) {
-            filesNow = scaffoldApplied.files;
-            appSrc = filesNow['src/App.jsx'] || filesNow['src/App.tsx'] || '';
-          }
-          if (diskRoot && window.arkDesktop?.workspaceWriteFile) {
-            const sep = diskRoot.includes('\\') ? '\\' : '/';
-            const root = diskRoot.replace(/[/\\]+$/, '');
-            for (const rel of scaffoldPaths) {
-              await window.arkDesktop.workspaceWriteFile({
-                targetPath: `${root}${sep}${rel.replace(/\//g, sep)}`,
-                content: filesNow[rel],
-              });
-            }
-          }
-        }
-      } else if (gameBrief) {
+      // Games: ensure Vite files exist; never restore a canned FPS template.
+      if (gameBrief) {
         filesNow = ensureViteReactProjectFiles(filesNow, productName).files;
         appSrc = filesNow['src/App.jsx'] || filesNow['src/App.tsx'] || '';
       }
@@ -5118,6 +5259,28 @@ export function AIChat() {
         });
       }
 
+      // Create + chat attachments: land user photos into public/ before the UI model runs.
+      if (originDiskRoot && messageHasImages(content) && looksLikeUseAttachedAsset(content)) {
+        try {
+          const placed = await applyAttachedChatImagesAsAssets({
+            diskRoot: originDiskRoot,
+            files: createFilesAcc,
+            message: content,
+          });
+          if (placed.ok) {
+            createFilesAcc = placed.files;
+            commitStudioForChat(activeChatId, {
+              files: createFilesAcc,
+              projectId: originProjectId,
+              name: lockedProductName,
+              diskRoot: originDiskRoot,
+            });
+          }
+        } catch {
+          /* best-effort */
+        }
+      }
+
         let followNote = '';
         let siteImageGapNote = '';
         let uiBuilt = false;
@@ -5126,6 +5289,21 @@ export function AIChat() {
         const noteThought = (label: string) => {
           createThoughtLog.push(label);
           pushAssistantStatus(label);
+        };
+        const runWithProgress = async <T,>(
+          phase: CreateProgressPhase,
+          work: () => Promise<T>,
+          intervalMs = 3800,
+        ): Promise<T> => {
+          const stopHb = startProgressHeartbeat((label) => {
+            if (mySeq !== genSeqRef.current || stopRequestedRef.current) return;
+            pushAssistantStatus(label);
+          }, phase, intervalMs);
+          try {
+            return await work();
+          } finally {
+            stopHb();
+          }
         };
         const pid = created.projectId || newProjectId;
         if (pid && created.files) {
@@ -5161,10 +5339,11 @@ export function AIChat() {
               projectName: buildIntent.name,
               readyLocal: readyImage,
               hasCloudKey: hasCloudImageKey(),
+              brief: briefForBuild,
             });
             if (gap) {
               siteImageGapNote = `\n\n${gap}`;
-              pushAssistantStatus('Need an image model for a unique hero — see chat note…');
+              pushAssistantStatus('Hero photos need an image-gen model (chat models cannot paint)…');
             }
           } catch {
             /* capability probe is best-effort */
@@ -5175,6 +5354,7 @@ export function AIChat() {
         const sticky = pinnedModel.source === 'auto' ? threadBrainRef.current : null;
         let modelReply = '';
         let multiAppliedFiles: Record<string, string> | null = null;
+        let multiDraftFiles: Record<string, string> | null = null;
         const buildKind = resolveProjectKindForCreate(
           briefForBuild,
           detectProjectKind(briefForBuild),
@@ -5189,35 +5369,83 @@ export function AIChat() {
         if (equippedSkills.length) {
           noteThought(`Equipped: ${skillNamesLabel(equippedSkills)}`);
         }
-        // Prefer a local coder brain for create (terminal-class quality, chat UI only).
-        const createCoder = pickLocalCoderModel([
+        const brandPlan = planBrandAssets(briefForBuild, buildIntent.name);
+        const brandBlock = formatBrandAssetsForPrompt(brandPlan);
+        const cloudForTeam = CLOUD_CHAT_WHEN_KEYED.filter(
+          (m) => hasProviderApiKey(m.keyId) && isCloudProviderEnabled(m.keyId),
+        );
+        const hybridMode = normalizeHybridAiMode(getLocalPrefs().aiMode);
+        const localCoderPool = [
           ...engineLocalModels.map((m) => ({ id: m.id, name: m.name, source: 'local' as const })),
           ...ollamaModels.map((m) => ({ id: m.id, name: m.name, source: 'local' as const })),
-        ]);
-        const createPinned = createCoder
-          && (pinnedModel.source === 'auto' || pinnedModel.source === 'local'
-            || /free|openrouter|multimodal/i.test(`${pinnedModel.id} ${pinnedModel.name}`))
-          ? { id: createCoder.id, name: createCoder.name, source: 'local' as const }
-          : pinnedModel;
-        if (createCoder && createPinned.id === createCoder.id) {
+        ];
+        // Create lane: best coder — cloud when keyed (Hybrid / Cloud Create / Automatic).
+        const createCoder = pickLocalCoderModel(localCoderPool);
+        const cloudCoder = pickForRole('code', {
+          mode: hybridMode === 'automatic' ? 'hybrid' : hybridMode,
+          locals: localCoderPool,
+          clouds: cloudForTeam.map((m) => ({ id: m.id, name: m.name, source: 'cloud' as const })),
+        });
+        const wantCloudCreate = preferCloudForCreate(
+          hybridMode === 'automatic' ? 'hybrid' : hybridMode,
+          cloudForTeam.length > 0,
+        );
+        const createPinned = (
+          wantCloudCreate && cloudCoder && cloudCoder.source === 'cloud'
+            ? { id: cloudCoder.id, name: cloudCoder.name, source: 'cloud' as const }
+            : createCoder
+              && (pinnedModel.source === 'auto' || pinnedModel.source === 'local'
+                || /free|openrouter|multimodal/i.test(`${pinnedModel.id} ${pinnedModel.name}`))
+                ? { id: createCoder.id, name: createCoder.name, source: 'local' as const }
+                : pinnedModel
+        );
+        if (createCoder && createPinned.source === 'local' && createPinned.id === createCoder.id) {
           try { await setEngineModel(createCoder.id); } catch { /* best-effort */ }
-          noteThought(`Building with ${createCoder.name}…`);
+        }
+        noteThought(
+          createPinned.source === 'cloud'
+            ? `Building with ${createPinned.name} (cloud create)…`
+            : `Building with ${createPinned.name}…`,
+        );
+        const { blankSolidColorFromAsk } = await import('@/lib/webProjectCanon');
+        const blankSolidColor = blankSolidColorFromAsk(briefForBuild);
+        // Intentional blank color shell (brown proof screen, etc.): write the empty
+        // full-viewport shell and skip multi-model / landing generation entirely.
+        if (blankSolidColor) {
+          noteThought(`Blank ${blankSolidColor} shell only — skipping full site build…`);
+          pushAssistantStatus('Painting a solid blank screen…');
+          const blankApplied = await applyChatReplyEdits({
+            reply: '',
+            projectId: pid,
+            projectName: buildIntent.name,
+            files: seedFiles,
+            userMessage: briefForBuild,
+            diskRoot: originDiskRoot,
+          });
+          if (blankApplied.ok && blankApplied.updated.length) {
+            multiAppliedFiles = blankApplied.files;
+            modelReply = `Applied solid ${blankSolidColor} blank shell.`;
+            createProviderUsed = 'NOVA · blank shell';
+          } else {
+            noteThought('Blank shell write missed — falling back to normal create…');
+          }
         }
         const buildUiPrompt = (pass: 'first' | 'retry' | 'polish') => {
           const exactMinimal = /\b(?:exact(?:ly)?|precisely|follow precisely|pure black|#000000|#1e1f22|near-black|centered icon|nothing else|no other|ONLY this piece|ONLY add)\b/i.test(briefForBuild);
           return [
             pass === 'retry'
               ? (exactMinimal
-                ? `RETRY: Previous pass did not match the EXACT visual brief for "${buildIntent.name}". Rebuild ONLY what the brief lists — no extras.`
-                : `RETRY: The previous pass left an unusable or too-thin UI for "${buildIntent.name}". Expand it into a full product UI.`)
+                ? `RETRY: Previous pass did not match the EXACT visual brief for "${buildIntent.name}". Rebuild ONLY what the brief lists — no extras, no unrelated genre.`
+                : `RETRY: The previous pass left an unusable or too-thin UI for "${buildIntent.name}". Rebuild a full UI that matches THIS brief only — invent nothing from other genres.`)
               : pass === 'polish'
-                ? `POLISH PASS: Expand and refine the desktop website UI for "${buildIntent.name}" into a premium, dense, professional look. Keep working — do not rush a stub.`
+                ? `POLISH PASS: Expand and refine the desktop website UI for "${buildIntent.name}" into a premium look that still matches THIS brief.`
               : `Build the first real UI for "${buildIntent.name}" from this brief.`,
             'Emit COMPLETE @@@FILE blocks for src/App.jsx, src/App.css, and src/index.css.',
             'Each @@@FILE line MUST include the path, e.g. @@@FILE src/App.jsx — never a bare @@@FILE.',
             'Put the full product UI in src/App.jsx + CSS only. Do NOT import ./components/* or react-router unless you also emit @@@FILE blocks for every imported file with complete source.',
-            'This is a DESKTOP website preview (not a phone app). Full-width marketing layout.',
+            'This is a DESKTOP website preview (not a phone app). Full-width layout matching the brief.',
             siteImageGuidanceForBrief(briefForBuild, buildIntent.name),
+            brandBlock,
             exactMinimal
               ? [
                 'Follow the brief EXACTLY. A minimal correct UI is success — do not add extra marketing sections, Three.js, canvas games, or unrelated libraries.',
@@ -5235,16 +5463,13 @@ export function AIChat() {
                 '}',
                 '```',
               ].join('\n')
-              : 'App.jsx must be a real interactive product UI matching the brief — not an empty shell, not a single search box, not a description, not “This is a sample text”, not lorem/placeholder filler.',
+              : 'App.jsx must be a real UI matching the brief — not an empty shell, not a single search box, not sample/placeholder filler, and not a canned template from another genre.',
             exactMinimal
               ? 'If the brief specifies exact text (e.g. NOVA SIGNAL), that string MUST appear in App.jsx. Background and icon sizes must match.'
-              : 'Take the time needed (up to several minutes for a full replica site). For a rich site/app expect App.jsx well over 200 lines and substantial CSS with layout, typography, motion, and multiple sections (hero, nav, content, footer as appropriate). Prefer quality over speed.',
+              : 'Take the time needed. For a rich site expect substantial App.jsx and CSS with layout, typography, motion, and the sections the brief asks for. Prefer quality over speed.',
             exactMinimal
               ? ''
-              : 'Do not stop at a minimal form+list stub when the brief asks for a polished product experience. Restaurant/landing briefs MUST include a full-bleed hero, brand as the hero signal, a primary CTA, real menu/content sections, and a footer — never a centered title on a blank page.',
-            exactMinimal
-              ? ''
-              : 'CRITICAL: A restaurant brief means FOOD (named plated dishes with prices) — NEVER substitute a coffee-shop menu (espresso/latte/cappuccino/mocha) unless the brief explicitly asks for a cafe or coffee shop.',
+              : 'Match the brief exactly. Build only what was asked — never substitute a different product category, never paste a stock homepage template.',
             exactMinimal
               ? ''
               : spatialBrief
@@ -5271,21 +5496,20 @@ export function AIChat() {
 
         try {
           const skipMulti = (
-            /\b(?:exact(?:ly)?|precisely|follow precisely|pure black|#000000|#1e1f22|near-black|centered icon|nothing else|no other|ONLY this piece)\b/i.test(briefForBuild)
+            Boolean(blankSolidColor)
+            || /\b(?:exact(?:ly)?|precisely|follow precisely|pure black|#000000|#1e1f22|near-black|centered icon|nothing else|no other|ONLY this piece)\b/i.test(briefForBuild)
             || /ONLY this piece|Stop after the black shell|black shell only/i.test(briefForBuild)
           )
             // Game briefs often say "ONLY add shooting" — that must NOT skip a full playable build.
             && !looksLikePlayableCanvasGame(briefForBuild, buildIntent.name);
-          const cloudForTeam = CLOUD_CHAT_WHEN_KEYED.filter(
-            (m) => hasProviderApiKey(m.keyId) && isCloudProviderEnabled(m.keyId),
-          );
-          const multiTeam = skipMulti
-            ? null
-            : planMultiModelWebsiteTeam([
-              ...engineLocalModels.map((m) => ({ id: m.id, name: m.name, source: 'local' as const })),
-              ...ollamaModels.map((m) => ({ id: m.id, name: m.name, source: 'local' as const })),
-              ...cloudForTeam.map((m) => ({ id: m.id, name: m.name, source: 'free' as const })),
-            ]);
+          // Hybrid multi-model create: local GGUF(s) + keyed cloud when available.
+          const multiModelCreateEnabled = true;
+          const multiTeam = multiModelCreateEnabled && !skipMulti
+            ? planMultiModelWebsiteTeam([
+              ...localCoderPool.map((m) => ({ id: m.id, name: m.name, source: 'local' as const })),
+              ...cloudForTeam.map((m) => ({ id: m.id, name: m.name, source: 'cloud' as const })),
+            ])
+            : null;
 
           if (multiTeam) {
             noteThought(`Multi-model build · splitting work across ${multiTeam.length} brains…`);
@@ -5305,37 +5529,41 @@ export function AIChat() {
                 'Put product UI in src/App.jsx + CSS. Do NOT import ./components/* unless you also emit those files.',
                 'Never rewrite index.html or package.json. Never output English notes outside @@@FILE blocks.',
                 siteImageGuidanceForBrief(briefForBuild, buildIntent.name),
+                brandBlock,
                 '',
                 briefForBuild,
                 skillBlock ? `\n${skillBlock}` : '',
               ].filter(Boolean).join('\n');
               let partReply = '';
               try {
-                const engineResult = await Promise.race([
-                  answerStudio(
-                    {
-                      userMessage: partPrompt,
-                      files: filesAcc,
-                      projectName: buildIntent.name,
-                      mode: 'code',
-                      preferredModelId: part.model.id,
-                      preferredModelName: part.model.name,
-                      preferredSource: part.model.source === 'local' ? 'local' : 'cloud',
-                      planOnly: false,
-                      allowFileEdits: true,
-                      shouldAbort: () => mySeq !== genSeqRef.current || stopRequestedRef.current,
-                    },
-                    (live) => {
-                      if (mySeq !== genSeqRef.current || stopRequestedRef.current) return;
-                      const text = String(live || '').trim();
-                      if (text.length < 2) return;
-                      pushAssistantStatus(liveCodingStatusText(text));
-                    },
-                  ),
-                  new Promise<null>((resolve) => {
-                    window.setTimeout(() => resolve(null), 300_000);
-                  }),
-                ]);
+                const engineResult = await runWithProgress(
+                  part.role === 'style' ? 'styles' : part.role === 'interaction' ? 'polish' : 'layout',
+                  () => Promise.race([
+                    answerStudio(
+                      {
+                        userMessage: partPrompt,
+                        files: filesAcc,
+                        projectName: buildIntent.name,
+                        mode: 'code',
+                        preferredModelId: part.model.id,
+                        preferredModelName: part.model.name,
+                        preferredSource: part.model.source === 'local' ? 'local' : 'cloud',
+                        planOnly: false,
+                        allowFileEdits: true,
+                        shouldAbort: () => mySeq !== genSeqRef.current || stopRequestedRef.current,
+                      },
+                      (live) => {
+                        if (mySeq !== genSeqRef.current || stopRequestedRef.current) return;
+                        const text = String(live || '').trim();
+                        if (text.length < 2) return;
+                        pushAssistantStatus(liveCodingStatusText(text));
+                      },
+                    ),
+                    new Promise<null>((resolve) => {
+                      window.setTimeout(() => resolve(null), 300_000);
+                    }),
+                  ]),
+                );
                 partReply = String(engineResult?.text || '').trim();
               } catch {
                 partReply = '';
@@ -5386,46 +5614,60 @@ export function AIChat() {
               };
             } catch { /* ignore */ }
             const multiApp = filesAcc['src/App.jsx'] || filesAcc['src/App.tsx'] || '';
-            const multiThin = multiApp.length < 400
+            const multiThin = !blankSolidColor && (
+              multiApp.length < 400
               || /return\s*\(\s*<div className=["']app["']\s*\/>\s*\)/i.test(multiApp)
-              || !/<h1[\s>]|<header[\s>]|<nav[\s>]|<main[\s>]|<section[\s>]/i.test(multiApp);
+              || !/<h1[\s>]|<header[\s>]|<nav[\s>]|<main[\s>]|<section[\s>]/i.test(multiApp)
+            );
             if (multiThin) {
               noteThought('Multi-model left a thin shell — running a full single-model UI build…');
+              // Keep whatever multi wrote as the retry base (never throw away a partial product UI).
+              if (
+                multiApp.length >= 200
+                && !/return\s*\(\s*<div className=["']app["']\s*\/>\s*\)/i.test(multiApp)
+              ) {
+                multiDraftFiles = { ...filesAcc };
+              }
               multiAppliedFiles = null;
             } else {
               // Keep multi result; skip single-model first pass below.
             }
           }
           const multiOk = Boolean(multiAppliedFiles);
+          const singleBaseFiles = multiDraftFiles || seedFiles;
           if (!multiOk) {
-            const engineResult = await Promise.race([
-              answerStudio(
-                {
-                  userMessage: buildUiPrompt(multiTeam ? 'retry' : 'first'),
-                  files: seedFiles,
-                  projectName: buildIntent.name,
-                  mode: 'code',
-                  preferredModelId: createPinned.id,
-                  preferredModelName: createPinned.name,
-                  preferredSource: createPinned.source,
-                  stickyModelId: sticky?.modelId,
-                  stickyModelName: sticky?.modelName,
-                  stickyPinnedSource: sticky?.pinnedSource,
-                  planOnly: false,
-                  allowFileEdits: true,
-                  shouldAbort: () => mySeq !== genSeqRef.current || stopRequestedRef.current,
-                },
-                (live) => {
-                  if (mySeq !== genSeqRef.current || stopRequestedRef.current) return;
-                  const text = String(live || '').trim();
-                  if (text.length < 2) return;
-                  pushAssistantStatus(liveCodingStatusText(text));
-                },
-              ),
-              new Promise<null>((resolve) => {
-                window.setTimeout(() => resolve(null), 300_000);
-              }),
-            ]);
+            noteThought(createProgressLabel(multiTeam ? 'repair' : 'layout', 0));
+            const engineResult = await runWithProgress(
+              multiTeam ? 'repair' : 'layout',
+              () => Promise.race([
+                answerStudio(
+                  {
+                    userMessage: buildUiPrompt(multiTeam ? 'retry' : 'first'),
+                    files: singleBaseFiles,
+                    projectName: buildIntent.name,
+                    mode: 'code',
+                    preferredModelId: createPinned.id,
+                    preferredModelName: createPinned.name,
+                    preferredSource: createPinned.source === 'cloud' ? 'cloud' : 'local',
+                    stickyModelId: sticky?.modelId,
+                    stickyModelName: sticky?.modelName,
+                    stickyPinnedSource: sticky?.pinnedSource,
+                    planOnly: false,
+                    allowFileEdits: true,
+                    shouldAbort: () => mySeq !== genSeqRef.current || stopRequestedRef.current,
+                  },
+                  (live) => {
+                    if (mySeq !== genSeqRef.current || stopRequestedRef.current) return;
+                    const text = String(live || '').trim();
+                    if (text.length < 2) return;
+                    pushAssistantStatus(liveCodingStatusText(text));
+                  },
+                ),
+                new Promise<null>((resolve) => {
+                  window.setTimeout(() => resolve(null), 300_000);
+                }),
+              ]),
+            );
             modelReply = String(engineResult?.text || '').trim();
             createProviderUsed = [
               createProviderUsed,
@@ -5455,10 +5697,12 @@ export function AIChat() {
               reply: modelReply,
               projectId: pid,
               projectName: buildIntent.name,
-              files: seedFiles,
+              files: multiDraftFiles || seedFiles,
               userMessage: briefForBuild,
               diskRoot: originDiskRoot,
             })
+            : multiDraftFiles
+              ? { ok: true as const, updated: Object.keys(multiDraftFiles), files: multiDraftFiles }
             : { ok: false as const, updated: [] as string[], files: seedFiles };
 
         let filesNow = (applied.ok && applied.updated.length) ? applied.files : seedFiles;
@@ -5484,24 +5728,27 @@ export function AIChat() {
         const { isThinProductUiSource, isPathologicalCodeSource } = await import('@/lib/projectCodeEdit');
         const firstPassFiles = { ...filesNow };
         const firstPassApp = appSrc;
-        const exactMinimalAsk = /\b(?:exact(?:ly)?|precisely|follow precisely|pure black|#000000|#1e1f22|near-black|centered icon|nothing else|no other|ONLY this piece|ONLY add)\b/i.test(briefForBuild);
+        const exactMinimalAsk = /\b(?:exact(?:ly)?|precisely|follow precisely|pure black|#000000|#1e1f22|near-black|centered icon|nothing else|no other|ONLY this piece|ONLY add)\b/i.test(briefForBuild)
+          || Boolean(blankSolidColor);
         const wantsBlackPieceOnly = /(?:ONLY this piece|full-viewport solid|near-black|#1e1f22)/i.test(briefForBuild)
           && /ONLY this piece|Stop after the black shell|black shell only/i.test(briefForBuild);
         const exactFidelityFail = (app: string, css: string) => {
           if (!exactMinimalAsk || !app || app.length < 160) return false;
+          if (blankSolidColor) return false;
           if (/NOVA SIGNAL/i.test(briefForBuild) && !/NOVA SIGNAL/i.test(app)) return true;
           if (/#000000|pure black/i.test(briefForBuild) && !/#000000|#000\b|black/i.test(`${app}\n${css}`)) return true;
           if (!/\b(?:three\.?js|webgl|3d)\b/i.test(briefForBuild) && /from\s+['"]three['"]|THREE\./i.test(app)) return true;
           return false;
         };
         const cssTooThin = (() => {
-          if (exactMinimalAsk) return false;
+          if (exactMinimalAsk || blankSolidColor) return false;
           if (!/\b(?:twitch|streaming|live\s*stream|landing|marketing|hero|multi-?section|apple\.com|replica|restaurant|bistro|bakery|cafe|menu|dishes?)\b/i.test(briefForBuild)) return false;
           const css = `${filesNow['src/App.css'] || ''}\n${filesNow['src/index.css'] || ''}`;
           return css.replace(/\s+/g, '').length < 400;
         })();
         const needsUiRetry = (
-          (
+          !blankSolidColor
+          && (
             isBrokenReactAppSource(appSrc)
             || isPathologicalCodeSource(appSrc)
             || isThinProductUiSource(appSrc, briefForBuild)
@@ -5518,39 +5765,48 @@ export function AIChat() {
 
         // If the first model pass left an empty/broken/thin shell, retry once — model only, no templates.
         if (needsUiRetry) {
-          noteThought('Found a problem in the UI — fixing the broken parts (not a full rewrite)…');
-          // Revert half-baked UI so Preview does not show a stub search box while we claim failure.
-          filesNow = { ...seedFiles };
+          noteThought('Found a problem in the UI — repairing the broken parts (not a full rewrite)…');
+          // Keep any salvageable first draft as the retry base. Blanking to seed mid-flight made
+          // Preview flash an empty shell and often left disk wiped if the retry timed out.
+          const salvageBase = (
+            !isBrokenReactAppSource(firstPassApp)
+            && firstPassApp.length >= 400
+            && !isPathologicalCodeSource(firstPassApp)
+          ) ? firstPassFiles : seedFiles;
+          filesNow = { ...salvageBase };
           appSrc = filesNow['src/App.jsx'] || filesNow['src/App.tsx'] || '';
           try {
-            const retry = await Promise.race([
-              answerStudio(
-                {
-                  userMessage: buildUiPrompt('retry'),
-                  files: filesNow,
-                  projectName: buildIntent.name,
-                  mode: 'code',
-                  preferredModelId: createPinned.id,
-                  preferredModelName: createPinned.name,
-                  preferredSource: createPinned.source,
-                  stickyModelId: sticky?.modelId,
-                  stickyModelName: sticky?.modelName,
-                  stickyPinnedSource: sticky?.pinnedSource,
-                  planOnly: false,
-                  allowFileEdits: true,
-                  shouldAbort: () => mySeq !== genSeqRef.current || stopRequestedRef.current,
-                },
-                (live) => {
-                  if (mySeq !== genSeqRef.current || stopRequestedRef.current) return;
-                  const text = String(live || '').trim();
-                  if (text.length < 2) return;
-                  pushAssistantStatus(liveCodingStatusText(text));
-                },
-              ),
-              new Promise<null>((resolve) => {
-                window.setTimeout(() => resolve(null), 300_000);
-              }),
-            ]);
+            const retry = await runWithProgress(
+              'repair',
+              () => Promise.race([
+                answerStudio(
+                  {
+                    userMessage: buildUiPrompt('retry'),
+                    files: filesNow,
+                    projectName: buildIntent.name,
+                    mode: 'code',
+                    preferredModelId: createPinned.id,
+                    preferredModelName: createPinned.name,
+                    preferredSource: createPinned.source === 'cloud' ? 'cloud' : 'local',
+                    stickyModelId: sticky?.modelId,
+                    stickyModelName: sticky?.modelName,
+                    stickyPinnedSource: sticky?.pinnedSource,
+                    planOnly: false,
+                    allowFileEdits: true,
+                    shouldAbort: () => mySeq !== genSeqRef.current || stopRequestedRef.current,
+                  },
+                  (live) => {
+                    if (mySeq !== genSeqRef.current || stopRequestedRef.current) return;
+                    const text = String(live || '').trim();
+                    if (text.length < 2) return;
+                    pushAssistantStatus(liveCodingStatusText(text));
+                  },
+                ),
+                new Promise<null>((resolve) => {
+                  window.setTimeout(() => resolve(null), 300_000);
+                }),
+              ]),
+            );
             modelReply = String(retry?.text || '').trim();
             try {
               (window as unknown as { __NOVA_LAST_BUILD_UI?: unknown }).__NOVA_LAST_BUILD_UI = {
@@ -5688,6 +5944,37 @@ export function AIChat() {
               : `\n\nDraft UI kept (${changed.slice(0, 8).join(', ')}) — this pass is lighter than the full brief.`
                 + '\n\nTell me what you want next — layout, sections, motion, or polish — and I’ll expand that.';
           } else {
+          // Prefer keeping a salvageable draft on disk over wiping to an empty scaffold.
+          // Empty-shell Preview after a long "Writing…" session feels like a silent failure.
+          const salvageDraft = (
+            (!finalBroken && finalApp.length >= 800 && !isPathologicalCodeSource(finalApp))
+            || (!isBrokenReactAppSource(firstPassApp) && firstPassApp.length >= 800 && !isPathologicalCodeSource(firstPassApp))
+          );
+          if (salvageDraft) {
+            if (isBrokenReactAppSource(finalApp) || finalApp.length < 800) {
+              filesNow = firstPassFiles;
+            }
+            filesNow = mergeBriefNpmDependencies(filesNow, briefForBuild);
+            const changed = Object.keys(filesNow).filter((p) => /(?:^|\/)App\.(jsx|tsx|css)$|index\.css$/i.test(p.replace(/\\/g, '/')));
+            followNote = `\n\n**Not Ready yet.** A draft is on disk (${changed.slice(0, 8).join(', ')}) but it is still too light or incomplete for this brief. `
+              + 'Tell me what to expand (sections, interaction, polish) and I will keep building from this draft — not from an empty shell.';
+            // Write the salvage draft to disk (may still be thin — honesty is Not Ready, not blank).
+            const keepBlocks = ['src/App.jsx', 'src/App.tsx', 'src/App.css', 'src/index.css']
+              .filter((p) => filesNow[p] != null)
+              .map((p) => `@@@FILE ${p}\n${filesNow[p]}`)
+              .join('\n');
+            if (keepBlocks) {
+              const kept = await applyChatReplyEdits({
+                reply: keepBlocks,
+                projectId: pid,
+                projectName: buildIntent.name,
+                files: filesNow,
+                userMessage: briefForBuild,
+                diskRoot: originDiskRoot,
+              });
+              if (kept.ok) filesNow = kept.files;
+            }
+          } else {
           // Keep the empty scaffold on disk — do not leave a half-stub UI that looks "done".
           filesNow = { ...seedFiles, ...mergeBriefNpmDependencies(seedFiles, briefForBuild) };
           followNote = exactMismatch
@@ -5718,6 +6005,7 @@ export function AIChat() {
               diskRoot: originDiskRoot,
             });
             if (reverted.ok) filesNow = reverted.files;
+          }
           }
           }
         }
@@ -5793,34 +6081,37 @@ export function AIChat() {
         ) {
           pushAssistantStatus('Polishing the desktop website (second pass)…');
           try {
-            const polishResult = await Promise.race([
-              answerStudio(
-                {
-                  userMessage: buildUiPrompt('polish'),
-                  files: filesNow,
-                  projectName: buildIntent.name,
-                  mode: 'code',
-                  preferredModelId: createPinned.id,
-                  preferredModelName: createPinned.name,
-                  preferredSource: createPinned.source,
-                  stickyModelId: sticky?.modelId,
-                  stickyModelName: sticky?.modelName,
-                  stickyPinnedSource: sticky?.pinnedSource,
-                  planOnly: false,
-                  allowFileEdits: true,
-                  shouldAbort: () => mySeq !== genSeqRef.current || stopRequestedRef.current,
-                },
-                (live) => {
-                  if (mySeq !== genSeqRef.current || stopRequestedRef.current) return;
-                  const text = String(live || '').trim();
-                  if (text.length < 2) return;
-                  pushAssistantStatus(liveCodingStatusText(text));
-                },
-              ),
-              new Promise<null>((resolve) => {
-                window.setTimeout(() => resolve(null), 300_000);
-              }),
-            ]);
+            const polishResult = await runWithProgress(
+              'polish',
+              () => Promise.race([
+                answerStudio(
+                  {
+                    userMessage: buildUiPrompt('polish'),
+                    files: filesNow,
+                    projectName: buildIntent.name,
+                    mode: 'code',
+                    preferredModelId: createPinned.id,
+                    preferredModelName: createPinned.name,
+                    preferredSource: createPinned.source === 'cloud' ? 'cloud' : 'local',
+                    stickyModelId: sticky?.modelId,
+                    stickyModelName: sticky?.modelName,
+                    stickyPinnedSource: sticky?.pinnedSource,
+                    planOnly: false,
+                    allowFileEdits: true,
+                    shouldAbort: () => mySeq !== genSeqRef.current || stopRequestedRef.current,
+                  },
+                  (live) => {
+                    if (mySeq !== genSeqRef.current || stopRequestedRef.current) return;
+                    const text = String(live || '').trim();
+                    if (text.length < 2) return;
+                    pushAssistantStatus(liveCodingStatusText(text));
+                  },
+                ),
+                new Promise<null>((resolve) => {
+                  window.setTimeout(() => resolve(null), 300_000);
+                }),
+              ]),
+            );
             const polishReply = String(polishResult?.text || '').trim();
             if (polishReply && /@@@FILE/i.test(polishReply)) {
               const polished = await applyChatReplyEdits({
@@ -5895,6 +6186,23 @@ export function AIChat() {
               }
             }
           }
+          // Brand assets before Ready — wires local logo/hero paths so gates can reject Pollinations leftovers.
+          if (originDiskRoot && brandPlan.slots.length) {
+            noteThought('Importing logos, icons, and unique photos into public/…');
+            try {
+              const installed = await materializeBrandAssets({
+                diskRoot: originDiskRoot,
+                files: filesNow,
+                plan: brandPlan,
+                brief: briefForBuild,
+                projectName: buildIntent.name,
+              });
+              filesNow = installed.files;
+              if (installed.note) noteThought(installed.note);
+            } catch {
+              /* keep UI even if a photo download fails */
+            }
+          }
           const looksMarketingBrief = briefLooksLikeMarketingLanding(briefForBuild);
           // Keep restaurant/landing creates on the marketing Ready path even if research notes
           // mention "application" / "workspace" (those words used to flip requireInteractive on
@@ -5914,11 +6222,15 @@ export function AIChat() {
               ? isPlayableGameReady(filesNow)
               : isPlayableArcadeGameReady(filesNow))
             : isPreviewReady(filesNow, previewOpts);
+          const { blankSolidColorFromAsk } = await import('@/lib/webProjectCanon');
+          const intentionalBlank = Boolean(blankSolidColorFromAsk(briefForBuild));
           // Never ship a thin / filler landing as Ready even if older gates were soft.
+          // Exception: intentional blank solid-color shells (brown/black proof screens).
           {
             const curApp = filesNow['src/App.jsx'] || filesNow['src/App.tsx'] || '';
             if (
               ready.ok
+              && !intentionalBlank
               && !looksLikePlayableCanvasGame(briefForBuild, buildIntent.name)
               && (
                 looksLikeFillerStubAppSource(curApp)
@@ -5934,7 +6246,7 @@ export function AIChat() {
               };
             }
           }
-          if (!ready.ok) {
+          if (!ready.ok && !intentionalBlank) {
             noteThought(`Preview check failed (${ready.reasons.slice(0, 2).join('; ')}) — adjusting files…`);
             // Strip prose leaks then re-check before giving up.
             for (const key of Object.keys(filesNow)) {
@@ -5954,12 +6266,13 @@ export function AIChat() {
           // Marketing / restaurant landings: rebuild when Ready fails on thin/filler stubs.
           if (
             !ready.ok
+            && !intentionalBlank
             && (marketingLanding || looksMarketingBrief)
             && mySeq === genSeqRef.current
             && !stopRequestedRef.current
             && ready.reasons.some((r) => /filler|thin|landing|menu|CSS|sections|CTA|stub|coffee shop|restaurant brief/i.test(r))
           ) {
-            noteThought('Draft wasn’t a real landing page — rebuilding hero, menu, and footer…');
+            noteThought('Draft wasn’t a real landing page — rebuilding hero, sections, and footer…');
             try {
               const rebuild = await Promise.race([
                 answerStudio(
@@ -5969,8 +6282,8 @@ export function AIChat() {
                       '',
                       `CRITICAL: Brand name "${buildIntent.name}" must be the hero-level signal.`,
                       'CRITICAL: Full-bleed hero + one tagline + one primary CTA + real content sections + footer.',
-                      'CRITICAL: If this is a restaurant/menu brief, include exactly the dishes/items requested with prices.',
-                      'CRITICAL: Restaurant = food dishes (seafood/grill/pasta/dessert), NOT espresso/latte/cappuccino unless the brief is a cafe.',
+                      'CRITICAL: Match THIS brief only. Do not invent content from another product category.',
+                      'CRITICAL: Include the concrete content the brief asks for — nothing from a stock template.',
                       'CRITICAL: Distinctive non-generic CSS (not purple-on-white, not cream+terracotta). No sample/placeholder text.',
                       'Emit complete @@@FILE blocks for src/App.jsx (or src/App.tsx), src/App.css, and src/index.css.',
                     ].join('\n'),
@@ -6027,6 +6340,7 @@ export function AIChat() {
           // Second expand: marketing landings still thin after one rebuild (free models under-deliver vs terminal).
           if (
             !ready.ok
+            && !intentionalBlank
             && (marketingLanding || looksMarketingBrief)
             && mySeq === genSeqRef.current
             && !stopRequestedRef.current
@@ -6161,280 +6475,6 @@ export function AIChat() {
               /* keep prior ready state */
             }
           }
-          // Never ship a restaurant/marketing shell for a todo brief.
-          {
-            const curApp = filesNow['src/App.jsx'] || filesNow['src/App.tsx'] || '';
-            try {
-              const { briefLooksLikeTodoApp } = await import('@/lib/todoAppScaffold');
-              if (
-                briefLooksLikeTodoApp(briefForBuild)
-                && /(?:Ember-Grilled Halibut|Menu highlights|Order ahead|Coastal plates|hero-cta|Tonight)/i.test(curApp)
-              ) {
-                ready = { ok: false, reasons: ['todo brief built as a marketing/restaurant page instead'] };
-              }
-            } catch { /* ignore */ }
-          }
-          // Todo / interactive: after retries still thin or wrong-genre marketing shell — install a real todo board.
-          if (
-            !ready.ok
-            && mySeq === genSeqRef.current
-            && !stopRequestedRef.current
-          ) {
-            try {
-              const { briefLooksLikeTodoApp, buildTodoAppScaffold } = await import('@/lib/todoAppScaffold');
-              const cur = filesNow['src/App.jsx'] || filesNow['src/App.tsx'] || '';
-              const wrongGenre = /Ember-Grilled Halibut|Menu highlights|Order ahead|Coastal plates/i.test(cur)
-                || (!/localStorage/i.test(cur) && briefLooksLikeTodoApp(briefForBuild));
-              if (briefLooksLikeTodoApp(briefForBuild) && (previewOpts.requireInteractive || wrongGenre || ready.reasons.some((r) => /todo brief|interactive|thin|persist|filter/i.test(r)))) {
-                noteThought('Draft wasn’t a working todo app — installing todo board mechanics…');
-                const shell = buildTodoAppScaffold(buildIntent.name);
-                filesNow = {
-                  ...filesNow,
-                  'src/App.jsx': shell.app,
-                  'src/App.css': shell.css,
-                  'src/index.css': shell.indexCss,
-                };
-                if (filesNow['src/App.tsx'] != null) {
-                  const { ['src/App.tsx']: _dropTodo, ...restTodo } = filesNow;
-                  filesNow = restTodo;
-                }
-                filesNow = ensureViteReactProjectFiles(filesNow, buildIntent.name).files;
-                filesNow = {
-                  ...filesNow,
-                  'src/App.jsx': shell.app,
-                  'src/App.css': shell.css,
-                  'src/index.css': shell.indexCss,
-                };
-                if (filesNow['src/App.tsx'] != null) {
-                  const { ['src/App.tsx']: _dropTodo2, ...restTodo2 } = filesNow;
-                  filesNow = restTodo2;
-                }
-                const todoPaths = ['src/App.jsx', 'src/App.css', 'src/index.css', 'src/main.jsx', 'index.html']
-                  .filter((p) => filesNow[p]);
-                const todoWrite = await applyChatReplyEdits({
-                  reply: todoPaths.map((p) => `@@@FILE ${p}\n${filesNow[p]}`).join('\n'),
-                  projectId: pid,
-                  projectName: buildIntent.name,
-                  files: filesNow,
-                  userMessage: briefForBuild,
-                  diskRoot: originDiskRoot,
-                });
-                if (todoWrite.ok) {
-                  filesNow = {
-                    ...todoWrite.files,
-                    'src/App.jsx': shell.app,
-                    'src/App.css': shell.css,
-                    'src/index.css': shell.indexCss,
-                  };
-                } else if (originDiskRoot && window.arkDesktop?.workspaceWriteFile) {
-                  const sep = originDiskRoot.includes('\\') ? '\\' : '/';
-                  const root = originDiskRoot.replace(/[/\\]+$/, '');
-                  for (const rel of ['src/App.jsx', 'src/App.css', 'src/index.css']) {
-                    await window.arkDesktop.workspaceWriteFile({
-                      targetPath: `${root}${sep}${rel.replace(/\//g, sep)}`,
-                      content: filesNow[rel],
-                    });
-                  }
-                }
-                ready = isPreviewReady(filesNow, { ...previewOpts, requireInteractive: true });
-                const todoApp = filesNow['src/App.jsx'] || '';
-                if (
-                  !ready.ok
-                  && /localStorage/i.test(todoApp)
-                  && /useState/i.test(todoApp)
-                  && /filter/i.test(todoApp)
-                  && todoApp.length >= 1800
-                ) {
-                  ready = { ok: true, reasons: [] };
-                }
-              }
-            } catch {
-              /* keep prior ready state */
-            }
-          }
-          // Restaurant/marketing: after model retries still thin/coffee — install a real food landing (same idea as FPS scaffold).
-          if (
-            !ready.ok
-            && (marketingLanding || looksMarketingBrief)
-            && mySeq === genSeqRef.current
-            && !stopRequestedRef.current
-            && !/\b(?:coffee\s*shop|caf[eé]|espresso\s*bar|roaster)\b/i.test(briefForBuild)
-            && (
-              ready.reasons.some((r) => /filler|thin|landing|menu|CSS|sections|CTA|stub|coffee shop|restaurant brief/i.test(r))
-              || restaurantBriefBuiltAsCoffeeShop(
-                filesNow['src/App.jsx'] || filesNow['src/App.tsx'] || '',
-                briefForBuild,
-              )
-            )
-          ) {
-            noteThought('Model kept a thin/coffee draft — installing a real restaurant landing…');
-            try {
-              const { buildRestaurantLandingScaffold } = await import('@/lib/restaurantLandingScaffold');
-              const shell = buildRestaurantLandingScaffold(buildIntent.name);
-              filesNow = {
-                ...filesNow,
-                'src/App.jsx': shell.app,
-                'src/App.css': shell.css,
-                'src/index.css': shell.indexCss,
-              };
-              if (filesNow['src/App.tsx'] != null) {
-                const { ['src/App.tsx']: _drop, ...rest } = filesNow;
-                filesNow = rest;
-              }
-              filesNow = ensureViteReactProjectFiles(filesNow, buildIntent.name).files;
-              // Re-assert scaffold after ensure (never let a stub twin win).
-              filesNow = {
-                ...filesNow,
-                'src/App.jsx': shell.app,
-                'src/App.css': shell.css,
-                'src/index.css': shell.indexCss,
-              };
-              if (filesNow['src/App.tsx'] != null) {
-                const { ['src/App.tsx']: _drop2, ...rest2 } = filesNow;
-                filesNow = rest2;
-              }
-              const shellPaths = ['src/App.jsx', 'src/App.css', 'src/index.css', 'src/main.jsx', 'index.html']
-                .filter((p) => filesNow[p]);
-              const shellWrite = await applyChatReplyEdits({
-                reply: shellPaths.map((p) => `@@@FILE ${p}\n${filesNow[p]}`).join('\n'),
-                projectId: pid,
-                projectName: buildIntent.name,
-                files: filesNow,
-                userMessage: briefForBuild,
-                diskRoot: originDiskRoot,
-              });
-              if (shellWrite.ok) {
-                filesNow = shellWrite.files;
-                filesNow = {
-                  ...filesNow,
-                  'src/App.jsx': shell.app,
-                  'src/App.css': shell.css,
-                  'src/index.css': shell.indexCss,
-                };
-                if (filesNow['src/App.tsx'] != null) {
-                  const { ['src/App.tsx']: _drop3, ...rest3 } = filesNow;
-                  filesNow = rest3;
-                }
-              } else if (originDiskRoot && window.arkDesktop?.workspaceWriteFile) {
-                const sep = originDiskRoot.includes('\\') ? '\\' : '/';
-                const root = originDiskRoot.replace(/[/\\]+$/, '');
-                for (const rel of ['src/App.jsx', 'src/App.css', 'src/index.css']) {
-                  await window.arkDesktop.workspaceWriteFile({
-                    targetPath: `${root}${sep}${rel.replace(/\//g, sep)}`,
-                    content: filesNow[rel],
-                  });
-                }
-              }
-              ready = isPreviewReady(filesNow, { ...previewOpts, requireInteractive: false });
-              const shellApp = filesNow['src/App.jsx'] || '';
-              if (
-                !ready.ok
-                && shellApp.length >= 1800
-                && /menu__list|Ember-Grilled|Kelp Butter/i.test(shellApp)
-                && !restaurantBriefBuiltAsCoffeeShop(shellApp, briefForBuild)
-              ) {
-                ready = { ok: true, reasons: [] };
-              }
-            } catch {
-              /* keep prior ready state */
-            }
-          }
-          if (!ready.ok && looksLikeFpsGame(briefForBuild, buildIntent.name)) {
-            noteThought('Model draft wasn’t playable — installing FPS Arena core mechanics…');
-            const { buildPlayableFpsScaffold } = await import('@/lib/playableFpsScaffold');
-            const scaffold = buildPlayableFpsScaffold(buildIntent.name);
-            filesNow = {
-              ...filesNow,
-              'src/App.jsx': scaffold['src/App.jsx'],
-              'src/App.css': scaffold['src/App.css'],
-            };
-            filesNow = ensureViteReactProjectFiles(filesNow, buildIntent.name).files;
-            const scaffoldPaths = ['src/App.jsx', 'src/App.css', 'src/main.jsx', 'src/index.css', 'index.html']
-              .filter((p) => filesNow[p]);
-            const diskRootCreate = originDiskRoot;
-            const scaffoldWrite = await applyChatReplyEdits({
-              reply: scaffoldPaths.map((p) => `@@@FILE ${p}\n${filesNow[p]}`).join('\n'),
-              projectId: pid,
-              projectName: buildIntent.name,
-              files: filesNow,
-              userMessage: briefForBuild,
-              diskRoot: diskRootCreate,
-            });
-            if (scaffoldWrite.ok) {
-              filesNow = scaffoldWrite.files;
-            } else if (diskRootCreate && window.arkDesktop?.workspaceWriteFile) {
-              const sep = diskRootCreate.includes('\\') ? '\\' : '/';
-              const root = diskRootCreate.replace(/[/\\]+$/, '');
-              for (const rel of scaffoldPaths) {
-                await window.arkDesktop.workspaceWriteFile({
-                  targetPath: `${root}${sep}${rel.replace(/\//g, sep)}`,
-                  content: filesNow[rel],
-                });
-              }
-            }
-            ready = isPlayableGameReady(filesNow);
-          }
-          // Pong / arcade paddle games: install a playable court when model left a todo shell.
-          if (
-            !ready.ok
-            && looksLikePlayableCanvasGame(briefForBuild, buildIntent.name)
-            && !looksLikeFpsGame(briefForBuild, buildIntent.name)
-            && mySeq === genSeqRef.current
-            && !stopRequestedRef.current
-          ) {
-            try {
-              const { briefLooksLikePongGame, buildPongGameScaffold } = await import('@/lib/pongGameScaffold');
-              const cur = filesNow['src/App.jsx'] || filesNow['src/App.tsx'] || '';
-              const needsPong = briefLooksLikePongGame(briefForBuild, buildIntent.name)
-                || (!/<canvas\b|requestAnimationFrame/i.test(cur) && /\b(?:pong|paddle|browser\s+game|arcade)\b/i.test(briefForBuild));
-              if (needsPong) {
-                noteThought('Model draft wasn’t a playable Pong court — installing EmberPong mechanics…');
-                const scaffold = buildPongGameScaffold(buildIntent.name);
-                filesNow = {
-                  ...filesNow,
-                  ...scaffold,
-                };
-                if (filesNow['src/App.tsx'] != null) {
-                  const { ['src/App.tsx']: _dropPong, ...restPong } = filesNow;
-                  filesNow = restPong;
-                }
-                filesNow = ensureViteReactProjectFiles(filesNow, buildIntent.name).files;
-                filesNow = { ...filesNow, ...scaffold };
-                if (filesNow['src/App.tsx'] != null) {
-                  const { ['src/App.tsx']: _dropPong2, ...restPong2 } = filesNow;
-                  filesNow = restPong2;
-                }
-                const pongPaths = ['src/App.jsx', 'src/App.css', 'src/index.css', 'src/main.jsx', 'index.html']
-                  .filter((p) => filesNow[p]);
-                const pongWrite = await applyChatReplyEdits({
-                  reply: pongPaths.map((p) => `@@@FILE ${p}\n${filesNow[p]}`).join('\n'),
-                  projectId: pid,
-                  projectName: buildIntent.name,
-                  files: filesNow,
-                  userMessage: briefForBuild,
-                  diskRoot: originDiskRoot,
-                });
-                if (pongWrite.ok) {
-                  filesNow = { ...pongWrite.files, ...scaffold };
-                } else if (originDiskRoot && window.arkDesktop?.workspaceWriteFile) {
-                  const sep = originDiskRoot.includes('\\') ? '\\' : '/';
-                  const root = originDiskRoot.replace(/[/\\]+$/, '');
-                  for (const rel of Object.keys(scaffold)) {
-                    await window.arkDesktop.workspaceWriteFile({
-                      targetPath: `${root}${sep}${rel.replace(/\//g, sep)}`,
-                      content: scaffold[rel],
-                    });
-                  }
-                }
-                ready = isPlayableArcadeGameReady(filesNow);
-                if (!ready.ok && /requestAnimationFrame/i.test(filesNow['src/App.jsx'] || '') && /<canvas\b/i.test(filesNow['src/App.jsx'] || '')) {
-                  ready = { ok: true, reasons: [] };
-                }
-              }
-            } catch {
-              /* keep prior ready state */
-            }
-          }
           if (ready.ok) {
             uiBuilt = true;
             // Persist any Ready-gate repairs (prose strip / brand stamp) to disk.
@@ -6479,6 +6519,24 @@ export function AIChat() {
           if (pkgWrite.ok) filesNow = pkgWrite.files;
         }
 
+        if (originDiskRoot && brandPlan.slots.length) {
+          // Second pass: catch any Pollinations leftovers after repair/rebuild loops.
+          noteThought('Refreshing brand asset wiring…');
+          try {
+            const installed = await materializeBrandAssets({
+              diskRoot: originDiskRoot,
+              files: filesNow,
+              plan: brandPlan,
+              brief: briefForBuild,
+              projectName: buildIntent.name,
+            });
+            filesNow = installed.files;
+            if (installed.saved.length) noteThought(installed.note);
+          } catch {
+            /* keep UI even if a photo download fails */
+          }
+        }
+
         createFilesAcc = filesNow;
         commitStudioForChat(activeChatId, {
           files: createFilesAcc,
@@ -6506,21 +6564,28 @@ export function AIChat() {
         && Object.keys(bootstrapFiles).some(p => /(^|\/)package\.json$/i.test(p.replace(/\\/g, '/')));
       if (needsNpm) noteThought('Installing npm dependencies…');
       let bootstrap = originDiskRoot
-        ? await bootstrapProjectWorkspace(originDiskRoot, scaffoldKind, {
+        ? await runWithProgress('install', () => bootstrapProjectWorkspace(originDiskRoot, scaffoldKind, {
           files: bootstrapFiles,
-        })
+        }), 5000)
         : { npmInstalled: true as const, previewLive: !needsNpm };
       // Live Preview gate: Vite/npm projects must not claim Ready without a responding localhost.
       if (bootstrap.devServerUrl) {
+        noteThought('Opening localhost for Preview…');
         const { verifyLivePreviewUrl } = await import('@/lib/projectPreview');
         const live = await verifyLivePreviewUrl(bootstrap.devServerUrl);
-        if (live) {
+        const smoke = live
+          ? await smokeCheckPreviewUrl(bootstrap.devServerUrl)
+          : { ok: false as const, note: 'Preview URL did not answer' };
+        if (live && smoke.ok) {
           bootstrap.previewLive = true;
+          noteThought('Preview page responded — finishing up…');
         } else {
           bootstrap.previewLive = false;
           bootstrap.devServerUrl = undefined;
           bootstrap.bootstrapNote = bootstrap.bootstrapNote
+            || smoke.note
             || 'Dev server URL was returned but localhost did not answer. Say **run Preview** to retry.';
+          noteThought(`Preview check: ${smoke.note}`);
         }
       }
       if (needsNpm && bootstrap.npmInstalled === false) {
@@ -6550,7 +6615,7 @@ export function AIChat() {
       }
 
       pushAssistantStatus('Preparing answer…');
-      if (siteImageGapNote && !String(followNote || '').includes('fresh original hero')) {
+      if (siteImageGapNote && !String(followNote || '').includes('image generation')) {
         followNote = `${followNote || ''}${siteImageGapNote}`;
       }
       const finalFiles = Object.keys(createFilesAcc).length ? createFilesAcc : (created.files || {});
@@ -6784,8 +6849,20 @@ export function AIChat() {
     const workspaceActive = hasActiveWorkspace({
       files: resolvedStudio.files,
       projectId: workspaceProjectId,
-      diskRoot: chatStudioDiskRootRef.current || chatStudioDiskRoot,
+      diskRoot: chatStudioDiskRootRef.current
+        || chatStudioDiskRoot
+        || resolvedStudio.diskRoot
+        || loadChatStudio(activeChatId)?.diskRoot
+        || null,
     });
+    if (!chatStudioDiskRootRef.current) {
+      const recoveredRoot = resolvedStudio.diskRoot || loadChatStudio(activeChatId)?.diskRoot || null;
+      if (recoveredRoot) {
+        chatStudioDiskRootRef.current = recoveredRoot;
+        setChatStudioDiskRoot(recoveredRoot);
+        studioBoundChatIdRef.current = activeChatId;
+      }
+    }
     const turnComposerMode = composerModeFromContent(content) || composerMode;
     const agentCwd = chatStudioDiskRootRef.current
       || chatStudioDiskRoot
@@ -7192,6 +7269,17 @@ export function AIChat() {
     ) {
       wantsCodeEdit = true;
     }
+    // "Center words that say …" on a bound brown/blank screen — always write disk.
+    if (
+      !wantsCodeEdit
+      && diskBound
+      && (
+        /\b(?:center|centred|middle)\b[\s\S]{0,48}\b(?:words?|text|phrase|wording)\b/i.test(content)
+        || (/\b(?:words?|wording|phrase)\b/i.test(content) && /\b(?:says?|reading)\b/i.test(content))
+      )
+    ) {
+      wantsCodeEdit = true;
+    }
     // Bound folder + explicit apply/polish asks must always write disk (never chat-only).
     if (
       !wantsCodeEdit
@@ -7306,6 +7394,78 @@ export function AIChat() {
     }
 
     const visionReady = await hasVisionCapability();
+
+    if (
+      messageHasImages(content)
+      && looksLikeUseAttachedAsset(content)
+      && (chatStudioDiskRootRef.current || resolvedStudio.diskRoot)
+    ) {
+      const diskRoot = chatStudioDiskRootRef.current || resolvedStudio.diskRoot || '';
+      const placed = await applyAttachedChatImagesAsAssets({
+        diskRoot,
+        files: stickyFiles,
+        message: content,
+      });
+      if (placed.ok) {
+        setChatStudioFiles({ ...placed.files });
+        chatStudioFilesRef.current = { ...placed.files };
+        commitStudioForChat(activeChatId, {
+          files: placed.files,
+          projectId: resolvedStudio.projectId || chatStudioProjectIdRef.current,
+          name: resolvedStudio.name,
+          diskRoot,
+        });
+        const where = placed.saved.length
+          ? placed.saved.map((p) => p.replace(/^public\//, '/')).join(', ')
+          : 'public/';
+        await finishPlainReply(
+          `Saved your photo${placed.saved.length > 1 ? 's' : ''} into **${where}** and wired ${
+            placed.saved.length > 1 ? 'them' : 'it'
+          } as the **${placed.role || 'hero'}**. Preview should refresh — say if you want a different section.`,
+        );
+        return;
+      }
+    }
+
+    // Link-only asset asks on a bound project (Iconify / Unsplash / “professional icons”).
+    if (
+      (chatStudioDiskRootRef.current || resolvedStudio.diskRoot)
+      && looksLikeAssetLinkAsk(content)
+      && !messageHasImages(content)
+    ) {
+      const diskRoot = chatStudioDiskRootRef.current || resolvedStudio.diskRoot || '';
+      pushAssistantStatus('Importing icons and images…');
+      try {
+        const plan = planBrandAssets(
+          content,
+          resolvedStudio.name || 'project',
+        );
+        const installed = await materializeBrandAssets({
+          diskRoot,
+          files: stickyFiles,
+          plan,
+          brief: content,
+          projectName: resolvedStudio.name || 'project',
+        });
+        if (installed.saved.length) {
+          setChatStudioFiles({ ...installed.files });
+          chatStudioFilesRef.current = { ...installed.files };
+          commitStudioForChat(activeChatId, {
+            files: installed.files,
+            projectId: resolvedStudio.projectId || chatStudioProjectIdRef.current,
+            name: resolvedStudio.name,
+            diskRoot,
+          });
+          await finishPlainReply(
+            `${installed.note}\n\nOpen **Preview** to review. Paste more links or say which icons to swap.`,
+          );
+          return;
+        }
+      } catch {
+        /* fall through */
+      }
+    }
+
     // Multi-model: image attached but nothing can see pixels → clear CTA.
     if (messageHasImages(content) && !visionReady) {
       const gap = visionCapabilityGapReply({
@@ -7340,7 +7500,13 @@ export function AIChat() {
         visionHopMeta = hop.providerLabel;
         setMessages(prev => prev.map(m => (
           m.id === assistantId
-            ? { ...m, content: `__generating__:chat:${multiModelStatusLabel('coder')}` }
+            ? {
+              ...m,
+              content: `__generating__:chat:${formatHybridAttribution([
+                { role: 'vision', name: hop.providerLabel || 'Vision' },
+                { role: 'code', name: 'Coder' },
+              ])}`,
+            }
             : m
         )));
       }
@@ -8055,41 +8221,52 @@ export function AIChat() {
         }
       }
 
-      const result = await answerStudio(
-        {
-          userMessage: studioUserMessage,
-          files: stickyFiles,
-          projectName: projectLabel,
-          lastIntent: lastStudioIntentRef.current,
-          lastFindings: lastFindingsRef.current,
-          mode: allowEdits ? 'code' : 'chat',
-          preferredModelId: pinnedModel.id,
-          preferredModelName: pinnedModel.name,
-          preferredSource: pinnedModel.source,
-          stickyModelId: sticky?.modelId,
-          stickyModelName: sticky?.modelName,
-          stickyPinnedSource: sticky?.pinnedSource,
-          planOnly: planTurn,
-          allowFileEdits: allowEdits,
-          shouldAbort: () => mySeq !== genSeqRef.current || stopRequestedRef.current,
-        },
-        (live) => {
+      const editHbStop = allowEdits
+        ? startProgressHeartbeat((label) => {
           if (mySeq !== genSeqRef.current || stopRequestedRef.current) return;
-          const text = String(live || '').trim();
-          if (text.length < 2) return;
-          // Chat mode: stream the answer as-is. Never flip to a status label mid-reply (causes flicker).
-          const bubble = allowEdits
-            ? `__generating__:chat:${liveCodingStatusText(text)}`
-            : text;
-          setMessages(prev => {
-            const next = prev.map(m => (
-              m.id === assistantId ? { ...m, content: bubble } : m
-            ));
-            messagesRef.current = next;
-            return next;
-          });
-        },
-      );
+          pushAssistantStatus(label);
+        }, 'edit', 4000)
+        : () => {};
+      let result: Awaited<ReturnType<typeof answerStudio>>;
+      try {
+        result = await answerStudio(
+          {
+            userMessage: studioUserMessage,
+            files: stickyFiles,
+            projectName: projectLabel,
+            lastIntent: lastStudioIntentRef.current,
+            lastFindings: lastFindingsRef.current,
+            mode: allowEdits ? 'code' : 'chat',
+            preferredModelId: pinnedModel.id,
+            preferredModelName: pinnedModel.name,
+            preferredSource: pinnedModel.source,
+            stickyModelId: sticky?.modelId,
+            stickyModelName: sticky?.modelName,
+            stickyPinnedSource: sticky?.pinnedSource,
+            planOnly: planTurn,
+            allowFileEdits: allowEdits,
+            shouldAbort: () => mySeq !== genSeqRef.current || stopRequestedRef.current,
+          },
+          (live) => {
+            if (mySeq !== genSeqRef.current || stopRequestedRef.current) return;
+            const text = String(live || '').trim();
+            if (text.length < 2) return;
+            // Chat mode: stream the answer as-is. Never flip to a status label mid-reply (causes flicker).
+            const bubble = allowEdits
+              ? `__generating__:chat:${liveCodingStatusText(text)}`
+              : text;
+            setMessages(prev => {
+              const next = prev.map(m => (
+                m.id === assistantId ? { ...m, content: bubble } : m
+              ));
+              messagesRef.current = next;
+              return next;
+            });
+          },
+        );
+      } finally {
+        editHbStop();
+      }
 
       if (await stopIfSuperseded()) return;
 
@@ -9709,13 +9886,16 @@ export function AIChat() {
           chatTurnCtlRef.current.clearGenerating();
           const timedOut = err instanceof Error && /timed out/i.test(err.message);
           const rawErr = stopRequestedRef.current && streamedPartial
-            ? usableAssistantText(streamedPartial, content, previousAssistant) || streamedPartial.trim()
+            ? usableAssistantText(streamedPartial, content, previousAssistant) || ''
             : streamedPartial.trim().length > 8
-              ? usableAssistantText(streamedPartial, content, previousAssistant) || (looksLikePromptEcho(streamedPartial) ? '' : streamedPartial.trim())
+              ? usableAssistantText(streamedPartial, content, previousAssistant)
+                || (looksLikePromptEcho(streamedPartial) ? '' : '')
               : (timedOut
                 ? 'Response timed out. Try again or pick another model.'
                 : (err instanceof Error ? err.message : 'NOVA Router failed'));
-          response = classifyErrorMessage(rawErr).message;
+          response = classifyErrorMessage(rawErr || (timedOut
+            ? 'Response timed out. Try again or pick another model.'
+            : 'Stopped.')).message;
           usedPlugin = true;
         }
       }
@@ -10397,14 +10577,6 @@ export function AIChat() {
               )}
             </div>
           )}
-          {dropHint && !attachUploading && (
-            <p
-              className="mb-2 w-full max-w-full min-w-0 overflow-hidden px-1 text-[11px] text-amber-300/90 break-words [overflow-wrap:anywhere] line-clamp-2"
-              title={dropHint}
-            >
-              {dropHint}
-            </p>
-          )}
           {dictating ? (
             <p className="mb-2 px-1 text-[11px] text-rose-300/90 animate-pulse">
               Listening… speak now, then click the mic again when you’re done.
@@ -10469,6 +10641,14 @@ export function AIChat() {
             ) : null}
           </div>
           <div className="flex-1 min-w-0 flex flex-col">
+          {dropHint && !attachUploading && (
+            <p
+              className="mb-2 w-full min-w-0 overflow-hidden text-left text-[11px] text-amber-300/90 break-words [overflow-wrap:anywhere] line-clamp-2"
+              title={dropHint}
+            >
+              {dropHint}
+            </p>
+          )}
           {pathBindOpen && (
             <div className="mb-2 w-full min-w-0 box-border rounded-xl border border-surface-border bg-ark-navy-900/90 px-2 py-1.5">
               <div className="flex items-center gap-1.5 min-w-0">
@@ -10725,15 +10905,25 @@ export function AIChat() {
                 Preview
               </button>
             ) : null}
-            {(mode === 'general' || mode === 'code') && showStudioPills && codePillSticky ? (
+            {(mode === 'general' || mode === 'code') && (showStudioPills || codePillSticky || chatStudioDiskRoot) ? (
               <button
                 type="button"
                 onClick={() => openCodeWorkspace()}
-                className="inline-flex items-center gap-1 rounded-full border border-violet-500/45 bg-violet-500/20 px-2.5 py-1 text-xs font-medium text-violet-100 hover:bg-violet-500/30 transition-colors shrink-0"
-                title="Open Code. files on the left, editor on the right"
+                disabled={!chatStudioDiskRoot && Object.keys(chatStudioFiles).length === 0}
+                className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors shrink-0 ${
+                  !chatStudioDiskRoot && Object.keys(chatStudioFiles).length === 0
+                    ? 'border-violet-500/20 bg-violet-500/10 text-violet-100/40 cursor-not-allowed'
+                    : 'border-violet-500/45 bg-violet-500/20 text-violet-100 hover:bg-violet-500/30'
+                }`}
+                title={
+                  generating
+                    ? 'Live Code view — watch files update. Editing unlocks when the build finishes.'
+                    : 'Open Code. files on the left, editor on the right'
+                }
               >
                 <Code2 className="w-3.5 h-3.5 text-violet-300" />
                 Code
+                {generating ? <span className="text-[10px] text-violet-200/80">· live</span> : null}
               </button>
             ) : null}
             <div className="flex-1 min-w-0" aria-hidden />
@@ -11358,11 +11548,13 @@ export function AIChat() {
         open={codeOverlayOpen}
         onClose={() => setCodeOverlayOpen(false)}
         files={chatStudioFiles}
+        readOnly={generating}
         projectName={
           loadChatStudio(route.name === 'chat' ? (route.chatId || '') : '')?.name
           || (chatStudioDiskRoot ? chatStudioDiskRoot.split(/[/\\]/).pop() : undefined)
         }
         onChangeFile={(path, content) => {
+          if (generating) return;
           const next = { ...chatStudioFilesRef.current, [path]: content };
           setChatStudioFiles(next);
           chatStudioFilesRef.current = next;

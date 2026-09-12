@@ -44,4 +44,17 @@ supabase/.temp/
 .tmp*
 .tmp-*/
 tmp-media/
+scripts/live-cdp*
+scripts/tmp-*
+scripts/_tmp*
+scripts/_stretch-*
+scripts/_check-*
+scripts/*.patch
+scripts/check-edit-routing.ts
+scripts/console-check.mjs
+scripts/dump-build-debug.mjs
+scripts/inspect-ark-builds.mjs
+scripts/nav-chat-check.mjs
+scripts/reload-check.mjs
+scripts/_splash-preview*
 

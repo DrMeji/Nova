@@ -137,6 +137,7 @@ function askCloudRetryReply(attempted: string[]): ArkRouterResult {
 }
 
 function modePrefersCloud(mode: AiModePref) {
+  // Hybrid (cloud_when_available) + Cloud Create (local_fallback) prefer keyed cloud first.
   return mode === 'cloud_when_available' || mode === 'local_fallback';
 }
 
@@ -869,7 +870,7 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
         reply: [
           'Local-only mode is on, but no live local brain is ready.',
           'Install a GGUF model into NOVA Engine (Local AI / Models), or enable optional Ollama.',
-          'NOVA Core’s template replies are not a live model. they won’t answer like ChatGPT.',
+          'NOVA Core’s template replies are not a live model. Connect or download a chat model for real answers.',
         ].join('\n'),
         modelName: 'NOVA Engine',
         source: 'none',
@@ -972,7 +973,7 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
       reply: [
         'Local-only mode is on, but no live local brain is ready.',
         'Install a GGUF model into NOVA Engine (Local AI / Models), or enable optional Ollama.',
-        'NOVA Core’s template replies are not a live model. they won’t answer like ChatGPT.',
+        'NOVA Core’s template replies are not a live model. Connect or download a chat model for real answers.',
       ].join('\n'),
       modelName: 'NOVA Engine',
       source: 'none',

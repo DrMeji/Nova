@@ -87,7 +87,7 @@ export const BLANK_STARTER: Record<string, string> = {
 <body>
   <main class="wrap">
     <h1>Blank page</h1>
-    <p>Tell NOVA what to add. a search bar, a dashboard, a ChatGPT-style layout, anything.</p>
+    <p>Tell NOVA what to add. a search bar, a dashboard, a chat-style layout, anything.</p>
   </main>
   <script src="js/app.js"></script>
 </body>

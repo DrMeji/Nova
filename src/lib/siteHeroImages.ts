@@ -1,7 +1,7 @@
 /**
  * Hero / product imagery for marketing-site creates.
- * Every project gets a unique generative prompt — no canned stock photos,
- * no shared cafe Unsplash fallbacks, no placeholder hosts.
+ * Site creates prefer Brand Assets (uploads, pasted URLs, Openverse, Iconify).
+ * Pollinations helpers remain for the Image tab only — never injected into creates.
  */
 
 import { getEngineStatus } from '@/lib/arkEngine';
@@ -43,7 +43,6 @@ export function enrichImagePrompt(prompt: string): string {
     .replace(/\s+/g, ' ')
     .trim();
   if (!p) p = 'premium commercial photography';
-  // Thin prompts like "cozy cafe hero image" → add camera / lighting cues (still unique — never swap to stock).
   if (p.length < 48 || (/^(?:cozy|warm|nice|beautiful|cool)\b/i.test(p) && p.split(' ').length < 8)) {
     p = `${p}, professional photography, sharp focus, natural lighting, high detail, 35mm, editorial quality`;
   }
@@ -64,6 +63,7 @@ export function heroSeedForProject(projectName: string, salt = ''): number {
   return (h >>> 0) % 1_000_000_000 || 1;
 }
 
+/** Image-tab / explicit gen only — do not call from site create prompts. */
 export function pollinationsImageUrl(prompt: string, opts?: PollinationsImageOpts): string {
   const w = Math.max(1280, opts?.width ?? 1920);
   const h = Math.max(720, opts?.height ?? 1080);
@@ -74,7 +74,7 @@ export function pollinationsImageUrl(prompt: string, opts?: PollinationsImageOpt
 }
 
 /**
- * Unique hero URL for this project + scene. Never returns a fixed stock photo.
+ * Unique hero URL helper (Image tab / legacy). Site creates must not inject these.
  */
 export function uniqueHeroImageUrl(
   scenePrompt: string,
@@ -92,7 +92,7 @@ export function uniqueHeroImageUrl(
   });
 }
 
-/** @deprecated Kept only so old imports compile — always unique generative, never canned Unsplash. */
+/** @deprecated Kept only so old imports compile — prefer Brand Assets local paths. */
 export function unsplashHeroUrl(kind: 'cafe' | 'restaurant' | 'product' | 'generic' = 'generic'): string {
   const scenes: Record<typeof kind, string> = {
     cafe: 'warm specialty coffee shop interior, wooden counter, soft morning light, editorial',
@@ -103,7 +103,7 @@ export function unsplashHeroUrl(kind: 'cafe' | 'restaurant' | 'product' | 'gener
   return uniqueHeroImageUrl(scenes[kind], `nova-${kind}`, { salt: kind });
 }
 
-/** Apple.com-style product hero prompts (private lookalike tests) — unique seeds per device. */
+/** Apple.com-style product hero prompts — Image tab only; creates use /heroes/*.jpg. */
 export function appleStyleHeroImageUrls(projectName = 'apple.com'): Record<string, string> {
   return {
     iphone: uniqueHeroImageUrl(
@@ -165,73 +165,50 @@ export async function isLocalSiteImageReady(): Promise<boolean> {
 }
 
 /**
- * Honest chat ask when marketing heroes need image models the user has not installed.
- * Does not block the build — generative URLs can still draft — but never silent stock reuse.
+ * Optional nudge for original generated heroes. Site creates still work via Brand Assets.
  */
 export function siteImageCapabilityGapReply(opts?: {
   projectName?: string;
   readyLocal?: Array<{ id: string; name: string }>;
   hasCloudKey?: boolean;
+  brief?: string;
 }): string | null {
   if (opts?.readyLocal?.length) return null;
+  if (opts?.hasCloudKey) return null;
   const name = String(opts?.projectName || 'this site').trim() || 'this site';
-  const lines = [
-    `For **${name}**, I need a fresh original hero photo — not a reused stock cafe background.`,
-    '',
-    '**Download an image model so multi-model can generate a unique background:**',
-    ...RECOMMENDED_SITE_IMAGE_MODELS.map(
-      (m) => `- **${m.name}** → ${m.where} (start with **${RECOMMENDED_SITE_IMAGE_MODEL_NAME}** if unsure)`,
-    ),
-  ];
-  if (!opts?.hasCloudKey) {
-    lines.push(
-      '',
-      '**Or** Models → Cloud → add a Hugging Face / OpenAI image key for a cloud image hop.',
-    );
-  } else {
-    lines.push('', 'A cloud image key is already saved — I can hop to that after local weights are optional.');
-  }
-  lines.push(
-    '',
-    'After the model is ready, say **regenerate the hero background** and I will rebuild imagery unique to this brand.',
+  const foodBrief = /\b(?:cafe|coffee|restaurant|bistro|bakery|food|dining)\b/i.test(
+    `${opts?.brief || ''} ${name}`,
   );
+  const lines = [
+    `**${name}** looks best with real photos (upload in chat, or paste Unsplash/Pexels/Openverse links).`,
+    '',
+    foodBrief
+      ? 'Optional: install an **image generation** model for original hero photography:'
+      : 'Optional: install an **image generation** model for original hero photography:',
+    ...RECOMMENDED_SITE_IMAGE_MODELS.map(
+      (m) => `- **${m.name}** → ${m.where}`,
+    ),
+    '',
+    `Start with **${RECOMMENDED_SITE_IMAGE_MODEL_NAME}** if you are unsure.`,
+    '',
+    '**Or** Models → Cloud → add a Hugging Face / OpenAI **image** key (not a chat key).',
+    '',
+    'Until then, NOVA uses Brand Assets (Iconify + Openverse + your uploads/links) — not Pollinations hotlinks.',
+  ];
   return lines.join('\n');
 }
 
-export function siteImageGuidanceForBrief(brief: string, projectName: string): string {
-  const t = `${brief}\n${projectName}`;
-  const brand = String(projectName || 'this brand').trim() || 'this brand';
-  const seed = heroSeedForProject(brand, brief.slice(0, 64));
-  const lines = [
+export function siteImageGuidanceForBrief(_brief: string, _projectName: string): string {
+  return [
     'IMAGES (required for marketing / replica sites):',
-    '- NEVER use via.placeholder.com, placehold.co, lorem pics, or broken local files unless you also emit the binary.',
-    '- NEVER paste a fixed Unsplash photo id or any shared stock URL. Every project must look different.',
-    '- NEVER reuse a previous cafe/restaurant hero. Build a UNIQUE photography prompt that includes this brand name.',
-    `- Prefer Pollinations Flux with an explicit seed for uniqueness: https://image.pollinations.ai/prompt/<DETAILED_PROMPT>?width=1920&height=1080&model=flux&nologo=true&enhance=true&seed=${seed}`,
-    '- Prompts must be detailed photography language (scene, lighting, lens, materials) AND include the brand name — NEVER short slugs like cozy_cafe_hero_image.',
-    '- Every hero section must show a real visual (background-image or <img src=https...>). No broken-image icons.',
-  ];
-  if (/\b(?:cafe|coffee|restaurant|bistro|bakery)\b/i.test(t)) {
-    const cafeUrl = uniqueHeroImageUrl(
-      `unique ${brand} specialty coffee shop interior, original angle, warm wood, soft daylight, editorial, not a stock template`,
-      brand,
-      { salt: `cafe-${seed}` },
-    );
-    lines.push(
-      `- Cafe/restaurant hero for THIS brand only (do not copy into other projects): ${cafeUrl}`,
-    );
-  }
-  if (/\bapple\.com\b/i.test(t) || /^apple\.com$/i.test(projectName)) {
-    const urls = appleStyleHeroImageUrls(brand);
-    lines.push(
-      'For this apple.com lookalike, use these unique image URLs (or equivalent pollinations prompts with the same seed idea):',
-      `- iPhone hero: ${urls.iphone}`,
-      `- MacBook hero: ${urls.macbook}`,
-      `- Watch hero: ${urls.watch}`,
-      `- AirPods hero: ${urls.airpods}`,
-    );
-  }
-  return lines.join('\n');
+    '- Prefer NOVA Brand Assets already listed: /logo.svg, /icons/*.svg, /heroes/*.jpg (files on disk in public/).',
+    '- If the user pasted image/icon URLs or attached photos, those win — use the local paths Brand Assets writes.',
+    '- NEVER scrape apple.com / akamai product CDN. NEVER use via.placeholder.com or placehold.co.',
+    '- NEVER reuse a canned cafe Unsplash photo ID. Unique Openverse search or user-pasted URLs only.',
+    '- NEVER hotlink image.pollinations.ai — Pollinations is disabled for site creates.',
+    '- Every hero must show a real visual. Nav logo must be an SVG <img>, not generated pixels.',
+    '- Professional icons: use Iconify SVGs under /icons/*.svg (lucide / simple-icons), not AI-generated glyphs.',
+  ].join('\n');
 }
 
 function isBannedUnsplashUrl(url: string): boolean {
@@ -240,93 +217,68 @@ function isBannedUnsplashUrl(url: string): boolean {
   return BANNED_UNSPLASH_IDS.some((id) => u.includes(id));
 }
 
-/** Rewrite weak / low-res Pollinations URLs already in source — never swap cafe → canned Unsplash. */
+/** Strip Pollinations hotlinks — replace with local Brand Asset paths (no re-injection). */
 export function upgradePollinationsUrlsInSource(source: string, projectName = ''): string {
-  const brand = String(projectName || '').trim();
-  return String(source || '').replace(
-    /https:\/\/image\.pollinations\.ai\/prompt\/([^"'?\s)]+)(\?[^"'\s)]*)?/gi,
-    (_full, encPrompt: string, query = '') => {
-      let prompt = '';
-      try {
-        prompt = decodeURIComponent(String(encPrompt || ''));
-      } catch {
-        prompt = String(encPrompt || '').replace(/\+/g, ' ');
-      }
-      const params = new URLSearchParams(String(query || '').replace(/^\?/, ''));
-      const width = Math.max(1920, Number(params.get('width') || 0) || 1920);
-      const height = Math.max(1080, Number(params.get('height') || 0) || 1080);
-      const existingSeed = params.get('seed');
-      // Thin cafe prompts → enrich + unique seed (do NOT replace with stock cafe photo).
-      if (/\b(?:cafe|coffee|bistro|bakery|espresso)\b/i.test(prompt) && prompt.replace(/_/g, ' ').split(/\s+/).length < 10) {
-        const rich = brand
-          ? `${brand} specialty cafe interior, ${prompt}, original editorial photograph`
-          : `${prompt}, original editorial cafe photograph, unique angle`;
-        return pollinationsImageUrl(rich, {
-          width,
-          height,
-          model: 'flux',
-          seed: existingSeed || heroSeedForProject(brand || rich, 'cafe-thin'),
-        });
-      }
-      return pollinationsImageUrl(prompt, {
-        width,
-        height,
-        model: 'flux',
-        seed: existingSeed || heroSeedForProject(brand || prompt, prompt.slice(0, 40)),
-      });
-    },
+  void projectName;
+  let s = String(source || '');
+  if (!s) return s;
+  let heroN = 0;
+  const nextHero = () => {
+    heroN += 1;
+    return heroN === 1 ? '/heroes/hero.jpg' : heroN === 2 ? '/heroes/story.jpg' : `/heroes/hero-${heroN}.jpg`;
+  };
+  s = s.replace(
+    /url\((['"]?)https:\/\/image\.pollinations\.ai\/[^)'"]+\1\)/gi,
+    () => `url('${nextHero()}')`,
   );
+  s = s.replace(
+    /src=(["'])https:\/\/image\.pollinations\.ai\/[^"']+\1/gi,
+    (_m, q: string) => `src=${q}${nextHero()}${q}`,
+  );
+  s = s.replace(
+    /https:\/\/image\.pollinations\.ai\/prompt\/[^"'\s)]+/gi,
+    () => nextHero(),
+  );
+  return s;
 }
 
-/** Replace common broken placeholders + banned canned Unsplash heroes with unique generative URLs. */
+/** Fix banned Unsplash + placeholders — never inject Pollinations. */
 export function repairBrokenSiteImageSrcs(appSource: string, brief: string, projectName = ''): string {
   const brand = String(projectName || '').trim()
     || (String(brief || '').match(/\b(?:called|named)\s+([A-Z][\w\s-]{1,40})/i)?.[1]?.trim())
     || 'brand';
   let s = upgradePollinationsUrlsInSource(String(appSource || ''), brand);
   if (!s) return s;
-  const urls = appleStyleHeroImageUrls(brand);
   const isApple = /\bapple\.com\b/i.test(brief) || /iPhone|MacBook|AirPods/i.test(s);
 
-  // Strip banned canned Unsplash IDs that made every cafe look identical.
   s = s.replace(/https:\/\/images\.unsplash\.com\/[^"')\s]+/gi, (m) => {
     if (!isBannedUnsplashUrl(m) && !/photo-1554118811|photo-1517248135|photo-150178|photo-1414235/i.test(m)) {
-      // Still avoid any raw Unsplash stock — force unique generative for site heroes.
-      if (/background|hero|cover|banner/i.test(s.slice(Math.max(0, s.indexOf(m) - 120), s.indexOf(m) + 40))) {
-        return uniqueHeroImageUrl('unique full-bleed hero photograph matching the brand atmosphere', brand, {
-          salt: `unsplash-strip-${heroSeedForProject(brand, m.slice(-12))}`,
-        });
-      }
+      return m;
     }
-    return uniqueHeroImageUrl(
-      /\b(?:cafe|coffee|bistro|bakery)\b/i.test(brief)
-        ? `unique ${brand} cafe interior hero, warm light, editorial, original`
-        : `unique ${brand} marketing hero photograph, editorial, original`,
-      brand,
-      { salt: `banned-${m.slice(-16)}` },
-    );
+    return '/heroes/hero.jpg';
   });
 
   s = s.replace(/https?:\/\/via\.placeholder\.com\/[^"')\s]+/gi, (m) => {
-    if (/iphone/i.test(m) || /iphone/i.test(s.slice(Math.max(0, s.indexOf(m) - 80), s.indexOf(m)))) return urls.iphone;
-    if (/macbook|mac/i.test(m)) return urls.macbook;
-    if (/watch/i.test(m)) return urls.watch;
-    if (/airpods|earbud/i.test(m)) return urls.airpods;
-    return uniqueHeroImageUrl('premium product hero, soft studio, commercial photography', brand, { salt: 'ph' });
+    if (/iphone/i.test(m) || /iphone/i.test(s.slice(Math.max(0, s.indexOf(m) - 80), s.indexOf(m)))) {
+      return '/heroes/iphone.jpg';
+    }
+    if (/macbook|mac/i.test(m)) return '/heroes/macbook.jpg';
+    if (/watch/i.test(m)) return '/heroes/watch.jpg';
+    if (/airpods|earbud/i.test(m)) return '/heroes/airpods.jpg';
+    return '/heroes/hero.jpg';
   });
-  s = s.replace(
-    /src=["']apple-logo\.png["']/gi,
-    `src="${pollinationsImageUrl('minimal black apple logo glyph on transparent, simple icon', { width: 64, height: 64, seed: heroSeedForProject(brand, 'logo') })}"`,
-  );
+  s = s.replace(/https?:\/\/placehold\.co\/[^"')\s]+/gi, () => '/heroes/hero.jpg');
+  s = s.replace(/src=["']apple-logo\.png["']/gi, 'src="/logo.svg"');
   s = s.replace(/src=["'][^"']*\.(?:png|jpg|jpeg|webp)["']/gi, (m) => {
-    if (/https?:\/\//i.test(m) || /pollinations|unsplash|images\./i.test(m)) return m;
+    if (/https?:\/\//i.test(m) || /\/(?:logo|icons?|heroes?)\//i.test(m) || /unsplash|images\.|pexels|openverse/i.test(m)) {
+      return m;
+    }
     if (!isApple) return m;
-    if (/iphone/i.test(m)) return `src="${urls.iphone}"`;
-    if (/mac/i.test(m)) return `src="${urls.macbook}"`;
-    if (/watch/i.test(m)) return `src="${urls.watch}"`;
-    if (/air/i.test(m)) return `src="${urls.airpods}"`;
+    if (/iphone/i.test(m)) return 'src="/heroes/iphone.jpg"';
+    if (/mac/i.test(m)) return 'src="/heroes/macbook.jpg"';
+    if (/watch/i.test(m)) return 'src="/heroes/watch.jpg"';
+    if (/air/i.test(m)) return 'src="/heroes/airpods.jpg"';
     return m;
   });
   return s;
 }
-

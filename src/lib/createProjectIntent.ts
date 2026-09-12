@@ -40,7 +40,7 @@ export type NewProjectIntent = {
 };
 
 const CREATE_RE =
-  /\b(?:create|scaffold|build\s+me\s+(?:a\s+)?|i\s+want\s+to\s+(?:make|build|create|start)|make\s+(?:a\s+)?new|start\s+(?:a\s+)?new|spin\s+up\s+(?:a\s+)?)\b/i;
+  /\b(?:create|scaffold|build\s+me\s+(?:a\s+)?|i\s+want\s+to\s+(?:make|build|create|start)|make\s+(?:a\s+)?new|start\s+(?:a\s+)?new|spin\s+up\s+(?:a\s+)?|open\s+(?:a\s+)?(?:vite|react)|kick\s+off(?:\s+(?:a|an))?)\b/i;
 
 const NEW_PROJECT_RE =
   /\bnew\s+(?:web\s+)?(?:app|application|project|website|site|python\s+project|react\s+app)\b/i;
@@ -71,9 +71,9 @@ export function extractProjectName(text: string): string | null {
   // Prefer explicit called/named titles before "create the project on disk" (which used to
   // capture the junk name "on disk").
   const patterns = [
-    /\b(?:called|named|name(?:d)?\s+it|call\s+it)\s+["“']([^"”']{2,48})["”']/i,
-    /\b(?:called|named|name(?:d)?\s+it|call\s+it)\s+([A-Z][A-Za-z0-9]*(?:\s+[A-Z][A-Za-z0-9]*){0,3})\b/,
-    /\b(?:called|named|name(?:d)?\s+it|call\s+it)\s+([A-Za-z][A-Za-z0-9._\s-]{1,48})/i,
+    /\b(?:called|named|titled|name(?:d)?\s+it|call\s+it)\s+["“']([^"”']{2,48})["”']/i,
+    /\b(?:called|named|titled|name(?:d)?\s+it|call\s+it)\s+([A-Z][A-Za-z0-9]*(?:\s+[A-Z][A-Za-z0-9]*){0,3})\b/,
+    /\b(?:called|named|titled|name(?:d)?\s+it|call\s+it)\s+([A-Za-z][A-Za-z0-9._\s-]{1,48})/i,
     /\b(?:app|application|website|site)\s+named\s+["“']?([A-Za-z][A-Za-z0-9._\s-]{1,48})/i,
     /\b(?:project|app|product|system)\s+(?:called|named)\s+["“']?([A-Za-z][A-Za-z0-9._\s-]{1,40})/i,
     // "Create the project apple.com on disk" / "Create project Peach"
@@ -203,8 +203,10 @@ export function parseNewProjectIntent(message: string): NewProjectIntent | null 
   // Explicit disk/preview asks must build immediately — never bounce to yellow "Bind a project".
   const shortChip = /^create\s+project\s+[A-Za-z]/i.test(t.trim()) && t.length < 80;
   // Premium website replicas should plan + research first unless the user clearly says go.
+  // Do NOT treat negated mentions ("NOT apple.com", "not a Netflix clone") as replica asks.
   const richReplicaBrief = /\b(?:exact\s+replica|identical|clone\s+(?:of\s+)?(?:the\s+)?(?:look|site|homepage)|apple\.com|netflix\.com|twitch\.tv)\b/i.test(t)
-    && /\b(?:website|site|landing|homepage|marketing|web\s*app|replica)\b/i.test(t);
+    && /\b(?:website|site|landing|homepage|marketing|web\s*app|replica)\b/i.test(t)
+    && !/\b(?:not|never|isn't|isnt|no)\b[\s\S]{0,40}\b(?:exact\s+replica|identical|apple\.com|netflix\.com|twitch\.tv|clone)\b/i.test(t);
   const wantsImmediateBuild = !richReplicaBrief && (
     /\bon\s+disk\b/i.test(t)
     || /\b(?:files?\s+on\s+disk|scaffold\s+now|build\s+it\s+now|open\s+preview|and\s+open\s+preview)\b/i.test(t)
@@ -216,13 +218,21 @@ export function parseNewProjectIntent(message: string): NewProjectIntent | null 
     // "Create a brand-new website project called X" / "Create a new website called X"
     || /\bcreate\s+(?:a\s+)?(?:brand[- ]?new\s+)?(?:website|site|web\s*app|home\s*page|landing)\b/i.test(t)
     || /\bbrand[- ]?new\s+(?:website|site|project|app)\b/i.test(t)
-    || (/\b(?:create|build)\b/i.test(t)
-      && /\b(?:called|named)\b/i.test(t)
+    || (/\b(?:create|build|scaffold|spin\s+up|make|open|kick\s+off)\b/i.test(t)
+      && /\b(?:called|named|titled)\b/i.test(t)
       && /\b(?:website|site|project|app|page|homepage)\b/i.test(t))
     || (/\bcreate\b/i.test(t) && /\b(?:called|named)\b/i.test(t) && /\b(?:website|site|project|app)\b/i.test(t) && /\bsrc\/app\.(jsx|tsx|css)\b/i.test(t))
+    // "Create a Vite + React website named X" (stack words between create and website)
+    || /\bcreate\s+(?:a\s+)?(?:[\w.+#-]+\s+){0,6}(?:website|site|web\s*app|react\s+app)\b/i.test(t)
+    // "Spin up a Vite React project named X" / "Scaffold a React app called X"
+    || /\b(?:spin\s+up|scaffold)\s+(?:a\s+)?(?:[\w.+#-]+\s+){0,8}(?:website|site|web\s*app|react\s+app|project|app)\b/i.test(t)
+    // "Open a Vite React site named X"
+    || /\bopen\s+(?:a\s+)?(?:[\w.+#-]+\s+){0,8}(?:website|site|web\s*app|react\s+app|project|app)\b/i.test(t)
   );
+  // Explicit on-disk / Preview asks always build now — never stall on a plan chip.
   const preferPlan = !shortChip
     && !looksLikeImplementGo(t)
+    && !/\bon\s+disk\b/i.test(t)
     && (richReplicaBrief || (
       !wantsImmediateBuild
       && (looksLikeLandingBrief(t) || prefersReactAppScaffold(t) || t.length > 200)

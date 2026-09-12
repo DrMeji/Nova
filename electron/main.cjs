@@ -1342,6 +1342,22 @@ ipcMain.handle('NOVA:workspace-write-file', async (_e, payload) => {
   }
 });
 
+ipcMain.handle('NOVA:workspace-save-asset', async (_e, payload) => {
+  try {
+    return await arkProjects.saveAssetToGrantedPath(payload || {});
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'asset save failed' };
+  }
+});
+
+ipcMain.handle('NOVA:brand-search-images', async (_e, payload) => {
+  try {
+    return await arkProjects.searchOpenverseImages(payload?.query, payload || {});
+  } catch (err) {
+    return { ok: false, results: [], error: err instanceof Error ? err.message : 'search failed' };
+  }
+});
+
 ipcMain.handle('NOVA:workspace-rename-path', async (_e, payload) => {
   try {
     return arkProjects.renameGrantedPath(payload?.fromPath, payload?.toPath);

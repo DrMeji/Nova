@@ -60,6 +60,28 @@ export async function verifyProjectAfterPatch(opts: {
   // Preview/Localhost already proves the tree; build stays a user/Build action.
 
   if (!command) {
+    // Vite React: light structure check so edits still get a pass/fail signal.
+    if (isViteProject(files)) {
+      const app = files['src/App.jsx'] || files['src/App.tsx'] || '';
+      const css = `${files['src/App.css'] || ''}\n${files['src/index.css'] || ''}`;
+      const issues: string[] = [];
+      if (app.length < 80) issues.push('App too thin after edit');
+      if (!/export\s+default/i.test(app)) issues.push('App missing default export');
+      if (/image\.pollinations\.ai/i.test(`${app}\n${css}`)
+        && /\/(?:logo|icons?|heroes?|hero)\//i.test(`${app}\n${css}`)) {
+        issues.push('Pollinations URL left beside local brand assets');
+      }
+      const ok = issues.length === 0;
+      return {
+        ran: true,
+        ok,
+        command: 'vite-structure',
+        output: ok ? 'Vite App structure ok' : issues.join('; '),
+        summary: ok
+          ? '\n\n**Verify:** App structure looks ok.'
+          : `\n\n**Verify:** edit check failed — ${issues.join('; ')}.`,
+      };
+    }
     // Static HTML sites: light structure check instead of silent skip.
     const htmlPath = changedPaths.find((p) => /\.html?$/i.test(p))
       || Object.keys(files).find((p) => /(^|\/)index\.html$/i.test(p));

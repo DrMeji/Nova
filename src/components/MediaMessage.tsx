@@ -88,7 +88,7 @@ export function GeneratingPlaceholder({
     return (
       <div className="flex items-center gap-2.5 py-1 text-sm text-content-secondary" aria-label={shown}>
         <span className="inline-flex items-center gap-1.5" aria-hidden>
-          <span className="ark-status-dot" />
+          <span className="ark-status-dot ark-status-dot-1" />
           <span className="ark-status-dot ark-status-dot-2" />
           <span className="ark-status-dot ark-status-dot-3" />
         </span>

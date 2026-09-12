@@ -1,6 +1,0 @@
-Applied on main (v0.1.138). See commit:
-
-  83ba82f  v0.1.138: wire Chat send path (strip prefix, keep workspace, apply edits)
-
-This leftover patch file is kept only so older workflow runs stay understandable.
-Do not re-apply.

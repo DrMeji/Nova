@@ -4,12 +4,14 @@
  */
 
 import { webSearchForChat, formatWebLookupForPrompt } from '@/lib/webSearch';
+import { extractReferenceSiteUrl } from '@/lib/brandAssets';
 
 export function looksLikeNeedsCreateResearch(brief: string): boolean {
   const t = String(brief || '').trim();
   if (t.length < 24) return false;
+  if (extractReferenceSiteUrl(t)) return true;
   return (
-    /\b(?:exact\s+replica|identical|clone|look\s+like|inspired\s+by|reference|open\s+source|github)\b/i.test(t)
+    /\b(?:exact\s+replica|identical|clone|look\s+like|inspired\s+by|reference|open\s+source|github|use this site)\b/i.test(t)
     || /\b(?:apple\.com|netflix\.com|twitch\.tv|spotify|airbnb|stripe\.com)\b/i.test(t)
     || (
       /\b(?:website|landing|homepage|marketing\s+site|web\s*app)\b/i.test(t)
@@ -21,6 +23,12 @@ export function looksLikeNeedsCreateResearch(brief: string): boolean {
 export function researchQueryFromBrief(brief: string, projectName: string): string {
   const t = String(brief || '').replace(/\s+/g, ' ').trim().slice(0, 220);
   const name = String(projectName || '').trim();
+  const refUrl = extractReferenceSiteUrl(brief);
+  if (refUrl) {
+    let host = refUrl;
+    try { host = new URL(refUrl).hostname.replace(/^www\./, ''); } catch { /* keep */ }
+    return `${host} homepage design layout nav hero sections footer React Vite landing UI reference`.slice(0, 220);
+  }
   if (/\bapple\.com\b/i.test(t) || /^apple\.com$/i.test(name)) {
     return 'apple.com homepage design React Vite open source landing clone github reference nav hero sections footer';
   }
@@ -38,11 +46,18 @@ export async function researchCreateReferences(opts: {
   projectName: string;
 }): Promise<{ ok: boolean; notes: string; sources: { title: string; url: string }[] }> {
   const query = researchQueryFromBrief(opts.brief, opts.projectName);
+  const refUrl = extractReferenceSiteUrl(opts.brief);
   const hit = await webSearchForChat(query);
   const github = await searchGithubRepos(query);
   const parts: string[] = [];
   const sources = [...(hit.sources || [])];
 
+  if (refUrl) {
+    parts.push(
+      `User reference site: ${refUrl}\nMatch layout/IA, hierarchy, and tone as inspiration only — rebuild original UI in App.jsx + App.css. Do not scrape proprietary assets or claim trademark ownership.`,
+    );
+    sources.unshift({ title: 'User reference', url: refUrl });
+  }
   if (hit.ok && hit.text) {
     parts.push(formatWebLookupForPrompt(hit));
   }

@@ -111,14 +111,21 @@ export async function runProjectMultiAgent(opts: {
     });
   }
 
-  // --- Verify worker: structural checks ---
+  // --- Verify worker: structural + thin-shell checks (reject stubs) ---
   const paths = Object.keys(files).map(p => p.replace(/\\/g, '/'));
   const hasIndex = paths.some(p => /(^|\/)index\.html$/i.test(p));
   const hasPkg = paths.some(p => /(^|\/)package\.json$/i.test(p));
   const hasCss = paths.some(p => /\.css$/i.test(p));
+  const appBody = files['src/App.jsx'] || files['src/App.tsx'] || '';
+  const cssBody = `${files['src/App.css'] || ''}\n${files['src/index.css'] || ''}`;
   const issues: string[] = [];
   if (kind === 'static-web' && !hasIndex) issues.push('missing index.html');
   if (kind === 'vite-react' && !hasPkg) issues.push('missing package.json');
+  if (kind === 'vite-react' && appBody.length < 200) issues.push('App.jsx too thin');
+  if (kind === 'vite-react' && cssBody.replace(/\s+/g, '').length < 200) issues.push('CSS too thin');
+  if (/return\s*\(\s*<div className=["']app["']\s*\/>\s*\)/i.test(appBody)) {
+    issues.push('App is still an empty shell');
+  }
   if (hasIndex && !hasCss && !paths.some(p => /\.css|style=/i.test(files[paths.find(x => /index\.html$/i.test(x)) || ''] || ''))) {
     /* soft. many pages use inline style */
   }
@@ -126,7 +133,7 @@ export async function runProjectMultiAgent(opts: {
     id: 'verify',
     label: 'Verify',
     ok: issues.length === 0,
-    note: issues.length ? issues.join('; ') : 'Structure looks usable. open Preview',
+    note: issues.length ? `Rejected: ${issues.join('; ')}` : 'Structure looks usable. open Preview',
   });
 
   const ok = workers.every(w => w.id === 'verify' ? w.ok : w.id !== 'code' || w.ok);

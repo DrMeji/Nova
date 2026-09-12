@@ -169,6 +169,17 @@ export function looksLikeCodeEditAsk(text: string): boolean {
     && /\b(add|put|place|move|put)\b/i.test(t)) {
     return true;
   }
+  // "Center white words that say …" / "wording only on the brown screen"
+  if (
+    /\b(?:center|centred|middle)\b[\s\S]{0,48}\b(?:words?|text|title|phrase|wording|copy)\b/i.test(t)
+    || (
+      /\b(?:words?|text|phrase|wording)\b/i.test(t)
+      && /\b(?:says?|reading)\b/i.test(t)
+      && /\b(?:screen|page|brown|center|centred|middle|viewport)\b/i.test(t)
+    )
+  ) {
+    return true;
+  }
   // "Add a comment near the top of app/main.py"
   if (/\b(add|insert|put|write)\b[\s\S]{0,100}\bcomments?\b/i.test(t)) return true;
   if (

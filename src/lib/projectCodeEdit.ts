@@ -949,10 +949,14 @@ export function fileContentLooksComplete(path: string, content: string): boolean
     return /\b(fun|class|@Composable)\b/.test(body) && body.length > 80;
   }
   if (/\.css$/i.test(path)) {
-    return /\{/.test(body) && /\}/.test(body);
+    return /\{/.test(body) && /\}/.test(body) && !/\{\s*$/.test(body);
   }
   if (/\.(js|ts|tsx|jsx)$/i.test(path)) {
-    return body.length > 40 && !/(function|=>)\s*\{\s*$/.test(body);
+    if (body.length <= 40 || /(function|=>)\s*\{\s*$/.test(body)) return false;
+    // Reject mid-write dumps so we never commit truncated App.* to disk.
+    if (/export\s+default/i.test(body) && !/\}\s*;?\s*$/.test(body)) return false;
+    if (/<[A-Za-z][\w.:-]*([^>'"`]|"[^"]*"|'[^']*')*$/.test(body)) return false;
+    return true;
   }
   return body.length > 40;
 }

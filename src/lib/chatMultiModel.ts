@@ -1,9 +1,10 @@
 /**
- * Multi-model chat orchestration (sequential hops — not parallel GGUF loads).
+ * Multi-model chat orchestration.
  *
- * Engine reality: one local chat brain at a time.
- * Vision hop uses Qwen2-VL on-device when installed, else cloud vision keys.
- * Multi-agent = Design→Code→Verify on project files. Multi-model = vision then chat/coder.
+ * Engine reality: one local GGUF at a time, so local hops stay sequential.
+ * Hybrid mode runs Vision → Code → Review with clear attribution, and create
+ * can mix keyed cloud + local brains across parts (cloud structure ∥ local style
+ * when both are ready — still one local load at a time).
  */
 
 import { extractVisionImages } from '@/lib/recentStore';
@@ -247,9 +248,9 @@ export async function runVisionDescribeHop(opts: {
 
 /** Soft status line for the generating bubble. */
 export function multiModelStatusLabel(phase: 'vision' | 'coder' | 'chat'): string {
-  if (phase === 'vision') return 'Looking at your image…';
-  if (phase === 'coder') return 'Applying the fix with your coding brain…';
-  return 'Thinking…';
+  if (phase === 'vision') return 'Vision · reading your image…';
+  if (phase === 'coder') return 'Code · updating project files…';
+  return 'Preparing answer…';
 }
 
 export function explainMultiModelVsMultiAgent(): string {

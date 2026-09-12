@@ -126,12 +126,14 @@ export function ChatCodeOverlay({
   files,
   projectName,
   onChangeFile,
+  readOnly = false,
 }: {
   open: boolean;
   onClose: () => void;
   files: Record<string, string>;
   projectName?: string;
   onChangeFile: (path: string, content: string) => void;
+  readOnly?: boolean;
 }) {
   const paths = useMemo(() => Object.keys(files).map(p => p.replace(/\\/g, '/')), [files]);
   const tree = useMemo(() => buildTree(paths), [paths]);
@@ -196,9 +198,15 @@ export function ChatCodeOverlay({
             <p className="text-sm font-medium text-content-primary truncate">
               {projectName || 'Project files'}
             </p>
-            <span className="text-[10px] text-content-tertiary hidden sm:inline">
-              Click outside or Esc to return to chat
-            </span>
+            {readOnly ? (
+              <span className="text-[10px] text-amber-300/90 shrink-0">
+                Live view — Nova is writing (editing unlocks when done)
+              </span>
+            ) : (
+              <span className="text-[10px] text-content-tertiary hidden sm:inline">
+                Click outside or Esc to return to chat
+              </span>
+            )}
           </div>
           <button
             type="button"
@@ -249,7 +257,11 @@ export function ChatCodeOverlay({
                 <CodeEditor
                   path={selected}
                   value={value}
-                  onChange={(next) => onChangeFile(selected, next)}
+                  readOnly={readOnly}
+                  onChange={(next) => {
+                    if (readOnly) return;
+                    onChangeFile(selected, next);
+                  }}
                 />
               ) : (
                 <div className="h-full grid place-items-center text-sm text-content-tertiary">

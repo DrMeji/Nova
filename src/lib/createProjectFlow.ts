@@ -358,7 +358,11 @@ export async function bootstrapProjectWorkspace(
     }
   }
 
-  const dev = await window.arkDesktop?.agentStartDevServer?.({ cwd: projectPath });
+  // depsReady: skip a second npm install — double install was freezing the whole PC.
+  const dev = await window.arkDesktop?.agentStartDevServer?.({
+    cwd: projectPath,
+    depsReady: true,
+  });
   if (dev?.ok && dev.url) {
     return { npmInstalled: true, devServerUrl: dev.url, previewLive: true };
   }

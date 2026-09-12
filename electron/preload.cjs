@@ -140,6 +140,8 @@ contextBridge.exposeInMainWorld('arkDesktop', {
   workspaceDeleteRoot: (payload) => ipcRenderer.invoke('NOVA:workspace-delete-root', payload),
   workspaceDeleteFolder: (payload) => ipcRenderer.invoke('NOVA:workspace-delete-folder', payload),
   workspaceWriteFile: (payload) => ipcRenderer.invoke('NOVA:workspace-write-file', payload),
+  workspaceSaveAsset: (payload) => ipcRenderer.invoke('NOVA:workspace-save-asset', payload),
+  brandSearchImages: (payload) => ipcRenderer.invoke('NOVA:brand-search-images', payload || {}),
   workspaceRenamePath: (payload) => ipcRenderer.invoke('NOVA:workspace-rename-path', payload),
   gitCloneOpen: (payload) => ipcRenderer.invoke('NOVA:git-clone-open', payload),
   onProjectImportProgress: (handler) => {

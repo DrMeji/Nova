@@ -3,15 +3,68 @@
  * Execution mode always comes from stored workspace grants — never from the renderer.
  */
 
-const { execFile } = require('child_process');
+const { execFile, spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
+const os = require('os');
 const arkProjects = require('./arkProjects.cjs');
 const arkSelfGuard = require('./arkSelfGuard.cjs');
 
 /** @type {Map<string, { url: string, pid?: number, child?: import('child_process').ChildProcess }>} */
 const devServersByCwd = new Map();
+
+/**
+ * Serialize npm/pnpm/yarn installs app-wide. Parallel node_modules storms
+ * freeze the whole PC (Defender + disk) — YouTube and everything hitch.
+ */
+let packageInstallChain = Promise.resolve();
+
+function isHeavyPackageInstall(command) {
+  const cmd = String(command || '').trim();
+  return /^(npm|pnpm|yarn)(\.cmd)?\s+(install|i|ci|add)(\s|$)/i.test(cmd)
+    || /^winget\s+install\b/i.test(cmd);
+}
+
+/** Cap npm network/disk pressure so install stays a background neighbor. */
+function softenPackageInstallCommand(command) {
+  const cmd = String(command || '').trim();
+  if (!/^(npm)(\.cmd)?\s+/i.test(cmd)) return cmd;
+  if (/\s--maxsockets\b/i.test(cmd)) return cmd;
+  if (/^(npm)(\.cmd)?\s+(install|i)(\s|$)/i.test(cmd)) {
+    const rest = cmd.replace(/^(npm)(\.cmd)?\s+(install|i)\b/i, '').trim();
+    return `npm install --no-audit --no-fund --progress=false --maxsockets=2${rest ? ` ${rest}` : ''}`;
+  }
+  if (/^(npm)(\.cmd)?\s+ci(\s|$)/i.test(cmd)) {
+    return 'npm ci --no-audit --no-fund --progress=false --maxsockets=2';
+  }
+  if (/^(npm)(\.cmd)?\s+add(\s|$)/i.test(cmd)) {
+    const rest = cmd.replace(/^(npm)(\.cmd)?\s+add\b/i, '').trim();
+    return `npm install --no-audit --no-fund --progress=false --maxsockets=2${rest ? ` ${rest}` : ''}`;
+  }
+  return cmd;
+}
+
+function packageInstallEnv() {
+  return {
+    ...process.env,
+    npm_config_maxsockets: '2',
+    npm_config_fetch_retries: '2',
+    npm_config_progress: 'false',
+    npm_config_audit: 'false',
+    npm_config_fund: 'false',
+    npm_config_prefer_offline: 'true',
+  };
+}
+
+function lowerChildPriority(pid) {
+  if (!pid) return;
+  try {
+    os.setPriority(pid, os.constants.priority.PRIORITY_BELOW_NORMAL);
+  } catch {
+    /* ignore — some hosts disallow priority changes */
+  }
+}
 
 const ALLOWLIST = [
   /^npm(\s|$)/i,
@@ -112,7 +165,6 @@ function commandAllowed(command, mode, userConfirmed) {
 }
 
 function resolveCwd(cwd) {
-  const os = require('os');
   const fallback = os.homedir();
   const p = path.resolve(String(cwd || fallback));
   if (!fs.existsSync(p)) return { ok: false, error: 'Working folder not found.' };
@@ -126,17 +178,12 @@ function resolveCwd(cwd) {
 }
 
 function runCommand(command, cwd, timeoutMs = 120_000) {
-  return new Promise((resolve) => {
-    const shell = process.platform === 'win32' ? 'powershell.exe' : '/bin/sh';
-    const args = process.platform === 'win32'
-      ? ['-NoProfile', '-NonInteractive', '-Command', command]
-      : ['-lc', command];
-    execFile(shell, args, {
-      cwd,
-      windowsHide: true,
-      timeout: timeoutMs,
-      maxBuffer: 4 * 1024 * 1024,
-    }, (err, stdout, stderr) => {
+  const heavy = isHeavyPackageInstall(command);
+  const finalCommand = heavy ? softenPackageInstallCommand(command) : String(command || '').trim();
+
+  const execute = () => new Promise((resolve) => {
+    const maxBuffer = 4 * 1024 * 1024;
+    const finish = (err, stdout, stderr) => {
       resolve({
         ok: !err,
         code: err && typeof err.code === 'number' ? err.code : 0,
@@ -144,8 +191,67 @@ function runCommand(command, cwd, timeoutMs = 120_000) {
         stderr: String(stderr || '').trim(),
         error: err && !stdout && !stderr ? (err.message || 'Command failed') : undefined,
       });
-    });
+    };
+
+    // Heavy installs: spawn npm via cmd (not PowerShell) at below-normal priority
+    // so unpacking node_modules does not freeze YouTube / the whole desktop.
+    if (heavy && process.platform === 'win32') {
+      const child = spawn('cmd.exe', ['/d', '/s', '/c', finalCommand], {
+        cwd,
+        windowsHide: true,
+        env: packageInstallEnv(),
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      lowerChildPriority(child.pid);
+      let stdout = '';
+      let stderr = '';
+      let settled = false;
+      const timer = setTimeout(() => {
+        try { child.kill(); } catch { /* ignore */ }
+      }, timeoutMs);
+      const done = (err) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        finish(err, stdout.slice(0, maxBuffer), stderr.slice(0, maxBuffer));
+      };
+      child.stdout?.on('data', (chunk) => {
+        if (stdout.length < maxBuffer) stdout += String(chunk);
+      });
+      child.stderr?.on('data', (chunk) => {
+        if (stderr.length < maxBuffer) stderr += String(chunk);
+      });
+      child.on('error', (err) => done(err));
+      child.on('close', (code) => {
+        if (code === 0) done(null);
+        else {
+          const err = new Error(`Command failed with code ${code}`);
+          err.code = code;
+          done(err);
+        }
+      });
+      return;
+    }
+
+    const shell = process.platform === 'win32' ? 'powershell.exe' : '/bin/sh';
+    const args = process.platform === 'win32'
+      ? ['-NoProfile', '-NonInteractive', '-Command', finalCommand]
+      : ['-lc', finalCommand];
+    const child = execFile(shell, args, {
+      cwd,
+      windowsHide: true,
+      timeout: timeoutMs,
+      maxBuffer,
+      env: heavy ? packageInstallEnv() : process.env,
+    }, (err, stdout, stderr) => finish(err, stdout, stderr));
+    lowerChildPriority(child?.pid);
   });
+
+  if (!heavy) return execute();
+
+  const queued = packageInstallChain.then(execute, execute);
+  packageInstallChain = queued.then(() => undefined, () => undefined);
+  return queued;
 }
 
 async function agentRun(payload) {
@@ -231,41 +337,53 @@ async function waitForDevServerUrl(port, timeoutMs = 25_000) {
 }
 
 function spawnHiddenDevServer(cwd, port) {
-  const { spawn } = require('child_process');
   // Force IPv4 + an explicit free port so we never steal NOVA's own Vite or miss ::1-only binds.
   const run = `npm run dev -- --host 127.0.0.1 --port ${port} --strictPort`;
   const env = { ...process.env, BROWSER: 'none' };
   if (process.platform === 'win32') {
     // npm.cmd + shell:false causes EINVAL on Windows — use cmd /c with hidden window.
     // Do not use detached:true — it forces a visible CMD on Windows despite windowsHide.
-    return spawn('cmd.exe', ['/d', '/s', '/c', run], {
+    const child = spawn('cmd.exe', ['/d', '/s', '/c', run], {
       cwd,
       stdio: 'ignore',
       windowsHide: true,
       windowsVerbatimArguments: false,
       env,
     });
+    lowerChildPriority(child.pid);
+    return child;
   }
-  return spawn('npm', ['run', 'dev', '--', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
+  const child = spawn('npm', ['run', 'dev', '--', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
     cwd,
     stdio: 'ignore',
     windowsHide: true,
     env,
   });
+  lowerChildPriority(child.pid);
+  return child;
 }
 
 /** Ensure node_modules exists before Vite — blank Localhost is usually a missing install. */
-async function ensureNodeModules(cwd) {
+async function ensureNodeModules(cwd, opts = {}) {
   const nm = path.join(cwd, 'node_modules');
   const viteBin = path.join(nm, 'vite');
   const reactBin = path.join(nm, 'react');
-  if (fs.existsSync(nm) && (fs.existsSync(viteBin) || fs.existsSync(reactBin))) {
+  const treeLooksReady = () => {
+    if (!fs.existsSync(nm)) return false;
+    if (!(fs.existsSync(viteBin) || fs.existsSync(reactBin))) return false;
     try {
-      const entries = fs.readdirSync(nm);
-      if (entries.length > 2) return { ok: true };
+      return fs.readdirSync(nm).length > 2;
     } catch {
-      /* fall through to install */
+      return false;
     }
+  };
+
+  // Create bootstrap already ran npm install — do not thrash disk a second time.
+  if (opts.depsReady === true && treeLooksReady()) {
+    return { ok: true };
+  }
+  if (treeLooksReady()) {
+    return { ok: true };
   }
   const ran = await runCommand('npm install', cwd, 300_000);
   if (!ran.ok) {
@@ -298,7 +416,7 @@ async function agentStartDevServer(payload) {
     return { ok: false, error: 'No package.json in this folder.' };
   }
 
-  const deps = await ensureNodeModules(cwdRes.path);
+  const deps = await ensureNodeModules(cwdRes.path, { depsReady: payload?.depsReady === true });
   if (!deps.ok) {
     return { ok: false, error: deps.error || 'npm install failed before starting the preview server.' };
   }
