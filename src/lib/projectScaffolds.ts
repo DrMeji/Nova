@@ -155,14 +155,31 @@ createRoot(document.getElementById('root')${preferTs ? '!' : ''}).render(
 
 export default function App() {
   return (
-    <div className="app" />
+    <div className="app">
+      <h1 className="title">${title.replace(/[`$\\]/g, '')}</h1>
+    </div>
   );
 }
 `,
     },
     {
       path: 'src/App.css',
-      content: `.app { min-height: 100vh; }\n`,
+      content: `.app {
+  min-height: 100vh;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #0f1419;
+  color: #f4f7fb;
+}
+.title {
+  margin: 0;
+  font-size: clamp(1.8rem, 5vw, 3rem);
+  font-weight: 650;
+  letter-spacing: -0.03em;
+}
+`,
     },
     {
       path: 'src/index.css',

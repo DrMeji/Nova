@@ -625,13 +625,21 @@ export function looksLikeConversationalPlanningAsk(text: string): boolean {
   if (/\b(?:go\s+build|go\s+implement|implement\s+it|build\s+it\s+now|lets?\s+build\s+(?:this|that|it)|build\s+this|build\s+that|create\s+(?:the\s+)?(?:files|project)\s+now)\b/i.test(t)) {
     return false;
   }
-  // Bare “keep building” = recommend next polish — not a from-scratch rebuild.
+  // Create/build verb + product noun = create, not planning chat.
+  if (
+    /\b(?:create|build|make|scaffold|spin\s+up|kick\s+off)\b/i.test(t)
+    && /\b(?:website|site|web\s*app|react\s+app|app|application|project|page|landing|homepage)\b/i.test(t)
+    && !/\b(?:how\s+(?:do|can|should|would)|what\s+(?:should|would|stack)|plan\s+only|don'?t\s+build\s+yet)\b/i.test(t)
+  ) {
+    return false;
+  }
+  // Bound-folder polish: keep/continue building is an edit ask, not planning-only.
   if (/^(?:keep\s+building|continue\s+building|keep\s+going|continue\s+(?:going|polish(?:ing)?))\s*[.!]?$/i.test(t)) {
-    return true;
+    return false;
   }
   if (/\b(?:keep\s+building|continue\s+building)\b/i.test(t) && t.split(/\s+/).length <= 8
     && !/\b(?:from\s+scratch|rebuild|scrap|new\s+project)\b/i.test(t)) {
-    return true;
+    return false;
   }
   // Explicit disk build asks are never “just talking”.
   if (/\bon\s+disk\b/i.test(t) && /\b(?:build|create|scaffold|make)\b/i.test(t)) return false;
@@ -647,9 +655,10 @@ export function looksLikeConversationalPlanningAsk(text: string): boolean {
   if (/\bwhat\s+(?:do|should|would|type|stack|software|framework|language|code|kind)\b/i.test(t)) return true;
   if (/\b(?:get\s+started|where\s+(?:should|do)\s+(?:i|we)\s+(?:begin|start)|how\s+to\s+(?:begin|approach))\b/i.test(t)) return true;
   if (/\bhelp\s+me\s+(?:figure|understand|think|plan|decide)\b/i.test(t)) return true;
-  // “Help me build a coffee shop web” without create/scaffold = talk it through first.
+  // “Help me build a coffee shop web” with a product noun = create (handled above). Remaining help-me-build without a noun stays planning.
   if (
     /\bhelp\s+me\s+(?:to\s+)?(?:build|make|create)\b/i.test(t)
+    && !/\b(?:website|site|web\s*app|app|project|page|landing)\b/i.test(t)
     && !/\b(?:create\s+(?:the\s+)?(?:files|project)|scaffold|lets?\s+build\s+this|build\s+it\s+now)\b/i.test(t)
   ) {
     return true;
@@ -698,8 +707,10 @@ export function looksLikeDirectJudgmentAsk(text: string): boolean {
 
 export function shouldInjectPlanningConversation(
   content: string,
-  opts?: { pendingIdea?: boolean },
+  opts?: { pendingIdea?: boolean; diskRoot?: string | null },
 ): boolean {
+  // Bound project: never wrap replies in planning framing after a real create.
+  if (opts?.diskRoot && String(opts.diskRoot).trim()) return false;
   if (looksLikeImplementGo(content)) return false;
   if (looksLikeDirectJudgmentAsk(content)) return false;
   // Bare continue — recommend next polish; never treat as a full rebuild trigger.

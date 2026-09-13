@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { Copy, Download, Check } from 'lucide-react';
 import { resolveMediaRef } from '@/lib/recentStore';
 import { usableAssistantText } from '@/lib/chatHistory';
@@ -14,6 +14,10 @@ import { PcExploreCard } from '@/components/PcExploreCard';
 import { isPromptChipsMessage, parsePromptChipsMessage } from '@/lib/chatPromptChips';
 import { PromptChipsCard } from '@/components/PromptChipsCard';
 import { AgentProgressStatus } from '@/components/AgentProgressStatus';
+import {
+  getChatTurnStatus,
+  subscribeChatTurnStatus,
+} from '@/lib/chatTurnStatusStore';
 
 const PIXEL_COLS = 18;
 const PIXEL_ROWS = 14;
@@ -400,11 +404,15 @@ export function MessageContent({
   content,
   live,
   onPromptChipPick,
+  messageId,
 }: {
   content: string;
   live?: boolean;
   onPromptChipPick?: (prompt: string) => void;
+  /** When set, live turn status is read from the status store (not message remounts). */
+  messageId?: string;
 }) {
+  const turnStatus = useSyncExternalStore(subscribeChatTurnStatus, getChatTurnStatus, getChatTurnStatus);
   if (!content) {
     return <GeneratingPlaceholder kind="chat" label="Thinking…" />;
   }
@@ -460,12 +468,18 @@ export function MessageContent({
   if (content.startsWith('__generating__:')) {
     const parts = content.split(':');
     const kind = parts[1] === 'video' ? 'video' : parts[1] === 'chat' ? 'chat' : 'image';
-    const label = parts.slice(2).join(':') || undefined;
+    const labelFromMsg = parts.slice(2).join(':') || undefined;
     const sessionKey = `${kind}`;
     if (kind === 'chat') {
-      return <AgentProgressStatus label={label || 'Thinking…'} />;
+      const liveLabel = (
+        messageId
+        && turnStatus
+        && turnStatus.assistantId === messageId
+        && turnStatus.label
+      ) || labelFromMsg || 'Thinking…';
+      return <AgentProgressStatus label={liveLabel} />;
     }
-    return <GeneratingPlaceholder kind={kind} label={label} sessionKey={sessionKey} />;
+    return <GeneratingPlaceholder kind={kind} label={labelFromMsg} sessionKey={sessionKey} />;
   }
 
   if (content.startsWith('__progress__:')) {

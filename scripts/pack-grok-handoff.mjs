@@ -15,30 +15,43 @@ const FULL_FILES = [
   'src/lib/webProjectCanon.ts',
   'src/lib/chatAgentTurn.ts',
   'src/lib/createProjectIntent.ts',
+  'src/lib/classifyTurn.ts',
+  'src/lib/chatTurnStatusStore.ts',
+  'src/lib/pendingStudioBind.ts',
+  'src/lib/createProjectFlow.ts',
+  'src/lib/localPrefs.ts',
+  'src/lib/chatIdeaIntent.ts',
+  'src/lib/chatStudio.ts',
   'src/lib/createBuildQuality.ts',
   'src/lib/chatAgentApply.ts',
   'src/lib/createProgressCopy.ts',
   'src/lib/chatCodeReply.ts',
   'src/lib/chatStudioStore.ts',
   'src/lib/postPatchVerify.ts',
+  'src/lib/chatMessageRouter.ts',
   'src/components/AgentProgressStatus.tsx',
+  'src/components/MediaMessage.tsx',
   'src/index.css',
   'electron/arkProjects.cjs',
   'electron/arkAgentExec.cjs',
+  'scripts/check-create-intent.mjs',
   'scripts/live-one-step.mjs',
   'scripts/live-brown-blank.mjs',
 ];
 
-/** AIChat is huge — extract the sections that own the broken loops. */
+/** AIChat is huge — extract the sections that own create / bind / status / edit. */
 const AICHAT_SLICES = [
   { title: 'bind-studio-disk listener', start: 2460, end: 2520 },
-  { title: 'sendMessage start + pending-studio-bind', start: 3485, end: 3560 },
-  { title: 'pushAssistantStatus throttle', start: 3880, end: 3960 },
-  { title: 'workspace gate NO_WORKSPACE_MSG', start: 7110, end: 7140 },
-  { title: 'wantsCodeEdit + micro/wording gates', start: 7235, end: 7290 },
-  { title: 'fast path finalizeWebEdits micro', start: 7725, end: 7860 },
-  { title: 'create blankSolid short-circuit', start: 5365, end: 5420 },
-  { title: 'create intentionalBlank Ready gate', start: 6180, end: 6320 },
+  { title: 'sendMessage start + pending-studio-bind', start: 3505, end: 3560 },
+  { title: 'pushAssistantStatus → status store (C1)', start: 3895, end: 3975 },
+  { title: 'createIntent + preferPlan force-create (A4)', start: 5085, end: 5190 },
+  { title: 'create surgical-before-blank + scaffold-only (A6/B2)', start: 5410, end: 5480 },
+  { title: 'multiModelCreate default off (C4)', start: 5525, end: 5550 },
+  { title: 'background npm bootstrap (C2)', start: 6585, end: 6660 },
+  { title: 'workspace gate + pending bind (B1)', start: 6875, end: 7210 },
+  { title: 'micro edit verify soft-keep (B4)', start: 7860, end: 7960 },
+  { title: 'code-edit stream status only (C3)', start: 8285, end: 8320 },
+  { title: 'keep-building talk only when unbound (B5)', start: 9535, end: 9595 },
 ];
 
 function read(rel) {
@@ -63,29 +76,29 @@ Workspace: Desktop/Projects/Nova
 
 ## Why you're here
 
-We are stuck in a diagnostic ladder for **Nightglass** (Vite React site under Documents/NOVA Projects/Nightglass). Cursor must NOT patch Nightglass files — only Nova. After each Nova code fix, test with a **new** natural prompt (never reuse the failed wording).
+Nova is an Electron AI creation studio (chat → write projects on disk → follow-up edits).
+**Fix Nova only** — never patch user project folders (Nightglass was only a diagnostic target).
 
-### Recurring failures
-1. **UI freeze / desktop hitch** while generating — status line was re-rendering the whole chat every token; dots remounted and blinked in sync.
-2. **Status dots** — must ripple 1→2→3 smoothly; remounts + bad delays broke that.
-3. **Blank brown create** — multi-model landing build ignored "empty brown shell"; blankSolid path needed; preferPlan/"spin up"/"open" wording missed immediate build.
-4. **Add centered words** — "center white words" was misread as **white blank shell** (wiped brown). Surgical micro-edits lost to blankSolid early-return. \`looksLikeCodeEditAsk\` missed "center words that say…". Bind set diskRoot only *after* slow file load → **No workspace yet** in ~50ms.
-5. **138ms · NOVA · local patch** on micro-edits is expected (surgical path). Cursor must not fake this by writing Nightglass App.jsx itself.
+### What we just shipped (Tier A–D + post-fix, Sep 2026)
 
-### Current Nightglass target shape
-- Full-viewport brown \`#8B4513\`
-- Centered white multi-word title: **Nightglass After Hours**
-- No icons/nav (words only for this step)
+| Tier | Fix |
+|------|-----|
+| **A–D** | Prior slice (create intent, bind, surgical title, status store, multi-model off, classifyTurn) |
+| **Post** | Guest send works; create returns after scaffold (no LLM first paint); sleeps/planning veto removed; \`classifyTurn\` closed kinds + reason; \`hasActiveWorkspace\` pending bind; agent onStep → status store; \`check-classify-turn.mjs\` |
+
+**Template-first create (Option A):** mkdir → scaffold → optional surgical/blank patch → reply → npm background. Model enrich is a follow-up.
+
+Acceptance: \`npm run smoke:create-intent\` + \`npm run smoke:classify-turn\`
+
+### Ask Grok for
+1. Review template-first create — still too much left in AIChat ladder?
+2. Remaining if-else branches that can override classifyTurn.
+3. Next: move create/edit/plan into \`src/lib/chatTurnHandlers/\`.
+4. Whether Option B agent loop should only run when patcher returns empty + capable model.
 
 ### Remotes
 - \`origin\` → https://github.com/DrMeji/Nova-Source.git
 - \`nova\` → https://github.com/DrMeji/Nova.git
-
-### Ask Grok for
-1. Hardening so blank-shell vs add-words never confuse again.
-2. Reliable workspace bind (hash route + diskRoot) so edits never hit NO_WORKSPACE_MSG falsely.
-3. Status UX that never freezes Electron/desktop.
-4. Next ladder steps (logo corner, search, bag) without regressions.
 
 ---
 

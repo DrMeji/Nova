@@ -3,7 +3,7 @@ const { contextBridge, ipcRenderer, webUtils } = require('electron');
 const packagedFlag = process.argv.find(a => typeof a === 'string' && a.startsWith('--ark-packaged='));
 const isPackagedApp = packagedFlag ? packagedFlag.endsWith('=1') : false;
 
-contextBridge.exposeInMainWorld('arkDesktop', {
+const arkDesktopApi = {
   isElectron: true,
   isPackaged: isPackagedApp,
   isDevBuild: !isPackagedApp,
@@ -179,7 +179,29 @@ contextBridge.exposeInMainWorld('arkDesktop', {
   secretsSave: (keys) => ipcRenderer.invoke('NOVA:secrets-save', { keys }),
   voiceNeuralVoices: () => ipcRenderer.invoke('NOVA:voice-neural-voices'),
   voiceNeuralSpeak: (payload) => ipcRenderer.invoke('NOVA:voice-neural-speak', payload || {}),
-});
+};
+
+// Dev assert: create/apply must not silently miss these bridges.
+if (!isPackagedApp) {
+  const required = [
+    'workspaceMkdir',
+    'workspaceWriteFile',
+    'workspaceOpenRoot',
+    'workspaceGetGrants',
+    'workspaceSetGrants',
+    'readTextFile',
+    'listDir',
+    'projectWrite',
+    'agentRun',
+    'agentStartDevServer',
+  ];
+  const absent = required.filter((k) => typeof arkDesktopApi[k] !== 'function');
+  if (absent.length) {
+    console.error('[NOVA preload] missing create/apply IPC:', absent.join(', '));
+  }
+}
+
+contextBridge.exposeInMainWorld('arkDesktop', arkDesktopApi);
 
 // Forward IPC push messages from main as DOM CustomEvents so the React app can listen.
 ipcRenderer.on('NOVA:open-settings', (_event, payload) => {

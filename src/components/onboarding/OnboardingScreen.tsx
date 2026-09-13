@@ -440,7 +440,7 @@ export function OnboardingScreen() {
     'Matching models to this PC',
   ];
 
-  const stepLabels = ['Hardware', 'Speed', 'Models', 'Access', 'Connect'] as const;
+  const stepLabels = ['Documents', 'Coder', 'Build'] as const;
   const accessEnabledCount = [desktopAccess, documentsAccess, fullPcAccess].filter(Boolean).length;
 
   const enableRecommendedAccess = () => {
@@ -475,10 +475,12 @@ export function OnboardingScreen() {
           <p className="text-xs uppercase tracking-[0.2em] text-content-tertiary mb-3">First run setup</p>
           <h1 className="text-3xl font-semibold text-content-primary tracking-tight">
             {phase === 'access'
-              ? 'Give NOVA access'
-              : phase === 'connect'
-                ? 'Connect free capacity'
-                : "Let's optimize your computer"}
+              ? 'Allow project folders'
+              : phase === 'models'
+                ? 'Pick a coding brain'
+                : phase === 'finishing'
+                  ? 'Type what to build'
+                  : 'Welcome to NOVA'}
           </h1>
         </div>
 
@@ -486,17 +488,13 @@ export function OnboardingScreen() {
           <div className="flex items-center gap-2 mb-7">
             {stepLabels.map((label, i) => {
               const active =
-                (i === 0 && (phase === 'intro' || phase === 'hardware'))
-                || (i === 1 && phase === 'speed')
-                || (i === 2 && phase === 'models')
-                || (i === 3 && phase === 'access')
-                || (i === 4 && (phase === 'connect' || phase === 'finishing'));
+                (i === 0 && (phase === 'intro' || phase === 'access'))
+                || (i === 1 && phase === 'models')
+                || (i === 2 && (phase === 'finishing' || phase === 'connect'));
               const done =
-                (i === 0 && Boolean(hw) && (phase === 'speed' || phase === 'models' || phase === 'access' || phase === 'connect' || phase === 'finishing'))
-                || (i === 1 && Boolean(speedPlan) && (phase === 'models' || phase === 'access' || phase === 'connect' || phase === 'finishing'))
-                || (i === 2 && (phase === 'access' || phase === 'connect' || phase === 'finishing'))
-                || (i === 3 && (phase === 'connect' || phase === 'finishing'))
-                || (i === 4 && phase === 'finishing' && progress >= 100);
+                (i === 0 && (phase === 'models' || phase === 'finishing' || phase === 'connect'))
+                || (i === 1 && (phase === 'finishing' || phase === 'connect'))
+                || (i === 2 && phase === 'finishing' && progress >= 100);
               return (
                 <div key={label} className="flex-1 min-w-0">
                   <div className={`h-1 rounded-full mb-2 ${
@@ -512,8 +510,24 @@ export function OnboardingScreen() {
 
           {phase === 'intro' && (
             <div className="space-y-5">
-              <button type="button" onClick={runHardware} className="ark-btn-primary w-full h-11 rounded-xl">
-                Start optimization
+              <p className="text-sm text-content-secondary text-center">
+                Three steps: allow Documents, pick a coder (or skip), then type what to build.
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  void detectHardwareAsync().then((info) => {
+                    if (info) {
+                      saveHardwareSnapshot(info);
+                      setHw(info);
+                      setModels(recommendationsFor(info));
+                    }
+                  }).catch(() => { /* optional */ });
+                  setPhase('access');
+                }}
+                className="ark-btn-primary w-full h-11 rounded-xl"
+              >
+                Continue
               </button>
             </div>
           )}
@@ -713,19 +727,32 @@ export function OnboardingScreen() {
                 type="button"
                 disabled={!selected}
                 onClick={() => {
-                  setPhase('access');
                   const chatId = selectedId || selected?.id;
                   if (chatId) {
+                    setLocalPrefs({
+                      activeCoderId: chatId,
+                      defaultCodeModelId: chatId,
+                      activeChatId: chatId,
+                      defaultModelId: chatId,
+                    });
                     queueSetupBrainDownloads({
                       chatId,
                       chatName: selected?.name,
                       hw,
                     });
                   }
+                  setPhase('finishing');
                 }}
                 className="ark-btn-primary w-full h-11 rounded-xl"
               >
-                Continue to access
+                Start building
+              </button>
+              <button
+                type="button"
+                onClick={() => setPhase('finishing')}
+                className="w-full h-10 rounded-xl border border-surface-border text-sm text-content-secondary hover:bg-surface-hover"
+              >
+                Skip — I’ll pick a brain later
               </button>
             </div>
           )}
@@ -817,17 +844,26 @@ export function OnboardingScreen() {
               <div className="flex gap-2 pt-1">
                 <button
                   type="button"
-                  onClick={() => setPhase('models')}
+                  onClick={() => setPhase('intro')}
                   className="flex-1 h-11 rounded-xl border border-surface-border text-sm text-content-secondary hover:bg-surface-hover"
                 >
                   Back
                 </button>
                 <button
                   type="button"
-                  onClick={() => setPhase('connect')}
+                  onClick={() => {
+                    if (!models.length) {
+                      const recs = hw ? recommendationsFor(hw) : [
+                        { id: 'NOVA-auto', name: 'Auto', size: '', detail: 'Pick later in Models', recommended: true },
+                      ];
+                      setModels(recs);
+                      setSelectedId(recs.find(r => r.recommended)?.id || recs[0]?.id || null);
+                    }
+                    setPhase('models');
+                  }}
                   className="ark-btn-primary flex-[2] h-11 rounded-xl"
                 >
-                  {accessEnabledCount > 0 ? 'Continue to connect' : 'Skip for now'}
+                  {accessEnabledCount > 0 ? 'Continue to coder' : 'Skip — use sandbox'}
                 </button>
               </div>
             </div>
@@ -925,11 +961,11 @@ export function OnboardingScreen() {
             <div className="space-y-5">
               <div className="text-center">
                 <p className="text-sm font-medium text-content-primary mb-1">
-                  {finishReady ? 'Chat brain ready' : 'Installing chat brain'}
+                  {finishReady ? 'Ready — open Chat and type what to build' : 'Almost ready'}
                 </p>
                 <p className="text-xs text-content-tertiary">
-                  {selected?.name || 'Qwen2.5 1.5B'}
-                  {connectedCount > 0 ? ` · ${connectedCount} cloud key${connectedCount === 1 ? '' : 's'}` : ''}
+                  Try: “build me a coffee shop site called Ember”
+                  {selected?.name ? ` · coder ${selected.name}` : ''}
                 </p>
               </div>
               <div className="space-y-2">

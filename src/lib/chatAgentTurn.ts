@@ -28,16 +28,32 @@ export function looksLikeKeepBuildingAsk(text: string): boolean {
 
 export type ComposerAgentMode = 'ask' | 'plan' | 'agent' | 'debug' | 'multitask' | null;
 
-/** Bound only when we have a disk folder or real file map — bare projectId is not enough. */
+/** Bound only when we have a disk folder, real file map, or a pending Open-folder bind. */
 export function hasActiveWorkspace(opts: {
   files: Record<string, string>;
   projectId: string | null;
   diskRoot: string | null;
+  chatId?: string | null;
 }): boolean {
-  return Boolean(
-    opts.diskRoot
-    || Object.keys(opts.files || {}).length > 0,
-  );
+  if (opts.diskRoot || Object.keys(opts.files || {}).length > 0) return true;
+  try {
+    if (typeof sessionStorage !== 'undefined') {
+      const pending = sessionStorage.getItem('NOVA:pending-studio-bind');
+      if (pending) {
+        const parsed = JSON.parse(pending) as { diskRoot?: string; files?: Record<string, string> };
+        if (parsed?.diskRoot || (parsed?.files && Object.keys(parsed.files).length)) return true;
+      }
+      if (opts.chatId) {
+        const last = sessionStorage.getItem(`NOVA:last-disk:${opts.chatId}`);
+        if (last && String(last).trim()) return true;
+      }
+    }
+    if (typeof localStorage !== 'undefined' && opts.chatId) {
+      const last = localStorage.getItem(`NOVA:last-disk:${opts.chatId}`);
+      if (last && String(last).trim()) return true;
+    }
+  } catch { /* ignore */ }
+  return false;
 }
 
 export function normalizeComposerMode(mode: ComposerAgentMode): 'ask' | 'plan' | 'agent' {

@@ -50,11 +50,21 @@ export function isProjectCreateBrief(text: string): boolean {
   if (/\bcreate\s+(?:the\s+)?project\s+[A-Za-z]/i.test(t) && /\bon\s+disk\b/i.test(t)) return true;
   if (looksLikeSingleFileCreateAsk(t)) return false;
   if (wantsPlanningOnly(t)) return false;
-  if (looksLikeConversationalPlanningAsk(t)) return false;
   if (wantsClarifyBeforeCreate(t)) return false;
   if (looksLikeInPlaceRebuildAsk(t)) return false;
+  // Pure advice questions ("what should I use if I were to build…") are not create.
+  if (
+    /\b(?:what|which|how)\b/i.test(t)
+    && /\b(?:should|would|could|type|stack|framework|use)\b/i.test(t)
+    && !/\b(?:create|scaffold|build\s+me|make\s+me|spin\s+up)\b/i.test(t)
+  ) {
+    return false;
+  }
+  // Do NOT veto on conversational planning — create verb + noun wins (Grok Tier A).
   if (looksLikeProjectBuildAsk(t)) return true;
-  if (looksLikeGreenfieldIdea(t)) return true;
+  if (looksLikeGreenfieldIdea(t) && (CREATE_RE.test(t) || NEW_PROJECT_RE.test(t)) && PROJECT_NOUN_RE.test(t)) {
+    return true;
+  }
   if (/\b(?:add|create|make|write|put)\b[\s\S]{0,40}\bfiles?\b/i.test(t)
     && !/\b(?:web\s+)?(?:app|application|project|website|site)\b/i.test(t)) {
     return false;

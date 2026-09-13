@@ -72,6 +72,7 @@ import {
   inferBuildLabel,
   parseClosedFileEdits,
   parseFileEdits,
+  parseFileEditsOrPatches,
   planFilesForBuild,
   rankFilesForTurnPack,
   fileContentLooksComplete,
@@ -2280,7 +2281,11 @@ export function ProjectWorkspace() {
         setFileTree(fileTreeRef.current);
       };
       const collectFinishedEdits = (reply: string) => {
-        let edits = parseClosedFileEdits(reply);
+        let edits = parseFileEditsOrPatches(reply, fileContentsRef.current)
+          .filter(e => fileContentLooksComplete(e.path, e.content));
+        if (!edits.length) {
+          edits = parseClosedFileEdits(reply);
+        }
         if (!edits.length) {
           edits = extractChatStyleFileEdits(reply, content)
             .filter(e => fileContentLooksComplete(e.path, e.content));

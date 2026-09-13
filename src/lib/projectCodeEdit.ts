@@ -11,6 +11,7 @@ import {
   touchesPreviewServing,
   webMicroAskEdits,
 } from '@/lib/webProjectCanon';
+import { applyAgentPatches, parseAgentPatches } from '@/lib/arkAgentPatch';
 
 export type ProjectFileMap = Record<string, string>;
 
@@ -120,7 +121,7 @@ ${LAYOUT_RULES}`;
 const CODING_INSTRUCTIONS_LITE = `You are NOVA Code. Edit ONLY what the user asked.
 Interpret typos generously; do not lecture about spelling unless asked.
 
-Prefer SEARCH/REPLACE for edits to existing files. Use @@@FILE with COMPLETE file content for new files or large rewrites.
+Prefer SEARCH/REPLACE for small edits to existing files (path + old + new). Use @@@FILE full contents only for new files or large rewrites.
 Do not echo the user message. Do not dump tutorials.
 Keep HTML/CSS/JS in sync.
 
@@ -538,6 +539,21 @@ export function parseFileEdits(reply: string): ParsedFileEdit[] {
   }
 
   return found;
+}
+
+/** Prefer SEARCH/REPLACE patches when files are known; fall back to @@@FILE. */
+export function parseFileEditsOrPatches(
+  reply: string,
+  files: ProjectFileMap = {},
+): ParsedFileEdit[] {
+  const patches = parseAgentPatches(reply);
+  const full = parseFileEdits(reply);
+  if (!patches.length) return full;
+  const patched = applyAgentPatches(files, patches);
+  if (!patched.updated.length) return full;
+  const fromPatches = patched.updated.map((p) => ({ path: p, content: patched.files[p]! }));
+  const patchedPaths = new Set(fromPatches.map((e) => e.path));
+  return [...fromPatches, ...full.filter((e) => !patchedPaths.has(e.path))];
 }
 
 function workspacePaths(files?: ProjectFileMap): string[] {

@@ -1,6 +1,11 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { Session, User } from '@supabase/supabase-js';
-import { supabase, clearAuthLocalFallback } from '@/lib/supabase';
+import {
+  supabase,
+  clearAuthLocalFallback,
+  healSessionExpires,
+  persistHealedAuthSession,
+} from '@/lib/supabase';
 import type { Profile, UserSettings } from '@/types';
 import {
   clearSetupCompleted,
@@ -92,10 +97,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const lastGoodSessionRef = useRef<Session | null>(null);
   const intentionalSignOutRef = useRef(false);
   const restoringSessionRef = useRef(false);
+  /** Ignore nested SIGNED_OUT while / shortly after we rehydrate a healed session. */
+  const restoreHoldUntilRef = useRef(0);
 
   const rememberSession = (next: Session | null) => {
     if (next?.access_token && next.refresh_token) {
-      lastGoodSessionRef.current = next;
+      lastGoodSessionRef.current = healSessionExpires(next) as Session;
+      return;
+    }
+    // Only clear the safety net on intentional wipe paths (caller nulls after sign-out).
+    if (next === null && intentionalSignOutRef.current) {
+      lastGoodSessionRef.current = null;
     }
   };
 
@@ -110,10 +122,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       /* fall through */
     }
-    const expMs = (s.expires_at ?? 0) * 1000;
+    const healed = healSessionExpires(s);
+    const expMs = (healed.expires_at ?? 0) * 1000;
     if (expMs > Date.now() + 15_000) return true;
     // Refresh token can still revive the session even if access looks expired locally.
     return s.refresh_token.length > 10;
+  };
+
+  const restoreSessionInUi = async (raw: Session) => {
+    const healed = (await persistHealedAuthSession(raw)) as Session;
+    rememberSession(healed);
+    setSession(healed);
+    setUser(healed.user);
+    setLoading(false);
+    restoreHoldUntilRef.current = Date.now() + 12_000;
   };
 
   // Never call supabase.auth.getUser() here — in auth-js 2.112.x a transient
@@ -225,7 +247,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Fresh / reinstalled desktop: wipe leftover sessions so AuthScreen is first.
       // Only once at cold start — never after a live sign-in in this Electron session.
       if (isPackaged && isFreshInstallGate()) {
+        intentionalSignOutRef.current = true;
         localStorage.removeItem(BYPASS_KEY);
+        clearAuthLocalFallback();
         try {
           await supabase.auth.signOut({ scope: 'local' });
         } catch {
@@ -237,6 +261,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           /* ignore */
         }
         if (!cancelled) {
+          lastGoodSessionRef.current = null;
           setBypass(false);
           setSession(null);
           setUser(null);
@@ -244,6 +269,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setSettings(null);
           setLoading(false);
         }
+        // Allow a real Sign in in this same Electron session.
+        intentionalSignOutRef.current = false;
         return;
       }
 
@@ -251,13 +278,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       const { data } = await supabase.auth.getSession();
       if (cancelled) return;
-      rememberSession(data.session);
-      setSession(data.session);
-      setUser(data.session?.user ?? null);
-      if (data.session?.user) {
-        await loadProfileAndSettings(data.session.user.id, data.session.user);
-        if (!cancelled) setLoading(false);
+      if (data.session) {
+        const healed = (await persistHealedAuthSession(data.session)) as Session;
+        rememberSession(healed);
+        setSession(healed);
+        setUser(healed.user ?? null);
+        if (healed.user) {
+          await loadProfileAndSettings(healed.user.id, healed.user);
+          if (!cancelled) setLoading(false);
+        } else {
+          setLoading(false);
+        }
       } else {
+        setSession(null);
+        setUser(null);
         setLoading(false);
       }
     })();
@@ -271,13 +305,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (newSession?.user) {
         intentionalSignOutRef.current = false;
-        rememberSession(newSession);
-        setSession(newSession);
-        setUser(newSession.user);
+        const healed = healSessionExpires(newSession) as Session;
+        rememberSession(healed);
+        setSession(healed);
+        setUser(healed.user);
         void (async () => {
+          try {
+            await persistHealedAuthSession(healed);
+          } catch {
+            /* ignore */
+          }
           await ensureFirstRunGate();
           if (cancelled) return;
-          await loadProfileAndSettings(newSession.user.id, newSession.user);
+          await loadProfileAndSettings(healed.user.id, healed.user);
           if (!cancelled) setLoading(false);
         })();
         return;
@@ -300,35 +340,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      // Spurious kickout (common 5–10s after bat launch / Code click): restore
-      // if we still have a usable access token in memory.
+      // Nested kickout while we are already rehydrating — do not clear UI / call getSession
+      // (getSession re-triggers the refresh storm that caused this SIGNED_OUT).
+      if (restoringSessionRef.current || Date.now() < restoreHoldUntilRef.current) {
+        return;
+      }
+
+      // Spurious kickout (often ~2s after login on skewed Windows clocks): restore
+      // from memory + re-persist healed expires_at. Never call getSession here.
       void (async () => {
         if (cancelled || bypassRef.current || restoringSessionRef.current) return;
-
-        try {
-          const { data } = await supabase.auth.getSession();
-          if (data.session?.user) {
-            rememberSession(data.session);
-            setSession(data.session);
-            setUser(data.session.user);
-            setLoading(false);
-            return;
-          }
-        } catch {
-          /* try memory restore next */
-        }
 
         const last = lastGoodSessionRef.current;
         if (sessionStillUsable(last)) {
           restoringSessionRef.current = true;
           try {
-            // Stay in-app immediately. Prefer getSession (uses storage) over
-            // setSession — setSession treats clock-skewed JWT exp as expired and
-            // forces another refresh (the post-login kickout loop).
-            rememberSession(last!);
-            setSession(last!);
-            setUser(last!.user);
-            setLoading(false);
+            await restoreSessionInUi(last!);
             return;
           } catch {
             /* fall through */
@@ -359,9 +386,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const wasGuest = bypass;
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (!error && data.session) {
-      rememberSession(data.session);
-      setSession(data.session);
-      setUser(data.session.user ?? null);
+      const healed = (await persistHealedAuthSession(data.session)) as Session;
+      rememberSession(healed);
+      setSession(healed);
+      setUser(healed.user ?? null);
+      restoreHoldUntilRef.current = Date.now() + 12_000;
       localStorage.setItem('ark:last-auth', JSON.stringify({
         method: 'supabase',
         email,
@@ -377,8 +406,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         void mergeGuestSocialToCloud(data.user.id);
       }
       // Force profile load immediately so we don't wait on a flaky auth event.
-      if (data.session.user) {
-        void loadProfileAndSettings(data.session.user.id, data.session.user);
+      if (healed.user) {
+        void loadProfileAndSettings(healed.user.id, healed.user);
       }
     }
     if (error) {

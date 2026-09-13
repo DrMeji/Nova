@@ -30,10 +30,8 @@ export function looksLikeBuildStart(message: string): boolean {
   }
   return (
     /\b(create|scaffold)\b[\s\S]{0,90}\b(app|website|site|page|tool|dashboard|ui|project)\b/i.test(t)
-    || (
-      /\b(build|make)\b[\s\S]{0,40}\b(?:me\s+)?(?:a\s+)?(?:new\s+)?(app|website|site|project)\b/i.test(t)
-      && /\b(?:now|files|scaffold|on\s+desktop|create\s+the)\b/i.test(t)
-    )
+    // "build/make me a website|app|site|project" — create now (no "now/files/scaffold" required)
+    || /\b(build|make)\b[\s\S]{0,40}\b(?:me\s+)?(?:a\s+)?(?:new\s+)?(app|website|site|project|page)\b/i.test(t)
     || /\b(let'?s|lets)\s+(build|make|create)\s+(?:this|that|it|the\s+project|files)\b/i.test(t)
     || /\bstart with a blank\b/i.test(t)
     || /\banother chat\s*gpt\b/i.test(t)

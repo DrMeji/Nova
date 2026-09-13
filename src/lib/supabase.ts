@@ -100,6 +100,10 @@ function arkDesktopAuth() {
  * → auth-js refresh-storms → 429 → SIGNED_OUT within seconds of login.
  * Re-base expires_at from local now + expires_in whenever we persist.
  */
+function nextExpiresAt(expiresIn: number): number {
+  return Math.floor(Date.now() / 1000) + Math.floor(expiresIn);
+}
+
 function normalizeSessionExpires(raw: string): string {
   try {
     const parsed = JSON.parse(raw) as Record<string, unknown>;
@@ -110,7 +114,7 @@ function normalizeSessionExpires(raw: string): string {
     if (!session || typeof session !== 'object') return raw;
     const expiresIn = Number(session.expires_in);
     if (!Number.isFinite(expiresIn) || expiresIn <= 0) return raw;
-    const nextExpires = Math.floor(Date.now() / 1000) + Math.floor(expiresIn);
+    const nextExpires = nextExpiresAt(expiresIn);
     if (session.expires_at === nextExpires) return raw;
     session.expires_at = nextExpires;
     if (parsed.currentSession && parsed.currentSession !== session) {
@@ -120,6 +124,38 @@ function normalizeSessionExpires(raw: string): string {
   } catch {
     return raw;
   }
+}
+
+type SessionExpiryFields = {
+  access_token?: string;
+  refresh_token?: string;
+  expires_in?: number;
+  expires_at?: number;
+};
+
+/** Heal in-memory session expires_at so auth-js auto-refresh does not treat it as already dead. */
+export function healSessionExpires<T extends SessionExpiryFields>(session: T): T {
+  const expiresIn = Number(session.expires_in);
+  if (!Number.isFinite(expiresIn) || expiresIn <= 0) return session;
+  const nextExpires = nextExpiresAt(expiresIn);
+  if (session.expires_at === nextExpires) return session;
+  return { ...session, expires_at: nextExpires };
+}
+
+/**
+ * Write a healed session blob back into Electron + local mirror without calling
+ * supabase.auth.setSession (setSession re-triggers refresh when JWT exp is skewed).
+ */
+export async function persistHealedAuthSession(session: SessionExpiryFields): Promise<SessionExpiryFields> {
+  const healed = healSessionExpires(session);
+  if (!healed?.access_token || !healed.refresh_token) return healed;
+  const blob = JSON.stringify(healed);
+  try {
+    await arkAuthStorage.setItem('ark-auth-token', blob);
+  } catch {
+    /* ignore — React restore still keeps the user in-app */
+  }
+  return healed;
 }
 
 const arkAuthStorage: SupportedStorage = {

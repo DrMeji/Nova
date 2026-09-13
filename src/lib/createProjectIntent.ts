@@ -20,6 +20,7 @@ import { looksLikeFolderCatalogAsk } from '@/lib/folderCatalog';
 import { looksLikeFolderPathAsk } from '@/lib/folderPathAsk';
 import { looksLikePcExploreAsk, looksLikeInstalledAppsAsk } from '@/lib/pcExplore';
 import { looksLikeInPlaceRebuildAsk, looksLikeProjectBuildAsk } from '@/lib/chatBuildIntent';
+import { looksLikeBuildStart } from '@/lib/chatStudio';
 import { slugifyProjectName } from '@/lib/projectNames';
 import {
   detectProjectKind,
@@ -40,31 +41,51 @@ export type NewProjectIntent = {
 };
 
 const CREATE_RE =
-  /\b(?:create|scaffold|build\s+me\s+(?:a\s+)?|i\s+want\s+to\s+(?:make|build|create|start)|make\s+(?:a\s+)?new|start\s+(?:a\s+)?new|spin\s+up\s+(?:a\s+)?|open\s+(?:a\s+)?(?:vite|react)|kick\s+off(?:\s+(?:a|an))?)\b/i;
+  /\b(?:create|scaffold|build\s+me\s+(?:a\s+)?|help\s+me\s+(?:to\s+)?(?:build|make|create)|(?:make|build)\s+(?:me\s+)?(?:an?\s+)(?:new\s+)?|i\s+want\s+to\s+(?:make|build|create|start)|make\s+(?:a\s+)?new|start\s+(?:a\s+)?new|spin\s+up\s+(?:a\s+)?|open\s+(?:a\s+)?(?:vite|react)|kick\s+off(?:\s+(?:a|an))?)\b/i;
 
 const NEW_PROJECT_RE =
   /\bnew\s+(?:web\s+)?(?:app|application|project|website|site|python\s+project|react\s+app)\b/i;
 
 const PROJECT_NOUN_RE =
-  /\b(?:app|application|project|website|site|web\s*app|webapp|bot|program|starter)\b/i;
+  /\b(?:app|application|project|website|site|web\s*app|webapp|bot|program|starter|page|landing|homepage)\b/i;
+
+/** Shared create-verb + product-noun gate (classifyTurn / createBrief / buildStart). */
+export function isCreateVerbNoun(message: string): boolean {
+  const t = String(message || '').trim();
+  if (!t) return false;
+  if (/\b(?:do\s+not|don't|dont|never|without)\s+create\b/i.test(t)) return false;
+  if (wantsPlanningOnly(t)) return false;
+  return (
+    CREATE_RE.test(t) || NEW_PROJECT_RE.test(t) || looksLikeProjectBuildAsk(t) || looksLikeBuildStart(t)
+  ) && PROJECT_NOUN_RE.test(t);
+}
 
 /** Lightweight create detect. no project name required (used by route guards). */
 export function looksLikeCreateProjectBrief(message: string): boolean {
   const t = String(message || '').trim();
   if (!t) return false;
   if (looksLikeSingleFileCreateAsk(t)) return false;
-  if (/\b(?:do\s+not|don't|dont|never|without)\s+create\b/i.test(t)) return false;
   if (/\bask\s+me\b[\s\S]{0,80}\b(?:clarifying\s+)?questions?\b/i.test(t)) return false;
   if (/\b(?:add|create|make|write|put)\b[\s\S]{0,40}\bfiles?\b/i.test(t)
     && !/\b(?:web\s+)?(?:app|application|project|website|site)\b/i.test(t)) {
     return false;
   }
-  return (
-    CREATE_RE.test(t) || NEW_PROJECT_RE.test(t) || looksLikeProjectBuildAsk(t)
-  ) && PROJECT_NOUN_RE.test(t);
+  return isCreateVerbNoun(t);
 }
 
 export { slugifyProjectName } from '@/lib/projectNames';
+
+/** When the user says create/build but never names the product. */
+export function fallbackCreateProjectName(text: string): string {
+  const t = String(text || '');
+  const kind = resolveProjectKindForCreate(t, detectProjectKind(t), detectProjectKind(t));
+  if (/\b(?:kanban|board|tracker|dashboard)\b/i.test(t)) return 'Board';
+  if (/\b(?:game|arcade|fps|shooter)\b/i.test(t)) return 'Game';
+  if (/\b(?:bot|cli|script)\b/i.test(t) && kind === 'python') return 'Tool';
+  if (kind === 'static-web' || /\b(?:website|site|landing|page|homepage)\b/i.test(t)) return 'Site';
+  if (kind === 'vite-react' || /\b(?:app|application|spa|react)\b/i.test(t)) return 'App';
+  return 'My App';
+}
 
 export function extractProjectName(text: string): string | null {
   const t = String(text || '').trim();
@@ -87,6 +108,8 @@ export function extractProjectName(text: string): string | null {
     /\bcreate\s+(?:a\s+)?(?:new\s+)?project\s+["“']?([A-Za-z][A-Za-z0-9._\s-]{1,48})/i,
     /\bcreate\s+([A-Z][A-Za-z0-9.]{1,40})\s*[—–\-:]/,
     /\bcreate\s+([A-Z][A-Za-z0-9.]{1,40})\s+as\b/i,
+    // "Create SaltPier restaurant website" / "Create Nightglass site"
+    /\bcreate\s+([A-Z][A-Za-z0-9.]{1,40})\s+(?:restaurant|landing|marketing|festival|portfolio)?\s*(?:website|site|app|application|project)\b/i,
     /\b(?:app|project|website|site)\s+["“']([^"”']{2,48})["”']/i,
     /\bnew\s+(?:web\s+)?(?:app|project|website|site)\s+([A-Za-z][A-Za-z0-9._-]{1,40})/i,
     /\bkeep\s+the\s+folder\s+name\s+([A-Za-z][A-Za-z0-9._\s-]{1,40})/i,
@@ -170,7 +193,7 @@ export function parseNewProjectIntent(message: string): NewProjectIntent | null 
     return null;
   }
 
-  const isCreate = CREATE_RE.test(t) || NEW_PROJECT_RE.test(t) || looksLikeProjectBuildAsk(t);
+  const isCreate = isCreateVerbNoun(t) || CREATE_RE.test(t) || NEW_PROJECT_RE.test(t) || looksLikeProjectBuildAsk(t) || looksLikeBuildStart(t);
   if (!isCreate || !PROJECT_NOUN_RE.test(t)) return null;
 
   // Build/create always wins over explore/catalog false positives.
@@ -195,8 +218,11 @@ export function parseNewProjectIntent(message: string): NewProjectIntent | null 
     return null;
   }
 
-  const name = extractProjectName(t);
-  if (!name) return null;
+  const name = extractProjectName(t)
+    || extractGreenfieldName(t)
+    || inferGreenfieldName(t)
+    || fallbackCreateProjectName(t)
+    || 'App';
 
   const kind = resolveProjectKindForCreate(t, detectProjectKind(t), detectProjectKind(t));
   // Rich briefs plan first (chips). Short "Create project X" builds now.
@@ -207,8 +233,15 @@ export function parseNewProjectIntent(message: string): NewProjectIntent | null 
   const richReplicaBrief = /\b(?:exact\s+replica|identical|clone\s+(?:of\s+)?(?:the\s+)?(?:look|site|homepage)|apple\.com|netflix\.com|twitch\.tv)\b/i.test(t)
     && /\b(?:website|site|landing|homepage|marketing|web\s*app|replica)\b/i.test(t)
     && !/\b(?:not|never|isn't|isnt|no)\b[\s\S]{0,40}\b(?:exact\s+replica|identical|apple\.com|netflix\.com|twitch\.tv|clone)\b/i.test(t);
-  const wantsImmediateBuild = !richReplicaBrief && (
-    /\bon\s+disk\b/i.test(t)
+  const explicitPlanOnly = /\b(?:plan\s+only|planning\s+only|don'?t\s+build\s+yet|do\s+not\s+build\s+yet|questions?\s+only|just\s+plan)\b/i.test(t)
+    || wantsPlanningOnly(t);
+  const shortCreateAsk = t.length <= 200
+    && /\b(?:create|build|make|scaffold|spin\s+up|kick\s+off|open)\b/i.test(t)
+    && /\b(?:website|site|web\s*app|react\s+app|app|project|page|landing)\b/i.test(t);
+  const wantsImmediateBuild = !richReplicaBrief && !explicitPlanOnly && (
+    shortCreateAsk
+    || looksLikeBuildStart(t)
+    || /\bon\s+disk\b/i.test(t)
     || /\b(?:files?\s+on\s+disk|scaffold\s+now|build\s+it\s+now|open\s+preview|and\s+open\s+preview)\b/i.test(t)
     || /\bkeep\s+building\s+until\s+ready\b/i.test(t)
     || /\bcreate\s+(?:a\s+)?(?:brand[- ]?new\s+)?project\s+folder\b/i.test(t)
@@ -229,14 +262,8 @@ export function parseNewProjectIntent(message: string): NewProjectIntent | null 
     // "Open a Vite React site named X"
     || /\bopen\s+(?:a\s+)?(?:[\w.+#-]+\s+){0,8}(?:website|site|web\s*app|react\s+app|project|app)\b/i.test(t)
   );
-  // Explicit on-disk / Preview asks always build now — never stall on a plan chip.
-  const preferPlan = !shortChip
-    && !looksLikeImplementGo(t)
-    && !/\bon\s+disk\b/i.test(t)
-    && (richReplicaBrief || (
-      !wantsImmediateBuild
-      && (looksLikeLandingBrief(t) || prefersReactAppScaffold(t) || t.length > 200)
-    ));
+  // Plan only for explicit plan-only or rich replica research — never for normal create/build.
+  const preferPlan = Boolean(explicitPlanOnly || (richReplicaBrief && !wantsImmediateBuild && !shortChip));
 
   return {
     name,

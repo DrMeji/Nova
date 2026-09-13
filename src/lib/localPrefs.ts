@@ -21,6 +21,12 @@ export type LocalPrefs = {
   lastChatModelId?: string;
   /** Default brain for Code workspace when Auto is not selected. */
   defaultCodeModelId?: string;
+  /** Role brains (Sprint C). Prefer these over legacy defaults when set. */
+  activeChatId?: string;
+  activeCoderId?: string;
+  activeVisionId?: string;
+  /** Prefs schema version for migrations (never let stale toggles resurrect). */
+  prefsVersion?: number;
   /** Last provider/model that actually answered (Settings → AI). */
   lastAnsweredLabel?: string;
   /** UI font size in px (html root). */
@@ -85,13 +91,12 @@ export type LocalPrefs = {
   allowFullPcAccess: boolean;
   /** Agent shell command policy. allowlist, auto-review, or run everything. */
   agentExecutionMode: 'allowlist' | 'auto_review' | 'run_all';
-  /**
-   * Level-B agent tool loop (search → read → edit → run → verify).
-   * When false, Agent mode falls back to one-shot coding.
-   */
+  /** Level-B agent tool loop (search → read → edit → run → verify). */
   agentLoopEnabled: boolean;
   /** Max tool steps per Agent loop (4–60). */
   agentLoopMaxSteps: number;
+  /** When true, create hops across multiple local/cloud models (slow). Default off. */
+  multiModelCreate: boolean;
   /** After a green verify, auto `git commit` changed files (allowlist/confirm still apply). */
   agentLoopCommitOnSuccess: boolean;
   /** Chat-first shell. hide Code tab from sidebar (Code still works via handoff). */
@@ -120,6 +125,7 @@ const DEFAULT_PREFS: LocalPrefs = {
   presenceStatus: 'online',
   defaultModelId: 'NOVA-auto',
   defaultCodeModelId: 'NOVA-auto',
+  prefsVersion: 2,
   fontSizePx: 16,
   aiMode: 'automatic',
   keepFilesLocal: true,
@@ -154,11 +160,13 @@ const DEFAULT_PREFS: LocalPrefs = {
   autoLockMinutes: 30,
   sandboxAgent: true,
   allowDesktopFolderAccess: false,
-  allowDocumentsFolderAccess: false,
+  // First-create needs a real NOVA Projects home without a Settings trip.
+  allowDocumentsFolderAccess: true,
   allowFullPcAccess: false,
   agentExecutionMode: 'allowlist',
   agentLoopEnabled: true,
   agentLoopMaxSteps: 24,
+  multiModelCreate: false,
   agentLoopCommitOnSuccess: false,
   chatFirst: true,
   voiceChatEnabled: false,
@@ -190,6 +198,17 @@ export function getLocalPrefs(): LocalPrefs {
       merged.orbBlurPx = 7;
     } else {
       merged.orbBlurPx = Math.max(0, Math.min(24, Math.round(merged.orbBlurPx)));
+    }
+    // Schema migrate — never resurrect stale multiModelCreate: true from old installs.
+    const ver = typeof merged.prefsVersion === 'number' ? merged.prefsVersion : 0;
+    if (ver < 2) {
+      merged.multiModelCreate = false;
+      merged.prefsVersion = 2;
+      if (!merged.activeChatId && merged.defaultModelId) merged.activeChatId = merged.defaultModelId;
+      if (!merged.activeCoderId && merged.defaultCodeModelId) merged.activeCoderId = merged.defaultCodeModelId;
+      try {
+        localStorage.setItem(PREFS_KEY, JSON.stringify(merged));
+      } catch { /* ignore */ }
     }
     return merged;
   } catch {

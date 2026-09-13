@@ -13,6 +13,8 @@ import { slugifyProjectName } from '@/lib/projectNames';
 
 export type ProjectBootstrapResult = {
   npmInstalled: boolean;
+  /** Install kicked off in background — not a failure. */
+  npmPending?: boolean;
   /** Set only when the Vite/dev server answered HTTP (localhost live). */
   devServerUrl?: string;
   bootstrapNote?: string;
@@ -94,6 +96,27 @@ export async function resolveNewProjectParent(
     const arkDir = joinPath(desktop, 'NOVA Projects');
     await window.arkDesktop?.workspaceMkdir?.({ targetPath: arkDir });
     return { parentPath: joinPath(arkDir, intent.slug), source: 'Desktop\\NOVA Projects' };
+  }
+
+  // First create with grants never touched: enable Documents so mkdir is not blocked.
+  if (documents && !grants.documents && !grants.desktop && !grants.fullPc) {
+    try {
+      const { setLocalPrefs } = await import('@/lib/localPrefs');
+      setLocalPrefs({ allowDocumentsFolderAccess: true });
+      await window.arkDesktop?.workspaceSetGrants?.({
+        desktop: false,
+        documents: true,
+        fullPc: false,
+        executionMode: grants.executionMode || 'allowlist',
+      });
+      const arkDir = joinPath(documents, 'NOVA Projects');
+      const mkdir = await window.arkDesktop?.workspaceMkdir?.({ targetPath: arkDir });
+      if (mkdir?.ok !== false) {
+        return { parentPath: joinPath(arkDir, intent.slug), source: 'Documents\\NOVA Projects' };
+      }
+    } catch {
+      /* fall through to sandbox */
+    }
   }
 
   const sandbox = await window.arkDesktop?.workspaceSandboxRoot?.();
@@ -321,7 +344,7 @@ export async function bootstrapProjectWorkspace(
   });
 
   if (npmInstallLooksFailed(install)) {
-    // Fresh machines often lack Node — try a silent winget install once, then retry npm.
+    // No winget — tell the user once. Background hammer freezes weak PCs.
     const nodeOk = await window.arkDesktop?.agentRun?.({
       command: 'node -v',
       cwd: undefined,
@@ -329,33 +352,18 @@ export async function bootstrapProjectWorkspace(
       userConfirmed: true,
     });
     if (!nodeOk?.ok) {
-      await window.arkDesktop?.agentRun?.({
-        command: 'winget install OpenJS.NodeJS.LTS --accept-package-agreements --accept-source-agreements',
-        cwd: undefined,
-        skipConfirm: true,
-        userConfirmed: true,
-      });
-      const retry = await runAgentCommand({
-        command: 'npm install',
-        cwd: projectPath,
-        skipConfirm: true,
-      });
-      if (npmInstallLooksFailed(retry)) {
-        return {
-          npmInstalled: false,
-          previewLive: false,
-          bootstrapNote: sanitizeBootstrapNote(retry.reply || install.reply)
-            || 'Could not install npm dependencies. Install Node.js LTS, then say **install npm dependencies**.',
-        };
-      }
-    } else {
       return {
         npmInstalled: false,
         previewLive: false,
-        bootstrapNote: sanitizeBootstrapNote(install.reply)
-          || 'Could not install npm dependencies automatically. Say **install npm dependencies** to retry, or open the folder and run `npm install` once.',
+        bootstrapNote: 'Node.js is not installed. Install Node.js LTS, then say **install npm dependencies** or **run Preview**.',
       };
     }
+    return {
+      npmInstalled: false,
+      previewLive: false,
+      bootstrapNote: sanitizeBootstrapNote(install.reply)
+        || 'Could not install npm dependencies automatically. Say **install npm dependencies** to retry, or open the folder and run `npm install` once.',
+    };
   }
 
   // depsReady: skip a second npm install — double install was freezing the whole PC.
@@ -396,7 +404,12 @@ export function formatCreateProjectReply(
   const livePreview = Boolean(bootstrap?.previewLive && bootstrap?.devServerUrl);
 
   let statusLine: string;
-  if (bootstrap?.npmInstalled === false) {
+  if (bootstrap?.npmPending) {
+    statusLine = [
+      '**Files written.** Dependencies install in the background.',
+      bootstrap.bootstrapNote || 'Click **Preview** in a moment, or say **make it richer** to expand the UI.',
+    ].join('\n');
+  } else if (bootstrap?.npmInstalled === false) {
     statusLine = [
       '**Not Ready yet.** **npm install failed.**',
       bootstrap.bootstrapNote || 'Dependencies need a one-time install before Preview can run.',

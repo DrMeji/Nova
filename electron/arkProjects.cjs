@@ -199,7 +199,8 @@ function loadWorkspaceGrants() {
         : 'allowlist',
     };
   } catch {
-    return { desktop: false, documents: false, fullPc: false, executionMode: 'allowlist' };
+    // First install: Documents on so Documents\NOVA Projects mkdir works without Settings.
+    return { desktop: false, documents: true, fullPc: false, executionMode: 'allowlist' };
   }
 }
 

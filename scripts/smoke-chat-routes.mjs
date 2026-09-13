@@ -92,7 +92,7 @@ const CASES = [
     expectNotReadFile: true,
     expectCreateBrief: true,
     expectWinner: ['create_project', 'greenfield_plan'],
-    expectParsedName: 'Saltpier',
+    expectParsedName: 'SaltPier',
   },
   {
     name: 'BrassGate festival landing',

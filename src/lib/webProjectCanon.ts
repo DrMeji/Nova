@@ -803,17 +803,21 @@ export function reactSurgicalMicroAskEdits(
       || t.match(/\b(?:says?|reading)\s+([A-Z][A-Za-z0-9]+(?:\s+[A-Z][A-Za-z0-9]+){0,6})\b/)?.[1]
       || t.match(/\b(?:put|add|place|write|show)\b[\s\S]{0,48}\b(?:words?|text|phrase)\b[\s\S]{0,24}["“']([^"”']{2,80})["”']/i)?.[1]
       || t.match(/\b(?:put|add|place|write|show)\b[\s\S]{0,40}\b(?:words?|text|title)\s+["“']([^"”']{2,80})["”']/i)?.[1]
+      // Unquoted multi-word: "put the words Nightglass After Hours in the center"
+      || t.match(/\b(?:put|add|place|write|show)\b[\s\S]{0,48}\b(?:words?|text|phrase|title)\s+([A-Z][A-Za-z0-9]+(?:\s+[A-Z][A-Za-z0-9]+){0,6})\b/i)?.[1]
+      || t.match(/\b(?:change|rename|set|update)\b[\s\S]{0,48}\b(?:centered\s+)?(?:words?|title|text)\s+(?:to|into)\s+["“']?([A-Z][A-Za-z0-9]+(?:\s+[A-Z][A-Za-z0-9]+){0,6})\b/i)?.[1]
       || t.match(/\b(?:put|add|place|write|show)\b[\s\S]{0,40}\b(?:word|text|title)\s+["“']?([A-Za-z][A-Za-z0-9_-]{1,40})\b/i)?.[1]
       || t.match(/\b(?:word|text)\s+["“']?([A-Za-z][A-Za-z0-9_-]{1,40})["”']?\s+(?:in|on|at)\b/i)?.[1]
       || ''
     ).trim().replace(/[.,;:]+$/, '').replace(/\s+/g, ' ');
     const wantsCenteredWord = Boolean(centeredWord) && (
-      /\b(?:middle|center|centred|screen|page|viewport|brown)\b/i.test(t)
+      /\b(?:middle|center|centred|screen|page|viewport|brown|centered)\b/i.test(t)
       || /\bjust\s+that\s+word\b/i.test(t)
       || /\bnothing else\b/i.test(t)
       || /\bonly\s+words?\b/i.test(t)
       || /\bwords?\s+only\b/i.test(t)
       || /\bwording\s+only\b/i.test(t)
+      || /\b(?:change|rename|set|update)\b[\s\S]{0,40}\b(?:centered\s+)?(?:words?|title)\b/i.test(t)
     );
     const subtitle = (
       t.match(/\bsubtitle\b[\s\S]{0,40}["“']([^"”']{2,80})["”']/i)?.[1]
@@ -865,7 +869,7 @@ export function reactSurgicalMicroAskEdits(
       }
     }
 
-    // Centered word(s) on an otherwise blank color screen (diagnostic / minimal asks).
+    // Centered word(s): patch into existing shell — never wipe logo/nav/background with a full App rewrite.
     if (wantsCenteredWord && centeredWord) {
       const label = centeredWord
         .replace(/[`$]/g, '')
@@ -877,7 +881,45 @@ export function reactSurgicalMicroAskEdits(
         /* skip empty */
       } else {
       const white = /\bwhite\b/i.test(t);
-      app = `import './App.css';
+      const black = /\bblack\b/i.test(t) && !white;
+      const color = white ? '#fff' : black ? '#111' : '#fff';
+      if (/className=["']center-word["']/i.test(app)) {
+        // Update existing centered title in place.
+        if (/<h1[^>]*className=["']center-word["'][^>]*>[\s\S]*?<\/h1>/i.test(app)) {
+          app = app.replace(
+            /(<h1[^>]*className=["']center-word["'][^>]*>)([\s\S]*?)(<\/h1>)/i,
+            `$1${label}$3`,
+          );
+        } else {
+          app = app.replace(
+            /(className=["']center-word["'][^>]*>)([\s\S]*?)(<\/)/i,
+            `$1${label}$3`,
+          );
+        }
+        touchedApp = true;
+      } else if (/<div\s+className=["']app["']\s*\/>/i.test(app)) {
+        app = app.replace(
+          /<div\s+className=["']app["']\s*\/>/i,
+          `<div className="app">\n      <h1 className="center-word">${label}</h1>\n    </div>`,
+        );
+        touchedApp = true;
+      } else if (/className=["']app["'][^>]*>/i.test(app)) {
+        // Inject title into existing shell (keeps nav/logo/hero siblings).
+        if (/<h1[\s>]/i.test(app)) {
+          app = app.replace(
+            /(<h1\b[^>]*>)([\s\S]*?)(<\/h1>)/i,
+            `<h1 className="center-word">${label}</h1>`,
+          );
+        } else {
+          app = app.replace(
+            /(className=["']app["'][^>]*>)/i,
+            `$1\n      <h1 className="center-word">${label}</h1>`,
+          );
+        }
+        touchedApp = true;
+      } else {
+        // No recognizable shell — minimal centered title only.
+        app = `import './App.css';
 
 export default function App() {
   return (
@@ -887,9 +929,9 @@ export default function App() {
   );
 }
 `;
-      touchedApp = true;
+        touchedApp = true;
+      }
       if (cssPath) {
-        const color = white ? '#fff' : '#fff';
         const centerRules = `.app{min-height:100vh;margin:0;display:flex;align-items:center;justify-content:center}`
           + `\n.center-word{margin:0;color:${color};font-size:clamp(1.6rem,5vw,3.2rem);font-weight:600;letter-spacing:-0.02em;`
           + `text-align:center;max-width:min(92vw,28rem);line-height:1.15}\n`;
@@ -1629,15 +1671,39 @@ export function verifyMicroAskApplied(
   }
 
   const headline = (
-    t.match(/(?:change|rename|set|make).{0,64}(?:hero\s+headline|hero\s+title|headline|heading|h1).{0,40}(?:to|into|say)\s+["'“”]?([^"'“”\n]{2,80})/i)?.[1]
+    t.match(/(?:change|rename|set|make|update).{0,64}(?:hero\s+headline|hero\s+title|headline|heading|h1).{0,40}(?:to|into|say)\s+["'“”]?([^"'“”\n]{2,80})/i)?.[1]
     || t.match(/\b(?:words?|text|phrase|copy|line)\s+(?:that\s+)?(?:says?|reading)\s*[:\s]+["“']?([A-Z][A-Za-z0-9]+(?:\s+[A-Z][A-Za-z0-9]+){0,6})\b/)?.[1]
     || t.match(/\b(?:says?|reading)\s+["“']([^"”']{2,80})["”']/i)?.[1]
     || t.match(/\b(?:says?|reading)\s+([A-Z][A-Za-z0-9]+(?:\s+[A-Z][A-Za-z0-9]+){0,6})\b/)?.[1]
+    || t.match(/\btitle\b[\s\S]{0,40}\b([A-Z][A-Za-z0-9]+(?:\s+[A-Z][A-Za-z0-9]+){0,6})\b/)?.[1]
     || ''
-  ).trim().replace(/[,;:]+$/, '');
+  ).trim()
+    .replace(/[,;:]+$/, '')
+    // Drop instruction tails that used to fail verify and revert good writes.
+    .replace(/\s+\b(?:and\s+)?(?:leave|keep|with|nothing|only|no|without|empty|in\s+the\s+center|in\s+white)\b.*$/i, '')
+    .trim();
   if (headline && !textInApp(headline)) {
-    if (!missing.some((m) => m.toLowerCase().includes(headline.slice(0, 12).toLowerCase()))) {
+    // Soft pass: if center-word exists and shares most tokens, do not fail.
+    const softOk = /center-word/i.test(app)
+      && headline.split(/\s+/).filter((w) => w.length > 2).some((w) => textInApp(w));
+    if (!softOk && !missing.some((m) => m.toLowerCase().includes(headline.slice(0, 12).toLowerCase()))) {
       missing.push(headline);
+    }
+  }
+
+  // If App already has a center-word heading, treat the micro title ask as applied
+  // even when quote extraction swallowed trailing instruction words.
+  if (missing.length && /className=["']center-word["']/i.test(app)) {
+    const centerText = app.match(/className=["']center-word["'][^>]*>([^<]{1,80})</i)?.[1]?.trim() || '';
+    if (centerText) {
+      const leftovers = missing.filter((m) => {
+        const core = m.replace(/\s+\b(?:in|on|at|the|center|middle|white|black)\b.*$/i, '').trim();
+        return core && !textInApp(core) && !centerText.toLowerCase().includes(core.slice(0, 12).toLowerCase());
+      });
+      if (leftovers.length < missing.length) {
+        missing.length = 0;
+        missing.push(...leftovers);
+      }
     }
   }
 

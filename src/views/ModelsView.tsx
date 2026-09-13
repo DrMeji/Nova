@@ -518,9 +518,9 @@ export function ModelsView() {
     const cat = model?.category;
     if (cat === 'image' || cat === 'video' || cat === 'vision') return;
     if (cat === 'coding') {
-      setLocalPrefs({ defaultCodeModelId: id });
+      setLocalPrefs({ defaultCodeModelId: id, activeCoderId: id });
     } else {
-      setLocalPrefs({ defaultModelId: id, lastChatModelId: id });
+      setLocalPrefs({ defaultModelId: id, lastChatModelId: id, activeChatId: id });
     }
     clearAllThreadBrains();
     setOllamaNote(`${model?.name || id} is ready — Chat will use it on the next message.`);
@@ -948,9 +948,9 @@ export function ModelsView() {
       if (installed.has(id) || isEngineDownloading(id)) return;
 
       if (hunt.category === 'coding') {
-        setLocalPrefs({ defaultCodeModelId: id });
+        setLocalPrefs({ defaultCodeModelId: id, activeCoderId: id });
       } else {
-        setLocalPrefs({ defaultModelId: id, lastChatModelId: id });
+        setLocalPrefs({ defaultModelId: id, lastChatModelId: id, activeChatId: id });
       }
 
       const needGb = hunt.sizeGb * 1.15;
@@ -982,9 +982,9 @@ export function ModelsView() {
     const model = LOCAL_MODELS.find(m => m.id === id);
 
     if (model?.category === 'coding') {
-      setLocalPrefs({ defaultCodeModelId: id });
+      setLocalPrefs({ defaultCodeModelId: id, activeCoderId: id });
     } else {
-      setLocalPrefs({ defaultModelId: id, lastChatModelId: id });
+      setLocalPrefs({ defaultModelId: id, lastChatModelId: id, activeChatId: id });
     }
 
     const needGb = modelSizeGb(model || { size: '0' }) * 1.15;

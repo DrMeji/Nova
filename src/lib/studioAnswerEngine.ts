@@ -91,6 +91,15 @@ const MODEL_TIMEOUT_MS = 90_000;
 const MODEL_TIMEOUT_CODE_MS = 120_000;
 /** Full website / app / game creates — allow up to ~5 minutes per model pass. */
 const MODEL_TIMEOUT_BUILD_MS = 300_000;
+/** Micro follow-ups after surgical miss — never 300s. */
+const MODEL_TIMEOUT_MICRO_MS = 45_000;
+
+function looksLikeMicroCodingAsk(message: string): boolean {
+  const t = String(message || '');
+  if (/\b(?:scrap|rebuild|from scratch|make it richer|redesign|entire)\b/i.test(t)) return false;
+  return /\b(?:title|heading|h1|center|footer|color|background|button|text|label|copy|logo)\b/i.test(t)
+    || (/^\s*(?:add|put|place|change|update|make|set|rename)\b/i.test(t) && t.length < 220);
+}
 
 function cleanAsk(message: string): string {
   return String(message || '')
@@ -476,7 +485,7 @@ export async function answerStudio(
   try {
     const routeKind = (input.mode === 'code' || input.allowFileEdits) ? 'coding' : 'chat';
     const timeoutMs = input.allowFileEdits
-      ? MODEL_TIMEOUT_BUILD_MS
+      ? (looksLikeMicroCodingAsk(input.userMessage) ? MODEL_TIMEOUT_MICRO_MS : MODEL_TIMEOUT_BUILD_MS)
       : routeKind === 'coding' && looksLikeProjectDebugAsk(input.userMessage)
         ? MODEL_TIMEOUT_CODE_MS
         : MODEL_TIMEOUT_MS;

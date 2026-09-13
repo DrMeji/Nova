@@ -86,41 +86,85 @@ async function writeViaDiskRoot(
   return { ok: true };
 }
 
-async function hydrateFilesFromDiskRoot(diskRoot: string): Promise<ProjectFileMap> {
-  if (!window.arkDesktop?.readTextFile) return {};
-  const rels = [
-    'src/App.jsx', 'src/App.tsx', 'src/App.css', 'src/index.css', 'src/main.jsx', 'src/main.tsx',
-    'index.html', 'css/styles.css', 'js/app.js', 'package.json',
-    'vite.config.js', 'vite.config.ts', 'src/components',
-  ];
-  const out: ProjectFileMap = {};
-  for (const rel of rels) {
-    if (rel === 'src/components') continue;
-    try {
-      const read = await window.arkDesktop.readTextFile({ path: joinDisk(diskRoot, rel) });
-      if (read?.ok && typeof read.text === 'string') out[rel] = read.text;
-    } catch {
-      /* missing */
-    }
-  }
-  // Pull one level of components so Ready/edit see more than App.jsx.
+async function listDirItems(abs: string): Promise<{ name: string; isDirectory?: boolean; isFile?: boolean }[]> {
   try {
-    const listing = await window.arkDesktop.listDir?.(joinDisk(diskRoot, 'src/components'));
-    const raw = listing as { items?: { name?: string }[]; entries?: { name?: string }[] } | undefined;
+    const listing = await window.arkDesktop?.listDir?.(abs);
+    const raw = listing as {
+      items?: { name?: string; kind?: string; isDirectory?: boolean; isFile?: boolean }[];
+      entries?: { name?: string; kind?: string; isDirectory?: boolean; isFile?: boolean }[];
+    } | undefined;
     const entries = Array.isArray(raw?.items)
       ? raw!.items!
       : Array.isArray(raw?.entries)
         ? raw!.entries!
         : [];
-    for (const ent of entries.slice(0, 40)) {
-      const name = String(ent?.name || '');
-      if (!/\.(jsx?|tsx?|css)$/i.test(name)) continue;
-      const rel = `src/components/${name}`;
-      const read = await window.arkDesktop.readTextFile?.({ path: joinDisk(diskRoot, rel) });
-      if (read?.ok && typeof read.text === 'string') out[rel] = read.text;
-    }
+    return entries
+      .map((ent) => {
+        const name = String(ent?.name || '');
+        const kind = String(ent?.kind || '').toLowerCase();
+        const isDirectory = Boolean(ent?.isDirectory) || kind === 'dir' || kind === 'directory';
+        const isFile = Boolean(ent?.isFile) || kind === 'file';
+        return { name, isDirectory, isFile };
+      })
+      .filter((ent) => Boolean(ent.name));
   } catch {
-    /* optional */
+    return [];
+  }
+}
+
+/** Walk src/ (and a few roots) so follow-up edits see more than a fixed App.jsx list. */
+async function hydrateFilesFromDiskRoot(diskRoot: string): Promise<ProjectFileMap> {
+  if (!window.arkDesktop?.readTextFile) return {};
+  const out: ProjectFileMap = {};
+  const maxFiles = 80;
+  const codeRe = /\.(jsx?|tsx?|css|html|json|md)$/i;
+  const skipDir = /^(node_modules|dist|build|\.git|\.vite|coverage)$/i;
+
+  const readRel = async (rel: string) => {
+    if (Object.keys(out).length >= maxFiles) return;
+    try {
+      const read = await window.arkDesktop!.readTextFile!({ path: joinDisk(diskRoot, rel) });
+      if (read?.ok && typeof read.text === 'string' && read.text.length < 400_000) {
+        out[rel] = read.text;
+      }
+    } catch {
+      /* missing */
+    }
+  };
+
+  const walk = async (relDir: string, depth: number) => {
+    if (depth > 4 || Object.keys(out).length >= maxFiles) return;
+    const abs = relDir ? joinDisk(diskRoot, relDir) : diskRoot;
+    const entries = await listDirItems(abs);
+    for (const ent of entries) {
+      if (Object.keys(out).length >= maxFiles) break;
+      if (skipDir.test(ent.name)) continue;
+      const rel = relDir ? `${relDir}/${ent.name}` : ent.name;
+      const looksDir = ent.isDirectory || (!ent.isFile && !codeRe.test(ent.name));
+      if (looksDir && (ent.isDirectory || !codeRe.test(ent.name))) {
+        if (ent.isFile) {
+          /* file without extension — skip */
+        } else if (ent.isDirectory || !/\./.test(ent.name)) {
+          await walk(rel, depth + 1);
+          continue;
+        }
+      }
+      if (codeRe.test(ent.name) || ent.isFile) {
+        if (codeRe.test(ent.name)) await readRel(rel.replace(/\\/g, '/'));
+      }
+    }
+  };
+
+  // Prefer src/ first, then project roots.
+  await walk('src', 0);
+  for (const rootFile of [
+    'index.html', 'package.json', 'vite.config.js', 'vite.config.ts',
+    'css/styles.css', 'js/app.js', 'README.md',
+  ]) {
+    await readRel(rootFile);
+  }
+  if (Object.keys(out).length < 8) {
+    await walk('', 0);
   }
   return out;
 }
@@ -164,8 +208,30 @@ export async function applyChatReplyEdits(opts: {
   if (opts.diskRoot) {
     const fromDisk = await hydrateFilesFromDiskRoot(opts.diskRoot);
     if (Object.keys(fromDisk).length) {
-      // Prefer in-memory base (wipe/scaffold/edits) over longer stale disk bytes.
-      const merged: ProjectFileMap = { ...fromDisk, ...baseFiles };
+      const isThinShell = (src: string) => {
+        const s = String(src || '');
+        return !s.trim()
+          || s.length < 220
+          || /return\s*\(\s*<div className=["']app["']\s*\/>\s*\)/i.test(s);
+      };
+      // Disk wins over stale empty memory for product files; this-turn memory still wins
+      // when it has real content (wipe / surgical / model edits not yet flushed).
+      const merged: ProjectFileMap = { ...fromDisk };
+      for (const [k, mem] of Object.entries(baseFiles)) {
+        const diskVal = fromDisk[k];
+        if (diskVal == null) {
+          merged[k] = mem;
+          continue;
+        }
+        const appKey = /(^|\/)App\.(jsx|tsx|css)$/i.test(k.replace(/\\/g, '/'));
+        if (appKey && isThinShell(mem) && !isThinShell(diskVal)) {
+          merged[k] = diskVal;
+        } else if (String(mem || '').trim()) {
+          merged[k] = mem;
+        } else {
+          merged[k] = diskVal;
+        }
+      }
       baseFiles = normalizeStudioFileKeys(merged, opts.diskRoot);
     }
   }
