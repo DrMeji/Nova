@@ -30,6 +30,7 @@ export {
   withExplicitTurnKind,
   FIRST_RUN_KIND_CHIPS,
 } from './kinds';
+export { runChatTurn, type ChatTurnHost, type ChatTurnResult } from './chat';
 export {
   planTurnDispatch,
   dispatchOwnedTurn,

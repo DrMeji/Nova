@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Copy, Download, Check } from 'lucide-react';
 import { resolveMediaRef } from '@/lib/recentStore';
 import { usableAssistantText } from '@/lib/chatHistory';
@@ -14,10 +14,7 @@ import { PcExploreCard } from '@/components/PcExploreCard';
 import { isPromptChipsMessage, parsePromptChipsMessage } from '@/lib/chatPromptChips';
 import { PromptChipsCard } from '@/components/PromptChipsCard';
 import { AgentProgressStatus } from '@/components/AgentProgressStatus';
-import {
-  getChatTurnStatus,
-  subscribeChatTurnStatus,
-} from '@/lib/chatTurnStatusStore';
+import { useChatTurnStatus } from '@/hooks/useChatTurnStatus';
 
 const PIXEL_COLS = 18;
 const PIXEL_ROWS = 14;
@@ -412,7 +409,7 @@ export function MessageContent({
   /** When set, live turn status is read from the status store (not message remounts). */
   messageId?: string;
 }) {
-  const turnStatus = useSyncExternalStore(subscribeChatTurnStatus, getChatTurnStatus, getChatTurnStatus);
+  const turnStatus = useChatTurnStatus(messageId);
   if (!content) {
     return <GeneratingPlaceholder kind="chat" label="Thinking…" />;
   }

@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useRouter } from '@/context/RouterContext';
 import { useAuth } from '@/context/AuthContext';
 import { useRecentProjects } from '@/context/RecentProjectsContext';
+import { useWorkspace } from '@/hooks/useWorkspace';
 import { fetchProjects, saveChatMessage, updateProject } from '@/lib/api';
 import type { Project, ChatMessage } from '@/types';
 import {
@@ -372,6 +373,7 @@ export function ProjectWorkspace() {
   const projectId = route.name === 'project' ? route.id : '';
   const isFreshCode = route.name === 'code';
   const codeSession = route.name === 'code' ? (route.session || 'new') : '';
+  const workspace = useWorkspace(projectId || null);
   const [project, setProject] = useState<ProjectRow | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [chatPlugins, setChatPlugins] = useState(() => getChatEnabledPlugins(loadPluginState()));
@@ -420,6 +422,10 @@ export function ProjectWorkspace() {
   const [creating, setCreating] = useState<null | { kind: 'file' | 'folder'; parentPath: string }>(null);
   const [createName, setCreateName] = useState('');
   const [diskRoot, setDiskRoot] = useState<string | null>(null);
+  // Hook bind — keep in sync when Electron hydrate fills the workspace slice.
+  useEffect(() => {
+    if (workspace.diskRoot && !diskRoot) setDiskRoot(workspace.diskRoot);
+  }, [workspace.diskRoot, diskRoot]);
   const [workspaceInPlace, setWorkspaceInPlace] = useState(false);
   const [githubMenuOpen, setGithubMenuOpen] = useState(false);
   const [findOpen, setFindOpen] = useState(false);

@@ -229,6 +229,28 @@ export async function runEditTurn(host: RunEditTurnHost): Promise<RunEditTurnRes
     return { status: 'weak_miss' };
   }
 
+  if (!host.generate) {
+    // Default owner: answerStudio lives here — not in AIChat.
+    const { answerStudio } = await import('@/lib/studioAnswerEngine');
+    host.generate = async ({ signal, userMessage, files }) => {
+      const started = Date.now();
+      const result = await answerStudio(
+        {
+          userMessage,
+          files,
+          projectName: host.projectLabel,
+          mode: 'code',
+          preferredModelId: host.modelId || undefined,
+          preferredModelName: host.modelName || undefined,
+          allowFileEdits: true,
+          shouldAbort: () => signal.aborted || Date.now() - started > 45_000,
+        },
+        undefined,
+      );
+      return result.text || '';
+    };
+  }
+
   if (!host.generate) return { status: 'miss' };
 
   const { verifyMicroAskApplied } = await import('@/lib/webProjectCanon');
@@ -307,6 +329,42 @@ export async function runEditTurn(host: RunEditTurnHost): Promise<RunEditTurnRes
   }
 
   host.onSnapshot?.({ files: snapshot, updatedPaths: applied.updated });
+
+  const { verifyAsk } = await import('@/lib/verifyAsk');
+  const askCheck = verifyAsk(host.editUserMessage, applied.files);
+  if (!askCheck.ok) {
+    const revertBlocks = applied.updated
+      .filter((p) => snapshot[p] != null)
+      .map((p) => `@@@FILE ${p}\n${snapshot[p]}`)
+      .join('\n');
+    if (revertBlocks) {
+      await applyChatReplyEdits({
+        reply: revertBlocks,
+        projectId: host.projectId,
+        projectName: host.projectLabel,
+        files: snapshot,
+        userMessage: host.editUserMessage,
+        diskRoot: host.diskRoot,
+      });
+    }
+    const failAnswer = [
+      'I didn’t keep that edit — it didn’t match your ask.',
+      askCheck.missing.length ? `Missing: ${askCheck.missing.join(', ')}.` : '',
+      'Try a clearer one-line change.',
+    ].filter(Boolean).join(' ');
+    host.onFailed({
+      reply: host.buildStudioTraceMessage({
+        startedAt: host.replyStartedAt,
+        elapsedMs,
+        userMessage: host.content,
+        answer: failAnswer,
+        wrotePaths: [],
+        projectName: host.projectLabel,
+      }),
+      elapsedMs,
+    });
+    return { status: 'failed' };
+  }
 
   const answer = finalizeCodingChatBubble({
     userMessage: host.content,

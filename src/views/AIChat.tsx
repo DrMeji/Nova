@@ -39,7 +39,6 @@ import {
   wantsGithubCatalog,
 } from '@/lib/chatStudio';
 import {
-  answerStudio,
   type StudioIntent,
 } from '@/lib/studioAnswerEngine';
 import {
@@ -206,6 +205,7 @@ import {
   runCmdTurn,
   runEditTurn,
   dispatchOwnedTurn,
+  runChatTurn,
 } from '@/lib/chatTurnHandlers';
 import {
   pushApplySnapshot,
@@ -4487,7 +4487,78 @@ export function AIChat() {
       }
     }
 
-    // In-place scrap/rebuild of the bound workspace. never catalog Desktop or create sibling folders.
+        // EARLY_OWNED_DISPATCH_V216 — create/plan before any generate.
+    if (mode === 'general' || mode === 'code') {
+      const earlyClassified = classifyTurn(content, {
+        diskRoot: chatStudioDiskRootRef.current || chatStudioDiskRoot || resolvedStudio.diskRoot,
+        files: chatStudioFilesRef.current || resolvedStudio.files,
+        projectId: chatStudioProjectIdRef.current || resolvedStudio.projectId,
+        chatId: activeChatId,
+      });
+      if (earlyClassified.kind === 'create' || earlyClassified.kind === 'plan') {
+        const earlyIntent = parseNewProjectIntent(content) || null;
+        const renameFromAsk = extractProjectName(content);
+        const createIntentEarly = earlyIntent && renameFromAsk && !/^(My App|New App|App)$/i.test(renameFromAsk)
+          ? { ...earlyIntent, name: renameFromAsk, slug: slugifyProjectName(renameFromAsk), summary: content.length > 40 ? `${content}\n\n${earlyIntent.summary}` : earlyIntent.summary }
+          : earlyIntent;
+        const workspaceActiveForCreate = hasActiveWorkspace({
+          files: resolvedStudio.files,
+          projectId: resolvedStudio.projectId || chatStudioProjectIdRef.current,
+          diskRoot: resolvedStudio.diskRoot || chatStudioDiskRootRef.current,
+        });
+        const owned = await dispatchOwnedTurn({
+          content,
+          mode,
+          classifyOpts: {
+            diskRoot: chatStudioDiskRootRef.current || resolvedStudio.diskRoot,
+            files: chatStudioFilesRef.current || resolvedStudio.files,
+            projectId: chatStudioProjectIdRef.current || resolvedStudio.projectId,
+            chatId: activeChatId,
+          },
+          skipCreate: diskIntent?.type === 'add_file',
+          planName: createIntentEarly?.name || earlyClassified.createName || extractProjectName(content) || 'your idea',
+          planSummary: createIntentEarly?.summary || content,
+          savePlanBrief: ({ name, summary }) => {
+            setLastPendingGreenfield(activeChatId, {
+              name,
+              slug: slugifyProjectName(name),
+              kind: resolveProjectKindForCreate(summary, 'vite-react', 'vite-react'),
+              summary,
+              problemLine: `Build ${name} from your brief.`,
+            });
+            renameChat(activeChatId, cleanProductTitle(name));
+          },
+          finishPlainReply,
+          createHost: {
+            content,
+            chatId: activeChatId,
+            mode,
+            workspaceBound: workspaceActiveForCreate,
+            createIntent: createIntentEarly,
+            classifiedCreateName: earlyClassified.createName,
+            messages: messagesRef.current,
+            routeChatId: routeChatIdRef.current,
+            pushStatus: pushAssistantStatus,
+            stopIfSuperseded,
+            finishPlainReply,
+            syncGrants: syncWorkspaceGrantsFromPrefs,
+            commitStudio: (opts) => { commitStudioForChat(activeChatId, opts); },
+            setChatCodePill,
+            shouldPaintStudioLive,
+            setCodePillSticky,
+            renameChat,
+            addChat: (chat) => addChat(chat as never),
+            setLastDiskTarget,
+            clearPending: clearLastPendingGreenfield,
+            getPending: getLastPendingGreenfield,
+            previewFromText,
+          },
+        });
+        if (owned.status === 'handled') return;
+      }
+    }
+
+// In-place scrap/rebuild of the bound workspace. never catalog Desktop or create sibling folders.
     // Create/plan always win — never let answerStudio run before runCreateTurn.
     const rebuildClassify = (mode === 'general' || mode === 'code') && looksLikeInPlaceRebuildAsk(intentText)
       ? classifyTurn(content, {
@@ -4610,195 +4681,18 @@ export function AIChat() {
       filesNow = mergeBriefNpmDependencies({ ...filesNow }, briefForBuild);
       const sticky = pinnedModel.source === 'auto' ? threadBrainRef.current : null;
 
-      let modelReply = '';
-      const rebuildStartedAt = Date.now();
-      // Always ask the model — never inject a canned FPS / game template.
+      // No answerStudio on rebuild path — capable coder or one-line edits only.
       if (isWeakCoderModel(pinnedModel.id, pinnedModel.name)) {
-        await finishPlainReply(
-          weakModelMicroEditReply(`Rebuild ${productName}`),
-          'NOVA · local',
-        );
+        await finishPlainReply(weakModelMicroEditReply(`Rebuild ${productName}`), 'NOVA · local');
         return;
       }
-      try {
-        const engineResult = await answerStudio(
-          {
-            userMessage: [
-              `The previous UI in this folder was WRONG. Scrap it and rebuild entirely as "${productName}".`,
-              'Write complete project files with @@@FILE blocks (or SEARCH/REPLACE).',
-              'You MUST rewrite App.jsx / App.css (or index.html + css + js) together.',
-              'Do not preserve the old marketing layout, Buy now buttons, or prior product type.',
-              spatialBrief
-                ? 'This is a spatial / 3D editor app: real WebGL viewport. Do not build a marketing website.'
-                : fpsBrief
-                  ? 'This must be a REAL playable FPS / canvas game with WASD, look, shooting, and an enemy — not a static mock.'
-                  : '',
-              '',
-              briefForBuild,
-            ].filter(Boolean).join('\n'),
-            files: filesNow,
-            projectName: productName,
-            mode: 'code',
-            preferredModelId: pinnedModel.id,
-            preferredModelName: pinnedModel.name,
-            preferredSource: pinnedModel.source,
-            stickyModelId: sticky?.modelId,
-            stickyModelName: sticky?.modelName,
-            stickyPinnedSource: sticky?.pinnedSource,
-            planOnly: false,
-            allowFileEdits: true,
-            shouldAbort: () => mySeq !== genSeqRef.current || stopRequestedRef.current || (Date.now() - rebuildStartedAt > 45_000),
-          },
-          (live) => {
-            if (mySeq !== genSeqRef.current || stopRequestedRef.current) return;
-            const text = String(live || '').trim();
-            if (text.length < 2) return;
-            pushAssistantStatus(liveCodingStatusText(text));
-          },
-        );
-        modelReply = String(engineResult?.text || '').trim();
-      } catch {
-        modelReply = '';
-      }
-      if (await stopIfSuperseded()) return;
-
-      const applied = modelReply
-        ? await applyChatReplyEdits({
-          reply: modelReply,
-          projectId,
-          projectName: productName,
-          files: filesNow,
-          userMessage: briefForBuild,
-          diskRoot,
-        })
-        : { ok: false as const, updated: [] as string[], files: filesNow };
-
-      filesNow = (applied.ok && applied.updated.length) ? applied.files : filesNow;
-      let appSrc = filesNow['src/App.jsx'] || filesNow['src/App.tsx'] || '';
-      const marketingBrief = /\b(?:buy\s+now|bracelet|product\s+page|landing|storefront|specs?\s+section)\b/i.test(briefForBuild)
-        && !looksLikePlayableCanvasGame(briefForBuild, productName);
-      const stillLooksLikeGame = /getContext\(['"]2d['"]\)|requestAnimationFrame|Play again|asteroid|frightened|pelletsLeft/i.test(appSrc);
-      const stillLooksLikeMarketing = /Buy now|Your bag|FEATURE/i.test(appSrc) && !/frightened|pelletsLeft|requestAnimationFrame/i.test(appSrc);
-      const stillLooksLikeWorkspaceShell = /Ask NOVA in chat to add pages|Local demo from your brief|Main view/i.test(appSrc);
-      // Game rebuilds already installed a playable FPS core — don't let a model retry wipe it.
-      const needsUniqueRewrite = !gameBrief && (
-        isBrokenReactAppSource(appSrc)
-        || stillLooksLikeWorkspaceShell
-        || (marketingBrief && stillLooksLikeGame)
-        || !applied.ok
-        || !applied.updated.length
-      );
-
-      if (needsUniqueRewrite) {
-        pushAssistantStatus(`Rewriting ${productName} from your correction…`);
-        try {
-          const retry = await answerStudio(
-            {
-              userMessage: [
-                `CRITICAL RETRY: Rebuild "${productName}" as a complete unique product from the correction brief.`,
-                'Output full @@@FILE blocks for App.jsx / App.css / index.css (or html+css+js).',
-                'Do not reuse the previous UI. Do not emit placeholder workspace shells.',
-                gameBrief
-                  ? [
-                      'Must be a REAL playable FPS / canvas game for THIS brief — not a marketing site and not a static CSS mock.',
-                      'Mandatory: fullscreen <canvas>, requestAnimationFrame loop, WASD + pointer-lock look, left-click hitscan, crosshair, HP HUD, chasing enemy, win/lose + R restart.',
-                      'export default is fine as App or any PascalCase name. Include shooting + movement code, not just drawRect props.',
-                    ].join(' ')
-                  : '',
-                marketingBrief
-                  ? 'Must be a real product marketing page for THIS brief — not a leftover game.'
-                  : '',
-                '',
-                briefForBuild,
-              ].filter(Boolean).join('\n'),
-              files: filesNow,
-              projectName: productName,
-              mode: 'code',
-              preferredModelId: pinnedModel.id,
-              preferredModelName: pinnedModel.name,
-              preferredSource: pinnedModel.source,
-              stickyModelId: sticky?.modelId,
-              stickyModelName: sticky?.modelName,
-              stickyPinnedSource: sticky?.pinnedSource,
-              planOnly: false,
-              allowFileEdits: true,
-              shouldAbort: () => mySeq !== genSeqRef.current || stopRequestedRef.current,
-            },
-            (live) => {
-              if (mySeq !== genSeqRef.current || stopRequestedRef.current) return;
-              const text = String(live || '').trim();
-              if (text.length < 2) return;
-              pushAssistantStatus(liveCodingStatusText(text));
-            },
-          );
-          const retryText = String(retry?.text || '').trim();
-          if (retryText) {
-            const retryApplied = await applyChatReplyEdits({
-              reply: retryText,
-              projectId,
-              projectName: productName,
-              files: filesNow,
-              userMessage: briefForBuild,
-              diskRoot,
-            });
-            if (retryApplied.ok && retryApplied.updated.length) {
-              filesNow = retryApplied.files;
-              appSrc = filesNow['src/App.jsx'] || filesNow['src/App.tsx'] || '';
-            }
-          }
-        } catch {
-          /* keep wiped shell */
-        }
-      }
-
-      // Games: ensure Vite files exist; never restore a canned FPS template.
-      if (gameBrief) {
-        filesNow = ensureViteReactProjectFiles(filesNow, productName).files;
-        appSrc = filesNow['src/App.jsx'] || filesNow['src/App.tsx'] || '';
-      }
-
-      setChatStudioFiles(filesNow);
-      chatStudioFilesRef.current = filesNow;
-      persistStudioSnapshot(activeChatId, {
-        files: filesNow,
-        projectId: projectId || null,
-        name: productName,
-        diskRoot: diskRoot || null,
-      });
-      renameChat(activeChatId, productName);
-      addChat({
-        id: activeChatId,
-        mode,
-        title: productName,
-        updatedAt: new Date().toISOString(),
-        preview: previewFromText(content),
-      });
-
-      const gameGateFinal = gameBrief
-        ? (fpsBrief ? isPlayableGameReady(filesNow) : isPlayableArcadeGameReady(filesNow))
-        : { ok: true, reasons: [] as string[] };
-      if (isBrokenReactAppSource(appSrc) || !gameGateFinal.ok) {
-        const gameFail = gameBrief && !gameGateFinal.ok;
-        await finishPlainReply(
-          `${apologyRebuildLead(productName)}\n\n`
-          + (gameFail
-            ? (
-                'I’m having an issue — that rebuild still isn’t a playable game.\n\n'
-                + `Missing: ${gameGateFinal.reasons.slice(0, 4).join('; ') || 'canvas controls / shooting'}.\n\n`
-                + 'Ask me again to scrap and rebuild with WASD, mouse look, and shooting — I’ll keep working in this same folder.'
-              )
-            : (
-                'I’m having an issue — I can’t provide the UI you’re asking for from that rebuild pass.\n\n'
-                + 'No usable App.jsx landed. Tell me one clearer detail and I’ll try again from your brief.'
-              )),
-        );
-        return;
-      }
-
       await finishPlainReply(
-        `${apologyRebuildLead(productName)}\n\n`
-        + `Rebuilt **${productName}** in this same folder from your correction.\n\n`
-        + 'Click **Preview** under the chat box to open the live window.',
+        [
+          `To scrap and rebuild **${productName}**, pin a capable coder (7B+ or cloud) in **Models**, then ask again.`,
+          '',
+          'Or say a one-line change (title / color / footer) and I’ll patch this folder.',
+        ].join('\n'),
+        'NOVA · rebuild',
       );
       return;
     } else if ((mode === 'general' || mode === 'code') && looksLikeStartWorkOnFolderAsk(intentText)) {
@@ -6202,38 +6096,7 @@ export function AIChat() {
           pushStatus: pushAssistantStatus,
           countLineDiff,
           buildStudioTraceMessage,
-          generate: async ({ signal, userMessage, files }) => {
-            const sticky = pinnedModel.source === 'auto' ? threadBrainRef.current : null;
-            const result = await answerStudio(
-              {
-                userMessage,
-                files,
-                projectName: projectLabel,
-                lastIntent: lastStudioIntentRef.current,
-                lastFindings: lastFindingsRef.current,
-                mode: 'code',
-                preferredModelId: pinnedModel.id,
-                preferredModelName: pinnedModel.name,
-                preferredSource: pinnedModel.source,
-                stickyModelId: sticky?.modelId,
-                stickyModelName: sticky?.modelName,
-                stickyPinnedSource: sticky?.pinnedSource,
-                planOnly: false,
-                allowFileEdits: true,
-                shouldAbort: () => signal.aborted || mySeq !== genSeqRef.current || stopRequestedRef.current,
-              },
-              (live) => {
-                if (signal.aborted || mySeq !== genSeqRef.current || stopRequestedRef.current) return;
-                const text = String(live || '').trim();
-                if (text.length < 2) return;
-                pushAssistantStatus(liveCodingStatusText(text));
-              },
-            );
-            lastStudioIntentRef.current = result.intent;
-            if (result.findings?.length) lastFindingsRef.current = result.findings;
-            return result.text || '';
-          },
-          onApplied: ({ files, updated, reply, provider, elapsedMs }) => {
+onApplied: ({ files, updated, reply, provider, elapsedMs }) => {
             pushApplySnapshot({
               chatId: activeChatId,
               assistantId,
@@ -6562,52 +6425,50 @@ export function AIChat() {
           pushAssistantStatus(label);
         }, 'edit', 4000)
         : () => {};
-      let result: Awaited<ReturnType<typeof answerStudio>>;
+      // answerStudio only via runChatTurn / edit.ts.
+      if (allowEdits) {
+        await finishPlainReply(
+          'Could not apply that edit. Try a clearer one-line ask, or pin a larger coder in Models.',
+          'NOVA · edit',
+        );
+        return;
+      }
+      let result: { text: string; intent?: unknown; findings?: unknown[]; packedTokens?: number };
       try {
-        result = await answerStudio(
-          {
-            userMessage: studioUserMessage,
-            files: stickyFiles,
-            projectName: projectLabel,
-            lastIntent: lastStudioIntentRef.current,
-            lastFindings: lastFindingsRef.current,
-            mode: allowEdits ? 'code' : 'chat',
-            preferredModelId: pinnedModel.id,
-            preferredModelName: pinnedModel.name,
-            preferredSource: pinnedModel.source,
-            stickyModelId: sticky?.modelId,
-            stickyModelName: sticky?.modelName,
-            stickyPinnedSource: sticky?.pinnedSource,
-            planOnly: planTurn,
-            allowFileEdits: allowEdits,
-            shouldAbort: () => mySeq !== genSeqRef.current || stopRequestedRef.current,
-          },
-          (live) => {
+        const chatOut = await runChatTurn({
+          content: studioUserMessage,
+          files: stickyFiles,
+          projectName: projectLabel,
+          mode: 'chat',
+          allowFileEdits: false,
+          preferredModelId: pinnedModel.id,
+          preferredModelName: pinnedModel.name,
+          preferredSource: pinnedModel.source,
+          stickyModelId: sticky?.modelId,
+          stickyModelName: sticky?.modelName,
+          stickyPinnedSource: sticky?.pinnedSource,
+          planOnly: planTurn,
+          shouldAbort: () => mySeq !== genSeqRef.current || stopRequestedRef.current,
+          onDelta: (live) => {
             if (mySeq !== genSeqRef.current || stopRequestedRef.current) return;
             const text = String(live || '').trim();
             if (text.length < 2) return;
-            // C3: never stream raw tokens into the full chat list during code edits.
-            if (allowEdits) {
-              pushAssistantStatus(liveCodingStatusText(text));
-              return;
-            }
             setMessages(prev => {
-              const next = prev.map(m => (
-                m.id === assistantId ? { ...m, content: text } : m
-              ));
+              const next = prev.map(m => (m.id === assistantId ? { ...m, content: text } : m));
               messagesRef.current = next;
               return next;
             });
           },
-        );
+        });
+        result = { text: chatOut.text, intent: chatOut.intent as never, findings: chatOut.findings as never, packedTokens: chatOut.packedTokens };
       } finally {
         editHbStop();
       }
 
       if (await stopIfSuperseded()) return;
 
-      lastStudioIntentRef.current = result.intent;
-      if (result.findings?.length) lastFindingsRef.current = result.findings;
+      lastStudioIntentRef.current = (result.intent as StudioIntent | null) || null;
+      if (result.findings?.length) lastFindingsRef.current = result.findings as InspectFinding[];
       if (result.packedTokens != null) {
         setTokenRatio(syncTokenUsage(activeChatId, result.packedTokens));
       }
@@ -6680,8 +6541,8 @@ export function AIChat() {
             ...m,
             content: reply,
             provider_used: visionHopMeta
-              ? `${visionHopMeta} → ${result.meta || 'coder'}`
-              : (result.meta || 'Local scan · attached files'),
+              ? `${visionHopMeta} → coder`
+              : 'NOVA · chat',
             elapsed_ms: elapsedMs,
           }
           : m
@@ -7393,42 +7254,25 @@ export function AIChat() {
               response = weakModelMicroEditReply(inspectAsk);
               usedPlugin = true;
             } else {
-            const engineResult = await answerStudio(
-              {
-                userMessage: inspectAsk,
+            const engineResult = await (async () => {
+              const chatOut = await runChatTurn({
+                content: inspectAsk || content,
                 files: filesForInspect,
                 projectName: projectLabel,
-                lastIntent: lastStudioIntentRef.current,
-                lastFindings: lastFindingsRef.current,
                 mode: allowEdits ? 'code' : 'chat',
+                allowFileEdits: Boolean(allowEdits),
                 preferredModelId: pinnedModel.id,
                 preferredModelName: pinnedModel.name,
                 preferredSource: pinnedModel.source,
-                stickyModelId: sticky?.modelId,
-                stickyModelName: sticky?.modelName,
-                stickyPinnedSource: sticky?.pinnedSource,
-                planOnly: planTurn,
-                allowFileEdits: allowEdits,
-                shouldAbort: () => abandoned || stopRequestedRef.current || mySeq !== genSeqRef.current,
-              },
-              (live) => {
-                if (abandoned || stopRequestedRef.current || mySeq !== genSeqRef.current) return;
-                const text = String(live || '').trim();
-                if (text.length < 2) return;
-                const bubble = allowEdits
-                  ? `__generating__:chat:${liveCodingStatusText(text)}`
-                  : text;
-                setMessages(prev => {
-                  const next = prev.map(m => (
-                    m.id === assistantId ? { ...m, content: bubble } : m
-                  ));
-                  messagesRef.current = next;
-                  return next;
-                });
-              },
-            );
-            lastStudioIntentRef.current = engineResult.intent;
-            if (engineResult.findings?.length) lastFindingsRef.current = engineResult.findings;
+                shouldAbort: () => mySeq !== genSeqRef.current || stopRequestedRef.current,
+                timeoutMs: 45_000,
+              });
+              return { text: chatOut.text, intent: chatOut.intent, findings: chatOut.findings, packedTokens: chatOut.packedTokens };
+            })();
+            lastStudioIntentRef.current = (engineResult.intent as StudioIntent | null) || null;
+            if (Array.isArray(engineResult.findings) && engineResult.findings.length) {
+              lastFindingsRef.current = engineResult.findings as InspectFinding[];
+            }
             if (engineResult.packedTokens != null) {
               setTokenRatio(syncTokenUsage(activeChatId, engineResult.packedTokens));
             }
@@ -7495,7 +7339,7 @@ export function AIChat() {
               })
               : bubble;
             lastInspectReplyRef.current = response;
-            resolvedProvider = engineResult.meta || `${providerLabel} · files`;
+            resolvedProvider = `${providerLabel} · files`;
             usedPlugin = true;
             if (!allowEdits) {
               setInspectOfferId(null);
