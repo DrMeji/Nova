@@ -2,7 +2,7 @@
  * Turn handlers — AIChat switches on classifyTurn.kind and calls these owners.
  */
 
-export { handlePlanTurnReply } from './plan';
+export { handlePlanTurnReply, type PlanTurnHost } from './plan';
 export {
   pendingCreateBootstrap,
   runCreateTurn,
@@ -15,8 +15,11 @@ export {
   weakModelMicroEditReply,
   isWeakCoderModel,
   runSurgicalEditTurn,
+  runEditTurn,
   type SurgicalEditHost,
   type SurgicalEditResult,
+  type RunEditTurnHost,
+  type RunEditTurnResult,
 } from './edit';
 export { runDeleteTurn, type DeleteTurnHost, type DeleteTurnResult } from './delete';
 export { runOpenFolderTurn, type OpenFolderTurnHost, type OpenFolderTurnResult } from './openFolder';
@@ -27,4 +30,11 @@ export {
   withExplicitTurnKind,
   FIRST_RUN_KIND_CHIPS,
 } from './kinds';
-export { planTurnDispatch, HANDLER_OWNED_KINDS } from './dispatch';
+export {
+  planTurnDispatch,
+  dispatchOwnedTurn,
+  HANDLER_OWNED_KINDS,
+  type DispatchHost,
+  type DispatchOwnedResult,
+  type TurnDispatchPlan,
+} from './dispatch';

@@ -22,8 +22,7 @@ let packageInstallChain = Promise.resolve();
 
 function isHeavyPackageInstall(command) {
   const cmd = String(command || '').trim();
-  return /^(npm|pnpm|yarn)(\.cmd)?\s+(install|i|ci|add)(\s|$)/i.test(cmd)
-    || /^winget\s+install\b/i.test(cmd);
+  return /^(npm|pnpm|yarn)(\.cmd)?\s+(install|i|ci|add)(\s|$)/i.test(cmd);
 }
 
 /** Cap npm network/disk pressure so install stays a background neighbor. */
@@ -77,8 +76,6 @@ const ALLOWLIST = [
   /^pip(\s|$)/i,
   /^pip3(\s|$)/i,
   /^git(\s|$)/i,
-  /^winget(\s|$)/i,
-  /^choco(\s|$)/i,
   /^Checkpoint-Computer\b/i,
   /^Get-ComputerRestorePoint\b/i,
   /^Enable-ComputerRestore\b/i,
@@ -93,6 +90,9 @@ const BLOCKED = [
   /Remove-Item\s+-Recurse\s+-Force\s+[A-Z]:\\/i,
   /\bshutdown\b/i,
   /\brestart-computer\b/i,
+  // Chat must never PC-wide install runtimes.
+  /^winget(\s|$)/i,
+  /^choco(\s|$)/i,
   // Inline code eval — treat as always-dangerous regardless of mode.
   /\bnode(?:\.exe)?\s+(-e|--eval)\b/i,
   /\bpython(?:\d+(?:\.\d+)?)?(?:\.exe)?\s+(-c|--command)\b/i,

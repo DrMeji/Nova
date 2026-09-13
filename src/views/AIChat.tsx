@@ -204,6 +204,8 @@ import {
   runDeleteTurn,
   runOpenFolderTurn,
   runCmdTurn,
+  runEditTurn,
+  dispatchOwnedTurn,
 } from '@/lib/chatTurnHandlers';
 import {
   pushApplySnapshot,
@@ -235,6 +237,7 @@ import {
 } from '@/lib/chatTurnStatusStore';
 import { consumePendingStudioBind, readPendingStudioBind } from '@/lib/pendingStudioBind';
 import { getCreateJobForChat } from '@/lib/createJobStore';
+import { useCreateJob } from '@/hooks/useCreateJob';
 import {
   buildStudioTraceMessage,
   finalizeCodingChatBubble,
@@ -1141,6 +1144,8 @@ export function AIChat() {
   const [codeOverlayOpen, setCodeOverlayOpen] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const previewUrlRef = useRef<string | null>(null);
+  const activeChatId = route.name === 'chat' ? route.chatId : undefined;
+  const createJobLive = useCreateJob(activeChatId);
   const attachInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const chatStudioFilesRef = useRef<Record<string, string>>({});
@@ -4483,7 +4488,22 @@ export function AIChat() {
     }
 
     // In-place scrap/rebuild of the bound workspace. never catalog Desktop or create sibling folders.
-    if ((mode === 'general' || mode === 'code') && looksLikeInPlaceRebuildAsk(intentText)) {
+    // Create/plan always win — never let answerStudio run before runCreateTurn.
+    const rebuildClassify = (mode === 'general' || mode === 'code') && looksLikeInPlaceRebuildAsk(intentText)
+      ? classifyTurn(content, {
+        diskRoot: chatStudioDiskRootRef.current || chatStudioDiskRoot,
+        files: chatStudioFilesRef.current,
+        projectId: chatStudioProjectIdRef.current,
+        chatId: activeChatId,
+      })
+      : null;
+    if (
+      (mode === 'general' || mode === 'code')
+      && looksLikeInPlaceRebuildAsk(intentText)
+      && rebuildClassify
+      && rebuildClassify.kind !== 'create'
+      && rebuildClassify.kind !== 'plan'
+    ) {
       let rebuildFiles = resolvedStudio.files;
       let rebuildProjectId = resolvedStudio.projectId || chatStudioProjectIdRef.current;
       let rebuildDiskRoot = resolvedStudio.diskRoot || chatStudioDiskRootRef.current;
@@ -4591,6 +4611,7 @@ export function AIChat() {
       const sticky = pinnedModel.source === 'auto' ? threadBrainRef.current : null;
 
       let modelReply = '';
+      const rebuildStartedAt = Date.now();
       // Always ask the model — never inject a canned FPS / game template.
       if (isWeakCoderModel(pinnedModel.id, pinnedModel.name)) {
         await finishPlainReply(
@@ -4626,7 +4647,7 @@ export function AIChat() {
             stickyPinnedSource: sticky?.pinnedSource,
             planOnly: false,
             allowFileEdits: true,
-            shouldAbort: () => mySeq !== genSeqRef.current || stopRequestedRef.current,
+            shouldAbort: () => mySeq !== genSeqRef.current || stopRequestedRef.current || (Date.now() - rebuildStartedAt > 45_000),
           },
           (live) => {
             if (mySeq !== genSeqRef.current || stopRequestedRef.current) return;
@@ -5065,6 +5086,16 @@ export function AIChat() {
       await finishPlainReply(handlePlanTurnReply({
         name: planName,
         summary: createIntent?.summary || pendingPlan?.summary || content,
+        savePlanBrief: ({ name, summary }) => {
+          setLastPendingGreenfield(activeChatId, {
+            name,
+            slug: slugifyProjectName(name),
+            kind: resolveProjectKindForCreate(summary, 'vite-react', 'vite-react'),
+            summary,
+            problemLine: `Build ${name} from your brief.`,
+          });
+          renameChat(activeChatId, cleanProductTitle(name));
+        },
       }));
       return;
     }
@@ -5161,6 +5192,13 @@ export function AIChat() {
             diskRoot: root || null,
           });
           if (locateNote) lastFolderLocateNoteRef.current = locateNote;
+        },
+        waitUntilBound: async (root) => {
+          for (let i = 0; i < 20; i++) {
+            if (chatStudioDiskRootRef.current === root) return true;
+            await new Promise((r) => window.setTimeout(r, 25));
+          }
+          return chatStudioDiskRootRef.current === root;
         },
       });
       if (openOutcome.status === 'handled') return;
@@ -5527,12 +5565,7 @@ export function AIChat() {
 
     if (turnNeedsWorkspace && !workspaceActiveAfterPending && (mode === 'general' || mode === 'code')) {
       // Create-shaped asks never hit the workspace wall — they create a folder.
-      const classifiedHere = classifyTurn(content, {
-        diskRoot: chatStudioDiskRootRef.current,
-        files: chatStudioFilesRef.current,
-        projectId: chatStudioProjectIdRef.current,
-        chatId: activeChatId,
-      });
+      const classifiedHere = classifiedBound;
       if (classifiedHere.kind === 'create') {
         // Fall through: create Intent path above should have handled; if not, don't wall.
       } else if (classifiedHere.kind === 'edit' || classifiedHere.kind === 'keep_building') {
@@ -6155,7 +6188,7 @@ export function AIChat() {
             }
           }
         }
-        const surgical = await runSurgicalEditTurn({
+        const surgical = await runEditTurn({
           content,
           editUserMessage,
           projectId: workspaceProjectId,
@@ -6164,9 +6197,42 @@ export function AIChat() {
           files: stickyFiles,
           replyStartedAt,
           visionHopMeta,
+          modelId: pinnedModel.id,
+          modelName: pinnedModel.name,
           pushStatus: pushAssistantStatus,
           countLineDiff,
           buildStudioTraceMessage,
+          generate: async ({ signal, userMessage, files }) => {
+            const sticky = pinnedModel.source === 'auto' ? threadBrainRef.current : null;
+            const result = await answerStudio(
+              {
+                userMessage,
+                files,
+                projectName: projectLabel,
+                lastIntent: lastStudioIntentRef.current,
+                lastFindings: lastFindingsRef.current,
+                mode: 'code',
+                preferredModelId: pinnedModel.id,
+                preferredModelName: pinnedModel.name,
+                preferredSource: pinnedModel.source,
+                stickyModelId: sticky?.modelId,
+                stickyModelName: sticky?.modelName,
+                stickyPinnedSource: sticky?.pinnedSource,
+                planOnly: false,
+                allowFileEdits: true,
+                shouldAbort: () => signal.aborted || mySeq !== genSeqRef.current || stopRequestedRef.current,
+              },
+              (live) => {
+                if (signal.aborted || mySeq !== genSeqRef.current || stopRequestedRef.current) return;
+                const text = String(live || '').trim();
+                if (text.length < 2) return;
+                pushAssistantStatus(liveCodingStatusText(text));
+              },
+            );
+            lastStudioIntentRef.current = result.intent;
+            if (result.findings?.length) lastFindingsRef.current = result.findings;
+            return result.text || '';
+          },
           onApplied: ({ files, updated, reply, provider, elapsedMs }) => {
             pushApplySnapshot({
               chatId: activeChatId,
@@ -6217,7 +6283,13 @@ export function AIChat() {
             clearGeneratingIfMineEarly();
           },
         });
-        if (surgical.status === 'applied' || surgical.status === 'failed') return;
+        // Edit owner finished — do not fall through to a second long answerStudio.
+        if (surgical.status !== 'miss') return;
+        await finishPlainReply(
+          'Could not apply that edit with a reliable patch. Try a clearer one-line ask, or pin a larger coder in Models.',
+          'NOVA · edit',
+        );
+        return;
       }
 
       // Multi-agent: Design → Code → Verify (+ → Multi-agent, or explicit ask).
@@ -9185,10 +9257,18 @@ export function AIChat() {
                 type="button"
                 onClick={() => void openProjectPreview()}
                 className="inline-flex items-center gap-1 rounded-full border border-sky-500/40 bg-sky-500/15 px-2.5 py-1 text-xs font-medium text-sky-100 hover:bg-sky-500/25 transition-colors shrink-0"
-                title={previewUrl ? `Open live preview (${previewUrl})` : 'Open live preview window'}
+                title={
+                  createJobLive?.status === 'npm'
+                    ? 'Installing dependencies…'
+                    : (createJobLive?.status === 'ready' && createJobLive.previewUrl)
+                      ? `Open live preview (${createJobLive.previewUrl})`
+                      : previewUrl
+                        ? `Open live preview (${previewUrl})`
+                        : 'Open live preview window'
+                }
               >
                 <Globe className="w-3.5 h-3.5 text-sky-300" />
-                Preview
+                {createJobLive?.status === 'npm' ? 'Installing…' : 'Preview'}
               </button>
             ) : null}
             {(mode === 'general' || mode === 'code') && (showStudioPills || codePillSticky || chatStudioDiskRoot) ? (

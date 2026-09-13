@@ -180,3 +180,162 @@ export async function runSurgicalEditTurn(host: SurgicalEditHost): Promise<Surgi
 
   return { status: 'miss' };
 }
+
+export type RunEditTurnHost = SurgicalEditHost & {
+  modelId?: string | null;
+  modelName?: string | null;
+  /** Model generate with AbortSignal; capped at 45s by runEditTurn. */
+  generate?: (opts: {
+    signal: AbortSignal;
+    userMessage: string;
+    files: Record<string, string>;
+  }) => Promise<string | null | undefined>;
+  onWeakMiss?: () => void;
+  /** Called after a successful model apply, before onApplied (e.g. undo snapshot). */
+  onSnapshot?: (opts: { files: Record<string, string>; updatedPaths: string[] }) => void;
+};
+
+export type RunEditTurnResult =
+  | SurgicalEditResult
+  | { status: 'weak_miss' };
+
+/**
+ * Surgical first; on miss, skip weak coder or one generate→apply (45s cap).
+ */
+export async function runEditTurn(host: RunEditTurnHost): Promise<RunEditTurnResult> {
+  const surgical = await runSurgicalEditTurn(host);
+  if (surgical.status === 'applied' || surgical.status === 'failed') return surgical;
+
+  const weakHop = shouldSkipWeakModelCodingHop({
+    userMessage: host.editUserMessage,
+    modelId: host.modelId,
+    modelName: host.modelName,
+    surgicalMissed: true,
+  }) || isWeakCoderModel(host.modelId, host.modelName);
+
+  if (weakHop) {
+    host.onWeakMiss?.();
+    const elapsedMs = Date.now() - host.replyStartedAt;
+    const answer = weakModelMicroEditReply(host.editUserMessage);
+    const reply = host.buildStudioTraceMessage({
+      startedAt: host.replyStartedAt,
+      elapsedMs,
+      userMessage: host.content,
+      answer,
+      wrotePaths: [],
+      projectName: host.projectLabel,
+    });
+    host.onFailed({ reply, elapsedMs });
+    return { status: 'weak_miss' };
+  }
+
+  if (!host.generate) return { status: 'miss' };
+
+  const { verifyMicroAskApplied } = await import('@/lib/webProjectCanon');
+  const snapshot = { ...host.files };
+  host.pushStatus('Coding…');
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 45_000);
+  let modelReply = '';
+  try {
+    const raced = await Promise.race([
+      host.generate({
+        signal: controller.signal,
+        userMessage: host.editUserMessage,
+        files: host.files,
+      }),
+      new Promise<null>((resolve) => {
+        controller.signal.addEventListener('abort', () => resolve(null), { once: true });
+      }),
+    ]);
+    modelReply = String(raced || '').trim();
+  } catch {
+    modelReply = '';
+  } finally {
+    clearTimeout(timer);
+  }
+
+  if (!modelReply) return { status: 'miss' };
+
+  const applied = await applyChatReplyEdits({
+    reply: modelReply,
+    projectId: host.projectId,
+    projectName: host.projectLabel,
+    files: host.files,
+    userMessage: host.editUserMessage,
+    diskRoot: host.diskRoot,
+  });
+  const elapsedMs = Date.now() - host.replyStartedAt;
+
+  if (!applied.ok || !applied.updated.length) {
+    const failAnswer = finalizeCodingChatBubble({
+      userMessage: host.content,
+      rawReply: modelReply,
+      applyError: applied.error || 'write_failed',
+      editMode: true,
+    });
+    const failReply = host.buildStudioTraceMessage({
+      startedAt: host.replyStartedAt,
+      elapsedMs,
+      userMessage: host.content,
+      answer: failAnswer || applied.reply || 'Could not apply that edit.',
+      wrotePaths: [],
+      projectName: host.projectLabel,
+    });
+    host.onFailed({ reply: failReply, elapsedMs });
+    return { status: 'failed' };
+  }
+
+  const verified = verifyMicroAskApplied(host.editUserMessage, applied.files);
+  if (!verified.ok) {
+    const revertBlocks = applied.updated
+      .filter((p) => snapshot[p] != null)
+      .map((p) => `@@@FILE ${p}\n${snapshot[p]}`)
+      .join('\n');
+    if (revertBlocks) {
+      await applyChatReplyEdits({
+        reply: revertBlocks,
+        projectId: host.projectId,
+        projectName: host.projectLabel,
+        files: snapshot,
+        userMessage: host.editUserMessage,
+        diskRoot: host.diskRoot,
+      });
+    }
+    return { status: 'miss' };
+  }
+
+  host.onSnapshot?.({ files: snapshot, updatedPaths: applied.updated });
+
+  const answer = finalizeCodingChatBubble({
+    userMessage: host.content,
+    rawReply: modelReply,
+    changedPaths: applied.updated,
+    applied: true,
+  });
+  const patchFileChanges = applied.updated.map((path) => {
+    const diff = host.countLineDiff(
+      String(snapshot[path] || ''),
+      String(applied.files?.[path] || ''),
+    );
+    return { path, added: diff.added, removed: diff.removed };
+  });
+  const reply = host.buildStudioTraceMessage({
+    startedAt: host.replyStartedAt,
+    elapsedMs,
+    userMessage: host.content,
+    answer,
+    wrotePaths: applied.updated,
+    fileChanges: patchFileChanges,
+    projectName: host.projectLabel,
+  });
+  host.onApplied({
+    files: applied.files,
+    updated: applied.updated,
+    reply,
+    provider: host.visionHopMeta ? 'NOVA · vision → model' : 'NOVA · model edit',
+    elapsedMs,
+  });
+  return { status: 'applied' };
+}

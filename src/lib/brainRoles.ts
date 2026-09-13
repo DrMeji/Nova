@@ -10,7 +10,11 @@ export type BrainRole = 'chat' | 'coder' | 'vision';
 export function getActiveBrainId(role: BrainRole): string {
   const prefs = getLocalPrefs();
   if (role === 'coder') {
-    return String(prefs.activeCoderId || prefs.defaultCodeModelId || prefs.defaultModelId || 'NOVA-auto');
+    for (const candidate of [prefs.activeCoderId, prefs.defaultCodeModelId, prefs.defaultModelId, 'NOVA-auto']) {
+      const id = String(candidate || '').trim();
+      if (id && !isWeakCoderId(id)) return id;
+    }
+    return 'NOVA-auto';
   }
   if (role === 'vision') {
     return String(prefs.activeVisionId || prefs.defaultModelId || 'NOVA-auto');
@@ -18,9 +22,18 @@ export function getActiveBrainId(role: BrainRole): string {
   return String(prefs.activeChatId || prefs.lastChatModelId || prefs.defaultModelId || 'NOVA-auto');
 }
 
+export function isWeakCoderId(id: string | null | undefined): boolean {
+  return /1\.5b|0\.5b|0\.6b|tiny|qwen2\.5-1\.5/i.test(String(id || ''));
+}
+
 export function setActiveBrainId(role: BrainRole, id: string): void {
   const clean = String(id || '').trim() || 'NOVA-auto';
   if (role === 'coder') {
+    // Weak models cannot be the coding brain — pin chat-only instead.
+    if (isWeakCoderId(clean)) {
+      setLocalPrefs({ activeChatId: clean, defaultModelId: clean, lastChatModelId: clean });
+      return;
+    }
     setLocalPrefs({ activeCoderId: clean, defaultCodeModelId: clean });
     return;
   }
@@ -29,10 +42,6 @@ export function setActiveBrainId(role: BrainRole, id: string): void {
     return;
   }
   setLocalPrefs({ activeChatId: clean, defaultModelId: clean, lastChatModelId: clean });
-}
-
-export function isWeakCoderId(id: string | null | undefined): boolean {
-  return /1\.5b|0\.5b|0\.6b|tiny|qwen2\.5-1\.5/i.test(String(id || ''));
 }
 
 /** Hardware blurb for first-run / Models card. */

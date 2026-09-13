@@ -33,9 +33,9 @@ const ENTRY_CANDIDATES = [
 const INSPECT_BUDGET = 8_000;
 const INSPECT_FILE_CHARS = 2_400;
 const INSPECT_MAX_FILES = 10;
-const INSPECT_BUDGET_DEBUG = 14_000;
+const INSPECT_BUDGET_DEBUG = 40_000;
 const INSPECT_FILE_CHARS_DEBUG = 3_200;
-const INSPECT_MAX_FILES_DEBUG = 16;
+const INSPECT_MAX_FILES_DEBUG = 40;
 /** Cap regex scan so 300+ file uploads don’t freeze the desktop. */
 const SCAN_MAX_FILES = 56;
 

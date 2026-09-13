@@ -42,6 +42,8 @@ export type OpenFolderTurnHost = {
     root?: string | null;
     locateNote?: string | null;
   }) => void;
+  /** Optional: poll until chat diskRoot matches opened root. */
+  waitUntilBound?: (root: string) => Promise<boolean>;
   formatFolderLocatedMessage?: (
     located: { path?: string; matchedName?: string; nested?: boolean },
     name: string,
@@ -82,13 +84,25 @@ export async function runOpenFolderTurn(host: OpenFolderTurnHost): Promise<OpenF
     if (opened.ok && opened.files) {
       const name = opened.name || located.matchedName || folderRef.name;
       const locateNote = host.formatFolderLocatedMessage?.(located, folderRef.name) || null;
+      const root = opened.root || null;
       host.onOpened({
         files: opened.files,
         projectId: opened.projectId,
         name,
-        root: opened.root || null,
+        root,
         locateNote,
       });
+      // Wait until diskRoot is set on the host side (bind race defense).
+      if (root && host.waitUntilBound) {
+        const ok = await host.waitUntilBound(root);
+        if (!ok) {
+          await host.finishPlainReply(
+            'Folder opened but the chat bind did not settle. Try **+ → Open folder** once, then ask again.',
+          );
+          host.clearGenerating();
+          return { status: 'handled' };
+        }
+      }
       return { status: 'bound', files: opened.files };
     }
     if (opened.error && opened.error !== 'canceled') {

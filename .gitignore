@@ -27,6 +27,8 @@ tmp-*
 *.sln
 *.sw?
 .env
+.env.*
+!.env.example
 .aider*
 .clinerules/
 *.bak

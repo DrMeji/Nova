@@ -53,20 +53,20 @@ export function looksLikeRuntimeInstallAsk(message: string): boolean {
   return RUNTIME_INSTALL_RE.test(t);
 }
 
-export function proposeRuntimeInstall(message: string): string | null {
-  const t = String(message || '').toLowerCase();
-  if (looksLikeInstallDepsAsk(message)) return null;
-  if (/\bnpm\s+install\b/i.test(t) || /\bpip\s+install\b/i.test(t)) return null;
-  if (/\b(install|need|get)\s+npm\b/.test(t) && /\b(dependencies|packages)\b/.test(t)) return null;
-  if (/\bnode\b/.test(t) && !/\bnode_modules\b/.test(t)) {
-    return 'winget install OpenJS.NodeJS.LTS --accept-package-agreements --accept-source-agreements';
-  }
-  if (/\bnpm\b/.test(t) && /\b(install|need|get)\s+node\b/.test(t)) {
-    return 'winget install OpenJS.NodeJS.LTS --accept-package-agreements --accept-source-agreements';
-  }
-  if (/\bpython\b|\bpip\b/.test(t)) return 'winget install Python.Python.3.12 --accept-package-agreements --accept-source-agreements';
-  if (/\bgit\b/.test(t)) return 'winget install Git.Git --accept-package-agreements --accept-source-agreements';
+/** Never propose winget/choco — Chat points users at official installers instead. */
+export function proposeRuntimeInstall(_message: string): string | null {
   return null;
+}
+
+export function runtimeInstallManualReply(message: string): string {
+  const t = String(message || '').toLowerCase();
+  if (/\bpython\b|\bpip\b/.test(t)) {
+    return 'Install Python from https://www.python.org/downloads/ (check “Add to PATH”), then restart NOVA.';
+  }
+  if (/\bgit\b/.test(t)) {
+    return 'Install Git from https://git-scm.com/downloads, then restart NOVA.';
+  }
+  return 'Install Node.js from https://nodejs.org (LTS), then restart NOVA so npm is on PATH.';
 }
 
 export async function probeRuntime(command: string): Promise<boolean> {

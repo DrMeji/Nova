@@ -475,9 +475,9 @@ export function OnboardingScreen() {
           <p className="text-xs uppercase tracking-[0.2em] text-content-tertiary mb-3">First run setup</p>
           <h1 className="text-3xl font-semibold text-content-primary tracking-tight">
             {phase === 'access'
-              ? 'Allow project folders'
+              ? 'Grant Documents access'
               : phase === 'models'
-                ? 'Pick a coding brain'
+                ? 'Optional coding model'
                 : phase === 'finishing'
                   ? 'Type what to build'
                   : 'Welcome to NOVA'}
@@ -511,7 +511,7 @@ export function OnboardingScreen() {
           {phase === 'intro' && (
             <div className="space-y-5">
               <p className="text-sm text-content-secondary text-center">
-                Three steps: allow Documents, pick a coder (or skip), then type what to build.
+                Grant Documents, pick an optional model, then type what to build.
               </p>
               <button
                 type="button"
@@ -684,7 +684,7 @@ export function OnboardingScreen() {
                   <Gauge className="w-5 h-5 text-content-secondary" />
                 </span>
                 <div>
-                  <p className="text-sm font-medium text-content-primary">Recommended for this PC</p>
+                  <p className="text-sm font-medium text-content-primary">Optional — pick a model or skip</p>
                 </div>
               </div>
 
@@ -764,12 +764,16 @@ export function OnboardingScreen() {
                   <Shield className="w-5 h-5 text-emerald-400" />
                 </span>
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium text-content-primary">PC permissions</p>
+                  <p className="text-sm font-medium text-content-primary">Documents grant first</p>
                   {accessEnabledCount > 0 ? (
                     <p className="text-xs text-content-tertiary mt-0.5">
                       {accessEnabledCount} permission{accessEnabledCount === 1 ? '' : 's'} enabled
                     </p>
-                  ) : null}
+                  ) : (
+                    <p className="text-xs text-content-tertiary mt-0.5">
+                      Needed so NOVA can write projects under Documents
+                    </p>
+                  )}
                 </div>
               </div>
 

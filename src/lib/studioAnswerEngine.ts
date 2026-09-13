@@ -485,7 +485,7 @@ export async function answerStudio(
   try {
     const routeKind = (input.mode === 'code' || input.allowFileEdits) ? 'coding' : 'chat';
     const timeoutMs = input.allowFileEdits
-      ? (looksLikeMicroCodingAsk(input.userMessage) ? MODEL_TIMEOUT_MICRO_MS : MODEL_TIMEOUT_BUILD_MS)
+      ? (looksLikeMicroCodingAsk(input.userMessage) ? MODEL_TIMEOUT_MICRO_MS : MODEL_TIMEOUT_CODE_MS)
       : routeKind === 'coding' && looksLikeProjectDebugAsk(input.userMessage)
         ? MODEL_TIMEOUT_CODE_MS
         : MODEL_TIMEOUT_MS;

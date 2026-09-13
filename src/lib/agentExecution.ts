@@ -27,12 +27,13 @@ const ALLOWLIST_PATTERNS: RegExp[] = [
   /^pip(\s|$)/i,
   /^pip3(\s|$)/i,
   /^git(\s|$)/i,
-  /^winget(\s|$)/i,
-  /^choco(\s|$)/i,
   /^Checkpoint-Computer\b/i,
   /^Get-ComputerRestorePoint\b/i,
   /^Enable-ComputerRestore\b/i,
 ];
+
+/** Shared allowlist — renderer + Electron should import this. */
+export const EXEC_ALLOWLIST_PATTERNS = ALLOWLIST_PATTERNS;
 
 const BLOCKED_PATTERNS: RegExp[] = [
   /\bformat\b/i,
@@ -46,11 +47,20 @@ const BLOCKED_PATTERNS: RegExp[] = [
   /\bnode(?:\.exe)?\s+(-e|--eval)\b/i,
   /\bpython(?:\d+(?:\.\d+)?)?(?:\.exe)?\s+(-c|--command)\b/i,
   /\bpy(?:\.exe)?\s+(-3\s+)?-c\b/i,
+  /^winget(\s|$)/i,
+  /^choco(\s|$)/i,
 ];
+
+/** Chat must never propose PC-wide package-manager installs. */
+export function isChatBannedInstallCommand(command: string): boolean {
+  const cmd = String(command || '').trim();
+  return /^winget(\s|$)/i.test(cmd) || /^choco(\s|$)/i.test(cmd);
+}
 
 export function isBlockedAgentCommand(command: string): boolean {
   const cmd = String(command || '').trim();
   if (!cmd) return true;
+  if (isChatBannedInstallCommand(cmd)) return true;
   return BLOCKED_PATTERNS.some(re => re.test(cmd));
 }
 

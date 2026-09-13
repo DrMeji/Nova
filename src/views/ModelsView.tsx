@@ -48,6 +48,7 @@ import {
 import { FREE_SOURCES } from '@/lib/freeSources';
 import { huntModelsForPc, huntSourceBadge, type HuntedModel } from '@/lib/arkModelHunt';
 import { probeLiveCapacity, type LiveCapacity } from '@/lib/arkCapacity';
+import { isWeakCoderId } from '@/lib/brainRoles';
 import { openInSystemBrowser } from '@/lib/openExternal';
 import { providerKeyUrl } from '@/lib/providerKeyUrls';
 
@@ -518,12 +519,19 @@ export function ModelsView() {
     const cat = model?.category;
     if (cat === 'image' || cat === 'video' || cat === 'vision') return;
     if (cat === 'coding') {
-      setLocalPrefs({ defaultCodeModelId: id, activeCoderId: id });
+      if (isWeakCoderId(id)) {
+        setLocalPrefs({ defaultModelId: id, lastChatModelId: id, activeChatId: id });
+        setOllamaNote(`${model?.name || id} is ready for chat only — too small for the coder role.`);
+      } else {
+        setLocalPrefs({ defaultCodeModelId: id, activeCoderId: id });
+      }
     } else {
       setLocalPrefs({ defaultModelId: id, lastChatModelId: id, activeChatId: id });
     }
     clearAllThreadBrains();
-    setOllamaNote(`${model?.name || id} is ready — Chat will use it on the next message.`);
+    if (!(cat === 'coding' && isWeakCoderId(id))) {
+      setOllamaNote(`${model?.name || id} is ready — Chat will use it on the next message.`);
+    }
     try {
       window.dispatchEvent(new CustomEvent('NOVA:local-model-ready', { detail: { id } }));
     } catch {
@@ -948,7 +956,12 @@ export function ModelsView() {
       if (installed.has(id) || isEngineDownloading(id)) return;
 
       if (hunt.category === 'coding') {
-        setLocalPrefs({ defaultCodeModelId: id, activeCoderId: id });
+        if (isWeakCoderId(id)) {
+          setLocalPrefs({ defaultModelId: id, lastChatModelId: id, activeChatId: id });
+          setOllamaNote(`${hunt.name} will be chat-only — too small for the coder role.`);
+        } else {
+          setLocalPrefs({ defaultCodeModelId: id, activeCoderId: id });
+        }
       } else {
         setLocalPrefs({ defaultModelId: id, lastChatModelId: id, activeChatId: id });
       }
@@ -982,7 +995,12 @@ export function ModelsView() {
     const model = LOCAL_MODELS.find(m => m.id === id);
 
     if (model?.category === 'coding') {
-      setLocalPrefs({ defaultCodeModelId: id, activeCoderId: id });
+      if (isWeakCoderId(id)) {
+        setLocalPrefs({ defaultModelId: id, lastChatModelId: id, activeChatId: id });
+        setOllamaNote(`${model?.name || id} will be chat-only — too small for the coder role.`);
+      } else {
+        setLocalPrefs({ defaultCodeModelId: id, activeCoderId: id });
+      }
     } else {
       setLocalPrefs({ defaultModelId: id, lastChatModelId: id, activeChatId: id });
     }

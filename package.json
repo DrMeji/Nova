@@ -1,7 +1,7 @@
 {
   "name": "nova",
   "private": true,
-  "version": "0.1.214",
+  "version": "0.1.215",
   "type": "module",
   "main": "electron/main.cjs",
   "description": "NOVA — AI Creation Studio desktop app",
@@ -49,7 +49,9 @@
     "smoke:create-quality": "tsx --tsconfig tsconfig.app.json scripts/smoke-create-quality.mjs",
     "smoke:create-intent": "tsx --tsconfig tsconfig.app.json scripts/check-create-intent.mjs",
     "smoke:classify-turn": "tsx --tsconfig tsconfig.app.json scripts/check-classify-turn.mjs",
-    "smoke:create-reply": "tsx --tsconfig tsconfig.app.json scripts/check-create-reply.mjs",
+    "smoke:dispatch-contract": "tsx --tsconfig tsconfig.app.json scripts/check-dispatch-no-answerstudio.mjs",
+    "smoke:create-reply": "npx tsx --tsconfig tsconfig.app.json scripts/check-create-reply.mjs",
+    "smoke:edit-weak": "npx tsx --tsconfig tsconfig.app.json scripts/check-edit-weak-no-hop.mjs",
     "smoke:auth-heal": "tsx --tsconfig tsconfig.app.json scripts/check-auth-session-heal.mjs",
     "website:dev": "npm --prefix website run dev",
     "website:build": "npm --prefix website run build"
