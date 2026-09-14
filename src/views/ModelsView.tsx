@@ -1,13 +1,12 @@
+/**
+ * Models catalog (For your PC / Local / Cloud). Sidebar → Models.
+ * CLOUD_MODELS stays exported for SearchPanel.
+ */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Search, Plus, Check, Download, Loader2, Cpu, Cloud, Monitor,
   Code, Boxes, Brain, Eye, Zap, Image as ImageIcon, Video, Gauge, Sparkles, Rocket, X, KeyRound, Globe, RefreshCw, Trash2, ExternalLink,
 } from 'lucide-react';
-/**
- * Models catalog UI. App routes `models` / `local-ai` / `brain` render BrainView;
- * Brain embeds this view for Installed + Cloud tabs. CLOUD_MODELS stays exported
- * for SearchPanel and other callers.
- */
 import { detectHardware, getAccurateHardware, getHardwareClass, isEngineDownloadable, loadHardwareSnapshot, parseRamGb, type HardwareClass } from '@/lib/api';
 import {
   categoryDisplayLabel,
@@ -1120,16 +1119,6 @@ export function ModelsView({ embedTab, hideChrome = false }: ModelsViewProps = {
               <div className="min-w-0">
                 <h1 className="text-2xl sm:text-3xl font-semibold text-content-primary tracking-tight">Models</h1>
               </div>
-              <div className="flex items-center gap-2 rounded-full bg-surface-hover px-3 py-2 w-36 sm:w-52 md:w-64 shrink-0 min-w-0">
-                <Search className="w-4 h-4 text-content-tertiary shrink-0" />
-                <input
-                  type="text"
-                  value={query}
-                  onChange={e => setQuery(e.target.value)}
-                  placeholder="Search models"
-                  className="flex-1 bg-transparent border-none text-sm text-content-primary placeholder:text-content-tertiary focus:outline-none min-w-0"
-                />
-              </div>
             </div>
 
             {liveCapacity && !liveCapacity.liveChat && (
@@ -1150,29 +1139,41 @@ export function ModelsView({ embedTab, hideChrome = false }: ModelsViewProps = {
               </div>
             )}
 
-            <div className="flex items-center gap-1 mb-4 flex-wrap">
-              {([
-                { id: 'for-pc' as const, label: 'For your PC', icon: Monitor },
-                { id: 'local' as const, label: 'Local AI', icon: Cpu },
-                { id: 'cloud' as const, label: 'Cloud AI', icon: Cloud },
-              ]).map(t => (
-                <button
-                  key={t.id}
-                  type="button"
-                  onClick={() => {
-                    setTab(t.id);
-                    navigate({ name: 'models', tab: t.id });
-                  }}
-                  className={`inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 text-sm transition-colors ${
-                    tab === t.id
-                      ? 'bg-surface-hover text-content-primary'
-                      : 'text-content-secondary hover:text-content-primary'
-                  }`}
-                >
-                  <t.icon className="w-3.5 h-3.5" />
-                  {t.label}
-                </button>
-              ))}
+            <div className="flex items-center justify-between gap-3 mb-4 min-w-0">
+              <div className="flex items-center gap-1 flex-wrap min-w-0">
+                {([
+                  { id: 'for-pc' as const, label: 'For your PC', icon: Monitor },
+                  { id: 'local' as const, label: 'Local AI', icon: Cpu },
+                  { id: 'cloud' as const, label: 'Cloud AI', icon: Cloud },
+                ]).map(t => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => {
+                      setTab(t.id);
+                      navigate({ name: 'models', tab: t.id });
+                    }}
+                    className={`inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 text-sm transition-colors ${
+                      tab === t.id
+                        ? 'bg-surface-hover text-content-primary'
+                        : 'text-content-secondary hover:text-content-primary'
+                    }`}
+                  >
+                    <t.icon className="w-3.5 h-3.5" />
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+              <div className="flex items-center gap-2 rounded-full bg-surface-hover px-3 py-2 w-36 sm:w-52 md:w-64 shrink-0 min-w-0">
+                <Search className="w-4 h-4 text-content-tertiary shrink-0" />
+                <input
+                  type="text"
+                  value={query}
+                  onChange={e => setQuery(e.target.value)}
+                  placeholder="Search models"
+                  className="flex-1 bg-transparent border-none text-sm text-content-primary placeholder:text-content-tertiary focus:outline-none min-w-0"
+                />
+              </div>
             </div>
           </div>
         </div>

@@ -11,6 +11,8 @@ import { ProjectsView } from '@/views/ProjectsView';
 import { ProjectWorkspace } from '@/views/ProjectWorkspace';
 import { AIChat } from '@/views/AIChat';
 import { BuildRun } from '@/views/BuildRun';
+import { ModelsView } from '@/views/ModelsView';
+import { LocalAI } from '@/views/LocalAI';
 import { McpView } from '@/views/McpView';
 import { BrainView } from '@/views/BrainView';
 import { Settings } from '@/views/Settings';
@@ -97,23 +99,11 @@ function AppRoutes() {
         // Legacy image/video creations — History only.
         other = <Dashboard />;
         break;
-      case 'models':
-        other = (
-          <BrainView
-            initialTab={
-              route.tab === 'cloud'
-                ? 'cloud'
-                : route.tab === 'for-pc'
-                  ? 'recommended'
-                  : 'installed'
-            }
-          />
-        );
-        break;
+      case 'models': other = <ModelsView />; break;
       case 'build': other = <BuildRun />; break;
-      case 'local-ai': other = <BrainView initialTab="this-pc" />; break;
+      case 'local-ai': other = <LocalAI />; break;
       case 'mcp': other = <McpView />; break;
-      case 'brain': other = <BrainView initialTab={route.tab || 'installed'} />; break;
+      case 'brain': other = <BrainView />; break;
       case 'networking':
         other = isSocialParked('networking')
           ? <ParkedNotice feature="networking" />

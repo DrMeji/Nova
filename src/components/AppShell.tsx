@@ -77,10 +77,10 @@ function getNavGroups(): {
       label: 'Tools',
       items: [
         { label: 'Plugins', icon: Blocks, route: { name: 'build' }, activity: 'plugins' },
-        { label: 'Models', icon: Database, route: { name: 'brain', tab: 'installed' as const }, activity: 'models' },
-        { label: 'Local AI', icon: Bot, route: { name: 'brain', tab: 'this-pc' as const } },
+        { label: 'Models', icon: Database, route: { name: 'models' }, activity: 'models' },
+        { label: 'Local AI', icon: Bot, route: { name: 'local-ai' } },
         { label: 'MCP', icon: Cable, route: { name: 'mcp' } },
-        { label: 'Brain', icon: BrainNavIcon, route: { name: 'brain', tab: 'recommended' as const } },
+        { label: 'Brain', icon: BrainNavIcon, route: { name: 'brain' } },
       ],
     },
     {
@@ -271,18 +271,16 @@ export function AppShell({ children }: { children: ReactNode }) {
       return route.name === 'projects';
     }
     if (item.label === 'Models') {
-      return route.name === 'models'
-        || (route.name === 'brain' && (route.tab === 'installed' || route.tab === 'cloud' || !route.tab));
+      return route.name === 'models';
     }
     if (item.label === 'Local AI') {
-      return route.name === 'local-ai'
-        || (route.name === 'brain' && route.tab === 'this-pc');
+      return route.name === 'local-ai';
     }
     if (item.label === 'MCP') {
       return route.name === 'mcp';
     }
     if (item.label === 'Brain') {
-      return route.name === 'brain' && route.tab === 'recommended';
+      return route.name === 'brain';
     }
     return route.name === item.route.name;
   };
