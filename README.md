@@ -1,4 +1,4 @@
-# NOVA
+﻿# NOVA
 
 **NOVA** is a desktop AI creation studio for Windows.
 
@@ -9,7 +9,6 @@ Chat with local or cloud models, generate images and video, build and edit proje
 Get the Windows installer from **[Releases](https://github.com/DrMeji/Nova/releases)**:
 
 - **NOVA-Setup.exe** — install NOVA on your PC
-- Older releases may still list **ARK-Setup.exe** as the download filename (same app); prefer the newest **NOVA** release
 - After install: **Settings → Updates → Check → Download** for newer builds
 
 ## Important: "Source code (zip / tar.gz)" on Releases
@@ -29,9 +28,9 @@ If you want NOVA, download **NOVA-Setup.exe** (or the latest Setup.exe on the re
 
 | Included | Not included |
 |----------|--------------|
-| This README | Application source (`src`, `electron`, etc.) |
+| This README | Application source (src, electron, etc.) |
 | Windows installers on Releases | How NOVA works internally |
-| Update feed (`latest.yml`) | Private docs / build recipes |
+| Update feed (latest.yml) | Private docs / build recipes |
 
 ## Privacy
 
