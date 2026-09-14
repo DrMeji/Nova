@@ -88,6 +88,26 @@ check(
   );
 }
 
+{
+  let replied = '';
+  const outcome = await dispatchOwnedTurn({
+    content: 'delete the file notes.md',
+    mode: 'general',
+    finishPlainReply: (t) => { replied = String(t || ''); },
+    // no deleteHost → handled + can't-yet (never generate)
+  });
+  check(
+    'dispatchOwnedTurn delete without host → handled',
+    outcome.status === 'handled' && outcome.classified.kind === 'delete',
+    `${outcome.status} ${outcome.classified.kind}`,
+  );
+  check(
+    'dispatchOwnedTurn delete without host finishes plain reply',
+    /can'?t do that yet/i.test(replied),
+    replied.slice(0, 80),
+  );
+}
+
 if (failed) {
   console.error(`\n${failed} failed`);
   process.exit(1);

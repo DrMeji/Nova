@@ -184,15 +184,11 @@ import {
   type ProjectKind,
 } from '@/lib/createProjectIntent';
 import {
-  handlePlanTurnReply,
   shouldSkipWeakModelCodingHop,
   weakModelMicroEditReply,
   runSurgicalEditTurn,
   isWeakCoderModel,
   FIRST_RUN_KIND_CHIPS,
-  runDeleteTurn,
-  runOpenFolderTurn,
-  runCmdTurn,
   runEditTurn,
   dispatchOwnedTurn,
   runChatTurn,
@@ -220,7 +216,7 @@ import {
   stripComposerPrefix,
   workspacePathLabel,
 } from '@/lib/chatAgentTurn';
-import { classifyTurn } from '@/lib/classifyTurn';
+import type { ClassifyTurnResult } from '@/lib/classifyTurn';
 import {
   clearChatTurnStatus,
   setChatTurnStatus,
@@ -1085,6 +1081,12 @@ export function AIChat() {
   /** Blocks double Enter / click from queueing the same prompt on top of itself. */
   const lastSendGuardRef = useRef<{ text: string; at: number }>({ text: '', at: 0 });
   const sendMessageRef = useRef<(content: string) => Promise<void>>(async () => {});
+  const tryStartTurn = (text: string) => {
+    if (generatingRef.current) return;
+    const t = String(text || '').trim();
+    if (!t) return;
+    void sendMessageRef.current(t);
+  };
   /** Bumps on every new send/stop so late chunks from an old turn cannot stick Stop/queue. */
   const genSeqRef = useRef(0);
   const persistTimerRef = useRef<number | undefined>(undefined);
@@ -3314,7 +3316,7 @@ export function AIChat() {
     if (typed && looksLikeVoiceBuildOrEditAsk(typed)) {
       // Voice is Chat with a mic — same classify + create/edit path.
       setVoicePhase('idle');
-      await sendMessageRef.current(typed);
+      tryStartTurn(typed);
       return;
     }
 
@@ -4174,34 +4176,7 @@ export function AIChat() {
         diskRoot: resolvedStudio.diskRoot || turnDiskRoot,
       });
     if ((mode === 'general' || mode === 'code') && !skipDiskForInPlaceRebuild && !skipDiskForCodeEdit) {
-      {
-        const deleteOutcome = await runDeleteTurn({
-          content,
-          chatId: activeChatId,
-          mode,
-          assistantId,
-          mySeq,
-          replyStartedAt,
-          diskIntent,
-          diskRoot,
-          diskProjectId,
-          diskWorkspaceName,
-          stickyDiskTarget,
-          workspaceFiles: resolvedStudio.files,
-          messages: messagesRef.current,
-          finishPlainReply,
-          getLastListedFolder,
-          setLastDiskTarget,
-          setDeleteFilePrompt,
-          setDeleteProjectPrompt,
-          setDeleteFolderClarifyPrompt,
-          pendingFileDeleteRef,
-          pendingProjectDeleteRef,
-          pendingFolderClarifyRef,
-          relPathFromDisk,
-        });
-        if (deleteOutcome.status === 'handled') return;
-      }
+      // delete → early dispatchOwnedTurn (WAVE 1)
 
       if (diskIntent.type === 'rename_file') {
         pushAssistantStatus('Renaming…');
@@ -4477,15 +4452,10 @@ export function AIChat() {
       }
     }
 
-        // EARLY_OWNED_DISPATCH_V217 — every kind before generate.
+    // EARLY_OWNED_DISPATCH_V217 — one door: classify once + all owned hosts.
+    let ownedClassified: ClassifyTurnResult | null = null;
+    let ownedStatus: 'handled' | 'edit' | 'continue' | null = null;
     if (mode === 'general' || mode === 'code') {
-      const earlyClassified = classifyTurn(content, {
-        diskRoot: chatStudioDiskRootRef.current || chatStudioDiskRoot || resolvedStudio.diskRoot,
-        files: chatStudioFilesRef.current || resolvedStudio.files,
-        projectId: chatStudioProjectIdRef.current || resolvedStudio.projectId,
-        chatId: activeChatId,
-      });
-      // EARLY_OWNED_DISPATCH_V217 — every kind; hosts for delete/open/cmd still move up later.
       {
         const earlyIntent = parseNewProjectIntent(content) || null;
         const renameFromAsk = extractProjectName(content);
@@ -4497,6 +4467,15 @@ export function AIChat() {
           projectId: resolvedStudio.projectId || chatStudioProjectIdRef.current,
           diskRoot: resolvedStudio.diskRoot || chatStudioDiskRootRef.current,
         });
+        const earlyComposerMode = composerModeFromContent(content) || composerMode;
+        const earlyPkg = Object.keys(resolvedStudio.files || {}).some((k) => /(^|\/)package\.json$/i.test(k));
+        const earlyAgentCwd = chatStudioDiskRootRef.current
+          || chatStudioDiskRoot
+          || resolvedStudio.diskRoot
+          || null;
+        const earlyFinishAgentReply = (reply: string, provider = 'NOVA · agent') => {
+          void finishPlainReply(reply, provider);
+        };
         const owned = await dispatchOwnedTurn({
           content,
           mode,
@@ -4507,7 +4486,7 @@ export function AIChat() {
             chatId: activeChatId,
           },
           skipCreate: diskIntent?.type === 'add_file',
-          planName: createIntentEarly?.name || earlyClassified.createName || extractProjectName(content) || 'your idea',
+          planName: createIntentEarly?.name || extractProjectName(content) || 'your idea',
           planSummary: createIntentEarly?.summary || content,
           savePlanBrief: ({ name, summary }) => {
             setLastPendingGreenfield(activeChatId, {
@@ -4526,7 +4505,7 @@ export function AIChat() {
             mode,
             workspaceBound: workspaceActiveForCreate,
             createIntent: createIntentEarly,
-            classifiedCreateName: earlyClassified.createName,
+            classifiedCreateName: createIntentEarly?.name,
             messages: messagesRef.current,
             routeChatId: routeChatIdRef.current,
             pushStatus: pushAssistantStatus,
@@ -4544,22 +4523,101 @@ export function AIChat() {
             getPending: getLastPendingGreenfield,
             previewFromText,
           },
+          deleteHost: {
+            content,
+            chatId: activeChatId,
+            mode,
+            assistantId,
+            mySeq,
+            replyStartedAt,
+            diskIntent,
+            diskRoot,
+            diskProjectId,
+            diskWorkspaceName,
+            stickyDiskTarget,
+            workspaceFiles: resolvedStudio.files,
+            messages: messagesRef.current,
+            finishPlainReply,
+            getLastListedFolder,
+            setLastDiskTarget,
+            setDeleteFilePrompt,
+            setDeleteProjectPrompt,
+            setDeleteFolderClarifyPrompt,
+            pendingFileDeleteRef,
+            pendingProjectDeleteRef,
+            pendingFolderClarifyRef,
+            relPathFromDisk,
+          },
+          openFolderHost: {
+            content,
+            chatId: activeChatId,
+            mode,
+            assistantId,
+            userId: user?.id || 'guest-local',
+            workspaceFileCount: Object.keys(resolvedStudio.files).length,
+            finishPlainReply,
+            syncGrants: syncWorkspaceGrantsFromPrefs,
+            resolveScopedFolderPath,
+            openFolderInChat,
+            formatFolderLocatedMessage,
+            clearGenerating: clearGeneratingIfMineEarly,
+            onOpened: ({ files, projectId, name, root, locateNote }) => {
+              resolvedStudio.files = files;
+              resolvedStudio.projectId = projectId || resolvedStudio.projectId;
+              resolvedStudio.name = name;
+              chatStudioFilesRef.current = files;
+              setChatStudioFiles(files);
+              if (projectId) {
+                chatStudioProjectIdRef.current = projectId;
+                setChatStudioProjectId(projectId);
+              }
+              if (root) setChatStudioDiskRoot(root);
+              persistStudioSnapshot(activeChatId, {
+                files,
+                projectId: projectId || null,
+                name,
+                diskRoot: root || null,
+              });
+              if (locateNote) lastFolderLocateNoteRef.current = locateNote;
+            },
+            waitUntilBound: async (root) => {
+              for (let i = 0; i < 20; i++) {
+                if (chatStudioDiskRootRef.current === root) return true;
+                await new Promise((r) => window.setTimeout(r, 25));
+              }
+              return chatStudioDiskRootRef.current === root;
+            },
+          },
+          runCmdHost: {
+            content,
+            mode,
+            composerMode: earlyComposerMode,
+            agentCwd: earlyAgentCwd,
+            hasPackageJson: earlyPkg,
+            assistantId,
+            finishAgentReply: earlyFinishAgentReply,
+            confirm: (message) => window.confirm(message),
+            setRunningStatus: (label) => {
+              setMessages((prev) => prev.map((m) => (
+                m.id === assistantId
+                  ? { ...m, content: `__generating__:chat:${label}` }
+                  : m
+              )));
+            },
+          },
         });
+        ownedClassified = owned.classified;
+        ownedStatus = owned.status;
         if (owned.status === 'handled') return;
-        // edit → fall through to runEditTurn; chat → runChatTurn; other kinds without hosts continue.
+        // edit → sticky hydrate + runEditTurn below; continue → chat / remaining non-owned paths.
       }
     }
+    // Dead mid-ladder STEPs for owned kinds must not re-run after early dispatch.
+    const ownedAlreadyResolved = ownedStatus === 'handled' || ownedStatus === 'edit';
 
 // In-place scrap/rebuild of the bound workspace. never catalog Desktop or create sibling folders.
-    // Create/plan always win — never let answerStudio run before runCreateTurn.
-    const rebuildClassify = (mode === 'general' || mode === 'code') && looksLikeInPlaceRebuildAsk(intentText)
-      ? classifyTurn(content, {
-        diskRoot: chatStudioDiskRootRef.current || chatStudioDiskRoot,
-        files: chatStudioFilesRef.current,
-        projectId: chatStudioProjectIdRef.current,
-        chatId: activeChatId,
-      })
-      : null;
+    // Create/plan always win — owned.classified from early dispatch only.
+    const rebuildClassify = ownedClassified;
     if (
       (mode === 'general' || mode === 'code')
       && looksLikeInPlaceRebuildAsk(intentText)
@@ -4949,43 +5007,8 @@ export function AIChat() {
           summary: content.length > 40 ? `${content}\n\n${createIntentRaw.summary}` : createIntentRaw.summary,
         }
       : createIntentRaw;
-    const classifiedBound = classifyTurn(content, {
-      diskRoot: chatStudioDiskRootRef.current || chatStudioDiskRoot,
-      files: chatStudioFilesRef.current,
-      projectId: chatStudioProjectIdRef.current,
-      chatId: activeChatId,
-    });
-    // Sovereign create/plan: handlers own the bodies (Sprint A).
-    if (classifiedBound.kind === 'plan' && (mode === 'general' || mode === 'code')) {
-      const pendingPlan = getLastPendingGreenfield(activeChatId);
-      const planName = createIntent?.name || pendingPlan?.name || extractProjectName(content) || 'your idea';
-      if (createIntent) {
-        setLastPendingGreenfield(activeChatId, {
-          name: createIntent.name,
-          slug: createIntent.slug,
-          kind: resolveProjectKindForCreate(createIntent.summary, createIntent.kind, createIntent.kind),
-          summary: createIntent.summary,
-          problemLine: `Build ${createIntent.name} from your brief.`,
-        });
-        renameChat(activeChatId, cleanProductTitle(createIntent.name));
-      }
-      await finishPlainReply(handlePlanTurnReply({
-        name: planName,
-        summary: createIntent?.summary || pendingPlan?.summary || content,
-        savePlanBrief: ({ name, summary }) => {
-          setLastPendingGreenfield(activeChatId, {
-            name,
-            slug: slugifyProjectName(name),
-            kind: resolveProjectKindForCreate(summary, 'vite-react', 'vite-react'),
-            summary,
-            problemLine: `Build ${name} from your brief.`,
-          });
-          renameChat(activeChatId, cleanProductTitle(name));
-        },
-      }));
-      return;
-    }
-    // Duplicate create path retired — early dispatchOwnedTurn owns create (v0.1.217).
+    // Plan/create owned by early dispatchOwnedTurn (WAVE 1). Use ownedClassified only.
+    const classifiedBound = ownedClassified;
 
     // PC read file. AFTER create/greenfield so build briefs never become "open SignalDesk.txt".
     // Use pendingAttaches here — `attaches` only exists in handleSend and threw ReferenceError,
@@ -5012,49 +5035,9 @@ export function AIChat() {
       return;
     }
 
-    // STEP 1: Natural-language folder open (handler).
-    if (mode === 'general' || mode === 'code') {
-      const openOutcome = await runOpenFolderTurn({
-        content,
-        chatId: activeChatId,
-        mode,
-        assistantId,
-        userId: user?.id || 'guest-local',
-        workspaceFileCount: Object.keys(resolvedStudio.files).length,
-        finishPlainReply,
-        syncGrants: syncWorkspaceGrantsFromPrefs,
-        resolveScopedFolderPath,
-        openFolderInChat,
-        formatFolderLocatedMessage,
-        clearGenerating: clearGeneratingIfMineEarly,
-        onOpened: ({ files, projectId, name, root, locateNote }) => {
-          resolvedStudio.files = files;
-          resolvedStudio.projectId = projectId || resolvedStudio.projectId;
-          resolvedStudio.name = name;
-          chatStudioFilesRef.current = files;
-          setChatStudioFiles(files);
-          if (projectId) {
-            chatStudioProjectIdRef.current = projectId;
-            setChatStudioProjectId(projectId);
-          }
-          if (root) setChatStudioDiskRoot(root);
-          persistStudioSnapshot(activeChatId, {
-            files,
-            projectId: projectId || null,
-            name,
-            diskRoot: root || null,
-          });
-          if (locateNote) lastFolderLocateNoteRef.current = locateNote;
-        },
-        waitUntilBound: async (root) => {
-          for (let i = 0; i < 20; i++) {
-            if (chatStudioDiskRootRef.current === root) return true;
-            await new Promise((r) => window.setTimeout(r, 25));
-          }
-          return chatStudioDiskRootRef.current === root;
-        },
-      });
-      if (openOutcome.status === 'handled') return;
+    // STEP 1 open_folder → early dispatchOwnedTurn (WAVE 1).
+    if (ownedAlreadyResolved && ownedStatus === 'edit') {
+      /* fall through to sticky hydrate + runEditTurn only */
     }
 
     // STEP 1b: Folder by name. default to catalog when we parsed a folder name.
@@ -5419,9 +5402,9 @@ export function AIChat() {
     if (turnNeedsWorkspace && !workspaceActiveAfterPending && (mode === 'general' || mode === 'code')) {
       // Create-shaped asks never hit the workspace wall — they create a folder.
       const classifiedHere = classifiedBound;
-      if (classifiedHere.kind === 'create') {
+      if (classifiedHere?.kind === 'create') {
         // Fall through: create Intent path above should have handled; if not, don't wall.
-      } else if (classifiedHere.kind === 'edit' || classifiedHere.kind === 'keep_building') {
+      } else if (classifiedHere?.kind === 'edit' || classifiedHere?.kind === 'keep_building') {
         await finishPlainReply(
           'No folder is bound yet.\n\nSay **build me a website called …** and I’ll create one, or use **+ → Open folder**.',
         );
@@ -5468,27 +5451,7 @@ export function AIChat() {
       }
     }
 
-    // STEP 4–5: Agent commands (handler).
-    {
-      const cmdOutcome = await runCmdTurn({
-        content,
-        mode,
-        composerMode: turnComposerMode,
-        agentCwd,
-        hasPackageJson,
-        assistantId,
-        finishAgentReply,
-        confirm: (message) => window.confirm(message),
-        setRunningStatus: (label) => {
-          setMessages(prev => prev.map(m => (
-            m.id === assistantId
-              ? { ...m, content: `__generating__:chat:${label}` }
-              : m
-          )));
-        },
-      });
-      if (cmdOutcome.status === 'handled') return;
-    }
+    // STEP 4–5 run_cmd → early dispatchOwnedTurn (WAVE 1).
 
     const stickyFiles = resolvedStudio.files;
     let stickyCount = Object.keys(stickyFiles).length;
@@ -6052,6 +6015,10 @@ export function AIChat() {
           visionHopMeta,
           modelId: pinnedModel.id,
           modelName: pinnedModel.name,
+          stickyModelId: sticky?.modelId,
+          stickyModelName: sticky?.modelName,
+          preferredModelId: pinnedModel.id,
+          preferredModelName: pinnedModel.name,
           pushStatus: pushAssistantStatus,
           countLineDiff,
           buildStudioTraceMessage,
@@ -6109,6 +6076,14 @@ onApplied: ({ files, updated, reply, provider, elapsedMs }) => {
         if (surgical.status !== 'miss') return;
         await finishPlainReply(
           'Could not apply that edit with a reliable patch. Try a clearer one-line ask, or pin a larger coder in Models.',
+          'NOVA · edit',
+        );
+        return;
+      }
+      // WAVE 1: owned edit path must not continue into multi-agent / weak-hop / chat generate.
+      if (ownedStatus === 'edit') {
+        await finishPlainReply(
+          'Could not apply that edit. Try a clearer one-line ask, or pin a larger coder in Models.',
           'NOVA · edit',
         );
         return;
@@ -8184,8 +8159,11 @@ onApplied: ({ files, updated, reply, provider, elapsedMs }) => {
   useEffect(() => {
     const onContinue = () => {
       setComposerMode('agent');
-      setInput('Continue');
-      void sendMessageRef.current('Continue');
+      const lastUser = [...messagesRef.current].reverse().find((m) => m.role === 'user');
+      const text = String(lastUser?.content || '').replace(/<!--[\s\S]*?-->/g, '').trim();
+      if (!text || /^continue$/i.test(text)) return;
+      setInput(text);
+      tryStartTurn(text);
     };
     window.addEventListener('NOVA:agent-continue', onContinue);
     return () => window.removeEventListener('NOVA:agent-continue', onContinue);
@@ -9374,7 +9352,7 @@ onApplied: ({ files, updated, reply, provider, elapsedMs }) => {
                         key={chip.label}
                         type="button"
                         className="text-[11px] rounded-full border border-sky-500/35 bg-sky-500/10 text-sky-200 px-3 py-1.5 hover:bg-sky-500/20 transition-colors"
-                        onClick={() => void sendMessageRef.current(chip.prompt)}
+                        onClick={() => tryStartTurn(chip.prompt)}
                       >
                         {chip.label}
                       </button>
@@ -9414,7 +9392,7 @@ onApplied: ({ files, updated, reply, provider, elapsedMs }) => {
                           <MessageContent
                             content={msg.content}
                             live={false}
-                            onPromptChipPick={(prompt) => void sendMessageRef.current(prompt)}
+                            onPromptChipPick={(prompt) => tryStartTurn(prompt)}
                           />
                         </div>
                         {(() => {
@@ -9481,7 +9459,7 @@ onApplied: ({ files, updated, reply, provider, elapsedMs }) => {
                           content={msg.content}
                           live={Boolean(generating && isLast && isAssistant && isTraceMessage(raw))}
                           messageId={msg.id}
-                          onPromptChipPick={(prompt) => void sendMessageRef.current(prompt)}
+                          onPromptChipPick={(prompt) => tryStartTurn(prompt)}
                         />
                       );
                     })()}
@@ -9542,7 +9520,11 @@ onApplied: ({ files, updated, reply, provider, elapsedMs }) => {
                       <button
                         type="button"
                         className="mt-2 text-[10px] rounded-full bg-sky-600 text-white px-2.5 py-1"
-                        onClick={() => void sendMessage('Continue the previous answer from where you stopped.')}
+                        onClick={() => {
+                          const lastUser = [...messages].reverse().find((m) => m.role === 'user');
+                          const text = String(lastUser?.content || '').replace(/<!--[\s\S]*?-->/g, '').trim();
+                          tryStartTurn(text);
+                        }}
                       >
                         Continue from cutoff
                       </button>

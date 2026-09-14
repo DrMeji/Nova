@@ -48,6 +48,15 @@ jobs:
       - run: npm run smoke:no-brain-nudge
       - run: npm run smoke:ready-gates
       - run: npm run smoke:create-quality
+      - run: npm run smoke:classify-turn
+      - run: npm run smoke:create-reply
+      - run: npm run smoke:create-intent
+      - run: npm run smoke:dispatch-contract
+      - run: npm run smoke:dispatch-hosts
+      - run: npm run smoke:edit-weak
+      - run: npm run smoke:verify-ask
+      - run: npm run smoke:brain-profile
+      - run: npm run smoke:auth-heal
       # Brain HTTP smoke only when a local brain is running (desktop app).
       - name: Brain API smoke (optional)
         env:

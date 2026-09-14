@@ -105,7 +105,7 @@ export function honestNoLiveChatReply(): string {
     'NOVA doesn’t have a live model connected for this chat yet.',
     '',
     'To start getting real answers:',
-    '1. Open Local AI and install the default local brain (Qwen2.5 1.5B). NOVA downloads llama-cli + weights for you.',
+    '1. Open Models / Local AI and install a chat brain that fits this PC (prefer 3B+). Tiny 1.5B is chat-only — never the coder.',
     '2. Or connect free capacity. Groq, Google AI Studio, OpenRouter, Hugging Face, or Together (Settings → Providers / Models → Cloud).',
     '',
     'Once something is connected, leave the picker on Nova Multimodal. it will fail over for you and keep this thread’s context.',

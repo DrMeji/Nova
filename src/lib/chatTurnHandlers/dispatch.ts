@@ -9,6 +9,7 @@ import { runCreateTurn, type CreateTurnHost, type CreateTurnOutcome } from './cr
 import { runDeleteTurn, type DeleteTurnHost } from './delete';
 import { runOpenFolderTurn, type OpenFolderTurnHost } from './openFolder';
 import { runCmdTurn, type RunCmdTurnHost } from './runCmd';
+import { runEditTurn, type RunEditTurnHost, type RunEditTurnResult } from './edit';
 
 export type TurnDispatchPlan = {
   classified: ClassifyTurnResult;
@@ -36,9 +37,13 @@ export function planTurnDispatch(
   };
 }
 
+const CANT_YET = "I can't do that yet.";
+
 /**
  * Host bag for owned kinds. Optional nested hosts mirror what AIChat passes today.
- * Missing host for a kind → that branch is skipped (continue/edit as appropriate).
+ * Missing delete/open/cmd host → plain reply + handled (never fall through to generate).
+ * Missing create host → continue (scaffold still optional at call site).
+ * editHost present → runEditTurn inside dispatch and return handled.
  */
 export type DispatchHost = {
   content: string;
@@ -56,10 +61,12 @@ export type DispatchHost = {
   deleteHost?: DeleteTurnHost;
   openFolderHost?: OpenFolderTurnHost;
   runCmdHost?: RunCmdTurnHost;
+  /** When set, edit/keep_building runs runEditTurn here and returns handled. */
+  editHost?: RunEditTurnHost;
 };
 
 export type DispatchOwnedResult =
-  | { status: 'handled'; classified: ClassifyTurnResult; createOutcome?: CreateTurnOutcome }
+  | { status: 'handled'; classified: ClassifyTurnResult; createOutcome?: CreateTurnOutcome; editOutcome?: RunEditTurnResult }
   | { status: 'edit'; classified: ClassifyTurnResult }
   | { status: 'continue'; classified: ClassifyTurnResult };
 
@@ -95,7 +102,10 @@ export async function dispatchOwnedTurn(host: DispatchHost): Promise<DispatchOwn
     }
 
     case 'delete': {
-      if (!host.deleteHost) return { status: 'continue', classified };
+      if (!host.deleteHost) {
+        if (host.finishPlainReply) await host.finishPlainReply(CANT_YET);
+        return { status: 'handled', classified };
+      }
       const outcome = await runDeleteTurn({
         ...host.deleteHost,
         content: host.deleteHost.content || host.content,
@@ -105,7 +115,10 @@ export async function dispatchOwnedTurn(host: DispatchHost): Promise<DispatchOwn
     }
 
     case 'open_folder': {
-      if (!host.openFolderHost) return { status: 'continue', classified };
+      if (!host.openFolderHost) {
+        if (host.finishPlainReply) await host.finishPlainReply(CANT_YET);
+        return { status: 'handled', classified };
+      }
       const outcome = await runOpenFolderTurn({
         ...host.openFolderHost,
         content: host.openFolderHost.content || host.content,
@@ -115,7 +128,10 @@ export async function dispatchOwnedTurn(host: DispatchHost): Promise<DispatchOwn
     }
 
     case 'run_cmd': {
-      if (!host.runCmdHost) return { status: 'continue', classified };
+      if (!host.runCmdHost) {
+        if (host.finishPlainReply) await host.finishPlainReply(CANT_YET);
+        return { status: 'handled', classified };
+      }
       const outcome = await runCmdTurn({
         ...host.runCmdHost,
         content: host.runCmdHost.content || host.content,
@@ -125,8 +141,16 @@ export async function dispatchOwnedTurn(host: DispatchHost): Promise<DispatchOwn
     }
 
     case 'edit':
-    case 'keep_building':
+    case 'keep_building': {
+      if (host.editHost) {
+        const editOutcome = await runEditTurn({
+          ...host.editHost,
+          content: host.editHost.content || host.content,
+        });
+        return { status: 'handled', classified, editOutcome };
+      }
       return { status: 'edit', classified };
+    }
 
     default:
       return { status: 'continue', classified };

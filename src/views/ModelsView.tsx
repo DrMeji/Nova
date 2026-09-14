@@ -141,7 +141,7 @@ const LOCAL_MODELS: LocalModel[] = [
   { id: 'ltx-video', name: 'LTX Video', description: 'Fast video drafts via Engine free video providers.', size: '7.1 GB', category: 'video', tiers: ['free'], tone: 'from-emerald-400 to-teal-800', initial: 'LT' },
 
   // Fast
-  { id: 'qwen25-15b', name: 'Qwen2.5 1.5B', description: 'Very fast replies on modest hardware.', size: '1.0 GB', category: 'fast', tiers: ['free'], recommended: true, tone: 'from-emerald-400 to-green-700', initial: 'Q1' },
+  { id: 'qwen25-15b', name: 'Qwen2.5 1.5B', description: 'Very fast chat-only replies on modest hardware. Never use as coder.', size: '1.0 GB', category: 'fast', tiers: ['free'], recommended: false, tone: 'from-emerald-400 to-green-700', initial: 'Q1' },
   { id: 'gemma2-2b', name: 'Gemma 2 2B', description: 'Small and snappy for quick drafts.', size: '1.6 GB', category: 'fast', tiers: ['free'], tone: 'from-teal-400 to-cyan-700', initial: 'G2' },
   { id: 'phi3-mini', name: 'Phi-3 Mini', description: 'Lightweight everyday assistant.', size: '2.3 GB', category: 'fast', tiers: ['free'], tone: 'from-cyan-400 to-sky-700', initial: 'Φ3' },
   { id: 'smollm2-1.7b', name: 'SmolLM2 1.7B', description: 'Ultra small model for instant responses.', size: '1.1 GB', category: 'fast', tiers: ['free'], tone: 'from-lime-400 to-emerald-700', initial: 'Sm' },

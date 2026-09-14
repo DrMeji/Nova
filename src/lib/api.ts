@@ -203,19 +203,24 @@ export function getHardwareClass(hw: HardwareInfo): HardwareClass {
 export function getRecommendedModel(hw: HardwareInfo): { name: string; size: string; id: string } {
   const tier = getHardwareClass(hw);
   const ramGb = parseRamGb(hw);
+  // Never recommend 1.5B as the default “brain” when a larger chat fit exists.
   if (tier === 'strong' && ramGb >= 28) {
     return { name: 'Qwen2.5-Coder 14B Instruct', size: '9.0 GB', id: 'qwen25-coder-14b' };
   }
   if (tier === 'strong') {
     return { name: 'Qwen2.5-Coder 7B Instruct', size: '4.7 GB', id: 'qwen25-coder-7b' };
   }
-  if (tier === 'standard') {
+  if (tier === 'standard' || ramGb >= 16) {
     return { name: 'Llama 3.2 3B Instruct', size: '2.0 GB', id: 'llama32-3b' };
   }
+  if (ramGb >= 8) {
+    return { name: 'Llama 3.2 3B Instruct', size: '2.0 GB', id: 'llama32-3b' };
+  }
+  // Light PC: still chat-only tiny — never pin as coder (see assertCoderAllowed).
   return { name: 'Qwen2.5 1.5B Instruct', size: '1.0 GB', id: 'qwen25-15b' };
 }
 
-/** Default chat brain for Auto / onboarding. instruct, not the tiny 1.5B, when RAM allows. */
+/** Default chat brain for Auto / onboarding. Prefer 3B+ when RAM allows; 1.5B is chat-only fallback. */
 export function getRecommendedChatModel(hw: HardwareInfo): { name: string; size: string; id: string } {
   const ramGb = parseRamGb(hw);
   if (ramGb >= 16) {
@@ -227,14 +232,20 @@ export function getRecommendedChatModel(hw: HardwareInfo): { name: string; size:
   return { name: 'Qwen2.5 1.5B Instruct', size: '1.0 GB', id: 'qwen25-15b' };
 }
 
-/** Optional second download during setup when RAM can hold a coder. */
+/** Optional second download during setup when RAM can hold a coder. Never returns 1.5B. */
 export function getRecommendedCoderModel(hw: HardwareInfo): { name: string; size: string; id: string } | null {
   const ramGb = parseRamGb(hw);
-  if (ramGb >= 16) {
+  const hasGpu =
+    hw.acceleration === 'CUDA'
+    || hw.acceleration === 'Vulkan'
+    || hw.acceleration === 'Metal';
+  // Need real headroom + preferably dedicated accel; ignore VRAM string parse failures → null.
+  if (ramGb >= 16 && hasGpu) {
     return { name: 'Qwen2.5-Coder 7B Instruct', size: '4.7 GB', id: 'qwen25-coder-7b' };
   }
-  if (ramGb >= 10) {
-    return { name: 'Qwen2.5-Coder 7B Instruct', size: '4.7 GB', id: 'qwen25-coder-7b' };
+  if (ramGb >= 16) {
+    // CPU-only 16GB: light 3B coder candidate only (BrainProfile may still block generate).
+    return { name: 'Llama 3.2 3B Instruct', size: '2.0 GB', id: 'llama32-3b' };
   }
   return null;
 }

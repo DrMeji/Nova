@@ -4,6 +4,7 @@
 
 import { applyChatReplyEdits } from '@/lib/chatAgentApply';
 import { finalizeCodingChatBubble } from '@/lib/chatCodeReply';
+import { editMiss } from '@/lib/productContract';
 
 export function shouldSkipWeakModelCodingHop(opts: {
   userMessage: string;
@@ -101,30 +102,41 @@ export async function runSurgicalEditTurn(host: SurgicalEditHost): Promise<Surgi
   if (applied.ok && applied.updated.length) {
     const verified = verifyMicroAskApplied(host.editUserMessage, applied.files);
     if (!verified.ok) {
-      const appNow = `${applied.files['src/App.jsx'] || ''}\n${applied.files['src/App.tsx'] || ''}`;
-      const softKeep = /center-word/i.test(appNow)
-        || verified.missing.every((m) => {
-          const core = String(m || '').split(/\s+/).filter((w) => w.length > 2);
-          return core.some((w) => new RegExp(w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i').test(appNow));
+      // Fail closed — no softKeep. Revert and miss.
+      const revertBlocks = applied.updated
+        .filter((p) => snapshot[p] != null)
+        .map((p) => `@@@FILE ${p}\n${snapshot[p]}`)
+        .join('\n');
+      if (revertBlocks) {
+        await applyChatReplyEdits({
+          reply: revertBlocks,
+          projectId: host.projectId,
+          projectName: host.projectLabel,
+          files: snapshot,
+          userMessage: host.editUserMessage,
+          diskRoot: host.diskRoot,
         });
-      if (!softKeep) {
-        // Explicit rollback to snapshot
-        const revertBlocks = applied.updated
-          .filter((p) => snapshot[p] != null)
-          .map((p) => `@@@FILE ${p}\n${snapshot[p]}`)
-          .join('\n');
-        if (revertBlocks) {
-          await applyChatReplyEdits({
-            reply: revertBlocks,
-            projectId: host.projectId,
-            projectName: host.projectLabel,
-            files: snapshot,
-            userMessage: host.editUserMessage,
-            diskRoot: host.diskRoot,
-          });
-        }
-        return { status: 'miss' };
       }
+      const miss = editMiss(
+        'verify_failed',
+        [
+          'I didn’t keep that edit — it didn’t match your ask.',
+          verified.missing?.length ? `Missing: ${verified.missing.join(', ')}.` : '',
+          'Try a clearer one-line change.',
+        ].filter(Boolean).join(' '),
+      );
+      host.onFailed({
+        reply: host.buildStudioTraceMessage({
+          startedAt: host.replyStartedAt,
+          elapsedMs,
+          userMessage: host.content,
+          answer: miss.message,
+          wrotePaths: [],
+          projectName: host.projectLabel,
+        }),
+        elapsedMs,
+      });
+      return { status: 'failed' };
     }
 
     const answer = finalizeCodingChatBubble({
@@ -184,6 +196,11 @@ export async function runSurgicalEditTurn(host: SurgicalEditHost): Promise<Surgi
 export type RunEditTurnHost = SurgicalEditHost & {
   modelId?: string | null;
   modelName?: string | null;
+  /** Thread-sticky coder (auto route). Prefer over pinned when gating. */
+  stickyModelId?: string | null;
+  stickyModelName?: string | null;
+  preferredModelId?: string | null;
+  preferredModelName?: string | null;
   /** Model generate with AbortSignal; capped at 45s by runEditTurn. */
   generate?: (opts: {
     signal: AbortSignal;
@@ -233,7 +250,9 @@ export async function runEditTurn(host: RunEditTurnHost): Promise<RunEditTurnRes
   {
     const { getBrainProfile, assertCoderAllowed } = await import('@/lib/brainProfile');
     const profile = await getBrainProfile();
-    const gate = assertCoderAllowed(profile, host.modelId, host.modelName);
+    const coderId = host.stickyModelId || host.preferredModelId || host.modelId;
+    const coderName = host.stickyModelName || host.preferredModelName || host.modelName;
+    const gate = assertCoderAllowed(profile, coderId, coderName);
     if (!gate.ok) {
       host.onWeakMiss?.();
       const elapsedMs = Date.now() - host.replyStartedAt;
@@ -268,8 +287,8 @@ export async function runEditTurn(host: RunEditTurnHost): Promise<RunEditTurnRes
           files,
           projectName: host.projectLabel,
           mode: 'code',
-          preferredModelId: host.modelId || undefined,
-          preferredModelName: host.modelName || undefined,
+          preferredModelId: host.stickyModelId || host.preferredModelId || host.modelId || undefined,
+          preferredModelName: host.stickyModelName || host.preferredModelName || host.modelName || undefined,
           allowFileEdits: true,
           shouldAbort: () => signal.aborted || Date.now() - started > 45_000,
         },
@@ -375,17 +394,20 @@ export async function runEditTurn(host: RunEditTurnHost): Promise<RunEditTurnRes
         diskRoot: host.diskRoot,
       });
     }
-    const failAnswer = [
-      'I didn’t keep that edit — it didn’t match your ask.',
-      askCheck.missing.length ? `Missing: ${askCheck.missing.join(', ')}.` : '',
-      'Try a clearer one-line change.',
-    ].filter(Boolean).join(' ');
+    const miss = editMiss(
+      'verify_failed',
+      [
+        'I didn’t keep that edit — it didn’t match your ask.',
+        askCheck.missing.length ? `Missing: ${askCheck.missing.join(', ')}.` : '',
+        'Try a clearer one-line change.',
+      ].filter(Boolean).join(' '),
+    );
     host.onFailed({
       reply: host.buildStudioTraceMessage({
         startedAt: host.replyStartedAt,
         elapsedMs,
         userMessage: host.content,
-        answer: failAnswer,
+        answer: miss.message,
         wrotePaths: [],
         projectName: host.projectLabel,
       }),

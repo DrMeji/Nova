@@ -61,10 +61,37 @@ if (!edits.length || !/Slow roast/i.test(String(h1)) || !/Order ahead/i.test(Str
 if (byPath['src/App.tsx'] && !/Slow roast/i.test(String(h1t))) process.exit(4);
 
 const baseReady = {
-  'src/App.jsx': files['src/App.jsx'] + '\n' + 'x'.repeat(80),
+  'src/App.jsx': `import './App.css';
+export default function App() {
+  return (
+    <div className="app">
+      <header className="hero">
+        <h1 className="hero-title">Nightcord</h1>
+        <p className="hero-copy">Live streams for creators who care about craft.</p>
+        <button type="button" className="cta">Watch now</button>
+      </header>
+      <main className="section">
+        <h2>Tonight</h2>
+        <p>Featured rooms and upcoming shows.</p>
+      </main>
+      <footer className="footer">Nightcord · stay live</footer>
+    </div>
+  );
+}
+`,
+  'src/App.css': [
+    '.app{min-height:100vh;display:flex;flex-direction:column;background:#0b1220;color:#e2e8f0;font-family:system-ui,sans-serif}',
+    '.hero{padding:4.5rem 1.75rem 3rem;background:linear-gradient(160deg,#0f172a,#1e293b);border-bottom:1px solid #334155}',
+    '.hero-title{font-size:2.75rem;font-weight:700;margin:0 0 0.85rem;letter-spacing:-0.02em}',
+    '.hero-copy{max-width:34rem;line-height:1.55;margin:0 0 1.25rem;color:#cbd5e1}',
+    '.cta{padding:0.8rem 1.35rem;border-radius:999px;border:0;background:#38bdf8;color:#0f172a;font-weight:600;cursor:pointer}',
+    '.section{padding:2rem 1.75rem;flex:1}',
+    '.section h2{margin:0 0 0.5rem;font-size:1.25rem}',
+    '.footer{padding:1rem 1.75rem;border-top:1px solid #1e293b;font-size:0.85rem;color:#94a3b8}',
+  ].join('\n'),
   'package.json': JSON.stringify({ dependencies: { vite: '5', react: '18' } }),
   'index.html': '<!doctype html><html><body><div id="root"></div><script type="module" src="/src/main.jsx"></script></body></html>',
-  'src/main.jsx': 'import App from "./App.jsx"',
+  'src/main.jsx': 'import App from "./App.jsx"; import { createRoot } from "react-dom/client"; createRoot(document.getElementById("root")).render(<App />);',
 };
 const miss = isPreviewReady(baseReady, { productName: 'Copper Mug Roasters' });
 const hit = isPreviewReady({

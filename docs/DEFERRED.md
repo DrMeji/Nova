@@ -9,7 +9,7 @@ Master list of things not done yet, half-done, or parked.
 
 | # | Item | Why first |
 |---|------|-----------|
-| **A–M** | Prior UX / chat reliability batch | ✅ Done |
+| **A–M** | Prior UX / chat reliability batch | ⚠️ Partial — Wave 1 dispatch+hosts (0.1.218); AIChat still ~9.7k; Wave 2 peel open |
 | **1** | Settings **Update 504** | ✅ Done |
 | **2** | MCP **tools/call** in Chat | ✅ Done |
 | **3** | Plugins UX polish | ✅ Done (clarity pass, not full redesign) |
@@ -30,7 +30,7 @@ Master list of things not done yet, half-done, or parked.
 4. Live name sync — re-test when inviting
 
 ### Chat / AI
-5–14. ~~Prior chat / MCP / Update items~~ ✅
+5–14. ~~Prior chat / MCP / Update items~~ — **Wave 1 (0.1.218):** one early dispatch with create/delete/open/cmd hosts; no `classifyTurn` in AIChat; no `runArkAgentLoop` / `answerStudio` in AIChat. **Still open:** mid-ladder hydrate→edit→chat; AIChat ≤2k; verifyAsk on every apply site; single PreviewSession; Electron job queue.
 
 ### Onboarding / Settings UX
 15–20. ~~Prior onboarding / plugins~~ ✅

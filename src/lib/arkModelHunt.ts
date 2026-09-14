@@ -53,7 +53,6 @@ const SEARCHES = [
 ];
 
 const MS_SEEDS = [
-  'Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF',
   'Qwen/Qwen2.5-Coder-3B-Instruct-GGUF',
   'Qwen/Qwen2.5-3B-Instruct-GGUF',
   'Qwen/Qwen3-1.7B-GGUF',
