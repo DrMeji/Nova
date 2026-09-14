@@ -24,7 +24,8 @@ export type HuntedModel = {
 const CACHE_KEY = 'NOVA:model-hunt-cache-v2';
 const CACHE_MS = 6 * 60 * 60 * 1000;
 
-const QUANT_PREF = [/q4_k_m/i, /q4_k_s/i, /q5_k_m/i, /iq4_xs/i, /q4_0/i, /q5_0/i];
+/** Prefer Q5_K_M when it fits the hunt size cap; else Q4_K_M. Never Q3/Q2 as coder. */
+const QUANT_PREF = [/q5_k_m/i, /q4_k_m/i, /q4_k_s/i, /iq4_xs/i, /q5_0/i, /q4_0/i];
 
 /** Skip Hub hits that are already the pinned NOVA Engine catalog. */
 const KNOWN_CATALOG = [
@@ -155,6 +156,8 @@ function pickGgufFile(
   const files = (siblings || [])
     .filter(s => /\.gguf$/i.test(s.rfilename || '') && !/mmproj|encoder|vision/i.test(s.rfilename || ''))
     .filter(s => !/\d+-of-\d+/i.test(s.rfilename || ''))
+    // Never recommend Q3/Q2 as coder/chat download — quality too low for Nova.
+    .filter(s => !/q3_k|q2_k|q3_0|q2_0/i.test(s.rfilename || ''))
     .map(s => ({ file: String(s.rfilename), bytes: Number(s.size) || 0 }))
     .filter(s => s.bytes > 50 * 1024 * 1024 && s.bytes <= capBytes);
   if (!files.length) return null;

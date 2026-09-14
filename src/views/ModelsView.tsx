@@ -49,6 +49,7 @@ import { FREE_SOURCES } from '@/lib/freeSources';
 import { huntModelsForPc, huntSourceBadge, type HuntedModel } from '@/lib/arkModelHunt';
 import { probeLiveCapacity, type LiveCapacity } from '@/lib/arkCapacity';
 import { isWeakCoderId } from '@/lib/brainRoles';
+import { getBrainProfile, assertCoderAllowed } from '@/lib/brainProfile';
 import { openInSystemBrowser } from '@/lib/openExternal';
 import { providerKeyUrl } from '@/lib/providerKeyUrls';
 
@@ -952,38 +953,73 @@ export function ModelsView() {
     category?: string;
   }) => {
     const { id, hunt } = target;
-    if (hunt) {
-      if (installed.has(id) || isEngineDownloading(id)) return;
 
-      if (hunt.category === 'coding') {
-        if (isWeakCoderId(id)) {
-          setLocalPrefs({ defaultModelId: id, lastChatModelId: id, activeChatId: id });
-          setOllamaNote(`${hunt.name} will be chat-only — too small for the coder role.`);
-        } else {
-          setLocalPrefs({ defaultCodeModelId: id, activeCoderId: id });
-        }
-      } else {
-        setLocalPrefs({ defaultModelId: id, lastChatModelId: id, activeChatId: id });
-      }
-
-      const needGb = hunt.sizeGb * 1.15;
-      void engineDiskSpace().then(disk => {
-        if (disk?.freeGb != null && needGb > 0 && disk.freeGb < needGb) {
-          setOllamaNote(`⚠️ Not enough space. ${hunt.name} needs ~${needGb.toFixed(1)} GB but only ${disk.freeGb.toFixed(1)} GB is free. Free up space or change the models folder in Settings → Storage.`);
+    const startDownload = async (opts: {
+      downloadId: string;
+      downloadName: string;
+      needGb: number;
+      category?: string;
+      huntMeta?: HuntedModel;
+    }) => {
+      if (opts.category === 'coding' && !isWeakCoderId(opts.downloadId)) {
+        const profile = await getBrainProfile(true);
+        const gate = assertCoderAllowed(profile, opts.downloadId, opts.downloadName);
+        if (!gate.ok) {
+          setOllamaNote(`Blocked as coder on this PC: ${gate.reason}`);
+          setLocalPrefs({
+            defaultModelId: opts.downloadId,
+            lastChatModelId: opts.downloadId,
+            activeChatId: opts.downloadId,
+          });
           return;
         }
-        setOllamaNote(`Downloading ${hunt.name}…`);
-        void startEngineDownload({
-          id: hunt.id,
-          name: hunt.name,
-          source: 'models',
-          hunt: {
-            url: hunt.url,
-            sizeGb: hunt.sizeGb,
-            detail: hunt.detail,
-            category: hunt.category,
-          },
+        setLocalPrefs({ defaultCodeModelId: opts.downloadId, activeCoderId: opts.downloadId });
+      } else if (opts.category === 'coding' && isWeakCoderId(opts.downloadId)) {
+        setLocalPrefs({
+          defaultModelId: opts.downloadId,
+          lastChatModelId: opts.downloadId,
+          activeChatId: opts.downloadId,
         });
+        setOllamaNote(`${opts.downloadName} will be chat-only — too small for the coder role.`);
+      } else {
+        setLocalPrefs({
+          defaultModelId: opts.downloadId,
+          lastChatModelId: opts.downloadId,
+          activeChatId: opts.downloadId,
+        });
+      }
+
+      const disk = await engineDiskSpace();
+      if (disk?.freeGb != null && opts.needGb > 0 && disk.freeGb < opts.needGb) {
+        setOllamaNote(
+          `⚠️ Not enough space. ${opts.downloadName} needs ~${opts.needGb.toFixed(1)} GB but only ${disk.freeGb.toFixed(1)} GB is free. Free up space or change the models folder in Settings → Storage.`,
+        );
+        return;
+      }
+      setOllamaNote(`Downloading ${opts.downloadName}…`);
+      void startEngineDownload({
+        id: opts.downloadId,
+        name: opts.downloadName,
+        source: 'models',
+        hunt: opts.huntMeta
+          ? {
+              url: opts.huntMeta.url,
+              sizeGb: opts.huntMeta.sizeGb,
+              detail: opts.huntMeta.detail,
+              category: opts.huntMeta.category,
+            }
+          : undefined,
+      });
+    };
+
+    if (hunt) {
+      if (installed.has(id) || isEngineDownloading(id)) return;
+      void startDownload({
+        downloadId: hunt.id,
+        downloadName: hunt.name,
+        needGb: hunt.sizeGb * 1.15,
+        category: hunt.category,
+        huntMeta: hunt,
       });
       return;
     }
@@ -993,30 +1029,11 @@ export function ModelsView() {
     }
     if (installed.has(id) || isEngineDownloading(id)) return;
     const model = LOCAL_MODELS.find(m => m.id === id);
-
-    if (model?.category === 'coding') {
-      if (isWeakCoderId(id)) {
-        setLocalPrefs({ defaultModelId: id, lastChatModelId: id, activeChatId: id });
-        setOllamaNote(`${model?.name || id} will be chat-only — too small for the coder role.`);
-      } else {
-        setLocalPrefs({ defaultCodeModelId: id, activeCoderId: id });
-      }
-    } else {
-      setLocalPrefs({ defaultModelId: id, lastChatModelId: id, activeChatId: id });
-    }
-
-    const needGb = modelSizeGb(model || { size: '0' }) * 1.15;
-    void engineDiskSpace().then(disk => {
-      if (disk?.freeGb != null && needGb > 0 && disk.freeGb < needGb) {
-        setOllamaNote(`⚠️ Not enough space. ${model?.name || id} needs ~${needGb.toFixed(1)} GB but only ${disk.freeGb.toFixed(1)} GB is free. Free up space or change the models folder in Settings → Storage.`);
-        return;
-      }
-      setOllamaNote(`Downloading ${model?.name || id}…`);
-      void startEngineDownload({
-        id,
-        name: model?.name || id,
-        source: 'models',
-      });
+    void startDownload({
+      downloadId: id,
+      downloadName: model?.name || id,
+      needGb: modelSizeGb(model || { size: '0' }) * 1.15,
+      category: model?.category,
     });
   };
 

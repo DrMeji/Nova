@@ -229,6 +229,34 @@ export async function runEditTurn(host: RunEditTurnHost): Promise<RunEditTurnRes
     return { status: 'weak_miss' };
   }
 
+  // BrainProfile: block wrong-size / wrong-VRAM coder before any generate.
+  {
+    const { getBrainProfile, assertCoderAllowed } = await import('@/lib/brainProfile');
+    const profile = await getBrainProfile();
+    const gate = assertCoderAllowed(profile, host.modelId, host.modelName);
+    if (!gate.ok) {
+      host.onWeakMiss?.();
+      const elapsedMs = Date.now() - host.replyStartedAt;
+      const answer = [
+        gate.reason,
+        '',
+        `Ask: “${String(host.editUserMessage || '').trim().slice(0, 160)}”`,
+        '',
+        'Pin a fitting coder in **Models**, or keep using one-line surgical edits / scaffold.',
+      ].join('\n');
+      const reply = host.buildStudioTraceMessage({
+        startedAt: host.replyStartedAt,
+        elapsedMs,
+        userMessage: host.content,
+        answer,
+        wrotePaths: [],
+        projectName: host.projectLabel,
+      });
+      host.onFailed({ reply, elapsedMs });
+      return { status: 'weak_miss' };
+    }
+  }
+
   if (!host.generate) {
     // Default owner: answerStudio lives here — not in AIChat.
     const { answerStudio } = await import('@/lib/studioAnswerEngine');

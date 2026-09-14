@@ -7,6 +7,7 @@ export {
   pendingCreateBootstrap,
   runCreateTurn,
   teachableCreateError,
+  assertCreateMultiModelOk,
   type CreateTurnHost,
   type CreateTurnOutcome,
 } from './create';

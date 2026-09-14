@@ -188,6 +188,10 @@ function AppContent() {
 
 function HuntOnLaunch() {
   useEffect(() => startModelHuntCycle(), []);
+  useEffect(() => {
+    // Warm BrainProfile once so Chat gates have a cached probe.
+    void import('@/lib/brainProfile').then((m) => m.getBrainProfile(true));
+  }, []);
   return null;
 }
 

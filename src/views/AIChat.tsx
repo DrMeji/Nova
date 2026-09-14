@@ -115,18 +115,9 @@ import {
   type NovaSkillPack,
 } from '@/lib/novaSkills';
 import {
-  runArkAgentLoop,
   shouldRunAgentLoop,
-  agentLoopPreferCloud,
-  agentLoopStepsToTrace,
 } from '@/lib/arkAgentLoop';
 import { parseAddCommentAsk, applyLineComment, applyVisibleHtmlMarker, wantsVisiblePreviewMarker } from '@/lib/arkQuickEdit';
-import {
-  saveAgentContinue,
-  loadAgentContinue,
-  clearAgentContinue,
-  looksLikeAgentContinueAsk,
-} from '@/lib/arkAgentContinue';
 import { beginChatInflight, endChatInflight, hasChatInflight } from '@/lib/chatInflight';
 import { looksLikeNsfwAsk, nsfwBlockedReply } from '@/lib/nsfwGate';
 import {
@@ -194,7 +185,6 @@ import {
 } from '@/lib/createProjectIntent';
 import {
   handlePlanTurnReply,
-  runCreateTurn,
   shouldSkipWeakModelCodingHop,
   weakModelMicroEditReply,
   runSurgicalEditTurn,
@@ -4487,7 +4477,7 @@ export function AIChat() {
       }
     }
 
-        // EARLY_OWNED_DISPATCH_V216 — create/plan before any generate.
+        // EARLY_OWNED_DISPATCH_V217 — every kind before generate.
     if (mode === 'general' || mode === 'code') {
       const earlyClassified = classifyTurn(content, {
         diskRoot: chatStudioDiskRootRef.current || chatStudioDiskRoot || resolvedStudio.diskRoot,
@@ -4495,7 +4485,8 @@ export function AIChat() {
         projectId: chatStudioProjectIdRef.current || resolvedStudio.projectId,
         chatId: activeChatId,
       });
-      if (earlyClassified.kind === 'create' || earlyClassified.kind === 'plan') {
+      // EARLY_OWNED_DISPATCH_V217 — every kind; hosts for delete/open/cmd still move up later.
+      {
         const earlyIntent = parseNewProjectIntent(content) || null;
         const renameFromAsk = extractProjectName(content);
         const createIntentEarly = earlyIntent && renameFromAsk && !/^(My App|New App|App)$/i.test(renameFromAsk)
@@ -4555,6 +4546,7 @@ export function AIChat() {
           },
         });
         if (owned.status === 'handled') return;
+        // edit → fall through to runEditTurn; chat → runChatTurn; other kinds without hosts continue.
       }
     }
 
@@ -4993,40 +4985,7 @@ export function AIChat() {
       }));
       return;
     }
-    if (
-      (mode === 'general' || mode === 'code')
-      && classifiedBound.kind === 'create'
-      && diskIntent.type !== 'add_file'
-    ) {
-      const createOutcome = await runCreateTurn({
-        content,
-        chatId: activeChatId,
-        mode,
-        workspaceBound: workspaceActiveForCreate,
-        createIntent,
-        classifiedCreateName: classifiedBound.createName,
-        messages: messagesRef.current,
-        routeChatId: routeChatIdRef.current,
-        pushStatus: pushAssistantStatus,
-        stopIfSuperseded,
-        finishPlainReply,
-        syncGrants: syncWorkspaceGrantsFromPrefs,
-        commitStudio: (opts) => {
-          commitStudioForChat(activeChatId, opts);
-        },
-        setChatCodePill,
-        shouldPaintStudioLive,
-        setCodePillSticky,
-        renameChat,
-        addChat: (chat) => addChat(chat as never),
-        setLastDiskTarget,
-        clearPending: clearLastPendingGreenfield,
-        getPending: getLastPendingGreenfield,
-        previewFromText,
-      });
-      if (createOutcome.status === 'handled' || createOutcome.status === 'failed') return;
-      // fallthrough_edit → continue into edit ladder
-    }
+    // Duplicate create path retired — early dispatchOwnedTurn owns create (v0.1.217).
 
     // PC read file. AFTER create/greenfield so build briefs never become "open SignalDesk.txt".
     // Use pendingAttaches here — `attaches` only exists in handleSend and threw ReferenceError,
@@ -6161,6 +6120,12 @@ onApplied: ({ files, updated, reply, provider, elapsedMs }) => {
         && (workspaceProjectId || chatStudioDiskRootRef.current)
         && wantsMultiAgentTurn(content, turnComposerMode === 'multitask')
         && stickyCount > 0
+        && (await (async () => {
+          const { getBrainProfile, assertMultiModelAllowed } = await import('@/lib/brainProfile');
+          const { getLocalPrefs } = await import('@/lib/localPrefs');
+          if (!getLocalPrefs().multiModelCreate && turnComposerMode !== 'multitask') return false;
+          return assertMultiModelAllowed(await getBrainProfile()).ok;
+        })())
       ) {
         setChatTurnStatus({
           chatId: activeChatId,
@@ -6195,119 +6160,8 @@ onApplied: ({ files, updated, reply, provider, elapsedMs }) => {
         // If multi-agent produced nothing useful, fall through to normal edit path.
       }
 
-      // Level-B agent tool loop (search → read → edit → run → verify).
-      if (
-        allowEdits
-        && (workspaceProjectId || chatStudioDiskRootRef.current)
-        && shouldRunAgentLoop({
-          composerMode: turnComposerMode,
-          hasWorkspace: true,
-          message: content,
-        })
-      ) {
-        if (stickyCount === 0) {
-          finishAgentReply(
-            'Bound folder path is set, but NOVA could not load files from disk yet. Use **+ → Open folder** again on this chat, then retry.',
-            'NOVA · agent',
-          );
-          return;
-        }
-        setChatTurnStatus({
-          chatId: activeChatId,
-          assistantId,
-          label: 'Agent · planning…',
-        });
-        const loopPreferCloud = agentLoopPreferCloud(stickyFiles, editUserMessage);
-        const continueKey = activeChatId || 'chat';
-        const prior = looksLikeAgentContinueAsk(content)
-          ? loadAgentContinue(continueKey)
-          : null;
-        const loopBrief = prior?.brief || editUserMessage;
-        const loop = await runArkAgentLoop({
-          brief: loopBrief,
-          files: stickyFiles,
-          projectId: workspaceProjectId || resolvedStudio.projectId || activeChatId || 'chat-project',
-          projectName: projectLabel,
-          diskRoot: chatStudioDiskRootRef.current,
-          priorObservations: prior?.observations,
-          shouldAbort: () => mySeq !== genSeqRef.current || stopRequestedRef.current,
-          onStep: (step) => {
-            if (mySeq !== genSeqRef.current) return;
-            setChatTurnStatus({
-              chatId: activeChatId,
-              assistantId,
-              label: `Agent · ${step.label}`,
-            });
-          },
-          callModel: async ({ prompt }) => {
-            const routed = await arkRoute({
-              message: prompt,
-              kind: 'coding',
-              preferCloudCoding: loopPreferCloud,
-              history: [],
-            });
-            return {
-              reply: routed.reply || '',
-              modelName: routed.modelName,
-              providerLabel: routerProviderLabel(routed, 'NOVA · agent'),
-            };
-          },
-        });
-        if (await stopIfSuperseded()) return;
-        if (loop.updated.length || loop.ok || loop.steps.some(s => s.tool === 'write' || s.tool === 'patch' || s.tool === 'done')) {
-          setChatStudioFiles(loop.files);
-          chatStudioFilesRef.current = loop.files;
-          resolvedStudio.files = loop.files;
-          setChatCodePill(activeChatId, true);
-          setCodePillSticky(true);
-          persistStudioSnapshot(activeChatId, {
-            files: loop.files,
-            projectId: workspaceProjectId,
-            name: projectLabel,
-          });
-          void pushLivePreview(loop.files, false);
-          const traced = encodeTraceMessage({
-            startedAt: replyStartedAt,
-            done: true,
-            steps: agentLoopStepsToTrace(loop.steps),
-            answer: loop.reply,
-            changedPaths: loop.updated,
-            fileChanges: (loop.updated || []).map(path => {
-            const before = String(stickyFiles?.[path] || '');
-            const after = String(loop.files?.[path] || '');
-            if (before || after) {
-              const diff = countLineDiff(before, after);
-              return { path, added: Math.max(0, diff.added), removed: Math.max(0, diff.removed) };
-            }
-            return { path, added: 1, removed: 0 };
-          }),
-            canContinue: loop.hitStepCap,
-          });
-          const provider = loop.providerLabel
-            || (loop.hitStepCap ? 'NOVA · agent (continue)' : 'NOVA · agent');
-          finishAgentReply(
-            visionHopMeta ? `${traced}\n\n_Vision hop: ${visionHopMeta}_` : traced,
-            visionHopMeta ? `${provider} · vision` : provider,
-          );
-          if (loop.hitStepCap) {
-            saveAgentContinue({
-              chatKey: continueKey,
-              brief: loopBrief,
-              observations: loop.observations,
-              updated: loop.updated,
-              projectId: workspaceProjectId || resolvedStudio.projectId || activeChatId || 'chat-project',
-              projectName: projectLabel,
-              diskRoot: chatStudioDiskRootRef.current,
-              at: Date.now(),
-            });
-          } else {
-            clearAgentContinue(continueKey);
-          }
-          return;
-        }
-        // Empty loop → fall through to one-shot coding
-      }
-
+      // Level-B agent tool loop removed from AIChat (v0.1.217).
+      // Capable coder hops go through runEditTurn + BrainProfile gates only.
       // Fast path: deterministic UI patches. surgical tweaks + layout rebuilds.
       if (allowEdits && (workspaceProjectId || chatStudioDiskRootRef.current)) {
         const { finalizeWebEdits } = await import('@/lib/webProjectCanon');

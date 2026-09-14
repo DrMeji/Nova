@@ -26,8 +26,22 @@ import {
   startCreateJob,
   updateCreateJob,
 } from '@/lib/createJobStore';
+import { getLocalPrefs } from '@/lib/localPrefs';
 
-export { pendingCreateBootstrap } from './createBootstrap';
+export { pendingCreateBootstrap };
+
+/**
+ * Stage-2 multi-model polish only when pref is on AND this PC can hold two locals.
+ * Call before any multi-model create path; scaffold create itself never needs this.
+ */
+export async function assertCreateMultiModelOk(): Promise<{ ok: boolean; reason?: string }> {
+  if (!getLocalPrefs().multiModelCreate) {
+    return { ok: false, reason: 'multiModelCreate pref is off' };
+  }
+  const { getBrainProfile, assertMultiModelAllowed } = await import('@/lib/brainProfile');
+  const gate = assertMultiModelAllowed(await getBrainProfile());
+  return gate.ok ? { ok: true } : { ok: false, reason: gate.reason };
+}
 
 export type CreateTurnOutcome =
   | { status: 'handled' }

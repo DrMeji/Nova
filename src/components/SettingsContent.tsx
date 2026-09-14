@@ -165,6 +165,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
   const [hw, setHw] = useState<HardwareInfo>(() => loadHardwareSnapshot() || detectHardware());
   const [hwScanning, setHwScanning] = useState(false);
   const [hwFlash, setHwFlash] = useState('');
+  const [brainProfileReason, setBrainProfileReason] = useState('');
   const [arkCopied, setArkCopied] = useState(false);
   const [deleteAccountBusy, setDeleteAccountBusy] = useState(false);
   const [deleteAccountMsg, setDeleteAccountMsg] = useState<string | null>(null);
@@ -220,6 +221,13 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
     void getEngineStatus().then(setEngineStatus).catch(() => undefined);
     void engineDiskSpace().then(setDiskSpace).catch(() => undefined);
   }, [activeSection]);
+
+  useEffect(() => {
+    if (activeSection !== 'hardware') return;
+    void import('@/lib/brainProfile').then((m) =>
+      m.getBrainProfile(true).then((p) => setBrainProfileReason(p.reason)),
+    );
+  }, [activeSection, hw]);
 
   useEffect(() => {
     const syncSkills = () => setEnabledSkills(getEnabledSkillIds());
@@ -1574,6 +1582,16 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                     <span className="text-content-primary text-right min-w-0 truncate">{hw.acceleration}</span>
                   </div>
                   <div className="flex justify-between gap-3 text-sm">
+                    <span className="text-content-secondary">This PC</span>
+                    <span className="text-content-primary text-right min-w-0 text-xs leading-snug max-w-[70%]">
+                      {brainProfileReason || (getHardwareClass(hw) === 'strong'
+                        ? 'High end'
+                        : getHardwareClass(hw) === 'standard'
+                          ? 'Mid range'
+                          : 'Light')}
+                    </span>
+                  </div>
+                  <div className="flex justify-between gap-3 text-sm">
                     <span className="text-content-secondary">Profile</span>
                     <span className="text-content-primary text-right">
                       {getHardwareClass(hw) === 'strong'
@@ -1595,6 +1613,9 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
                       setHw(info);
                       setHwScanning(false);
                       setHwFlash(info.accurate ? 'Updated' : 'Approximate scan');
+                      void import('@/lib/brainProfile').then((m) =>
+                        m.getBrainProfile(true).then((p) => setBrainProfileReason(p.reason)),
+                      );
                       window.dispatchEvent(new Event('NOVA:hardware-rescanned'));
                       window.setTimeout(() => setHwFlash(''), 2000);
                     });
