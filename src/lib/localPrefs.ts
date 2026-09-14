@@ -166,7 +166,7 @@ const DEFAULT_PREFS: LocalPrefs = {
   allowDocumentsFolderAccess: true,
   allowFullPcAccess: false,
   agentExecutionMode: 'allowlist',
-  agentLoopEnabled: true,
+  agentLoopEnabled: false,
   agentLoopInWorkspace: false,
   agentLoopMaxSteps: 24,
   multiModelCreate: false,

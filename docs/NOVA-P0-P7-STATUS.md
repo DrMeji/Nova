@@ -1,20 +1,24 @@
 # NOVA P0–P7 Implementation Status
 
-Last updated: 2026-09-13 (v0.1.218 Wave 1 reliability)
+Last updated: 2026-09-13 (v0.1.220 basic public ready ~82)
 
 ## Honest summary
 
 | Priority | Status |
 |----------|--------|
-| **P0** Chat turn ownership | **In progress** — `dispatchOwnedTurn` + hosts for create/plan/delete/open/cmd; AIChat mid-ladder still large (~9.7k). Target AIChat ≤ 2k. |
-| **P1** Image recreate/upscale | **Removed** from product UI |
-| **P2** Model routing + BrainProfile | **Partial** — BrainProfile/VRAM gates wired; recommenders cleaned; Models+LocalAI+Brain still split |
-| **P3** File ops | **Working** — handlers + disk guards; winget/choco blocked |
-| **P4** Preview / localhost | **Partial** — dual Vite/static still exists; createJob preview attach not single session |
-| **P5** Voice / Video / Call | Voice live (conversation only). Image/Video/Call **removed** |
-| **P6** Social | **Partial** — guest + RLS/SMTP still ops |
-| **P7** Ship polish | Releases on Nova-Source + public Nova; Authenticode cert still ops |
+| **P0** Chat turn ownership | **Done for 80%** — AIChat ≈150; useAIChatSend ≈315; chatTurnHosts |
+| **P1** Image recreate/upscale | **Removed** (parked) |
+| **P2** Model routing + BrainProfile | **Done** — Brain hub; sticky + router gates; profile + models dir |
+| **P3** File ops | **Working** |
+| **P4** Preview / localhost | **Done for 80%** — getOrAttachPreview; attach-only |
+| **P5** Voice / Video / Call | Voice live. Image/Video/Call **removed** |
+| **P6** Social | Guest local OK; SMTP/RLS **ops** |
+| **P7** Ship polish | 0.1.220; Authenticode **ops**; Electron guest-local if no Supabase env |
+
+## Score
+
+~**82/100** basic public ready (create → bind → edit → Preview). Ops (cert/SMTP/RLS) still for ~90.
 
 ## Do not trust older rows
 
-Anything claiming Image/Video “Working” or “chat reliability done” before **0.1.218** is stale.
+Anything claiming AIChat 9.7k or hard black-screen on Electron without keys before **0.1.220** is stale.

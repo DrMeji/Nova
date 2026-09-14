@@ -328,6 +328,7 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
       markCreateJobNpm(jobId);
       void bootstrapProjectWorkspace(originDiskRoot, scaffoldKind, {
         files: createFilesAcc,
+        preferPreviewUrl: null,
       }).then((boot: ProjectBootstrapResult) => {
         if (boot.npmInstalled && boot.previewLive) {
           markCreateJobReady(jobId, boot.devServerUrl || null);

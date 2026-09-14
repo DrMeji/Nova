@@ -1,7 +1,7 @@
 {
   "name": "nova",
   "private": true,
-  "version": "0.1.219",
+  "version": "0.1.220",
   "type": "module",
   "main": "electron/main.cjs",
   "description": "NOVA — AI Creation Studio desktop app",
@@ -13,6 +13,7 @@
   "homepage": "https://github.com/DrMeji/Nova/releases",
   "scripts": {
     "dev": "vite",
+    "prebuild": "node scripts/check-env-for-build.mjs",
     "build": "vite build",
     "preview": "vite preview",
     "lint": "eslint .",
@@ -56,6 +57,8 @@
     "smoke:verify-ask": "tsx --tsconfig tsconfig.app.json scripts/check-verify-ask.mjs",
     "smoke:brain-profile": "tsx --tsconfig tsconfig.app.json scripts/check-brain-profile.mjs",
     "smoke:auth-heal": "tsx --tsconfig tsconfig.app.json scripts/check-auth-session-heal.mjs",
+    "smoke:preview-session": "tsx --tsconfig tsconfig.app.json scripts/smoke-preview-session.mjs",
+    "smoke:bind-isolation": "tsx --tsconfig tsconfig.app.json scripts/smoke-bind-isolation.mjs",
     "website:dev": "npm --prefix website run dev",
     "website:build": "npm --prefix website run build"
   },

@@ -38,6 +38,9 @@ const {
   agentLoopMaxSteps,
   runArkAgentLoop,
 } = await import('../src/lib/arkAgentLoop.ts');
+const { setLocalPrefs } = await import('../src/lib/localPrefs.ts');
+// Pref defaults off (S008); enable for gate + loop assertions in this smoke.
+setLocalPrefs({ agentLoopEnabled: true });
 const {
   filterAgentFiles,
   listAgentTree,

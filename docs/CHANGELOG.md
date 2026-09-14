@@ -4,6 +4,13 @@ Product release notes for Settings → Update and release packaging.
 
 > **Canonical home:** this file. In-app Settings reads `src/lib/changelog.ts` (`ARK_CHANGELOG`).
 
+## 0.1.220
+
+- Basic public ready (~80–85): AIChat shell thin; `useAIChatSend` ≤400 with `chatTurnHosts`
+- Preview SSOT attach-only; bind-isolation + preview-session smokes
+- Electron guest-local boot when Supabase env missing (no black screen)
+- Build env guard (`check-env-for-build.mjs`); Brain shows profile + models dir
+
 ## 0.1.219
 
 - Wave 2 mid-ladder peel: AIChat ≤3400 lines; send = hydrate + dispatch(editHost+chatHost) + one runChatTurn

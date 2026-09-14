@@ -117,6 +117,7 @@ const arkDesktopApi = {
   previewUpdate: (payload) => ipcRenderer.invoke('NOVA:preview-update', payload),
   previewReload: (projectId) => ipcRenderer.invoke('NOVA:preview-reload', projectId),
   previewSession: (cwd) => ipcRenderer.invoke('NOVA:preview-session', cwd),
+  getOrAttachPreview: (cwd) => ipcRenderer.invoke('NOVA:preview-get-or-attach', cwd),
   mediaLibrary: () => ipcRenderer.invoke('NOVA:media-library'),
   mediaClear: () => ipcRenderer.invoke('NOVA:media-clear'),
   mediaGet: (id) => ipcRenderer.invoke('NOVA:media-get', id),
@@ -195,6 +196,8 @@ if (!isPackagedApp) {
     'projectWrite',
     'agentRun',
     'agentStartDevServer',
+    'getOrAttachPreview',
+    'previewSession',
   ];
   const absent = required.filter((k) => typeof arkDesktopApi[k] !== 'function');
   if (absent.length) {

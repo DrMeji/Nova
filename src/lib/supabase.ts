@@ -6,11 +6,22 @@ const viteEnv = (import.meta as unknown as { env?: Record<string, unknown> }).en
 const supabaseUrl = (typeof viteEnv?.VITE_SUPABASE_URL === 'string' ? viteEnv.VITE_SUPABASE_URL : '').trim();
 const supabaseAnonKey = (typeof viteEnv?.VITE_SUPABASE_ANON_KEY === 'string' ? viteEnv.VITE_SUPABASE_ANON_KEY : '').trim();
 
-/** Set when the production bundle was built without Vite env. UI should show this, not go blank. */
+const missingSupabase = !supabaseUrl || !supabaseAnonKey;
+
+/**
+ * Hard brick only for browser builds without env.
+ * Electron desktop may boot guest-local (create/bind/preview) when cloud keys
+ * were not baked in — show supabaseCloudWarning instead of a black screen.
+ */
 export const supabaseConfigError =
-  !supabaseUrl || !supabaseAnonKey
+  missingSupabase && typeof window !== 'undefined' && !(window as { arkDesktop?: unknown }).arkDesktop
     ? 'NOVA was built without Supabase config (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY).'
     : null;
+
+/** Non-blocking: cloud sign-in / sync unavailable until rebuilt with env. */
+export const supabaseCloudWarning = missingSupabase
+  ? 'Cloud sign-in is off (no Supabase env in this build). Guest local create still works.'
+  : null;
 
 /**
  * auth-js builds sessions as `{ expires_at: now+expires_in, ...data }` and the

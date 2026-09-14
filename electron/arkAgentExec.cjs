@@ -28,6 +28,25 @@ function getPreviewSession(cwd) {
 }
 
 /**
+ * If a live session already owns this cwd, return its URL (no new Vite).
+ * Dead map entries are cleared so a later start can own the cwd again.
+ * @param {string} cwd
+ * @returns {Promise<{ ok: true, cwd: string, url: string, attached: true, reused: true } | null>}
+ */
+async function attachLivePreviewSession(cwd) {
+  const existing = getPreviewSession(cwd);
+  if (!existing?.url) return null;
+  const cwdKey = String(cwd || '').trim().toLowerCase();
+  const port = portFromUrl(existing.url);
+  if (await httpProbePortAny(port)) {
+    return { ok: true, cwd: existing.cwd || cwdKey, url: existing.url, attached: true, reused: true };
+  }
+  try { existing.child?.kill?.(); } catch { /* ignore */ }
+  if (cwdKey) devServersByCwd.delete(cwdKey);
+  return null;
+}
+
+/**
  * Serialize npm/pnpm/yarn installs app-wide. Parallel node_modules storms
  * freeze the whole PC (Defender + disk) — YouTube and everything hitch.
  */
@@ -414,15 +433,8 @@ async function agentStartDevServer(payload) {
   if (!cwdRes.ok) return cwdRes;
 
   const cwdKey = cwdRes.path.toLowerCase();
-  const existing = getPreviewSession(cwdRes.path);
-  if (existing?.url) {
-    const port = portFromUrl(existing.url);
-    if (await httpProbePortAny(port)) {
-      return { ok: true, cwd: cwdRes.path, url: existing.url, reused: true };
-    }
-    try { existing.child?.kill?.(); } catch { /* ignore */ }
-    devServersByCwd.delete(cwdKey);
-  }
+  const attached = await attachLivePreviewSession(cwdRes.path);
+  if (attached) return attached;
 
   const pkgPath = path.join(cwdRes.path, 'package.json');
   if (!fs.existsSync(pkgPath)) {
@@ -494,15 +506,8 @@ async function agentStartFolderPreview(payload) {
   const cwd = cwdRes.path;
   const cwdKey = cwd.toLowerCase();
 
-  const existing = getPreviewSession(cwd);
-  if (existing?.url) {
-    const port = portFromUrl(existing.url);
-    if (await httpProbePortAny(port)) {
-      return { ok: true, cwd, url: existing.url, reused: true };
-    }
-    try { existing.child?.kill?.(); } catch { /* ignore */ }
-    devServersByCwd.delete(cwdKey);
-  }
+  const attached = await attachLivePreviewSession(cwd);
+  if (attached) return attached;
 
   // Reuse a server only when THIS cwd already owns it in our map (checked above).
   // Do not attach to arbitrary localhost ports listed in run.bat — those may belong
@@ -536,11 +541,31 @@ async function agentStartFolderPreview(payload) {
   return { ok: false, error: 'No live preview server for this folder.' };
 }
 
+/**
+ * Preview SSOT: attach to an existing cwd session when live; otherwise start folder preview.
+ * Never starts a second Vite while a live URL already exists for the same cwd.
+ * @param {string | { cwd?: string }} cwdOrPayload
+ */
+async function getOrAttachPreview(cwdOrPayload) {
+  const cwd = typeof cwdOrPayload === 'string'
+    ? cwdOrPayload
+    : (cwdOrPayload?.cwd || '');
+  const cwdRes = resolveCwd(cwd);
+  if (!cwdRes.ok) return cwdRes;
+
+  const attached = await attachLivePreviewSession(cwdRes.path);
+  if (attached) return attached;
+
+  return agentStartFolderPreview({ cwd: cwdRes.path });
+}
+
 module.exports = {
   agentRun,
   agentStartDevServer,
   agentStartFolderPreview,
   getPreviewSession,
+  getOrAttachPreview,
+  attachLivePreviewSession,
   commandAllowed,
   loadExecutionMode,
 };

@@ -120,6 +120,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
   const [hwScanning, setHwScanning] = useState(false);
   const [hwFlash, setHwFlash] = useState('');
   const [brainProfileReason, setBrainProfileReason] = useState('');
+  const [userDataProfile, setUserDataProfile] = useState('');
   const [arkCopied, setArkCopied] = useState(false);
   const [deleteAccountBusy, setDeleteAccountBusy] = useState(false);
   const [deleteAccountMsg, setDeleteAccountMsg] = useState<string | null>(null);
@@ -171,7 +172,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
   }, []);
 
   useEffect(() => {
-    if (activeSection !== 'ai') return;
+    if (activeSection !== 'hardware' && activeSection !== 'ai') return;
     void getEngineStatus().then(setEngineStatus).catch(() => undefined);
     void engineDiskSpace().then(setDiskSpace).catch(() => undefined);
   }, [activeSection]);
@@ -194,6 +195,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
     void window.arkDesktop?.appMeta?.()
       .then(meta => {
         if (meta?.version) setAppVersion(meta.version);
+        if (meta?.userDataProfile) setUserDataProfile(String(meta.userDataProfile));
       })
       .catch(() => {});
     void window.arkDesktop?.signingStatus?.()
@@ -497,6 +499,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
     keyDraft, setKeyDraft, keyTestMsg, setKeyTestMsg, keyTestFor, setKeyTestFor,
     showLegacyProviders, setShowLegacyProviders, keyedCount,
     hw, setHw, hwScanning, setHwScanning, hwFlash, setHwFlash, brainProfileReason, setBrainProfileReason,
+    userDataProfile,
     localReports, setLocalReports, cacheBusy, runClearChatCache, runClearAppCaches,
     installedModels, modelUsedGb, modelPercent, diskTotalGb, diskUsedGb, diskUsedPercent,
     deletingModelId, runDeleteModel, refreshStorage,

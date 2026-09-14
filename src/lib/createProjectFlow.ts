@@ -10,6 +10,7 @@ import { safeProjectWrite } from '@/lib/projectWriteSafe';
 import { runAgentCommand } from '@/lib/chatAgentExec';
 import { cleanProductTitle } from '@/lib/freshSpaFromBrief';
 import { slugifyProjectName } from '@/lib/projectNames';
+import { attachPreviewIfExists, isPlaceholderPreviewUrl } from '@/lib/projectPreview';
 
 export type ProjectBootstrapResult = {
   npmInstalled: boolean;
@@ -320,7 +321,7 @@ function npmInstallLooksFailed(outcome: { ok?: boolean; reply?: string; handled?
 export async function bootstrapProjectWorkspace(
   projectPath: string,
   kind: NewProjectIntent['kind'],
-  opts?: { files?: Record<string, string> },
+  opts?: { files?: Record<string, string>; preferPreviewUrl?: string | null },
 ): Promise<ProjectBootstrapResult> {
   if (!projectPath) {
     return { npmInstalled: true };
@@ -335,6 +336,15 @@ export async function bootstrapProjectWorkspace(
   // Static HTML/CSS/JS scaffolds (calculator, landings, etc.) must never run npm.
   if (!diskHasPkg || !projectUsesNpm(kind)) {
     return { npmInstalled: true };
+  }
+
+  // If createJob already has a live URL, attach only — never start another Vite.
+  const earlyAttach = await attachPreviewIfExists({
+    cwd: projectPath,
+    preferUrl: opts?.preferPreviewUrl,
+  });
+  if (earlyAttach.ok) {
+    return { npmInstalled: true, devServerUrl: earlyAttach.url, previewLive: true };
   }
 
   const install = await runAgentCommand({
@@ -367,15 +377,29 @@ export async function bootstrapProjectWorkspace(
   }
 
   // Prefer an already-running create/preview session — never start a second Vite.
-  if (window.arkDesktop?.previewSession) {
-    try {
-      const session = await window.arkDesktop.previewSession(projectPath);
-      if (session?.ok && session.url) {
-        return { npmInstalled: true, devServerUrl: session.url, previewLive: true };
-      }
-    } catch {
-      /* fall through to start */
+  const attached = await attachPreviewIfExists({
+    cwd: projectPath,
+    preferUrl: opts?.preferPreviewUrl,
+  });
+  if (attached.ok) {
+    return { npmInstalled: true, devServerUrl: attached.url, previewLive: true };
+  }
+
+  // SSOT: getOrAttachPreview attaches or starts once for this cwd.
+  if (window.arkDesktop?.getOrAttachPreview) {
+    const live = await window.arkDesktop.getOrAttachPreview(projectPath);
+    if (live?.ok && live.url && !isPlaceholderPreviewUrl(live.url)) {
+      return { npmInstalled: true, devServerUrl: live.url, previewLive: true };
     }
+    return {
+      npmInstalled: true,
+      previewLive: false,
+      bootstrapNote: sanitizeBootstrapNote(
+        live?.error
+          ? `Dependencies installed. Dev server did not start (${live.error}). Say **run Preview** or **run dev server**.`
+          : 'Dependencies installed, but the live Preview server did not respond yet. Say **run Preview** to retry.',
+      ),
+    };
   }
 
   // depsReady: skip a second npm install — double install was freezing the whole PC.
@@ -383,7 +407,7 @@ export async function bootstrapProjectWorkspace(
     cwd: projectPath,
     depsReady: true,
   });
-  if (dev?.ok && dev.url) {
+  if (dev?.ok && dev.url && !isPlaceholderPreviewUrl(dev.url)) {
     return { npmInstalled: true, devServerUrl: dev.url, previewLive: true };
   }
 

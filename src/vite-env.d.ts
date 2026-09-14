@@ -361,6 +361,15 @@ declare global {
         running?: boolean;
         error?: string;
       }>;
+      /** Preview SSOT — attach live session for cwd, or start folder preview once. */
+      getOrAttachPreview?: (cwd: string) => Promise<{
+        ok: boolean;
+        url?: string;
+        cwd?: string;
+        attached?: boolean;
+        reused?: boolean;
+        error?: string;
+      }>;
       mediaLibrary?: () => Promise<{
         ok: boolean;
         items: Array<{

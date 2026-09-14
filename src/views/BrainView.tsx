@@ -47,6 +47,7 @@ export function BrainView({ initialTab }: { initialTab?: BrainTab } = {}) {
     'phase' | 'activeModelName' | 'ggufBinary' | 'modelsDir' | 'note' | 'models'
   > | null>(null);
   const [profile, setProfile] = useState<BrainProfile | null>(null);
+  const [userDataProfile, setUserDataProfile] = useState('');
 
   useEffect(() => {
     setTab(resolveInitialTab(initialTab, route.name, routeTab));
@@ -65,6 +66,11 @@ export function BrainView({ initialTab }: { initialTab?: BrainTab } = {}) {
         });
       })
       .catch(() => setEngineSnap(null));
+    void window.arkDesktop?.appMeta?.()
+      .then((meta) => {
+        if (meta?.userDataProfile) setUserDataProfile(String(meta.userDataProfile));
+      })
+      .catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -216,7 +222,18 @@ export function BrainView({ initialTab }: { initialTab?: BrainTab } = {}) {
                   </span>
                 </p>
                 {engineSnap?.modelsDir ? (
-                  <p className="text-[11px] text-content-tertiary font-mono break-all">{engineSnap.modelsDir}</p>
+                  <p className="text-[11px] text-content-tertiary font-mono break-all">
+                    Models · {engineSnap.modelsDir}
+                  </p>
+                ) : null}
+                {userDataProfile ? (
+                  <p className="text-xs text-content-secondary">
+                    App profile ·{' '}
+                    <span className="font-mono text-content-primary">{userDataProfile}</span>
+                    {userDataProfile === 'ARK-Dev'
+                      ? ' (source bat — models stay separate from installed NOVA)'
+                      : ' (installed app)'}
+                  </p>
                 ) : null}
                 {engineSnap?.note ? (
                   <p className="text-xs text-content-tertiary">{engineSnap.note}</p>

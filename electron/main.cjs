@@ -1312,6 +1312,21 @@ ipcMain.handle('NOVA:preview-session', async (_e, cwd) => {
   }
 });
 
+/** Preview SSOT — attach live cwd session or start one (never a second Vite for same cwd). */
+ipcMain.handle('NOVA:preview-get-or-attach', async (_e, cwd) => {
+  try {
+    const arkAgentExec = require('./arkAgentExec.cjs');
+    const arkJobs = require('./arkJobs.cjs');
+    return await arkJobs.enqueue({
+      kind: 'vite',
+      label: 'preview-get-or-attach',
+      run: () => arkAgentExec.getOrAttachPreview(cwd || ''),
+    });
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'preview get-or-attach failed' };
+  }
+});
+
 ipcMain.handle('NOVA:jobs-enqueue', async (_e, payload) => {
   try {
     const arkJobs = require('./arkJobs.cjs');

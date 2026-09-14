@@ -8,6 +8,54 @@ export function isViteProject(files: Record<string, string>): boolean {
   );
 }
 
+/** Placeholder / not-ready preview URL — never treat as live iframe src. */
+export function isPlaceholderPreviewUrl(url: string | null | undefined): boolean {
+  const raw = String(url || '').trim();
+  if (!raw) return true;
+  if (raw.startsWith('blob:')) return true;
+  if (raw.includes('127.0.0.1:0') || raw.includes('localhost:0')) return true;
+  if (/:\/\/0(?:\/|$|\?)/.test(raw)) return true;
+  return false;
+}
+
+/** Prefer createJob / session URL — attach only, never start a second Vite. */
+export async function attachPreviewIfExists(opts: {
+  cwd?: string | null;
+  preferUrl?: string | null;
+}): Promise<{ ok: true; url: string; attached: true } | { ok: false }> {
+  const prefer = String(opts.preferUrl || '').trim();
+  if (prefer && !isPlaceholderPreviewUrl(prefer)) {
+    return { ok: true, url: prefer, attached: true };
+  }
+  const root = String(opts.cwd || '').trim();
+  if (root && window.arkDesktop?.previewSession) {
+    try {
+      const session = await window.arkDesktop.previewSession(root);
+      const decision = decidePreviewSessionAttach(session);
+      if (decision.action === 'attach') {
+        return { ok: true, url: decision.url, attached: true };
+      }
+    } catch {
+      /* fall through */
+    }
+  }
+  return { ok: false };
+}
+
+/**
+ * Prefer attaching an existing preview session over starting another Vite/dev server.
+ * Pure decision helper — used by ensureViteDevServer / ensureBoundFolderPreview and smokes.
+ */
+export function decidePreviewSessionAttach(
+  session: { ok?: boolean; url?: string | null } | null | undefined,
+): { action: 'attach'; url: string } | { action: 'start' } {
+  const url = String(session?.url || '').trim();
+  if (session?.ok && url && !isPlaceholderPreviewUrl(url)) {
+    return { action: 'attach', url };
+  }
+  return { action: 'start' };
+}
+
 export type PreviewOpenOpts = {
   projectId?: string | null;
   title?: string;
@@ -147,18 +195,15 @@ export async function refreshLivePreview(opts: {
 }
 
 /** Start Vite dev server (hidden) and return URL when the port is listening. */
-export async function ensureViteDevServer(cwd: string): Promise<{ ok: boolean; url?: string; error?: string }> {
+export async function ensureViteDevServer(cwd: string): Promise<{ ok: boolean; url?: string; error?: string; attached?: boolean; reused?: boolean }> {
   const root = String(cwd || '').trim();
   // Prefer an already-running preview session — never spawn a second Vite for the same cwd.
-  if (root && window.arkDesktop?.previewSession) {
-    try {
-      const session = await window.arkDesktop.previewSession(root);
-      if (session?.ok && session.url) {
-        return { ok: true, url: session.url };
-      }
-    } catch {
-      /* fall through to start */
-    }
+  const attached = await attachPreviewIfExists({ cwd: root });
+  if (attached.ok) {
+    return { ok: true, url: attached.url, attached: true, reused: true };
+  }
+  if (root && window.arkDesktop?.getOrAttachPreview) {
+    return window.arkDesktop.getOrAttachPreview(root);
   }
   if (!window.arkDesktop?.agentStartDevServer) {
     return { ok: false, error: 'Dev server not available in this build.' };
@@ -287,26 +332,38 @@ export async function ensureBoundFolderPreview(opts: {
   const viteLike = isViteProject(files);
 
   // Attach to an existing preview session before starting another Vite.
-  if (window.arkDesktop?.previewSession) {
-    try {
-      const session = await window.arkDesktop.previewSession(root);
-      if (session?.ok && session.url) {
-        await openInAppPreview(session.url, {
-          projectId: opts.projectId,
-          title: opts.title,
-          forceNavigate: true,
-          device: opts.device,
-        });
-        return { ok: true, url: session.url };
-      }
-    } catch {
-      /* fall through */
-    }
+  const attached = await attachPreviewIfExists({ cwd: root });
+  if (attached.ok) {
+    await openInAppPreview(attached.url, {
+      projectId: opts.projectId,
+      title: opts.title,
+      forceNavigate: true,
+      device: opts.device,
+    });
+    return { ok: true, url: attached.url };
   }
 
-  if (window.arkDesktop?.agentStartFolderPreview) {
+  if (window.arkDesktop?.getOrAttachPreview) {
+    const live = await window.arkDesktop.getOrAttachPreview(root);
+    if (live?.ok && live.url && !isPlaceholderPreviewUrl(live.url)) {
+      await openInAppPreview(live.url, {
+        projectId: opts.projectId,
+        title: opts.title,
+        forceNavigate: true,
+        device: opts.device,
+      });
+      return { ok: true, url: live.url };
+    }
+    if (viteLike) {
+      return {
+        ok: false,
+        error: live?.error
+          || 'Could not start the live preview. Say **install npm dependencies** then click Localhost again.',
+      };
+    }
+  } else if (window.arkDesktop?.agentStartFolderPreview) {
     const live = await window.arkDesktop.agentStartFolderPreview({ cwd: root });
-    if (live?.ok && live.url) {
+    if (live?.ok && live.url && !isPlaceholderPreviewUrl(live.url)) {
       await openInAppPreview(live.url, {
         projectId: opts.projectId,
         title: opts.title,
@@ -324,7 +381,7 @@ export async function ensureBoundFolderPreview(opts: {
     }
   } else if (viteLike) {
     const dev = await ensureViteDevServer(root);
-    if (dev.ok && dev.url) {
+    if (dev.ok && dev.url && !isPlaceholderPreviewUrl(dev.url)) {
       await openInAppPreview(dev.url, {
         projectId: opts.projectId,
         title: opts.title,

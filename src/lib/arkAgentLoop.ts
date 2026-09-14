@@ -1,6 +1,10 @@
 /**
  * Level-B agent tool loop: search → read → patch/write → run → verify → repeat.
  * Bound workspace only. Allowlisted shell. Abortable. Continuable.
+ *
+ * Product path (S008): not imported by AIChat / Workspace / views.
+ * Pref defaults off (`agentLoopEnabled` / `agentLoopInWorkspace`). Kept here for
+ * smokes + scripts; do not re-wire into Chat send without an explicit product decision.
  */
 
 import { applyChatReplyEdits } from '@/lib/chatAgentApply';

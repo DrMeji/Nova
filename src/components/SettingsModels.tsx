@@ -22,7 +22,7 @@ import { ARK_CHANGELOG } from '@/lib/changelog';
 import { formatArkId } from '@/lib/arkUserId';
 import { isArkDevEmail } from '@/lib/arkDevAccount';
 import { clearSetupCompleted } from '@/lib/setup';
-import { getHardwareClass, getAccurateHardware } from '@/lib/api';
+import { getAccurateHardware } from '@/lib/api';
 import { getGgufCtx, ggufCtxCapacityLabel } from '@/lib/ggufContext';
 import { setCloudProviderEnabled } from '@/lib/cloudSources';
 import { probeProviderKey } from '@/lib/providerSpeed';
@@ -51,7 +51,7 @@ export function SettingsModels({ ctx }: { ctx: any }) {
     allowSync, diagnostics, providerKeys, setProviderKeys, editingProvider, setEditingProvider,
     keyDraft, setKeyDraft, keyTestMsg, setKeyTestMsg, keyTestFor, setKeyTestFor, showLegacyProviders,
     setShowLegacyProviders, keyedCount, hw, setHw, hwScanning, setHwScanning, hwFlash, setHwFlash,
-    brainProfileReason, setBrainProfileReason, localReports, setLocalReports, cacheBusy, runClearChatCache, runClearAppCaches,
+    brainProfileReason, setBrainProfileReason, userDataProfile, localReports, setLocalReports, cacheBusy, runClearChatCache, runClearAppCaches,
     installedModels, modelUsedGb, modelPercent, diskTotalGb, diskUsedGb, diskUsedPercent,
     deletingModelId, runDeleteModel, refreshStorage, pinNew, setPinNew, pinConfirm, setPinConfirm,
     pinMsg, setPinMsg, twoFaNew, setTwoFaNew, twoFaConfirm, setTwoFaConfirm, twoFaMsg, setTwoFaMsg,
@@ -349,23 +349,34 @@ export function SettingsModels({ ctx }: { ctx: any }) {
                   <div className="flex justify-between gap-3 text-sm">
                     <span className="text-content-secondary">This PC</span>
                     <span className="text-content-primary text-right min-w-0 text-xs leading-snug max-w-[70%]">
-                      {brainProfileReason || (getHardwareClass(hw) === 'strong'
-                        ? 'High end'
-                        : getHardwareClass(hw) === 'standard'
-                          ? 'Mid range'
-                          : 'Light')}
+                      {brainProfileReason || 'Probing…'}
                     </span>
                   </div>
                   <div className="flex justify-between gap-3 text-sm">
-                    <span className="text-content-secondary">Profile</span>
-                    <span className="text-content-primary text-right">
-                      {getHardwareClass(hw) === 'strong'
-                        ? 'High end'
-                        : getHardwareClass(hw) === 'standard'
-                          ? 'Mid range'
-                          : 'Light'}
+                    <span className="text-content-secondary">App profile</span>
+                    <span className="text-content-primary text-right font-mono text-xs">
+                      {userDataProfile
+                        || (window.arkDesktop?.isElectron
+                          ? '…'
+                          : 'Browser')}
+                      {userDataProfile === 'ARK-Dev'
+                        ? ' · source bat'
+                        : userDataProfile === 'ARK' || userDataProfile === 'NOVA'
+                          ? ' · installed'
+                          : ''}
                     </span>
                   </div>
+                  {engineStatus?.modelsDir ? (
+                    <div className="flex justify-between gap-3 text-sm">
+                      <span className="text-content-secondary">Models dir</span>
+                      <span
+                        className="text-content-primary text-right min-w-0 text-[11px] font-mono leading-snug max-w-[70%] break-all"
+                        title={engineStatus.modelsDir}
+                      >
+                        {engineStatus.modelsDir}
+                      </span>
+                    </div>
+                  ) : null}
                 </div>
                 <button
                   type="button"

@@ -4,6 +4,8 @@ import { useRouter } from '@/context/RouterContext';
 import { useAuth } from '@/context/AuthContext';
 import { useRecentProjects } from '@/context/RecentProjectsContext';
 import { useWorkspace } from '@/hooks/useWorkspace';
+import { useCreateJobForWorkspace } from '@/hooks/useCreateJob';
+import { isPlaceholderPreviewUrl } from '@/lib/projectPreview';
 import { fetchProjects, saveChatMessage, updateProject } from '@/lib/api';
 import type { Project, ChatMessage } from '@/types';
 import {
@@ -25,11 +27,6 @@ import {
   runPluginAction,
 } from '@/lib/plugins';
 import { arkRoute, routerProviderLabel } from '@/lib/arkRouter';
-import {
-  runArkAgentLoop,
-  shouldRunAgentLoop,
-  agentLoopPreferCloud,
-} from '@/lib/arkAgentLoop';
 import { buildRouterHistory, looksLikePromptEcho, looksLikeUserAskEcho } from '@/lib/chatHistory';
 import {
   autoEquippedCaption,
@@ -527,6 +524,14 @@ export function ProjectWorkspace() {
     });
   }, [applyProjectFiles]);
 
+  // Prefer useWorkspace file map when local state is empty (no full rewrite).
+  useEffect(() => {
+    if (workspace.loading) return;
+    if (!workspace.files || !Object.keys(workspace.files).length) return;
+    if (Object.keys(fileContentsRef.current).length) return;
+    applyProjectFiles(workspace.files);
+  }, [workspace.loading, workspace.files, applyProjectFiles]);
+
   const refreshGit = useCallback(async (id?: string) => {
     const pid = id || projectId;
     if (!pid || !window.arkDesktop?.gitStatus) return;
@@ -625,7 +630,7 @@ export function ProjectWorkspace() {
           files: nextFiles,
           device: d || undefined,
         });
-        if (live.ok && live.url) {
+        if (live.ok && live.url && !isPlaceholderPreviewUrl(live.url)) {
           const bust = `${live.url}${live.url.includes('?') ? '&' : '?'}t=${Date.now()}`;
           setLivePreviewUrl(bust);
           setPreviewUrl(bust);
@@ -649,7 +654,7 @@ export function ProjectWorkspace() {
       projectName: project?.name,
       files: payloadFiles,
     });
-    if (!res?.url) return false;
+    if (!res?.url || isPlaceholderPreviewUrl(res.url)) return false;
     const bust = `${res.url}${res.url.includes('?') ? '&' : '?'}t=${Date.now()}`;
     setLivePreviewUrl(bust);
     setPreviewUrl(bust);
@@ -776,6 +781,58 @@ export function ProjectWorkspace() {
   }, [gitInfo?.remote]);
   const [previewUrl, setPreviewUrl] = useState('http://127.0.0.1:0');
   const [livePreviewUrl, setLivePreviewUrl] = useState<string | null>(null);
+  const [sessionPreviewUrl, setSessionPreviewUrl] = useState<string | null>(null);
+  // createJob.previewUrl wins when Chat bootstrap already started Vite for this project.
+  const createJob = useCreateJobForWorkspace(projectId || null, diskRoot);
+
+  // Attach-only: if main already owns a preview for this cwd, reuse URL (no second Vite).
+  useEffect(() => {
+    const root = diskRoot || workspace.diskRoot;
+    if (!root || !window.arkDesktop?.previewSession) {
+      setSessionPreviewUrl(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const session = await window.arkDesktop?.previewSession?.(root);
+        if (cancelled) return;
+        if (session?.ok && session.url && !isPlaceholderPreviewUrl(session.url)) {
+          setSessionPreviewUrl(session.url);
+          setLivePreviewUrl((prev) => (prev && !isPlaceholderPreviewUrl(prev) ? prev : session.url!));
+          setPreviewUrl(session.url);
+          setPreviewReady(true);
+        }
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [diskRoot, workspace.diskRoot]);
+
+  // Prefer createJob URL when bootstrap finishes after Workspace opened.
+  useEffect(() => {
+    const jobUrl = createJob?.previewUrl;
+    if (!jobUrl || isPlaceholderPreviewUrl(jobUrl)) return;
+    setLivePreviewUrl(jobUrl);
+    setPreviewUrl(jobUrl);
+    setPreviewReady(true);
+  }, [createJob?.previewUrl]);
+
+  /** iframe src SSOT: createJob → session → live — never :0 as ready src. */
+  const resolvedPreviewSrc = useMemo(() => {
+    const candidates = [
+      createJob?.previewUrl,
+      sessionPreviewUrl,
+      livePreviewUrl,
+      previewUrl,
+    ];
+    for (const c of candidates) {
+      const u = String(c || '').trim();
+      if (u && !isPlaceholderPreviewUrl(u)) return u;
+    }
+    return null;
+  }, [createJob?.previewUrl, sessionPreviewUrl, livePreviewUrl, previewUrl]);
 
   useEffect(() => {
     if (!projectId) {
@@ -887,6 +944,7 @@ export function ProjectWorkspace() {
       setBuildLive(null);
       setPreviewReady(false);
       setLivePreviewUrl(null);
+      setSessionPreviewUrl(null);
       setDiskRoot(null);
       setEditingUserId(null);
       setReviseUserMsgId(null);
@@ -911,6 +969,7 @@ export function ProjectWorkspace() {
     setBuildLive(null);
     setPreviewReady(false);
     setLivePreviewUrl(null);
+    setSessionPreviewUrl(null);
     setEditingUserId(null);
     setRevertPrompt(null);
 
@@ -1869,7 +1928,7 @@ export function ProjectWorkspace() {
             projectName: offlineLabel,
             files: packDiskFiles(applied.files, messagesRef.current),
           }).then(res => {
-            if (res?.url) {
+            if (res?.url && !isPlaceholderPreviewUrl(res.url)) {
               setLivePreviewUrl(res.url);
               setPreviewUrl(res.url);
               setPreviewReady(true);
@@ -2233,13 +2292,13 @@ export function ProjectWorkspace() {
           projectName: buildLabel,
           files: packDiskFiles(cleaned, messagesRef.current),
         }).then(res => {
-          if (res?.url && !String(res.url).includes('127.0.0.1:0') && !String(res.url).includes('://0')) {
+          if (res?.url && !isPlaceholderPreviewUrl(res.url)) {
             const bust = `${res.url}${res.url.includes('?') ? '&' : '?'}t=${Date.now()}`;
             setLivePreviewUrl(bust);
             setPreviewUrl(bust);
             setPreviewReady(true);
             if (opts?.openPreview) setRightTab('preview');
-          } else if (res && (res.ok === false || !res.url || String(res.url).includes(':0'))) {
+          } else if (res && (res.ok === false || !res.url || isPlaceholderPreviewUrl(res.url))) {
             setSandboxNote('Preview server did not start. static HTML is still in the Preview tab.');
             window.setTimeout(() => setSandboxNote(null), 4200);
           }
@@ -2412,66 +2471,6 @@ export function ProjectWorkspace() {
               replyText = formatCodeChatReply(rawContent, changedPaths, '', { previewTouched });
               bumpStep('done');
             }
-          }
-        }
-
-        // Level-B agent tool loop — pref-gated off by default (Wave 2: do not re-import into AIChat).
-        const agentLoopPrefOn = Boolean(getLocalPrefs().agentLoopInWorkspace);
-        if (
-          agentLoopPrefOn
-          && !replyText
-          && canEdit
-          && !inspectOnly
-          && Object.keys(fileContentsRef.current).length > 0
-          && shouldRunAgentLoop({
-            composerMode: turnComposerMode || (composerWasDebug ? 'debug' : null),
-            hasWorkspace: true,
-            message: rawContent,
-          })
-        ) {
-          bumpStep('generate');
-          const loopPreferCloud = agentLoopPreferCloud(fileContentsRef.current, rawContent);
-          const loop = await runArkAgentLoop({
-            brief: content,
-            files: fileContentsRef.current,
-            projectId: pid,
-            projectName: buildLabel,
-            diskRoot,
-            shouldAbort: () => aborted,
-            onStep: (step) => {
-              if (aborted) return;
-              setBuildLive(prev => prev ? {
-                ...prev,
-                label: `Agent · ${step.label}`,
-              } : prev);
-            },
-            callModel: async ({ prompt }) => {
-              const routed = await arkRoute({
-                message: prompt,
-                kind: 'coding',
-                preferCloudCoding: loopPreferCloud,
-                history: [],
-              });
-              return {
-                reply: routed.reply || '',
-                modelName: routed.modelName,
-                providerLabel: routerProviderLabel(routed, 'NOVA · agent'),
-              };
-            },
-          });
-          if (aborted) return;
-          if (loop.updated.length || loop.ok) {
-            fileContentsRef.current = loop.files;
-            setFileContents(loop.files);
-            changedPaths = loop.updated;
-            replyText = loop.reply;
-            provider = loop.providerLabel || 'NOVA · agent';
-            if (loop.updated.length) {
-              bumpStep('apply');
-              void refreshLivePreview(loop.files);
-              previewTouched = true;
-            }
-            bumpStep('done');
           }
         }
 
@@ -3243,8 +3242,8 @@ export function ProjectWorkspace() {
   };
 
   const openPreviewInBrowser = () => {
-    const url = livePreviewUrl || previewUrl;
-    if (!url || url.startsWith('blob:') || url.includes('127.0.0.1:0')) {
+    const url = resolvedPreviewSrc;
+    if (!url || isPlaceholderPreviewUrl(url)) {
       setSandboxNote('No preview URL yet. Ask NOVA to create a page, then open Preview.');
       window.setTimeout(() => setSandboxNote(null), 3200);
       return;
@@ -3330,7 +3329,7 @@ export function ProjectWorkspace() {
     ? (fileContents[selectedFile] ?? fileContents[fileKey] ?? '')
     : '';
   const showBrowserChrome = Boolean(
-    (livePreviewUrl && !livePreviewUrl.includes('127.0.0.1:0')) || previewReady,
+    resolvedPreviewSrc || previewReady,
   ) && !isNativeMobileTree(fileContents);
 
   const buildLabel = buildRunning
@@ -4464,12 +4463,12 @@ export function ProjectWorkspace() {
                       <p className="text-sm text-content-secondary">Native project</p>
                     </div>
                     )
-                  ) : livePreviewUrl && !livePreviewUrl.includes('127.0.0.1:0') ? (
+                  ) : resolvedPreviewSrc ? (
                     <div className="relative w-full h-full">
                       <iframe
-                        key={livePreviewUrl}
+                        key={resolvedPreviewSrc}
                         title="Project preview"
-                        src={livePreviewUrl}
+                        src={resolvedPreviewSrc}
                         className="w-full h-full border-0"
                         sandbox="allow-scripts allow-same-origin"
                       />
@@ -4500,7 +4499,7 @@ export function ProjectWorkspace() {
                 <div className="shrink-0 px-3 py-2 flex items-center gap-2 text-xs text-content-secondary flex-wrap">
                   <Globe className="w-3.5 h-3.5 text-sky-400 shrink-0" />
                   <span className="truncate">
-                    {livePreviewUrl && !livePreviewUrl.includes('127.0.0.1:0')
+                    {resolvedPreviewSrc
                       ? `Preview · ${fileKey || 'index'}`
                       : `Preview (static HTML) · ${fileKey || 'index'}`}
                   </span>
@@ -4568,8 +4567,8 @@ export function ProjectWorkspace() {
         </div>
           <div className="flex items-center gap-2 shrink-0 min-w-0">
             {showBrowserChrome && (
-              <span className="text-[11px] text-content-tertiary truncate font-mono max-w-[18rem]" title={livePreviewUrl && !livePreviewUrl.includes('127.0.0.1:0') ? livePreviewUrl : 'Static HTML preview'}>
-                {livePreviewUrl && !livePreviewUrl.includes('127.0.0.1:0') ? livePreviewUrl : 'Static HTML preview'}
+              <span className="text-[11px] text-content-tertiary truncate font-mono max-w-[18rem]" title={resolvedPreviewSrc || 'Static HTML preview'}>
+                {resolvedPreviewSrc || 'Static HTML preview'}
               </span>
             )}
           {!explorerOpen && (

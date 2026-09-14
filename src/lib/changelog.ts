@@ -5,6 +5,18 @@
 
 export const ARK_CHANGELOG = [
   {
+    version: '0.1.220',
+    channel: 'stable' as const,
+    date: 'Sep 13, 2026',
+    title: 'Basic public ready — thin Chat, Preview SSOT',
+    notes: [
+      'AIChat shell ≤200 lines; useAIChatSend ≤400 with chatTurnHosts',
+      'Preview attach-only (no second Vite); bind isolation smoke',
+      'Electron boots guest-local if Supabase env missing (no black screen)',
+      'Build env guard; Brain shows profile + models dir',
+    ],
+  },
+  {
     version: '0.1.219',
     channel: 'stable' as const,
     date: 'Sep 13, 2026',

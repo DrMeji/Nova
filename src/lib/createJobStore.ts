@@ -83,6 +83,26 @@ export function getCreateJobForChat(chatId: string): CreateJob | null {
   return hydrateFromSession(chatId);
 }
 
+/** Lookup create job by project id (Workspace Preview attach). */
+export function getCreateJobForProject(projectId: string): CreateJob | null {
+  const pid = String(projectId || '').trim();
+  if (!pid) return null;
+  for (const job of jobs.values()) {
+    if (job.projectId === pid) return job;
+  }
+  return null;
+}
+
+/** Lookup create job by disk path (normalize case for Windows). */
+export function getCreateJobForPath(diskPath: string): CreateJob | null {
+  const key = String(diskPath || '').trim().toLowerCase();
+  if (!key) return null;
+  for (const job of jobs.values()) {
+    if (String(job.path || '').trim().toLowerCase() === key) return job;
+  }
+  return null;
+}
+
 export function startCreateJob(partial: Omit<CreateJob, 'updatedAt' | 'status'> & { status?: CreateJobStatus }): CreateJob {
   const job: CreateJob = {
     ...partial,

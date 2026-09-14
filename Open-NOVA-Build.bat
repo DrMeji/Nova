@@ -55,7 +55,18 @@ if errorlevel 1 (
   exit /b 1
 )
 
+echo Checking build env (VITE_SUPABASE_*)...
+REM Guest-local desktop is allowed without cloud keys (create/bind/preview still work).
+set "NOVA_ALLOW_LOCAL_ONLY=1"
+call node scripts/check-env-for-build.mjs
+if errorlevel 1 (
+  echo ERROR: Missing Supabase env. Copy .env.example to .env.local and fill VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY.
+  pause
+  exit /b 1
+)
+
 echo Building...
+set "NOVA_ALLOW_LOCAL_ONLY=1"
 call npm run build
 if errorlevel 1 (
   echo ERROR: Build failed.

@@ -39,6 +39,8 @@ globalThis.window.arkDesktop = {
 };
 
 const { parseAgentToolReply, runArkAgentLoop, shouldRunAgentLoop } = await import('../src/lib/arkAgentLoop.ts');
+const { setLocalPrefs } = await import('../src/lib/localPrefs.ts');
+setLocalPrefs({ agentLoopEnabled: true });
 const { applyAgentPatches, parseAgentPatches } = await import('../src/lib/arkAgentPatch.ts');
 const { buildAgentRepoIndex, searchAgentIndex } = await import('../src/lib/arkAgentIndex.ts');
 const { detectKindFromFiles, agentKindGuidance } = await import('../src/lib/arkAgentPrompts.ts');
