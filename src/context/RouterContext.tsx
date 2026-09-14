@@ -13,7 +13,7 @@ export type Route =
   | { name: 'build' }
   | { name: 'local-ai' }
   | { name: 'mcp' }
-  | { name: 'brain' }
+  | { name: 'brain'; tab?: 'installed' | 'recommended' | 'cloud' | 'this-pc' }
   | { name: 'networking' }
   | { name: 'message'; peer?: string; groupId?: string }
   | { name: 'notifications' }

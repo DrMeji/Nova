@@ -83,12 +83,12 @@ import {
   type BuildLiveStep,
 } from '@/lib/projectCodeEdit';
 import {
-  finalizeWebEdits,
   isWebMicroAsk,
   prunePlaceholderJunk,
   touchesPreviewServing,
   webMicroAskEdits,
 } from '@/lib/webProjectCanon';
+import { applyAndVerify } from '@/lib/applyAndVerify';
 import { classifyMobileTarget, inferMobileTargetFromFiles, isNativeMobileTree, looksLikeWebsiteBuild, needsMobileTargetChoice, WEBSITE_BUILD_MARK } from '@/lib/mobileTarget';
 import { finalizeMobileEdits, formatNativeBuildReply, formatNativePushReply, preferredMobileFocus, simpleVisualPatchEdits, layoutLockEdits } from '@/lib/mobileTemplates';
 import {
@@ -2128,17 +2128,14 @@ export function ProjectWorkspace() {
       });
     };
 
-    const commitEdits = (
+    const commitEdits = async (
       edits: ReturnType<typeof parseFileEdits>,
       opts?: { openPreview?: boolean },
     ) => {
       if (!canEdit) return { changedPaths: [] as string[], summary: '', previewTouched: false };
       const nativeTree = isNativeMobileTree(fileContentsRef.current);
-      const webFinal = nativeTree
-        ? edits
-        : finalizeWebEdits(fileContentsRef.current, content, edits, { projectName: project?.name || buildLabel });
-      if (!webFinal.length) return { changedPaths: [] as string[], summary: '', previewTouched: false };
-      const nativeEdits = finalizeMobileEdits(content, webFinal, fileContentsRef.current);
+      // Web finalize lives inside applyAndVerify → applyChatReplyEdits.
+      const nativeEdits = finalizeMobileEdits(content, edits, fileContentsRef.current);
       if (!nativeEdits.length) return { changedPaths: [] as string[], summary: '', previewTouched: false };
       if (classifyMobileTarget(content) && !isLayoutLockAsk(content)) {
         const drop = new Set(['index.html', 'css/styles.css', 'js/app.js', 'src/App.tsx', 'src/main.tsx', 'src/index.css']);
@@ -2146,40 +2143,58 @@ export function ProjectWorkspace() {
           Object.entries(fileContentsRef.current).filter(([path]) => !drop.has(path) && !/^css\/|^js\//.test(path)),
         );
       }
-      undoSnapshotRef.current = { ...fileContentsRef.current };
+      const before = { ...fileContentsRef.current };
+      const reply = nativeEdits.map((e) => `@@@FILE ${e.path}\n${e.content}`).join('\n');
+      const result = await applyAndVerify({
+        reply,
+        userMessage: content,
+        files: before,
+        projectName: project?.name || buildLabel,
+        projectId: pid,
+        diskRoot,
+      });
+      if (!result.ok) {
+        // applyAndVerify already reverted disk/memory on verify fail.
+        return { changedPaths: [] as string[], summary: '', previewTouched: false };
+      }
+      undoSnapshotRef.current = before;
       setUndoReady(true);
-      const applied = applyFileEdits(fileContentsRef.current, fileTreeRef.current, nativeEdits);
-      const cleaned = prunePlaceholderJunk(applied.files);
+      const cleaned = prunePlaceholderJunk(result.files);
+      const changedPaths = result.updated;
       fileContentsRef.current = cleaned;
       fileTreeRef.current = buildFileTreeFromPaths(cleaned);
       setFileContents(cleaned);
       setFileTree(fileTreeRef.current);
-      const previewTouched = nativeTree || touchesPreviewServing(applied.changedPaths, cleaned);
+      const previewTouched = nativeTree || touchesPreviewServing(changedPaths, cleaned);
       setFileChanges(prev => {
         const map = new Map(prev.map(f => [f.path, f]));
-        for (const d of applied.fileDiffs) {
-          const cur = map.get(d.path);
-          map.set(d.path, {
-            path: d.path,
-            added: (cur?.added || 0) + d.added,
-            removed: (cur?.removed || 0) + d.removed,
+        for (const path of changedPaths) {
+          const oldLines = String(before[path] || '').split('\n').length;
+          const newLines = String(cleaned[path] || '').split('\n').length;
+          const added = Math.max(0, newLines - oldLines);
+          const removed = Math.max(0, oldLines - newLines);
+          const cur = map.get(path);
+          map.set(path, {
+            path,
+            added: (cur?.added || 0) + (added || 1),
+            removed: (cur?.removed || 0) + removed,
           });
         }
         return [...map.values()];
       });
-      const expand = foldersToExpand(applied.changedPaths);
+      const expand = foldersToExpand(changedPaths);
       setExpandedFolders(prev => {
         const next = new Set(prev);
         expand.forEach(p => next.add(p));
         return next;
       });
       const native = isNativeMobileTree(cleaned);
-      const focus = preferredLiveEditPath(applied.changedPaths)
-        || preferredMobileFocus(applied.changedPaths)
-        || applied.changedPaths[0];
+      const focus = preferredLiveEditPath(changedPaths)
+        || preferredMobileFocus(changedPaths)
+        || changedPaths[0];
       if (focus) {
         setSelectedFile(focus);
-    setRightTab('code');
+        setRightTab('code');
         setCodeOpen(true);
         setFileFlash(true);
         window.setTimeout(() => setFileFlash(false), 1400);
@@ -2198,21 +2213,21 @@ export function ProjectWorkspace() {
         void refreshLivePreview(cleaned, nextDevice);
       }
       void safeProjectWrite({
-          projectId: pid,
-          projectName: buildLabel,
-          files: packDiskFiles(cleaned, messagesRef.current),
-        }).then(res => {
-          if (res.root) setDiskRoot(res.root);
+        projectId: pid,
+        projectName: buildLabel,
+        files: packDiskFiles(cleaned, messagesRef.current),
+      }).then(res => {
+        if (res.root) setDiskRoot(res.root);
         setWorkspaceInPlace(Boolean(res.meta && (res.meta as { inPlace?: boolean }).inPlace));
-          if (!res.ok && res.error) {
-            setSandboxNote(res.error);
-            window.setTimeout(() => setSandboxNote(null), 5000);
-          }
-        }).catch(err => {
-          setSandboxNote(err instanceof Error ? err.message : 'Could not save project files');
+        if (!res.ok && res.error) {
+          setSandboxNote(res.error);
           window.setTimeout(() => setSandboxNote(null), 5000);
-        });
-      if (applied.changedPaths.length && !native && window.arkDesktop?.previewStart) {
+        }
+      }).catch(err => {
+        setSandboxNote(err instanceof Error ? err.message : 'Could not save project files');
+        window.setTimeout(() => setSandboxNote(null), 5000);
+      });
+      if (changedPaths.length && !native && window.arkDesktop?.previewStart) {
         void window.arkDesktop.previewStart({
           projectId: pid,
           projectName: buildLabel,
@@ -2241,7 +2256,7 @@ export function ProjectWorkspace() {
       if (isNativeMobileTree(cleaned) && !classifyMobileDevice(content)) {
         setDeviceOfferId(assistantId);
       }
-      return { ...applied, files: cleaned, previewTouched };
+      return { changedPaths, files: cleaned, previewTouched, summary: '' };
     };
 
     const runId = ++runIdRef.current;
@@ -2390,7 +2405,7 @@ export function ProjectWorkspace() {
           const micro = webMicroAskEdits(fileContentsRef.current, rawContent);
           if (micro.length) {
             bumpStep('apply');
-            const applied = commitEdits(micro, { openPreview: true });
+            const applied = await commitEdits(micro, { openPreview: true });
             changedPaths = applied.changedPaths;
             previewTouched = Boolean(applied.previewTouched);
             if (changedPaths.length) {
@@ -2400,9 +2415,11 @@ export function ProjectWorkspace() {
           }
         }
 
-        // Level-B agent tool loop for Agent/Debug (and clear implement asks).
+        // Level-B agent tool loop — pref-gated off by default (Wave 2: do not re-import into AIChat).
+        const agentLoopPrefOn = Boolean(getLocalPrefs().agentLoopInWorkspace);
         if (
-          !replyText
+          agentLoopPrefOn
+          && !replyText
           && canEdit
           && !inspectOnly
           && Object.keys(fileContentsRef.current).length > 0
@@ -2759,7 +2776,7 @@ export function ProjectWorkspace() {
             }
 
             if (edits.length > 0) {
-              const applied = commitEdits(edits, { openPreview: true });
+              const applied = await commitEdits(edits, { openPreview: true });
               changedPaths = applied.changedPaths;
               previewTouched = Boolean((applied as { previewTouched?: boolean }).previewTouched);
             } else if (patchOnlyNamed) {
@@ -2767,7 +2784,7 @@ export function ProjectWorkspace() {
               if (!changedPaths.length) {
                 const visual = simpleVisualPatchEdits(fileContentsRef.current, rawContent);
                 if (visual.length) {
-                  const applied = commitEdits(visual, { openPreview: true });
+                  const applied = await commitEdits(visual, { openPreview: true });
                   changedPaths = applied.changedPaths;
               previewTouched = Boolean((applied as { previewTouched?: boolean }).previewTouched);
                   if (changedPaths.length) {
@@ -2778,7 +2795,7 @@ export function ProjectWorkspace() {
             } else if (wantsProjectFileEdits(rawContent) || looksLikeWebsiteBuild(rawContent)) {
               const fallback = scaffoldFallbackEdits(rawContent, fileContentsRef.current);
               if (fallback.length) {
-                const applied = commitEdits(fallback, { openPreview: true });
+                const applied = await commitEdits(fallback, { openPreview: true });
                 changedPaths = applied.changedPaths;
               previewTouched = Boolean((applied as { previewTouched?: boolean }).previewTouched);
                 if (changedPaths.length) {
@@ -2834,7 +2851,7 @@ export function ProjectWorkspace() {
           const cutOff = replyHasUnclosedFileBlock(draft);
           if (edits.length) {
             bumpStep('apply');
-            const applied = commitEdits(
+            const applied = await commitEdits(
               patchOnlyNamed ? filterEditsToPaths(edits, lastInspectPathsRef.current) : edits,
             );
             changedPaths = applied.changedPaths;
@@ -2851,7 +2868,7 @@ export function ProjectWorkspace() {
             if (!changedPaths.length && patchOnlyNamed) {
               const visual = simpleVisualPatchEdits(fileContentsRef.current, rawContent);
               if (visual.length) {
-                const applied = commitEdits(visual);
+                const applied = await commitEdits(visual);
                 changedPaths = applied.changedPaths;
               previewTouched = Boolean((applied as { previewTouched?: boolean }).previewTouched);
                 if (changedPaths.length) {
@@ -2862,7 +2879,7 @@ export function ProjectWorkspace() {
             if (!changedPaths.length && (wantsProjectFileEdits(rawContent) || looksLikeWebsiteBuild(rawContent))) {
               const fallback = scaffoldFallbackEdits(rawContent, fileContentsRef.current);
               if (fallback.length) {
-                const applied = commitEdits(fallback, { openPreview: true });
+                const applied = await commitEdits(fallback, { openPreview: true });
                 changedPaths = applied.changedPaths;
               previewTouched = Boolean((applied as { previewTouched?: boolean }).previewTouched);
                 if (changedPaths.length) {

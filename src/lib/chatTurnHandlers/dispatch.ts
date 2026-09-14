@@ -10,6 +10,7 @@ import { runDeleteTurn, type DeleteTurnHost } from './delete';
 import { runOpenFolderTurn, type OpenFolderTurnHost } from './openFolder';
 import { runCmdTurn, type RunCmdTurnHost } from './runCmd';
 import { runEditTurn, type RunEditTurnHost, type RunEditTurnResult } from './edit';
+import { runChatTurn, type ChatTurnHost, type ChatTurnResult } from './chat';
 
 export type TurnDispatchPlan = {
   classified: ClassifyTurnResult;
@@ -63,10 +64,12 @@ export type DispatchHost = {
   runCmdHost?: RunCmdTurnHost;
   /** When set, edit/keep_building runs runEditTurn here and returns handled. */
   editHost?: RunEditTurnHost;
+  /** When set, default / chat-like kinds run runChatTurn here and return handled. */
+  chatHost?: ChatTurnHost;
 };
 
 export type DispatchOwnedResult =
-  | { status: 'handled'; classified: ClassifyTurnResult; createOutcome?: CreateTurnOutcome; editOutcome?: RunEditTurnResult }
+  | { status: 'handled'; classified: ClassifyTurnResult; createOutcome?: CreateTurnOutcome; editOutcome?: RunEditTurnResult; chatOutcome?: ChatTurnResult }
   | { status: 'edit'; classified: ClassifyTurnResult }
   | { status: 'continue'; classified: ClassifyTurnResult };
 
@@ -152,7 +155,19 @@ export async function dispatchOwnedTurn(host: DispatchHost): Promise<DispatchOwn
       return { status: 'edit', classified };
     }
 
-    default:
+    default: {
+      // Kinds not owned above (chat / inspect / unknown): run chatHost when present.
+      if (host.chatHost) {
+        const chatOutcome = await runChatTurn({
+          ...host.chatHost,
+          content: host.chatHost.content || host.content,
+        });
+        if (host.finishPlainReply) {
+          await host.finishPlainReply(chatOutcome.text, 'NOVA');
+        }
+        return { status: 'handled', classified, chatOutcome };
+      }
       return { status: 'continue', classified };
+    }
   }
 }

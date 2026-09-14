@@ -1,10 +1,14 @@
 /**
  * Sticky brain per thread. Auto picks once, stays equipped until failover.
  * Scoped by chat/project id + kind (chat, coding, image, video).
+ *
+ * Coding sticky is gated here with assertCoderAllowed so a weak model cannot
+ * bypass the router / studioAnswerEngine checks by being persisted as sticky.
  */
 
 import type { ChatMode } from '@/context/RouterContext';
 import type { ArkRouterResult, RouterKind, RouterTier } from '@/lib/arkRouter';
+import { assertCoderAllowed, getBrainProfile, getBrainProfileSync } from '@/lib/brainProfile';
 
 export type ThreadBrainKind = 'chat' | 'coding' | 'image' | 'video' | 'voice';
 
@@ -74,8 +78,31 @@ export function loadThreadBrain(scopeId: string, kind: ThreadBrainKind = 'chat')
 export function saveThreadBrain(scopeId: string, brain: ThreadBrain, kind?: ThreadBrainKind) {
   if (!scopeId) return;
   const k = kind || brain.kind || 'chat';
+  let next: ThreadBrain = { ...brain, kind: k };
+
+  if (k === 'coding') {
+    const profile = getBrainProfileSync();
+    if (!profile) {
+      // Fail closed until BrainProfile is probed — warm cache for the next save.
+      void getBrainProfile();
+      return;
+    }
+    const gate = assertCoderAllowed(profile, next.modelId, next.modelName);
+    if (!gate.ok) {
+      // Do not persist a weak/oversized coder sticky; drop pending too.
+      next = { ...next, pendingModelId: undefined, pendingModelName: undefined };
+      return;
+    }
+    if (next.pendingModelId) {
+      const pendingGate = assertCoderAllowed(profile, next.pendingModelId, next.pendingModelName);
+      if (!pendingGate.ok) {
+        next = { ...next, pendingModelId: undefined, pendingModelName: undefined };
+      }
+    }
+  }
+
   try {
-    localStorage.setItem(threadBrainKey(scopeId, k), JSON.stringify({ ...brain, kind: k }));
+    localStorage.setItem(threadBrainKey(scopeId, k), JSON.stringify(next));
     if (k === 'chat' || k === 'coding') {
       localStorage.removeItem(legacyThreadBrainKey(scopeId));
     }

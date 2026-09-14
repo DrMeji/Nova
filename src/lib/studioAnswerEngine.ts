@@ -484,6 +484,37 @@ export async function answerStudio(
 
   try {
     const routeKind = (input.mode === 'code' || input.allowFileEdits) ? 'coding' : 'chat';
+
+    // Wave 2 / threadBrain: gate weak local coder before generate (assertCoderAllowed).
+    // Full sticky-brain wiring stays in AIChat; this is the shared soft-miss fence.
+    if (routeKind === 'coding' && input.allowFileEdits) {
+      try {
+        const { getBrainProfile, assertCoderAllowed } = await import('@/lib/brainProfile');
+        const profile = await getBrainProfile();
+        const gate = assertCoderAllowed(
+          profile,
+          input.stickyModelId || input.preferredModelId,
+          input.stickyModelName || input.preferredModelName,
+        );
+        if (!gate.ok && profile.maxCoderParamsB <= 0) {
+          return {
+            text: [
+              gate.reason,
+              '',
+              'Skip the coding hop on this PC — use surgical one-line edits, scaffold, or a cloud coder.',
+            ].join('\n'),
+            intent,
+            findings,
+            meta: 'Brain gate · soft miss',
+            streamed: false,
+            packedTokens,
+          };
+        }
+      } catch {
+        /* continue */
+      }
+    }
+
     const timeoutMs = input.allowFileEdits
       ? (looksLikeMicroCodingAsk(input.userMessage) ? MODEL_TIMEOUT_MICRO_MS : MODEL_TIMEOUT_CODE_MS)
       : routeKind === 'coding' && looksLikeProjectDebugAsk(input.userMessage)

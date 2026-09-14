@@ -1,9 +1,9 @@
 /**
  * Lightweight multi-agent pass on one bound project: Design → Code → Verify.
- * Sequential coordinator (not parallel LLM swarm). safe merge via chatAgentApply.
+ * Sequential coordinator (not parallel LLM swarm). Writes via applyAndVerify.
  */
 
-import { applyChatReplyEdits } from '@/lib/chatAgentApply';
+import { applyAndVerify } from '@/lib/applyAndVerify';
 import {
   selectSkillsForBrief,
   formatSkillsForPrompt,
@@ -11,6 +11,7 @@ import {
   skillNamesLabel,
 } from '@/lib/novaSkills';
 import { detectProjectKind } from '@/lib/projectKind';
+import { editMiss, editSuccess, type EditMiss, type EditSuccess } from '@/lib/productContract';
 
 export type MultiAgentWorkerId = 'design' | 'code' | 'verify';
 
@@ -27,6 +28,8 @@ export type MultiAgentResult = {
   files: Record<string, string>;
   updated: string[];
   workers: MultiAgentWorkerResult[];
+  /** Product-contract outcome for the code apply step (editSuccess / editMiss). */
+  outcome?: EditSuccess | EditMiss;
 };
 
 /** True when + → Multi-agent is on, or user asked for multi-agent explicitly. */
@@ -47,6 +50,7 @@ export async function runProjectMultiAgent(opts: {
   const workers: MultiAgentWorkerResult[] = [];
   const kind = detectProjectKind(opts.brief);
   let files = { ...opts.files };
+  let outcome: EditSuccess | EditMiss | undefined;
 
   const projectSkills = await loadProjectSkills(opts.diskRoot);
   const skills = selectSkillsForBrief(opts.brief, kind, {
@@ -72,17 +76,18 @@ export async function runProjectMultiAgent(opts: {
       : 'No skills enabled. using brief only',
   });
 
-  // --- Code worker: apply via existing edit path ---
+  // --- Code worker: apply + verify via shared write path ---
   let updated: string[] = [];
   try {
-    const applied = await applyChatReplyEdits({
+    const applied = await applyAndVerify({
       reply: '',
       projectId: opts.projectId,
       projectName: opts.projectName,
       files,
       userMessage: designBrief,
-      diskRoot: opts.diskRoot || undefined,
+      diskRoot: opts.diskRoot || null,
     });
+    outcome = applied.outcome;
     if (applied.ok) {
       files = applied.files;
       updated = applied.updated || [];
@@ -99,15 +104,16 @@ export async function runProjectMultiAgent(opts: {
         id: 'code',
         label: 'Code',
         ok: false,
-        note: applied.error || 'Apply failed',
+        note: applied.outcome.message || 'Apply failed',
       });
     }
   } catch (err) {
+    outcome = editMiss('write_failed', err instanceof Error ? err.message : 'Code worker error');
     workers.push({
       id: 'code',
       label: 'Code',
       ok: false,
-      note: err instanceof Error ? err.message : 'Code worker error',
+      note: outcome.message,
     });
   }
 
@@ -136,16 +142,31 @@ export async function runProjectMultiAgent(opts: {
     note: issues.length ? `Rejected: ${issues.join('; ')}` : 'Structure looks usable. open Preview',
   });
 
-  const ok = workers.every(w => w.id === 'verify' ? w.ok : w.id !== 'code' || w.ok);
+  const codeOk = workers.find(w => w.id === 'code')?.ok !== false;
+  const verifyOk = issues.length === 0;
+  const ok = codeOk && verifyOk;
+  if (ok && !outcome) {
+    outcome = editSuccess(updated, true);
+  } else if (!ok && outcome?.ok !== false) {
+    outcome = editMiss(
+      verifyOk ? 'write_failed' : 'verify_failed',
+      verifyOk
+        ? 'Multi-agent code step did not apply edits.'
+        : `Multi-agent verify rejected: ${issues.join('; ')}`,
+    );
+  }
+
   const reply = [
     '**Multi-agent pass** (Design → Code → Verify)',
     '',
     ...workers.map(w => `- **${w.label}:** ${w.ok ? '✓' : '✗'} ${w.note}`),
     '',
-    updated.length
-      ? `Files touched: ${updated.map(p => `\`${p}\``).join(', ')}. Open **Preview** to review.`
-      : 'No file changes this pass. try a more specific edit ask.',
+    !ok && outcome && !outcome.ok
+      ? outcome.message
+      : updated.length
+        ? `Files touched: ${updated.map(p => `\`${p}\``).join(', ')}. Open **Preview** to review.`
+        : 'No file changes this pass. try a more specific edit ask.',
   ].join('\n');
 
-  return { ok, reply, files, updated, workers };
+  return { ok, reply, files, updated, workers, outcome };
 }

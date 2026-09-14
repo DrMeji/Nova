@@ -148,10 +148,22 @@ export async function refreshLivePreview(opts: {
 
 /** Start Vite dev server (hidden) and return URL when the port is listening. */
 export async function ensureViteDevServer(cwd: string): Promise<{ ok: boolean; url?: string; error?: string }> {
+  const root = String(cwd || '').trim();
+  // Prefer an already-running preview session — never spawn a second Vite for the same cwd.
+  if (root && window.arkDesktop?.previewSession) {
+    try {
+      const session = await window.arkDesktop.previewSession(root);
+      if (session?.ok && session.url) {
+        return { ok: true, url: session.url };
+      }
+    } catch {
+      /* fall through to start */
+    }
+  }
   if (!window.arkDesktop?.agentStartDevServer) {
     return { ok: false, error: 'Dev server not available in this build.' };
   }
-  return window.arkDesktop.agentStartDevServer({ cwd });
+  return window.arkDesktop.agentStartDevServer({ cwd: root || cwd });
 }
 
 function joinRoot(root: string, rel: string): string {
@@ -273,6 +285,25 @@ export async function ensureBoundFolderPreview(opts: {
   // Prefer a live project server when the folder has one (Vite / run.bat / FastAPI).
   // Never fall through to static HTML for Vite — serving raw JSX is a blank black window.
   const viteLike = isViteProject(files);
+
+  // Attach to an existing preview session before starting another Vite.
+  if (window.arkDesktop?.previewSession) {
+    try {
+      const session = await window.arkDesktop.previewSession(root);
+      if (session?.ok && session.url) {
+        await openInAppPreview(session.url, {
+          projectId: opts.projectId,
+          title: opts.title,
+          forceNavigate: true,
+          device: opts.device,
+        });
+        return { ok: true, url: session.url };
+      }
+    } catch {
+      /* fall through */
+    }
+  }
+
   if (window.arkDesktop?.agentStartFolderPreview) {
     const live = await window.arkDesktop.agentStartFolderPreview({ cwd: root });
     if (live?.ok && live.url) {

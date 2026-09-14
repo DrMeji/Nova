@@ -27,8 +27,12 @@ import {
   updateCreateJob,
 } from '@/lib/createJobStore';
 import { getLocalPrefs } from '@/lib/localPrefs';
+import type { CreateSuccess } from '@/lib/productContract';
 
 export { pendingCreateBootstrap };
+
+/** Product-contract create success (Wave 2 alias for callers). */
+export type { CreateSuccess };
 
 /**
  * Stage-2 multi-model polish only when pref is on AND this PC can hold two locals.
@@ -44,7 +48,7 @@ export async function assertCreateMultiModelOk(): Promise<{ ok: boolean; reason?
 }
 
 export type CreateTurnOutcome =
-  | { status: 'handled' }
+  | { status: 'handled'; contract?: CreateSuccess }
   | { status: 'fallthrough_edit' }
   | { status: 'failed'; message: string };
 

@@ -3,6 +3,11 @@ import {
   Search, Plus, Check, Download, Loader2, Cpu, Cloud, Monitor,
   Code, Boxes, Brain, Eye, Zap, Image as ImageIcon, Video, Gauge, Sparkles, Rocket, X, KeyRound, Globe, RefreshCw, Trash2, ExternalLink,
 } from 'lucide-react';
+/**
+ * Models catalog UI. App routes `models` / `local-ai` / `brain` render BrainView;
+ * Brain embeds this view for Installed + Cloud tabs. CLOUD_MODELS stays exported
+ * for SearchPanel and other callers.
+ */
 import { detectHardware, getAccurateHardware, getHardwareClass, isEngineDownloadable, loadHardwareSnapshot, parseRamGb, type HardwareClass } from '@/lib/api';
 import {
   categoryDisplayLabel,
@@ -471,9 +476,16 @@ function TierBadges({ tiers }: { tiers: Tier[] }) {
   );
 }
 
-export function ModelsView() {
+export type ModelsViewProps = {
+  /** When set (Brain embed), show only this catalog tab and skip Models chrome. */
+  embedTab?: TabId;
+  hideChrome?: boolean;
+};
+
+export function ModelsView({ embedTab, hideChrome = false }: ModelsViewProps = {}) {
   const { route, navigate } = useRouter();
   const [tab, setTab] = useState<TabId>(() => {
+    if (embedTab) return embedTab;
     if (route.name !== 'models') return 'for-pc';
     const t = route.tab;
     if (t === 'local' || t === 'cloud' || t === 'for-pc') return t;
@@ -554,11 +566,15 @@ export function ModelsView() {
   const fitLists = useMemo(() => buildFitLists(pcClass, ramGb), [pcClass, ramGb]);
 
   useEffect(() => {
+    if (embedTab) {
+      setTab(embedTab);
+      return;
+    }
     if (route.name !== 'models') return;
     const t = route.tab;
     if (t === 'local' || t === 'cloud' || t === 'for-pc') setTab(t);
     else setTab('for-pc');
-  }, [route]);
+  }, [route, embedTab]);
 
   useEffect(() => {
     const hydrate = () => {
@@ -1097,13 +1113,75 @@ export function ModelsView() {
 
   return (
     <div className="h-full min-w-0 flex flex-col overflow-hidden animate-fade-in bg-transparent">
-      <div className="shrink-0 px-4 sm:px-6 pt-[min(12vh,6rem)] bg-transparent">
-        <div className="w-full max-w-4xl mx-auto min-w-0">
-          <div className="flex items-center justify-between gap-3 mb-5 min-w-0">
-            <div className="min-w-0">
-              <h1 className="text-2xl sm:text-3xl font-semibold text-content-primary tracking-tight">Models</h1>
+      {!hideChrome && (
+        <div className="shrink-0 px-4 sm:px-6 pt-[min(12vh,6rem)] bg-transparent">
+          <div className="w-full max-w-4xl mx-auto min-w-0">
+            <div className="flex items-center justify-between gap-3 mb-5 min-w-0">
+              <div className="min-w-0">
+                <h1 className="text-2xl sm:text-3xl font-semibold text-content-primary tracking-tight">Models</h1>
+              </div>
+              <div className="flex items-center gap-2 rounded-full bg-surface-hover px-3 py-2 w-36 sm:w-52 md:w-64 shrink-0 min-w-0">
+                <Search className="w-4 h-4 text-content-tertiary shrink-0" />
+                <input
+                  type="text"
+                  value={query}
+                  onChange={e => setQuery(e.target.value)}
+                  placeholder="Search models"
+                  className="flex-1 bg-transparent border-none text-sm text-content-primary placeholder:text-content-tertiary focus:outline-none min-w-0"
+                />
+              </div>
             </div>
-            <div className="flex items-center gap-2 rounded-full bg-surface-hover px-3 py-2 w-36 sm:w-52 md:w-64 shrink-0 min-w-0">
+
+            {liveCapacity && !liveCapacity.liveChat && (
+              <div className="mb-4 rounded-xl border border-amber-500/25 bg-amber-500/10 px-4 py-3 text-sm text-amber-100/90 leading-relaxed">
+                <span className="font-medium text-amber-200">No live brain yet</span>
+                {'. '}
+                {liveCapacity.summary}
+                {liveCapacity.suggestedFreeKeys.length > 0 && (
+                  <>
+                    {' '}
+                    Try free keys:
+                    {' '}
+                    {liveCapacity.suggestedFreeKeys.map(k => k.name).join(', ')}
+                    {' '}
+                    in Settings → Connect.
+                  </>
+                )}
+              </div>
+            )}
+
+            <div className="flex items-center gap-1 mb-4 flex-wrap">
+              {([
+                { id: 'for-pc' as const, label: 'For your PC', icon: Monitor },
+                { id: 'local' as const, label: 'Local AI', icon: Cpu },
+                { id: 'cloud' as const, label: 'Cloud AI', icon: Cloud },
+              ]).map(t => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => {
+                    setTab(t.id);
+                    navigate({ name: 'models', tab: t.id });
+                  }}
+                  className={`inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 text-sm transition-colors ${
+                    tab === t.id
+                      ? 'bg-surface-hover text-content-primary'
+                      : 'text-content-secondary hover:text-content-primary'
+                  }`}
+                >
+                  <t.icon className="w-3.5 h-3.5" />
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {hideChrome && (
+        <div className="shrink-0 px-4 sm:px-6 pb-2">
+          <div className="w-full max-w-4xl mx-auto min-w-0">
+            <div className="flex items-center gap-2 rounded-full bg-surface-hover px-3 py-2 w-full sm:w-72 md:w-80 min-w-0">
               <Search className="w-4 h-4 text-content-tertiary shrink-0" />
               <input
                 type="text"
@@ -1114,53 +1192,10 @@ export function ModelsView() {
               />
             </div>
           </div>
-
-          {liveCapacity && !liveCapacity.liveChat && (
-            <div className="mb-4 rounded-xl border border-amber-500/25 bg-amber-500/10 px-4 py-3 text-sm text-amber-100/90 leading-relaxed">
-              <span className="font-medium text-amber-200">No live brain yet</span>
-              {'. '}
-              {liveCapacity.summary}
-              {liveCapacity.suggestedFreeKeys.length > 0 && (
-                <>
-                  {' '}
-                  Try free keys:
-                  {' '}
-                  {liveCapacity.suggestedFreeKeys.map(k => k.name).join(', ')}
-                  {' '}
-                  in Settings → Connect.
-                </>
-              )}
-            </div>
-          )}
-
-          <div className="flex items-center gap-1 mb-4 flex-wrap">
-            {([
-              { id: 'for-pc' as const, label: 'For your PC', icon: Monitor },
-              { id: 'local' as const, label: 'Local AI', icon: Cpu },
-              { id: 'cloud' as const, label: 'Cloud AI', icon: Cloud },
-            ]).map(t => (
-              <button
-                key={t.id}
-                type="button"
-                onClick={() => {
-                  setTab(t.id);
-                  navigate({ name: 'models', tab: t.id });
-                }}
-                className={`inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 text-sm transition-colors ${
-                  tab === t.id
-                    ? 'bg-surface-hover text-content-primary'
-                    : 'text-content-secondary hover:text-content-primary'
-                }`}
-              >
-                <t.icon className="w-3.5 h-3.5" />
-                {t.label}
-              </button>
-            ))}
-          </div>
         </div>
-      </div>
+      )}
 
-      <div className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden px-4 sm:px-6 pb-10">
+      <div className={`flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden px-4 sm:px-6 pb-10 ${hideChrome ? '' : ''}`}>
         <div className="w-full max-w-4xl mx-auto min-w-0">
           {tab === 'for-pc' ? (
             <>

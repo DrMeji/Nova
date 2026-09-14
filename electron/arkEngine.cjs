@@ -745,7 +745,11 @@ async function generate(message, opts = {}) {
       300_000,
       2048,
       0.35,
-      { images: visionImages },
+      {
+        images: visionImages,
+        jobId: opts.jobId,
+        chatId: opts.chatId,
+      },
     );
     return {
       ok: true,
@@ -814,7 +818,15 @@ async function generate(message, opts = {}) {
       const nPredictCap = Math.max(nPredictMin, ctx - promptReserve);
       const nPredict = Math.min(Math.max(requested, nPredictMin), nPredictCap);
       const temperature = typeof opts.temperature === 'number' ? opts.temperature : 0.55;
-      const gguf = await arkGguf.runGgufStream(ggufId, message, onChunk, timeoutMs, nPredict, temperature);
+      const gguf = await arkGguf.runGgufStream(
+        ggufId,
+        message,
+        onChunk,
+        timeoutMs,
+        nPredict,
+        temperature,
+        { jobId: opts.jobId, chatId: opts.chatId },
+      );
       let reply = gguf.reply;
       if (gguf.truncated || (reply && reply.length > nPredict * 3)) {
         reply = `${reply}\n\n_Stopped at length limit — ask to continue._`;

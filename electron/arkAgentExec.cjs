@@ -15,6 +15,19 @@ const arkSelfGuard = require('./arkSelfGuard.cjs');
 const devServersByCwd = new Map();
 
 /**
+ * Return an existing preview/dev-server session for this cwd, if any.
+ * @param {string} cwd
+ * @returns {{ url: string, pid?: number, child?: import('child_process').ChildProcess, cwd: string } | null}
+ */
+function getPreviewSession(cwd) {
+  const key = String(cwd || '').trim().toLowerCase();
+  if (!key) return null;
+  const session = devServersByCwd.get(key);
+  if (!session?.url) return null;
+  return { ...session, cwd: key };
+}
+
+/**
  * Serialize npm/pnpm/yarn installs app-wide. Parallel node_modules storms
  * freeze the whole PC (Defender + disk) — YouTube and everything hitch.
  */
@@ -401,11 +414,11 @@ async function agentStartDevServer(payload) {
   if (!cwdRes.ok) return cwdRes;
 
   const cwdKey = cwdRes.path.toLowerCase();
-  const existing = devServersByCwd.get(cwdKey);
+  const existing = getPreviewSession(cwdRes.path);
   if (existing?.url) {
     const port = portFromUrl(existing.url);
     if (await httpProbePortAny(port)) {
-      return { ok: true, cwd: cwdRes.path, url: existing.url };
+      return { ok: true, cwd: cwdRes.path, url: existing.url, reused: true };
     }
     try { existing.child?.kill?.(); } catch { /* ignore */ }
     devServersByCwd.delete(cwdKey);
@@ -481,11 +494,11 @@ async function agentStartFolderPreview(payload) {
   const cwd = cwdRes.path;
   const cwdKey = cwd.toLowerCase();
 
-  const existing = devServersByCwd.get(cwdKey);
+  const existing = getPreviewSession(cwd);
   if (existing?.url) {
     const port = portFromUrl(existing.url);
     if (await httpProbePortAny(port)) {
-      return { ok: true, cwd, url: existing.url };
+      return { ok: true, cwd, url: existing.url, reused: true };
     }
     try { existing.child?.kill?.(); } catch { /* ignore */ }
     devServersByCwd.delete(cwdKey);
@@ -527,6 +540,7 @@ module.exports = {
   agentRun,
   agentStartDevServer,
   agentStartFolderPreview,
+  getPreviewSession,
   commandAllowed,
   loadExecutionMode,
 };

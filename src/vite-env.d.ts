@@ -218,7 +218,15 @@ declare global {
         message: string,
         modelId?: string,
         kind?: string,
-        opts?: { temperature?: number; nPredict?: number; mediaDurationSec?: number; referenceImageDataUrl?: string; visionImages?: string[] },
+        opts?: {
+          temperature?: number;
+          nPredict?: number;
+          mediaDurationSec?: number;
+          referenceImageDataUrl?: string;
+          visionImages?: string[];
+          jobId?: string;
+          chatId?: string;
+        },
       ) => Promise<{
         ok?: boolean;
         reply: string;
@@ -227,7 +235,10 @@ declare global {
         cancelled?: boolean;
         media?: { kind: string; dataUrl: string; path?: string; libraryId?: string; real?: boolean };
       }>;
-      engineGenerateCancel?: () => Promise<{ ok: boolean; error?: string }>;
+      engineGenerateCancel?: (opts?: {
+        jobId?: string;
+        chatId?: string;
+      }) => Promise<{ ok: boolean; error?: string; cancelled?: boolean }>;
       webSearch?: (query: string) => Promise<{
         ok: boolean;
         text?: string;
@@ -273,7 +284,15 @@ declare global {
         message: string,
         modelId?: string,
         kind?: 'image' | 'video' | 'chat' | 'coding',
-        opts?: { temperature?: number; nPredict?: number; mediaDurationSec?: number; referenceImageDataUrl?: string; visionImages?: string[] },
+        opts?: {
+          temperature?: number;
+          nPredict?: number;
+          mediaDurationSec?: number;
+          referenceImageDataUrl?: string;
+          visionImages?: string[];
+          jobId?: string;
+          chatId?: string;
+        },
       ) => Promise<{
         ok: boolean;
         reply: string;
@@ -334,6 +353,14 @@ declare global {
         projectName?: string;
       }) => Promise<{ ok: boolean; url?: string; reloaded?: boolean; error?: string }>;
       previewReload?: (projectId: string) => Promise<{ ok: boolean; error?: string }>;
+      /** Attach to an already-running Vite/dev preview for this cwd (no second server). */
+      previewSession?: (cwd: string) => Promise<{
+        ok: boolean;
+        url?: string;
+        cwd?: string;
+        running?: boolean;
+        error?: string;
+      }>;
       mediaLibrary?: () => Promise<{
         ok: boolean;
         items: Array<{

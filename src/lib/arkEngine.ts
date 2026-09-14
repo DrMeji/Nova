@@ -1,4 +1,5 @@
 import { getLocalPrefs } from '@/lib/localPrefs';
+import { getChatJobId, getLastInflightChatId } from '@/lib/chatInflight';
 
 export type ArkEngineModel = {
   id: string;
@@ -144,9 +145,13 @@ export async function engineGenerate(
     visionImages?: string[];
     /** Override n_predict (e.g. voice tab short replies). */
     nPredict?: number;
+    jobId?: string;
+    chatId?: string;
   },
 ) {
   const prefs = getLocalPrefs();
+  const chatId = opts?.chatId || getLastInflightChatId() || undefined;
+  const jobId = opts?.jobId || (chatId ? getChatJobId(chatId) || undefined : undefined);
   const sampling = {
     temperature: prefs.ggufTemperature,
     nPredict: opts?.nPredict ?? ggufNPredictForKind(kind),
@@ -154,6 +159,8 @@ export async function engineGenerate(
     referenceImageDataUrl: opts?.referenceImageDataUrl,
     allowNsfw: Boolean(prefs.allowNsfw),
     visionImages: opts?.visionImages,
+    jobId,
+    chatId,
   };
   if (window.arkDesktop?.engineGenerate) {
     // Let Thinking… dots paint before a heavy local GGUF turn can stall the UI thread.
@@ -185,13 +192,17 @@ export async function engineGenerateStream(
   modelId: string | undefined,
   onChunk: (text: string) => void,
   kind?: 'image' | 'video' | 'chat' | 'coding',
-  opts?: { visionImages?: string[] },
+  opts?: { visionImages?: string[]; jobId?: string; chatId?: string },
 ) {
   const prefs = getLocalPrefs();
+  const chatId = opts?.chatId || getLastInflightChatId() || undefined;
+  const jobId = opts?.jobId || (chatId ? getChatJobId(chatId) || undefined : undefined);
   const sampling = {
     temperature: prefs.ggufTemperature,
     nPredict: ggufNPredictForKind(kind),
     visionImages: opts?.visionImages,
+    jobId,
+    chatId,
   };
   if (window.arkDesktop?.engineGenerateStream) {
     const stop = window.arkDesktop.onEngineChunk?.((payload) => {
@@ -203,12 +214,12 @@ export async function engineGenerateStream(
       stop?.();
     }
   }
-  return engineGenerate(message, modelId, kind);
+  return engineGenerate(message, modelId, kind, { jobId, chatId });
 }
 
-export async function engineGenerateCancel() {
+export async function engineGenerateCancel(opts?: { jobId?: string; chatId?: string }) {
   if (window.arkDesktop?.engineGenerateCancel) {
-    return window.arkDesktop.engineGenerateCancel();
+    return window.arkDesktop.engineGenerateCancel(opts);
   }
   return { ok: false };
 }

@@ -260,6 +260,31 @@ export function saveChatStudio(
   }
 }
 
+export type BoundStudio = {
+  chatId: string;
+  diskRoot: string | null;
+  projectId: string | null;
+  name?: string;
+  files: Record<string, string>;
+  previewUrl?: string | null;
+};
+
+/** SSOT snapshot for one chatId — handlers must use this, not mixed refs. */
+export function getBoundStudio(chatId: string): BoundStudio | null {
+  const id = String(chatId || '').trim();
+  if (!id) return null;
+  const snap = loadChatStudio(id);
+  if (!snap) return null;
+  return {
+    chatId: id,
+    diskRoot: snap.diskRoot || null,
+    projectId: snap.projectId || null,
+    name: snap.name,
+    files: snap.files || {},
+    previewUrl: snap.previewUrl ?? null,
+  };
+}
+
 export function loadChatStudio(chatId: string): ChatStudioSnapshot | null {
   if (!chatId) return null;
   try {

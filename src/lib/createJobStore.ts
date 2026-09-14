@@ -1,5 +1,6 @@
 /**
  * Create job lifecycle — Preview / UI subscribe while npm runs in background.
+ * Persists to sessionStorage so a tab refresh can still show Progress / Ready.
  */
 
 export type CreateJobStatus = 'writing' | 'npm' | 'ready' | 'failed';
@@ -21,6 +22,43 @@ const jobs = new Map<string, CreateJob>();
 const byChat = new Map<string, string>();
 const listeners = new Set<() => void>();
 
+function storageKey(chatId: string) {
+  return `nova-create-job:${chatId}`;
+}
+
+function persistJob(job: CreateJob) {
+  try {
+    // Avoid huge file blobs in sessionStorage — keep metadata + tiny file map.
+    const fileKeys = Object.keys(job.files || {});
+    const slimFiles: Record<string, string> = {};
+    for (const k of fileKeys.slice(0, 40)) {
+      const v = job.files[k];
+      if (typeof v === 'string' && v.length <= 80_000) slimFiles[k] = v;
+    }
+    sessionStorage.setItem(storageKey(job.chatId), JSON.stringify({
+      ...job,
+      files: slimFiles,
+    }));
+  } catch {
+    /* quota / private mode */
+  }
+}
+
+function hydrateFromSession(chatId: string): CreateJob | null {
+  if (!chatId) return null;
+  try {
+    const raw = sessionStorage.getItem(storageKey(chatId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as CreateJob;
+    if (!parsed?.id || !parsed.chatId) return null;
+    jobs.set(parsed.id, parsed);
+    byChat.set(parsed.chatId, parsed.id);
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
 function emit() {
   listeners.forEach((l) => {
     try { l(); } catch { /* ignore */ }
@@ -38,7 +76,11 @@ export function getCreateJob(id: string): CreateJob | null {
 
 export function getCreateJobForChat(chatId: string): CreateJob | null {
   const id = byChat.get(chatId);
-  return id ? jobs.get(id) || null : null;
+  if (id) {
+    const mem = jobs.get(id);
+    if (mem) return mem;
+  }
+  return hydrateFromSession(chatId);
 }
 
 export function startCreateJob(partial: Omit<CreateJob, 'updatedAt' | 'status'> & { status?: CreateJobStatus }): CreateJob {
@@ -49,6 +91,7 @@ export function startCreateJob(partial: Omit<CreateJob, 'updatedAt' | 'status'> 
   };
   jobs.set(job.id, job);
   byChat.set(job.chatId, job.id);
+  persistJob(job);
   emit();
   return job;
 }
@@ -59,6 +102,7 @@ export function updateCreateJob(id: string, patch: Partial<CreateJob>): CreateJo
   const next = { ...prev, ...patch, id: prev.id, updatedAt: Date.now() };
   jobs.set(id, next);
   byChat.set(next.chatId, id);
+  persistJob(next);
   emit();
   return next;
 }

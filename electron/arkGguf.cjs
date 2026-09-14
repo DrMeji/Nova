@@ -539,6 +539,37 @@ let activeChild = null;
 let generateBusy = false;
 let cancelRequested = false;
 let activeAbort = null;
+/** @type {string | null} */
+let activeJobId = null;
+/**
+ * Per-job cancel handles so Stop on chat A does not need a global-only kill.
+ * @type {Map<string, { child: import('child_process').ChildProcess | null, abort: AbortController | null, chatId?: string }>}
+ */
+const jobsById = new Map();
+/** @type {Map<string, string>} chatId → jobId */
+const chatToJob = new Map();
+
+function registerGgufJob(opts = {}) {
+  const chatId = opts.chatId != null ? String(opts.chatId).trim() : '';
+  const jobId = String(opts.jobId || '').trim()
+    || (chatId ? `chat-${chatId}` : '')
+    || `gguf-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const entry = { child: null, abort: null, chatId: chatId || undefined };
+  jobsById.set(jobId, entry);
+  if (chatId) chatToJob.set(chatId, jobId);
+  activeJobId = jobId;
+  return { jobId, entry };
+}
+
+function clearGgufJob(jobId) {
+  const id = String(jobId || '').trim();
+  if (!id) return;
+  const entry = jobsById.get(id);
+  if (entry?.chatId) chatToJob.delete(entry.chatId);
+  jobsById.delete(id);
+  if (activeJobId === id) activeJobId = null;
+}
+
 let serverChild = null;
 let serverGguf = null;
 let serverMmproj = null;
@@ -581,18 +612,63 @@ function killLlamaChild(child) {
   }
 }
 
-function cancelGguf() {
-  cancelRequested = true;
-  try { activeAbort?.abort(); } catch { /* ignore */ }
-  activeAbort = null;
-  if (activeChild) {
-    killLlamaChild(activeChild);
-    activeChild = null;
+function cancelGguf(jobIdOrOpts) {
+  let targetId = '';
+  if (typeof jobIdOrOpts === 'string') {
+    targetId = jobIdOrOpts.trim();
+  } else if (jobIdOrOpts && typeof jobIdOrOpts === 'object') {
+    const jid = String(jobIdOrOpts.jobId || '').trim();
+    const cid = String(jobIdOrOpts.chatId || '').trim();
+    targetId = jid || (cid ? (chatToJob.get(cid) || '') : '');
   }
-  // Always free the lock — Stop used to leave generateBusy=true while bindLlamaServer
-  // kept waiting, so every later chat sat on Thinking… forever with no llama process.
-  generateBusy = false;
-  return { ok: true };
+
+  // No id → cancel active job (legacy Stop / single-flight).
+  if (!targetId) {
+    targetId = activeJobId || '';
+    cancelRequested = true;
+    try { activeAbort?.abort(); } catch { /* ignore */ }
+    activeAbort = null;
+    if (activeChild) {
+      killLlamaChild(activeChild);
+      activeChild = null;
+    }
+    if (targetId) {
+      const entry = jobsById.get(targetId);
+      if (entry) {
+        try { entry.abort?.abort(); } catch { /* ignore */ }
+        if (entry.child) killLlamaChild(entry.child);
+        clearGgufJob(targetId);
+      }
+    } else {
+      for (const [id, entry] of [...jobsById.entries()]) {
+        try { entry.abort?.abort(); } catch { /* ignore */ }
+        if (entry.child) killLlamaChild(entry.child);
+        clearGgufJob(id);
+      }
+    }
+    generateBusy = false;
+    return { ok: true, cancelled: true };
+  }
+
+  const entry = jobsById.get(targetId);
+  if (!entry) {
+    // Unknown / already finished — do not kill a different chat's job.
+    return { ok: true, cancelled: false };
+  }
+
+  const isActive = activeJobId === targetId;
+  if (isActive) cancelRequested = true;
+  try { entry.abort?.abort(); } catch { /* ignore */ }
+  if (entry.child) killLlamaChild(entry.child);
+  if (isActive) {
+    if (activeAbort === entry.abort) activeAbort = null;
+    if (activeChild === entry.child) activeChild = null;
+    // Always free the lock — Stop used to leave generateBusy=true while bindLlamaServer
+    // kept waiting, so every later chat sat on Thinking… forever with no llama process.
+    generateBusy = false;
+  }
+  clearGgufJob(targetId);
+  return { ok: true, cancelled: true };
 }
 
 function stopServer() {
@@ -693,12 +769,13 @@ async function warmServer(modelId) {
   }
 }
 
-async function runGgufServerStream(modelId, prompt, onChunk, timeoutMs, nPredict = 4096, temperature = 0.55, visionImages = []) {
+async function runGgufServerStream(modelId, prompt, onChunk, timeoutMs, nPredict = 4096, temperature = 0.55, visionImages = [], jobEntry = null) {
   const promptStr = wrapChatPrompt(modelId, prompt);
   const started = Date.now();
   cancelRequested = false;
   const ac = new AbortController();
   activeAbort = ac;
+  if (jobEntry) jobEntry.abort = ac;
   const timer = setTimeout(() => ac.abort(), timeoutMs);
   let out = '';
   const images = normalizeVisionImages(visionImages);
@@ -780,6 +857,7 @@ async function runGgufServerStream(modelId, prompt, onChunk, timeoutMs, nPredict
   } finally {
     clearTimeout(timer);
     if (activeAbort === ac) activeAbort = null;
+    if (jobEntry && jobEntry.abort === ac) jobEntry.abort = null;
   }
 }
 
@@ -1026,6 +1104,10 @@ function runGgufStream(modelId, prompt, onChunk, timeoutMs = 240000, nPredict = 
   }
   generateBusy = true;
   cancelRequested = false;
+  const { jobId, entry } = registerGgufJob({
+    jobId: extra?.jobId,
+    chatId: extra?.chatId,
+  });
   return (async () => {
     try {
       if (await ensureLlamaServer(modelId)) {
@@ -1035,7 +1117,7 @@ function runGgufStream(modelId, prompt, onChunk, timeoutMs = 240000, nPredict = 
             stopped.code = 'CANCELED';
             throw stopped;
           }
-          const hit = await runGgufServerStream(modelId, prompt, onChunk, timeoutMs, nPredict, temperature, visionImages);
+          const hit = await runGgufServerStream(modelId, prompt, onChunk, timeoutMs, nPredict, temperature, visionImages, entry);
           if (hit?.cancelled) return hit;
           if (hit?.reply) return hit;
         } catch (err) {
@@ -1052,14 +1134,15 @@ function runGgufStream(modelId, prompt, onChunk, timeoutMs = 240000, nPredict = 
         stopped.code = 'CANCELED';
         throw stopped;
       }
-      return await runGgufCliStream(modelId, prompt, onChunk, timeoutMs, nPredict, temperature, visionImages);
+      return await runGgufCliStream(modelId, prompt, onChunk, timeoutMs, nPredict, temperature, visionImages, entry);
     } finally {
       generateBusy = false;
+      clearGgufJob(jobId);
     }
   })();
 }
 
-function runGgufCliStream(modelId, prompt, onChunk, timeoutMs = 240000, nPredict = 4096, temperature = 0.55, visionImages = []) {
+function runGgufCliStream(modelId, prompt, onChunk, timeoutMs = 240000, nPredict = 4096, temperature = 0.55, visionImages = [], jobEntry = null) {
   return new Promise((resolve, reject) => {
     const gguf = findGgufForModel(modelId);
     const mmproj = findMmprojForModel(modelId);
@@ -1115,6 +1198,7 @@ function runGgufCliStream(modelId, prompt, onChunk, timeoutMs = 240000, nPredict
       /* ignore */
     }
     activeChild = child;
+    if (jobEntry) jobEntry.child = child;
     let out = '';
     let err = '';
     let emitted = '';
@@ -1148,12 +1232,14 @@ function runGgufCliStream(modelId, prompt, onChunk, timeoutMs = 240000, nPredict
       clearTimeout(timer);
       cleanupPrompt();
       if (activeChild === child) activeChild = null;
+      if (jobEntry && jobEntry.child === child) jobEntry.child = null;
       reject(e);
     });
     child.on('close', (code) => {
       clearTimeout(timer);
       cleanupPrompt();
       if (activeChild === child) activeChild = null;
+      if (jobEntry && jobEntry.child === child) jobEntry.child = null;
       const text = cleanGgufReply(promptStr, out);
       writeGgufDebug({
         at: new Date().toISOString(),

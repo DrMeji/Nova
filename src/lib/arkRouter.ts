@@ -607,6 +607,43 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
   const brainKind: 'chat' | 'coding' = intent === 'coding' ? 'coding' : 'chat';
   const acceptCodingReply = (reply: string) =>
     brainKind !== 'coding' || !codingOutputIncomplete(coerceCodingFileReply(reply), opts.message);
+
+  // Wave 2: block weak / oversized local coder before any coding generate hop.
+  if (brainKind === 'coding') {
+    try {
+      const { getBrainProfile, assertCoderAllowed } = await import('@/lib/brainProfile');
+      const profile = await getBrainProfile();
+      const gate = assertCoderAllowed(
+        profile,
+        opts.stickyModelId || preferredId,
+        opts.stickyModelName || preferredName,
+      );
+      if (!gate.ok) {
+        // Soft miss — skip local coding; cloud preferCloudCoding may still run below
+        // only when maxCoderParamsB > 0 or cloud is explicitly preferred.
+        if (profile.maxCoderParamsB <= 0 && !opts.preferCloudCoding) {
+          return {
+            reply: [
+              gate.reason,
+              '',
+              'This PC cannot run a local coder. Pin a cloud coding model, or keep using surgical edits / scaffold.',
+            ].join('\n'),
+            modelName: 'Brain gate',
+            source: 'none',
+            tier: 'local-free',
+            attempted,
+          };
+        }
+        if (isWeakChatBrain(`${opts.stickyModelId || preferredId || ''} ${opts.stickyModelName || preferredName || ''}`)) {
+          // Clear weak sticky so later hops don't keep retrying the tiny model.
+          opts = { ...opts, stickyModelId: undefined, stickyModelName: undefined };
+        }
+      }
+    } catch {
+      /* probe failed — continue routing */
+    }
+  }
+
   const tryFreeCloud = () => cloudChatFreeKeys(
     opts.message,
     attempted,

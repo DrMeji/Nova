@@ -1,0 +1,556 @@
+import {
+  SettingsSection,
+  Field,
+  InfoCard,
+  ToggleRow,
+  ThemeCard,
+  SettingsGroup,
+  GgufSliderRow,
+  StorageBar,
+  OAuthClientRow,
+  AUTO_LOCK_OPTIONS,
+  AI_MODES,
+  DEFAULT_MODELS,
+  PROVIDER_ROWS,
+  ACCENTS,
+} from '@/components/SettingsShared';
+import { VoiceSettingsPanel } from '@/components/VoiceSettingsPanel';
+import { SettingsSystemHealth } from '@/components/SettingsSystemHealth';
+import { NovaMark } from '@/components/NovaMark';
+import { BrandMark, StatusCheck } from '@/components/BrandMark';
+import { ARK_CHANGELOG } from '@/lib/changelog';
+import { formatArkId } from '@/lib/arkUserId';
+import { isArkDevEmail } from '@/lib/arkDevAccount';
+import { clearSetupCompleted } from '@/lib/setup';
+import { getHardwareClass, getAccurateHardware } from '@/lib/api';
+import { getGgufCtx, ggufCtxCapacityLabel } from '@/lib/ggufContext';
+import { setCloudProviderEnabled } from '@/lib/cloudSources';
+import { probeProviderKey } from '@/lib/providerSpeed';
+import { setProviderApiKey, getProviderApiKeys, getLocalPrefs, type DensityPref, type AiModePref } from '@/lib/localPrefs';
+import { hasPinSet, setPin, clearPin } from '@/lib/pinLock';
+import { hasSecondFactorSet, setSecondFactor, clearSecondFactor } from '@/lib/twoFactor';
+import {
+  getEnabledSkillIds,
+  listBuiltinSkillPacks,
+  toggleSkillEnabled,
+  type BuiltinNovaSkillId,
+} from '@/lib/novaSkills';
+import { isArkDevSession } from '@/lib/arkRuntime';
+import {
+  Check, Cpu, KeyRound, Sparkles, Mail, BadgeCheck, Trash2, Download, Info, Monitor, Copy, X, FolderOpen, Github, RefreshCw, Cloud, Lock as LockIcon,
+} from 'lucide-react';
+
+
+export function SettingsGeneral({ ctx }: { ctx: any }) {
+  const {
+    activeSection, displayName, setDisplayName, saveDisplayName, user, profile, setArkCopied, arkCopied,
+    flashSaved, setSavedFlash, deleteAccountBusy, setDeleteAccountBusy, deleteAccountMsg, setDeleteAccountMsg,
+    deleteConfirmOpen, setDeleteConfirmOpen, scheduleAccountDeletion, cancelAccountDeletion,
+    signOut, theme, setTheme, prefs, patchPrefs, enabledSkills, setEnabledSkills, featureTick,
+    engineStatus, diskSpace, brainUrl, brainContractVersion, secretsEncrypted, aiMode, keepLocal,
+    allowSync, diagnostics, providerKeys, setProviderKeys, editingProvider, setEditingProvider,
+    keyDraft, setKeyDraft, keyTestMsg, setKeyTestMsg, keyTestFor, setKeyTestFor, showLegacyProviders,
+    setShowLegacyProviders, keyedCount, hw, setHw, hwScanning, setHwScanning, hwFlash, setHwFlash,
+    brainProfileReason, setBrainProfileReason, localReports, setLocalReports, cacheBusy, runClearChatCache, runClearAppCaches,
+    installedModels, modelUsedGb, modelPercent, diskTotalGb, diskUsedGb, diskUsedPercent,
+    deletingModelId, runDeleteModel, refreshStorage, pinNew, setPinNew, pinConfirm, setPinConfirm,
+    pinMsg, setPinMsg, twoFaNew, setTwoFaNew, twoFaConfirm, setTwoFaConfirm, twoFaMsg, setTwoFaMsg,
+    checkingUpdates, downloadingUpdate, updateMsg, updateInfo, updatePercent, appVersion,
+    checkForUpdates, downloadUpdate, visibleChangelog, signingStatus, navigate, onClose,
+    settings, updateSettings, blockedUsers, unblockFriend, refreshBlocked,
+  } = ctx;
+
+  void featureTick;
+  void setLocalReports;
+  void refreshBlocked;
+
+
+  return (
+    <>
+          {activeSection === 'account' && (
+            <SettingsSection title="Account">
+              <div className="space-y-5">
+                <div className="flex items-start gap-4">
+                  <div className="relative shrink-0 w-16 h-16 flex items-center justify-center">
+                    <NovaMark className="w-8 h-8 text-content-primary" title="NOVA" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-content-primary truncate">{displayName || 'Guest'}</p>
+                    <p className="text-xs text-content-tertiary truncate flex items-center gap-1.5 mt-0.5">
+                      <Mail className="w-3 h-3" />
+                      {user?.email ?? 'guest@NOVA.local'}
+                    </p>
+                    <p className="text-[11px] text-content-tertiary mt-1 inline-flex items-center gap-1">
+                      <BadgeCheck className="w-3 h-3 text-sky-400" />
+                      {user?.id === 'guest-local' ? 'Guest session on this device' : 'Signed in account'}
+                    </p>
+                  </div>
+                </div>
+
+                <Field
+                  label="Display Name"
+                  value={displayName}
+                  onChange={setDisplayName}
+                  onBlur={saveDisplayName}
+                />
+                <div>
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <label className="block text-xs font-medium text-content-secondary">NOVA ID</label>
+                  </div>
+                  <div className="flex items-center gap-2 min-w-0">
+                    <p className="flex-1 min-w-0 rounded-lg border border-surface-border bg-ark-navy-900/80 px-3 py-2 text-sm font-mono tracking-[0.18em] sm:tracking-[0.28em] text-content-primary overflow-x-auto">
+                      {isArkDevEmail(user?.email)
+                        ? 'DEV'
+                        : (profile?.ark_id ? formatArkId(profile.ark_id) : '•••••••')}
+                    </p>
+                    <button
+                      type="button"
+                      disabled={!profile?.ark_id && !isArkDevEmail(user?.email)}
+                      onClick={() => {
+                        if (!profile?.ark_id && !isArkDevEmail(user?.email)) return;
+                        const arkIdText = isArkDevEmail(user?.email)
+                          ? 'DEV'
+                          : formatArkId(String(profile?.ark_id ?? ''));
+                        void navigator.clipboard.writeText(arkIdText).then(() => {
+                          setArkCopied(true);
+                          window.setTimeout(() => setArkCopied(false), 1600);
+                        }).catch(() => undefined);
+                      }}
+                      className="ark-btn-secondary shrink-0"
+                      title="Copy NOVA ID"
+                    >
+                      {arkCopied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                      {arkCopied ? 'Copied' : 'Copy'}
+                    </button>
+                  </div>
+                </div>
+                <Field label="Email" value={user?.email ?? 'guest@NOVA.local'} onChange={() => {}} disabled />
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <InfoCard title="Plan" value="Free on this PC" />
+                  <InfoCard title="Devices" value="This PC" />
+                </div>
+
+                <div className="flex flex-wrap gap-2 pt-1 items-center">
+                  <button type="button" onClick={signOut} className="ark-btn-secondary !text-ark-accent-red">
+                    Sign Out
+                  </button>
+                  {user?.id && user.id !== 'guest-local' ? (
+                    profile?.delete_scheduled_at ? (
+                      <button
+                        type="button"
+                        disabled={deleteAccountBusy}
+                        className="ark-btn-secondary !text-amber-200 border-amber-500/40 disabled:opacity-50"
+                        onClick={() => {
+                          setDeleteAccountBusy(true);
+                          setDeleteAccountMsg(null);
+                          void cancelAccountDeletion().then((res: any) => {
+                            setDeleteAccountBusy(false);
+                            if (!res.ok) {
+                              setDeleteAccountMsg(res.error);
+                              return;
+                            }
+                            flashSaved('Deletion canceled');
+                          });
+                        }}
+                      >
+                        {deleteAccountBusy ? 'Canceling…' : 'Cancel account deletion'}
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={deleteAccountBusy}
+                        className="ark-btn-secondary !text-rose-300 border-rose-500/40 disabled:opacity-50"
+                        onClick={() => {
+                          setDeleteAccountMsg(null);
+                          setDeleteConfirmOpen(true);
+                        }}
+                      >
+                        Delete account
+                      </button>
+                    )
+                  ) : null}
+                </div>
+                {profile?.delete_scheduled_at ? (
+                  <p className="text-[11px] text-amber-200/90 leading-relaxed">
+                    Account deletion is scheduled for{' '}
+                    {new Date(profile.delete_scheduled_at).toLocaleString()}. You can cancel above before then.
+                    We will email {user?.email || 'you'} when mail delivery is live.
+                  </p>
+                ) : null}
+                {deleteAccountMsg ? (
+                  <p className="text-[11px] text-amber-200/90">{deleteAccountMsg}</p>
+                ) : null}
+              </div>
+            </SettingsSection>
+          )}
+
+          {deleteConfirmOpen ? (
+            <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-black/70">
+              <div
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="NOVA-delete-account-title"
+                className="w-full max-w-md rounded-2xl border border-rose-500/40 bg-ark-navy-900 shadow-2xl p-5 space-y-3"
+              >
+                <h3 id="NOVA-delete-account-title" className="text-base font-semibold text-content-primary">
+                  You&apos;re about to delete your account
+                </h3>
+                <p className="text-sm text-content-secondary leading-relaxed">
+                  This starts a <span className="text-content-primary font-medium">24-hour</span> deletion window.
+                  Your account stays usable until then. After 24 hours it is permanently removed.
+                </p>
+                <p className="text-[12px] text-content-tertiary leading-relaxed">
+                  We&apos;ll send an email to <span className="text-content-secondary">{user?.email || 'your inbox'}</span>{' '}
+                  confirming the schedule (email delivery ships with SMTP. The notice is prepared on this PC for now).
+                </p>
+                <div className="flex flex-wrap gap-2 justify-end pt-1">
+                  <button
+                    type="button"
+                    className="ark-btn-secondary"
+                    disabled={deleteAccountBusy}
+                    onClick={() => setDeleteConfirmOpen(false)}
+                  >
+                    Keep account
+                  </button>
+                  <button
+                    type="button"
+                    className="ark-btn-secondary !text-rose-300 border-rose-500/40 disabled:opacity-50"
+                    disabled={deleteAccountBusy}
+                    onClick={() => {
+                      setDeleteAccountBusy(true);
+                      setDeleteAccountMsg(null);
+                      void scheduleAccountDeletion(24).then((res: any) => {
+                        setDeleteAccountBusy(false);
+                        if (!res.ok) {
+                          setDeleteAccountMsg(res.error);
+                          return;
+                        }
+                        setDeleteConfirmOpen(false);
+                        flashSaved('Deletion scheduled · 24 hours');
+                      });
+                    }}
+                  >
+                    {deleteAccountBusy ? 'Scheduling…' : 'Delete in 24 hours'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+
+          {activeSection === 'appearance' && (
+            <SettingsSection title="Appearance">
+              <div className="space-y-6">
+                <div>
+                  <label className="block text-xs font-medium text-content-secondary mb-2">Theme</label>
+                  <div className="grid grid-cols-1 min-[420px]:grid-cols-2 gap-3">
+                    <ThemeCard label="Dark" active={theme === 'dark'} onClick={() => setTheme('dark')} />
+                    <ThemeCard label="Light" active={theme === 'light'} onClick={() => setTheme('light')} />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-content-secondary mb-2">Accent</label>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 min-w-0">
+                    {ACCENTS.map((a: any) => (
+                      <button
+                        key={a.id}
+                        type="button"
+                        onClick={() => patchPrefs({ accent: a.id })}
+                        className={`rounded-xl border px-3 py-2.5 text-left transition-all ${
+                          prefs.accent === a.id
+                            ? 'border-content-primary bg-surface-hover'
+                            : 'border-surface-border hover:border-surface-border-light'
+                        }`}
+                      >
+                        <span className={`inline-block w-4 h-4 rounded-full ${a.swatch} mb-1.5`} />
+                        <span className="block text-sm text-content-primary">{a.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-content-secondary mb-2">Density</label>
+                  <div className="grid grid-cols-1 min-[420px]:grid-cols-2 gap-2">
+                    {([
+                      { id: 'comfortable' as DensityPref, label: 'Comfortable' },
+                      { id: 'compact' as DensityPref, label: 'Compact' },
+                    ]).map((d: any) => (
+                      <button
+                        key={d.id}
+                        type="button"
+                        onClick={() => patchPrefs({ density: d.id })}
+                        className={`rounded-xl border px-3 py-3 text-left transition-all ${
+                          prefs.density === d.id
+                            ? 'border-content-primary bg-surface-hover'
+                            : 'border-surface-border hover:border-surface-border-light'
+                        }`}
+                      >
+                        <span className="block text-sm font-medium text-content-primary">{d.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-content-secondary mb-2">Font size</label>
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="range"
+                      min={13}
+                      max={18}
+                      value={prefs.fontSizePx}
+                      onChange={e => patchPrefs({ fontSizePx: Number(e.target.value) })}
+                      className="flex-1"
+                    />
+                    <span className="text-xs text-content-tertiary tabular-nums w-10">{prefs.fontSizePx}px</span>
+                  </div>
+                </div>
+
+                <div>
+                  <div className="flex items-baseline justify-between gap-3 mb-2">
+                    <label className="block text-xs font-medium text-content-secondary">Background circle blur</label>
+                    <span className="text-xs text-content-tertiary tabular-nums">
+                      {prefs.reduceMotion ? '24px (Reduce motion)' : `${prefs.orbBlurPx}px`}
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min={0}
+                    max={24}
+                    step={1}
+                    value={prefs.orbBlurPx}
+                    onChange={e => patchPrefs({ orbBlurPx: Number(e.target.value) })}
+                    className="w-full accent-ark-blue-400"
+                    aria-label="Background circle blur"
+                  />
+                  <div className="flex justify-between text-[10px] text-content-tertiary uppercase tracking-wide mt-1">
+                    <span>Sharp / bright</span>
+                    <span>Soft / dim</span>
+                  </div>
+                  <p className="text-[11px] text-content-tertiary mt-1.5 leading-relaxed">
+                    {prefs.reduceMotion
+                      ? `Circles stay at maximum soft blur while Reduce motion is on. Your saved level is ${prefs.orbBlurPx}px and comes back when you turn Reduce motion off.`
+                      : 'Drag left for brighter sharp circles. Drag right for softer dimmer circles.'}
+                  </p>
+                </div>
+
+                <ToggleRow
+                  label="Reduce motion"
+                  hint="Freezes the bouncing circles and switches them to maximum soft blur. Turn off to restore movement and your blur setting."
+                  value={prefs.reduceMotion}
+                  onChange={v => patchPrefs({ reduceMotion: v })}
+                />
+              </div>
+            </SettingsSection>
+          )}
+
+
+          {activeSection === 'ai' && (
+            <SettingsSection title="AI">
+              <div className="space-y-6 max-w-3xl">
+                {/* Status */}
+                <div className="ark-card p-4 flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-lg bg-ark-accent-green/10 flex items-center justify-center shrink-0">
+                    <Cpu className="w-5 h-5 text-ark-accent-green" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-content-primary">Routing brain</p>
+                    <p className="text-xs text-content-secondary">
+                      {AI_MODES.find((m: any) => m.value === aiMode)?.label ?? 'Automatic'}
+                    </p>
+                  </div>
+                  <Sparkles className="w-4 h-4 text-sky-400 shrink-0" />
+                </div>
+
+                <div className="rounded-xl border border-surface-border p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <p className="text-sm font-medium text-content-primary">NOVA Brain details</p>
+                  <button
+                    type="button"
+                    className="ark-btn-secondary text-xs shrink-0 self-start sm:self-center"
+                    onClick={() => {
+                      onClose?.();
+                      navigate({ name: 'brain' });
+                    }}
+                  >
+                    Open NOVA Brain
+                  </button>
+                </div>
+
+                <SettingsSystemHealth
+                  engineStatus={engineStatus}
+                  brainUrl={brainUrl}
+                  diskFreeGb={diskSpace?.freeGb}
+                />
+
+                {/* Routing mode */}
+                <SettingsGroup title="Routing mode">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {AI_MODES.map((mode: any) => (
+                      <button
+                        key={mode.value}
+                        type="button"
+                        onClick={() => {
+                          patchPrefs({ aiMode: mode.value as AiModePref });
+                          if (settings) updateSettings({ ai_mode: mode.value as typeof settings.ai_mode });
+                        }}
+                        className={`w-full text-left p-3 rounded-lg border transition-all ${
+                          aiMode === mode.value
+                            ? 'border-ark-blue-400 bg-ark-blue-500/10'
+                            : 'border-surface-border hover:border-surface-border-light'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <div>
+                            <p className={`text-sm font-medium ${aiMode === mode.value ? 'text-ark-blue-300' : 'text-content-primary'}`}>
+                              {mode.label}
+                            </p>
+                            {'hint' in mode && mode.hint ? (
+                              <p className="text-xs text-content-tertiary mt-0.5">{mode.hint}</p>
+                            ) : null}
+                          </div>
+                          {aiMode === mode.value && <Check className="w-4 h-4 text-ark-blue-400 shrink-0" />}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </SettingsGroup>
+
+                <SettingsGroup title="Failover & cloud">
+                  <div className="rounded-xl border border-surface-border px-3 divide-y divide-white/[0.06]">
+                    <ToggleRow
+                      bare
+                      label="Auto failover"
+                      value={prefs.autoFailover}
+                      onChange={v => patchPrefs({ autoFailover: v })}
+                    />
+                    <ToggleRow
+                      bare
+                      label="Ask before cloud failover"
+                      value={prefs.askBeforeCloudFailover}
+                      onChange={v => patchPrefs({ askBeforeCloudFailover: v })}
+                    />
+                  </div>
+                </SettingsGroup>
+
+                {/* Chat behavior */}
+                <SettingsGroup title="Chat behavior">
+                  <div className="rounded-xl border border-surface-border px-3 divide-y divide-white/[0.06]">
+                    <ToggleRow
+                      bare
+                      label="Stream responses"
+                      value={prefs.streamResponses}
+                      onChange={v => patchPrefs({ streamResponses: v })}
+                    />
+                    <ToggleRow
+                      bare
+                      label="Remember chat context"
+                      value={prefs.rememberContext}
+                      onChange={v => patchPrefs({ rememberContext: v })}
+                    />
+                  </div>
+                </SettingsGroup>
+
+                <SettingsGroup title="Skills">
+                  <p className="text-[11px] text-content-tertiary leading-relaxed mb-3">
+                    NOVA skills are build contracts injected into create and edit prompts so Multimodal builds stay Preview-ready.
+                    Drop custom packs in a bound project at <span className="font-mono text-content-secondary">.nova/skills/packName/SKILL.md</span>.
+                    Preview contract stays on for every create/build.
+                  </p>
+                  <div className="rounded-xl border border-surface-border px-3 divide-y divide-white/[0.06]">
+                    {listBuiltinSkillPacks().map((pack: any) => {
+                      const locked = Boolean(pack.alwaysOnCreate);
+                      const on = locked || enabledSkills.includes(pack.id as BuiltinNovaSkillId);
+                      return (
+                        <ToggleRow
+                          key={pack.id}
+                          bare
+                          disabled={locked}
+                          label={locked ? `${pack.name} (always on)` : pack.name}
+                          hint={pack.summary}
+                          value={on}
+                          onChange={v => {
+                            if (locked) return;
+                            toggleSkillEnabled(pack.id as BuiltinNovaSkillId, v);
+                            setEnabledSkills(getEnabledSkillIds());
+                            setSavedFlash('Saved on this device');
+                            window.setTimeout(() => setSavedFlash(''), 2200);
+                          }}
+                        />
+                      );
+                    })}
+                  </div>
+                </SettingsGroup>
+
+                {/* Model discovery */}
+                <SettingsGroup title="Model discovery">
+                  <div className="rounded-xl border border-surface-border px-3 divide-y divide-white/[0.06]">
+                    <ToggleRow
+                      bare
+                      label="Hunt new models online"
+                      value={prefs.huntInternetModels}
+                      onChange={v => patchPrefs({ huntInternetModels: v })}
+                    />
+                    <ToggleRow
+                      bare
+                      label="Download next when a model runs out"
+                      value={prefs.autoInstallHuntModels}
+                      onChange={v => patchPrefs({ autoInstallHuntModels: v })}
+                    />
+                  </div>
+                </SettingsGroup>
+
+                {/* Local GGUF */}
+                <SettingsGroup title="Local GGUF (advanced)">
+                  <div className="rounded-xl border border-surface-border p-5 space-y-6 bg-surface/30">
+                    <div className="rounded-lg border border-surface-border/80 bg-ark-navy-950/40 px-3 py-2.5">
+                      <p className="text-[11px] font-medium text-content-secondary">Local chat history capacity</p>
+                      <p className="text-sm text-content-primary mt-0.5 tabular-nums">
+                        {ggufCtxCapacityLabel()}
+                      </p>
+                    </div>
+                    <GgufSliderRow
+                      label="Temperature"
+                      valueLabel={Number(prefs.ggufTemperature ?? 0.55).toFixed(2)}
+                      min={0.1}
+                      max={1.2}
+                      step={0.05}
+                      value={prefs.ggufTemperature ?? 0.55}
+                      onChange={v => patchPrefs({ ggufTemperature: v })}
+                      lowLabel="Focused"
+                      highLabel="Creative"
+                    />
+                    <GgufSliderRow
+                      label="Max output tokens"
+                      valueLabel={String(prefs.ggufNPredict ?? 4096)}
+                      min={4096}
+                      max={8192}
+                      step={256}
+                      value={prefs.ggufNPredict ?? 4096}
+                      onChange={v => patchPrefs({ ggufNPredict: v })}
+                      lowLabel="4096 default"
+                      highLabel="8192 longer"
+                    />
+                  </div>
+                </SettingsGroup>
+              </div>
+            </SettingsSection>
+          )}
+
+
+          {activeSection === 'voice' && (
+            <SettingsSection title="Voice">
+              <div className="min-h-0 pb-6">
+                <VoiceSettingsPanel onSaved={msg => {
+                  setSavedFlash(msg);
+                  window.setTimeout(() => setSavedFlash(''), 2200);
+                }} />
+              </div>
+            </SettingsSection>
+          )}
+
+    </>
+  );
+}

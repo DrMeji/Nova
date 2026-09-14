@@ -10,14 +10,10 @@ import { Dashboard } from '@/views/Dashboard';
 import { ProjectsView } from '@/views/ProjectsView';
 import { ProjectWorkspace } from '@/views/ProjectWorkspace';
 import { AIChat } from '@/views/AIChat';
-import { ModelsView } from '@/views/ModelsView';
 import { BuildRun } from '@/views/BuildRun';
-import { LocalAI } from '@/views/LocalAI';
 import { McpView } from '@/views/McpView';
 import { BrainView } from '@/views/BrainView';
 import { Settings } from '@/views/Settings';
-import { NetworkingView } from '@/views/NetworkingView';
-import { MessageView } from '@/views/MessageView';
 import { NotificationsView } from '@/views/NotificationsView';
 import { SocialProvider } from '@/context/SocialContext';
 import { ParkedNotice } from '@/components/ParkedNotice';
@@ -31,10 +27,17 @@ import { applyLocalAppearancePrefs } from '@/lib/applyLocalAppearance';
 import { startModelHuntCycle } from '@/lib/arkHuntBootstrap';
 import { needsFirstRunSetup } from '@/lib/setup';
 import { supabaseConfigError } from '@/lib/supabase';
-import { hasChatInflight, subscribeChatInflight } from '@/lib/chatInflight';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { cancelAll, hasChatInflight, subscribeChatInflight } from '@/lib/chatInflight';
+import { useEffect, useRef, useState, type ReactNode, lazy, Suspense } from 'react';
 import { Loader2 } from 'lucide-react';
 import { RotatingTip } from '@/components/RotatingTip';
+
+const NetworkingView = lazy(() =>
+  import('@/views/NetworkingView').then((m) => ({ default: m.NetworkingView })),
+);
+const MessageView = lazy(() =>
+  import('@/views/MessageView').then((m) => ({ default: m.MessageView })),
+);
 
 runCleanBootIfNeeded();
 runArkIdRotationIfNeeded();
@@ -51,6 +54,20 @@ function LegacyCodeRedirect({ projectId }: { projectId?: string }) {
     <div className="h-full flex items-center justify-center text-sm text-content-tertiary">
       Opening Code…
     </div>
+  );
+}
+
+function LazyPane({ children }: { children: ReactNode }) {
+  return (
+    <Suspense
+      fallback={
+        <div className="h-full flex items-center justify-center text-sm text-content-tertiary">
+          Loading…
+        </div>
+      }
+    >
+      {children}
+    </Suspense>
   );
 }
 
@@ -80,21 +97,39 @@ function AppRoutes() {
         // Legacy image/video creations — History only.
         other = <Dashboard />;
         break;
-      case 'models': other = <ModelsView />; break;
+      case 'models':
+        other = (
+          <BrainView
+            initialTab={
+              route.tab === 'cloud'
+                ? 'cloud'
+                : route.tab === 'for-pc'
+                  ? 'recommended'
+                  : 'installed'
+            }
+          />
+        );
+        break;
       case 'build': other = <BuildRun />; break;
-      case 'local-ai': other = <LocalAI />; break;
+      case 'local-ai': other = <BrainView initialTab="this-pc" />; break;
       case 'mcp': other = <McpView />; break;
-      case 'brain': other = <BrainView />; break;
+      case 'brain': other = <BrainView initialTab={route.tab || 'installed'} />; break;
       case 'networking':
-        other = isSocialParked('networking') ? <ParkedNotice feature="networking" /> : <NetworkingView />;
+        other = isSocialParked('networking')
+          ? <ParkedNotice feature="networking" />
+          : <LazyPane><NetworkingView /></LazyPane>;
         break;
       case 'message':
-        other = isSocialParked('message') ? <ParkedNotice feature="message" /> : <MessageView />;
+        other = isSocialParked('message')
+          ? <ParkedNotice feature="message" />
+          : <LazyPane><MessageView /></LazyPane>;
         break;
       case 'notifications': other = <NotificationsView />; break;
       case 'call':
         // Call removed from product — bounce to Message.
-        other = isSocialParked('message') ? <ParkedNotice feature="message" /> : <MessageView />;
+        other = isSocialParked('message')
+          ? <ParkedNotice feature="message" />
+          : <LazyPane><MessageView /></LazyPane>;
         break;
       case 'settings': other = <Settings />; break;
       default: other = <Dashboard />; break;
@@ -121,6 +156,11 @@ function AppRoutes() {
 function AppContent() {
   const { user, profile, loading, bypass } = useAuth();
   const [setupTick, setSetupTick] = useState(0);
+
+  useEffect(() => {
+    // Clear stale inflight from a prior crash / HMR so Chat is not stuck mounted.
+    cancelAll();
+  }, []);
 
   useEffect(() => {
     const applyPrefs = () => {

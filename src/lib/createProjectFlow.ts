@@ -366,6 +366,18 @@ export async function bootstrapProjectWorkspace(
     };
   }
 
+  // Prefer an already-running create/preview session — never start a second Vite.
+  if (window.arkDesktop?.previewSession) {
+    try {
+      const session = await window.arkDesktop.previewSession(projectPath);
+      if (session?.ok && session.url) {
+        return { npmInstalled: true, devServerUrl: session.url, previewLive: true };
+      }
+    } catch {
+      /* fall through to start */
+    }
+  }
+
   // depsReady: skip a second npm install — double install was freezing the whole PC.
   const dev = await window.arkDesktop?.agentStartDevServer?.({
     cwd: projectPath,

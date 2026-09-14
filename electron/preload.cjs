@@ -74,7 +74,7 @@ const arkDesktopApi = {
   brainTokenRotate: () => ipcRenderer.invoke('NOVA:brain-token-rotate'),
   engineGenerateStream: (message, modelId, kind, opts) =>
     ipcRenderer.invoke('NOVA:engine-generate-stream', { message, modelId, kind, ...(opts || {}) }),
-  engineGenerateCancel: () => ipcRenderer.invoke('NOVA:engine-generate-cancel'),
+  engineGenerateCancel: (opts) => ipcRenderer.invoke('NOVA:engine-generate-cancel', opts || {}),
   webSearch: (query) => ipcRenderer.invoke('NOVA:web-search', { query }),
   onEngineChunk: (handler) => {
     const listener = (_event, payload) => handler?.(payload);
@@ -116,6 +116,7 @@ const arkDesktopApi = {
   previewCloseLive: () => ipcRenderer.invoke('NOVA:preview-close-live'),
   previewUpdate: (payload) => ipcRenderer.invoke('NOVA:preview-update', payload),
   previewReload: (projectId) => ipcRenderer.invoke('NOVA:preview-reload', projectId),
+  previewSession: (cwd) => ipcRenderer.invoke('NOVA:preview-session', cwd),
   mediaLibrary: () => ipcRenderer.invoke('NOVA:media-library'),
   mediaClear: () => ipcRenderer.invoke('NOVA:media-clear'),
   mediaGet: (id) => ipcRenderer.invoke('NOVA:media-get', id),

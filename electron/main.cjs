@@ -987,6 +987,8 @@ ipcMain.handle('NOVA:engine-generate', async (_e, payload) =>
     mediaDurationSec: payload?.mediaDurationSec,
     referenceImageDataUrl: payload?.referenceImageDataUrl,
     visionImages: payload?.visionImages,
+    jobId: payload?.jobId,
+    chatId: payload?.chatId,
   }),
 );
 
@@ -998,6 +1000,8 @@ ipcMain.handle('NOVA:engine-generate-stream', async (event, payload) => {
     temperature: payload?.temperature,
     nPredict: payload?.nPredict,
     visionImages: payload?.visionImages,
+    jobId: payload?.jobId,
+    chatId: payload?.chatId,
     onChunk: (text) => {
       try {
         event.sender.send('NOVA:engine-chunk', { webContentsId, text: String(text || '') });
@@ -1008,9 +1012,12 @@ ipcMain.handle('NOVA:engine-generate-stream', async (event, payload) => {
   });
 });
 
-ipcMain.handle('NOVA:engine-generate-cancel', async () => {
+ipcMain.handle('NOVA:engine-generate-cancel', async (_e, payload) => {
   try {
-    return arkGguf.cancelGguf?.() || { ok: true };
+    return arkGguf.cancelGguf?.({
+      jobId: payload?.jobId,
+      chatId: payload?.chatId,
+    }) || { ok: true };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'Cancel failed' };
   }
@@ -1254,6 +1261,16 @@ ipcMain.handle('NOVA:workspace-get-grants', async () => {
 ipcMain.handle('NOVA:agent-run', async (_e, payload) => {
   try {
     const arkAgentExec = require('./arkAgentExec.cjs');
+    const arkJobs = require('./arkJobs.cjs');
+    const command = String(payload?.command || '').trim();
+    // Serialize heavy npm installs through arkJobs so Defender/disk storms don't stack.
+    if (/^(npm|pnpm|yarn)(\.cmd)?\s+(install|i|ci|add)(\s|$)/i.test(command)) {
+      return await arkJobs.enqueue({
+        kind: 'npm',
+        label: command.slice(0, 80),
+        run: () => arkAgentExec.agentRun(payload || {}),
+      });
+    }
     return await arkAgentExec.agentRun(payload || {});
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'agent run failed' };
@@ -1263,7 +1280,12 @@ ipcMain.handle('NOVA:agent-run', async (_e, payload) => {
 ipcMain.handle('NOVA:agent-start-dev-server', async (_e, payload) => {
   try {
     const arkAgentExec = require('./arkAgentExec.cjs');
-    return await arkAgentExec.agentStartDevServer(payload || {});
+    const arkJobs = require('./arkJobs.cjs');
+    return await arkJobs.enqueue({
+      kind: 'vite',
+      label: 'agent-start-dev-server',
+      run: () => arkAgentExec.agentStartDevServer(payload || {}),
+    });
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'dev server failed' };
   }
@@ -1275,6 +1297,43 @@ ipcMain.handle('NOVA:agent-start-folder-preview', async (_e, payload) => {
     return await arkAgentExec.agentStartFolderPreview(payload || {});
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'folder preview failed' };
+  }
+});
+
+ipcMain.handle('NOVA:preview-session', async (_e, cwd) => {
+  try {
+    const arkAgentExec = require('./arkAgentExec.cjs');
+    const session = arkAgentExec.getPreviewSession(cwd || '');
+    return session?.url
+      ? { ok: true, url: session.url, cwd: session.cwd }
+      : { ok: false, running: false };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'preview session failed' };
+  }
+});
+
+ipcMain.handle('NOVA:jobs-enqueue', async (_e, payload) => {
+  try {
+    const arkJobs = require('./arkJobs.cjs');
+    const kind = String(payload?.kind || '');
+    if (kind !== 'gguf' && kind !== 'npm' && kind !== 'vite') {
+      return { ok: false, error: 'kind must be gguf|npm|vite' };
+    }
+    // Renderer cannot pass run(); this IPC is a status/ack stub for future wiring.
+    // Real enqueue with run() is main-process only — see NOVA:agent-run (npm) and
+    // NOVA:agent-start-dev-server (vite) which call arkJobs.enqueue({ kind, run }).
+    return { ok: true, queued: false, status: arkJobs.status(), note: 'Pass run() from main only' };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'jobs enqueue failed' };
+  }
+});
+
+ipcMain.handle('NOVA:jobs-status', async () => {
+  try {
+    const arkJobs = require('./arkJobs.cjs');
+    return { ok: true, ...arkJobs.status() };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'jobs status failed' };
   }
 });
 
