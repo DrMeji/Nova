@@ -99,22 +99,34 @@ function ThoughtBlock({
 function FilesChangedCard({
   changes,
   paths,
+  projectPath,
 }: {
   changes: AgentFileChange[];
   paths: string[];
+  projectPath?: string;
 }) {
-  const [open, setOpen] = useState(true);
+  // Collapsed by default so long SVG lists don't eat the chat viewport.
+  const [expanded, setExpanded] = useState(false);
   const rows: AgentFileChange[] = changes.length
     ? changes
     : paths.map(path => ({ path, added: 0, removed: 0 }));
-  if (!rows.length) return null;
-  const visible = open ? rows : rows.slice(0, 6);
+  if (!rows.length && !projectPath) return null;
+  const PREVIEW = 6;
+  const visible = expanded ? rows : rows.slice(0, PREVIEW);
   const hidden = Math.max(0, rows.length - visible.length);
   const totalAdd = rows.reduce((n, r) => n + (r.added || 0), 0);
   const totalDel = rows.reduce((n, r) => n + (r.removed || 0), 0);
 
   return (
     <div className="rounded-xl border border-surface-border/70 bg-surface-hover/30 px-3 py-2.5 max-w-full min-w-0">
+      {projectPath ? (
+        <p className="mb-2 text-[11px] leading-snug text-content-tertiary">
+          <span className="text-content-secondary">Location</span>
+          <span className="mt-0.5 block truncate font-mono text-[11px] text-content-secondary" title={projectPath}>
+            {projectPath}
+          </span>
+        </p>
+      ) : null}
       <p className="text-[12px] font-medium text-content-primary mb-1.5">
         {rows.length} File{rows.length === 1 ? '' : 's'} Changed
         {totalAdd > 0 || totalDel > 0 ? (
@@ -152,16 +164,16 @@ function FilesChangedCard({
       {hidden > 0 ? (
         <button
           type="button"
-          onClick={() => setOpen(true)}
+          onClick={() => setExpanded(true)}
           className="mt-1.5 text-[11px] text-content-tertiary hover:text-content-secondary"
         >
-          … Show {hidden} more
+          Show more ({hidden})
         </button>
       ) : null}
-      {open && rows.length > 6 ? (
+      {expanded && rows.length > PREVIEW ? (
         <button
           type="button"
-          onClick={() => setOpen(false)}
+          onClick={() => setExpanded(false)}
           className="mt-1 text-[11px] text-content-tertiary hover:text-content-secondary"
         >
           Show less
@@ -192,6 +204,7 @@ export function AgentTracePanel({
   const thought = payload.steps.find(s => s.kind === 'thought');
   const changed = payload.changedPaths || [];
   const fileChanges = payload.fileChanges || [];
+  const showFilesCard = payload.done && (fileChanges.length > 0 || changed.length > 0 || Boolean(payload.projectPath));
 
   return (
     <div className="space-y-2 min-w-0 max-w-full">
@@ -210,14 +223,18 @@ export function AgentTracePanel({
         </div>
       ) : null}
 
-      {shownAnswer && !stepsOnly ? (
-        <div className={`${payload.steps.length ? 'pt-1' : ''} min-w-0 max-w-full overflow-hidden break-words [overflow-wrap:anywhere] text-content-primary`}>
-          <ChatMarkdown text={shownAnswer} />
-        </div>
+      {showFilesCard ? (
+        <FilesChangedCard
+          changes={fileChanges}
+          paths={changed}
+          projectPath={payload.projectPath}
+        />
       ) : null}
 
-      {payload.done && (fileChanges.length > 0 || changed.length > 0) ? (
-        <FilesChangedCard changes={fileChanges} paths={changed} />
+      {shownAnswer && !stepsOnly ? (
+        <div className={`${payload.steps.length || showFilesCard ? 'pt-1' : ''} min-w-0 max-w-full overflow-hidden break-words [overflow-wrap:anywhere] text-content-primary`}>
+          <ChatMarkdown text={shownAnswer} />
+        </div>
       ) : null}
 
       {payload.canContinue && payload.done && onContinue ? (

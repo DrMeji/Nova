@@ -652,25 +652,18 @@
 .ark-tok-punct { color: #808080; }
 .ark-tok-plain { color: #d4d4d4; }
 
-/* Chat status dots — smooth 1 → 2 → 3 ripple, then loop */
+/* Chat status dots — smooth overlapping wave (not one-at-a-time pops) */
 @keyframes ark-status-dot {
   0%,
-  8% {
-    opacity: 0.28;
-    transform: translate3d(0, 0, 0) scale(0.85);
-    background-color: rgb(115 115 115);
-  }
-  16%,
-  28% {
-    opacity: 1;
-    transform: translate3d(0, -4px, 0) scale(1.18);
-    background-color: rgb(226 232 240);
-  }
-  40%,
   100% {
-    opacity: 0.28;
-    transform: translate3d(0, 0, 0) scale(0.85);
+    opacity: 0.3;
+    transform: translate3d(0, 0, 0) scale(0.88);
     background-color: rgb(115 115 115);
+  }
+  50% {
+    opacity: 1;
+    transform: translate3d(0, -3px, 0) scale(1.15);
+    background-color: rgb(226 232 240);
   }
 }
 .ark-status-dots {
@@ -683,8 +676,7 @@
   height: 6px;
   border-radius: 9999px;
   background-color: rgb(115 115 115);
-  /* 1.5s cycle; delays at 0 / 0.5 / 1.0 = equal beats */
-  animation: ark-status-dot 1.5s linear infinite;
+  animation: ark-status-dot 1.05s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
   will-change: transform, opacity;
   backface-visibility: hidden;
 }
@@ -694,11 +686,11 @@
 }
 .ark-status-dot-2,
 .ark-status-dot:nth-child(2) {
-  animation-delay: 0.5s;
+  animation-delay: 0.18s;
 }
 .ark-status-dot-3,
 .ark-status-dot:nth-child(3) {
-  animation-delay: 1s;
+  animation-delay: 0.36s;
 }
 
 /* Kill UI motion, but leave ambient orbs + chat status dots alone. */
@@ -717,7 +709,7 @@ html.reduce-motion .auth-orb {
 
 /* Status bubble must keep rippling even when Reduce motion is on. */
 html.reduce-motion .ark-status-dot {
-  animation: ark-status-dot 1.5s linear infinite !important;
+  animation: ark-status-dot 1.05s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite !important;
 }
 html.reduce-motion .ark-status-dot-1,
 html.reduce-motion .ark-status-dot:nth-child(1) {
@@ -725,11 +717,11 @@ html.reduce-motion .ark-status-dot:nth-child(1) {
 }
 html.reduce-motion .ark-status-dot-2,
 html.reduce-motion .ark-status-dot:nth-child(2) {
-  animation-delay: 0.5s !important;
+  animation-delay: 0.18s !important;
 }
 html.reduce-motion .ark-status-dot-3,
 html.reduce-motion .ark-status-dot:nth-child(3) {
-  animation-delay: 1s !important;
+  animation-delay: 0.36s !important;
 }
 
 /* (Show status bar toggle removed — footer with profile/settings always stays visible.) */

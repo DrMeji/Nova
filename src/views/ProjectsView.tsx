@@ -93,6 +93,7 @@ export function ProjectsView() {
         modified: p.updatedAt ? new Date(p.updatedAt) : new Date(),
         source: 'local',
         typeLabel: 'this PC',
+        diskPath: (p as { diskPath?: string }).diskPath,
       }));
 
     const recentNames = new Set(fromRecent.map(p => p.name.toLowerCase()));

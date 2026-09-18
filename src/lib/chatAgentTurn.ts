@@ -162,7 +162,7 @@ export function looksLikeCodeEditAsk(text: string): boolean {
     return true;
   }
   if (
-    /\b(change|update|set|make|edit|fix|rename|restyle)\b[\s\S]{0,100}\b(background|color|colour|font|title|text|layout|style|css|button|icon|logo|header|hero|headline|heading|h1|copy|wording|theme|column|label|hint|gradient|teal|notes?)\b/i.test(t)
+    /\b(change|update|set|make|edit|fix|rename|restyle)\b[\s\S]{0,100}\b(background|color|colour|font|title|text|layout|style|css|button|icon|logo|header|hero|headline|heading|h1|copy|wording|theme|column|label|hint|gradient|teal|notes?|name)\b/i.test(t)
   ) {
     // Casual science / Q&A ("how do octopuses change color?"). not a UI edit.
     if (

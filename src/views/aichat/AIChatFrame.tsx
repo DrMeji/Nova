@@ -2,6 +2,7 @@
  * AIChat presentational shell — composer, message list, dialogs.
  */
 // @ts-nocheck — props bag is intentionally loose; logic stays in AIChat.tsx
+import { useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { RotatingTip } from '@/components/RotatingTip';
 import { ParkedNotice } from '@/components/ParkedNotice';
@@ -37,7 +38,7 @@ import {
   Loader2, ImageIcon, Video, Code2,
   Upload, Cpu, Cloud, ChevronDown, Check,
   Folder, Square, X, ImagePlus,
-  Puzzle, Briefcase, Github, Globe, Copy, Plus, Mic, MicOff,
+  Puzzle, Briefcase, Github, Globe, Copy, Plus, Mic, MicOff, RotateCcw,
 } from 'lucide-react';
 import {
   ChatModeTabs,
@@ -167,6 +168,13 @@ export function AIChatFrame(props: AIChatFrameProps) {
   const setComposerMode = props.setComposerMode;
   const setCopiedMsgId = props.setCopiedMsgId;
   const setDropHint = props.setDropHint;
+  // Undo toast: gray (via text-content-tertiary) and auto-dismiss once.
+  useEffect(() => {
+    if (dropHint !== 'Undid the last file apply.') return;
+    const id = window.setTimeout(() => setDropHint(null), 2200);
+    return () => window.clearTimeout(id);
+  }, [dropHint, setDropHint]);
+  // Keep ambient orbs moving while a reply generates (do not freeze the shell animation).
   const setEditingQueueId = props.setEditingQueueId;
   const setEditingQueueText = props.setEditingQueueText;
   const setFailoverNote = props.setFailoverNote;
@@ -594,7 +602,7 @@ export function AIChatFrame(props: AIChatFrameProps) {
           <div className="flex-1 min-w-0 flex flex-col">
           {dropHint && !attachUploading && (
             <p
-              className="mb-2 w-full min-w-0 overflow-hidden text-left text-[11px] text-amber-300/90 break-words [overflow-wrap:anywhere] line-clamp-2"
+              className="mb-2 w-full min-w-0 overflow-hidden text-left text-[11px] text-content-tertiary break-words [overflow-wrap:anywhere] line-clamp-2"
               title={dropHint}
             >
               {dropHint}
@@ -845,25 +853,6 @@ export function AIChatFrame(props: AIChatFrameProps) {
                 </span>
               </button>
             ) : null}
-            {(mode === 'general' || mode === 'code') && chatStudioDiskRoot ? (
-              <button
-                type="button"
-                onClick={() => void openProjectPreview()}
-                className="inline-flex items-center gap-1 rounded-full border border-sky-500/40 bg-sky-500/15 px-2.5 py-1 text-xs font-medium text-sky-100 hover:bg-sky-500/25 transition-colors shrink-0"
-                title={
-                  createJobLive?.status === 'npm'
-                    ? 'Installing dependencies…'
-                    : (createJobLive?.status === 'ready' && createJobLive.previewUrl)
-                      ? `Open live preview (${createJobLive.previewUrl})`
-                      : previewUrl
-                        ? `Open live preview (${previewUrl})`
-                        : 'Open live preview window'
-                }
-              >
-                <Globe className="w-3.5 h-3.5 text-sky-300" />
-                {createJobLive?.status === 'npm' ? 'Installing…' : 'Preview'}
-              </button>
-            ) : null}
             {(mode === 'general' || mode === 'code') && (showStudioPills || codePillSticky || chatStudioDiskRoot) ? (
               <button
                 type="button"
@@ -876,13 +865,40 @@ export function AIChatFrame(props: AIChatFrameProps) {
                 }`}
                 title={
                   generating
-                    ? 'Live Code view — watch files update. Editing unlocks when the build finishes.'
+                    ? 'Code view — watch files update. Editing unlocks when the build finishes.'
                     : 'Open Code. files on the left, editor on the right'
                 }
               >
                 <Code2 className="w-3.5 h-3.5 text-violet-300" />
                 Code
-                {generating ? <span className="text-[10px] text-violet-200/80">· live</span> : null}
+                {generating ? <span className="text-[10px] text-violet-200/80">· writing</span> : null}
+              </button>
+            ) : null}
+            {(mode === 'general' || mode === 'code')
+              && chatStudioDiskRoot
+              && !generating
+              && (
+                createJobLive?.status === 'ready'
+                || (
+                  !createJobLive
+                  && Boolean(previewUrl || chatStudioDiskRoot)
+                )
+              )
+              ? (
+              <button
+                type="button"
+                onClick={() => void openProjectPreview()}
+                className="inline-flex items-center gap-1 rounded-full border border-sky-500/40 bg-sky-500/15 px-2.5 py-1 text-xs font-medium text-sky-100 hover:bg-sky-500/25 transition-colors shrink-0"
+                title={
+                  (createJobLive?.status === 'ready' && createJobLive.previewUrl)
+                    ? `Open Live (${createJobLive.previewUrl})`
+                    : previewUrl
+                      ? `Open Live (${previewUrl})`
+                      : 'Open Live window'
+                }
+              >
+                <Globe className="w-3.5 h-3.5 text-sky-300" />
+                Live
               </button>
             ) : null}
             <div className="flex-1 min-w-0" aria-hidden />
@@ -1285,9 +1301,9 @@ export function AIChatFrame(props: AIChatFrameProps) {
                   }`}
                 >
                   <div
-                    className={`text-sm text-content-primary overflow-hidden min-w-0 ${
+                    className={`text-sm text-content-primary min-w-0 ${
                       msg.role === 'user'
-                        ? 'max-w-[min(48rem,88%)] min-w-0 break-words [overflow-wrap:anywhere] flex flex-col items-end gap-1'
+                        ? 'max-w-[min(48rem,88%)] min-w-0 break-words [overflow-wrap:anywhere] overflow-hidden flex flex-col items-end gap-1'
                         : isMediaOnlyContent(msg.content)
                           || (
                             msg.content.startsWith('__generating__:image:')
@@ -1300,7 +1316,8 @@ export function AIChatFrame(props: AIChatFrameProps) {
                             && (mode === 'image' || mode === 'video')
                           )
                           ? 'shrink-0 max-w-[min(56rem,94%)]'
-                          : 'max-w-[min(56rem,94%)] min-w-0 break-words [overflow-wrap:anywhere]'
+                          // overflow-x-auto (not hidden) so 10+ list markers and long code stay visible
+                          : 'max-w-[min(56rem,94%)] min-w-0 break-words [overflow-wrap:anywhere] overflow-x-auto'
                     }`}
                   >
                     {msg.role === 'user' ? (
@@ -1407,8 +1424,57 @@ export function AIChatFrame(props: AIChatFrameProps) {
                         ? `Responded in ${formatReplyElapsed(msg.elapsed_ms)}`
                         : 'Responded';
                       const modelBit = String(msg.provider_used || '').trim() || 'NOVA';
+                      const chatId = routeChatIdRef.current || persistChatIdRef.current || '';
+                      const snap = chatId ? getApplySnapshot(chatId) : null;
+                      // Undo only on the assistant bubble that produced the last apply.
+                      const showUndo = Boolean(
+                        snap
+                        && snap.assistantId === msg.id
+                        && snap.updatedPaths?.length
+                      );
+                      const runUndo = () => {
+                        void (async () => {
+                          if (!chatId || !snap) return;
+                          const blocks = snapshotToRevertBlocks(snap);
+                          if (!blocks) return;
+                          const applied = await applyChatReplyEdits({
+                            reply: blocks,
+                            projectId: chatStudioProjectIdRef.current,
+                            projectName: studioPathBasename(snap.diskRoot || '') || 'project',
+                            files: snap.files,
+                            userMessage: 'undo last apply',
+                            diskRoot: snap.diskRoot,
+                          });
+                          if (applied.ok) {
+                            setChatStudioFiles(applied.files);
+                            chatStudioFilesRef.current = applied.files;
+                            persistStudioSnapshot(chatId, {
+                              files: applied.files,
+                              projectId: chatStudioProjectIdRef.current,
+                              diskRoot: snap.diskRoot,
+                            });
+                            clearApplySnapshot(chatId);
+                            const undoHint = 'Undid the last file apply.';
+                            setDropHint(undoHint);
+                            window.setTimeout(() => {
+                              setDropHint(null);
+                            }, 2200);
+                          }
+                        })();
+                      };
                       return (
                         <div className="mt-2 flex items-center gap-2 text-[11px] text-content-tertiary tabular-nums">
+                          {showUndo ? (
+                            <button
+                              type="button"
+                              title="Undo last edit"
+                              aria-label="Undo last edit"
+                              className="inline-flex shrink-0 items-center justify-center p-0.5 text-content-tertiary hover:text-content-secondary"
+                              onClick={runUndo}
+                            >
+                              <RotateCcw className="h-3.5 w-3.5" strokeWidth={2} />
+                            </button>
+                          ) : null}
                           <button
                             type="button"
                             title={copied ? 'Copied' : 'Copy response'}
@@ -1425,7 +1491,7 @@ export function AIChatFrame(props: AIChatFrameProps) {
                           >
                             {copied ? <Check className="w-3.5 h-3.5 text-ark-accent-green" /> : <Copy className="w-3.5 h-3.5" />}
                           </button>
-                          <span>
+                          <span className="min-w-0 truncate">
                             {timeBit}
                             {' · '}
                             {modelBit}
@@ -1457,43 +1523,6 @@ export function AIChatFrame(props: AIChatFrameProps) {
                         }}
                       >
                         Retry with cloud
-                      </button>
-                    ) : null}
-                    {msg.role === 'assistant' && getApplySnapshot(routeChatIdRef.current || persistChatIdRef.current || '') ? (
-                      <button
-                        type="button"
-                        className="mt-2 ml-1 text-[10px] rounded-full border border-amber-500/40 text-amber-200 px-2.5 py-1"
-                        onClick={() => {
-                          void (async () => {
-                            const chatId = routeChatIdRef.current || persistChatIdRef.current;
-                            if (!chatId) return;
-                            const snap = getApplySnapshot(chatId);
-                            if (!snap) return;
-                            const blocks = snapshotToRevertBlocks(snap);
-                            if (!blocks) return;
-                            const applied = await applyChatReplyEdits({
-                              reply: blocks,
-                              projectId: chatStudioProjectIdRef.current,
-                              projectName: studioPathBasename(snap.diskRoot || '') || 'project',
-                              files: snap.files,
-                              userMessage: 'undo last apply',
-                              diskRoot: snap.diskRoot,
-                            });
-                            if (applied.ok) {
-                              setChatStudioFiles(applied.files);
-                              chatStudioFilesRef.current = applied.files;
-                              persistStudioSnapshot(chatId, {
-                                files: applied.files,
-                                projectId: chatStudioProjectIdRef.current,
-                                diskRoot: snap.diskRoot,
-                              });
-                              clearApplySnapshot(chatId);
-                              setDropHint('Undid the last file apply.');
-                            }
-                          })();
-                        }}
-                      >
-                        Undo last edit
                       </button>
                     ) : null}
                     {msg.role === 'assistant' && /folder access|Allow Documents/i.test(msg.content) ? (

@@ -58,9 +58,11 @@ function buildProfile(hw: HardwareInfo): BrainProfile {
   const cores = navigator.hardwareConcurrency || 4;
   const gpuUsable = (vramGB || 0) >= 4
     && (hw.acceleration === 'CUDA' || hw.acceleration === 'Vulkan' || hw.acceleration === 'Metal');
-  const maxCoderParamsB = gpuUsable
-    ? Math.min(maxCoderParamsBForVram(vramGB), ramGB >= 32 ? 14 : ramGB >= 16 ? 7 : ramGB >= 10 ? 3 : 0)
-    : (ramGB >= 16 ? 3 : 0); // CPU-only: tiny coder at best, or none
+  // VRAM band for full-GPU load; high RAM still allows larger Q4 coders via CPU/partial offload.
+  // 16GB+ RAM can run 7B Q4 offload; 24GB → 14B; 48GB+ → 32B. Never recommend Instruct as coder.
+  const ramCoderCap = ramGB >= 64 ? 32 : ramGB >= 48 ? 32 : ramGB >= 24 ? 14 : ramGB >= 16 ? 7 : ramGB >= 10 ? 3 : 0;
+  const gpuCoderCap = gpuUsable ? maxCoderParamsBForVram(vramGB) : 0;
+  const maxCoderParamsB = Math.max(ramCoderCap, gpuCoderCap);
   const maxChatParamsB = ramGB >= 16 ? 7 : ramGB >= 8 ? 3 : 1.5;
   const allowMultiModel = allowTwoLocalModels(ramGB, vramGB) && maxCoderParamsB >= 7;
   const preferredQuant = preferredCoderQuant(vramGB);
@@ -70,13 +72,16 @@ function buildProfile(hw: HardwareInfo): BrainProfile {
   else if (maxChatParamsB >= 3) chat = { id: 'llama32-3b', name: 'Llama 3.2 3B Instruct', role: 'chat' };
   else chat = { id: 'qwen25-15b', name: 'Qwen2.5 1.5B Instruct', role: 'chat' };
 
+  // Recommend the strongest real coder this PC can run — never Instruct as a fake coder.
   let coder: ModelRef | null = null;
-  if (maxCoderParamsB >= 14) {
+  if (maxCoderParamsB >= 32) {
+    coder = { id: 'qwen25-coder-32b', name: 'Qwen2.5-Coder 32B', role: 'coder' };
+  } else if (maxCoderParamsB >= 14) {
     coder = { id: 'qwen25-coder-14b', name: 'Qwen2.5-Coder 14B', role: 'coder' };
   } else if (maxCoderParamsB >= 7) {
     coder = { id: 'qwen25-coder-7b', name: 'Qwen2.5-Coder 7B', role: 'coder' };
-  } else if (maxCoderParamsB >= 3) {
-    coder = { id: 'llama32-3b', name: 'Llama 3.2 3B (light coder)', role: 'coder' };
+  } else {
+    coder = null;
   }
 
   const vision: ModelRef | null = ramGB >= 16 && (vramGB || 0) >= 6
@@ -84,10 +89,13 @@ function buildProfile(hw: HardwareInfo): BrainProfile {
     : null;
 
   const mode = gpuUsable ? `GPU ~${vramGB} GB` : 'CPU / iGPU';
+  const offloadNote = ramCoderCap > gpuCoderCap
+    ? ' · RAM offload OK for coder'
+    : '';
   const reason = [
     `${ramGB} GB RAM · ${mode} · ${cores} cores`,
     coder
-      ? `Coder up to ~${maxCoderParamsB}B (${preferredQuant})`
+      ? `Coder up to ~${maxCoderParamsB}B (${preferredQuant})${offloadNote}`
       : 'No local coder — scaffold + optional cloud',
     allowMultiModel ? 'Multi-model polish allowed' : 'Multi-model off on this PC',
   ].join(' · ');
@@ -155,9 +163,13 @@ export function assertCoderAllowed(
   }
   const vram = assertVramFits({ vramGb: profile.vramGB, idOrName: label });
   if (!vram.ok && profile.gpuUsable) {
+    // High-RAM machines: allow Q4 coders via CPU / partial offload when within maxCoderParamsB.
+    if (profile.ramGB >= 24 && (params == null || params <= profile.maxCoderParamsB)) {
+      return { ok: true, reason: `${profile.reason} · CPU/RAM offload` };
+    }
     return { ok: false, reason: vram.reason };
   }
-  // CPU-only path: allow only if params within maxCoderParamsB (already checked).
+  // CPU-only / low-VRAM: params already gated by maxCoderParamsB (includes RAM offload cap).
   return { ok: true, reason: profile.reason };
 }
 

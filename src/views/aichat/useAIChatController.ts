@@ -1861,9 +1861,13 @@ export function useAIChatController() {
     setQueueTick(t => t + 1);
     setEditingQueueId(null);
     setEditingQueueText('');
-    void engineGenerateCancel();
+    // Cancel only this chat's infer job — never nuke the other Live create.
+    const originGenChatId = activeGenChatIdRef.current
+      || routeChatIdRef.current
+      || persistChatIdRef.current
+      || null;
+    void engineGenerateCancel(originGenChatId ? { chatId: originGenChatId } : undefined);
     generatingRef.current = false;
-    const originGenChatId = activeGenChatIdRef.current;
     activeGenChatIdRef.current = null;
     try {
       sessionStorage.removeItem('NOVA:inflight-media');
@@ -3105,6 +3109,7 @@ export function useAIChatController() {
     previewUrlRef,
     pushLivePreview,
     renameChat,
+    touchRecentProject,
     resolveStudioFiles,
     route,
     routeChatIdRef,

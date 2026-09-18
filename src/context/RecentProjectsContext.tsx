@@ -35,7 +35,7 @@ interface RecentProjectsContextValue {
   renameChat: (id: string, title: string) => void;
   removeRecent: (id: string) => void;
   /** Add/touch a Code project in Recent after real activity (not on bare nav). */
-  touchRecentProject: (id: string, name?: string) => void;
+  touchRecentProject: (id: string, name?: string, diskPath?: string) => void;
   addCreation: (entry: RecentCreation) => void;
   addChat: (entry: RecentChat) => void;
   pinChat: (chatId: string) => void;
@@ -166,8 +166,8 @@ export function RecentProjectsProvider({ children }: { children: ReactNode }) {
     setRecent(removeRecentProject(id));
   }, []);
 
-  const touchRecentProject = useCallback((id: string, name?: string) => {
-    setRecent(ensureRecentProject(id, name));
+  const touchRecentProject = useCallback((id: string, name?: string, diskPath?: string) => {
+    setRecent(ensureRecentProject(id, name, diskPath));
   }, []);
 
   const addCreation = useCallback((entry: RecentCreation) => {

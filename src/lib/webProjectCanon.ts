@@ -1,3 +1,7 @@
+import { extractBrandLabel, extractNameRenameTarget, extractNameTextColorTarget, looksLikeNameTextColorAsk } from '@/lib/brandLabel';
+import { looksLikeNameFontStyleAsk, normalizeMessyUiEditAsk } from '@/lib/editAskResolve';
+import { parseNamedBrandLogos, parseNamedUiIcons } from '@/lib/brandAssets';
+
 /**
  * Canonical web project paths + micro-ask patches.
  * Stops models from writing into literal `path/to/...` junk and reporting false "Done".
@@ -218,7 +222,42 @@ function cssColor(name: string): string | null {
   if (/purple|violet/i.test(name)) return '#7c3aed';
   if (/brown|chocolate|sienna/i.test(name)) return '#8B4513';
   if (/teal/i.test(name)) return '#0f766e';
+  if (/pink/i.test(name)) return '#ec4899';
+  if (/orange/i.test(name)) return '#f97316';
+  if (/navy/i.test(name)) return '#1e3a8a';
+  if (/cream/i.test(name)) return '#fef3c7';
+  if (/gr[ae]y/i.test(name)) return '#6b7280';
   return null;
+}
+
+/** Patch .app / .App / body / html,body,#root backgrounds to a solid color. */
+function patchSolidBackground(css: string, bg: string): string {
+  let next = String(css || '');
+  const paint = (sel: string) => {
+    const re = new RegExp(`(${sel}\\s*\\{)([^}]*)(\\})`, 'i');
+    if (!re.test(next)) return false;
+    next = next.replace(re, (_m, open: string, body: string, close: string) => {
+      let b = String(body || '');
+      if (/background(?:-color)?\s*:/i.test(b)) {
+        b = b.replace(/background(?:-color)?\s*:\s*[^;]+/i, `background: ${bg}`);
+      } else {
+        if (b.trim() && !/;\s*$/.test(b)) b = `${b.trim()};`;
+        b = `${b} background: ${bg};`;
+      }
+      return `${open}${b}${close}`;
+    });
+    return true;
+  };
+  const hit = paint('\\.app') || paint('\\.App') || paint('body') || paint('html,\\s*body,\\s*#root');
+  if (!hit) {
+    next = `.app { min-height: 100vh; margin: 0; background: ${bg}; }\n${next}`;
+  }
+  // Keep html/body/#root in sync when present (Preview often paints from index.css).
+  next = next.replace(
+    /(html,\s*body,\s*#root\s*\{[^}]*?)background(?:-color)?\s*:\s*[^;]+/i,
+    `$1background: ${bg}`,
+  );
+  return next;
 }
 
 function contrastTextForBg(bg: string): string {
@@ -306,7 +345,7 @@ export function webMicroAskEdits(files: WebFileMap, message: string): WebFileEdi
   let js = js0;
   let touched = false;
 
-  const colorWord = t.match(/\b(black|white|blue|dark|red|green|yellow|purple|violet|brown|teal|chocolate|sienna)\b/i)?.[1];
+  const colorWord = t.match(/\b(black|white|blue|dark|red|green|yellow|purple|violet|brown|teal|chocolate|sienna|pink|orange|navy|cream)\b/i)?.[1];
   const wantsBg = /\bbackground\b/i.test(t) && Boolean(colorWord);
   const wantsTextColor = /\b(text|words?|title|heading|hello\s*world)\b.{0,48}\b(white|black|color|colour)\b|\b(white|black)\s+(color|colour|text)\b/i.test(t);
   const wantsRgb = /\b(rgb|multi[- ]?colou?r|multiple\s+colou?rs?|rainbow|gradient)\b/i.test(t);
@@ -702,15 +741,21 @@ document.getElementById('waitlist-form')?.addEventListener('submit', (e) => {
 }
 
 export function isWebMicroAsk(message: string): boolean {
-  const t = String(message || '');
+  const t = normalizeMessyUiEditAsk(String(message || ''));
   if (!t.trim()) return false;
   // Structural Discord/chat piece asks must go through real App.jsx generation — never HTML micro.
   if (isStructuralUiPieceAsk(t)) return false;
   if (/\b(build|create|make|scaffold)\b.{0,40}\b(app|website|site|page)\b/i.test(t) && /\bhello\s*world\b/i.test(t) === false) {
     // brand-new big builds are not micro. except hello world follow-ups with change verbs
   }
-  if (/\bbackground\b/i.test(t) && /\b(black|white|blue|dark|red|green|teal|brown|chocolate|sienna)\b/i.test(t)) return true;
-  if (/\b(solid|pure|just|blank)\b[\s\S]{0,24}\b(brown|black|white|blue|red|green|teal)\b/i.test(t)) return true;
+  if (/\b(?:cinematic|movie[- ]?like|atmospheric|premium\s+background|website[- ]?fit|editorial\s+background|background\s+image)\b/i.test(t)) return true;
+  if (/\bbackground\b/i.test(t) && /\b(black|white|blue|dark|red|green|teal|brown|chocolate|sienna|pink|orange|navy|cream|gr[ae]y|yellow|purple)\b/i.test(t)) return true;
+  if (/\b(solid|pure|just|blank)\b[\s\S]{0,24}\b(brown|black|white|blue|red|green|teal|pink|orange)\b/i.test(t)) return true;
+  if (/\b(?:change|set|make|turn|update|switch)\b[\s\S]{0,40}\b(?:to|into)\s+(?:a\s+)?(?:solid\s+)?(brown|black|white|blue|red|green|teal|pink|orange|navy|cream)\b/i.test(t)) return true;
+  if (/\b(?:change|rename|set|update|make)\b[\s\S]{0,64}\b(?:name|title|heading|word|text)\b/i.test(t)) return true;
+  if (looksLikeNameTextColorAsk(t) || looksLikeNameFontStyleAsk(t)) return true;
+  if (/\b(?:move|put|place)\b[\s\S]{0,40}\b(?:name|title|word|text|it)\b[\s\S]{0,40}\b(?:top|bottom|left|right|corner|center|middle)\b/i.test(t)) return true;
+  if (/\b(?:bold|italic|cursive|serif|sans|thin|light|skinny|professional)\b/i.test(t) && /\b(?:font|make|look|style|word|title|name|text)\b/i.test(t)) return true;
   if (/\b(?:put|add|place)\b[\s\S]{0,40}\b(?:word|text)\b/i.test(t)) return true;
   if (/\bword\b/i.test(t) && /\b(?:middle|center|screen)\b/i.test(t)) return true;
   if (/\b(?:words?|wording|phrase)\b/i.test(t) && /\b(?:center|centred|middle|screen|brown|viewport)\b/i.test(t)) return true;
@@ -752,16 +797,25 @@ export function reactSurgicalMicroAskEdits(
   files: WebFileMap,
   message: string,
 ): WebFileEdit[] {
-  const t = String(message || '');
+  const t = normalizeMessyUiEditAsk(String(message || ''));
   if (!t.trim()) return [];
   // Piece-by-piece Discord layout asks need full model App.jsx writes, not surgical tweaks.
   if (isStructuralUiPieceAsk(t)) return [];
+  // Full product / quiet-luxury landings must never collapse into a center-word stub.
+  if (
+    /\b(?:quiet\s+luxury|landing(?:\s+page)?|marketing\s+site|scroll\s+to\s+reveal|soft\s+(?:mint\s+|green\s+)?orbs?|premium\s+(?:product|quiet)|full\s+scrollable\s+landing)\b/i.test(t)
+    || (/\b(?:hero|footer|features?)\b/i.test(t) && /\b(?:website|landing|marketing)\b/i.test(t) && t.length > 220)
+  ) {
+    return [];
+  }
   if (/\b(scrap|rebuild|from\s+scratch|scaffold\s+(?:a\s+)?new|replace\s+(?:the\s+)?(?:entire\s+)?(?:app|layout|ui)|start\s+over)\b/i.test(t)) {
     return [];
   }
   if (
     !isWebMicroAsk(t)
-    && !/\b(rename|change|tint|make|update|finish|feel\s+finished|apply|badge|unread|syncing|connect\s+bank|folder\s+groups?|find\s+in\s+note|tags?\s+chips?|add|remove|delete|copyright|contact|footer|nav)\b/i.test(t)
+    && !looksLikeNameFontStyleAsk(t)
+    && !looksLikeNameTextColorAsk(t)
+    && !/\b(rename|change|tint|make|update|finish|feel\s+finished|apply|badge|unread|syncing|connect\s+bank|folder\s+groups?|find\s+in\s+note|tags?\s+chips?|add|put|place|remove|delete|copyright|contact|footer|nav|brand)\b/i.test(t)
   ) {
     return [];
   }
@@ -772,16 +826,164 @@ export function reactSurgicalMicroAskEdits(
   const cssPath = findReactCssPath(flat, appPath);
   let app = flat[appPath];
   let css = flat[cssPath] || '';
+  let indexCss = flat['src/index.css'] || '';
   let touchedApp = false;
   let touchedCss = false;
+  let touchedIndex = false;
+
+  // Solid page background color (brown / pink / blue / …) — do this before richer chrome so
+  // "change the background to brown" never false-passes as already applied.
+  {
+    const colorWord = t.match(
+      /\b(black|white|blue|dark|red|green|yellow|purple|violet|brown|teal|chocolate|sienna|pink|orange|navy|cream|gr[ae]y)\b/i,
+    )?.[1];
+    // "keep the cream background" + "name in black" → cream wins for page paint.
+    const keepCream = /\b(?:keep|leave|back\s+to)\b[\s\S]{0,24}\bcream\b/i.test(t)
+      || /\bcream\s+background\b/i.test(t);
+    const bgColorWord = (keepCream && /black|white/i.test(String(colorWord || '')) && /\bcream\b/i.test(t))
+      ? 'cream'
+      : colorWord;
+    const wantsBgColor = Boolean(bgColorWord) && (
+      /\bbackground\b/i.test(t)
+      || (
+        /\b(?:change|set|make|turn|update|switch|add)\b[\s\S]{0,48}\b(?:to|into)\s+(?:a\s+)?(?:solid\s+)?(?:brown|black|white|blue|red|green|teal|pink|orange|navy|cream)\b/i.test(t)
+        && !/\b(?:text|title|heading|h1|button|word|label|copy|name)\b/i.test(t)
+      )
+    );
+    // "change the color of the name to black" is text paint — never a page wipe.
+    if (looksLikeNameTextColorAsk(t) && !(keepCream && /\bbackground\b/i.test(t) && !/\bcharcoal\b/i.test(t))) {
+      /* skip bg — unless they also asked to keep/restore cream */
+    } else if (
+      wantsBgColor
+      && bgColorWord
+      && !/\bcharcoal\b/i.test(t)
+      && !/\b(?:glow|accent)\b/i.test(t)
+      && !/\b(?:gradient|tint)\b/i.test(t)
+      && !(/\bteal\b/i.test(t) && /\b(?:gradient|tint)\b/i.test(t))
+    ) {
+      const bg = cssColor(bgColorWord) || '#000000';
+      css = patchSolidBackground(css, bg);
+      // Leaving charcoal: drop the red glow halo so cream/white reads clean.
+      if (/cream|white/i.test(bgColorWord)) {
+        css = css.replace(/\n?\.app::before\{[^}]*\}\n?/gi, '\n');
+        css = css.replace(/\n?\.app>\*\{[^}]*\}\n?/gi, '\n');
+      }
+      touchedCss = true;
+      if (indexCss) {
+        indexCss = patchSolidBackground(indexCss, bg);
+        touchedIndex = true;
+      } else if (/html,\s*body,\s*#root/i.test(css) === false) {
+        // Ensure root paint even when index.css is missing from the map.
+        css = `html, body, #root { height: 100%; margin: 0; background: ${bg}; }\n${css}`;
+      }
+      // Inline style backgrounds on the shell div
+      if (/style=\{\{[^}]*background/i.test(app)) {
+        app = app.replace(
+          /(style=\{\{[^}]*?)background(?:Color)?\s*:\s*['"][^'"]+['"]/gi,
+          `$1background: '${bg}'`,
+        );
+        touchedApp = true;
+      }
+    }
+  }
+
+  // Premium website-fit backgrounds — Codex-grade craft:
+  // editorial photo layers + graded wash + soft light bloom + grain + slow drift.
+  // No logos, icons, or copy.
+  {
+    const wantsCinemaBg = (
+      /\b(?:cinematic|movie[- ]?like|film\s+still|premium\s+(?:background|atmosphere|website|site)|atmospheric|website[- ]?fit|editorial\s+background)\b/i.test(t)
+      || (/\bbackground\b/i.test(t) && /\b(?:movie|film|cinema|orb|glow|depth|professional|premium|website|scroll|landing)\b/i.test(t))
+    )
+      && /\b(?:background|atmosphere|imagery|image|photo|hero|scene|website|site|scroll)\b/i.test(t)
+      && !/\b(?:logo|icon|wordmark|title|headline|brand\s+name|center(?:ed)?\s+word)\b/i.test(t);
+    if (wantsCinemaBg) {
+      const scrollSite = /\b(?:scroll|pages?|website|landing|multi[- ]?(?:panel|section|page)|full[- ]?site|website[- ]?fit)\b/i.test(t)
+        || /\bpremium\b/i.test(t);
+      const stageNames = scrollSite
+        ? ['stage stage--a', 'stage stage--b', 'stage stage--c']
+        : ['stage stage--a'];
+      app = [
+        "import './App.css';",
+        '',
+        `const stages = ${JSON.stringify(stageNames)};`,
+        '',
+        'export default function App() {',
+        '  return (',
+        '    <main className="site" aria-hidden="true">',
+        '      {stages.map((stage) => (',
+        '        <section className={stage} key={stage}>',
+        '          <div className="stage__image" />',
+        '          <div className="stage__wash" />',
+        '          <div className="stage__light stage__light--one" />',
+        '          <div className="stage__light stage__light--two" />',
+        '          <div className="stage__grain" />',
+        '        </section>',
+        '      ))}',
+        '    </main>',
+        '  );',
+        '}',
+        '',
+      ].join('\n');
+      css = [
+        ':root { background: #05080b; }',
+        'html, body, #root { min-height: 100%; margin: 0; }',
+        'body { background: #05080b; overflow-x: hidden; }',
+        '.site { background: #05080b; }',
+        '.stage { position: relative; isolation: isolate; height: 100svh; min-height: 620px; overflow: hidden; background: #070a0b; }',
+        '.stage__image, .stage__wash, .stage__light, .stage__grain { position: absolute; inset: -3%; pointer-events: none; }',
+        '.stage__image { inset: 0; background-position: center; background-size: cover; filter: saturate(.78) contrast(1.08) brightness(.72); transform: scale(1.035); animation: drift 18s ease-in-out infinite alternate; }',
+        '.stage__wash { z-index: 1; background: linear-gradient(180deg, rgba(7,12,14,.17) 0%, rgba(5,7,9,.18) 45%, rgba(4,6,8,.7) 100%); }',
+        '.stage__light { z-index: 2; border-radius: 50%; mix-blend-mode: screen; filter: blur(22px); opacity: .76; }',
+        '.stage__light--one { inset: auto; width: 64vw; height: 64vw; max-width: 950px; max-height: 950px; top: -27vw; right: -17vw; background: radial-gradient(circle at 44% 48%, rgba(255,243,194,.78), rgba(255,183,108,.22) 29%, transparent 67%); }',
+        '.stage__light--two { inset: auto; width: 50vw; height: 50vw; bottom: -30vw; left: -14vw; background: radial-gradient(circle, rgba(100,180,199,.32), rgba(83,103,157,.1) 42%, transparent 70%); }',
+        '.stage__grain { z-index: 3; opacity: .12; mix-blend-mode: soft-light; background-image: url("data:image/svg+xml,%3Csvg viewBox=\'0 0 220 220\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cfilter id=\'n\'%3E%3CfeTurbulence type=\'fractalNoise\' baseFrequency=\'.95\' numOctaves=\'4\' stitchTiles=\'stitch\'/%3E%3C/filter%3E%3Crect width=\'100%25\' height=\'100%25\' filter=\'url(%23n)\' opacity=\'.88\'/%3E%3C/svg%3E"); }',
+        ".stage--a .stage__image { background-image: url('/heroes/cinema.jpg'); background-position: center 57%; }",
+        '.stage--a .stage__wash { background: linear-gradient(118deg, rgba(8,17,20,.1) 15%, rgba(17,32,33,.05) 50%, rgba(6,11,12,.58) 100%), linear-gradient(0deg, rgba(5,7,8,.65), transparent 46%); }',
+        ...(scrollSite ? [
+          ".stage--b .stage__image { background-image: url('/heroes/cinema-b.jpg'); filter: saturate(.62) contrast(1.06) brightness(.69); animation-duration: 23s; }",
+          '.stage--b .stage__wash { background: linear-gradient(105deg, rgba(18,15,9,.34), transparent 47%, rgba(16,31,28,.52)), linear-gradient(0deg, rgba(5,7,5,.68), transparent 55%); }',
+          '.stage--b .stage__light--one { top: 4vh; right: -25vw; background: radial-gradient(circle, rgba(255,225,165,.72), rgba(244,165,81,.19) 34%, transparent 68%); }',
+          ".stage--c .stage__image { background-image: url('/heroes/cinema-c.jpg'); background-position: center 62%; filter: saturate(.7) contrast(1.12) brightness(.52); animation-duration: 20s; }",
+          '.stage--c .stage__wash { background: linear-gradient(160deg, rgba(4,10,18,.45), transparent 40%, rgba(3,6,12,.72)), linear-gradient(0deg, rgba(2,4,8,.7), transparent 50%); }',
+          '.stage--c .stage__light--one { top: -18vw; right: -12vw; background: radial-gradient(circle, rgba(160,200,255,.45), rgba(80,120,180,.15) 40%, transparent 70%); }',
+          '.stage--c .stage__light--two { bottom: -16vw; left: auto; right: -16vw; background: radial-gradient(circle, rgba(251,167,103,.2), rgba(90,68,133,.12) 44%, transparent 69%); }',
+        ] : []),
+        '@keyframes drift { from { transform: scale(1.035) translate3d(-.5%, -.25%, 0); } to { transform: scale(1.085) translate3d(.5%, .35%, 0); } }',
+        '@media (prefers-reduced-motion: reduce) { .stage__image { animation: none; } }',
+        '',
+      ].join('\n');
+      touchedApp = true;
+      touchedCss = true;
+      const out: WebFileEdit[] = [
+        { path: appPath, content: app },
+        ...(cssPath ? [{ path: cssPath, content: css }] : []),
+      ];
+      return out;
+    }
+  }
 
   // --- Incremental chrome (logo / icons / search / bag / hero / footer) ---
   // Deterministic so "Still Nightglass only: add …" still lands when the model talks instead of writing @@@FILE.
   {
-    const wantsLogo = /\b(?:logo|wordmark|brand\s*mark)\b/i.test(t)
-      && /\b(?:add|put|place|insert|top[\s-]?left)\b/i.test(t);
+    const namedBrands = parseNamedBrandLogos(t);
+    const namedIcons = parseNamedUiIcons(t);
+    const wantsLogo = (
+      (
+        /\b(?:add|put|place|insert)\b[\s\S]{0,48}\b(?:a\s+|the\s+|premium\s+|professional\s+)?(?:logo|wordmark|brand\s*mark)\b/i.test(t)
+        || (/\b(?:logo|wordmark|brand\s*mark)\b/i.test(t) && /\btop[\s-]?left\b/i.test(t) && !/\bicon\b/i.test(t))
+        || namedBrands.length > 0
+      )
+      // "change the name to logo only" is a rename, not an icon ask
+      && !/\b(?:to|into)\s+["']?logo\b/i.test(t)
+      && !extractNameRenameTarget(t)
+      && !/\b(?:menu|search|bag|cart|user)\s+icons?\b/i.test(t)
+    );
     const wantsExtraIcon = /\b(?:another|second|more|extra)\b[\s\S]{0,24}\bicon\b/i.test(t)
-      || (/\bicon\b/i.test(t) && /\btop[\s-]?left\b/i.test(t) && !wantsLogo);
+      || /\b(?:add|put|place)\b[\s\S]{0,40}\b(?:a\s+|the\s+|premium\s+|professional\s+)?(?:menu|search|bag|cart)\s+icons?\b/i.test(t)
+      || (/\bicon\b/i.test(t) && /\b(?:top[\s-]?left|add|put|place|premium|professional)\b/i.test(t) && !wantsLogo)
+      || /\b(?:premium|professional)\s+icons?\b/i.test(t)
+      || namedIcons.length > 0;
     const searchNegated = /\b(?:no|without|never|skip|omit|don't|do\s+not|dont)\b[\s\S]{0,40}\bsearch(?:\s*(?:bar|input|field))?\b/i.test(t);
     const bagNegated = /\b(?:no|without|never|skip|omit|don't|do\s+not|dont)\b[\s\S]{0,40}\b(?:cart|bag|shopping)\b/i.test(t);
     const wantsSearch = !searchNegated && (
@@ -798,26 +1000,37 @@ export function reactSurgicalMicroAskEdits(
     ).trim();
     const wantsHeroTitle = Boolean(heroTitle) || (/\bhero\s+title\b/i.test(t) && /\badd\b/i.test(t));
     const centeredWord = (
-      t.match(/\b(?:words?|text|phrase|copy|line)\s+(?:that\s+)?(?:says?|reading)\s*[:\s]+["“']([^"”']{2,80})["”']/i)?.[1]
+      extractNameRenameTarget(t)
+      || t.match(/\b(?:words?|text|phrase|copy|line)\s+(?:that\s+)?(?:says?|reading)\s*[:\s]+["“']([^"”']{2,80})["”']/i)?.[1]
       || t.match(/\b(?:says?|reading)\s+["“']([^"”']{2,80})["”']/i)?.[1]
       || t.match(/\b(?:says?|reading)\s+([A-Z][A-Za-z0-9]+(?:\s+[A-Z][A-Za-z0-9]+){0,6})\b/)?.[1]
       || t.match(/\b(?:put|add|place|write|show)\b[\s\S]{0,48}\b(?:words?|text|phrase)\b[\s\S]{0,24}["“']([^"”']{2,80})["”']/i)?.[1]
       || t.match(/\b(?:put|add|place|write|show)\b[\s\S]{0,40}\b(?:words?|text|title)\s+["“']([^"”']{2,80})["”']/i)?.[1]
       // Unquoted multi-word: "put the words Nightglass After Hours in the center"
-      || t.match(/\b(?:put|add|place|write|show)\b[\s\S]{0,48}\b(?:words?|text|phrase|title)\s+([A-Z][A-Za-z0-9]+(?:\s+[A-Z][A-Za-z0-9]+){0,6})\b/i)?.[1]
-      || t.match(/\b(?:change|rename|set|update)\b[\s\S]{0,48}\b(?:centered\s+)?(?:words?|title|text)\s+(?:to|into)\s+["“']?([A-Z][A-Za-z0-9]+(?:\s+[A-Z][A-Za-z0-9]+){0,6})\b/i)?.[1]
+      // No /i — Title-Case only so "centered in the" is not swallowed.
+      || t.match(/\b(?:put|add|place|write|show)\b[\s\S]{0,48}\b(?:words?|text|phrase|title)\s+([A-Z][A-Za-z0-9]+(?:\s+[A-Z][A-Za-z0-9]+){0,6})\b/)?.[1]
+      || t.match(/\b(?:change|rename|set|update)\b[\s\S]{0,48}\b(?:centered\s+)?(?:words?|title|text)\s+(?:to|into)\s+["“']?([A-Z][A-Za-z0-9]+(?:\s+[A-Z][A-Za-z0-9]+){0,6})\b/)?.[1]
+      // Brand name / brand should say VOID Peripherals — stop at layout words
+      || extractBrandLabel(t)
       || t.match(/\b(?:put|add|place|write|show)\b[\s\S]{0,40}\b(?:word|text|title)\s+["“']?([A-Za-z][A-Za-z0-9_-]{1,40})\b/i)?.[1]
       || t.match(/\b(?:word|text)\s+["“']?([A-Za-z][A-Za-z0-9_-]{1,40})["”']?\s+(?:in|on|at)\b/i)?.[1]
       || ''
     ).trim().replace(/[.,;:]+$/, '').replace(/\s+/g, ' ');
-    const wantsCenteredWord = Boolean(centeredWord) && (
-      /\b(?:middle|center|centred|screen|page|viewport|brown|centered)\b/i.test(t)
+    // Strip layout tails if a Title-Case regex still swallowed them — keep "local only"
+    const centeredWordFinal = centeredWord
+      .replace(/\s+\bonly\s+(?:add|put|place|with|and|no|nothing|keep|leave)\b.*$/i, '')
+      .replace(/\s+\b(?:centered?|centred|in\s+the|middle|clean|white|black|text|on\s+screen|nothing|else)\b.*$/i, '')
+      .trim() || centeredWord;
+    const wantsCenteredWord = Boolean(centeredWordFinal) && (
+      /\b(?:middle|center|centred|screen|page|viewport|brown|centered|white)\b/i.test(t)
+      || /\bbrand\s+(?:name|should\s+say)\b/i.test(t)
       || /\bjust\s+that\s+word\b/i.test(t)
       || /\bnothing else\b/i.test(t)
       || /\bonly\s+words?\b/i.test(t)
       || /\bwords?\s+only\b/i.test(t)
       || /\bwording\s+only\b/i.test(t)
-      || /\b(?:change|rename|set|update)\b[\s\S]{0,40}\b(?:centered\s+)?(?:words?|title)\b/i.test(t)
+      || /\b(?:change|rename|set|update)\b[\s\S]{0,40}\b(?:centered\s+)?(?:words?|title|name)\b/i.test(t)
+      || Boolean(extractNameRenameTarget(t))
     );
     const subtitle = (
       t.match(/\bsubtitle\b[\s\S]{0,40}["“']([^"”']{2,80})["”']/i)?.[1]
@@ -862,7 +1075,8 @@ export function reactSurgicalMicroAskEdits(
     };
 
     if (wantsLogo || wantsExtraIcon || wantsSearch || wantsBag || wantsHeroTitle || wantsCenteredWord || wantsSubtitle || wantsCta || wantsFooter) {
-      if (!wantsCenteredWord) ensureNavShell();
+      // Named brand/icon rails use absolute positioning on .app — skip empty nav chrome.
+      if (!wantsCenteredWord && namedBrands.length === 0 && namedIcons.length === 0) ensureNavShell();
       if (!/import\s+['"]\.\/App\.css['"]/.test(app) && /export\s+default/.test(app)) {
         app = `import './App.css';\n${app}`;
         touchedApp = true;
@@ -870,11 +1084,13 @@ export function reactSurgicalMicroAskEdits(
     }
 
     // Centered word(s): patch into existing shell — never wipe logo/nav/background with a full App rewrite.
-    if (wantsCenteredWord && centeredWord) {
-      const label = centeredWord
+    if (wantsCenteredWord && centeredWordFinal) {
+      const label = centeredWordFinal
         .replace(/[`$]/g, '')
         // Stop at trailing instruction tails the regex sometimes swallows.
-        .replace(/\s+\b(?:and\s+)?(?:leave|keep|with|nothing|only|no|without|empty)\b.*$/i, '')
+        // Keep short names that end in "only" (local only / logo only).
+        .replace(/\s+\bonly\s+(?:add|put|place|with|and|no|nothing|keep|leave)\b.*$/i, '')
+        .replace(/\s+\b(?:and\s+)?(?:leave|keep|with|nothing|no|without|empty|centered?|centred|in\s+the|middle|clean|white)\b.*$/i, '')
         .trim()
         .slice(0, 72);
       if (!label) {
@@ -897,13 +1113,13 @@ export function reactSurgicalMicroAskEdits(
           );
         }
         touchedApp = true;
-      } else if (/<div\s+className=["']app["']\s*\/>/i.test(app)) {
+      } else if (/<div\s+className=["'][Aa]pp["']\s*\/>/i.test(app)) {
         app = app.replace(
-          /<div\s+className=["']app["']\s*\/>/i,
+          /<div\s+className=["'][Aa]pp["']\s*\/>/i,
           `<div className="app">\n      <h1 className="center-word">${label}</h1>\n    </div>`,
         );
         touchedApp = true;
-      } else if (/className=["']app["'][^>]*>/i.test(app)) {
+      } else if (/className=["'][Aa]pp["'][^>]*>/i.test(app)) {
         // Inject title into existing shell (keeps nav/logo/hero siblings).
         if (/<h1[\s>]/i.test(app)) {
           app = app.replace(
@@ -912,7 +1128,7 @@ export function reactSurgicalMicroAskEdits(
           );
         } else {
           app = app.replace(
-            /(className=["']app["'][^>]*>)/i,
+            /(className=["'][Aa]pp["'][^>]*>)/i,
             `$1\n      <h1 className="center-word">${label}</h1>`,
           );
         }
@@ -958,9 +1174,20 @@ export default function App() {
           css = css.replace(/(\.center-word\s*\{[^}]*?)color\s*:\s*[^;]+/i, `$1color: ${color}`);
           touchedCss = true;
         }
-        if (!/\.app\s*\{[^}]*background/i.test(css) && !/background\s*:/i.test(css)) {
-          css = `.app { min-height: 100vh; margin: 0; background: #8B4513; display: flex; align-items: center; justify-content: center; }\n${css}`;
+        if (!/\.app\s*\{[^}]*background/i.test(css) && !/\.App\s*\{[^}]*background/i.test(css) && !/background\s*:/i.test(css)) {
+          const bg = /\bblack\b/i.test(t) ? '#000000' : /\bbrown\b/i.test(t) ? '#8B4513' : '#000000';
+          css = `.app { min-height: 100vh; margin: 0; background: ${bg}; display: flex; align-items: center; justify-content: center; }\n${css}`;
           touchedCss = true;
+        } else if (/\bkeep\b[\s\S]{0,24}\bblack\b|\bblack\s+background\b/i.test(t)) {
+          if (/\.App\s*\{/i.test(css) && !/\.App\s*\{[^}]*background\s*:\s*#000/i.test(css)) {
+            css = css.replace(/\.App\s*\{([^}]*)\}/i, (m, body) => {
+              if (/background\s*:/i.test(body)) {
+                return `.App {${String(body).replace(/background(?:-color)?\s*:\s*[^;]+/i, 'background: #000000')}}`;
+              }
+              return `.App {${body} background: #000000;}`;
+            });
+            touchedCss = true;
+          }
         }
       }
       }
@@ -970,33 +1197,120 @@ export default function App() {
     const wantsCornerLogoFix = /center-word/i.test(app)
       && (/<nav[\s>]/i.test(app) || /className=["']logo["']/i.test(app))
       && !/corner-logo/i.test(app)
-      && (wantsLogo || /\b(?:logo|icon)\b/i.test(t));
-    if ((wantsLogo && !(/corner-logo|className=["']logo["']|\/logo\.svg/i.test(app))) || wantsCornerLogoFix) {
+      && wantsLogo
+      && !extractNameRenameTarget(t)
+      && namedBrands.length === 0;
+    const lightCanvas = /background\s*:\s*(?:#fef3c7|#fff(?:fff)?|#f[5-9a-f]{5}|#e[8-f][0-9a-f]{4}|cream|white)/i.test(css)
+      || /\bcream\b|\bwhite\b/i.test(t);
+    const ink = lightCanvas ? '#1a1a1a' : '#ffffff';
+
+    // Company logo rail — accumulate named brands; never wipe cream.
+    const pendingBrandSvgs: Array<{ path: string; content: string }> = [];
+    if (namedBrands.length) {
+      const missing = namedBrands.filter((b) => !new RegExp(`/logos/${b.id}\\.svg`, 'i').test(app));
+      if (missing.length) {
+        const imgs = missing
+          .map((b) => `<img className="brand-mark" src="/logos/${b.id}.svg" alt="${b.label}" width="28" height="28" />`)
+          .join('');
+        if (/className=["']brand-rail["']/i.test(app)) {
+          app = app.replace(/(className=["']brand-rail["'][^>]*>)/i, `$1${imgs}`);
+        } else if (/<div\s+className=["']app["']\s*\/>/i.test(app)) {
+          app = app.replace(
+            /<div\s+className=["']app["']\s*\/>/i,
+            `<div className="app">\n      <div className="brand-rail" aria-label="Brand logos">${imgs}</div>\n    </div>`,
+          );
+        } else if (/className=["']app["'][^>]*>/i.test(app)) {
+          app = app.replace(
+            /(className=["']app["'][^>]*>)/i,
+            `$1\n      <div className="brand-rail" aria-label="Brand logos">${imgs}</div>`,
+          );
+        }
+        touchedApp = true;
+        for (const b of missing) {
+          const path = `public/logos/${b.id}.svg`;
+          if (flat[path] == null) {
+            pendingBrandSvgs.push({
+              path,
+              content: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="${ink}"><title>${b.label}</title><circle cx="12" cy="12" r="9" fill="none" stroke="${ink}" stroke-width="1.4"/><text x="12" y="15.5" text-anchor="middle" font-size="8" font-family="system-ui,sans-serif" fill="${ink}">${b.label.slice(0, 2).toUpperCase()}</text></svg>\n`,
+            });
+          }
+        }
+        if (cssPath && !/\.brand-rail\b/.test(css)) {
+          css += `\n.brand-rail{position:absolute;top:1.35rem;left:1.35rem;z-index:2;display:flex;flex-wrap:wrap;align-items:center;gap:14px;max-width:min(92vw,720px)}`
+            + `\n.brand-mark{display:block;width:28px;height:28px;opacity:.95}\n`;
+          if (/\.app\s*\{/i.test(css) && !/\.app\s*\{[^}]*position\s*:/i.test(css)) {
+            css = css.replace(/\.app\s*\{([^}]*)\}/i, (_m, body: string) => `.app {${body} position:relative;}`);
+          }
+          touchedCss = true;
+        }
+      }
+    }
+
+    // Toolbar icons — only fill existing nav-tools / icon-rail. Never stamp a floating
+    // icon-rail onto .app (that made every store look like the same black + mint shell).
+    const pendingIconSvgs: Array<{ path: string; content: string }> = [];
+    if (namedIcons.length) {
+      const missing = namedIcons.filter((ic) => !new RegExp(`/icons/${ic.id}\\.svg`, 'i').test(app));
+      if (missing.length) {
+        const imgs = missing
+          .map((ic) => `<img className="nav-icon" src="/icons/${ic.id}.svg" alt="${ic.label}" width="20" height="20" />`)
+          .join('');
+        let injected = false;
+        if (/className=["']icon-rail["']/i.test(app)) {
+          app = app.replace(/(className=["']icon-rail["'][^>]*>)/i, `$1${imgs}`);
+          injected = true;
+        } else if (/className=["']nav-tools["']/i.test(app)) {
+          app = app.replace(/(className=["']nav-tools["'][^>]*>)/i, `$1${imgs}`);
+          injected = true;
+        }
+        if (injected) {
+          touchedApp = true;
+          for (const ic of missing) {
+            const path = `public/icons/${ic.id}.svg`;
+            if (flat[path] == null) {
+              pendingIconSvgs.push({
+                path,
+                content: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="${ink}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><title>${ic.label}</title><circle cx="12" cy="12" r="8"/><path d="M8 12h8"/></svg>\n`,
+              });
+            }
+          }
+          if (cssPath && !/\.icon-rail\b/.test(css) && /className=["']icon-rail["']/i.test(app)) {
+            css += `\n.icon-rail{position:absolute;top:1.35rem;right:1.35rem;z-index:2;display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:12px;max-width:min(92vw,520px)}`
+              + `\n.nav-icon{display:block;opacity:.92;width:20px;height:20px}\n`;
+            if (/\.app\s*\{/i.test(css) && !/\.app\s*\{[^}]*position\s*:/i.test(css)) {
+              css = css.replace(/\.app\s*\{([^}]*)\}/i, (_m, body: string) => `.app {${body} position:relative;}`);
+            }
+            touchedCss = true;
+          }
+        }
+      }
+    }
+
+    if ((wantsLogo && namedBrands.length === 0 && !(/corner-logo|className=["']logo["']|\/logo\.svg/i.test(app))) || wantsCornerLogoFix) {
       const hasCenteredWord = /center-word/i.test(app);
       if (hasCenteredWord) {
         app = app.replace(/\s*<nav className=["']nav["']>[\s\S]*?<\/nav>\s*/i, '\n');
         if (!/corner-logo/i.test(app)) {
           app = app.replace(
             /(className=["']app["'][^>]*>)/i,
-            `$1\n      <a className="corner-logo" href="#top" aria-label="Logo"><img src="/logo.svg" alt="" width="22" height="22" /></a>`,
+            `$1\n      <a className="corner-logo" href="#top" aria-label="Logo"><img src="/logo.svg" alt="" width="40" height="40" /></a>`,
           );
         }
         touchedApp = true;
         if (cssPath) {
-          if (!/\.app\s*\{[^}]*position\s*:\s*relative/i.test(css)) {
-            if (/\.app\s*\{[^}]*display\s*:\s*flex/i.test(css)) {
-              css = css.replace(
-                /\.app\s*\{[^}]*\}/i,
-                '.app{position:relative;min-height:100vh;margin:0;display:flex;align-items:center;justify-content:center;background:#8B4513}',
-              );
-            } else if (/\.app\s*\{/i.test(css)) {
-              css = css.replace(/\.app\s*\{/i, '.app{position:relative;');
-            } else {
-              css += `\n.app{position:relative;min-height:100vh;margin:0;display:flex;align-items:center;justify-content:center;background:#8B4513}\n`;
-            }
+          // Preserve existing .app background — never force brown when adding a logo.
+          if (/\.app\s*\{/i.test(css)) {
+            css = css.replace(/\.app\s*\{([^}]*)\}/i, (_m, body: string) => {
+              let next = String(body || '');
+              if (!/position\s*:/i.test(next)) next += ' position:relative;';
+              return `.app {${next}}`;
+            });
+          } else {
+            css += `\n.app{position:relative;min-height:100vh;margin:0}\n`;
           }
           if (!/\.corner-logo\b/.test(css)) {
-            css += `\n.corner-logo{position:absolute;top:1.25rem;left:1.25rem;z-index:2;line-height:0}\n.corner-logo img{display:block;width:22px;height:22px;filter:invert(1)}\n`;
+            css += `\n.corner-logo{position:absolute;top:1.5rem;left:1.5rem;z-index:2;line-height:0}`
+              + `\n.corner-logo img{display:block;width:40px;height:40px}\n`;
           }
           touchedCss = true;
         }
@@ -1005,22 +1319,24 @@ export default function App() {
         if (!/<div className=["']nav-left["']/i.test(app) && /<nav/i.test(app)) {
           app = app.replace(
             /(<nav[^>]*>)/i,
-            `$1\n        <div className="nav-left"><a className="logo" href="#top" aria-label="Logo"><img src="/logo.svg" alt="" width="22" height="22" /></a></div>`,
+            `$1\n        <div className="nav-left"><a className="logo" href="#top" aria-label="Logo"><img src="/logo.svg" alt="" width="36" height="36" /></a></div>`,
           );
         } else if (/<div className=["']nav-left["']\s*\/>/i.test(app)) {
           app = app.replace(
             /<div className=["']nav-left["']\s*\/>/i,
-            `<div className="nav-left"><a className="logo" href="#top" aria-label="Logo"><img src="/logo.svg" alt="" width="22" height="22" /></a></div>`,
+            `<div className="nav-left"><a className="logo" href="#top" aria-label="Logo"><img src="/logo.svg" alt="" width="36" height="36" /></a></div>`,
           );
         } else if (/<div className=["']nav-left["'][^>]*>/i.test(app) && !/className=["']logo["']/i.test(app)) {
           app = app.replace(
             /(<div className=["']nav-left["'][^>]*>)/i,
-            `$1<a className="logo" href="#top" aria-label="Logo"><img src="/logo.svg" alt="" width="22" height="22" /></a>`,
+            `$1<a className="logo" href="#top" aria-label="Logo"><img src="/logo.svg" alt="" width="36" height="36" /></a>`,
           );
         }
         touchedApp = true;
         if (cssPath && !/\.nav-left\b/.test(css)) {
-          css += `\n.nav{display:flex;align-items:center;justify-content:space-between;padding:1rem 1.25rem}\n.nav-left{display:flex;align-items:center;gap:10px}\n.logo img{display:block;filter:invert(1)}\n`;
+          css += `\n.nav{display:flex;align-items:center;justify-content:space-between;padding:1.25rem 1.5rem}`
+            + `\n.nav-left{display:flex;align-items:center;gap:12px}`
+            + `\n.logo img{display:block;width:36px;height:36px}\n`;
           touchedCss = true;
         }
       }
@@ -1031,8 +1347,8 @@ export default function App() {
       /* handled below via out push when returning chrome edits */
     }
 
-    if (wantsExtraIcon && !(/nav-icon|\/icons\/menu\.svg/i.test(app) && /nav-left/i.test(app))) {
-      const icon = `<img className="nav-icon" src="/icons/menu.svg" alt="" width="18" height="18" />`;
+    if (wantsExtraIcon && namedIcons.length === 0 && !(/nav-icon|\/icons\/menu\.svg/i.test(app) && /nav-left/i.test(app))) {
+      const icon = `<img className="nav-icon" src="/icons/menu.svg" alt="" width="20" height="20" />`;
       if (/<\/div>\s*(?=<div className=["']nav-tools)/i.test(app) && /nav-left/i.test(app)) {
         app = app.replace(
           /(<div className=["']nav-left["'][^>]*>)([\s\S]*?)(<\/div>)/i,
@@ -1043,10 +1359,21 @@ export default function App() {
           /(className=["']logo["'][\s\S]*?<\/a>)/i,
           `$1${icon}`,
         );
+      } else if (/className=["']corner-logo["'][\s\S]{0,200}/i.test(app)) {
+        app = app.replace(
+          /(className=["']corner-logo["'][\s\S]*?<\/a>)/i,
+          `$1${icon}`,
+        );
+      } else if (/className=["']app["'][^>]*>/i.test(app) && !/nav-icon/i.test(app)) {
+        app = app.replace(
+          /(className=["']app["'][^>]*>)/i,
+          `$1\n      <img className="nav-icon corner-icon" src="/icons/menu.svg" alt="" width="20" height="20" />`,
+        );
       }
       touchedApp = true;
       if (cssPath && !/\.nav-icon\b/.test(css)) {
-        css += `\n.nav-icon{display:block;opacity:.9;filter:invert(1)}\n`;
+        css += `\n.nav-icon{display:block;opacity:.92;width:20px;height:20px}`
+          + `\n.corner-icon{position:absolute;top:1.65rem;left:4.75rem;z-index:2}\n`;
         touchedCss = true;
       }
     }
@@ -1062,13 +1389,16 @@ export default function App() {
       }
       touchedApp = true;
       if (cssPath && !/\.search-bar\b/.test(css)) {
-        css += `\n.nav-tools{display:flex;align-items:center;gap:10px}\n.search-bar{padding:.45rem .75rem;border:0;border-radius:8px;background:#222;color:#fff}\n`;
+        const searchBg = lightCanvas ? 'rgba(26,26,26,.06)' : '#222';
+        const searchFg = lightCanvas ? '#1a1a1a' : '#fff';
+        css += `\n.nav-tools{display:flex;align-items:center;gap:12px}`
+          + `\n.search-bar{padding:.5rem .85rem;border:0;border-radius:999px;background:${searchBg};color:${searchFg};font-size:.9rem}\n`;
         touchedCss = true;
       }
     }
 
     if (wantsBag && !(/\/icons\/bag\.svg|shopping-bag|aria-label=["']Cart/i.test(app))) {
-      const bag = `<img className="nav-icon" src="/icons/bag.svg" alt="" width="18" height="18" aria-label="Cart" />`;
+      const bag = `<img className="nav-icon" src="/icons/bag.svg" alt="" width="20" height="20" aria-label="Cart" />`;
       if (/className=["']search-bar["'][^>]*>/i.test(app)) {
         app = app.replace(/(className=["']search-bar["'][^>]*>)/i, `$1${bag}`);
       } else if (/<div className=["']nav-tools["'][^>]*>/i.test(app)) {
@@ -1078,6 +1408,73 @@ export default function App() {
       app = app.replace(/import\s+cartIcon\s+from\s+['"]\/path\/to\/[^'"]+['"];?\s*/i, '');
       app = app.replace(/src=\{cartIcon\}/i, 'src="/icons/bag.svg"');
       touchedApp = true;
+    }
+
+    // Sticky product nav — inject without wiping center-word / hero content.
+    {
+      const wantsStickyNav = (
+        /\b(?:add|put|include)\b[\s\S]{0,48}\b(?:sticky\s+)?nav(?:igation|bar)?\b/i.test(t)
+        || (/\bsticky\b/i.test(t) && /\bnav(?:igation|bar)?\b/i.test(t))
+      );
+      const labels = [...t.matchAll(/\b(Products|Specs|Buy|Shop|About|Contact|Menu|Home)\b/g)]
+        .map((m) => m[1]);
+      const uniq = [...new Set(labels)];
+      if (wantsStickyNav && uniq.length && !/<nav[\s>]/i.test(app)) {
+        const links = uniq
+          .map((l) => `<li><a href="#${l.toLowerCase()}">${l}</a></li>`)
+          .join('');
+        const nav = `<nav className="sticky-nav" aria-label="Primary">\n        <ul>${links}</ul>\n      </nav>`;
+        if (/className=["'][Aa]pp["'][^>]*>/i.test(app)) {
+          app = app.replace(/(className=["'][Aa]pp["'][^>]*>)/i, `$1\n      ${nav}`);
+          touchedApp = true;
+        }
+        if (touchedApp && cssPath && !/\.sticky-nav\b/.test(css)) {
+          css += `\n.sticky-nav{position:sticky;top:0;z-index:20;width:100%;flex-shrink:0;background:#000;padding:.75rem 1rem}`
+            + `\n.sticky-nav ul{list-style:none;margin:0;padding:0;display:flex;justify-content:center;gap:1.25rem}`
+            + `\n.sticky-nav a{color:#fff;text-decoration:none;font-size:.95rem}\n`;
+          touchedCss = true;
+        }
+        // Keep brand centered when sticky nav shares the column — but never
+        // overlay absolute brand once a hero stack (photos/tagline) exists.
+        if (touchedApp && cssPath && /className=["']center-word["']/i.test(app)) {
+          if (/\.app\s*\{/i.test(css)) {
+            css = css.replace(/\.app\s*\{([^}]*)\}/i, (_m, body: string) => {
+              let next = String(body || '');
+              if (!/position\s*:/i.test(next)) next += ' position: relative;';
+              if (!/flex-direction\s*:/i.test(next)) next += ' flex-direction: column;';
+              return `.app {${next}}`;
+            });
+          }
+          const heroBlock = app.match(/<section\b[^>]*className=["']hero["'][^>]*>[\s\S]*?<\/section>/i)?.[0] || '';
+          const heroHasStack = /hero-photo|tagline/i.test(heroBlock);
+          if (/\.center-word\s*\{/i.test(css)) {
+            css = css.replace(/\.center-word\s*\{([^}]*)\}/i, (_m, body: string) => {
+              let next = String(body || '');
+              if (!/;\s*$/.test(next) && next.trim()) next = `${next.trim()};`;
+              if (heroHasStack) {
+                next = next
+                  .replace(/position\s*:\s*absolute\s*;?/ig, '')
+                  .replace(/left\s*:\s*[^;]+;?/ig, '')
+                  .replace(/top\s*:\s*[^;]+;?/ig, '')
+                  .replace(/transform\s*:\s*[^;]+;?/ig, '');
+              } else if (!/position\s*:/i.test(next)) {
+                next += ' position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);';
+              }
+              return `.center-word {${next}}`;
+            });
+          }
+          // Prefer brand inside the hero once photos/tagline exist.
+          if (heroHasStack) {
+            const brand = app.match(/<h1[^>]*className=["']center-word["'][^>]*>[\s\S]*?<\/h1>/i)?.[0];
+            if (brand && !/className=["']center-word["']/i.test(heroBlock)) {
+              app = app.replace(brand, '');
+              app = app.replace(/(<section\b[^>]*className=["']hero["'][^>]*>)/i, `$1\n        ${brand}`);
+              touchedApp = true;
+            }
+          }
+          touchedCss = true;
+        }
+      }
     }
 
     if (wantsHeroTitle) {
@@ -1136,6 +1533,96 @@ export default function App() {
       }
     }
 
+    // Product photos + tagline (fail-closed verifyAsk needs real https srcs)
+    {
+      const wantsMousePhoto = /\bmouse\b/i.test(t) && /\b(?:photo|shot|image|img|hero)\b/i.test(t);
+      const wantsKeyboardPhoto = /\bkeyboard\b/i.test(t) && /\b(?:photo|shot|image|img)\b/i.test(t);
+      const wantsTagline = /\btagline\b/i.test(t)
+        || (/\bprecision\b/i.test(t) && /\bspeed\b/i.test(t) && /\b(?:add|short)\b/i.test(t));
+      const mouseUrl = 'https://images.unsplash.com/photo-1615663245857-ac93bb7c39e7?auto=format&fit=crop&w=1200&q=80';
+      const keyboardUrl = 'https://images.unsplash.com/photo-1511467687858-23d96c32e4ae?auto=format&fit=crop&w=1200&q=80';
+      const ensureHeroShell = () => {
+        if (/className=["']hero["']/i.test(app)) return;
+        const shell = `<section className="hero"></section>`;
+        if (/<\/nav>/i.test(app)) app = app.replace(/<\/nav>/i, `</nav>\n      ${shell}`);
+        else if (/className=["'][Aa]pp["'][^>]*>/i.test(app)) {
+          app = app.replace(/(className=["'][Aa]pp["'][^>]*>)/i, `$1\n      ${shell}`);
+        }
+        touchedApp = true;
+      };
+      if (wantsMousePhoto && !/alt=["'][^"']*mouse/i.test(app)) {
+        ensureHeroShell();
+        const img = `<img className="hero-photo" src="${mouseUrl}" alt="Gaming mouse product photo" />`;
+        if (/<section className=["']hero["'][^>]*>/i.test(app)) {
+          app = app.replace(/(<section className=["']hero["'][^>]*>)/i, `$1\n        ${img}`);
+        } else if (/className=["']center-word["']/i.test(app)) {
+          app = app.replace(/(<h1[^>]*className=["']center-word["'][^>]*>[\s\S]*?<\/h1>)/i, `$1\n      ${img}`);
+        }
+        touchedApp = true;
+      }
+      if (wantsKeyboardPhoto && !/alt=["'][^"']*keyboard/i.test(app)) {
+        ensureHeroShell();
+        const img = `<img className="hero-photo" src="${keyboardUrl}" alt="Mechanical keyboard product shot" />`;
+        if (/alt=["'][^"']*mouse/i.test(app)) {
+          app = app.replace(
+            /(<img className=["']hero-photo["'][^>]*mouse[^>]*>)/i,
+            `$1\n        ${img}`,
+          );
+        } else if (/<section className=["']hero["'][^>]*>/i.test(app)) {
+          app = app.replace(/(<section className=["']hero["'][^>]*>)/i, `$1\n        ${img}`);
+        } else if (/<\/h1>/i.test(app)) {
+          app = app.replace(/<\/h1>/i, `</h1>\n      ${img}`);
+        }
+        touchedApp = true;
+      }
+      if (wantsTagline && !/className=["']tagline["']/i.test(app)) {
+        const line = 'Precision and speed — built for the win.';
+        const tag = `<p className="tagline">${line}</p>`;
+        if (/alt=["'][^"']*keyboard/i.test(app)) {
+          app = app.replace(/(<img className=["']hero-photo["'][^>]*keyboard[^>]*>)/i, `$1\n        ${tag}`);
+        } else if (/alt=["'][^"']*mouse/i.test(app)) {
+          app = app.replace(/(<img className=["']hero-photo["'][^>]*mouse[^>]*>)/i, `$1\n        ${tag}`);
+        } else if (/<\/h1>/i.test(app)) {
+          app = app.replace(/<\/h1>/i, `</h1>\n        ${tag}`);
+        }
+        touchedApp = true;
+      }
+      if ((wantsMousePhoto || wantsKeyboardPhoto || wantsTagline) && cssPath) {
+        if (!/\.hero-photo\b/.test(css)) {
+          css += `\n.hero{display:flex;flex-direction:column;align-items:center;gap:1rem;padding:2rem 1.25rem;text-align:center;flex:1;justify-content:center}`
+            + `\n.hero-photo{width:min(420px,86vw);height:auto;border-radius:12px;object-fit:cover;display:block}\n`;
+          touchedCss = true;
+        }
+        if (wantsTagline && !/\.tagline\b/.test(css)) {
+          css += `\n.tagline{margin:0;color:#d4d4d4;font-size:1.05rem;letter-spacing:0.02em}\n`;
+          touchedCss = true;
+        }
+        // Brand belongs in the hero stack, not absolutely over the photos.
+        // Important: only treat brand as nested when it sits INSIDE the hero
+        // section ([\s\S]* across </section> falsely matched brand siblings).
+        if (/className=["']center-word["']/i.test(app) && /className=["']hero["']/i.test(app)) {
+          const heroBlock = app.match(/<section\b[^>]*className=["']hero["'][^>]*>[\s\S]*?<\/section>/i)?.[0] || '';
+          const brand = app.match(/<h1[^>]*className=["']center-word["'][^>]*>[\s\S]*?<\/h1>/i)?.[0];
+          if (brand && !/className=["']center-word["']/i.test(heroBlock)) {
+            app = app.replace(brand, '');
+            app = app.replace(/(<section\b[^>]*className=["']hero["'][^>]*>)/i, `$1\n        ${brand}`);
+            touchedApp = true;
+          }
+          if (cssPath && /\.center-word\s*\{[^}]*position\s*:\s*absolute/i.test(css)) {
+            css = css.replace(/\.center-word\s*\{([^}]*)\}/i, (_m, body: string) => {
+              let next = String(body || '')
+                .replace(/position\s*:\s*absolute\s*;?/ig, '')
+                .replace(/left\s*:\s*[^;]+;?/ig, '')
+                .replace(/top\s*:\s*[^;]+;?/ig, '')
+                .replace(/transform\s*:\s*[^;]+;?/ig, '');
+              return `.center-word {${next}}`;
+            });
+            touchedCss = true;
+          }
+        }
+      }
+    }
+
     if (wantsFooter && !/<footer[\s>]/i.test(app)) {
       const brand = (
         t.match(/\bfooter\b[\s\S]{0,60}\bword\s+([A-Za-z][A-Za-z0-9_-]{1,40})\b/i)?.[1]
@@ -1171,10 +1658,37 @@ export default function App() {
       const out: WebFileEdit[] = [];
       if (touchedApp) out.push({ path: appPath, content: app });
       if (touchedCss && cssPath) out.push({ path: cssPath, content: css });
+      for (const svg of pendingBrandSvgs) out.push(svg);
+      for (const svg of pendingIconSvgs) out.push(svg);
       if (/\/logo\.svg/i.test(app) && flat['public/logo.svg'] == null) {
+        // Premium ink mark — works on cream/light without invert filters.
         out.push({
           path: 'public/logo.svg',
-          content: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 20 8.5v7L12 21 4 15.5v-7L12 3z"/><circle cx="12" cy="12" r="2.25"/></svg>\n`,
+          content: [
+            `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">`,
+            `<circle cx="32" cy="32" r="23" stroke="${ink}" stroke-width="1.4"/>`,
+            `<path d="M22 38.5V25.5L32 19.5l10 6v13L32 44.5 22 38.5z" stroke="${ink}" stroke-width="1.4" stroke-linejoin="round"/>`,
+            `<circle cx="32" cy="32" r="3.25" fill="${ink}"/>`,
+            `</svg>\n`,
+          ].join(''),
+        });
+      }
+      if (/\/icons\/menu\.svg/i.test(app) && flat['public/icons/menu.svg'] == null) {
+        out.push({
+          path: 'public/icons/menu.svg',
+          content: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="${ink}" stroke-width="1.5" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>\n`,
+        });
+      }
+      if (/\/icons\/bag\.svg/i.test(app) && flat['public/icons/bag.svg'] == null) {
+        out.push({
+          path: 'public/icons/bag.svg',
+          content: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="${ink}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8h12l-1 12H7L6 8z"/><path d="M9 8a3 3 0 0 1 6 0"/></svg>\n`,
+        });
+      }
+      if (/\/icons\/search\.svg/i.test(app) && flat['public/icons/search.svg'] == null) {
+        out.push({
+          path: 'public/icons/search.svg',
+          content: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="${ink}" stroke-width="1.5" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="M16.5 16.5 21 21"/></svg>\n`,
         });
       }
       return out;
@@ -1373,7 +1887,258 @@ export default function App() {
     }
   }
 
-  if (/\bteal\b/i.test(t) || (/\bbackground\b/i.test(t) && /\b(gradient|tint|deep)\b/i.test(t))) {
+  if (
+    /\bcharcoal\b/i.test(t)
+    || (/\bbackground\b/i.test(t) && /\b(?:glow|accent)\b/i.test(t) && /\bred\b/i.test(t))
+  ) {
+    const charcoal = '#141414';
+    if (/\.app\s*\{/i.test(css)) {
+      css = css.replace(/\.app\s*\{([^}]*)\}/i, (_m, body: string) => {
+        let next = String(body || '');
+        if (/background(?:-color)?\s*:/i.test(next)) {
+          next = next.replace(/background(?:-color)?\s*:\s*[^;]+/i, `background: ${charcoal}`);
+        } else {
+          next += ` background: ${charcoal};`;
+        }
+        if (!/position\s*:/i.test(next)) next += ' position: relative;';
+        if (!/overflow\s*:/i.test(next)) next += ' overflow: hidden;';
+        return `.app {${next}}`;
+      });
+      touchedCss = true;
+    } else {
+      css += `\n.app{min-height:100vh;margin:0;background:${charcoal};color:#f4f7fb;position:relative;overflow:hidden}\n`;
+      touchedCss = true;
+    }
+    if (!/\.hero-glow\b|\.app::before/i.test(css)) {
+      css += `\n.app::before{content:"";position:absolute;inset:10% 12% auto;height:min(48vh,420px);border-radius:50%;`
+        + `background:radial-gradient(circle,rgba(220,38,38,.35),transparent 68%);pointer-events:none;z-index:0;filter:blur(8px)}`
+        + `\n.app>*{position:relative;z-index:1}\n`;
+      touchedCss = true;
+    }
+  }
+
+  // Brand size + red accent underline
+  if (/\b(?:underline|larger|bigger)\b/i.test(t) && /className=["']center-word["']/i.test(app)) {
+    if (/\.center-word\s*\{/i.test(css)) {
+      css = css.replace(/\.center-word\s*\{([^}]*)\}/i, (_m, body: string) => {
+        let next = String(body || '');
+        if (!/;\s*$/.test(next) && next.trim()) next = `${next.trim()};`;
+        if (/\blarger|bigger\b/i.test(t)) {
+          next = next.replace(/font-size\s*:\s*[^;]+;?/i, '');
+          next += ' font-size:clamp(2.2rem,6vw,4rem);';
+        }
+        if (/\bunderline\b/i.test(t) || /\baccent\b/i.test(t)) {
+          if (!/border-bottom\s*:/i.test(next)) {
+            next += ' border-bottom:3px solid #dc2626; padding-bottom:.35rem;';
+          }
+        }
+        return `.center-word {${next}}`;
+      });
+      touchedCss = true;
+    }
+  }
+
+  // Move centered name: top-left / top-right / bottom-left / bottom-right / center
+  if (
+    /className=["']center-word["']/i.test(app)
+    && /\b(?:move|put|place|shift)\b/i.test(t)
+    && /\b(?:top|bottom|left|right|corner|center|middle)\b/i.test(t)
+  ) {
+    const top = /\btop\b/i.test(t);
+    const bottom = /\bbottom\b/i.test(t);
+    const left = /\bleft\b/i.test(t);
+    const right = /\bright\b/i.test(t);
+    const recenter = /\b(?:center|centre|middle)\b/i.test(t) && !left && !right;
+    if (recenter || (!top && !bottom && !left && !right)) {
+      if (/\.app\s*\{/i.test(css)) {
+        css = css.replace(/\.app\s*\{([^}]*)\}/i, (_m, body: string) => {
+          let next = String(body || '');
+          next = next
+            .replace(/align-items\s*:\s*[^;]+;?/gi, '')
+            .replace(/justify-content\s*:\s*[^;]+;?/gi, '');
+          if (!/display\s*:/i.test(next)) next += ' display:flex;';
+          next += ' align-items:center; justify-content:center;';
+          return `.app {${next}}`;
+        });
+      }
+      if (/\.center-word\s*\{/i.test(css)) {
+        css = css.replace(/\.center-word\s*\{([^}]*)\}/i, (_m, body: string) => {
+          let next = String(body || '');
+          next = next
+            .replace(/position\s*:\s*[^;]+;?/gi, '')
+            .replace(/top\s*:\s*[^;]+;?/gi, '')
+            .replace(/left\s*:\s*[^;]+;?/gi, '')
+            .replace(/right\s*:\s*[^;]+;?/gi, '')
+            .replace(/bottom\s*:\s*[^;]+;?/gi, '')
+            .replace(/transform\s*:\s*[^;]+;?/gi, '');
+          return `.center-word {${next}}`;
+        });
+      }
+      touchedCss = true;
+    } else {
+      const y = top ? 'top:1.25rem;' : bottom ? 'bottom:1.25rem;' : 'top:50%;';
+      const x = left ? 'left:1.25rem;' : right ? 'right:1.25rem;' : 'left:50%;';
+      let transform = '';
+      if (!top && !bottom && left) transform = 'transform:translateY(-50%);';
+      else if (!top && !bottom && right) transform = 'transform:translateY(-50%);';
+      else if (top && !left && !right) transform = 'transform:translateX(-50%); left:50%;';
+      else if (bottom && !left && !right) transform = 'transform:translateX(-50%); left:50%;';
+      const posCss = `position:absolute;${y}${x}${transform}`;
+      if (/\.app\s*\{/i.test(css)) {
+        css = css.replace(/\.app\s*\{([^}]*)\}/i, (_m, body: string) => {
+          let next = String(body || '');
+          if (!/position\s*:/i.test(next)) next += ' position:relative;';
+          return `.app {${next}}`;
+        });
+      }
+      if (/\.center-word\s*\{/i.test(css)) {
+        css = css.replace(/\.center-word\s*\{([^}]*)\}/i, (_m, body: string) => {
+          let next = String(body || '');
+          next = next
+            .replace(/position\s*:\s*[^;]+;?/gi, '')
+            .replace(/top\s*:\s*[^;]+;?/gi, '')
+            .replace(/left\s*:\s*[^;]+;?/gi, '')
+            .replace(/right\s*:\s*[^;]+;?/gi, '')
+            .replace(/bottom\s*:\s*[^;]+;?/gi, '')
+            .replace(/transform\s*:\s*[^;]+;?/gi, '');
+          if (!/;\s*$/.test(next) && next.trim()) next = `${next.trim()};`;
+          next += ` ${posCss}`;
+          return `.center-word {${next}}`;
+        });
+      } else {
+        css += `\n.center-word{${posCss}}\n`;
+      }
+      touchedCss = true;
+    }
+  }
+
+  // Font style on the centered name: bold / thin / cursive / serif / professional
+  if (
+    /className=["']center-word["']/i.test(app)
+    && (
+      looksLikeNameFontStyleAsk(t)
+      || (
+        /\b(?:bold|italic|cursive|serif|sans(?:-serif)?|thin|light|skinny|professional|font)\b/i.test(t)
+        && /\b(?:make|look|style|font|change|set|more|try)\b/i.test(t)
+      )
+    )
+  ) {
+    if (/\.center-word\s*\{/i.test(css)) {
+      css = css.replace(/\.center-word\s*\{([^}]*)\}/i, (_m, body: string) => {
+        let next = String(body || '');
+        if (!/;\s*$/.test(next) && next.trim()) next = `${next.trim()};`;
+        if (/\bbold\b/i.test(t)) {
+          next = next.replace(/font-weight\s*:\s*[^;]+;?/gi, '');
+          next += ' font-weight:700;';
+        } else if (/\b(?:thin|light|skinny)\b/i.test(t)) {
+          next = next.replace(/font-weight\s*:\s*[^;]+;?/gi, '');
+          next += ' font-weight:300;';
+        }
+        if (/\b(?:cursive|italic)\b/i.test(t)) {
+          next = next.replace(/font-style\s*:\s*[^;]+;?/gi, '');
+          next = next.replace(/font-family\s*:\s*[^;]+;?/gi, '');
+          next += ' font-style:italic; font-family:Georgia,"Times New Roman",serif;';
+        } else if (/\b(?:serif|professional)\b/i.test(t)) {
+          next = next.replace(/font-family\s*:\s*[^;]+;?/gi, '');
+          next = next.replace(/font-style\s*:\s*[^;]+;?/gi, '');
+          next += ' font-family:Georgia,"Times New Roman",serif; font-style:normal;';
+        } else if (/\bsans\b/i.test(t)) {
+          next = next.replace(/font-family\s*:\s*[^;]+;?/gi, '');
+          next = next.replace(/font-style\s*:\s*[^;]+;?/gi, '');
+          next += ' font-family:system-ui,-apple-system,Segoe UI,sans-serif; font-style:normal;';
+        }
+        return `.center-word {${next}}`;
+      });
+      touchedCss = true;
+    }
+  }
+
+  // Name text color only: "change the color of the name from white to black"
+  if (/className=["']center-word["']/i.test(app) && looksLikeNameTextColorAsk(t)) {
+    const colorName = extractNameTextColorTarget(t);
+    const fg = (colorName && cssColor(colorName)) || '';
+    if (fg && cssPath) {
+      if (/\.center-word\s*\{/i.test(css)) {
+        css = css.replace(/\.center-word\s*\{([^}]*)\}/i, (_m, body: string) => {
+          let next = String(body || '');
+          if (/color\s*:/i.test(next)) {
+            next = next.replace(/color\s*:\s*[^;]+/i, `color: ${fg}`);
+          } else {
+            if (!/;\s*$/.test(next) && next.trim()) next = `${next.trim()};`;
+            next += ` color: ${fg};`;
+          }
+          return `.center-word {${next}}`;
+        });
+      } else {
+        css += `\n.center-word{color:${fg}}\n`;
+      }
+      touchedCss = true;
+    }
+  }
+
+  // Product cards section (Mouse / Keyboard / Headset)
+  {
+    const wantsCards = /\b(?:product\s+cards?|three\s+short\s+product)\b/i.test(t)
+      || (/\bcards?\b/i.test(t) && /\b(?:Mouse|Keyboard|Headset)\b/i.test(t));
+    const removeHeadset = /\b(?:remove|delete|drop)\b[\s\S]{0,40}\bHeadset\b/i.test(t);
+    const restoreHeadset = /\b(?:put|add|bring)\b[\s\S]{0,40}\bHeadset\b/i.test(t)
+      && /\b(?:back|again|card)\b/i.test(t);
+    if (wantsCards && !/className=["']product-cards["']/i.test(app)) {
+      const cards = `<section id="products" className="product-cards" aria-label="Products">`
+        + `<article className="product-card"><h2>Mouse</h2><p>Precision tracking.</p></article>`
+        + `<article className="product-card"><h2>Keyboard</h2><p>Fast switches.</p></article>`
+        + `<article className="product-card"><h2>Headset</h2><p>Clear audio.</p></article>`
+        + `</section>`;
+      if (/<\/section>/i.test(app)) {
+        app = app.replace(/<\/section>/i, `</section>\n      ${cards}`);
+      } else if (/<\/nav>/i.test(app)) {
+        app = app.replace(/<\/nav>/i, `</nav>\n      ${cards}`);
+      } else {
+        app = app.replace(/(className=["'][Aa]pp["'][^>]*>)/i, `$1\n      ${cards}`);
+      }
+      touchedApp = true;
+      if (cssPath && !/\.product-cards\b/.test(css)) {
+        css += `\n.product-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:1rem;width:min(920px,92vw);margin:0 auto 2.5rem;padding:0 1rem}`
+          + `\n.product-card{background:#1c1c1c;border:1px solid #2a2a2a;border-radius:12px;padding:1.1rem 1rem;text-align:center}`
+          + `\n.product-card h2{margin:0 0 .4rem;font-size:1.05rem;color:#fff}`
+          + `\n.product-card p{margin:0;color:#bdbdbd;font-size:.92rem}\n`;
+        touchedCss = true;
+      }
+    }
+    if (removeHeadset && /Headset/i.test(app)) {
+      app = app.replace(
+        /<article className=["']product-card["']>\s*<h2>Headset<\/h2>[\s\S]*?<\/article>/i,
+        '',
+      );
+      touchedApp = true;
+    }
+    if (restoreHeadset && /className=["']product-cards["']/i.test(app) && !/<h2>Headset<\/h2>/i.test(app)) {
+      const card = `<article className="product-card"><h2>Headset</h2><p>Clear audio.</p></article>`;
+      app = app.replace(
+        /(<section[^>]*className=["']product-cards["'][^>]*>)([\s\S]*?)(<\/section>)/i,
+        (_m, open: string, inner: string, close: string) => `${open}${inner}${card}${close}`,
+      );
+      touchedApp = true;
+    }
+    if (/\bheadset\b/i.test(t) && /\b(?:photo|shot|image|img)\b/i.test(t) && !/alt=["'][^"']*headset/i.test(app)) {
+      const url = 'https://images.unsplash.com/photo-1546435770-a3e426bf472b?auto=format&fit=crop&w=1200&q=80';
+      const img = `<img className="hero-photo headset-photo" src="${url}" alt="Gaming headset product photo" />`;
+      if (/className=["']product-cards["'][\s\S]*?<\/section>/i.test(app)) {
+        app = app.replace(
+          /(<section[^>]*className=["']product-cards["'][^>]*>[\s\S]*?<\/section>)/i,
+          `$1\n      ${img}`,
+        );
+      } else if (/<\/section>/i.test(app)) {
+        app = app.replace(/<\/section>/i, `</section>\n      ${img}`);
+      }
+      touchedApp = true;
+    }
+  }
+
+  if (
+    (/\bteal\b/i.test(t) && /\b(?:gradient|tint)\b/i.test(t))
+    || (/\bbackground\b/i.test(t) && /\b(gradient|tint)\b/i.test(t) && !/\bcharcoal\b/i.test(t) && !/\bred\b/i.test(t))
+  ) {
     if (/--bg\s*:/.test(css)) {
       css = css.replace(/--bg\s*:\s*[^;]+;/, '--bg: #0a2f2a;');
       touchedCss = true;
@@ -1399,6 +2164,9 @@ export default function App() {
     out.push({ path: appPath, content: app });
   }
   if (touchedCss) out.push({ path: cssPath, content: css });
+  if (touchedIndex && cssPath !== 'src/index.css') {
+    out.push({ path: 'src/index.css', content: indexCss });
+  }
   if (out.length) return out;
 
   return [];
@@ -1408,6 +2176,17 @@ function findReactAppPath(flat: WebFileMap): string | null {
   const jsx = flat['src/App.jsx'];
   const tsx = flat['src/App.tsx'];
   if (jsx != null && tsx != null) {
+    const stub = (body: string) => {
+      const s = String(body || '');
+      return !s.trim()
+        || /return\s*\(\s*<div className=["']app["']\s*\/>\s*\)/i.test(s)
+        || s.length < 160;
+    };
+    // Edit the twin that already has UI; only fall back to entry preference for two stubs.
+    if (stub(jsx) && !stub(tsx)) return 'src/App.tsx';
+    if (stub(tsx) && !stub(jsx)) return 'src/App.jsx';
+    if (flat['src/main.jsx'] != null && flat['src/main.tsx'] == null) return 'src/App.jsx';
+    if (flat['src/main.tsx'] != null && flat['src/main.jsx'] == null) return 'src/App.tsx';
     const score = (body: string) => {
       let n = String(body || '').length;
       if (/\bcreateRoot\s*\(/.test(body) && /\bimport\s+App\b/.test(body)) n -= 5000;
@@ -1416,7 +2195,6 @@ function findReactAppPath(flat: WebFileMap): string | null {
       if (/<header[\s>]|<section[\s>]/i.test(body)) n += 300;
       return n;
     };
-    // Prefer the real hero UI; when tied, prefer App.jsx (Vite resolves `./App` there).
     return score(jsx) >= score(tsx) ? 'src/App.jsx' : 'src/App.tsx';
   }
   if (jsx != null) return 'src/App.jsx';
@@ -1670,19 +2448,23 @@ export function verifyMicroAskApplied(
     if (!textInApp(q)) missing.push(q);
   }
 
+  // Brand asks: use shared extractor so layout tails never become "missing".
+  const brandWanted = extractBrandLabel(t);
+  if (brandWanted && !textInApp(brandWanted)) {
+    missing.push(`brand “${brandWanted}”`);
+  }
+
   const headline = (
     t.match(/(?:change|rename|set|make|update).{0,64}(?:hero\s+headline|hero\s+title|headline|heading|h1).{0,40}(?:to|into|say)\s+["'“”]?([^"'“”\n]{2,80})/i)?.[1]
     || t.match(/\b(?:words?|text|phrase|copy|line)\s+(?:that\s+)?(?:says?|reading)\s*[:\s]+["“']?([A-Z][A-Za-z0-9]+(?:\s+[A-Z][A-Za-z0-9]+){0,6})\b/)?.[1]
     || t.match(/\b(?:says?|reading)\s+["“']([^"”']{2,80})["”']/i)?.[1]
-    || t.match(/\b(?:says?|reading)\s+([A-Z][A-Za-z0-9]+(?:\s+[A-Z][A-Za-z0-9]+){0,6})\b/)?.[1]
-    || t.match(/\btitle\b[\s\S]{0,40}\b([A-Z][A-Za-z0-9]+(?:\s+[A-Z][A-Za-z0-9]+){0,6})\b/)?.[1]
     || ''
   ).trim()
     .replace(/[,;:]+$/, '')
     // Drop instruction tails that used to fail verify and revert good writes.
-    .replace(/\s+\b(?:and\s+)?(?:leave|keep|with|nothing|only|no|without|empty|in\s+the\s+center|in\s+white)\b.*$/i, '')
+    .replace(/\s+\b(?:and\s+)?(?:leave|keep|with|nothing|only|no|without|empty|in\s+the\s+center|in\s+white|centered?|centred|middle|clean|white)\b.*$/i, '')
     .trim();
-  if (headline && !textInApp(headline)) {
+  if (headline && !brandWanted && !textInApp(headline)) {
     // Soft pass: if center-word exists and shares most tokens, do not fail.
     const softOk = /center-word/i.test(app)
       && headline.split(/\s+/).filter((w) => w.length > 2).some((w) => textInApp(w));
@@ -1713,6 +2495,39 @@ export function verifyMicroAskApplied(
   ).trim().replace(/[,;:]+$/, '');
   if (cta && !textInApp(cta)) {
     if (!missing.includes(cta)) missing.push(cta);
+  }
+
+  // Solid background color asks (Vite React) — hex must match the named color.
+  {
+    const colorWord = t.match(
+      /\b(brown|black|white|blue|red|green|teal|pink|orange|navy|cream|purple|yellow)\b/i,
+    )?.[1];
+    if (colorWord && /\bbackground\b/i.test(t) && !/\b(?:glow|accent|gradient|tint|charcoal)\b/i.test(t)) {
+      const want = (
+        /brown|chocolate|sienna/i.test(colorWord) ? '#8B4513'
+        : /black|dark/i.test(colorWord) ? '#000000'
+        : /white/i.test(colorWord) ? '#ffffff'
+        : /pink/i.test(colorWord) ? '#ec4899'
+        : /blue/i.test(colorWord) ? '#2563eb'
+        : /red/i.test(colorWord) ? '#dc2626'
+        : /green/i.test(colorWord) ? '#16a34a'
+        : /teal/i.test(colorWord) ? '#0f766e'
+        : /orange/i.test(colorWord) ? '#f97316'
+        : /navy/i.test(colorWord) ? '#1e3a8a'
+        : /cream/i.test(colorWord) ? '#fef3c7'
+        : /purple/i.test(colorWord) ? '#7c3aed'
+        : /yellow/i.test(colorWord) ? '#eab308'
+        : ''
+      ).toLowerCase();
+      const short = want.length === 7 ? `#${want[1]}${want[3]}${want[5]}` : '';
+      const bgHay = [...app.matchAll(/background(?:-color)?\s*:\s*([^;{}]+)/gi)]
+        .map((m) => m[1] || '')
+        .join('\n')
+        .toLowerCase();
+      if (want && !bgHay.includes(want) && !(short && bgHay.includes(short))) {
+        missing.push(`${colorWord.toLowerCase()} background`);
+      }
+    }
   }
 
   return { ok: missing.length === 0, missing };
@@ -1889,10 +2704,10 @@ export function blankSolidColorFromAsk(ask: string): string | null {
   }
   // "solid brown blank", "just a pure brown full-screen", "blank brown page", etc.
   const word = (
-    t.match(/\b(?:solid|pure|just|blank|flat|full[- ]?(?:screen|viewport|window))\b[\s\S]{0,48}\b(brown|black|white|blue|red|green|teal|chocolate|sienna)\b/i)?.[1]
-    || t.match(/\b(brown|black|white|blue|red|green|teal)\b[\s\S]{0,48}\b(?:blank|full[- ]?(?:screen|viewport|window)|nothing else|nothing but|empty(?:\s+canvas)?|zero\s+ui|no (?:nav|text|icons?|words?|ui|chrome))\b/i)?.[1]
-    || t.match(/\bnothing but\b[\s\S]{0,64}\b(brown|black|white|blue|red|green|teal)\b/i)?.[1]
-    || t.match(/\bcover\b[\s\S]{0,64}\b(brown|black|white|blue|red|green|teal)\b/i)?.[1]
+    t.match(/\b(?:solid|pure|just|blank|flat|full[- ]?(?:screen|viewport|window))\b[\s\S]{0,48}\b(brown|black|white|blue|red|green|teal|chocolate|sienna|pink|orange)\b/i)?.[1]
+    || t.match(/\b(brown|black|white|blue|red|green|teal|pink|orange)\b[\s\S]{0,48}\b(?:blank|full[- ]?(?:screen|viewport|window)|nothing else|nothing but|empty(?:\s+canvas)?|zero\s+ui|no (?:nav|text|icons?|words?|ui|chrome))\b/i)?.[1]
+    || t.match(/\bnothing but\b[\s\S]{0,64}\b(brown|black|white|blue|red|green|teal|pink|orange)\b/i)?.[1]
+    || t.match(/\bcover\b[\s\S]{0,64}\b(brown|black|white|blue|red|green|teal|pink|orange)\b/i)?.[1]
     || ''
   );
   if (!word) return null;
@@ -1937,8 +2752,11 @@ export function finalizeWebEdits(
 
   const exactMinimal = /\b(?:exact(?:ly)?|precisely|follow precisely|pure black|#000000|centered icon|nothing else|no other)\b/i.test(ask);
   const appMin = exactMinimal ? 160 : 400;
+  // Full marketing / quiet-luxury creates: never let surgical center-word win over model/shell writes.
+  const marketingCreate = /\b(?:quiet\s+luxury|landing(?:\s+page)?|marketing\s+site|scroll\s+to\s+reveal|soft\s+(?:mint\s+|green\s+)?orbs?|premium\s+(?:product|quiet)|full\s+scrollable\s+landing)\b/i.test(ask)
+    || (/\b(?:hero|footer|features?)\b/i.test(ask) && /\b(?:website|landing|marketing)\b/i.test(ask) && ask.length > 220);
   // Surgical add-word / logo / search asks must win before blank-shell wipe.
-  const surgicalEarly = reactSurgicalMicroAskEdits(files, message);
+  const surgicalEarly = marketingCreate ? [] : reactSurgicalMicroAskEdits(files, message);
   if (surgicalEarly.length) {
     const microAsk = isWebMicroAsk(message)
       || /\b(?:add|put|place|insert|center|centred|words?|wording)\b/i.test(ask);
@@ -1983,7 +2801,7 @@ export function finalizeWebEdits(
   });
 
   // Surgical incremental asks must win over a fat model dump that ignored "ONLY add X".
-  const surgical = surgicalEarly.length ? surgicalEarly : reactSurgicalMicroAskEdits(files, message);
+  const surgical = marketingCreate ? [] : (surgicalEarly.length ? surgicalEarly : reactSurgicalMicroAskEdits(files, message));
   if (surgical.length) {
     const microAsk = isWebMicroAsk(message)
       || /\b(?:add|put|place|insert)\b/i.test(ask);

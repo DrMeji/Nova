@@ -314,6 +314,10 @@ async function persistProviderKeys(map: ProviderKeyMap) {
     }
     return;
   }
+  // Desktop shell without vault = refuse (never write keys into localStorage).
+  if (window.arkDesktop) {
+    throw new Error('Secure key vault unavailable — API keys cannot be saved unsafely.');
+  }
   writeLegacyLocalKeys(map);
   try {
     localStorage.removeItem(API_KEYS_KEY_LEGACY_NOVA);

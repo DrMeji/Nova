@@ -8,6 +8,9 @@
 import { looksLikeBuildStart } from '@/lib/chatStudio';
 import {
   wantsPlanningOnly,
+  looksLikeRequirementsAsk,
+  looksLikeTalkBeforeCreateAsk,
+  looksLikeGreenfieldCreateGo,
 } from '@/lib/chatIdeaIntent';
 import {
   parseNewProjectIntent,
@@ -25,6 +28,7 @@ import { blankSolidColorFromAsk, isWebMicroAsk } from '@/lib/webProjectCanon';
 import { winningChatRoute } from '@/lib/chatMessageRouter';
 import { looksLikeFolderPathAsk } from '@/lib/folderPathAsk';
 import { classifyDiskIntent } from '@/lib/chatDiskIntent';
+import { looksLikeConversationalEditShorthand } from '@/lib/editAskResolve';
 
 export type TurnKind =
   | 'chat'
@@ -47,7 +51,18 @@ function brandNewProductAsk(t: string): boolean {
   return /\bbrand[- ]?new\b/i.test(t)
     || /\b(?:create|make|build|scaffold|spin\s+up)\s+(?:a\s+)?(?:brand[- ]?new\s+)?new\s+(?:website|site|project|app)\b/i.test(t)
     || (/\bfrom\s+scratch\b/i.test(t) && /\b(?:create|build|make|rebuild|scrap)\b/i.test(t))
-    || (/\bcreate\s+(?:a\s+)?new\s+project\b/i.test(t) && /\b(?:called|named)\b/i.test(t));
+    || (/\bcreate\s+(?:a\s+)?new\s+project\b/i.test(t) && /\b(?:called|named)\b/i.test(t))
+    // New named product while a folder is bound — create a fresh project, don't edit the splash.
+    || (
+      /\b(?:called|named)\b/i.test(t)
+      && /\b(?:build|create|make|scaffold)\b/i.test(t)
+      && /\b(?:app|website|site|project|chat)\b/i.test(t)
+    )
+    || (
+      /\b(?:discord|slack)(?:-|\s+)?like\b/i.test(t)
+      && /\b(?:build|create|make)\b/i.test(t)
+      && !/\b(?:add|fix|change|update)\s+(?:the\s+)?(?:existing|current)\b/i.test(t)
+    );
 }
 
 export function classifyTurn(
@@ -79,6 +94,11 @@ export function classifyTurn(
     return { kind: explicit, reason: 'explicit-ark-kind' };
   }
 
+  // 1a. Requirements / exploratory "I want to build…" — plain chat, never scaffold.
+  if (looksLikeRequirementsAsk(t) || looksLikeTalkBeforeCreateAsk(t)) {
+    return { kind: 'chat', reason: looksLikeRequirementsAsk(t) ? 'requirements-advice' : 'talk-before-create' };
+  }
+
   // 1. Explicit plan-only
   if (wantsPlanningOnly(t) || /\b(?:plan\s+only|planning\s+only|don'?t\s+build\s+yet|questions?\s+only|just\s+plan)\b/i.test(t)) {
     return { kind: 'plan', reason: 'explicit-plan-only' };
@@ -90,6 +110,16 @@ export function classifyTurn(
     projectId: opts?.projectId || null,
     chatId: opts?.chatId || null,
   });
+
+  // 1b. "Start building…" / "ok create it" after requirements — create (pending brief),
+  // not chat. Bound folders stay edit/keep_building below unless brand-new.
+  if (looksLikeGreenfieldCreateGo(t) && (!workspace || brandNewProductAsk(t))) {
+    return {
+      kind: 'create',
+      reason: 'greenfield-create-go',
+      createName: extractProjectName(t) || fallbackCreateProjectName(t) || 'App',
+    };
+  }
 
   // Disk delete / add
   const disk = classifyDiskIntent(t);
@@ -109,6 +139,9 @@ export function classifyTurn(
     }
     if (isWebMicroAsk(t) || looksLikeCodeEditAsk(t) || blankSolidColorFromAsk(t)) {
       return { kind: 'edit', reason: 'micro-or-code-edit-bound' };
+    }
+    if (looksLikeConversationalEditShorthand(t)) {
+      return { kind: 'edit', reason: 'conversational-shorthand-bound' };
     }
     if (isCreateVerbNoun(t) || parseNewProjectIntent(t) || looksLikeBuildStart(t)) {
       // Same chat create wording without brand-new → polish/edit the bound folder

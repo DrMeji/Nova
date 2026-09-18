@@ -42,47 +42,59 @@ const BRAIN_PORT = arkConfig.BRAIN_PORT_BASE;
 let brainPort = BRAIN_PORT;
 
 /**
- * Keep a stable AppData folder across the ARK → NOVA rename.
- * electron-builder productName "NOVA" would otherwise create %APPDATA%\NOVA and
- * look like a fresh install (logout + setup + model re-download).
- * Installer hooks still manage %APPDATA%\ARK.
+ * Pin AppData under NOVA / NOVA-Dev. One-time migrate from legacy ARK / ARK-Dev
+ * so models + auth survive the rename without a fresh-install feel.
  */
 (function pinStableUserData() {
   const fs = require('fs');
   const appData = app.getPath('appData');
+
+  function migrateFolder(from, to) {
+    if (!fs.existsSync(from)) return;
+    if (!fs.existsSync(to)) {
+      try {
+        fs.renameSync(from, to);
+        return;
+      } catch {
+        /* fall through to copy */
+      }
+    }
+    try {
+      fs.mkdirSync(to, { recursive: true });
+      for (const name of fs.readdirSync(from)) {
+        const src = path.join(from, name);
+        const dest = path.join(to, name);
+        if (!fs.existsSync(dest)) {
+          fs.cpSync(src, dest, { recursive: true, force: false });
+        }
+      }
+    } catch {
+      /* best-effort */
+    }
+  }
+
   if (!app.isPackaged) {
-    app.setPath('userData', path.join(appData, 'ARK-Dev'));
+    const novaDev = path.join(appData, 'NOVA-Dev');
+    const arkDev = path.join(appData, 'ARK-Dev');
+    migrateFolder(arkDev, novaDev);
+    app.setPath('userData', fs.existsSync(novaDev) ? novaDev : arkDev);
     return;
   }
-  const legacyArk = path.join(appData, 'ARK');
   const novaFolder = path.join(appData, 'NOVA');
+  const legacyArk = path.join(appData, 'ARK');
   try {
-    // Prefer the long-lived ARK profile (models, auth, setup).
+    migrateFolder(legacyArk, novaFolder);
+    if (fs.existsSync(novaFolder)) {
+      app.setPath('userData', novaFolder);
+      return;
+    }
     if (fs.existsSync(legacyArk)) {
       app.setPath('userData', legacyArk);
       return;
     }
-    // One-time: if an empty/new NOVA profile was created first, still use ARK going forward
-    // so installer.nsh and future upgrades stay aligned. Copy NOVA → ARK when NOVA has data.
-    if (fs.existsSync(novaFolder)) {
-      try {
-        fs.mkdirSync(legacyArk, { recursive: true });
-        for (const name of fs.readdirSync(novaFolder)) {
-          const from = path.join(novaFolder, name);
-          const to = path.join(legacyArk, name);
-          if (!fs.existsSync(to)) {
-            fs.cpSync(from, to, { recursive: true, force: false });
-          }
-        }
-      } catch {
-        /* best-effort migrate */
-      }
-      app.setPath('userData', legacyArk);
-      return;
-    }
-    app.setPath('userData', legacyArk);
+    app.setPath('userData', novaFolder);
   } catch {
-    app.setPath('userData', legacyArk);
+    app.setPath('userData', novaFolder);
   }
 })();
 
@@ -791,7 +803,7 @@ ipcMain.handle('NOVA:app-meta', async () => ({
   isPackaged: app.isPackaged,
   isDevBuild: !app.isPackaged,
   isDev: Boolean(isDev),
-  userDataProfile: app.isPackaged ? 'ARK' : 'ARK-Dev',
+  userDataProfile: app.isPackaged ? 'NOVA' : 'NOVA-Dev',
   version: app.getVersion(),
   name: app.getName(),
   updateFeed: arkUpdater.UPDATE_REPO,
@@ -1876,6 +1888,7 @@ if (isUpdaterMode) {
     app.on('before-quit', () => {
       quitting = true;
       try { require('./arkMcpHost.cjs').stopAll(); } catch { /* ignore */ }
+      try { require('./arkAgentExec.cjs').stopAllPreviews(); } catch { /* ignore */ }
       try { arkEngine.stop(); } catch { /* ignore */ }
       try { arkGguf.stopServer(); } catch { /* ignore */ }
       try { arkGguf.cancelGguf?.(); } catch { /* ignore */ }

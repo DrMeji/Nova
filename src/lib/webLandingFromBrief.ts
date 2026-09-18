@@ -19,13 +19,14 @@ export function wantsChatAppScaffold(text: string): boolean {
   const t = String(text || '').toLowerCase();
   const chatNoun = /\b(chat\s+app|messaging\s+app|desktop[- ]style\s+chat|team\s+messaging|discord)\b/.test(t)
     || (/\b(channel|direct\s+messages?|\bdms?\b|voice\s+channel|screen\s+share|mute|deafen)\b/.test(t)
-      && /\b(ui|app|react|sidebar|rail|layout|server)\b/.test(t));
+      && /\b(ui|app|react|sidebar|rail|layout|server)\b/.test(t))
+    || (/\bservers?\b/.test(t) && /\bchannels?\b/.test(t) && /\b(chat|message|pane|rail|sidebar)\b/.test(t));
   const railChat = /\bleft\s+rail\b/.test(t) && /\b(channel|dm|voice|message|thread|server|discord|chat)\b/.test(t);
   return (
     chatNoun
     || railChat
     || /\b(threads?\s+panel|command\s+palette|no\s+static\s+html)\b/.test(t)
-    || (/\b(server\s+sidebar|member\s+list|friends?\s+list|emoji\s+picker)\b/.test(t))
+    || (/\b(server\s+sidebar|member\s+list|friends?\s+list|emoji\s+picker|chat\s+pane)\b/.test(t))
   );
 }
 

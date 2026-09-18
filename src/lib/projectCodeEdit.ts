@@ -12,6 +12,7 @@ import {
   webMicroAskEdits,
 } from '@/lib/webProjectCanon';
 import { applyAgentPatches, parseAgentPatches } from '@/lib/arkAgentPatch';
+import { extractBrandLabel, looksLikeNameTextColorAsk } from '@/lib/brandLabel';
 
 export type ProjectFileMap = Record<string, string>;
 
@@ -1265,24 +1266,91 @@ export function formatCodeChatReply(
     const hello = /\bhello\s*world\b/i.test(ask) && /\b(build|create|make)\b/i.test(ask);
     const pizza = /\bpizza\b/i.test(ask);
     const structural = /\bONLY\s+add\b|\bserver\s+rail\b|\bchannel\s+(?:list|column)\b|\bchat\s+(?:pane|header|composer)\b|\bmember\s+list\b|\buser\s+bar\b/i.test(ask);
-    const bg = /\bbackground\b/i.test(ask) && !structural;
+    // Sticky nav before generic "background" (asks often say "keep the black background").
+    if (/\bsticky\b/i.test(ask) && /\bnav\b/i.test(ask)) {
+      const labels = [...ask.matchAll(/\b(Products|Specs|Buy|Shop|About|Contact)\b/g)].map((m) => m[1]);
+      const uniq = [...new Set(labels)];
+      if (uniq.length) {
+        return `Done. I added a dark sticky nav with ${uniq.join(', ')}. ${doneFooter}`;
+      }
+      return `Done. I added a sticky nav. ${doneFooter}`;
+    }
+    const bg = /\bbackground\b/i.test(ask) && !structural && !/\bnav\b/i.test(ask);
     const search = /\bsearch\b/i.test(ask) && !structural;
     const rgb = /\b(rgb|multi[- ]?colou?r|gradient)\b/i.test(ask);
     const toggle = /\b(toggle|theme)\b/i.test(ask) && /\b(remove|delete)\b/i.test(ask);
     if (usable) return `${clean}\n\n${doneFooter}`;
     if (hello) return `Done. Hello World is ready. ${doneFooter}`;
     if (pizza) return `Done. updated the page text. ${doneFooter}`;
-    if (bg) return `Done. background and colors are updated. ${doneFooter}`;
+    if (/\bcharcoal\b/i.test(ask) || (/\bglow\b/i.test(ask) && /\b(?:red|accent)\b/i.test(ask))) {
+      return `Done. charcoal background with a soft red accent glow is in. ${doneFooter}`;
+    }
+    if (/\bunderline\b/i.test(ask) && /\b(?:brand|title|name|larger|bigger)\b/i.test(ask)) {
+      return `Done. brand title is larger with a red accent underline. ${doneFooter}`;
+    }
+    if (/\b(?:cinematic|movie[- ]?like|film\s+still|atmospheric)\b/i.test(ask)
+      || (/\bpremium\b/i.test(ask) && /\bbackground\b/i.test(ask) && /\b(?:image|imagery|photo|orb)\b/i.test(ask))) {
+      return `Done. cinematic background is in. ${doneFooter}`;
+    }
+    if (looksLikeNameTextColorAsk(ask)) {
+      return `Done. updated the name color. ${doneFooter}`;
+    }
+    if (/\b(?:menu|search|bag|cart)\s+icons?\b/i.test(ask) && /\b(?:add|put|place)\b/i.test(ask) && !structural) {
+      return `Done. added the icon. ${doneFooter}`;
+    }
+    if (/\blogo\b/i.test(ask) && /\b(?:add|put|place|insert)\b/i.test(ask) && !structural) {
+      return `Done. added the logo. ${doneFooter}`;
+    }
+    if (/\bicons?\b/i.test(ask) && /\b(?:add|put|place|premium|professional)\b/i.test(ask) && !structural) {
+      return `Done. added the icons. ${doneFooter}`;
+    }
+    // "keep the cream background" is a constraint — not a background-change ask.
+    if (bg && !/\b(?:keep|leave|don't\s+change|do\s+not\s+change)\b[\s\S]{0,32}\bbackground\b/i.test(ask)
+      && !/\b(?:logo|icon)\b/i.test(ask)) {
+      return `Done. background and colors are updated. ${doneFooter}`;
+    }
     if (search) return `Done. search is in the top-right. ${doneFooter}`;
     if (rgb) return `Done. multi-color title is applied. ${doneFooter}`;
     if (toggle) return `Done. removed the theme toggle. ${doneFooter}`;
     if (/\b(logo|icon)\b/i.test(ask) && /\b(center|middle|screen)\b/i.test(ask) && !structural) {
       return `Done. added the logo centered on screen. ${doneFooter}`;
     }
+    // Ask-specific Done lines (brand / image / tagline)
+    {
+      const brand = extractBrandLabel(ask);
+      if (brand && /\b(?:brand|center|middle|title)\b/i.test(ask) && !/\bfrom\s+\w+\s+to\b/i.test(ask)) {
+        return `Done. I centered **${brand}** in white on the page. ${doneFooter}`;
+      }
+    }
+    {
+      const photo = /\b(?:mouse|keyboard|headset)\b/i.test(ask) && /\b(?:photo|shot|image|img)\b/i.test(ask);
+      const tagline = /\btagline\b/i.test(ask)
+        || (/\bprecision\b/i.test(ask) && /\bspeed\b/i.test(ask) && /\b(?:add|short)\b/i.test(ask));
+      if (/\bproduct\s+cards?\b/i.test(ask) || (/\bcards?\b/i.test(ask) && /\bMouse\b/i.test(ask))) {
+        if (/\b(?:remove|delete|drop)\b[\s\S]{0,40}\bHeadset\b/i.test(ask)) {
+          return `Done. removed the Headset card. ${doneFooter}`;
+        }
+        return `Done. product cards are on the page. ${doneFooter}`;
+      }
+      if (photo && tagline) {
+        const what = /\bmouse\b/i.test(ask) ? 'gaming mouse' : (/\bheadset\b/i.test(ask) ? 'headset' : 'keyboard');
+        return `Done. I added a ${what} product photo and a short tagline about precision and speed. ${doneFooter}`;
+      }
+      if (photo) {
+        const what = /\bmouse\b/i.test(ask) ? 'gaming mouse' : (/\bheadset\b/i.test(ask) ? 'headset' : 'keyboard');
+        return `Done. I added a ${what} product photo in the hero. ${doneFooter}`;
+      }
+      if (tagline) {
+        return `Done. I added a short tagline about precision and speed. ${doneFooter}`;
+      }
+    }
     if (/\b(icon|profile|account|center|logo|button)\b/i.test(ask) && !structural) {
       return `Done. updated the layout. ${doneFooter}`;
     }
-    return `Done. I updated the project. ${doneFooter}`;
+    const fileHint = changedPaths.length === 1
+      ? `Updated \`${changedPaths[0].replace(/^src\//, '')}\`.`
+      : `Updated ${changedPaths.length} files.`;
+    return `Done. ${fileHint} ${doneFooter}`;
   }
 
   if (changedPaths.length && !previewOk) {
@@ -1373,6 +1441,11 @@ export function sanitizeAppliedWebContent(path: string, content: string): string
   if (/\.(?:jsx?|tsx?|css)$/i.test(path) && isPathologicalCodeSource(body)) {
     console.warn('[NOVA] dropping pathological write', path, body.length);
     return '';
+  }
+  // Heal CSS rules that leaked after a closed JSX/TSX module (Vite "Unexpected token").
+  if (/\.(?:jsx|tsx)$/i.test(path) && /export\s+default[\s\S]*\}\s*\n\s*\.[a-zA-Z]/i.test(body)) {
+    body = body.replace(/\n\s*\.[a-zA-Z_-][\w-]*\s*\{[\s\S]*$/m, '').trimEnd();
+    if (!/\n$/.test(body)) body += '\n';
   }
   if (/\.json$/i.test(path) || /(^|\/)package\.json$/i.test(path)) {
     return sanitizeJsonFileContent(path, body);

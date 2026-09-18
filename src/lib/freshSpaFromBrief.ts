@@ -118,8 +118,13 @@ export function looksLikeTruncatedUiSource(source: string | undefined | null): b
   // Ends mid-expression / mid-string / mid-JSX prop
   if (/[=({[,:]\s*$/.test(s)) return true;
   if (/["'`]\s*$/.test(s) && (s.match(/["'`]/g) || []).length % 2 === 1) return true;
-  // Component file that never closes its outermost function/module brace
-  if (/export\s+default/i.test(s) && !/\}\s*;?\s*$/.test(s)) return true;
+  // Component file that never closes — allow `export default App;` (const/arrow style)
+  if (/export\s+default/i.test(s)) {
+    const endsClean = /\}\s*;?\s*$/.test(s)
+      || /export\s+default\s+[A-Za-z_$][\w$]*\s*;?\s*$/.test(s)
+      || /export\s+\{\s*default\s*\}\s*;?\s*$/.test(s);
+    if (!endsClean) return true;
+  }
   // Far more open JSX tags than closes (truncated return tree)
   const openTags = (s.match(/<[A-Za-z][\w.-]*\b[^>]*(?<!\/)\s*>/g) || []).length;
   const closeTags = (s.match(/<\/[A-Za-z][\w.-]*>/g) || []).length;

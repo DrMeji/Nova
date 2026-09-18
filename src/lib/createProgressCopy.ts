@@ -1,6 +1,7 @@
 /**
  * Professional live status copy while create / edit work runs.
  * Keeps the chat bubble moving so long GGUF / cloud waits never look frozen.
+ * Prefer file-specific lines ("Building src/App.tsx…") over vague phases.
  */
 
 export type CreateProgressPhase =
@@ -16,7 +17,8 @@ export type CreateProgressPhase =
   | 'install'
   | 'preview'
   | 'verify'
-  | 'edit';
+  | 'edit'
+  | 'file';
 
 const PHASE_LINES: Record<CreateProgressPhase, string[]> = {
   brief: [
@@ -29,32 +31,36 @@ const PHASE_LINES: Record<CreateProgressPhase, string[]> = {
     'Setting up the workspace on disk…',
   ],
   scaffold: [
-    'Writing the Vite shell…',
-    'Dropping package.json and entry files…',
+    'Writing project files one by one…',
+    'Scaffolding the Vite project…',
   ],
   equip: [
     'Equipping design skills…',
     'Loading brand and layout guidance…',
   ],
   assets: [
-    'Importing logos and icons into public/…',
-    'Fetching hero photos…',
-    'Wiring local asset paths…',
+    'Generating product photography…',
+    'Saving hero and story images to public/…',
+    'Wiring local image paths into the page…',
   ],
   layout: [
-    'Building the React layout in App.jsx…',
+    'Coding the React layout in App…',
     'Placing nav, hero, and sections…',
-    'Writing structural JSX…',
+    'Coding page structure…',
   ],
   styles: [
-    'Designing App.css…',
+    'Coding App.css…',
     'Tuning typography and color…',
-    'Adding motion and atmosphere…',
+    'Finishing visual polish…',
   ],
   polish: [
-    'Polishing interaction and hover states…',
-    'Tightening spacing and hierarchy…',
-    'Finishing visual details…',
+    'Just getting started — coder is opening your brief…',
+    'Coding the product page structure in App…',
+    'Laying out nav, hero, and product cards…',
+    'Wiring search, prices, and purchase actions…',
+    'Tuning App.css — colors, cards, and spacing…',
+    'Almost done — finishing visual polish…',
+    'Final pass — checking the UI hangs together…',
   ],
   repair: [
     'Preview check failed — fixing the broken parts…',
@@ -78,7 +84,53 @@ const PHASE_LINES: Record<CreateProgressPhase, string[]> = {
     'Applying your change on disk…',
     'Patching App and styles…',
   ],
+  file: [
+    'Writing the next project file…',
+  ],
 };
+
+/** Human label for a scaffold / polish file path shown in the generating bubble. */
+export function createFileBuildLabel(
+  relPath: string,
+  verb: 'Building' | 'Writing' | 'Coding' | 'Updating' = 'Building',
+): string {
+  const rel = String(relPath || '').replace(/\\/g, '/').replace(/^\.\//, '');
+  const base = rel.split('/').pop() || rel;
+  if (/^package\.json$/i.test(base)) {
+    return `${verb} package.json — dependencies and project name…`;
+  }
+  if (/^index\.html$/i.test(base)) {
+    return `${verb} index.html — page shell and title…`;
+  }
+  if (/^vite\.config\./i.test(base)) {
+    return `${verb} vite.config — local Preview server setup…`;
+  }
+  if (/^tsconfig/i.test(base)) {
+    return `${verb} tsconfig — TypeScript project settings…`;
+  }
+  if (/^\.gitignore$/i.test(base)) {
+    return `${verb} .gitignore — ignoring node_modules and build output…`;
+  }
+  if (/^App\.(tsx|jsx)$/i.test(base)) {
+    return `${verb} ${rel} — layout, product cards, and interactions…`;
+  }
+  if (/^App\.css$/i.test(base)) {
+    return `${verb} ${rel} — colors, spacing, and card styles…`;
+  }
+  if (/^main\.(tsx|jsx)$/i.test(base)) {
+    return `${verb} ${rel} — React entrypoint…`;
+  }
+  if (/^index\.css$/i.test(base)) {
+    return `${verb} ${rel} — base page styles…`;
+  }
+  if (/heroes?\//i.test(rel) || /\.(png|jpe?g|webp|svg)$/i.test(base)) {
+    return `${verb} ${rel} — local product / hero image…`;
+  }
+  if (/icons?\//i.test(rel)) {
+    return `${verb} ${rel} — nav / UI icon…`;
+  }
+  return `${verb} ${rel}…`;
+}
 
 /** Rotate a professional line for the given phase (stable across short intervals). */
 export function createProgressLabel(phase: CreateProgressPhase, tick = 0): string {

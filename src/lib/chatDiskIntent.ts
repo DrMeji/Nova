@@ -46,8 +46,20 @@ function detectProjectKind(text: string): ProjectKind {
 function looksLikeUiLabelRenameAsk(text: string): boolean {
   const t = String(text || '').trim();
   // "Rename the top title to …" / "rename the heading / button / label" = UI edit, not a file rename.
-  return /\brename\b[\s\S]{0,48}\b(?:title|heading|headline|header|label|button|text|copy|caption|name\s+on\s+(?:the\s+)?(?:screen|page|ui))\b/i.test(t)
-    || /\brename\b[\s\S]{0,24}\b(?:top|main|hero|page|app|screen)\s+(?:title|heading|headline|header|name)\b/i.test(t);
+  if (/\brename\b[\s\S]{0,48}\b(?:title|heading|headline|header|label|button|text|copy|caption|name\s+on\s+(?:the\s+)?(?:screen|page|ui))\b/i.test(t)) {
+    return true;
+  }
+  if (/\brename\b[\s\S]{0,24}\b(?:top|main|hero|page|app|screen)\s+(?:title|heading|headline|header|name)\b/i.test(t)) {
+    return true;
+  }
+  // "change the name to Tesla" / "change the name that's in the middle to local only"
+  if (
+    /\b(?:change|set|update|make)\b[\s\S]{0,64}\b(?:name|title|heading|word|text|label)\b[\s\S]{0,80}\b(?:to|into)\b/i.test(t)
+    && !/\b(?:file|folder|image|photo|\.[a-z0-9]{1,12})\b/i.test(t)
+  ) {
+    return true;
+  }
+  return false;
 }
 
 function looksLikeRenameFileAsk(text: string): boolean {
@@ -60,7 +72,9 @@ function looksLikeRenameFileAsk(text: string): boolean {
     if (/\brename\b\s+(?:the\s+)?(?:file|image|photo)\b/i.test(t)) return true;
     return false;
   }
-  if (/\bchange\s+(?:the\s+)?(?:file\s+)?name\b/i.test(t)) return true;
+  // Require "file name" (or an extension) — bare "change the name to X" is on-page title copy.
+  if (/\bchange\s+(?:the\s+)?file\s+name\b/i.test(t)) return true;
+  if (/\bchange\s+(?:the\s+)?name\b/i.test(t) && /\b(?:file|folder|\.[a-z0-9]{1,12})\b/i.test(t)) return true;
   if (/\b(?:call|name)\s+(?:the\s+)?(?:file|image|photo|png|jpe?g)\b/i.test(t) && /\b(?:to|as)\b/i.test(t)) {
     return true;
   }
@@ -116,11 +130,20 @@ function looksLikeAddFileAsk(text: string): boolean {
   if (/\bput\s+the\s+file\b/i.test(t)) return true;
   // "create notes.md" / "write a readme" / "make a markdown file"
   if (/\b(?:add|create|make|write|put|save)\b[\s\S]{0,64}\b(?:readme|markdown|\.md\b)/i.test(t)) return true;
-  if (
-    /\b(?:add|create|make|write|put|save)\b[\s\S]{0,40}\b[A-Za-z0-9_-]+\.[A-Za-z0-9]{1,12}\b/i.test(t)
-    && !/\b(?:app|website|site|project|folder)\b/i.test(t)
-  ) {
-    return true;
+  // Bare "create foo.bar" — require a real extension, not "name. Just a sentence…"
+  {
+    const extHit = t.match(
+      /\b(?:add|create|make|write|put|save)\b[\s\S]{0,40}\b([A-Za-z0-9_-]+\.([A-Za-z0-9]{1,12}))\b/i,
+    );
+    const ext = extHit?.[2] || '';
+    const known = /^(?:md|txt|json|csv|js|jsx|ts|tsx|css|html|py|rs|go|java|c|cpp|h|hpp|xml|yml|yaml|toml|svg|png|jpe?g|webp|gif)$/i.test(ext);
+    if (
+      extHit
+      && known
+      && !/\b(?:app|website|site|project|folder)\b/i.test(t)
+    ) {
+      return true;
+    }
   }
   return false;
 }
@@ -444,7 +467,16 @@ export function classifyDiskIntent(
   // UI/code edits on the open project are never "create a loose file on Desktop".
   // Disk deletes are checked before scrap/rebuild so "delete the file in project folder"
   // is never swallowed as an in-place UI wipe.
-  if (looksLikeCodeEditAsk(t) && !looksLikeAddFileAsk(t) && !DELETE_RE.test(t)) return { type: 'none' };
+  // Real file renames (extension / "file name") still win over code-edit heuristics
+  // ("notes" in draft-notes.md must not become a UI edit).
+  if (
+    looksLikeCodeEditAsk(t)
+    && !looksLikeAddFileAsk(t)
+    && !DELETE_RE.test(t)
+    && !looksLikeRenameFileAsk(t)
+  ) {
+    return { type: 'none' };
+  }
   const recent = opts?.recentUserMessages || [];
   const pendingAddFile = opts?.pendingAddFile || null;
   const stickyDiskTarget = opts?.stickyDiskTarget || null;

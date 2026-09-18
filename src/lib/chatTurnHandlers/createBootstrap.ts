@@ -7,6 +7,6 @@ export function pendingCreateBootstrap(note?: string): ProjectBootstrapResult {
     npmPending: true,
     previewLive: false,
     bootstrapNote: note
-      || 'Click **Preview** shortly, or say **make it richer** to expand the UI.',
+      || 'Click **Preview** shortly.',
   };
 }

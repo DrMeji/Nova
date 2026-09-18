@@ -38,12 +38,32 @@ async function attachLivePreviewSession(cwd) {
   if (!existing?.url) return null;
   const cwdKey = String(cwd || '').trim().toLowerCase();
   const port = portFromUrl(existing.url);
+  // Placeholder 127.0.0.1:0 is never "ready" — drop and start real Vite.
+  if (!port) {
+    try { existing.child?.kill?.(); } catch { /* ignore */ }
+    if (cwdKey) devServersByCwd.delete(cwdKey);
+    return null;
+  }
   if (await httpProbePortAny(port)) {
     return { ok: true, cwd: existing.cwd || cwdKey, url: existing.url, attached: true, reused: true };
   }
   try { existing.child?.kill?.(); } catch { /* ignore */ }
   if (cwdKey) devServersByCwd.delete(cwdKey);
   return null;
+}
+
+/** Kill every project Vite preview — call on app quit so orphans do not linger. */
+function stopAllPreviews() {
+  for (const [key, session] of [...devServersByCwd.entries()]) {
+    try { session.child?.kill?.(); } catch { /* ignore */ }
+    try {
+      if (session.pid && session.pid !== session.child?.pid) {
+        process.kill(session.pid);
+      }
+    } catch { /* ignore */ }
+    devServersByCwd.delete(key);
+  }
+  return { ok: true };
 }
 
 /**
@@ -91,7 +111,10 @@ function packageInstallEnv() {
 function lowerChildPriority(pid) {
   if (!pid) return;
   try {
-    os.setPriority(pid, os.constants.priority.PRIORITY_BELOW_NORMAL);
+    // Prefer LOWEST for heavy installs so Defender/disk storms stay behind the desktop.
+    const levels = os.constants.priority;
+    const level = levels.PRIORITY_LOWEST ?? levels.PRIORITY_BELOW_NORMAL;
+    os.setPriority(pid, level);
   } catch {
     /* ignore — some hosts disallow priority changes */
   }
@@ -196,9 +219,20 @@ function commandAllowed(command, mode, userConfirmed) {
   return { ok: true };
 }
 
-function resolveCwd(cwd) {
+function packageCmdNeedsProjectCwd(command) {
+  const cmd = String(command || '').trim();
+  if (!/^(npm|pnpm|yarn|npx)(\.cmd)?(\s|$)/i.test(cmd)) return false;
+  if (/\s(-v|--version)\b/i.test(cmd)) return false;
+  return true;
+}
+
+function resolveCwd(cwd, command) {
+  const raw = String(cwd || '').trim();
+  if (!raw && packageCmdNeedsProjectCwd(command)) {
+    return { ok: false, error: 'Working folder required for package commands. Bind a project folder first.' };
+  }
   const fallback = os.homedir();
-  const p = path.resolve(String(cwd || fallback));
+  const p = path.resolve(raw || fallback);
   if (!fs.existsSync(p)) return { ok: false, error: 'Working folder not found.' };
   if (arkSelfGuard.isArkProtectedPath(p)) {
     return { ok: false, error: arkSelfGuard.protectedPathError() };
@@ -299,7 +333,7 @@ async function agentRun(payload) {
   const allowed = commandAllowed(command, mode, userConfirmed);
   if (!allowed.ok) return allowed;
 
-  const cwdRes = resolveCwd(payload?.cwd);
+  const cwdRes = resolveCwd(payload?.cwd, command);
   if (!cwdRes.ok) return cwdRes;
 
   const ran = await runCommand(command, cwdRes.path);
@@ -336,12 +370,16 @@ async function httpProbePortAny(port, timeoutMs = 800) {
   return null;
 }
 
+/** Real listen port, or null for placeholder / bad URLs (never treat :0 as 5173). */
 function portFromUrl(url) {
   try {
-    const p = Number(new URL(url).port);
-    return p || 5173;
+    const raw = String(new URL(url).port || '');
+    if (!raw || raw === '0') return null;
+    const p = Number(raw);
+    if (!Number.isFinite(p) || p <= 0) return null;
+    return p;
   } catch {
-    return 5173;
+    return null;
   }
 }
 
@@ -566,6 +604,7 @@ module.exports = {
   getPreviewSession,
   getOrAttachPreview,
   attachLivePreviewSession,
+  stopAllPreviews,
   commandAllowed,
   loadExecutionMode,
 };

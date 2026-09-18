@@ -12,6 +12,7 @@ import {
   resolveGreenfieldFromThread,
   buildGreenfieldPlanReply,
   wantsPlanningOnly,
+  looksLikeTalkBeforeCreateAsk,
   extractGreenfieldName,
   inferGreenfieldName,
   type GreenfieldIdeaIntent,
@@ -55,6 +56,12 @@ export function isCreateVerbNoun(message: string): boolean {
   if (!t) return false;
   if (/\b(?:do\s+not|don't|dont|never|without)\s+create\b/i.test(t)) return false;
   if (wantsPlanningOnly(t)) return false;
+  if (looksLikeTalkBeforeCreateAsk(t)) return false;
+  // "what do I need / requirements" even if wantsPlanningOnly missed a variant
+  if (/\b(?:what\s+(?:do|would|will)\s+i\s+(?:actually\s+)?need|requirements?)\b/i.test(t)
+    && !/\b(?:build\s+it\s+now|scaffold\s+now|on\s+disk)\b/i.test(t)) {
+    return false;
+  }
   return (
     CREATE_RE.test(t) || NEW_PROJECT_RE.test(t) || looksLikeProjectBuildAsk(t) || looksLikeBuildStart(t)
   ) && PROJECT_NOUN_RE.test(t);
@@ -181,6 +188,7 @@ export function parseNewProjectIntent(message: string): NewProjectIntent | null 
   if (looksLikeSingleFileCreateAsk(t)) return null;
 
   if (wantsPlanningOnly(t)) return null;
+  if (looksLikeTalkBeforeCreateAsk(t)) return null;
   if (/\b(?:do\s+not|don't|dont|never|without)\s+create\b/i.test(t)) return null;
   if (/\bask\s+me\b[\s\S]{0,80}\b(?:clarifying\s+)?questions?\b/i.test(t)) return null;
   if (/\bclarifying\s+questions?\s+first\b/i.test(t)) return null;

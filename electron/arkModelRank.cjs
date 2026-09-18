@@ -88,16 +88,28 @@ function rankedReadyEngineIds(models, intent, ramGb) {
   );
   if (!ready.size) return [];
 
-  const extraCoders = [...ready].filter((id) =>
-    /coder|starcoder|codestral|codellama|devstral|deepseek-coder/i.test(id)
-    && !CODER_ENGINE_RANK.includes(id),
-  );
-  const rank = intent === 'coding'
-    ? extraCoders.concat(CODER_ENGINE_RANK, CHAT_ENGINE_RANK)
-    : CHAT_ENGINE_RANK.slice();
+  const isCoder = (id) =>
+    /coder|starcoder|codestral|codellama|devstral|deepseek-coder/i.test(id);
+
+  if (intent === 'coding') {
+    // Known quality order first (32B → 7B), then any other ready coder GGUFs.
+    const ordered = [];
+    for (const id of CODER_ENGINE_RANK) {
+      if (!ready.has(id)) continue;
+      if (!fitsRam(id, ram)) continue;
+      ordered.push(id);
+    }
+    for (const id of ready) {
+      if (ordered.includes(id)) continue;
+      if (!isCoder(id)) continue;
+      if (!fitsRam(id, ram)) continue;
+      ordered.push(id);
+    }
+    return ordered;
+  }
 
   const ordered = [];
-  for (const id of rank) {
+  for (const id of CHAT_ENGINE_RANK) {
     if (!ready.has(id)) continue;
     if (!fitsRam(id, ram)) continue;
     ordered.push(id);

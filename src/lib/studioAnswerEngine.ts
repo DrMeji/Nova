@@ -5,6 +5,7 @@
  */
 
 import { arkRoute, routerProviderLabel } from '@/lib/arkRouter';
+import { engineGenerateCancel } from '@/lib/arkEngine';
 import { buildRouterHistory, looksLikePromptEcho } from '@/lib/chatHistory';
 import { getLocalPrefs } from '@/lib/localPrefs';
 import {
@@ -31,6 +32,7 @@ import { looksLikeProjectDebugAsk } from '@/lib/chatProjectDebug';
 import { looksLikeProductCorrectionAsk } from '@/lib/chatBuildIntent';
 import { shouldPreferCloudForCoding, countSourceFiles } from '@/lib/codingCloudPolicy';
 import { estimateTokens } from '@/lib/tokenUsage';
+import { hasRealStudioFiles, looksLikePlainChatAsk, scrubFalseProjectChatPreamble } from '@/lib/plainChatAsk';
 
 export type StudioIntent =
   | 'overview'
@@ -71,6 +73,8 @@ export type StudioAnswerResult = {
   intent: StudioIntent;
   findings?: InspectFinding[];
   meta?: string;
+  /** Engine/router failure detail when text is empty (create polish surfaces this). */
+  error?: string;
   streamed?: boolean;
   packedTokens?: number;
 };
@@ -94,11 +98,29 @@ const MODEL_TIMEOUT_BUILD_MS = 300_000;
 /** Micro follow-ups after surgical miss — never 300s. */
 const MODEL_TIMEOUT_MICRO_MS = 45_000;
 
+/** Create polish / full App+CSS builds — must not use the 45s micro timeout. */
+export function looksLikeFullUiBuildCodingAsk(message: string): boolean {
+  const t = String(message || '');
+  if (/@@@FILE\b/i.test(t)) return true;
+  if (t.length > 400 && /\b(?:footer|hero|nav|multi-?section|landing|App\.css)\b/i.test(t)) return true;
+  return /\b(?:Build the first real|first real multi-section|from (?:your |this )?brief|Emit COMPLETE @@@FILE|product UI matching|fully built)\b/i.test(t);
+}
+
 function looksLikeMicroCodingAsk(message: string): boolean {
   const t = String(message || '');
+  // Create polish prompts mention footer/copy/hero — those are full builds, not micro edits.
+  if (looksLikeFullUiBuildCodingAsk(t)) return false;
   if (/\b(?:scrap|rebuild|from scratch|make it richer|redesign|entire)\b/i.test(t)) return false;
+  if (t.length > 400) return false;
   return /\b(?:title|heading|h1|center|footer|color|background|button|text|label|copy|logo)\b/i.test(t)
     || (/^\s*(?:add|put|place|change|update|make|set|rename)\b/i.test(t) && t.length < 220);
+}
+
+/** Timeout used by answerStudio for coding/file-edit turns (exported for smoke). */
+export function codingFileEditTimeoutMs(userMessage: string): number {
+  if (looksLikeFullUiBuildCodingAsk(userMessage)) return MODEL_TIMEOUT_BUILD_MS;
+  if (looksLikeMicroCodingAsk(userMessage)) return MODEL_TIMEOUT_MICRO_MS;
+  return MODEL_TIMEOUT_CODE_MS;
 }
 
 function cleanAsk(message: string): string {
@@ -307,10 +329,33 @@ export function packStudioContext(input: StudioAnswerInput): {
           : 'The user wants you to CHANGE THE CODE NOW. Emit @@@FILE blocks with COMPLETE file contents for every file you change. Do not only describe the change. Keep edits surgical. only files that need to change. After the files, add ONE short plain-English sentence (no code fences, no file dumps). Example: "Added the logo centered on screen."'
       : 'Do NOT write @@@FILE blocks. Do not dump whole files.';
 
+  const emptyProject = sourceKeys.length === 0;
+  const plainSocial = !input.allowFileEdits
+    && looksLikePlainChatAsk(ask)
+    && emptyProject;
+
+  // Never claim “attached project files” for a story / hello when the tree is empty.
+  if (plainSocial) {
+    const system = [
+      'You are NOVA, a helpful chat assistant.',
+      'Answer exactly what the user asked (story, joke, greeting, question).',
+      'Do NOT mention project files, file trees, attached folders, or empty projects unless the user asked about them.',
+      'Do NOT invent that the user attached a project.',
+      'Never output lines like “ANSWER THE USER QUESTION FIRST” or “User asked:”.',
+    ].join(' ');
+    const user = `Question: ${ask}`;
+    const prompt = `${system}\n\n${user}`;
+    return { system, user, findings, prompt, packedTokens: estimateTokens(prompt) };
+  }
+
   const system = [
-    'You can see the attached project files. Never say you cannot see them.',
+    emptyProject
+      ? 'If no project files are present, answer the user’s question normally. Do not invent an attached empty project.'
+      : 'You can see the attached project files. Never say you cannot see them.',
     'Never ask the user to paste code.',
-    'Answer ONLY about this codebase. No world news, climate, politics, or generic life advice.',
+    emptyProject
+      ? 'Answer the user’s question directly. For stories, jokes, and casual chat, just respond — no codebase framing.'
+      : 'Answer ONLY about this codebase when the ask is about the project. For pure social/story asks, answer the ask without codebase framing.',
     'Answer the user\u2019s question directly and specifically.',
     'If unsure, say what you inspected. Do not invent issues.',
     fileRule,
@@ -322,23 +367,32 @@ export function packStudioContext(input: StudioAnswerInput): {
       : intent === 'recommend' ? 'They want prioritized next steps grounded in findings and files.'
         : intent === 'debug' ? 'They want bugs/risks with file paths and brief fix hints.'
           : intent === 'overview' ? 'They want what this project is and who it is for.'
-            : intent === 'freeform' ? 'Answer exactly what they asked using the files.'
+            : intent === 'freeform'
+              ? (emptyProject
+                ? 'Answer exactly what they asked. Do not mention project files unless they asked.'
+                : 'Answer exactly what they asked using the files.')
               : 'Answer their ask from the files.';
 
-  const user = [
-    `Question: ${ask}`,
-    '',
-    `Project: ${input.projectName || 'Attached project'}`,
-    `Intent hint: ${intent}. ${intentHint}`,
-    '',
-    'File tree (summary):',
-    tree || '(empty)',
-    '',
-    findingsBlock,
-    '',
-    'Relevant file excerpts:',
-    chunks.join('\n\n') || '(no excerpts. say re-attach the folder)',
-  ].join('\n');
+  const user = emptyProject
+    ? [
+      `Question: ${ask}`,
+      '',
+      `Intent hint: ${intent}. ${intentHint}`,
+    ].join('\n')
+    : [
+      `Question: ${ask}`,
+      '',
+      `Project: ${input.projectName || 'Attached project'}`,
+      `Intent hint: ${intent}. ${intentHint}`,
+      '',
+      'File tree (summary):',
+      tree || '(empty)',
+      '',
+      findingsBlock,
+      '',
+      'Relevant file excerpts:',
+      chunks.join('\n\n') || '(no excerpts)',
+    ].join('\n');
 
   const prompt = `${system}\n\n${user}`;
   return { system, user, findings, prompt, packedTokens: estimateTokens(prompt) };
@@ -418,6 +472,52 @@ export async function answerStudio(
   onDelta?: (text: string) => void,
 ): Promise<StudioAnswerResult> {
   const ask = cleanAsk(input.userMessage);
+  // Pure social ask with no real files — never enter project packing / Local scan.
+  if (
+    !input.allowFileEdits
+    && looksLikePlainChatAsk(input.userMessage)
+    && !hasRealStudioFiles(input.files)
+  ) {
+    const prefs = getLocalPrefs();
+    let streamed = '';
+    const routed = await arkRoute({
+      message: input.userMessage,
+      kind: 'chat',
+      preferredModelId: input.preferredModelId,
+      preferredModelName: input.preferredModelName,
+      preferredSource: input.preferredSource as 'local' | 'cloud' | 'auto' | undefined,
+      stickyModelId: input.stickyModelId,
+      stickyModelName: input.stickyModelName,
+      stickyPinnedSource: input.stickyPinnedSource as 'local' | 'cloud' | undefined,
+      history: buildRouterHistory([], input.userMessage, undefined, {
+        keepContinuity: false,
+        kind: 'chat',
+      }),
+      onAttemptReset: () => {
+        streamed = '';
+      },
+      onChunk: prefs.streamResponses && onDelta
+        ? (piece) => {
+          if (input.shouldAbort?.()) return;
+          streamed += piece;
+          const live = scrubFalseProjectChatPreamble(streamed);
+          if (live.length < 2) return;
+          onDelta(live);
+        }
+        : undefined,
+    });
+    const text = scrubFalseProjectChatPreamble(
+      String(routed.reply || streamed || '').trim(),
+    ) || 'Sure — what would you like to talk about?';
+    return {
+      text,
+      intent: 'freeform',
+      meta: routerProviderLabel(routed, 'NOVA'),
+      streamed: Boolean(streamed),
+      packedTokens: 0,
+    };
+  }
+
   // File-edit / create-UI turns must always hit the model — never Local scan.
   const intent = input.allowFileEdits
     ? 'freeform'
@@ -463,6 +563,7 @@ export async function answerStudio(
   }
 
   if (input.shouldAbort?.()) {
+    void engineGenerateCancel();
     return {
       text: input.allowFileEdits
         ? ''
@@ -470,6 +571,7 @@ export async function answerStudio(
       intent,
       findings,
       meta: 'Local scan \u00b7 attached files',
+      error: input.allowFileEdits ? 'UI polish aborted before the model started' : undefined,
       streamed: false,
       packedTokens,
     };
@@ -477,6 +579,12 @@ export async function answerStudio(
 
   const prefs = getLocalPrefs();
   let streamed = '';
+  let cancelSent = false;
+  const killLocalInfer = () => {
+    if (cancelSent) return;
+    cancelSent = true;
+    void engineGenerateCancel();
+  };
   const history = buildRouterHistory([], packed.prompt, undefined, {
     keepContinuity: false,
     kind: 'coding',
@@ -516,7 +624,7 @@ export async function answerStudio(
     }
 
     const timeoutMs = input.allowFileEdits
-      ? (looksLikeMicroCodingAsk(input.userMessage) ? MODEL_TIMEOUT_MICRO_MS : MODEL_TIMEOUT_CODE_MS)
+      ? codingFileEditTimeoutMs(input.userMessage)
       : routeKind === 'coding' && looksLikeProjectDebugAsk(input.userMessage)
         ? MODEL_TIMEOUT_CODE_MS
         : MODEL_TIMEOUT_MS;
@@ -535,9 +643,15 @@ export async function answerStudio(
       stickyModelName: input.stickyModelName,
       stickyPinnedSource: input.stickyPinnedSource as 'local' | 'cloud' | undefined,
       history,
+      onAttemptReset: () => {
+        streamed = '';
+      },
       onChunk: prefs.streamResponses && onDelta
         ? (piece) => {
-          if (input.shouldAbort?.()) return;
+          if (input.shouldAbort?.()) {
+            killLocalInfer();
+            return;
+          }
           streamed += piece;
           const live = stripStudioMeta(streamed);
           if (live.length < 2 || looksLikePromptEcho(live)) return;
@@ -554,6 +668,7 @@ export async function answerStudio(
     ]);
 
     if (input.shouldAbort?.()) {
+      killLocalInfer();
       const partial = stripStudioMeta(streamed);
       return {
         text: input.allowFileEdits
@@ -562,12 +677,16 @@ export async function answerStudio(
         intent,
         findings,
         meta: 'Local model \u00b7 attached files',
+        error: input.allowFileEdits && !hasFileEditBlocks(partial)
+          ? 'UI polish aborted before the model finished (stop or timeout)'
+          : undefined,
         streamed: Boolean(streamed),
         packedTokens,
       };
     }
 
     if (!timed.ok) {
+      killLocalInfer();
       const partial = stripStudioMeta(streamed);
       // Never replace a build turn with Local scan — that wipes @@@FILE blocks mid-stream.
       if (input.allowFileEdits) {
@@ -576,12 +695,28 @@ export async function answerStudio(
           intent,
           findings,
           meta: 'Local model \u00b7 timed out',
+          error: hasFileEditBlocks(partial)
+            ? undefined
+            : `Local coder timed out after ~${Math.round(timeoutMs / 1000)}s with no @@@FILE blocks`,
+          streamed: Boolean(streamed),
+          packedTokens,
+        };
+      }
+      // Freeform / social: keep what streamed — never swap in a project Local scan.
+      if (intent === 'freeform' || !hasRealStudioFiles(input.files)) {
+        const keep = stripStudioMeta(streamed);
+        return {
+          text: scrubFalseProjectChatPreamble(keep)
+            || 'I started answering but ran out of time. Ask again and I will continue.',
+          intent,
+          findings,
+          meta: 'Local model · timed out',
           streamed: Boolean(streamed),
           packedTokens,
         };
       }
       const fallback = stripStudioMeta(localScanAnswer(
-        intent === 'freeform' ? 'debug' : intent,
+        intent,
         input.files,
         input.projectName,
         findings.length ? findings : collectProjectFindings(input.files, 'all'),
@@ -682,11 +817,31 @@ export async function answerStudio(
           intent,
           findings,
           meta: hasFileEditBlocks(spoken) ? 'Local model \u00b7 attached files' : 'Local model \u00b7 no file blocks',
+          error: hasFileEditBlocks(spoken)
+            ? undefined
+            : (spoken
+              ? `Model replied without @@@FILE blocks: ${spoken.slice(0, 240)}`
+              : (routerNoModel
+                ? 'No live local coder connected'
+                : 'UI model returned an empty reply')),
           streamed: Boolean(streamed),
           packedTokens,
         };
       }
       if (!findings.length) findings = collectProjectFindings(input.files, 'all');
+      // Freeform with no real files: keep spoken/stream text, never invent project scan.
+      if (intent === 'freeform' && !hasRealStudioFiles(input.files)) {
+        const keep = scrubFalseProjectChatPreamble(partial || spoken)
+          || 'I could not finish that answer. Try asking again in one short sentence.';
+        return {
+          text: keep,
+          intent,
+          findings,
+          meta: 'Local model',
+          streamed: Boolean(streamed),
+          packedTokens,
+        };
+      }
       spoken = stripStudioMeta(localScanAnswer(
         intent === 'freeform' ? 'debug' : intent,
         input.files,
@@ -775,6 +930,9 @@ export async function answerStudio(
         intent,
         findings,
         meta: 'Local model \u00b7 error',
+        error: hasFileEditBlocks(partial)
+          ? undefined
+          : (partial ? `Model error with partial text: ${partial.slice(0, 240)}` : 'Local model threw before returning file blocks'),
         streamed: Boolean(streamed),
         packedTokens,
       };

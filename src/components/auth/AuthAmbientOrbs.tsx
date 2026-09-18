@@ -218,6 +218,11 @@ export function AuthAmbientOrbs({ variant = 'auth' }: AuthAmbientOrbsProps) {
     const layer = layerRef.current;
     if (!layer) return;
 
+    let running = true;
+    const backgrounded = () =>
+      typeof document !== 'undefined'
+      && (document.hidden || document.visibilityState === 'hidden');
+
     const ensureSeeded = () => {
       const w = layer.clientWidth;
       const h = layer.clientHeight;
@@ -234,6 +239,14 @@ export function AuthAmbientOrbs({ variant = 'auth' }: AuthAmbientOrbsProps) {
     };
 
     const tick = () => {
+      if (!running) return;
+      // Stop rAF while the window is hidden/blurred — continuous paint + blur
+      // filters hitch the desktop compositor even when NOVA is in the background.
+      if (backgrounded()) {
+        rafRef.current = 0;
+        return;
+      }
+
       // Re-read every frame so blur/slider prefs never accidentally unfreeze motion.
       const frozen = isReduceMotionOn();
       reduceMotionRef.current = frozen;
@@ -275,16 +288,33 @@ export function AuthAmbientOrbs({ variant = 'auth' }: AuthAmbientOrbsProps) {
       rafRef.current = requestAnimationFrame(tick);
     };
 
+    const resume = () => {
+      if (!running || backgrounded() || rafRef.current) return;
+      rafRef.current = requestAnimationFrame(tick);
+    };
+
     ensureSeeded();
     rafRef.current = requestAnimationFrame(tick);
     const ro = new ResizeObserver(() => {
       ensureSeeded();
     });
     ro.observe(layer);
+    document.addEventListener('visibilitychange', resume);
+    window.addEventListener('focus', resume);
+    const onBlur = () => {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = 0;
+    };
+    window.addEventListener('blur', onBlur);
 
     return () => {
+      running = false;
       cancelAnimationFrame(rafRef.current);
+      rafRef.current = 0;
       ro.disconnect();
+      document.removeEventListener('visibilitychange', resume);
+      window.removeEventListener('focus', resume);
+      window.removeEventListener('blur', onBlur);
       // Keep seeded positions across Soft remounts from parent re-renders.
       // Only drop state when the layer truly unmounts with variant change handled by deps.
       stateRef.current = null;

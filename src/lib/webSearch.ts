@@ -13,6 +13,8 @@ export function looksLikeSideQuestAsk(text: string): boolean {
   }
   if (/\b(?:lyrics?|lyric\s+to|words\s+to\s+(?:the\s+)?(?:song|track))\b/i.test(t)) return true;
   if (/\b(?:song|track|album)\b/i.test(t) && /\b(?:by|from|lyrics|artist)\b/i.test(t)) return true;
+  if (/\b(?:tell\s+me\s+a\s+story|write\s+(?:me\s+)?a\s+story|story\s+about|bedtime\s+story)\b/i.test(t)) return true;
+  if (/\b(?:joke|poem|riddle|haiku)\b/i.test(t) && !/\b(?:code|file|project)\b/i.test(t)) return true;
   if (/\b(?:weather|forecast|temperature|humid(?:ity)?)\b/i.test(t)) return true;
   if (/\b(?:F1|formula\s*1|grand\s+prix|nascar|nba|nfl|mlb|nhl|world\s+cup|premier\s+league)\b/i.test(t)) return true;
   if (/\b(?:upcoming|next)\s+(?:race|races|gp|grand\s+prix)\b/i.test(t)) return true;

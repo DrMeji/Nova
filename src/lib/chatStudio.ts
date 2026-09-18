@@ -21,9 +21,19 @@ export type ChatStudioFiles = Record<string, string>;
 export function looksLikeBuildStart(message: string): boolean {
   const t = String(message || '');
   if (wantsInspectOnly(t, false) && !/\b(build|create|make)\b/i.test(t)) return false;
-  // Advisory talk ("I'm building a 3D app", "how do I get started") is NOT scaffold.
-  if (/\b(?:how\s+(?:do|can|should|would)|get\s+started|help\s+me\s+plan|just\s+(?:talk|plan|discuss)|planning\s+only|no\s+files|do\s+not\s+create)\b/i.test(t)) {
+  // Advisory / exploratory talk is NOT scaffold.
+  if (/\b(?:how\s+(?:do|can|should|would)|get\s+started|help\s+me\s+plan|just\s+(?:talk|plan|discuss)|planning\s+only|no\s+files|do\s+not\s+create|what\s+(?:do|would|will)\s+i\s+(?:actually\s+)?need|requirements?|are\s+you\s+familiar|do\s+you\s+know)\b/i.test(t)) {
     return false;
+  }
+  // Soft "I want to build" is scaffold when it is a clear product ask (no advice question).
+  if (/\bi\s+want\s+to\s+(?:build|make|create|start)\b/i.test(t)) {
+    if (
+      /\b(?:what\s+(?:do|would|will|should)|need|requirements?|advise|advice|are\s+you\s+familiar|do\s+you\s+know)\b/i.test(t)
+      || (/\?/.test(t) && !/\b(?:called|named)\b/i.test(t))
+    ) {
+      return false;
+    }
+    if (/\b(?:app|website|site|project|page|chat)\b/i.test(t)) return true;
   }
   if (/\bi(?:'m| am)\s+building\b/i.test(t) && !/\b(?:create\s+(?:the\s+)?(?:files|project)|scaffold|lets?\s+build\s+this)\b/i.test(t)) {
     return false;

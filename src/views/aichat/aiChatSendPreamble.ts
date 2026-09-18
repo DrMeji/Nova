@@ -401,6 +401,7 @@ export type AIChatSendPrepResult =
       persistModeThread: (...args: any[]) => void;
       renameChat: (...args: any[]) => void;
       addChat: (...args: any[]) => void;
+      touchRecentProject?: (...args: any[]) => void;
       previewFromText: (...args: any[]) => any;
       setCodePillSticky: (...args: any[]) => void;
       setDeleteFilePrompt: (...args: any[]) => void;
@@ -505,6 +506,7 @@ export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Pr
     previewUrlRef,
     pushLivePreview,
     renameChat,
+    touchRecentProject,
     resolveStudioFiles,
     route,
     routeChatIdRef,
@@ -550,7 +552,11 @@ export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Pr
   userDetachScrollRef.current = false;
   // Only cancel a prior engine job when this turn will replace it (not every keystroke path).
   if (generatingRef.current) {
-    void engineGenerateCancel();
+    const cancelChatId = activeGenChatIdRef.current
+      || routeChatIdRef.current
+      || persistChatIdRef.current
+      || undefined;
+    void engineGenerateCancel(cancelChatId ? { chatId: cancelChatId } : undefined);
   }
   // Do NOT clear generatingRef here — handleSend sets it early to block double Enter
   // from starting two creates / queueing the same prompt on itself.
@@ -1053,9 +1059,12 @@ export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Pr
     .filter(m => m.role === 'user')
     .map(m => String(m.content || ''));
   const stickyDiskTarget = getLastDiskTarget(activeChatId);
-  const intentText = stripComposerPrefix(content)
-    .replace(/!\[[^\]]*]\(data:image\/[^)]+\)/gi, ' ')
-    .replace(/!\[[^\]]*]\(ark-media:[^)]+\)/gi, ' ');
+  const { normalizeMessyUserAsk } = await import('@/lib/editAskResolve');
+  const intentText = normalizeMessyUserAsk(
+    stripComposerPrefix(content)
+      .replace(/!\[[^\]]*]\(data:image\/[^)]+\)/gi, ' ')
+      .replace(/!\[[^\]]*]\(ark-media:[^)]+\)/gi, ' '),
+  );
   const diskIntent = classifyDiskIntent(intentText, {
     recentUserMessages: recentUserLines,
     pendingAddFile: getLastPendingAddFile(activeChatId)?.fileName || null,
@@ -1099,9 +1108,13 @@ export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Pr
   }
 
   // Pasted icon/image URLs (Iconify, Unsplash, etc.) → download into public/ on the bound project.
+  // Full UI rebuild asks ("make it richer", landing/hero/footer) must fall through to edit/create —
+  // Unsplash URLs alone must not short-circuit into brand-assets-only.
+  const looksLikeFullUiRebuildAsk = /\b(?:richer|premium|landing|rebuild|hero|footer|hours|sections?)\b/i.test(content);
   if (
     diskRoot
     && looksLikeAssetLinkAsk(content)
+    && !looksLikeFullUiRebuildAsk
     && (extractExplicitAssetUrls(content).length > 0 || /lucide:|simple-icons:|iconify/i.test(content))
   ) {
     pushAssistantStatus('Importing icons and images from your links…');
@@ -1462,6 +1475,7 @@ export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Pr
     persistModeThread,
     renameChat,
     addChat,
+    touchRecentProject,
     previewFromText,
     setCodePillSticky,
     setDeleteFilePrompt,

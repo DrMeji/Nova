@@ -27,6 +27,8 @@ export type AgentTracePayload = {
   changedPaths?: string[];
   /** Per-file +/− line counts for the Files Changed card. */
   fileChanges?: AgentFileChange[];
+  /** Absolute project folder shown above the file list (create replies). */
+  projectPath?: string;
   /** Whether Continue is available after step-cap. */
   canContinue?: boolean;
 };
@@ -94,24 +96,42 @@ export function countLineDiff(before: string, after: string): { added: number; r
 export function traceThoughtFromAsk(userMessage: string): string {
   const t = String(userMessage || '').trim();
   if (/\bwhat(?:'s| is)\s+(?:in|inside)\b/i.test(t)) {
-    return 'The user wants to know what is inside a folder. list top level and summarize subfolders without importing every file into chat.';
+    return 'Listing folder contents and summarizing without dumping every file into chat.';
   }
   if (/\b(delete|remove|trash)\b/i.test(t)) {
-    return 'The user wants files removed. I need to locate the path, confirm scope, then delete only what they asked for.';
+    return 'Locating the path, confirming scope, then deleting only what was asked.';
   }
   if (/\b(clone|pull|github|push)\b/i.test(t)) {
-    return 'The user wants a Git/GitHub action. locate the repo or remote, run the command, and report the result.';
+    return 'Running the Git/GitHub action in the workspace and reporting the result.';
   }
   if (/\b(install|npm|pip)\b/i.test(t)) {
-    return 'The user wants dependencies installed. use the workspace folder, run the install command, and show output.';
+    return 'Installing dependencies in the project folder.';
   }
-  if (/\b(image|picture|photo|draw)\b/i.test(t)) {
-    return 'The user wants an image generated. pick a model route and produce real media, not a placeholder.';
+  if (/\b(?:create|scaffold|new)\b[\s\S]{0,40}\b(?:project|vite|react|app)\b/i.test(t)) {
+    return 'Creating the project folder, writing scaffold files, and verifying they exist on disk.';
   }
-  if (/\b(comment|edit|change|fix|update|add)\b/i.test(t)) {
-    return 'Locate the target file(s), read only what is needed, apply the edit on disk, then summarize what changed.';
+  if (/\bsticky\b/i.test(t) && /\bnav\b/i.test(t)) {
+    return 'Adding a sticky nav to the app files and verifying the labels landed.';
   }
-  return 'Understand the request, plan the steps, run only what is needed, then answer directly.';
+  if (/\b(?:mouse|keyboard)\b/i.test(t) && /\b(?:photo|shot|image)\b/i.test(t)) {
+    return 'Adding a real https product photo to the hero and verifying the image URL.';
+  }
+  if (/\bbrand\b/i.test(t) || (/\bcenter(?:ed)?\b/i.test(t) && /\b(?:white|middle|text)\b/i.test(t))) {
+    return 'Updating the centered brand text on disk and verifying it matches the ask.';
+  }
+  if (/\b(image|picture|photo|draw)\b/i.test(t) && !/\b(?:https|url|src)\b/i.test(t)) {
+    return 'Generating an image with a real model route — not a placeholder.';
+  }
+  if (/\b(?:add|put|place|insert)\b/i.test(t)) {
+    return 'Adding the requested UI to the project files, then verifying the change.';
+  }
+  if (/\b(?:remove|delete|drop)\b/i.test(t)) {
+    return 'Removing the requested piece from the project files.';
+  }
+  if (/\b(comment|edit|change|fix|update)\b/i.test(t)) {
+    return 'Editing the target file(s) on disk, then summarizing exactly what changed.';
+  }
+  return 'Understanding the ask, doing the work on disk when needed, then answering directly.';
 }
 
 export function summarizeTraceForHistory(payload: AgentTracePayload): string {
@@ -134,6 +154,7 @@ export function wrapReplyWithFileChanges(opts: {
   fileChanges?: AgentFileChange[];
   statusLabels?: string[];
   elapsedMs?: number;
+  projectPath?: string;
 }): string {
   const paths = (opts.changedPaths || []).filter(Boolean);
   const changes = opts.fileChanges?.length
@@ -168,5 +189,6 @@ export function wrapReplyWithFileChanges(opts: {
     elapsedMs,
     changedPaths: paths,
     fileChanges: changes,
+    projectPath: opts.projectPath || undefined,
   });
 }

@@ -20,6 +20,7 @@ import { skillPromptAppendix } from '@/lib/novaSkills';
 import { detectProjectKind } from '@/lib/projectKind';
 import { verifyProjectAfterPatch } from '@/lib/postPatchVerify';
 import { applyAgentPatches, parseAgentPatches } from '@/lib/arkAgentPatch';
+import { isSandboxBlockedPath } from '@/lib/agentSandbox';
 
 export type ChatApplyResult = {
   ok: boolean;
@@ -46,6 +47,14 @@ function joinDisk(root: string, rel: string): string {
   return cleanRel ? `${cleanRoot}${sep}${cleanRel}` : cleanRoot;
 }
 
+/** Resolved write must stay under diskRoot (no .. escape, no sibling project). */
+function isUnderDiskRoot(diskRoot: string, targetPath: string): boolean {
+  const norm = (p: string) => p.replace(/[/\\]+/g, '/').replace(/\/+$/, '').toLowerCase();
+  const root = norm(diskRoot);
+  const target = norm(targetPath);
+  return target === root || target.startsWith(`${root}/`);
+}
+
 async function writeViaDiskRoot(
   diskRoot: string,
   files: Record<string, string>,
@@ -54,7 +63,13 @@ async function writeViaDiskRoot(
     return { ok: false, error: 'Project write unavailable' };
   }
   for (const [rel, content] of Object.entries(files)) {
+    if (isSandboxBlockedPath(rel)) {
+      return { ok: false, error: `Blocked write: ${rel}` };
+    }
     const targetPath = joinDisk(diskRoot, rel);
+    if (!isUnderDiskRoot(diskRoot, targetPath)) {
+      return { ok: false, error: `Path escapes project folder: ${rel}` };
+    }
     const written = await window.arkDesktop.workspaceWriteFile({
       targetPath,
       content,
@@ -303,11 +318,49 @@ export async function applyChatReplyEdits(opts: {
 
   const next = { ...applied.files };
   let twinRemoved: string[] = [];
-  // #6 — never leave App.jsx + App.tsx fighting after an edit apply.
+  // Strip assistant chatter + repair Vite shell before disk write (edit path used to skip this).
   {
-    const { cleanupAppTwins } = await import('@/lib/createBuildQuality');
+    const { cleanupAppTwins, stripModelProseFromSource, ensureViteReactProjectFiles } = await import(
+      '@/lib/createBuildQuality'
+    );
+    for (const key of Object.keys(next)) {
+      if (typeof next[key] !== 'string') continue;
+      const cleaned = stripModelProseFromSource(key, next[key]);
+      if (cleaned !== next[key]) {
+        next[key] = cleaned;
+        if (!changed.includes(key)) changed.push(key);
+      }
+    }
+    // Capture twin drop BEFORE ensureVite (which also collapses twins in-memory only).
+    {
+      const earlyTwin = cleanupAppTwins(next);
+      twinRemoved = earlyTwin.removed;
+      for (const key of Object.keys(next)) {
+        if (!Object.prototype.hasOwnProperty.call(earlyTwin.files, key)) delete next[key];
+      }
+      Object.assign(next, earlyTwin.files);
+    }
+    const hasVite = Object.keys(next).some((p) => /(^|\/)src\/App\.(jsx|tsx)$/i.test(p.replace(/\\/g, '/')))
+      || /"vite"/i.test(next['package.json'] || '');
+    if (hasVite) {
+      const repaired = ensureViteReactProjectFiles(next, opts.projectName || 'app');
+      for (const key of Object.keys(next)) {
+        if (!Object.prototype.hasOwnProperty.call(repaired.files, key)) delete next[key];
+      }
+      Object.assign(next, repaired.files);
+      for (const r of repaired.repaired) {
+        if (r.startsWith('removed:')) {
+          const drop = r.slice('removed:'.length);
+          if (drop && !twinRemoved.includes(drop)) twinRemoved.push(drop);
+          continue;
+        }
+        if (!changed.includes(r) && typeof next[r] === 'string') changed.push(r);
+      }
+    }
     const twin = cleanupAppTwins(next);
-    twinRemoved = twin.removed;
+    for (const drop of twin.removed) {
+      if (!twinRemoved.includes(drop)) twinRemoved.push(drop);
+    }
     for (const key of Object.keys(next)) delete next[key];
     Object.assign(next, twin.files);
   }

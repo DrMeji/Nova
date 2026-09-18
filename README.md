@@ -7,7 +7,15 @@ Private **source** repository for the NOVA desktop app.
 | **[DrMeji/Nova](https://github.com/DrMeji/Nova)** | **Public** | README + Windows installers / Releases only |
 | **DrMeji/Nova-Source** (this repo) | **Private** | Full application source |
 
-Current source: **v0.1.197** · Private changelog: [docs/CHANGELOG.md](docs/CHANGELOG.md) · Public downloads: [NOVA Releases](https://github.com/DrMeji/Nova/releases)
+Current source: **v0.1.230** · Private changelog: [docs/CHANGELOG.md](docs/CHANGELOG.md) · Public downloads: [NOVA Releases](https://github.com/DrMeji/Nova/releases)
+
+## Public install (closed beta)
+
+- **Unsigned builds** may show SmartScreen — choose “More info → Run anyway.” Authenticode is optional ops, not a substitute for isolation.
+- **Guest** works fully on-device (`guest-local`); no shared cloud chat row without sign-in.
+- **Social / Messages / Networking / Call / Image / Video** stay parked on the first public Setup — do not treat half-wired UI as shipped.
+- **Keys** live in the OS vault only. Never paste API keys into Chat.
+- Before upload: `npm run smoke:public-harden` and `npm run smoke:secrets` must pass.
 
 ## Releasing (do not leak source)
 

@@ -82,6 +82,8 @@ function proseFromReply(raw: string): string {
   let body = stripped
     .replace(/```[\w]*\n[\s\S]*?```/g, '')
     .replace(/@@@FILE[^\n]*\n?/gi, '')
+    .replace(/^\s*(?:css|jsx|tsx|javascript|typescript|html)\s*$/gim, '')
+    .replace(/^\s*(?:And add the following CSS[^\n]*)$/gim, '')
     .replace(/^\s*(?:const|let|var|function|export|import|return|struct|import\s+SwiftUI)\b[\s\S]{0,200}$/gm, '')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
@@ -96,6 +98,7 @@ function proseFromReply(raw: string): string {
   // Drop pure status stubs the model sometimes echoes.
   if (/^(?:updating|writing|applying|generating)\b/i.test(body) && body.length < 80) return '';
   if (/\bTalk like ChatGPT\b/i.test(body) || /^You are NOVA,/i.test(body)) return '';
+  if (/@@@FILE|^\s*css\s*$/i.test(body)) return '';
   return body.slice(0, 4000);
 }
 
@@ -113,16 +116,36 @@ export function finalizeCodingChatBubble(opts: {
   const stripped = stripFileBlocks(opts.rawReply);
 
   if (opts.applied && opts.changedPaths?.length) {
-    // Never wipe a real streamed answer with a one-line “Done.” stub.
-    if (prose) {
-      return `${prose}\n\nI applied those updates on disk. Preview should refresh — tell me what you want to tweak next.`;
+    // Never leave protocol leftovers or CODE-fence prose in the bubble.
+    let cleanProse = prose
+      .replace(/@@@FILE\b[\s\S]*$/gi, '')
+      .replace(/```[\s\S]*?```/g, '')
+      .replace(/```[\s\S]*$/g, '')
+      .replace(/^\s*(?:css|jsx|tsx|CODE)\s*$/gim, '')
+      .replace(/I applied those updates on disk[^\n]*/gi, '')
+      .trim();
+    if (
+      /@@@FILE|^\s*css\s*$/i.test(cleanProse)
+      || cleanProse.length < 8
+      || /And add the following CSS/i.test(cleanProse)
+    ) {
+      cleanProse = '';
     }
-    return formatCodeChatReply(
+    // Prefer ask-specific Done when prose is a language label or generic filler.
+    const askSpecific = formatCodeChatReply(
       opts.userMessage,
       opts.changedPaths,
       '',
       { surface: 'chat' },
     );
+    if (!cleanProse || /^(?:css|Done\.|Updated)\b/i.test(cleanProse)) {
+      return askSpecific;
+    }
+    // Good descriptive prose (nav sticky…) — keep it, skip the CODE stub footer.
+    if (!/I applied those updates on disk/i.test(cleanProse)) {
+      return cleanProse;
+    }
+    return askSpecific;
   }
   if (opts.applyError === 'no_edits' || opts.applyError === 'no_changes') {
     if (prose) return prose;

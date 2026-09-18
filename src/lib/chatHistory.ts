@@ -29,7 +29,7 @@ export const ANSWER_THE_ASK =
   + 'If the latest message has multiple questions, answer EACH one in order with a clear take (a real paragraph or bullets per question — not one-liners). '
   + 'Do not replace a direct ask (timeline, worth-it, yes/no, recommendation) with a generic multi-week project plan unless they asked for a full plan. '
   + 'For casual chat, opinions, or “what do you think” takes: give a thoughtful answer (several clear paragraphs) first. Never bounce the same question back. '
-  + 'Prefer a thorough, accurate reply over a rushed short one. Take the space you need to be clear and correct. '
+  + 'Prefer a clear, accurate reply. Match length to the ask: greetings and “what can you do” stay short; deep explain/how questions can be longer. '
   + 'When someone describes a real problem (losing track of books, sleep issues, a product idea): acknowledge the problem briefly, then give a concrete resolution or plan. Sound like a sharp collaborator, not a survey. '
   + 'When details are missing for a *recommendation that needs personal facts* (allergies, budget, goal, symptoms, location), ask 2–4 short clarifying questions first — then recommend. '
   + 'If you cannot answer, say so in one clear line. '
@@ -58,7 +58,9 @@ export const BASE_SYSTEM =
   + 'Read every user message carefully before answering. Prefer a thorough, useful reply over a rushed short one. '
   + 'Never use em dashes or en dashes (the long dash characters). Prefer periods or commas. Do not put a long dash between clauses. '
   + 'Never invent a new subject (movies, TV, celebrities, weather, EcoBuddy-style fake products) when the thread is about something else. '
-  + 'Never echo the user’s greeting. If they only say hi/hello/hey, reply: "Hello! How can I assist you today?" '
+  + 'If they only say hi/hello/hey: greet them briefly in your own words (one short sentence). Do not paste a fixed script. Do not list capabilities unless they ask. '
+  + 'If they ask what you can do / what NOVA does: answer in ONE professional sentence (or two short ones) about real NOVA abilities — local and cloud chat, building websites and apps when they ask you to create, editing files in folders they grant, images and project help. No fake categories (calendar, entertainment packages, generic “personal assistance”). No long numbered lists. '
+  + 'When they ask about building something (Discord-like app, Netflix-like site, a product, a business): answer THAT question. Confirm familiarity if asked, explain what it is, then discuss requirements / approach in complete sentences. Never stop after a colon or “here is the structure” with no body. Do not dump unfinished code unless they asked for code. '
   + 'Never open by restating their request in first person ("I want to build…", "I would like to create…"). '
   + 'Acknowledge as the assistant ("Sure — here is how I would approach that"), then give concrete steps. '
   + 'When they give concrete product/device/gear specs (camera mm / f-stop / ISO / shutter, iPhone model + lenses, bike size, GPU, phone storage, etc.), '
@@ -968,8 +970,22 @@ export function isCannedGreetingReply(reply: string, userMessage?: string): bool
   const r = String(reply || '').trim();
   if (!/^Hello! How can I assist you today\??\.?$/i.test(r)) return false;
   const u = String(userMessage || '').trim();
-  if (!u) return true;
   return !/^(hi|hello|hey)\b/i.test(u);
+}
+
+/** Reply stopped mid-thought (common on small local models). */
+export function looksLikeTruncatedAssistantReply(text: string): boolean {
+  const t = String(text || '').trim();
+  if (!t || t.length < 48) return false;
+  if (/[:：]\s*$/.test(t)) return true;
+  if (/\b(?:here(?:'s| is)|following|below|structure|example|using)\b[^.!?\n]{0,80}$/i.test(t)
+    && !/[.!?]"?\s*$/.test(t)) {
+    return true;
+  }
+  if (/\b(?:flask|django|express|fastapi|react|python)\b[^.!?\n]{0,60}:\s*$/i.test(t)) return true;
+  // Ends mid-word or without terminal punctuation after a long clause.
+  if (t.length >= 120 && !/[.!?…]["')\]]?\s*$/.test(t) && /,\s*$/.test(t)) return true;
+  return false;
 }
 
 /** True when a soft follow-up reply mostly restates the previous assistant answer. */

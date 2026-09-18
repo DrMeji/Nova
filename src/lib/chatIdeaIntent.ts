@@ -79,11 +79,113 @@ export function wantsClarifyBeforeCreate(text: string): boolean {
   return false;
 }
 
+/**
+ * Requirements / advice ask — talk only, never scaffold.
+ * e.g. "I want to build an app like Discord, what do I need / requirements?"
+ */
+export function looksLikeRequirementsAsk(text: string): boolean {
+  const t = String(text || '').trim();
+  if (!t) return false;
+  // Explicit go-build wins over advice wording.
+  if (/\b(?:build\s+it\s+now|scaffold\s+now|create\s+(?:the\s+)?(?:files|project)\s+now|lets?\s+build\s+(?:this|that|it)|go\s+build|on\s+disk|open\s+preview)\b/i.test(t)) {
+    return false;
+  }
+  if (/\b(?:what\s+(?:do|would|will)\s+i\s+(?:actually\s+)?need|what\s+do\s+i\s+actually\s+need|all\s+the\s+requirements|requirements?\s+(?:and\s+stuff|to\s+build)|what\s+(?:are\s+)?(?:the\s+)?requirements)\b/i.test(t)) {
+    return true;
+  }
+  if (/\b(?:what\s+(?:stack|tech(?:nology)?|tools?|languages?|frameworks?)\s+(?:do\s+i\s+need|should\s+i\s+use)|what\s+would\s+it\s+take|how\s+(?:hard|much)\s+(?:is|would)\b)/i.test(t)) {
+    return true;
+  }
+  // Educational how-to (hardware, business, learning) — prose advice, never scaffolds.
+  if (
+    /\bhow\s+(?:do\s+(?:you|i)|would\s+(?:you|i)|can\s+(?:you|i)|to)\s+(?:build|make|start|begin|learn)\b/i.test(t)
+    && !/\b(?:create\s+(?:the\s+)?(?:files|project)|scaffold|on\s+disk|@@@FILE)\b/i.test(t)
+  ) {
+    return true;
+  }
+  // Mid-convo planning: MVP / high-level / before writing files.
+  if (
+    (
+      /\b(?:keep\s+it\s+high[- ]?level|high[- ]?level\s+(?:for\s+now|overview|plan)|simple\s+MVP|what\s+would\s+(?:a\s+)?(?:simple\s+)?MVP\b)/i.test(t)
+      || /\bbefore\s+(?:we|i|you)\s+(?:write|create|touch)\s+(?:any\s+)?(?:files?|code)\b/i.test(t)
+      || /\bmain\s+pieces?\b/i.test(t)
+      || /\bwhat\s+(?:are|would\s+be)\s+the\s+(?:main|core)\s+(?:pieces|parts|features)\b/i.test(t)
+    )
+    && !/\b(?:create\s+(?:the\s+)?(?:files|project)|scaffold|build\s+it\s+now|lets?\s+build\s+(?:this|that|it)\s+out|on\s+disk)\b/i.test(t)
+  ) {
+    return true;
+  }
+  // "I want to build X … what do I need / like all the requirements"
+  if (
+    /\b(?:i\s+want\s+to\s+(?:build|make|create)|(?:build|make)\s+(?:an?\s+)?(?:app|website|site))\b/i.test(t)
+    && /\b(?:what\s+(?:do|would|will|should)|need|requirements?|advise|advice|recommend|explain)\b/i.test(t)
+    && !/\b(?:create\s+(?:the\s+)?(?:files|project)|scaffold|called|named)\b/i.test(t)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Exploratory product talk — discuss first, never scaffold.
+ * Familiarity / requirements questions stay chat.
+ * Clear build asks ("build me…", "I want to build X called Y", "create a Discord-like app") create.
+ */
+export function looksLikeTalkBeforeCreateAsk(text: string): boolean {
+  const t = String(text || '').trim();
+  if (!t) return false;
+
+  const explicitGo =
+    /\b(?:build\s+it\s+now|scaffold(?:\s+now)?|create\s+(?:the\s+)?(?:files|project)(?:\s+now)?|lets?\s+build\s+(?:this|that|it|out)|go\s+(?:build|ahead)|on\s+disk|open\s+preview|build\s+this\s+out|start\s+building)\b/i.test(t)
+    || /\b(?:create|scaffold|spin\s+up)\s+(?:a\s+)?(?:new\s+)?(?:web\s+)?(?:app|application|project|website|site)\b/i.test(t)
+    || /\b(?:build|make)\s+me\s+(?:an?\s+)?(?:new\s+)?(?:app|website|site|project|page)\b/i.test(t)
+    || /\bi\s+want\s+you\s+to\s+(?:build|make|create)\b/i.test(t)
+    || (/\b(?:called|named)\b/i.test(t) && /\b(?:build|create|make|scaffold|want\s+to\s+build)\b/i.test(t) && !/\b(?:are\s+you\s+familiar|do\s+you\s+know|what\s+(?:do|would|will)\s+i)\b/i.test(t))
+    || (
+      /\b(?:discord|slack|twitch|netflix)(?:-|\s+)?like\b/i.test(t)
+      && /\b(?:build|create|make|scaffold)\b/i.test(t)
+      && !/\b(?:are\s+you\s+familiar|do\s+you\s+know|what\s+(?:do|would|will)\s+i|requirements?)\b/i.test(t)
+      && !/\?\s*$/.test(t)
+    );
+
+  if (explicitGo) return false;
+
+  // Familiarity / check-in questions with product wording.
+  if (/\b(?:are\s+you\s+familiar|do\s+you\s+know|have\s+you\s+(?:seen|used|heard)|familiar\s+with)\b/i.test(t)) {
+    return true;
+  }
+
+  // Soft desire is talk ONLY when they are asking / planning — not commanding a build.
+  if (/\bi\s+want\s+to\s+(?:build|make|create|start)\b/i.test(t)) {
+    if (
+      /\b(?:what\s+(?:do|would|will|should)|need|requirements?|advise|advice|recommend|explain|how\s+(?:do|would|should)|are\s+you\s+familiar|do\s+you\s+know)\b/i.test(t)
+      || /\?/.test(t)
+    ) {
+      return true;
+    }
+    // "I want to build a Discord app" with no question → treat as build intent (not talk).
+    return false;
+  }
+
+  // "…like Twitch/Discord…" plus a question mark → talk, not scaffold.
+  if (
+    /\b(?:app|website|site|platform)\b/i.test(t)
+    && /\b(?:like|similar\s+to)\b/i.test(t)
+    && (/\?/.test(t) || /\b(?:streaming|clone|inspired)\b/i.test(t))
+    && !/\b(?:build|make)\s+me\b/i.test(t)
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
 /** Planning-only turn. discuss sequence and features; no files, deps, or folders. */
 export function wantsPlanningOnly(text: string): boolean {
   const t = String(text || '').trim();
   if (!t) return false;
   if (wantsClarifyBeforeCreate(t)) return true;
+  if (looksLikeRequirementsAsk(t)) return true;
   if (/\bhelp\s+me\s+plan\b/i.test(t)) return true;
   if (/\bplanning\s+only\b/i.test(t)) return true;
   if (/\b(?:just|only)\s+(?:plan(?:ning)?|talk|discuss)\b/i.test(t) && !/\b(?:do\s+not|don't|dont|not)\s+only\s+plan\b/i.test(t)) return true;
@@ -489,6 +591,8 @@ export function looksLikeGreenfieldCreateGo(text: string): boolean {
   return (
     /\bcreate\s+(?:project\s+)?["“']?[A-Za-z]/i.test(t)
     || /\b(?:yes|yeah|sure|ok(?:ay)?)[\s,]*create\b/i.test(t)
+    // Stretch: requirements → “ok start.” / “okay, start building”
+    || /\b(?:yes|yeah|sure|ok(?:ay)?)[\s,!.]*start(?:\s+building)?\b/i.test(t)
     || /\bscaffold\s+(?:project\s+)?["“']?[A-Za-z]/i.test(t)
     || /\bstart\s+building\b/i.test(t)
     || /\bbuild\s+it(?:\s+now)?\b/i.test(t)
@@ -625,11 +729,13 @@ export function looksLikeConversationalPlanningAsk(text: string): boolean {
   if (/\b(?:go\s+build|go\s+implement|implement\s+it|build\s+it\s+now|lets?\s+build\s+(?:this|that|it)|build\s+this|build\s+that|create\s+(?:the\s+)?(?:files|project)\s+now)\b/i.test(t)) {
     return false;
   }
+  if (looksLikeRequirementsAsk(t) || looksLikeTalkBeforeCreateAsk(t)) return true;
   // Create/build verb + product noun = create, not planning chat.
+  // Exception: requirements / advice wording ("what do I need", "requirements").
   if (
     /\b(?:create|build|make|scaffold|spin\s+up|kick\s+off)\b/i.test(t)
     && /\b(?:website|site|web\s*app|react\s+app|app|application|project|page|landing|homepage)\b/i.test(t)
-    && !/\b(?:how\s+(?:do|can|should|would)|what\s+(?:should|would|stack)|plan\s+only|don'?t\s+build\s+yet)\b/i.test(t)
+    && !/\b(?:how\s+(?:do|can|should|would)|what\s+(?:do|should|would|will|stack|are)|need|requirements?|are\s+you\s+familiar|do\s+you\s+know|i\s+want\s+to|plan\s+only|don'?t\s+build\s+yet)\b/i.test(t)
   ) {
     return false;
   }

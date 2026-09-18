@@ -7,6 +7,7 @@
 import { getEngineStatus } from '@/lib/arkEngine';
 import { hasProviderApiKey } from '@/lib/localPrefs';
 import { isCloudProviderEnabled } from '@/lib/cloudSources';
+import { createIdentityFromBrief } from '@/lib/createIdentity';
 
 export type PollinationsImageOpts = {
   width?: number;
@@ -217,15 +218,24 @@ function isBannedUnsplashUrl(url: string): boolean {
   return BANNED_UNSPLASH_IDS.some((id) => u.includes(id));
 }
 
-/** Strip Pollinations hotlinks — replace with local Brand Asset paths (no re-injection). */
-export function upgradePollinationsUrlsInSource(source: string, projectName = ''): string {
-  void projectName;
+/** Local hero path for this brand — never the shared generic hero.jpg slot. */
+function identityHeroPaths(projectName: string, brief = '') {
+  const id = createIdentityFromBrief(projectName || 'brand', brief);
+  const story = id.heroQueries[1]
+    ? `/heroes/${id.heroQueries[1].id}.jpg`
+    : id.heroHref.replace(/-hero(\.|$)/, '-story$1');
+  return { hero: id.heroHref, story, id };
+}
+
+/** Strip Pollinations hotlinks — replace with identity slug hero paths (no shared hero.jpg). */
+export function upgradePollinationsUrlsInSource(source: string, projectName = '', brief = ''): string {
   let s = String(source || '');
   if (!s) return s;
+  const { hero, story } = identityHeroPaths(projectName, brief || projectName);
   let heroN = 0;
   const nextHero = () => {
     heroN += 1;
-    return heroN === 1 ? '/heroes/hero.jpg' : heroN === 2 ? '/heroes/story.jpg' : `/heroes/hero-${heroN}.jpg`;
+    return heroN === 1 ? hero : heroN === 2 ? story : `/heroes/${String(projectName || 'brand').toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 24) || 'brand'}-hero-${heroN}.jpg`;
   };
   s = s.replace(
     /url\((['"]?)https:\/\/image\.pollinations\.ai\/[^)'"]+\1\)/gi,
@@ -242,12 +252,13 @@ export function upgradePollinationsUrlsInSource(source: string, projectName = ''
   return s;
 }
 
-/** Fix banned Unsplash + placeholders — never inject Pollinations. */
+/** Fix banned Unsplash + placeholders — never inject Pollinations or shared hero.jpg. */
 export function repairBrokenSiteImageSrcs(appSource: string, brief: string, projectName = ''): string {
   const brand = String(projectName || '').trim()
     || (String(brief || '').match(/\b(?:called|named)\s+([A-Z][\w\s-]{1,40})/i)?.[1]?.trim())
     || 'brand';
-  let s = upgradePollinationsUrlsInSource(String(appSource || ''), brand);
+  const { hero } = identityHeroPaths(brand, brief);
+  let s = upgradePollinationsUrlsInSource(String(appSource || ''), brand, brief);
   if (!s) return s;
   const isApple = /\bapple\.com\b/i.test(brief) || /iPhone|MacBook|AirPods/i.test(s);
 
@@ -255,7 +266,7 @@ export function repairBrokenSiteImageSrcs(appSource: string, brief: string, proj
     if (!isBannedUnsplashUrl(m) && !/photo-1554118811|photo-1517248135|photo-150178|photo-1414235/i.test(m)) {
       return m;
     }
-    return '/heroes/hero.jpg';
+    return hero;
   });
 
   s = s.replace(/https?:\/\/via\.placeholder\.com\/[^"')\s]+/gi, (m) => {
@@ -265,9 +276,11 @@ export function repairBrokenSiteImageSrcs(appSource: string, brief: string, proj
     if (/macbook|mac/i.test(m)) return '/heroes/macbook.jpg';
     if (/watch/i.test(m)) return '/heroes/watch.jpg';
     if (/airpods|earbud/i.test(m)) return '/heroes/airpods.jpg';
-    return '/heroes/hero.jpg';
+    return hero;
   });
-  s = s.replace(/https?:\/\/placehold\.co\/[^"')\s]+/gi, () => '/heroes/hero.jpg');
+  s = s.replace(/https?:\/\/placehold\.co\/[^"')\s]+/gi, () => hero);
+  // Legacy shared slot → identity slug
+  s = s.replace(/\/heroes\/hero\.jpg/gi, hero);
   s = s.replace(/src=["']apple-logo\.png["']/gi, 'src="/logo.svg"');
   s = s.replace(/src=["'][^"']*\.(?:png|jpg|jpeg|webp)["']/gi, (m) => {
     if (/https?:\/\//i.test(m) || /\/(?:logo|icons?|heroes?)\//i.test(m) || /unsplash|images\.|pexels|openverse/i.test(m)) {

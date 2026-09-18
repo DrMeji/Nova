@@ -21,6 +21,18 @@ import { buildRouterHistory } from '@/lib/chatHistory';
 import { setLocalPrefs } from '@/lib/localPrefs';
 import { notifyChatDone } from '@/lib/activityIndicators';
 import {
+  resolveConversationalEditAsk,
+  rememberLastEditTopic,
+  inferEditTopicFromAsk,
+} from '@/lib/editAskResolve';
+import {
+  getApplySnapshot,
+  clearApplySnapshot,
+  snapshotToRevertBlocks,
+} from '@/lib/chatApplySnapshotStore';
+import { applyChatReplyEdits } from '@/lib/chatAgentApply';
+import { buildStudioTraceMessage, finalizeCodingChatBubble } from '@/lib/chatCodeReply';
+import {
   makeCreateHost,
   makeDeleteHost,
   makeOpenFolderHost,
@@ -111,9 +123,71 @@ export async function runAIChatSend(content: string, ctx: AIChatSendCtx): Promis
       || resolvedStudio.diskRoot
       || null;
 
+    const workspaceBound = hasActiveWorkspace({
+      files: chatStudioFilesRef.current || resolvedStudio.files,
+      projectId: chatStudioProjectIdRef.current || resolvedStudio.projectId,
+      diskRoot: chatStudioDiskRootRef.current || resolvedStudio.diskRoot,
+      chatId: activeChatId,
+    });
+    const resolvedAsk = resolveConversationalEditAsk({
+      message: prep.content,
+      chatId: activeChatId,
+      messages: messagesRef.current,
+      workspaceBound,
+      hasApplySnapshot: Boolean(getApplySnapshot(activeChatId)),
+    });
+    const editContent = resolvedAsk.content;
+
+    if (resolvedAsk.revertSnapshot && workspaceBound) {
+      const snap = getApplySnapshot(activeChatId);
+      const blocks = snap ? snapshotToRevertBlocks(snap) : '';
+      if (snap && blocks) {
+        const applied = await applyChatReplyEdits({
+          reply: blocks,
+          projectId: chatStudioProjectIdRef.current || resolvedStudio.projectId,
+          projectName: resolvedStudio.name || 'project',
+          files: snap.files,
+          userMessage: 'put it back',
+          diskRoot: snap.diskRoot,
+        });
+        if (applied.ok) {
+          setChatStudioFiles(applied.files);
+          chatStudioFilesRef.current = applied.files;
+          prep.persistStudioSnapshot(activeChatId, {
+            files: applied.files,
+            projectId: chatStudioProjectIdRef.current || resolvedStudio.projectId,
+            diskRoot: snap.diskRoot,
+          });
+          clearApplySnapshot(activeChatId);
+          const topic = inferEditTopicFromAsk(activeChatId, 'put it back', {
+            priorFiles: snap.files,
+            nextFiles: applied.files,
+          });
+          if (topic) rememberLastEditTopic(topic);
+          const answer = finalizeCodingChatBubble({
+            userMessage: prep.content,
+            rawReply: '',
+            changedPaths: applied.updated,
+            applied: true,
+          }) || 'Put it back — restored the previous version.';
+          const reply = buildStudioTraceMessage({
+            startedAt: prep.replyStartedAt,
+            elapsedMs: Math.max(1, Date.now() - prep.replyStartedAt),
+            userMessage: prep.content,
+            answer,
+            wrotePaths: applied.updated,
+            projectName: resolvedStudio.name || 'App',
+          });
+          await finishPlainReply(reply, 'NOVA · undo');
+          return;
+        }
+      }
+    }
+
     const bag: HostBag = {
       turnCtx,
       content: prep.content,
+      editUserMessage: editContent,
       mode,
       activeChatId,
       assistantId,
@@ -145,6 +219,7 @@ export async function runAIChatSend(content: string, ctx: AIChatSendCtx): Promis
       persistModeThread: prep.persistModeThread,
       renameChat: prep.renameChat,
       addChat: prep.addChat,
+      touchRecentProject: prep.touchRecentProject,
       previewFromText: prep.previewFromText,
       setCodePillSticky: prep.setCodePillSticky,
       setDeleteFilePrompt: prep.setDeleteFilePrompt,
@@ -172,7 +247,7 @@ export async function runAIChatSend(content: string, ctx: AIChatSendCtx): Promis
     };
 
     const owned = await dispatchOwnedTurn({
-      content: prep.content,
+      content: editContent,
       mode,
       classifyOpts: {
         diskRoot: chatStudioDiskRootRef.current || resolvedStudio.diskRoot,

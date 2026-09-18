@@ -6,6 +6,8 @@ export type RecentProject = {
   kind?: 'project';
   updatedAt?: string;
   pinnedAt?: string;
+  /** Absolute folder path when known (Chat create / Open folder). */
+  diskPath?: string;
 };
 
 export type RecentCreation = {
@@ -43,9 +45,11 @@ const CREATIONS_KEY = 'NOVA:recent-creations';
 const CHATS_KEY = 'NOVA:recent-chats';
 const DELETED_MEDIA_KEY = 'NOVA:deleted-media-ids';
 
-/** Keep Recent short; older unpinned chats move to History. */
-const RECENT_SIDEBAR_MAX = 12;
+/** Keep Recent short; older unpinned chats move to History overflow. */
+const RECENT_SIDEBAR_MAX = 4;
 const HISTORY_KEEP = 80;
+
+export { RECENT_SIDEBAR_MAX };
 
 /** In-memory thumbs so sidebar/viewer work without stuffing localStorage. */
 const memoryThumbs = new Map<string, string>();
@@ -133,7 +137,7 @@ export function clearRecentProjects(): RecentProject[] {
 }
 
 /** Put a project in Recent only when the user actually works in it (chat / files). */
-export function ensureRecentProject(id: string, name?: string): RecentProject[] {
+export function ensureRecentProject(id: string, name?: string, diskPath?: string): RecentProject[] {
   if (!id || id.startsWith('demo-')) return loadRecentProjects();
   const list = loadRecentProjects();
   const label = (name || '').trim() || 'Code project';
@@ -144,6 +148,7 @@ export function ensureRecentProject(id: string, name?: string): RecentProject[] 
     kind: 'project',
     updatedAt: new Date().toISOString(),
     pinnedAt: existing?.pinnedAt,
+    diskPath: diskPath || existing?.diskPath,
   };
   const next = [nextEntry, ...list.filter(p => p.id !== id)].slice(0, 30);
   saveRecentProjects(next);

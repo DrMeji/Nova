@@ -1,7 +1,7 @@
 {
   "name": "nova",
   "private": true,
-  "version": "0.1.221",
+  "version": "0.1.230",
   "type": "module",
   "main": "electron/main.cjs",
   "description": "NOVA — AI Creation Studio desktop app",
@@ -48,6 +48,7 @@
     "smoke:no-brain-nudge": "tsx --tsconfig tsconfig.app.json scripts/smoke-no-brain-nudge.mjs",
     "smoke:ready-gates": "tsx --tsconfig tsconfig.app.json scripts/smoke-ready-gates.mjs",
     "smoke:create-quality": "tsx --tsconfig tsconfig.app.json scripts/smoke-create-quality.mjs",
+    "smoke:create-identity": "tsx --tsconfig tsconfig.app.json scripts/smoke-create-identity.mjs",
     "smoke:create-intent": "tsx --tsconfig tsconfig.app.json scripts/check-create-intent.mjs",
     "smoke:classify-turn": "tsx --tsconfig tsconfig.app.json scripts/check-classify-turn.mjs",
     "smoke:dispatch-contract": "tsx --tsconfig tsconfig.app.json scripts/check-dispatch-no-answerstudio.mjs",
@@ -59,6 +60,10 @@
     "smoke:auth-heal": "tsx --tsconfig tsconfig.app.json scripts/check-auth-session-heal.mjs",
     "smoke:preview-session": "tsx --tsconfig tsconfig.app.json scripts/smoke-preview-session.mjs",
     "smoke:bind-isolation": "tsx --tsconfig tsconfig.app.json scripts/smoke-bind-isolation.mjs",
+    "smoke:react-import-heal": "tsx --tsconfig tsconfig.app.json scripts/smoke-react-import-heal.mjs",
+    "smoke:stretch-owners": "tsx --tsconfig tsconfig.app.json scripts/smoke-stretch-owners.mjs",
+    "smoke:public-harden": "tsx --tsconfig tsconfig.app.json scripts/smoke-public-harden.mjs",
+    "smoke:version-lock": "node scripts/check-version-lock.mjs",
     "website:dev": "npm --prefix website run dev",
     "website:build": "npm --prefix website run build"
   },

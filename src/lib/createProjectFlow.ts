@@ -141,6 +141,10 @@ export async function resolveNewProjectParent(
 export async function runCreateProjectFlow(
   intent: NewProjectIntent,
   projectId: string,
+  opts?: {
+    /** Fired before each scaffold file is written so chat can show “Building App.tsx…”. */
+    onFileWrite?: (relPath: string) => void;
+  },
 ): Promise<CreateProjectResult> {
   const name = cleanProductTitle(intent.name);
   const cleaned: NewProjectIntent = {
@@ -229,13 +233,50 @@ export async function runCreateProjectFlow(
   });
   const fileMap = Object.fromEntries(scaffold.map(f => [f.path.replace(/\\/g, '/'), f.content]));
 
-  const write = await safeProjectWrite({
-    projectId,
-    projectName: cleaned.name,
-    files: fileMap,
+  // Write one file at a time so the chat bubble can name each path (not a silent bulk dump).
+  const orderedPaths = Object.keys(fileMap).sort((a, b) => {
+    const rank = (p: string) => {
+      if (/package\.json$/i.test(p)) return 0;
+      if (/tsconfig/i.test(p)) return 1;
+      if (/vite\.config/i.test(p)) return 2;
+      if (/index\.html$/i.test(p)) return 3;
+      if (/main\.(tsx|jsx)$/i.test(p)) return 4;
+      if (/App\.(tsx|jsx)$/i.test(p)) return 5;
+      if (/App\.css$/i.test(p)) return 6;
+      if (/index\.css$/i.test(p)) return 7;
+      if (/\.gitignore$/i.test(p)) return 8;
+      return 9;
+    };
+    return rank(a) - rank(b) || a.localeCompare(b);
   });
+  const written: string[] = [];
+  for (const rel of orderedPaths) {
+    const content = fileMap[rel];
+    if (content == null) continue;
+    opts?.onFileWrite?.(rel);
+    const writeOne = await safeProjectWrite({
+      projectId,
+      projectName: cleaned.name,
+      files: { [rel]: content },
+    });
+    if (!writeOne.ok) {
+      return {
+        ok: false,
+        projectPath: bind.root,
+        projectId,
+        parentSource: source,
+        written,
+        files: {},
+        error: writeOne.error || `Scaffold write failed on ${rel}.`,
+        grantHint,
+      };
+    }
+    written.push(...(writeOne.files || [rel]));
+    // Yield so the generating bubble can paint the new status before the next file.
+    await new Promise((r) => setTimeout(r, 140));
+  }
 
-  if (!write.ok) {
+  if (!written.length) {
     return {
       ok: false,
       projectPath: bind.root,
@@ -243,12 +284,65 @@ export async function runCreateProjectFlow(
       parentSource: source,
       written: [],
       files: {},
-      error: write.error || 'Scaffold write failed.',
+      error: 'Scaffold write failed — no files written.',
       grantHint,
     };
   }
 
-  const written = write.files || Object.keys(fileMap);
+  // Fail-closed: confirm key files actually exist on disk (not just write ACK).
+  const sep = finalPath.includes('\\') ? '\\' : '/';
+  const mustCheck = Object.keys(fileMap).filter((p) =>
+    /(^|\/)(package\.json|index\.html|vite\.config\.(js|ts)|src\/main\.(jsx|tsx)|src\/App\.(jsx|tsx)|src\/index\.css)$/i.test(p),
+  );
+  const missingOnDisk: string[] = [];
+  for (const rel of mustCheck) {
+    const full = `${finalPath.replace(/[/\\]+$/, '')}${sep}${rel.replace(/\//g, sep)}`;
+    try {
+      const st = await window.arkDesktop?.workspaceStatPath?.(full);
+      if (!st?.ok || !st.isFile) missingOnDisk.push(rel);
+    } catch {
+      missingOnDisk.push(rel);
+    }
+  }
+  if (missingOnDisk.length) {
+    // One rewrite pass, then re-check.
+    const retry = await safeProjectWrite({
+      projectId,
+      projectName: cleaned.name,
+      files: Object.fromEntries(missingOnDisk.map((p) => [p, fileMap[p]]).filter(([, c]) => Boolean(c))),
+    });
+    if (!retry.ok) {
+      return {
+        ok: false,
+        projectPath: bind.root,
+        projectId,
+        parentSource: source,
+        written: [],
+        files: {},
+        error: `Scaffold wrote incompletely (missing ${missingOnDisk.slice(0, 4).join(', ')}). ${retry.error || ''}`.trim(),
+        grantHint,
+      };
+    }
+    const stillMissing: string[] = [];
+    for (const rel of missingOnDisk) {
+      const full = `${finalPath.replace(/[/\\]+$/, '')}${sep}${rel.replace(/\//g, sep)}`;
+      const st = await window.arkDesktop?.workspaceStatPath?.(full);
+      if (!st?.ok || !st.isFile) stillMissing.push(rel);
+    }
+    if (stillMissing.length) {
+      return {
+        ok: false,
+        projectPath: bind.root,
+        projectId,
+        parentSource: source,
+        written: [],
+        files: {},
+        error: `Could not verify files on disk: ${stillMissing.slice(0, 6).join(', ')}.`,
+        grantHint,
+      };
+    }
+  }
+
   return {
     ok: true,
     projectPath: bind.root,
@@ -439,53 +533,31 @@ export function formatCreateProjectReply(
     || (!hasPackageJson && intent.kind !== 'vite-react' && intent.kind !== 'python');
   const livePreview = Boolean(bootstrap?.previewLive && bootstrap?.devServerUrl);
 
-  let statusLine: string;
-  if (bootstrap?.npmPending) {
-    statusLine = [
-      '**Files written.** Dependencies install in the background.',
-      bootstrap.bootstrapNote || 'Click **Preview** in a moment, or say **make it richer** to expand the UI.',
-    ].join('\n');
-  } else if (bootstrap?.npmInstalled === false) {
-    statusLine = [
-      '**Not Ready yet.** **npm install failed.**',
-      bootstrap.bootstrapNote || 'Dependencies need a one-time install before Preview can run.',
+  const intro = [
+    `I've created **${displayName}** from what you asked for.`,
+    '',
+    livePreview
+      ? `Preview is live — click **Live** under the chat to open it.`
+      : bootstrap?.npmPending
+        ? `Dependencies are still installing in the background — this is **not Ready** yet. Click **Live** after install finishes, or say **install npm dependencies** if it stalls.`
+        : `Click **Live** under the chat when you're ready to view it (dependencies may still be finishing in the background).`,
+  ].join('\n');
+
+  let followUp: string;
+  if (bootstrap?.npmInstalled === false) {
+    followUp = [
       '',
-      'Say **install npm dependencies** to retry (or install Node.js LTS, then retry).',
-    ].join('\n');
+      '**npm install** did not finish — say **install npm dependencies** to retry.',
+      bootstrap.bootstrapNote || '',
+    ].filter(Boolean).join('\n');
   } else if (intent.kind === 'python') {
-    statusLine = '**Ready**. edit `app/main.py` and say what to build next.';
-  } else if (isStatic) {
-    statusLine = '**Ready**. use **Preview** under the chat box to open the site, or **Code** to edit files. Tell me what to add.';
-  } else if (livePreview) {
-    statusLine = `**Ready**. Live Preview is up at **${bootstrap!.devServerUrl}**. Click **Preview** under the chat box to open it.\n\nTell me what to build next (layout, pages, features) and I will edit the files here.`;
-  } else if (hasPackageJson || projectUsesNpm(intent.kind)) {
-    // Vite / npm projects must not claim Ready without a responding localhost.
-    statusLine = `**Not Ready yet.** Files are on disk, but live Preview did not start.${
-      bootstrap?.bootstrapNote ? `\n\n${bootstrap.bootstrapNote}` : ''
-    }\n\nSay **run Preview** after Node/npm is working, or **keep building** if the UI still needs work.`;
+    followUp = '\n\nEdit `app/main.py` next, or tell me what to build.';
+  } else if (isStatic || livePreview || hasPackageJson || projectUsesNpm(intent.kind)) {
+    followUp = '\n\nWant anything changed — layout, products, colors, or images? Tell me what to improve.';
   } else {
-    statusLine = '**Ready**. use **Preview** under the chat box, or **Code** to edit files.';
+    followUp = '\n\nWant anything changed? Tell me what to improve.';
   }
 
-  const lines = [
-    `**Created ${displayName}**`,
-    '',
-    `**Path:** \`${result.projectPath}\``,
-    result.parentSource ? `**Location:** ${result.parentSource}` : '',
-    '',
-    `**Files written (${result.written.length}):**`,
-    ...result.written.slice(0, 12).map(p => `- \`${p}\``),
-    result.written.length > 12 ? `- …and ${result.written.length - 12} more` : '',
-    '',
-    statusLine,
-    bootstrap?.bootstrapNote && bootstrap.npmInstalled && livePreview
-      ? `\n${bootstrap.bootstrapNote}`
-      : '',
-    '',
-    'This chat is bound to that folder.',
-    result.grantHint || '',
-  ].filter(Boolean);
-
-  return lines.join('\n');
+  return `${intro}${followUp}${result.grantHint ? `\n\n_${result.grantHint}_` : ''}`;
 }
 

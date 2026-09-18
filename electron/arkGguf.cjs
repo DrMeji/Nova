@@ -42,6 +42,33 @@ function getGgufCtx() {
   return cachedGgufCtx;
 }
 
+/**
+ * Cap llama threads so local inference cannot pin every logical core
+ * (that freezes YouTube / the desktop while chat or create polish runs).
+ * Leave UI headroom; scale the cap up on strong multi-core PCs.
+ */
+function getGgufThreads() {
+  const n = Math.max(1, (os.cpus() || []).length || 1);
+  const leaveFree = n >= 16 ? 4 : n >= 8 ? 2 : 1;
+  const hardCap = n >= 16 ? 10 : n >= 8 ? 6 : 4;
+  return Math.max(2, Math.min(n - leaveFree, hardCap));
+}
+
+function lowerChildPriority(pid) {
+  if (!pid) return;
+  try {
+    const levels = os.constants.priority;
+    const cores = Math.max(1, (os.cpus() || []).length || 1);
+    // Strong machines: BELOW_NORMAL (still yields to UI). Weak: LOWEST.
+    const level = cores >= 8
+      ? (levels.PRIORITY_BELOW_NORMAL ?? levels.PRIORITY_LOWEST)
+      : (levels.PRIORITY_LOWEST ?? levels.PRIORITY_BELOW_NORMAL);
+    if (level != null) os.setPriority(pid, level);
+  } catch {
+    /* ignore — some hosts disallow priority changes */
+  }
+}
+
 function modelsDir() {
   return arkPaths.modelsDir();
 }
@@ -614,12 +641,23 @@ function killLlamaChild(child) {
 
 function cancelGguf(jobIdOrOpts) {
   let targetId = '';
+  let scopedChatMiss = false;
   if (typeof jobIdOrOpts === 'string') {
     targetId = jobIdOrOpts.trim();
   } else if (jobIdOrOpts && typeof jobIdOrOpts === 'object') {
     const jid = String(jobIdOrOpts.jobId || '').trim();
     const cid = String(jobIdOrOpts.chatId || '').trim();
-    targetId = jid || (cid ? (chatToJob.get(cid) || '') : '');
+    if (jid) {
+      targetId = jid;
+    } else if (cid) {
+      targetId = chatToJob.get(cid) || '';
+      // Explicit chat-scoped Stop with no job yet — never kill another chat.
+      if (!targetId) scopedChatMiss = true;
+    }
+  }
+
+  if (scopedChatMiss) {
+    return { ok: true, cancelled: false };
   }
 
   // No id → cancel active job (legacy Stop / single-flight).
@@ -706,10 +744,12 @@ async function bindLlamaServer(bin, gguf, modelId) {
       '--host', '127.0.0.1',
       '--port', String(candidate),
       '-c', String(getGgufCtx()),
+      '-t', String(getGgufThreads()),
       '--parallel', '1',
     ];
     if (mmproj) args.push('--mmproj', mmproj);
     const child = spawn(bin, args, { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
+    lowerChildPriority(child.pid);
     serverChild = child;
     serverGguf = gguf;
     serverMmproj = mmproj;
@@ -1182,7 +1222,7 @@ function runGgufCliStream(modelId, prompt, onChunk, timeoutMs = 240000, nPredict
       '-f', promptFile,
       '-n', String(nPredict),
       '-c', String(getGgufCtx()),
-      '-t', String(Math.max(4, os.cpus().length)),
+      '-t', String(getGgufThreads()),
       '--temp', String(temperature),
       '--no-conversation',
       '--single-turn',
@@ -1192,6 +1232,7 @@ function runGgufCliStream(modelId, prompt, onChunk, timeoutMs = 240000, nPredict
     if (mmproj) args.push('--mmproj', mmproj);
     for (const imgPath of tempImages) args.push('--image', imgPath);
     const child = spawn(bin, args, { windowsHide: true });
+    lowerChildPriority(child.pid);
     try {
       child.stdin?.end();
     } catch {

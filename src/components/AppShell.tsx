@@ -26,7 +26,7 @@ import { JobsStrip } from '@/components/JobsStrip';
 import { PostLoginSafetyTip } from '@/components/PostLoginSafetyTip';
 import { AuthAmbientOrbs } from '@/components/auth/AuthAmbientOrbs';
 import { NovaMark } from '@/components/NovaMark';
-import { comparePinnedThenRecent } from '@/lib/recentStore';
+import { comparePinnedThenRecent, RECENT_SIDEBAR_MAX } from '@/lib/recentStore';
 import { formatArkId } from '@/lib/arkUserId';
 import { isArkDevEmail } from '@/lib/arkDevAccount';
 import {
@@ -306,7 +306,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         { pinnedAt: a.pinned ? '1' : undefined, updatedAt: a.updatedAt },
         { pinnedAt: b.pinned ? '1' : undefined, updatedAt: b.updatedAt },
       );
-    const sorted = [...chats].sort(byPin).slice(0, 7);
+    const sorted = [...chats].sort(byPin).slice(0, RECENT_SIDEBAR_MAX);
     return {
       chats: sorted,
       projects: [] as typeof sorted,

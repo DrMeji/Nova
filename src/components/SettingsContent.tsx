@@ -18,7 +18,7 @@ import {
   type DensityPref,
   type LocalPrefs,
 } from '@/lib/localPrefs';
-import { ARK_CHANGELOG } from '@/lib/changelog';
+import { NOVA_CHANGELOG } from '@/lib/changelog';
 import { clearSetupCompleted } from '@/lib/setup';
 import { hydratePrefsFromWorkspaceGrants, syncWorkspaceGrantsFromPrefs } from '@/lib/workspaceGrants';
 import { formatArkId } from '@/lib/arkUserId';
@@ -475,7 +475,7 @@ export function SettingsContent({ onClose, initialSection }: { onClose?: () => v
     }
   };
 
-  const visibleChangelog = ARK_CHANGELOG.filter(entry => {
+  const visibleChangelog = NOVA_CHANGELOG.filter(entry => {
     // Beta channel removed from Settings — stable entries only.
     if (entry.channel !== 'stable') return false;
     return entry.version === appVersion;

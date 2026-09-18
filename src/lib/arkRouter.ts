@@ -15,12 +15,14 @@ import {
   looksLikePromptEcho,
   looksLikeRestatedPriorAnswer,
   looksLikeUserAskEcho,
+  looksLikeTruncatedAssistantReply,
   isSoftContinuityAsk,
   usableAssistantText,
   stripFirstPersonAskRestatement,
   type RouterChatTurn,
 } from '@/lib/chatHistory';
 import { honestNoLiveChatReply } from '@/lib/arkCapacity';
+import { looksLikeTalkBeforeCreateAsk, looksLikeRequirementsAsk } from '@/lib/chatIdeaIntent';
 import { brainGenerate, brainGenerateStream, probeBrain } from '@/lib/brain';
 import {
   cloudChatFreeKeys,
@@ -226,8 +228,10 @@ async function tryLocalChat(
         }
       }
       // Local models often restate “I want to build…” — strip first; only regenerate if still echo-only.
+      // Skip the expensive second generate for exploratory talk (keeps the desktop responsive).
       if (
         kind === 'chat'
+        && !looksLikeTalkBeforeCreateAsk(message)
         && looksLikeUserAskEcho(cleaned || rawText, message)
       ) {
         const firstDraft = (cleaned || rawText).trim();
@@ -343,31 +347,123 @@ async function tryLocalChat(
         });
         return null;
       }
-      // Thin or rushed chat answers — deepen for substance (1+ min think is OK).
-      // Skip when the draft already has a real outline/list (retry was retracting FPS plans).
-      const thoroughAsk = /\b(?:explain|thorough|cover|detail|why|how\s+does|trilateration|walk\s+me\s+through)\b/i.test(
-        String(message || ''),
-      );
-      const hasSolidOutline = ((reply.match(/^\s*(?:\d+\.|[-*•])/gm) || []).length >= 3)
-        || ((reply.match(/\*\*[^*\n]{3,}\*\*/g) || []).length >= 3 && reply.trim().length >= 500);
+      // Never auto-deepen ordinary chat — that wiped the first stream and pasted a second answer
+      // (visible flicker). Only deepen when the user clearly asked for thorough detail.
+      // But DO finish truncated drafts (ends with ":" / "here's the structure" with nothing after).
+      let workingReply = (cleaned || rawText || reply).trim();
+      // Exploratory product talk / requirements must stay prose — fences, @@@FILE, or glued :javascript dumps.
+      const talkBleed = kind === 'chat'
+        && (looksLikeTalkBeforeCreateAsk(message) || looksLikeRequirementsAsk(message))
+        && (
+          /^```/.test(workingReply)
+          || /@@@FILE\b/i.test(workingReply)
+          || /```/.test(workingReply)
+          || /:(?:javascript|typescript|python|java|cpp|jsx|tsx)\b/i.test(workingReply)
+          || /^(?:import |const\s+app\s*=|from\s+flask\s+import)/im.test(workingReply)
+        );
+      if (talkBleed) {
+        onAttemptReset?.();
+        const prosePrompt = [
+          packHistoryPrompt(history, message),
+          '',
+          'CRITICAL RETRY: Answer in clear prose only. Confirm familiarity if asked, explain what the product is, then outline what building something like it involves.',
+          'Do NOT emit code, @@@FILE blocks, markdown fences, or language tags like :javascript. Finish in complete sentences.',
+        ].join('\n');
+        try {
+          const retry = onChunk
+            ? await brainGenerateStream(prosePrompt, id, onChunk, kind)
+            : await brainGenerate(prosePrompt, id, kind);
+          const retryClean = usableAssistantText(retry.reply, message, prevAsst);
+          const retryRaw = String(retry.reply || '').trim();
+          const best = (retryClean || retryRaw).trim();
+          const stillBleed = /^```/.test(best)
+            || /@@@FILE\b/i.test(best)
+            || /```/.test(best)
+            || /:(?:javascript|typescript|python|cpp|jsx)\b/i.test(best);
+          if (best && !stillBleed && best.length >= 80) {
+            cleaned = best;
+            rawText = best;
+            workingReply = best;
+            Object.assign(result, retry);
+          } else if (workingReply) {
+            // Last resort: strip protocol junk from the first draft so the bubble stays readable.
+            const stripped = stripFileBlocks(workingReply)
+              .replace(/([A-Za-z0-9).\]"'])\s*:\s*(javascript|typescript|python|java|cpp|jsx|tsx)\b/gi, '$1')
+              .replace(/\n{3,}/g, '\n\n')
+              .trim();
+            if (stripped.length >= 40) {
+              cleaned = stripped;
+              rawText = stripped;
+              workingReply = stripped;
+            }
+          }
+        } catch {
+          /* keep prior */
+        }
+      }
       if (
         kind === 'chat'
-        && reply.trim().length > 0
+        && looksLikeTruncatedAssistantReply(workingReply)
+        && !/^(?:hi|hello|hey|yo|sup|howdy)\b/i.test(String(message || '').trim())
+        && !/\b(?:what\s+can\s+you\s+do|who\s+are\s+you)\b/i.test(String(message || ''))
+      ) {
+        const continuePrompt = [
+          packHistoryPrompt(history, message),
+          '',
+          'CONTINUE: Your last draft stopped mid-answer. Pick up exactly where it ended and finish in complete sentences.',
+          'Do not restart. Do not greet. Prefer clear prose over unfinished code scaffolds unless the user asked for code.',
+          '',
+          'Draft so far:',
+          workingReply.slice(0, 2800),
+        ].join('\n');
+        try {
+          // Do not wipe the visible bubble — append continuation.
+          const retry = onChunk
+            ? await brainGenerateStream(continuePrompt, id, onChunk, kind)
+            : await brainGenerate(continuePrompt, id, kind);
+          const retryClean = usableAssistantText(retry.reply, message, prevAsst);
+          const retryRaw = String(retry.reply || '').trim();
+          const cont = (retryClean || retryRaw).trim();
+          if (cont) {
+            // If the model restarted, prefer the longer finished piece; else append.
+            const merged = cont.startsWith(workingReply.slice(0, Math.min(40, workingReply.length)))
+              || cont.length > workingReply.length + 40
+              ? cont
+              : `${workingReply}\n\n${cont}`.trim();
+            if (merged.length > workingReply.length) {
+              cleaned = merged;
+              rawText = merged;
+              workingReply = merged;
+              Object.assign(result, retry);
+            }
+          }
+        } catch {
+          /* keep truncated draft */
+        }
+      }
+      const thoroughAsk = /\b(?:explain|thorough|cover|detail|why|how\s+does|trilateration|walk\s+me\s+through|in\s+depth|deep\s+dive)\b/i.test(
+        String(message || ''),
+      );
+      const wantsShort =
+        /^(?:hi|hello|hey|yo|sup|howdy)\b/i.test(String(message || '').trim())
+        || /\b(?:what\s+can\s+you\s+do|who\s+are\s+you|what\s+is\s+nova)\b/i.test(String(message || ''));
+      const hasSolidOutline = ((workingReply.match(/^\s*(?:\d+\.|[-*•])/gm) || []).length >= 3)
+        || ((workingReply.match(/\*\*[^*\n]{3,}\*\*/g) || []).length >= 3 && workingReply.trim().length >= 500);
+      if (
+        kind === 'chat'
+        && thoroughAsk
+        && !wantsShort
+        && workingReply.trim().length > 0
         && !hasSolidOutline
-        && (
-          reply.trim().length < 900
-          || (thoroughAsk && reply.trim().length < 2200)
-        )
-        && !/^(hi|hello|hey|thanks|thank you)[.!]?\s*$/i.test(reply.trim())
-        && !looksLikePromptEcho(reply)
+        && workingReply.trim().length < 2200
+        && !/^(hi|hello|hey|thanks|thank you)[.!]?\s*$/i.test(workingReply.trim())
+        && !looksLikePromptEcho(workingReply)
       ) {
         onAttemptReset?.();
         const deepenPrompt = [
           packHistoryPrompt(history, message),
           '',
-          thoroughAsk
-            ? 'CRITICAL RETRY: Expand this into a longer, clearer answer. Cover every requested topic with concrete detail. Take your time. Do not pad with filler. Do not restart with a greeting.'
-            : 'CRITICAL RETRY: Your last draft was too short or rushed. Take your time. Write a longer, clearer, more accurate answer with real detail, numbered structure if helpful, and concrete examples. Do not pad with filler. Do not restart with a greeting.',
+          'CRITICAL RETRY: Expand this into a longer, clearer answer. Cover every requested topic with concrete detail. Take your time. Do not pad with filler. Do not restart with a greeting.',
         ].join('\n');
         try {
           const retry = onChunk
@@ -375,7 +471,7 @@ async function tryLocalChat(
             : await brainGenerate(deepenPrompt, id, kind);
           const retryClean = usableAssistantText(retry.reply, message, prevAsst);
           const retryRaw = String(retry.reply || '').trim();
-          if ((retryClean || retryRaw).length > reply.length) {
+          if ((retryClean || retryRaw).length > workingReply.length) {
             cleaned = retryClean || retryRaw;
             rawText = retryRaw;
             Object.assign(result, retry);
@@ -389,6 +485,7 @@ async function tryLocalChat(
       if (
         kind === 'chat'
         && thoroughAsk
+        && !wantsShort
         && afterDeepen.length > 0
         && afterDeepen.length < 3600
         && !looksLikePromptEcho(afterDeepen)
@@ -447,15 +544,16 @@ async function tryLocalChat(
   const first = await runOne(modelId);
   if (first?.reply?.trim() && isStrongLocal(first.source)) return first;
 
-  // Coding must not hop through every weak chat GGUF (each can take minutes).
-  if (!failover || kind === 'coding') return null;
+  // Coding: always try ranked coder backups on this PC (adaptive), even if cloud autoFailover is off.
+  // Chat: respect autoFailover pref.
+  if (!failover && kind !== 'coding') return null;
 
   const extras: string[] = [];
   if (failoverIds?.length) {
     for (const id of failoverIds) {
       if (id && id !== modelId && !extras.includes(id)) extras.push(id);
     }
-  } else {
+  } else if (kind !== 'coding') {
     try {
       const status = await getEngineStatus();
       for (const m of status.models) {
@@ -470,6 +568,19 @@ async function tryLocalChat(
     } catch {
       /* ignore */
     }
+  }
+
+  // Coding: hop only along ranked coder GGUFs (never Instruct chat brains).
+  // Up to 2 backups so a strong PC can fall 32B → 14B → 7B when one stalls.
+  if (kind === 'coding') {
+    const coderExtras = extras.filter((id) =>
+      /coder|starcoder|codestral|codellama|devstral|deepseek-coder/i.test(id),
+    );
+    for (const id of coderExtras.slice(0, 2)) {
+      const hit = await runOne(id);
+      if (hit && isStrongLocal(hit.source)) return hit;
+    }
+    return null;
   }
 
   // Chat: one brain attempt. hopping local GGUFs can stall for minutes with no answer.
@@ -814,16 +925,41 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
 
   const hwSnap = loadHardwareSnapshot();
   const ramGb = hwSnap ? parseRamGb(hwSnap) : 8;
+  let maxCoderParamsB: number | null = null;
+  if (brainKind === 'coding') {
+    try {
+      const { getBrainProfile } = await import('@/lib/brainProfile');
+      maxCoderParamsB = (await getBrainProfile()).maxCoderParamsB;
+    } catch {
+      maxCoderParamsB = null;
+    }
+  }
   let ranked: string[] = [];
   try {
     const status = await getEngineStatus();
-    ranked = rankedReadyEngineIds(status.models, intent, ramGb);
+    ranked = rankedReadyEngineIds(status.models, intent, ramGb, maxCoderParamsB);
   } catch {
     /* Engine offline */
   }
   const picked = ranked[0];
   const rest = ranked.slice(1);
   const capableLocal = Boolean(picked && !isWeakChatBrain(picked));
+
+  // Coding with no ready coder GGUF — never pretend Instruct built files.
+  if (brainKind === 'coding' && isAuto && !picked && !opts.preferCloudCoding) {
+    return {
+      reply: [
+        'No local **coder** model is ready, so this build cannot run yet.',
+        '',
+        'Install **qwen25-coder-7b** (or another coder) under **Models / Brain**, or pin a cloud coding model.',
+        'Chat Instruct models answer questions — they are not used to fake a code build.',
+      ].join('\n'),
+      modelName: 'NOVA · need coder',
+      source: 'none',
+      tier: 'local-free',
+      attempted,
+    };
+  }
 
   // ── NOVA Auto: Engine is the brain; Ollama is last-resort optional ──
   if (isAuto) {
@@ -975,6 +1111,24 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
 
     const ollama = await tryOllama(history, opts.message, preferredId, attempted);
     if (ollama) return ollama;
+
+    // Models may be installed but every hop failed (timeout / busy / OOM).
+    // Never claim “no live model” when we clearly attempted local Engine.
+    const triedLocal = attempted.some((a) => /NOVA Engine|ark-gguf|local/i.test(a));
+    if (triedLocal) {
+      return {
+        reply: [
+          'Your local brain is installed, but that reply did not finish (busy, timed out, or overloaded).',
+          '',
+          'Try again in a moment. If the desktop feels frozen while a reply runs, wait for it to finish or press Stop, then resend.',
+          'For smoother chat, keep Multimodal on Auto and prefer the 7B instruct brain for normal conversation (coders are for file builds).',
+        ].join('\n'),
+        modelName: 'Nova Multimodal',
+        source: 'none',
+        tier: 'local-free',
+        attempted,
+      };
+    }
 
     return {
       reply: honestNoLiveChatReply(),

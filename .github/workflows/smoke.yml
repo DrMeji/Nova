@@ -59,6 +59,11 @@ jobs:
       - run: npm run smoke:auth-heal
       - run: npm run smoke:preview-session
       - run: npm run smoke:bind-isolation
+      - run: npm run smoke:stretch-owners
+      - run: npm run smoke:public-harden
+      - run: npm run smoke:react-import-heal
+      - run: npm run smoke:version-lock
+      - run: npm run smoke:create-identity
       # Brain HTTP smoke only when a local brain is running (desktop app).
       - name: Brain API smoke (optional)
         env:

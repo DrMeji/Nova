@@ -21,11 +21,16 @@ import { shouldPaintStudioLive } from '@/lib/chatTurnIsolation';
 import { resolveScopedFolderPath, formatFolderLocatedMessage, syncWorkspaceGrantsFromPrefs } from '@/lib/workspaceGrants';
 import { countLineDiff } from '@/lib/agentTrace';
 import { buildStudioTraceMessage } from '@/lib/chatCodeReply';
+import { getActiveBrainId, isWeakCoderId } from '@/lib/brainRoles';
+import { inferEditTopicFromAsk, rememberLastEditTopic } from '@/lib/editAskResolve';
+import { pushApplySnapshot } from '@/lib/chatApplySnapshotStore';
 
 /** Shared wiring from AIChat send — refs, setters, turn locals. */
 export type HostBag = {
   turnCtx: TurnCtx;
   content: string;
+  /** Expanded surgical ask when shorthand was resolved; falls back to content. */
+  editUserMessage?: string;
   mode: string;
   activeChatId: string;
   assistantId: string;
@@ -62,6 +67,7 @@ export type HostBag = {
   persistModeThread: (mode: string, next: unknown[], opts: { chatId: string }) => void;
   renameChat: (chatId: string, title: string) => void;
   addChat: (chat: Record<string, unknown>) => void;
+  touchRecentProject?: (id: string, name?: string, diskPath?: string) => void;
   previewFromText: (text: string) => string | undefined;
   setCodePillSticky: (on: boolean) => void;
   setDeleteFilePrompt: (p: unknown) => void;
@@ -89,7 +95,18 @@ export type HostBag = {
 };
 
 export function makeCreateHost(bag: HostBag): CreateTurnHost {
-  const { content, mode, activeChatId, createIntentEarly, workspaceActiveForCreate } = bag;
+  const { content, mode, activeChatId, createIntentEarly, workspaceActiveForCreate, pinnedModel } = bag;
+  const sticky = pinnedModel.source === 'auto' ? bag.threadBrainRef.current : null;
+  // Prefer active coder prefs when the menu is on Auto — create polish needs a real GGUF id.
+  let preferredId = pinnedModel.id;
+  let preferredName = pinnedModel.name;
+  if (pinnedModel.id === 'NOVA-auto' || pinnedModel.source === 'auto') {
+    const coderPref = getActiveBrainId('coder');
+    if (coderPref && coderPref !== 'NOVA-auto' && !isWeakCoderId(coderPref)) {
+      preferredId = coderPref;
+      preferredName = coderPref;
+    }
+  }
   return {
     content,
     chatId: activeChatId,
@@ -101,7 +118,9 @@ export function makeCreateHost(bag: HostBag): CreateTurnHost {
     routeChatId: bag.routeChatId,
     pushStatus: bag.pushAssistantStatus,
     stopIfSuperseded: bag.stopIfSuperseded,
+    shouldAbort: () => bag.mySeq !== bag.genSeqRef.current || bag.stopRequestedRef.current,
     finishPlainReply: bag.finishPlainReply,
+    replyStartedAt: bag.replyStartedAt,
     syncGrants: syncWorkspaceGrantsFromPrefs,
     commitStudio: (opts) => { bag.commitStudioForChat(activeChatId, opts); },
     setChatCodePill,
@@ -109,10 +128,17 @@ export function makeCreateHost(bag: HostBag): CreateTurnHost {
     setCodePillSticky: bag.setCodePillSticky,
     renameChat: bag.renameChat,
     addChat: (chat) => bag.addChat(chat as never),
+    touchRecentProject: bag.touchRecentProject,
     setLastDiskTarget,
     clearPending: clearLastPendingGreenfield,
     getPending: getLastPendingGreenfield,
     previewFromText: bag.previewFromText,
+    modelId: preferredId,
+    modelName: preferredName,
+    stickyModelId: sticky?.modelId,
+    stickyModelName: sticky?.modelName,
+    preferredModelId: preferredId,
+    preferredModelName: preferredName,
   };
 }
 
@@ -214,7 +240,7 @@ export function makeEditHost(bag: HostBag): RunEditTurnHost {
     : (bag.chatStudioFilesRef.current || resolvedStudio.files || {});
   return {
     content: bag.content,
-    editUserMessage: bag.content,
+    editUserMessage: bag.editUserMessage || bag.content,
     projectId: turnCtx.projectId || resolvedStudio.projectId || bag.chatStudioProjectIdRef.current,
     projectLabel: turnCtx.name || resolvedStudio.name || 'App',
     diskRoot: turnCtx.diskRoot || bag.chatStudioDiskRootRef.current || resolvedStudio.diskRoot || null,
@@ -229,7 +255,22 @@ export function makeEditHost(bag: HostBag): RunEditTurnHost {
     pushStatus: bag.pushAssistantStatus,
     countLineDiff,
     buildStudioTraceMessage,
-    onApplied: ({ files: nextFiles, reply, provider, elapsedMs }) => {
+    onApplied: ({ files: nextFiles, updated, reply, provider, elapsedMs }) => {
+      const topic = inferEditTopicFromAsk(activeChatId, bag.editUserMessage || bag.content, {
+        priorFiles: files,
+        nextFiles,
+      });
+      if (topic) rememberLastEditTopic(topic);
+      if (updated?.length) {
+        pushApplySnapshot({
+          chatId: activeChatId,
+          assistantId,
+          diskRoot: turnCtx.diskRoot || bag.chatStudioDiskRootRef.current || resolvedStudio.diskRoot || null,
+          files,
+          updatedPaths: updated,
+          at: Date.now(),
+        });
+      }
       bag.setChatStudioFiles(nextFiles);
       bag.chatStudioFilesRef.current = nextFiles;
       resolvedStudio.files = nextFiles;

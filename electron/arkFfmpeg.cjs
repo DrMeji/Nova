@@ -4,6 +4,7 @@
  */
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { spawn, execFile } = require('child_process');
 const { URL } = require('url');
@@ -13,6 +14,15 @@ const arkPaths = require('./arkPaths.cjs');
 /** Pinned BtbN Windows GPL build (full, not shared). */
 const FFMPEG_URL_WIN =
   'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip';
+
+function lowerChildPriority(pid) {
+  if (!pid) return;
+  try {
+    os.setPriority(pid, os.constants.priority.PRIORITY_BELOW_NORMAL);
+  } catch {
+    /* ignore */
+  }
+}
 
 function binDir() {
   return arkPaths.binDir();
@@ -181,6 +191,7 @@ async function stillToMp4(stillPath, opts = {}) {
       outPath,
     ];
     const child = spawn(bin, args, { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
+    lowerChildPriority(child.pid);
     let stderr = '';
     const timer = setTimeout(() => {
       try {
@@ -255,6 +266,7 @@ async function sharpenUpscaleStill(inputPath, opts = {}) {
         outPath,
       ];
       const child = spawn(bin, args, { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
+      lowerChildPriority(child.pid);
       let stderr = '';
       const timer = setTimeout(() => {
         try { child.kill(); } catch { /* ignore */ }

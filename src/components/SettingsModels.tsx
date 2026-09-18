@@ -18,7 +18,7 @@ import { VoiceSettingsPanel } from '@/components/VoiceSettingsPanel';
 import { SettingsSystemHealth } from '@/components/SettingsSystemHealth';
 import { NovaMark } from '@/components/NovaMark';
 import { BrandMark, StatusCheck } from '@/components/BrandMark';
-import { ARK_CHANGELOG } from '@/lib/changelog';
+import { NOVA_CHANGELOG } from '@/lib/changelog';
 import { formatArkId } from '@/lib/arkUserId';
 import { isArkDevEmail } from '@/lib/arkDevAccount';
 import { clearSetupCompleted } from '@/lib/setup';
@@ -359,9 +359,9 @@ export function SettingsModels({ ctx }: { ctx: any }) {
                         || (window.arkDesktop?.isElectron
                           ? '…'
                           : 'Browser')}
-                      {userDataProfile === 'ARK-Dev'
+                      {userDataProfile === 'NOVA-Dev' || userDataProfile === 'ARK-Dev'
                         ? ' · source bat'
-                        : userDataProfile === 'ARK' || userDataProfile === 'NOVA'
+                        : userDataProfile === 'NOVA' || userDataProfile === 'ARK'
                           ? ' · installed'
                           : ''}
                     </span>

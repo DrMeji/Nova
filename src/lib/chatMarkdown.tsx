@@ -72,11 +72,19 @@ function splitBlocks(text: string): Block[] {
 
   for (const line of lines) {
     const fenceOpen = line.match(/^```([\w+-]*)\s*$/);
+    const fenceOpenInline = !fenceOpen && line.match(/^```([\w+-]*)\s+(.*)$/);
     if (fenceOpen && codeLines === null) {
       flushPara();
       flushList();
       codeLang = fenceOpen[1] || '';
       codeLines = [];
+      continue;
+    }
+    if (fenceOpenInline && codeLines === null) {
+      flushPara();
+      flushList();
+      codeLang = fenceOpenInline[1] || '';
+      codeLines = [fenceOpenInline[2]];
       continue;
     }
     if (/^```\s*$/.test(line) && codeLines !== null) {
@@ -277,9 +285,9 @@ export function ChatMarkdown({ text }: { text: string }) {
         }
         if (block.type === 'ol') {
           return (
-            <ol key={i} className="list-decimal pl-5 space-y-2">
+            <ol key={i} className="list-decimal list-inside space-y-2 [overflow-wrap:anywhere] marker:font-semibold marker:tabular-nums">
               {block.items.map((item, j) => (
-                <li key={j} className="[&::marker]:font-semibold">
+                <li key={j} className="pl-1">
                   <span className="font-semibold">{renderInline(item.text)}</span>
                   {item.kids && item.kids.length > 0 ? (
                     <ul className="list-none pl-0 mt-1 space-y-1 font-normal">

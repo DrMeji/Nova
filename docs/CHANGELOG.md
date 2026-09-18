@@ -4,6 +4,13 @@ Product release notes for Settings → Update and release packaging.
 
 > **Canonical home:** this file. In-app Settings reads `src/lib/changelog.ts` (`ARK_CHANGELOG`).
 
+## 0.1.230
+
+- Public harden: chat isolation smokes, Stop-by-chatId, preview `:0` reject, quit kills Vite
+- Blank-Live fix: heal/gate `React.*` without `import React`
+- CreateIdentity seal + requirements≠create + greenfield start-building → create
+- Secrets tree walk, vault-only desktop keys, `.env` write block, version-lock smoke
+
 ## 0.1.220
 
 - Basic public ready (~80–85): AIChat shell thin; `useAIChatSend` ≤400 with `chatTurnHosts`

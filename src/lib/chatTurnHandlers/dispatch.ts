@@ -163,7 +163,10 @@ export async function dispatchOwnedTurn(host: DispatchHost): Promise<DispatchOwn
           content: host.chatHost.content || host.content,
         });
         if (host.finishPlainReply) {
-          await host.finishPlainReply(chatOutcome.text, 'NOVA');
+          await host.finishPlainReply(
+            chatOutcome.text,
+            chatOutcome.provider || 'NOVA',
+          );
         }
         return { status: 'handled', classified, chatOutcome };
       }

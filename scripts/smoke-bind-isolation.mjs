@@ -55,7 +55,28 @@ assert.notEqual(boundB2.diskRoot, rootA);
 const stillA = getBoundStudio(chatA);
 assert.equal(stillA?.diskRoot, rootA);
 
+// Pending brief must not cross chats (plan in A, create in B).
+const {
+  setLastPendingGreenfield,
+  getLastPendingGreenfield,
+  clearLastPendingGreenfield,
+} = await import('../src/lib/chatStudioStore.ts');
+
+clearLastPendingGreenfield(chatA);
+clearLastPendingGreenfield(chatB);
+setLastPendingGreenfield(chatA, {
+  name: 'BakeryBrief',
+  slug: 'bakerybrief',
+  kind: 'vite-react',
+  summary: 'cream bakery',
+  problemLine: 'bakery',
+});
+assert.equal(getLastPendingGreenfield(chatB), null, 'chat B must not inherit chat A pending brief');
+assert.equal(getLastPendingGreenfield(chatA)?.name, 'BakeryBrief');
+
 clearChatStudio(chatA);
 clearChatStudio(chatB);
+clearLastPendingGreenfield(chatA);
+clearLastPendingGreenfield(chatB);
 
 console.log('smoke:bind-isolation ok');

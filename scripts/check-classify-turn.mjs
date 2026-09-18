@@ -55,6 +55,43 @@ check('looksLikeBuildStart(build me a website)', looksLikeBuildStart('build me a
   const r = classifyTurn('keep building');
   check('unbound keep building → create', r.kind === 'create', `${r.kind} ${r.reason}`);
 }
+{
+  const ask = 'i want to build a app like discord, what do i need to build it Like all the requirements and stuff. What do I actually need';
+  const r = classifyTurn(ask);
+  check('Discord requirements ask → chat (not create)', r.kind === 'chat', `${r.kind} ${r.reason}`);
+  check('requirements reason', r.reason === 'requirements-advice' || r.reason === 'talk-before-create', r.reason);
+}
+{
+  const ask = 'i want to build a app like twitch tv, Are you familiar with Twitch TV the Streaming platform app';
+  const r = classifyTurn(ask);
+  check('Twitch exploratory ask → chat (not create)', r.kind === 'chat', `${r.kind} ${r.reason}`);
+}
+{
+  const r = classifyTurn('Build me a Discord-like chat app called Nightcord');
+  check('named Discord clone build → create', r.kind === 'create', `${r.kind} ${r.reason}`);
+}
+{
+  const r = classifyTurn('scaffold a chat app now');
+  check('scaffold now → create', r.kind === 'create', `${r.kind} ${r.reason}`);
+}
+{
+  const r = classifyTurn('ok start.');
+  check('ok start. → create', r.kind === 'create', `${r.kind} ${r.reason}`);
+}
+{
+  const r = classifyTurn('Start building Nightcord first slice.');
+  check('Start building after requirements → create', r.kind === 'create', `${r.kind} ${r.reason}`);
+  check('greenfield-create-go reason', r.reason === 'greenfield-create-go', r.reason);
+}
+{
+  const r = classifyTurn('ok start building');
+  check('ok start building → create', r.kind === 'create', `${r.kind} ${r.reason}`);
+}
+{
+  // Bound folder: "start building" without brand-new stays polish, not a second project.
+  const r = classifyTurn('start building', { diskRoot: 'C:\\Ovenfold', files: { 'src/App.jsx': 'x' } });
+  check('start building on bound → edit/keep (not create)', r.kind !== 'create', `${r.kind} ${r.reason}`);
+}
 
 if (failed) {
   console.error(`\n${failed} failed`);

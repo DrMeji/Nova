@@ -4,6 +4,7 @@
  */
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { spawn, execFile } = require('child_process');
 const { URL } = require('url');
@@ -13,6 +14,15 @@ const arkPaths = require('./arkPaths.cjs');
 /** Pinned sd.cpp Windows/Linux CPU build. */
 const SD_TAG = 'master-656-0e4ee04';
 const SD_COMMIT = '0e4ee04';
+
+function lowerChildPriority(pid) {
+  if (!pid) return;
+  try {
+    os.setPriority(pid, os.constants.priority.PRIORITY_BELOW_NORMAL);
+  } catch {
+    /* ignore */
+  }
+}
 
 function modelsDir() {
   return arkPaths.modelsDir();
@@ -379,6 +389,7 @@ async function generateLocalImage(prompt, opts = {}) {
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
+    lowerChildPriority(child.pid);
     let stderr = '';
     const timer = setTimeout(() => {
       try {

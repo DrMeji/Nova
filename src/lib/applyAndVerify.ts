@@ -68,8 +68,8 @@ export async function applyAndVerify(opts: ApplyAndVerifyOpts): Promise<ApplyAnd
       outcome: editMiss(
         'verify_failed',
         [
-          'I didn’t keep that edit — it didn’t match your ask.',
-          check.missing?.length ? `Missing: ${check.missing.join(', ')}.` : '',
+          'That edit didn’t match what you asked for, so I left the project unchanged.',
+          check.missing?.length ? `Still missing: ${check.missing.join(', ')}.` : '',
         ].filter(Boolean).join(' '),
       ),
       files: snapshot,

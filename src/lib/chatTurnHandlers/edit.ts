@@ -75,8 +75,36 @@ export type SurgicalEditResult =
  */
 export async function runSurgicalEditTurn(host: SurgicalEditHost): Promise<SurgicalEditResult> {
   const { finalizeWebEdits, isStructuralUiPieceAsk, verifyMicroAskApplied } = await import('@/lib/webProjectCanon');
+  const { verifyAsk } = await import('@/lib/verifyAsk');
   const structuralPiece = isStructuralUiPieceAsk(host.editUserMessage);
+
+  // Prefer surgical edits when they would change files — never "already applied" if there is work.
   const micro = finalizeWebEdits(host.files, host.editUserMessage, [], { projectName: host.projectLabel });
+
+  // Ask already satisfied on disk — finish cleanly instead of hopping to a model (hang risk).
+  // Only when verifyAsk actually evaluated constraints (checked > 0) AND surgical has nothing to add.
+  const already = verifyAsk(host.editUserMessage, host.files);
+  if (already.ok && already.checked > 0 && !structuralPiece && micro.length === 0) {
+    const elapsedMs = Math.max(1, Date.now() - host.replyStartedAt);
+    const answer = 'Already on the page — that change is already applied.';
+    const reply = host.buildStudioTraceMessage({
+      startedAt: host.replyStartedAt,
+      elapsedMs,
+      userMessage: host.content,
+      answer,
+      wrotePaths: [],
+      projectName: host.projectLabel,
+    });
+    host.onApplied({
+      files: host.files,
+      updated: [],
+      reply,
+      provider: 'NOVA · already applied',
+      elapsedMs,
+    });
+    return { status: 'applied' };
+  }
+
   if (
     structuralPiece
     || !(
@@ -88,7 +116,13 @@ export async function runSurgicalEditTurn(host: SurgicalEditHost): Promise<Surgi
   }
 
   const snapshot = { ...host.files };
-  host.pushStatus('Updating project files…');
+  host.pushStatus(
+    /\b(?:add|put|place)\b/i.test(host.editUserMessage)
+      ? 'Adding to project files…'
+      : /\b(?:remove|delete|drop)\b/i.test(host.editUserMessage)
+        ? 'Removing from project files…'
+        : 'Updating project files…',
+  );
   const applied = await applyChatReplyEdits({
     reply: '',
     projectId: host.projectId,
@@ -100,10 +134,93 @@ export async function runSurgicalEditTurn(host: SurgicalEditHost): Promise<Surgi
   const elapsedMs = Date.now() - host.replyStartedAt;
 
   if (applied.ok && applied.updated.length) {
-    const verified = verifyMicroAskApplied(host.editUserMessage, applied.files);
+    host.pushStatus('Verifying your change on disk…');
+    let verified = verifyMicroAskApplied(host.editUserMessage, applied.files);
+    let finalFiles = applied.files;
+    let finalUpdated = applied.updated;
+    // Upgrade logo/icons/heroes with Iconify / Openverse when the ask is asset-shaped.
+    if (
+      host.diskRoot
+      && (
+        /\b(?:logos?|icons?|wordmark|brand\s*mark|simple\s*icons?|lucide)\b/i.test(host.editUserMessage)
+        || /\b(?:cinematic|movie[- ]?like|film\s+still|atmospheric|background\s+image|hero\s+(?:image|photo)|premium\s+background)\b/i.test(host.editUserMessage)
+      )
+      && /\b(?:add|put|place|insert|premium|professional|create|build|make)\b/i.test(host.editUserMessage)
+    ) {
+      try {
+        const { planBrandAssets, materializeBrandAssets } = await import('@/lib/brandAssets');
+        const { looksLikeHeavyImageAsk } = await import('@/lib/editPace');
+        const plan = planBrandAssets(host.editUserMessage, host.projectLabel || 'brand');
+        const wantIcons = /\b(?:menu|search|bag|cart|user)\s+icons?\b/i.test(host.editUserMessage)
+          || /\b(?:premium|professional)\s+icons?\b/i.test(host.editUserMessage)
+          || (/\bicons?\b/i.test(host.editUserMessage) && !/\b(?:add|put|place)\b[\s\S]{0,40}\blogo\b/i.test(host.editUserMessage))
+          || /\b(?:profile|settings?|notif|toolbar)\b/i.test(host.editUserMessage)
+          || /\b(?:heart|home|mail|calendar|camera|lucide|tabler|heroicons)\b/i.test(host.editUserMessage);
+        const wantLogo = /\b(?:add|put|place|insert)\b[\s\S]{0,48}\b(?:logo|wordmark|brand\s*mark)\b/i.test(host.editUserMessage)
+          || /\b(?:apple|google|github|discord|twitch|netflix|spotify|youtube|simple\s*icons?)\b/i.test(host.editUserMessage)
+          || /\b(?:instagram|linkedin|slack|amazon|microsoft|meta|reddit|tiktok)\b/i.test(host.editUserMessage);
+        const wantHero = looksLikeHeavyImageAsk(host.editUserMessage)
+          || /\b(?:hero|background\s+image|cinematic|atmospheric)\b/i.test(host.editUserMessage);
+        const assetPlan = {
+          ...plan,
+          slots: plan.slots.filter((s) => {
+            if (s.role === 'logo') return wantLogo;
+            if (s.role === 'icon') return wantIcons;
+            if (s.role === 'hero') return wantHero;
+            return false;
+          }),
+        };
+        if (assetPlan.slots.length) {
+          host.pushStatus(
+            wantHero
+              ? 'Searching cinematic photography (this can take a minute)…'
+              : 'Fetching premium logo and icons…',
+          );
+          const mat = await materializeBrandAssets({
+            diskRoot: host.diskRoot,
+            files: finalFiles,
+            plan: assetPlan,
+            brief: host.editUserMessage,
+            projectName: host.projectLabel || 'brand',
+          });
+          if (mat.saved.length) {
+            finalFiles = mat.files;
+            finalUpdated = [...new Set([...finalUpdated, ...mat.saved])];
+            await applyChatReplyEdits({
+              reply: '',
+              projectId: host.projectId,
+              projectName: host.projectLabel,
+              files: finalFiles,
+              userMessage: host.editUserMessage,
+              diskRoot: host.diskRoot,
+            });
+            verified = verifyMicroAskApplied(host.editUserMessage, finalFiles);
+          }
+        }
+      } catch {
+        /* keep surgical SVG fallback */
+      }
+    }
     if (!verified.ok) {
-      // Fail closed — no softKeep. Revert and miss.
-      const revertBlocks = applied.updated
+      // One repair pass — surgical from the post-edit files, not a hard reject.
+      host.pushStatus('Repairing edit to match your ask…');
+      const repair = await applyChatReplyEdits({
+        reply: '',
+        projectId: host.projectId,
+        projectName: host.projectLabel,
+        files: applied.files,
+        userMessage: host.editUserMessage,
+        diskRoot: host.diskRoot,
+      });
+      if (repair.ok && repair.updated.length) {
+        finalFiles = repair.files;
+        finalUpdated = [...new Set([...applied.updated, ...repair.updated])];
+        verified = verifyMicroAskApplied(host.editUserMessage, finalFiles);
+      }
+    }
+    if (!verified.ok) {
+      // Fail closed — revert.
+      const revertBlocks = finalUpdated
         .filter((p) => snapshot[p] != null)
         .map((p) => `@@@FILE ${p}\n${snapshot[p]}`)
         .join('\n');
@@ -120,21 +237,21 @@ export async function runSurgicalEditTurn(host: SurgicalEditHost): Promise<Surgi
       const miss = editMiss(
         'verify_failed',
         [
-          'I didn’t keep that edit — it didn’t match your ask.',
-          verified.missing?.length ? `Missing: ${verified.missing.join(', ')}.` : '',
-          'Try a clearer one-line change.',
+          'That edit didn’t match what you asked for, so I left the project unchanged.',
+          verified.missing?.length ? `Still missing: ${verified.missing.join(', ')}.` : '',
+          'Try one clearer change (e.g. brand name only, or “add sticky nav with Products Specs Buy”).',
         ].filter(Boolean).join(' '),
       );
       host.onFailed({
         reply: host.buildStudioTraceMessage({
           startedAt: host.replyStartedAt,
-          elapsedMs,
+          elapsedMs: Date.now() - host.replyStartedAt,
           userMessage: host.content,
           answer: miss.message,
           wrotePaths: [],
           projectName: host.projectLabel,
         }),
-        elapsedMs,
+        elapsedMs: Date.now() - host.replyStartedAt,
       });
       return { status: 'failed' };
     }
@@ -142,31 +259,38 @@ export async function runSurgicalEditTurn(host: SurgicalEditHost): Promise<Surgi
     const answer = finalizeCodingChatBubble({
       userMessage: host.content,
       rawReply: '',
-      changedPaths: applied.updated,
+      changedPaths: finalUpdated,
       applied: true,
     });
-    const patchFileChanges = applied.updated.map((path) => {
+    const patchFileChanges = finalUpdated.map((path) => {
       const diff = host.countLineDiff(
         String(snapshot[path] || ''),
-        String(applied.files?.[path] || ''),
+        String(finalFiles?.[path] || ''),
       );
       return { path, added: diff.added, removed: diff.removed };
     });
-    const reply = host.buildStudioTraceMessage({
-      startedAt: host.replyStartedAt,
-      elapsedMs,
-      userMessage: host.content,
-      answer,
-      wrotePaths: applied.updated,
-      fileChanges: patchFileChanges,
-      projectName: host.projectLabel,
-    });
+    {
+      const { minEditPaceMs, paceUntil, looksLikeHeavyImageAsk } = await import('@/lib/editPace');
+      if (looksLikeHeavyImageAsk(host.editUserMessage)) {
+        host.pushStatus('Searching premium cinematic imagery…');
+      }
+      await paceUntil(host.replyStartedAt, minEditPaceMs(host.editUserMessage));
+    }
+    const pacedElapsed = Math.max(1, Date.now() - host.replyStartedAt);
     host.onApplied({
-      files: applied.files,
-      updated: applied.updated,
-      reply,
+      files: finalFiles,
+      updated: finalUpdated,
+      reply: host.buildStudioTraceMessage({
+        startedAt: host.replyStartedAt,
+        elapsedMs: pacedElapsed,
+        userMessage: host.content,
+        answer,
+        wrotePaths: finalUpdated,
+        fileChanges: patchFileChanges,
+        projectName: host.projectLabel,
+      }),
       provider: host.visionHopMeta ? 'NOVA · vision → patch' : 'NOVA · local patch',
-      elapsedMs,
+      elapsedMs: pacedElapsed,
     });
     return { status: 'applied' };
   }
@@ -298,7 +422,21 @@ export async function runEditTurn(host: RunEditTurnHost): Promise<RunEditTurnRes
     };
   }
 
-  if (!host.generate) return { status: 'miss' };
+  if (!host.generate) {
+    const elapsedMs = Date.now() - host.replyStartedAt;
+    host.onFailed({
+      reply: host.buildStudioTraceMessage({
+        startedAt: host.replyStartedAt,
+        elapsedMs,
+        userMessage: host.content,
+        answer: 'I couldn’t apply that as a local patch. Try a clearer one-line ask (e.g. change the name to Tesla).',
+        wrotePaths: [],
+        projectName: host.projectLabel,
+      }),
+      elapsedMs,
+    });
+    return { status: 'miss' };
+  }
 
   const { verifyMicroAskApplied } = await import('@/lib/webProjectCanon');
   const snapshot = { ...host.files };
@@ -325,7 +463,21 @@ export async function runEditTurn(host: RunEditTurnHost): Promise<RunEditTurnRes
     clearTimeout(timer);
   }
 
-  if (!modelReply) return { status: 'miss' };
+  if (!modelReply) {
+    const elapsedMs = Date.now() - host.replyStartedAt;
+    host.onFailed({
+      reply: host.buildStudioTraceMessage({
+        startedAt: host.replyStartedAt,
+        elapsedMs,
+        userMessage: host.content,
+        answer: 'That edit timed out before I could write files. Try a shorter one-line change.',
+        wrotePaths: [],
+        projectName: host.projectLabel,
+      }),
+      elapsedMs,
+    });
+    return { status: 'miss' };
+  }
 
   const applied = await applyChatReplyEdits({
     reply: modelReply,
@@ -372,13 +524,51 @@ export async function runEditTurn(host: RunEditTurnHost): Promise<RunEditTurnRes
         diskRoot: host.diskRoot,
       });
     }
+    const miss = editMiss(
+      'verify_failed',
+      [
+        'That edit didn’t match what you asked for, so I left the project unchanged.',
+        verified.missing?.length ? `Still missing: ${verified.missing.join(', ')}.` : '',
+        'Try one clearer change (e.g. change the name to Tesla).',
+      ].filter(Boolean).join(' '),
+    );
+    host.onFailed({
+      reply: host.buildStudioTraceMessage({
+        startedAt: host.replyStartedAt,
+        elapsedMs,
+        userMessage: host.content,
+        answer: miss.message,
+        wrotePaths: [],
+        projectName: host.projectLabel,
+      }),
+      elapsedMs,
+    });
     return { status: 'miss' };
   }
 
   host.onSnapshot?.({ files: snapshot, updatedPaths: applied.updated });
 
   const { verifyAsk } = await import('@/lib/verifyAsk');
-  const askCheck = verifyAsk(host.editUserMessage, applied.files);
+  let askCheck = verifyAsk(host.editUserMessage, applied.files);
+  // Fail closed if the model wiped an existing centered brand on a non-wipe ask.
+  {
+    const before = `${snapshot['src/App.jsx'] || ''}\n${snapshot['src/App.tsx'] || ''}`;
+    const after = `${applied.files?.['src/App.jsx'] || ''}\n${applied.files?.['src/App.tsx'] || ''}`;
+    const brand = before.match(/className=["']center-word["'][^>]*>([^<]{1,80})</i)?.[1]?.trim() || '';
+    const wipeOk = /\b(?:remove|delete|drop|replace|rebuild|from\s+scratch)\b[\s\S]{0,48}\b(?:title|brand|heading|h1|words?)\b/i.test(
+      host.editUserMessage,
+    );
+    if (brand && !wipeOk) {
+      const esc = brand.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      if (!new RegExp(esc, 'i').test(after)) {
+        askCheck = {
+          ok: false,
+          missing: [...askCheck.missing, `kept brand “${brand}”`],
+          checked: Math.max(1, askCheck.checked || 0),
+        };
+      }
+    }
+  }
   if (!askCheck.ok) {
     const revertBlocks = applied.updated
       .filter((p) => snapshot[p] != null)
@@ -397,9 +587,9 @@ export async function runEditTurn(host: RunEditTurnHost): Promise<RunEditTurnRes
     const miss = editMiss(
       'verify_failed',
       [
-        'I didn’t keep that edit — it didn’t match your ask.',
-        askCheck.missing.length ? `Missing: ${askCheck.missing.join(', ')}.` : '',
-        'Try a clearer one-line change.',
+        'That edit didn’t match what you asked for, so I left the project unchanged.',
+        askCheck.missing.length ? `Still missing: ${askCheck.missing.join(', ')}.` : '',
+        'Try one clearer change.',
       ].filter(Boolean).join(' '),
     );
     host.onFailed({

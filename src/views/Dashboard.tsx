@@ -44,16 +44,15 @@ export function Dashboard() {
   const [sort, setSort] = useState<'newest' | 'oldest'>('newest');
 
   const historyItems = useMemo(() => {
-    const archived = chats.filter(c => c.archivedAt);
-    // Image / Video creations are retired — History is chat-only.
-    return archived
+    // History = full chat list (same source as Recent). Recent is only a top-4 shortcut.
+    return chats
       .filter(c => c.mode !== 'image' && c.mode !== 'video')
       .map(c => ({
         id: `chat-${c.id}`,
-        name: c.title,
-        sortAt: c.archivedAt || c.updatedAt || '',
-        modifiedLabel: formatWhen(c.archivedAt || c.updatedAt || ''),
-        sizeLabel: 'Chat',
+        name: c.title || 'Chat',
+        sortAt: c.updatedAt || c.archivedAt || '',
+        modifiedLabel: formatWhen(c.updatedAt || c.archivedAt || ''),
+        sizeLabel: c.archivedAt ? 'Older' : 'Recent',
         chatId: c.id,
       }))
       .sort((a, b) => (b.sortAt || '').localeCompare(a.sortAt || ''));

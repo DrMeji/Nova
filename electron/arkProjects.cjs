@@ -986,9 +986,17 @@ function resolveGrantedTarget(targetPath) {
   }
 }
 
+function isSecretEnvPath(filePath) {
+  const base = path.basename(String(filePath || ''));
+  return /^\.env($|\.)/i.test(base) && !/\.example$/i.test(base);
+}
+
 function writeGrantedFile(targetPath, content = '') {
   const resolved = resolveGrantedTarget(targetPath);
   if (!resolved.ok) return resolved;
+  if (isSecretEnvPath(resolved.path)) {
+    return { ok: false, error: 'Writing .env secret files is blocked.' };
+  }
   try {
     fs.mkdirSync(path.dirname(resolved.path), { recursive: true });
     fs.writeFileSync(resolved.path, typeof content === 'string' ? content : String(content ?? ''), 'utf8');
@@ -1001,6 +1009,9 @@ function writeGrantedFile(targetPath, content = '') {
 function writeGrantedBuffer(targetPath, buf) {
   const resolved = resolveGrantedTarget(targetPath);
   if (!resolved.ok) return resolved;
+  if (isSecretEnvPath(resolved.path)) {
+    return { ok: false, error: 'Writing .env secret files is blocked.' };
+  }
   try {
     fs.mkdirSync(path.dirname(resolved.path), { recursive: true });
     fs.writeFileSync(resolved.path, Buffer.isBuffer(buf) ? buf : Buffer.from(buf));
@@ -1031,17 +1042,64 @@ async function saveAssetToGrantedPath(payload = {}) {
     const ac = new AbortController();
     const t = setTimeout(() => ac.abort(), Number(payload.timeoutMs) || 45000);
     try {
-      const res = await fetch(url, {
-        signal: ac.signal,
-        headers: {
-          'User-Agent': 'NOVA-Desktop/1.0 (brand-assets)',
-          Accept: 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*',
-        },
-      });
-      if (!res.ok) return { ok: false, error: `Fetch ${res.status}` };
-      const buf = Buffer.from(await res.arrayBuffer());
-      if (buf.length < 32) return { ok: false, error: 'Empty download' };
-      return writeGrantedBuffer(dest, buf);
+      const fetchBinary = async (fetchUrl) => {
+        const res = await fetch(fetchUrl, {
+          signal: ac.signal,
+          headers: {
+            'User-Agent': 'NOVA-Desktop/1.0 (brand-assets)',
+            Accept: 'image/jpeg,image/jpg,image/png,*/*;q=0.1',
+          },
+        });
+        if (!res.ok) return { ok: false, error: `Fetch ${res.status}` };
+        const buf = Buffer.from(await res.arrayBuffer());
+        if (buf.length < 32) return { ok: false, error: 'Empty download' };
+        return { ok: true, buf, contentType: String(res.headers.get('content-type') || '') };
+      };
+
+      let fetchUrl = url;
+      let got = await fetchBinary(fetchUrl);
+      if (!got.ok) return got;
+
+      const sniff = (buf) => {
+        const head = buf.slice(0, 12);
+        return {
+          isAvif: head.includes(Buffer.from('ftypavif')) || head.includes(Buffer.from('ftypavis')),
+          isWebp: head[0] === 0x52 && head[1] === 0x49 && head[2] === 0x46 && head[3] === 0x46,
+          isJpeg: head[0] === 0xff && head[1] === 0xd8,
+          isPng: head[0] === 0x89 && head[1] === 0x50,
+        };
+      };
+
+      let { buf } = got;
+      let kind = sniff(buf);
+      // Unsplash often ignores Accept — retry once with fm=jpg when we need a .jpg file.
+      if ((kind.isAvif || kind.isWebp) && /\.jpe?g$/i.test(dest) && /images\.unsplash\.com/i.test(fetchUrl)) {
+        const retryUrl = /[?&]fm=jpg/i.test(fetchUrl)
+          ? fetchUrl
+          : `${fetchUrl}${fetchUrl.includes('?') ? '&' : '?'}fm=jpg`;
+        const again = await fetchBinary(retryUrl);
+        if (again.ok) {
+          buf = again.buf;
+          kind = sniff(buf);
+          got = again;
+        }
+      }
+      if ((kind.isAvif || kind.isWebp) && /\.jpe?g$/i.test(dest)) {
+        return { ok: false, error: 'CDN returned non-JPEG for JPEG path' };
+      }
+
+      let outPath = dest;
+      if (kind.isPng && /\.jpe?g$/i.test(outPath)) {
+        outPath = outPath.replace(/\.jpe?g$/i, '.png');
+      }
+      const written = writeGrantedBuffer(outPath, buf);
+      const looksSvg = /\.svg$/i.test(outPath)
+        || /image\/svg/i.test(got.contentType || '')
+        || buf.slice(0, 200).toString('utf8').includes('<svg');
+      if (looksSvg && written?.ok) {
+        return { ...written, text: buf.toString('utf8'), path: outPath };
+      }
+      return { ...written, path: outPath };
     } finally {
       clearTimeout(t);
     }

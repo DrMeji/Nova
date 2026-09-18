@@ -4,6 +4,7 @@
  */
 
 import { looksLikeFolderPathAsk } from '@/lib/folderPathAsk';
+import { looksLikeTalkBeforeCreateAsk, looksLikeRequirementsAsk } from '@/lib/chatIdeaIntent';
 
 export type ChatIntent = 'chat' | 'coding' | 'media';
 
@@ -15,10 +16,24 @@ const CODE_FILE =
 export function looksLikeCodeAsk(text: string): boolean {
   const t = String(text || '').trim();
   if (!t) return false;
+  // Planning / exploratory talk must stay on the chat brain — never spin up a coder GGUF.
+  if (looksLikeTalkBeforeCreateAsk(t) || looksLikeRequirementsAsk(t)) return false;
   // Planning / “how do I get started” is chat, not a coding/scaffold turn.
   if (/planning conversation only/i.test(t)) return false;
   if (/\b(?:help\s+me\s+plan|planning\s+only|just\s+(?:talk|discuss)|get\s+started)\b/i.test(t)
     && !/\b(?:create\s+the\s+files|scaffold|lets?\s+build\s+this)\b/i.test(t)) {
+    return false;
+  }
+  // Soft desire (“I want to build…”) without an imperative create → chat brain —
+  // but only when it is still exploratory (question / advice). Plain "I want to build X" codes.
+  if (
+    /\bi\s+want\s+to\s+(?:build|make|create|start)\b/i.test(t)
+    && (
+      /\b(?:what\s+(?:do|would|will|should)|need|requirements?|advise|advice|are\s+you\s+familiar|do\s+you\s+know)\b/i.test(t)
+      || /\?/.test(t)
+    )
+    && !/\b(?:create\s+(?:the\s+)?(?:files|project)|scaffold|build\s+it\s+now|lets?\s+build\s+(?:this|that|it)|on\s+disk|called|named)\b/i.test(t)
+  ) {
     return false;
   }
   // Explicit "do not create / still planning" must never count as a code ask
