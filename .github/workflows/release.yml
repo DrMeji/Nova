@@ -41,6 +41,11 @@ jobs:
         run: npm run typecheck
 
       - name: Build renderer (Vite)
+        env:
+          # Guest-local desktop is ship-valid without cloud keys (Settings can add keys later).
+          NOVA_ALLOW_LOCAL_ONLY: '1'
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
         run: npm run build
 
       - name: Build Windows installer
@@ -50,6 +55,7 @@ jobs:
           WIN_CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NOVA_ALLOW_LOCAL_ONLY: '1'
         run: npx electron-builder --win --publish never
 
       - name: Upload installer artifacts
