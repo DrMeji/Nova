@@ -1,8 +1,6 @@
 /**
- * Last-resort playable FPS scaffold when the model fails the playable-game gate.
- * Used only after create/rebuild retries — never as the first-pass UI.
+ * @deprecated LOOKBOOK — never call from create.
  */
-
 export function buildPlayableFpsScaffold(productName = 'FPS Arena'): {
   'src/App.jsx': string;
   'src/App.css': string;

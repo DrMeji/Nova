@@ -56,17 +56,37 @@ if errorlevel 1 (
 )
 
 echo Checking build env (VITE_SUPABASE_*)...
-REM Guest-local desktop is allowed without cloud keys (create/bind/preview still work).
+REM Prefer real cloud keys when .env.local is filled. Guest-local is only the fallback.
+REM findstr with multiple /C: is OR — check URL and anon key as separate commands.
 set "NOVA_ALLOW_LOCAL_ONLY=1"
+if not exist ".env.local" (
+  echo  WARNING: No .env.local - guest-local build ^(cloud sign-in off^).
+  echo  Copy .env.example to .env.local and set VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY.
+  goto env_check_run
+)
+findstr /R /C:"^VITE_SUPABASE_URL=https://" ".env.local" >nul 2>&1
+if errorlevel 1 (
+  echo  WARNING: .env.local incomplete - missing VITE_SUPABASE_URL - guest-local build.
+  goto env_check_run
+)
+findstr /R /C:"^VITE_SUPABASE_ANON_KEY=eyJ" ".env.local" >nul 2>&1
+if errorlevel 1 (
+  echo  WARNING: .env.local incomplete - missing VITE_SUPABASE_ANON_KEY - guest-local build.
+  goto env_check_run
+)
+set "NOVA_ALLOW_LOCAL_ONLY="
+echo  Found .env.local cloud keys - building with sign-in enabled.
+
+:env_check_run
 call node scripts/check-env-for-build.mjs
 if errorlevel 1 (
   echo ERROR: Missing Supabase env. Copy .env.example to .env.local and fill VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY.
+  echo Or set NOVA_ALLOW_LOCAL_ONLY=1 for guest-local desktop builds.
   pause
   exit /b 1
 )
 
 echo Building...
-set "NOVA_ALLOW_LOCAL_ONLY=1"
 call npm run build
 if errorlevel 1 (
   echo ERROR: Build failed.

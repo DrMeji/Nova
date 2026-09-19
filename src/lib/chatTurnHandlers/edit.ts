@@ -325,7 +325,7 @@ export type RunEditTurnHost = SurgicalEditHost & {
   stickyModelName?: string | null;
   preferredModelId?: string | null;
   preferredModelName?: string | null;
-  /** Model generate with AbortSignal; capped at 45s by runEditTurn. */
+  /** Model generate with AbortSignal; budget from codingFileEditTimeoutMs (45s–480s). */
   generate?: (opts: {
     signal: AbortSignal;
     userMessage: string;
@@ -341,7 +341,7 @@ export type RunEditTurnResult =
   | { status: 'weak_miss' };
 
 /**
- * Surgical first; on miss, skip weak coder or one generate→apply (45s cap).
+ * Surgical first; on miss, skip weak coder or one generate→apply (budget from ask).
  */
 export async function runEditTurn(host: RunEditTurnHost): Promise<RunEditTurnResult> {
   const surgical = await runSurgicalEditTurn(host);
@@ -402,7 +402,8 @@ export async function runEditTurn(host: RunEditTurnHost): Promise<RunEditTurnRes
 
   if (!host.generate) {
     // Default owner: answerStudio lives here — not in AIChat.
-    const { answerStudio } = await import('@/lib/studioAnswerEngine');
+    const { answerStudio, codingFileEditTimeoutMs } = await import('@/lib/studioAnswerEngine');
+    const budgetMs = codingFileEditTimeoutMs(host.editUserMessage || host.content);
     host.generate = async ({ signal, userMessage, files }) => {
       const started = Date.now();
       const result = await answerStudio(
@@ -414,7 +415,7 @@ export async function runEditTurn(host: RunEditTurnHost): Promise<RunEditTurnRes
           preferredModelId: host.stickyModelId || host.preferredModelId || host.modelId || undefined,
           preferredModelName: host.stickyModelName || host.preferredModelName || host.modelName || undefined,
           allowFileEdits: true,
-          shouldAbort: () => signal.aborted || Date.now() - started > 45_000,
+          shouldAbort: () => signal.aborted || Date.now() - started > budgetMs,
         },
         undefined,
       );
@@ -439,11 +440,13 @@ export async function runEditTurn(host: RunEditTurnHost): Promise<RunEditTurnRes
   }
 
   const { verifyMicroAskApplied } = await import('@/lib/webProjectCanon');
+  const { codingFileEditTimeoutMs } = await import('@/lib/studioAnswerEngine');
+  const editBudgetMs = codingFileEditTimeoutMs(host.editUserMessage || host.content);
   const snapshot = { ...host.files };
-  host.pushStatus('Coding…');
+  host.pushStatus(editBudgetMs >= 120_000 ? 'Rebuilding UI…' : 'Coding…');
 
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 45_000);
+  const timer = setTimeout(() => controller.abort(), editBudgetMs);
   let modelReply = '';
   try {
     const raced = await Promise.race([
@@ -470,7 +473,9 @@ export async function runEditTurn(host: RunEditTurnHost): Promise<RunEditTurnRes
         startedAt: host.replyStartedAt,
         elapsedMs,
         userMessage: host.content,
-        answer: 'That edit timed out before I could write files. Try a shorter one-line change.',
+        answer: editBudgetMs >= 120_000
+          ? 'That UI rebuild timed out before files were written. Say rebuild the UI again and I will continue from this folder.'
+          : 'That edit timed out before I could write files. Try a shorter one-line change.',
         wrotePaths: [],
         projectName: host.projectLabel,
       }),

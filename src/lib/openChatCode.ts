@@ -4,6 +4,8 @@ export type OpenChatCodeDetail = {
   projectId?: string;
   diskPath?: string;
   name?: string;
+  /** When false, bind studio/files only — do not open the overlay. Default true for explicit opens. */
+  openOverlay?: boolean;
 };
 
 export const OPEN_CHAT_CODE_EVENT = 'NOVA:open-code-overlay';

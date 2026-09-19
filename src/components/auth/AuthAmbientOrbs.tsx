@@ -240,8 +240,9 @@ export function AuthAmbientOrbs({ variant = 'auth' }: AuthAmbientOrbsProps) {
 
     const tick = () => {
       if (!running) return;
-      // Stop rAF while the window is hidden/blurred — continuous paint + blur
-      // filters hitch the desktop compositor even when NOVA is in the background.
+      // Pause only when the document is truly hidden (tab/minimize). Do NOT stop on
+      // window.blur — Windows/.bat/focus steals fire blur while visibility stays
+      // "visible", which previously left orbs frozen until a full app restart.
       if (backgrounded()) {
         rafRef.current = 0;
         return;
@@ -289,7 +290,8 @@ export function AuthAmbientOrbs({ variant = 'auth' }: AuthAmbientOrbsProps) {
     };
 
     const resume = () => {
-      if (!running || backgrounded() || rafRef.current) return;
+      if (!running || backgrounded()) return;
+      if (rafRef.current) return;
       rafRef.current = requestAnimationFrame(tick);
     };
 
@@ -301,20 +303,23 @@ export function AuthAmbientOrbs({ variant = 'auth' }: AuthAmbientOrbsProps) {
     ro.observe(layer);
     document.addEventListener('visibilitychange', resume);
     window.addEventListener('focus', resume);
-    const onBlur = () => {
-      cancelAnimationFrame(rafRef.current);
-      rafRef.current = 0;
-    };
-    window.addEventListener('blur', onBlur);
+    window.addEventListener('pageshow', resume);
+    // Watchdog: if something cancels rAF while still visible (focus races, Electron
+    // child windows, .bat launches), restart within ~1s without needing a remount.
+    const watchdog = window.setInterval(() => {
+      if (!running || backgrounded()) return;
+      if (!rafRef.current) resume();
+    }, 1000);
 
     return () => {
       running = false;
       cancelAnimationFrame(rafRef.current);
       rafRef.current = 0;
+      window.clearInterval(watchdog);
       ro.disconnect();
       document.removeEventListener('visibilitychange', resume);
       window.removeEventListener('focus', resume);
-      window.removeEventListener('blur', onBlur);
+      window.removeEventListener('pageshow', resume);
       // Keep seeded positions across Soft remounts from parent re-renders.
       // Only drop state when the layer truly unmounts with variant change handled by deps.
       stateRef.current = null;

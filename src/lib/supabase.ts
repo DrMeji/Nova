@@ -3,10 +3,38 @@ import { createClient, type SupportedStorage } from '@supabase/supabase-js';
 // Vite always injects import.meta.env in the app, but Node-based smoke tests
 // and tooling can import this module without that object being present.
 const viteEnv = (import.meta as unknown as { env?: Record<string, unknown> }).env;
-const supabaseUrl = (typeof viteEnv?.VITE_SUPABASE_URL === 'string' ? viteEnv.VITE_SUPABASE_URL : '').trim();
-const supabaseAnonKey = (typeof viteEnv?.VITE_SUPABASE_ANON_KEY === 'string' ? viteEnv.VITE_SUPABASE_ANON_KEY : '').trim();
 
-const missingSupabase = !supabaseUrl || !supabaseAnonKey;
+type DesktopCloudEnv = {
+  url?: string;
+  anonKey?: string;
+  configured?: boolean;
+};
+
+function readDesktopCloudEnv(): DesktopCloudEnv | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const fn = (window as { arkDesktop?: { getCloudAuthEnv?: () => DesktopCloudEnv } }).arkDesktop
+      ?.getCloudAuthEnv;
+    if (typeof fn !== 'function') return null;
+    const v = fn();
+    if (!v || typeof v !== 'object') return null;
+    return v;
+  } catch {
+    return null;
+  }
+}
+
+const desktopCloud = readDesktopCloudEnv();
+const viteUrl = (typeof viteEnv?.VITE_SUPABASE_URL === 'string' ? viteEnv.VITE_SUPABASE_URL : '').trim();
+const viteAnon = (typeof viteEnv?.VITE_SUPABASE_ANON_KEY === 'string' ? viteEnv.VITE_SUPABASE_ANON_KEY : '').trim();
+const deskUrl = typeof desktopCloud?.url === 'string' ? desktopCloud.url.trim() : '';
+const deskAnon = typeof desktopCloud?.anonKey === 'string' ? desktopCloud.anonKey.trim() : '';
+
+// Electron can override guest-local Vite placeholders via .env.local / cloud-auth.env.
+const supabaseUrl = deskUrl || viteUrl;
+const supabaseAnonKey = deskAnon || viteAnon;
+
+const missingSupabase = !supabaseUrl || !supabaseAnonKey || /placeholder\.invalid/i.test(supabaseUrl);
 
 /**
  * Hard brick only for browser builds without env.
@@ -20,8 +48,10 @@ export const supabaseConfigError =
 
 /** Non-blocking: cloud sign-in / sync unavailable until rebuilt with env. */
 export const supabaseCloudWarning = missingSupabase
-  ? 'Cloud sign-in is off (no Supabase env in this build). Guest local create still works.'
+  ? 'Cloud sign-in is off (no Supabase env in this build). Add VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY to .env.local, then relaunch. Guest local create still works.'
   : null;
+
+export const isSupabaseConfigured = !missingSupabase;
 
 /**
  * auth-js builds sessions as `{ expires_at: now+expires_in, ...data }` and the

@@ -143,7 +143,7 @@ export async function runCreateProjectFlow(
   projectId: string,
   opts?: {
     /** Fired before each scaffold file is written so chat can show “Building App.tsx…”. */
-    onFileWrite?: (relPath: string) => void;
+    onFileWrite?: (relPath: string, content?: string) => void;
   },
 ): Promise<CreateProjectResult> {
   const name = cleanProductTitle(intent.name);
@@ -253,7 +253,7 @@ export async function runCreateProjectFlow(
   for (const rel of orderedPaths) {
     const content = fileMap[rel];
     if (content == null) continue;
-    opts?.onFileWrite?.(rel);
+    opts?.onFileWrite?.(rel, content);
     const writeOne = await safeProjectWrite({
       projectId,
       projectName: cleaned.name,
@@ -532,32 +532,62 @@ export function formatCreateProjectReply(
   const isStatic = intent.kind === 'static-web'
     || (!hasPackageJson && intent.kind !== 'vite-react' && intent.kind !== 'python');
   const livePreview = Boolean(bootstrap?.previewLive && bootstrap?.devServerUrl);
+  const where = result.projectPath ? `\n\n**Project folder:** \`${result.projectPath}\`` : '';
 
-  const intro = [
-    `I've created **${displayName}** from what you asked for.`,
-    '',
-    livePreview
-      ? `Preview is live — click **Live** under the chat to open it.`
-      : bootstrap?.npmPending
-        ? `Dependencies are still installing in the background — this is **not Ready** yet. Click **Live** after install finishes, or say **install npm dependencies** if it stalls.`
-        : `Click **Live** under the chat when you're ready to view it (dependencies may still be finishing in the background).`,
-  ].join('\n');
-
-  let followUp: string;
-  if (bootstrap?.npmInstalled === false) {
-    followUp = [
+  let body: string;
+  if (livePreview) {
+    body = [
+      `**${displayName}** is ready.`,
       '',
-      '**npm install** did not finish — say **install npm dependencies** to retry.',
-      bootstrap.bootstrapNote || '',
+      'The product UI is on disk, dependencies installed, and Live preview verified.',
+      'Open **Live** under the chat to review it in a window.',
+      where,
+      '',
+      'Want changes to layout, copy, colors, or images? Tell me what to refine.',
+    ].filter(Boolean).join('\n');
+  } else if (bootstrap?.npmPending) {
+    body = [
+      `**${displayName}** is built on disk — finishing setup.`,
+      '',
+      'Installing project dependencies now. Live stays locked until install and verify finish.',
+      where,
+      '',
+      'I will unlock **Live** automatically when Ready. If install stalls, say **install npm dependencies**.',
+    ].filter(Boolean).join('\n');
+  } else if (bootstrap?.npmInstalled === false) {
+    body = [
+      `**${displayName}** is on disk, but setup did not finish.`,
+      '',
+      'Dependencies are not installed yet, so Live is not available.',
+      bootstrap.bootstrapNote || 'Say **install npm dependencies** to retry.',
+      where,
     ].filter(Boolean).join('\n');
   } else if (intent.kind === 'python') {
-    followUp = '\n\nEdit `app/main.py` next, or tell me what to build.';
-  } else if (isStatic || livePreview || hasPackageJson || projectUsesNpm(intent.kind)) {
-    followUp = '\n\nWant anything changed — layout, products, colors, or images? Tell me what to improve.';
+    body = [
+      `**${displayName}** is ready on disk.`,
+      where,
+      '',
+      'Edit `app/main.py` next, or tell me what to build.',
+    ].filter(Boolean).join('\n');
+  } else if (isStatic || hasPackageJson || projectUsesNpm(intent.kind)) {
+    body = [
+      `**${displayName}** is on disk.`,
+      '',
+      bootstrap?.bootstrapNote
+        || 'Open **Live** when it appears under the chat, or say **run Preview** if it stays hidden.',
+      where,
+      '',
+      'Want changes to layout, copy, colors, or images? Tell me what to refine.',
+    ].filter(Boolean).join('\n');
   } else {
-    followUp = '\n\nWant anything changed? Tell me what to improve.';
+    body = [
+      `**${displayName}** is on disk.`,
+      where,
+      '',
+      'Want anything changed? Tell me what to improve.',
+    ].filter(Boolean).join('\n');
   }
 
-  return `${intro}${followUp}${result.grantHint ? `\n\n_${result.grantHint}_` : ''}`;
+  return `${body}${result.grantHint ? `\n\n_${result.grantHint}_` : ''}`;
 }
 

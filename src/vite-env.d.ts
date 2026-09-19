@@ -94,6 +94,19 @@ declare global {
         exists?: boolean;
         error?: string;
       }>;
+      /** Sync override for guest-local builds (.env.local / userData cloud-auth.env). */
+      getCloudAuthEnv?: () => {
+        url?: string;
+        anonKey?: string;
+        source?: string | null;
+        configured?: boolean;
+      };
+      cloudAuthEnv?: () => Promise<{
+        url?: string;
+        anonKey?: string;
+        source?: string | null;
+        configured?: boolean;
+      }>;
       onUpdateProgress?: (
         handler: (payload: {
           status: string;

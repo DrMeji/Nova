@@ -3,7 +3,7 @@
  * Not a separate Code chat / ProjectWorkspace route.
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronRight, Code2, FileCode, Folder, FolderOpen, X } from 'lucide-react';
 import { CodeEditor } from '@/components/CodeEditor';
 import { fileTintClass } from '@/lib/syntaxHighlight';
@@ -127,6 +127,7 @@ export function ChatCodeOverlay({
   projectName,
   onChangeFile,
   readOnly = false,
+  followPath = null,
 }: {
   open: boolean;
   onClose: () => void;
@@ -134,14 +135,20 @@ export function ChatCodeOverlay({
   projectName?: string;
   onChangeFile: (path: string, content: string) => void;
   readOnly?: boolean;
+  /** While Nova is writing, auto-select this path so you can watch live. */
+  followPath?: string | null;
 }) {
   const paths = useMemo(() => Object.keys(files).map(p => p.replace(/\\/g, '/')), [files]);
   const tree = useMemo(() => buildTree(paths), [paths]);
   const [selected, setSelected] = useState('');
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  const userPickedRef = useRef(false);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      userPickedRef.current = false;
+      return;
+    }
     const folders = new Set<string>();
     for (const p of paths) {
       const parts = p.split('/');
@@ -152,12 +159,54 @@ export function ChatCodeOverlay({
       }
     }
     setExpanded(folders);
+    // Watch-only live follow: never prefer-reset while generating — stay on followPath.
+    if (readOnly) return;
     const prefer = paths.find(p => /index\.html$/i.test(p))
       || paths.find(p => /App\.(jsx|tsx)$/i.test(p))
       || paths[0]
       || '';
     setSelected(prefer);
-  }, [open, paths]);
+  }, [open, paths, readOnly, followPath]);
+
+  // Live follow: while writing, keep the editor on the file Nova is updating.
+  useEffect(() => {
+    if (!open || !readOnly) return;
+    const focus = String(followPath || '').replace(/\\/g, '/').replace(/^\.\//, '');
+    if (!focus) return;
+    const match = paths.find((p) => p === focus)
+      || paths.find((p) => p.endsWith('/' + focus) || p.split('/').pop() === focus.split('/').pop());
+    if (!match) return;
+    setSelected(match);
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      const parts = match.split('/');
+      let acc = '';
+      for (let i = 0; i < parts.length - 1; i++) {
+        acc = acc ? `${acc}/${parts[i]}` : parts[i];
+        next.add(acc);
+      }
+      return next;
+    });
+  }, [open, readOnly, followPath, paths]);
+
+  // Auto-scroll editor to bottom as live content grows — keep highlight + gutter in sync.
+  useEffect(() => {
+    if (!open || !readOnly || !followPath) return;
+    const sync = () => {
+      const el = document.querySelector('[data-nova-code-editor]');
+      if (!(el instanceof HTMLElement)) return;
+      el.scrollTop = el.scrollHeight;
+      const root = el.parentElement;
+      const pre = root?.querySelector('.ark-code-highlight') as HTMLElement | null;
+      const gutter = root?.querySelector('.ark-code-gutter') as HTMLElement | null;
+      if (pre) {
+        pre.scrollTop = el.scrollTop;
+        pre.scrollLeft = el.scrollLeft;
+      }
+      if (gutter) gutter.scrollTop = el.scrollTop;
+    };
+    requestAnimationFrame(sync);
+  }, [open, readOnly, followPath, files, selected]);
 
   useEffect(() => {
     if (!open) return;
@@ -174,6 +223,12 @@ export function ChatCodeOverlay({
   const value = selected
     ? (files[selected] ?? (altPath ? files[altPath] : '') ?? '')
     : '';
+
+  const onPick = (path: string) => {
+    // Watch-only: tabs auto-follow the write; no manual switching while generating.
+    if (readOnly) return;
+    setSelected(path);
+  };
 
   return (
     <div
@@ -199,8 +254,12 @@ export function ChatCodeOverlay({
               {projectName || 'Project files'}
             </p>
             {readOnly ? (
-              <span className="text-[10px] text-amber-300/90 shrink-0">
-                Live view — Nova is writing (editing unlocks when done)
+              <span className="inline-flex items-center gap-1.5 text-[10px] text-violet-200/80 shrink-0">
+                <span className="relative flex h-2 w-2" aria-hidden>
+                  <span className="absolute inset-0 rounded-full bg-violet-300/50 animate-ping" />
+                  <span className="relative h-2 w-2 rounded-full bg-violet-300" />
+                </span>
+                Live
               </span>
             ) : (
               <span className="text-[10px] text-content-tertiary hidden sm:inline">
@@ -239,7 +298,7 @@ export function ChatCodeOverlay({
                     return next;
                   });
                 }}
-                onPick={setSelected}
+                onPick={onPick}
               />
             ) : (
               <p className="px-3 text-[12px] text-content-tertiary">No files yet.</p>
@@ -251,6 +310,12 @@ export function ChatCodeOverlay({
               style={{ color: '#cccccc' }}
             >
               {selected || 'Select a file'}
+              {readOnly && followPath ? (
+                <span className="ml-2 inline-flex items-center gap-1 text-[10px] text-violet-300/80">
+                  <span className="h-1.5 w-1.5 rounded-full bg-violet-300 animate-pulse" aria-hidden />
+                  live
+                </span>
+              ) : null}
             </div>
             <div className="flex-1 min-h-0">
               {selected ? (

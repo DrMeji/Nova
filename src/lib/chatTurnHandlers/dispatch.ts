@@ -99,6 +99,13 @@ export async function dispatchOwnedTurn(host: DispatchHost): Promise<DispatchOwn
         classifiedCreateName: host.createHost.classifiedCreateName ?? classified.createName,
       });
       if (createOutcome.status === 'fallthrough_edit') {
+        if (host.editHost) {
+          const editOutcome = await runEditTurn({
+            ...host.editHost,
+            content: host.editHost.content || host.content,
+          });
+          return { status: 'handled', classified, createOutcome, editOutcome };
+        }
         return { status: 'edit', classified };
       }
       return { status: 'handled', classified, createOutcome };

@@ -9,14 +9,11 @@ import { extractReferenceSiteUrl } from '@/lib/brandAssets';
 export function looksLikeNeedsCreateResearch(brief: string): boolean {
   const t = String(brief || '').trim();
   if (t.length < 24) return false;
+  // Explicit URL reference / inspiration / clone only — never auto-trigger on brand names or “premium website”.
   if (extractReferenceSiteUrl(t)) return true;
   return (
-    /\b(?:exact\s+replica|identical|clone|look\s+like|inspired\s+by|reference|open\s+source|github|use this site)\b/i.test(t)
-    || /\b(?:apple\.com|netflix\.com|twitch\.tv|spotify|airbnb|stripe\.com)\b/i.test(t)
-    || (
-      /\b(?:website|landing|homepage|marketing\s+site|web\s*app)\b/i.test(t)
-      && /\b(?:build|create|scaffold|replica|professional|premium)\b/i.test(t)
-    )
+    /\b(?:exact\s+replica|identical\s+clone|clone\s+of|look\s+like|inspired\s+by|layout\s+(?:like|from|reference)|use\s+this\s+site|as\s+(?:a\s+)?(?:layout\s+)?reference)\b/i.test(t)
+    && /\b(?:https?:\/\/|\w+\.(?:com|tv|io|app|dev)\b)/i.test(t)
   );
 }
 
@@ -27,18 +24,10 @@ export function researchQueryFromBrief(brief: string, projectName: string): stri
   if (refUrl) {
     let host = refUrl;
     try { host = new URL(refUrl).hostname.replace(/^www\./, ''); } catch { /* keep */ }
-    return `${host} homepage design layout nav hero sections footer React Vite landing UI reference`.slice(0, 220);
+    return `${host} homepage layout hierarchy spacing React Vite UI reference inspiration only`.slice(0, 220);
   }
-  if (/\bapple\.com\b/i.test(t) || /^apple\.com$/i.test(name)) {
-    return 'apple.com homepage design React Vite open source landing clone github reference nav hero sections footer';
-  }
-  if (/\bnetflix\b/i.test(t)) {
-    return 'Netflix homepage React clone open source github streaming UI reference';
-  }
-  if (/\btwitch\b/i.test(t)) {
-    return 'Twitch.tv homepage React clone open source github live streaming UI reference';
-  }
-  return `${name || 'website'} ${t} open source github React Vite landing UI reference`.slice(0, 220);
+  // Never hardcode Apple/Netflix/Twitch lookbooks — search from this brief only.
+  return `${name || 'website'} ${t} layout UI reference inspiration only`.slice(0, 220);
 }
 
 export async function researchCreateReferences(opts: {

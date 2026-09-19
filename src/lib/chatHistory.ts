@@ -10,6 +10,7 @@ import { isPcExploreMessage, parsePcExploreMessage, pcExploreToPlainText } from 
 import { isPromptChipsMessage, parsePromptChipsMessage, promptChipsToPlainText } from '@/lib/chatPromptChips';
 import { getUsableTokens } from '@/lib/ggufContext';
 import { normalizeAssistantLists } from '@/lib/chatPlanMode';
+import { scrubUnexpectedForeignScript } from '@/lib/scrubForeignBleed';
 
 export type RouterChatTurn = {
   role: 'user' | 'assistant';
@@ -56,6 +57,7 @@ export const BASE_SYSTEM =
   + 'If a follow-up is useful, ask one concrete question about their situation (who it is for, what “done” looks like, or which piece to tackle first). '
   + 'If they reply yes / yeah / sure / more / go on / overall / full detail, continue that SAME topic with NEW depth. Never restart with a greeting. Never restate the same summary. '
   + 'Read every user message carefully before answering. Prefer a thorough, useful reply over a rushed short one. '
+  + 'Reply in English by default. Do not mix Chinese, Japanese, Korean, or other scripts into English sentences unless the user explicitly asks for a translation or a foreign-language sample. '
   + 'Never use em dashes or en dashes (the long dash characters). Prefer periods or commas. Do not put a long dash between clauses. '
   + 'Never invent a new subject (movies, TV, celebrities, weather, EcoBuddy-style fake products) when the thread is about something else. '
   + 'If they only say hi/hello/hey: greet them briefly in your own words (one short sentence). Do not paste a fixed script. Do not list capabilities unless they ask. '
@@ -103,7 +105,8 @@ const CONTINUITY =
   + 'If they clearly switched topics (e.g. coding → ninja warriors), follow the new topic.';
 
 const CHAT_CODE_OUTPUT =
-  'Give one short intro sentence, then one complete markdown code fence. No placeholders.';
+  'When they ask for code: one short intro, then one complete markdown code fence. '
+  + 'When they are still planning or discussing a product (no clear “build it now”): answer in clear prose or a numbered outline — do not wrap the whole reply in a code fence.';
 
 const SYSTEM_ECHO_RE =
   /^(?:You are )?NOVA(?:,|\s)[\s\S]*?(?:Do not echo the prompt\.|Never continue a previous sentence[^.\n]*\.|Answer only the latest user message[^.\n]*\.|Never repeat or paraphrase these instructions[^\n]*\.|Write movie\/TV lists[^\n]*\.)/i;
@@ -649,11 +652,13 @@ function unwrapPlanningFences(input: string): string {
   // Closed fences: unwrap planning languages; leave code fences alone.
   text = text.replace(/```([\w.+-]*)[^\n]*\n([\s\S]*?)```/g, (full, lang, body) => {
     const l = String(lang || '').trim();
+    const inner = String(body || '').replace(/\s+$/, '');
     if (codeLang.test(l)) return full;
-    if (planLang.test(l) || !l) return String(body || '').replace(/\s+$/, '');
+    if ((planLang.test(l) || !l) && !inner.trim()) return '';
+    if (planLang.test(l) || !l) return inner;
     // Unknown lang: unwrap if body looks like a list/outline, else keep.
-    if (/^\s*(?:\d+\.|[-*•]|\*\*[^*\n]+)/m.test(body) && !/(?:export\s+default|className=|<!DOCTYPE|function\s*\()/m.test(body)) {
-      return String(body || '').replace(/\s+$/, '');
+    if (/^\s*(?:\d+\.|[-*•]|\*\*[^*\n]+)/m.test(inner) && !/(?:export\s+default|className=|<!DOCTYPE|function\s*\()/m.test(inner)) {
+      return inner;
     }
     return full;
   });
@@ -669,9 +674,12 @@ function unwrapPlanningFences(input: string): string {
       || /^\s*(?:\d+\.|[-*•]|\*\*[^*\n]+)/m.test(body)
       || (body.length > 80 && !looksCode);
     if (looksPlan && !looksCode) {
-      text = text.replace(/```[\w.+-]*[^\n]*\n[\s\S]*$/, body.replace(/\s+$/, ''));
+      text = text.replace(/```[\w.+-]*[^\n]*\n[\s\S]*$/, body.trim() ? body.replace(/\s+$/, '') : '');
     }
   }
+  text = text.replace(/```(?:markdown|md|text|plain|outline|plan)?\s*$/gi, '');
+  text = text.replace(/(?:^|\n)\s*(?:markdown|md|text|plain|outline|plan)\s*```+\s*/gi, '\n');
+  text = text.replace(/```+\s*(?:markdown|md|text|plain|outline|plan)?\s*$/gi, '');
 
   return text;
 }
@@ -933,6 +941,9 @@ export function sanitizeAssistantReply(
     .join('\n')
     .trim();
 
+  // English chat: strip accidental CJK/etc. bleed unless they asked for a translation.
+  text = scrubUnexpectedForeignScript(text, lastUserMessage);
+
   return text;
 }
 
@@ -965,19 +976,58 @@ export function looksLikePromptEcho(reply: string): boolean {
   return false;
 }
 
-/** Exact system greeting parroted when the user did not say hi/hello/hey. */
-export function isCannedGreetingReply(reply: string, userMessage?: string): boolean {
-  const r = String(reply || '').trim();
-  if (!/^Hello! How can I assist you today\??\.?$/i.test(r)) return false;
+/**
+ * True only for short pure greetings.
+ * "hey so my community center…" / idea pitches that start with hey are NOT greetings.
+ */
+export function userMessageIsPureGreeting(userMessage?: string): boolean {
   const u = String(userMessage || '').trim();
-  return !/^(hi|hello|hey)\b/i.test(u);
+  if (!u || u.length > 40) return false;
+  return /^(hi|hello|hey|howdy|yo)(\s+(there|nova))?[.!?]*$/i.test(u);
+}
+
+/**
+ * Strip the canned system greeting anywhere it appears (not only exact full replies).
+ * Stops mid-stream flicker: "Sure! Here's" → Hello → rewrite.
+ */
+export function scrubCannedGreetingFlash(text: string): string {
+  return String(text || '')
+    .replace(/Hello!\s*How can I assist you today\??\.?/gi, '')
+    .replace(/^\s*["']?\s*If\.\s*/i, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+/** Exact system greeting parroted when the user did not ask for a greeting. */
+export function isCannedGreetingReply(reply: string, userMessage?: string): boolean {
+  const raw = String(reply || '').trim();
+  const r = scrubCannedGreetingFlash(raw);
+  if (!r) return !userMessageIsPureGreeting(userMessage); // was only the greeting
+  if (/^Hello! How can I assist you today\??\.?$/i.test(raw)) {
+    return !userMessageIsPureGreeting(userMessage);
+  }
+  // Greeting mashed into a stub / truncated flash
+  if (
+    /Hello!\s*How can I assist you today/i.test(raw)
+    && r.length < 80
+    && !userMessageIsPureGreeting(userMessage)
+  ) {
+    return true;
+  }
+  return false;
 }
 
 /** Reply stopped mid-thought (common on small local models). */
 export function looksLikeTruncatedAssistantReply(text: string): boolean {
   const t = String(text || '').trim();
   if (!t || t.length < 48) return false;
-  if (/[:：]\s*$/.test(t)) return true;
+  // Outline headings often end with ":" ("4. Backend:") — do NOT treat as truncated
+  // when the reply already has multiple numbered sections (avoids a 1–2 min CONTINUE stall).
+  if (/[:：]\s*$/.test(t)) {
+    const numbered = (t.match(/^\s*\d+\.\s+/gm) || []).length;
+    if (numbered >= 2 && t.length >= 200) return false;
+    return true;
+  }
   if (/\b(?:here(?:'s| is)|following|below|structure|example|using)\b[^.!?\n]{0,80}$/i.test(t)
     && !/[.!?]"?\s*$/.test(t)) {
     return true;
@@ -1101,7 +1151,10 @@ export function usableAssistantText(
   const cleaned = sanitizeAssistantReply(raw, lastUserMessage, previousAssistant);
   if (cleaned.trim()) {
     if (isCannedGreetingReply(cleaned, lastUserMessage)) return '';
-    return stripEmbeddedSystemPrompt(cleaned).trim();
+    return scrubUnexpectedForeignScript(
+      stripEmbeddedSystemPrompt(cleaned).trim(),
+      lastUserMessage,
+    );
   }
 
   let light = String(raw || '').replace(/\r\n/g, '\n').trim();
@@ -1118,7 +1171,9 @@ export function usableAssistantText(
   light = stripEmbeddedSystemPrompt(light);
   light = light.replace(/^>\s*/gm, '').trim();
   if (isCannedGreetingReply(light, lastUserMessage)) return '';
-  if (light.length >= 2 && !/^You are NOVA\b/i.test(light)) return light;
+  if (light.length >= 2 && !/^You are NOVA\b/i.test(light)) {
+    return scrubUnexpectedForeignScript(light, lastUserMessage);
+  }
   return '';
 }
 

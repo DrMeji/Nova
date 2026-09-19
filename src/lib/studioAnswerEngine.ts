@@ -93,8 +93,8 @@ const PACK_MAX_FILES_CODE = 12;
 const MODEL_TIMEOUT_MS = 90_000;
 /** Debug/fix coding turns — keep snappy (under ~30–60s feel for small edits). */
 const MODEL_TIMEOUT_CODE_MS = 120_000;
-/** Full website / app / game creates — allow up to ~5 minutes per model pass. */
-const MODEL_TIMEOUT_BUILD_MS = 300_000;
+/** Full website / app / game creates — allow up to ~8 minutes per model pass. */
+const MODEL_TIMEOUT_BUILD_MS = 480_000;
 /** Micro follow-ups after surgical miss — never 300s. */
 const MODEL_TIMEOUT_MICRO_MS = 45_000;
 
@@ -102,6 +102,9 @@ const MODEL_TIMEOUT_MICRO_MS = 45_000;
 export function looksLikeFullUiBuildCodingAsk(message: string): boolean {
   const t = String(message || '');
   if (/@@@FILE\b/i.test(t)) return true;
+  if (/\brebuild\s+(?:the\s+)?ui\b/i.test(t)) return true;
+  if (/\b(?:scrap|rebuild|redo|replace)\b[\s\S]{0,60}\b(?:ui|layout|app\.css|jsx|tsx)\b/i.test(t)) return true;
+  if (/\b(?:make\s+it\s+richer|full\s+ui\s+polish|premium\s+(?:ui|look|polish))\b/i.test(t)) return true;
   if (t.length > 400 && /\b(?:footer|hero|nav|multi-?section|landing|App\.css)\b/i.test(t)) return true;
   return /\b(?:Build the first real|first real multi-section|from (?:your |this )?brief|Emit COMPLETE @@@FILE|product UI matching|fully built)\b/i.test(t);
 }
@@ -473,13 +476,14 @@ export async function answerStudio(
 ): Promise<StudioAnswerResult> {
   const ask = cleanAsk(input.userMessage);
   // Pure social ask with no real files — never enter project packing / Local scan.
-  if (
-    !input.allowFileEdits
+  if (!input.allowFileEdits
     && looksLikePlainChatAsk(input.userMessage)
     && !hasRealStudioFiles(input.files)
   ) {
     const prefs = getLocalPrefs();
     let streamed = '';
+    let lastGood = '';
+    const { scrubCannedGreetingFlash, isCannedGreetingReply } = await import('@/lib/chatHistory');
     const routed = await arkRoute({
       message: input.userMessage,
       kind: 'chat',
@@ -495,25 +499,41 @@ export async function answerStudio(
       }),
       onAttemptReset: () => {
         streamed = '';
+        if (lastGood.length >= 2) onDelta?.(lastGood);
       },
       onChunk: prefs.streamResponses && onDelta
         ? (piece) => {
           if (input.shouldAbort?.()) return;
-          streamed += piece;
-          const live = scrubFalseProjectChatPreamble(streamed);
-          if (live.length < 2) return;
+          const delta = String(piece || '');
+          if (!delta) return;
+          if (streamed.length === 0 && delta.length >= 80) streamed = delta;
+          else if (delta.length > streamed.length + 40 && delta.length >= 80) streamed = delta;
+          else streamed += delta;
+          let live = scrubCannedGreetingFlash(scrubFalseProjectChatPreamble(streamed));
+          if (live.length < 2 || isCannedGreetingReply(live, input.userMessage)) {
+            if (lastGood.length >= 2) onDelta(lastGood);
+            return;
+          }
+          if (
+            lastGood.length >= 48
+            && live.length < Math.floor(lastGood.length * 0.55)
+            && !live.startsWith(lastGood.slice(0, Math.min(40, lastGood.length)))
+          ) {
+            return;
+          }
+          lastGood = live;
           onDelta(live);
         }
         : undefined,
     });
-    const text = scrubFalseProjectChatPreamble(
-      String(routed.reply || streamed || '').trim(),
-    ) || 'Sure — what would you like to talk about?';
+    const text = scrubCannedGreetingFlash(scrubFalseProjectChatPreamble(
+      String(routed.reply || lastGood || streamed || '').trim(),
+    )) || lastGood || 'Sure — what would you like to talk about?';
     return {
       text,
       intent: 'freeform',
       meta: routerProviderLabel(routed, 'NOVA'),
-      streamed: Boolean(streamed),
+      streamed: Boolean(streamed || lastGood),
       packedTokens: 0,
     };
   }
@@ -652,7 +672,11 @@ export async function answerStudio(
             killLocalInfer();
             return;
           }
-          streamed += piece;
+          const delta = String(piece || '');
+          if (!delta) return;
+          if (streamed.length === 0 && delta.length >= 80) streamed = delta;
+          else if (delta.length > streamed.length + 40 && delta.length >= 80) streamed = delta;
+          else streamed += delta;
           const live = stripStudioMeta(streamed);
           if (live.length < 2 || looksLikePromptEcho(live)) return;
           onDelta(live);
@@ -914,11 +938,13 @@ export async function answerStudio(
     }
 
     const label = routerProviderLabel(timed.routed, 'Local model');
+    const spokenText = preferFileBearingText(spoken);
+    const attached = input.allowFileEdits && hasFileEditBlocks(spokenText);
     return {
-      text: preferFileBearingText(spoken),
+      text: spokenText,
       intent,
       findings: findings.length ? findings : collectProjectFindings(input.files, 'all'),
-      meta: `${label} \u00b7 attached files`,
+      meta: attached ? `${label} \u00b7 attached files` : label,
       streamed: Boolean(streamed) || prefs.streamResponses,
       packedTokens,
     };

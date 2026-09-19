@@ -28,7 +28,7 @@ export function looksLikeKeepBuildingAsk(text: string): boolean {
 
 export type ComposerAgentMode = 'ask' | 'plan' | 'agent' | 'debug' | 'multitask' | null;
 
-/** Bound only when we have a disk folder, real file map, or a pending Open-folder bind. */
+/** Bound only when THIS chat has a disk folder or real file map — never a global pending bind. */
 export function hasActiveWorkspace(opts: {
   files: Record<string, string>;
   projectId: string | null;
@@ -37,16 +37,9 @@ export function hasActiveWorkspace(opts: {
 }): boolean {
   if (opts.diskRoot || Object.keys(opts.files || {}).length > 0) return true;
   try {
-    if (typeof sessionStorage !== 'undefined') {
-      const pending = sessionStorage.getItem('NOVA:pending-studio-bind');
-      if (pending) {
-        const parsed = JSON.parse(pending) as { diskRoot?: string; files?: Record<string, string> };
-        if (parsed?.diskRoot || (parsed?.files && Object.keys(parsed.files).length)) return true;
-      }
-      if (opts.chatId) {
-        const last = sessionStorage.getItem(`NOVA:last-disk:${opts.chatId}`);
-        if (last && String(last).trim()) return true;
-      }
+    if (opts.chatId && typeof sessionStorage !== 'undefined') {
+      const last = sessionStorage.getItem(`NOVA:last-disk:${opts.chatId}`);
+      if (last && String(last).trim()) return true;
     }
     if (typeof localStorage !== 'undefined' && opts.chatId) {
       const last = localStorage.getItem(`NOVA:last-disk:${opts.chatId}`);

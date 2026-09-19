@@ -112,6 +112,9 @@ export function extractProjectName(text: string): string | null {
     // "build EmberOak on disk" / "go ahead and build QuietStreak on disk"
     /\b(?:build|create|scaffold)\s+([A-Z][A-Za-z0-9.]{1,40})\s+on\s+disk\b/,
     /\b(?:build|create|scaffold)\s+([A-Z][A-Za-z0-9.]{1,40})\b(?=[\s\S]{0,80}\bon\s+disk\b)/,
+    // "build QuietShelf for me" / "go ahead and build QuietShelf — …"
+    /\b(?:go\s+ahead\s+and\s+)?(?:build|create|scaffold)\s+([A-Z][A-Za-z0-9.]{1,40})(?:\s+for\s+me)?\b(?=\s*[—–\-:.,]|\s+(?:a|an|the|with|for|that|as)\b)/,
+    /\b(?:go\s+ahead\s+and\s+)?(?:build|create)\s+([A-Z][A-Za-z0-9.]{1,40})\s+for\s+me\b/i,
     /\bcreate\s+(?:a\s+)?(?:new\s+)?project\s+["“']?([A-Za-z][A-Za-z0-9._\s-]{1,48})/i,
     /\bcreate\s+([A-Z][A-Za-z0-9.]{1,40})\s*[—–\-:]/,
     /\bcreate\s+([A-Z][A-Za-z0-9.]{1,40})\s+as\b/i,

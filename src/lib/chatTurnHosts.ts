@@ -36,6 +36,10 @@ export type HostBag = {
   assistantId: string;
   mySeq: number;
   replyStartedAt: number;
+  genSeqRef: { current: number };
+  genSeqByChatRef?: { current: Record<string, number> };
+  stopRequestedRef: { current: boolean };
+  stopRequestedByChatRef?: { current: Record<string, boolean> };
   pinnedModel: { id?: string; name?: string; source?: string };
   composerMode: string | null;
   diskIntent: unknown;
@@ -59,7 +63,7 @@ export type HostBag = {
   messages: { role: string; content?: string | null }[];
   routeChatId: string | null;
   finishPlainReply: (text: string, provider?: string) => Promise<void> | void;
-  pushAssistantStatus: (label: string) => void;
+  pushAssistantStatus: (label: string, writingPath?: string | null) => void;
   stopIfSuperseded: () => Promise<boolean>;
   clearGeneratingIfMineEarly: () => void;
   commitStudioForChat: (chatId: string, opts: Record<string, unknown>) => void;
@@ -73,6 +77,8 @@ export type HostBag = {
   setDeleteFilePrompt: (p: unknown) => void;
   setDeleteProjectPrompt: (p: unknown) => void;
   setDeleteFolderClarifyPrompt: (p: unknown) => void;
+  /** Pin a ready coder in the chat UI before create scaffolds. */
+  onCoderPinned?: (coder: { id: string; name: string }) => void;
   pendingFileDeleteRef: { current: unknown };
   pendingProjectDeleteRef: { current: unknown };
   pendingFolderClarifyRef: { current: unknown };
@@ -86,13 +92,26 @@ export type HostBag = {
   setChatStudioProjectId: (id: string | null) => void;
   setMessages: (updater: unknown) => void;
   messagesRef: { current: unknown[] };
-  genSeqRef: { current: number };
-  stopRequestedRef: { current: boolean };
   threadBrainRef: { current: { modelId?: string; modelName?: string } | null };
   pushLivePreview: (files: Record<string, string>, force?: boolean) => void;
   flushQueuedSend: () => void;
   relPathFromDisk: (filePath: string) => string | null;
 };
+
+function turnStillActive(bag: HostBag): boolean {
+  const chatId = bag.activeChatId;
+  const liveSeq = bag.genSeqByChatRef?.current?.[chatId] ?? bag.genSeqRef.current;
+  const stopped = Boolean(
+    bag.stopRequestedByChatRef?.current?.[chatId]
+    || bag.stopRequestedRef.current,
+  );
+  // Global stopRequested only aborts if we lack per-chat map (legacy) —
+  // with per-chat map, only that chat's flag counts.
+  if (bag.stopRequestedByChatRef?.current) {
+    return bag.mySeq === liveSeq && !bag.stopRequestedByChatRef.current[chatId];
+  }
+  return bag.mySeq === liveSeq && !stopped;
+}
 
 export function makeCreateHost(bag: HostBag): CreateTurnHost {
   const { content, mode, activeChatId, createIntentEarly, workspaceActiveForCreate, pinnedModel } = bag;
@@ -118,7 +137,7 @@ export function makeCreateHost(bag: HostBag): CreateTurnHost {
     routeChatId: bag.routeChatId,
     pushStatus: bag.pushAssistantStatus,
     stopIfSuperseded: bag.stopIfSuperseded,
-    shouldAbort: () => bag.mySeq !== bag.genSeqRef.current || bag.stopRequestedRef.current,
+    shouldAbort: () => !turnStillActive(bag),
     finishPlainReply: bag.finishPlainReply,
     replyStartedAt: bag.replyStartedAt,
     syncGrants: syncWorkspaceGrantsFromPrefs,
@@ -139,6 +158,7 @@ export function makeCreateHost(bag: HostBag): CreateTurnHost {
     stickyModelName: sticky?.modelName,
     preferredModelId: preferredId,
     preferredModelName: preferredName,
+    onCoderPinned: bag.onCoderPinned,
   };
 }
 
@@ -227,7 +247,7 @@ export function makeRunCmdHost(bag: HostBag): RunCmdTurnHost {
     },
     confirm: (message) => window.confirm(message),
     setRunningStatus: (label) => {
-      setChatTurnStatus({ chatId: bag.activeChatId, assistantId: bag.assistantId, label });
+      setChatTurnStatus({ chatId: bag.activeChatId, assistantId: bag.assistantId, label, history: [label] });
     },
   };
 }
@@ -293,7 +313,7 @@ export function makeEditHost(bag: HostBag): RunEditTurnHost {
       bag.setMessages(next);
       bag.clearGeneratingIfMineEarly();
       window.setTimeout(() => {
-        if (bag.mySeq === bag.genSeqRef.current) bag.flushQueuedSend();
+        if (turnStillActive(bag)) bag.flushQueuedSend();
       }, 0);
     },
     onFailed: ({ reply, elapsedMs }) => {
@@ -315,6 +335,32 @@ export function makeChatHost(bag: HostBag): ChatTurnHost {
   const files = Object.keys(turnCtx.files || {}).length
     ? turnCtx.files
     : (bag.chatStudioFilesRef.current || bag.resolvedStudio.files || {});
+  const priorHistory = (bag.messages || [])
+    .filter((m) => m && (m.role === 'user' || m.role === 'assistant'))
+    .map((m) => ({
+      role: m.role as 'user' | 'assistant',
+      content: String(m.content || '').trim(),
+    }))
+    .filter((m) => {
+      if (!m.content || m.content.startsWith('__generating__:')) return false;
+      // Drop the current user ask from prior (router appends it).
+      if (m.role === 'user' && m.content === String(bag.content || '').trim()) return false;
+      return true;
+    })
+    .slice(-16);
+  // Stick to the last *chat* brain only. A coding sticky from a prior build must not
+  // reload the coder GGUF for normal conversation (that mid-turn unload/load freezes UI).
+  const threadBrain = pinnedModel.source === 'auto' ? bag.threadBrainRef.current : null;
+  const stickyIsCoder = /coder|starcoder|codestral|codellama|devstral|deepseek-coder/i.test(
+    String(threadBrain?.modelId || threadBrain?.modelName || ''),
+  );
+  const stickyChat =
+    threadBrain
+    && threadBrain.kind !== 'coding'
+    && !stickyIsCoder
+    && threadBrain.pinnedSource
+      ? threadBrain
+      : null;
   return {
     content: bag.content,
     files,
@@ -324,14 +370,38 @@ export function makeChatHost(bag: HostBag): ChatTurnHost {
     preferredModelId: pinnedModel.id,
     preferredModelName: pinnedModel.name,
     preferredSource: pinnedModel.source,
-    stickyModelId: (pinnedModel.source === 'auto' ? bag.threadBrainRef.current?.modelId : null),
-    stickyModelName: (pinnedModel.source === 'auto' ? bag.threadBrainRef.current?.modelName : null),
-    shouldAbort: () => bag.mySeq !== bag.genSeqRef.current || bag.stopRequestedRef.current,
+    stickyModelId: stickyChat?.modelId || null,
+    stickyModelName: stickyChat?.modelName || null,
+    stickyPinnedSource: stickyChat?.pinnedSource || null,
+    priorHistory,
+    shouldAbort: () => !turnStillActive(bag),
     onDelta: (live: string) => {
-      if (bag.mySeq !== bag.genSeqRef.current || bag.stopRequestedRef.current) return;
-      const text = String(live || '').trim();
+      if (!turnStillActive(bag)) return;
+      let text = String(live || '').trim();
+      if (text.length < 2) return;
+      // Never paint the canned greeting flash into the bubble.
+      if (/Hello!\s*How can I assist you today/i.test(text) && text.length < 120) return;
+      text = text.replace(/Hello!\s*How can I assist you today\??\.?/gi, '').trim();
+      // Mid-stream system-prompt dumps (often after a model hop) — hide until cleaned.
+      if (/You are NOVA,/i.test(text) && /Stay in chat mode/i.test(text)) {
+        text = text.replace(
+          /You are NOVA,[\s\S]*?(?:Never nest asterisks[^\n]*\.|Never repeat or paraphrase these instructions[^\n]*\.|(?=\n\n(?:To |I |Here|Sure|Let me|For\b|When\b)))/gi,
+          '',
+        ).trim();
+      }
       if (text.length < 2) return;
       bag.setMessages((prev: { id?: string; content?: string }[]) => {
+        const cur = prev.find((m) => m.id === assistantId);
+        const prevText = String(cur?.content || '');
+        // Do not wipe a longer good stream with a short unrelated replacement.
+        if (
+          prevText.length >= 48
+          && !prevText.startsWith('__generating__:')
+          && text.length < Math.floor(prevText.length * 0.55)
+          && !text.startsWith(prevText.slice(0, Math.min(40, prevText.length)))
+        ) {
+          return prev;
+        }
         const next = prev.map((m) => (m.id === assistantId ? { ...m, content: text } : m));
         bag.messagesRef.current = next;
         return next;

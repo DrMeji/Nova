@@ -75,8 +75,13 @@ check('looksLikeBuildStart(build me a website)', looksLikeBuildStart('build me a
   check('scaffold now → create', r.kind === 'create', `${r.kind} ${r.reason}`);
 }
 {
-  const r = classifyTurn('ok start.');
-  check('ok start. → create', r.kind === 'create', `${r.kind} ${r.reason}`);
+  // Bare "ok start." with no pending brief must ask — not invent App.
+  const bare = classifyTurn('ok start.');
+  check('ok start. without pending → chat (needs brief)', bare.kind === 'chat', `${bare.kind} ${bare.reason}`);
+  const withPending = classifyTurn('ok start.', {
+    pendingBrief: 'Build a multi-restaurant booking marketplace with search and email confirmations for each venue.',
+  });
+  check('ok start. with pending brief → create', withPending.kind === 'create', `${withPending.kind} ${withPending.reason}`);
 }
 {
   const r = classifyTurn('Start building Nightcord first slice.');
@@ -84,8 +89,10 @@ check('looksLikeBuildStart(build me a website)', looksLikeBuildStart('build me a
   check('greenfield-create-go reason', r.reason === 'greenfield-create-go', r.reason);
 }
 {
-  const r = classifyTurn('ok start building');
-  check('ok start building → create', r.kind === 'create', `${r.kind} ${r.reason}`);
+  const r = classifyTurn('ok start building', {
+    pendingBrief: 'A Discord-like chat app called Nightcord with servers channels and a chat pane.',
+  });
+  check('ok start building with pending → create', r.kind === 'create', `${r.kind} ${r.reason}`);
 }
 {
   // Bound folder: "start building" without brand-new stays polish, not a second project.

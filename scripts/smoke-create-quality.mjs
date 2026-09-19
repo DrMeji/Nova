@@ -49,6 +49,7 @@ if (!briefLooksLikeChatApp(discordBrief)) {
   process.exit(2);
 }
 {
+  // Soft Ready gates: multi-pane + composer — not Discord server-rail class names.
   const shell = buildLastResortChatApp('NovaCord');
   const ready = isPreviewReady(
     {
@@ -61,10 +62,15 @@ if (!briefLooksLikeChatApp(discordBrief)) {
     { productName: 'NovaCord', brief: discordBrief, requireInteractive: true },
   );
   if (!ready.ok) {
-    console.error('FAIL: reference chat shell must still be Preview-ready (helper only — create no longer auto-applies it)', ready.reasons);
+    console.error('FAIL: messaging shell helper must still be Preview-ready (DEPRECATED — create no longer auto-applies it)', ready.reasons);
     process.exit(2);
   }
-  console.log('discordChatShellReady', true);
+  // Softened gates must NOT require Discord-only chrome class names.
+  if (ready.reasons.some((r) => /server rail|channel list/i.test(r))) {
+    console.error('FAIL: Ready must not require Discord server-rail/channel-list class names', ready.reasons);
+    process.exit(2);
+  }
+  console.log('chatShellReady', true);
 }
 const phonesBrief = 'Build a premium headphones website like AirPods and Beats with search, prices, and purchase buttons';
 if (!briefNeedsCreateUiPolish(phonesBrief)) {

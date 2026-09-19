@@ -5,6 +5,8 @@ import {
   clearAuthLocalFallback,
   healSessionExpires,
   persistHealedAuthSession,
+  isSupabaseConfigured,
+  supabaseCloudWarning,
 } from '@/lib/supabase';
 import type { Profile, UserSettings } from '@/types';
 import {
@@ -383,6 +385,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signIn = async (email: string, password: string) => {
     await ensureFirstRunGate();
     intentionalSignOutRef.current = false;
+    if (!isSupabaseConfigured) {
+      return {
+        error:
+          supabaseCloudWarning
+          || 'Cloud sign-in is off. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to .env.local, then relaunch.',
+      };
+    }
     const wasGuest = bypass;
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (!error && data.session) {
@@ -412,6 +421,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     if (error) {
       const msg = String(error.message || '');
+      if (/failed to fetch|networkerror|fetch failed|placeholder\.invalid/i.test(msg)) {
+        return {
+          error:
+            'Cannot reach cloud auth. Check .env.local (VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY) and relaunch.',
+        };
+      }
       if (/rate limit|too many requests|email rate limit/i.test(msg)) {
         return {
           error:
@@ -424,6 +439,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signUp = async (email: string, password: string, displayName?: string) => {
     await ensureFirstRunGate();
+    if (!isSupabaseConfigured) {
+      return {
+        error:
+          supabaseCloudWarning
+          || 'Cloud sign-up is off. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to .env.local, then relaunch.',
+      };
+    }
     const wasGuest = bypass;
     const { data, error } = await supabase.auth.signUp({
       email,
@@ -434,6 +456,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
     if (error) {
       const msg = String(error.message || '');
+      if (/failed to fetch|networkerror|fetch failed|placeholder\.invalid/i.test(msg)) {
+        return {
+          error:
+            'Cannot reach cloud auth. Check .env.local (VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY) and relaunch.',
+        };
+      }
       if (/rate limit|too many requests|email rate limit/i.test(msg)) {
         return {
           error:
@@ -491,6 +519,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!trimmed) {
       return { error: 'Enter your account email first.' };
     }
+    if (!isSupabaseConfigured) {
+      return {
+        error:
+          'Cloud auth is off in this build. Add VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY to .env.local, relaunch, then try again.',
+      };
+    }
     const redirectTo = accountResetRedirectUrl();
     if (!redirectTo) {
       return {
@@ -500,6 +534,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     const { error } = await supabase.auth.resetPasswordForEmail(trimmed, { redirectTo });
     if (error) {
+      const msg = String(error.message || '');
+      if (/failed to fetch|networkerror|fetch failed/i.test(msg)) {
+        return {
+          error:
+            'Cannot reach cloud auth. Check .env.local (VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY) and relaunch.',
+        };
+      }
       return { error: error.message || 'Could not send reset email.' };
     }
     return { error: null };

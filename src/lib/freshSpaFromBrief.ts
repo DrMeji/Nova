@@ -129,6 +129,11 @@ export function looksLikeTruncatedUiSource(source: string | undefined | null): b
   const openTags = (s.match(/<[A-Za-z][\w.-]*\b[^>]*(?<!\/)\s*>/g) || []).length;
   const closeTags = (s.match(/<\/[A-Za-z][\w.-]*>/g) || []).length;
   if (openTags >= 6 && openTags - closeTags >= 4) return true;
+  // CSS cut mid-rule / unbalanced braces (e.g. `color: #3333` with no `}`)
+  if (/[{;]\s*[\w-]+\s*:\s*[^;{}]*$/i.test(s) || /:\s*#[0-9a-fA-F]{1,5}\s*$/.test(s)) return true;
+  const openBrace = (s.match(/\{/g) || []).length;
+  const closeBrace = (s.match(/\}/g) || []).length;
+  if (openBrace >= 1 && openBrace > closeBrace) return true;
   return false;
 }
 

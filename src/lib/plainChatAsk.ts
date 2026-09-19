@@ -82,8 +82,76 @@ export function looksLikePlainChatAsk(message: string): boolean {
 }
 
 /**
- * Exploratory / how-to chat must stay prose. Strip @@@FILE dumps, fences, and
- * glued language tags like "Express:javascript" / "Code:cpp" that local models emit.
+ * Keep planning outlines wrapped in ```markdown / ```text / bare fences.
+ * Only real code languages are stripped as talk-bleed.
+ * Empty / opener-only fences are removed entirely (never leave "markdown ```").
+ */
+function unwrapPlanningFencesForTalk(input: string): string {
+  let text = String(input || '');
+  const planLang = /^(?:markdown|md|text|plain|outline|plan)?$/i;
+  const codeLang = /^(?:jsx?|tsx?|javascript|typescript|html|css|python|json|bash|sh|shell|xml|sql|rust|go|cpp|c\+\+|c|java|swift|kotlin|vue|svelte)$/i;
+
+  text = text.replace(/```([\w.+-]*)[^\n]*\n([\s\S]*?)```/g, (full, lang, body) => {
+    const l = String(lang || '').trim();
+    const inner = String(body || '').replace(/\s+$/, '');
+    if (codeLang.test(l)) return full;
+    // Empty planning fence → drop (causes blank CODE / "markdown ```" bleed).
+    if ((planLang.test(l) || !l) && !inner.trim()) return '';
+    if (planLang.test(l) || !l) return inner;
+    if (/^\s*(?:\d+\.|[-*•]|\*\*[^*\n]+)/m.test(inner)
+      && !/(?:export\s+default|className=|<!DOCTYPE|function\s*\()/m.test(inner)) {
+      return inner;
+    }
+    return full;
+  });
+
+  const unclosed = text.match(/```([\w.+-]*)[^\n]*\n([\s\S]*)$/);
+  if (unclosed) {
+    const l = String(unclosed[1] || '').trim();
+    const body = unclosed[2] || '';
+    const looksCode = codeLang.test(l)
+      || /(?:export\s+default|function\s*\(|const\s+\w+\s*=|className=|<!DOCTYPE)/.test(body);
+    const looksPlan = planLang.test(l)
+      || /^\s*(?:\d+\.|[-*•]|\*\*[^*\n]+)/m.test(body)
+      || (body.length > 80 && !looksCode);
+    if (looksPlan && !looksCode) {
+      // Empty unclosed ```markdown → erase opener; do not leave the lang tag.
+      text = text.replace(/```[\w.+-]*[^\n]*\n[\s\S]*$/, body.trim() ? body.replace(/\s+$/, '') : '');
+    }
+  }
+
+  // Opener-only fences with no newline body yet: ```markdown / ``` at EOL
+  text = text.replace(/```(?:markdown|md|text|plain|outline|plan)?\s*$/gi, '');
+  // Glued leftovers: "markdown ```" / "``` markdown"
+  text = text.replace(/(?:^|\n)\s*(?:markdown|md|text|plain|outline|plan)\s*```+\s*/gi, '\n');
+  text = text.replace(/```+\s*(?:markdown|md|text|plain|outline|plan)?\s*$/gi, '');
+  text = text.replace(/(?:^|\n)\s*```+\s*(?:markdown|md|text|plain|outline|plan)?\s*(?=\n|$)/gi, '\n');
+
+  return text;
+}
+
+/** True when the bubble is only empty fences / lang tags — never commit this as a reply. */
+export function isTalkFenceJunk(text: string): boolean {
+  const t = String(text || '').trim();
+  if (!t) return true;
+  if (t.length >= 48 && /[a-zA-Z]{4,}/.test(t) && !/^```/.test(t) && (t.match(/```/g) || []).length < 2) {
+    // Has real prose with maybe one leftover tick — not junk.
+    const withoutFence = t.replace(/```[\w.+-]*/g, '').replace(/`+/g, '').trim();
+    if (withoutFence.length >= 40) return false;
+  }
+  const stripped = t
+    .replace(/```[\w.+-]*/g, ' ')
+    .replace(/`+/g, ' ')
+    .replace(/\b(?:markdown|md|text|plain|outline|plan|javascript|typescript|python|html|css|json|bash|sh|code|copy)\b/gi, ' ')
+    .replace(/[~\s*_#>|\-.:;,/\\[\](){}'"]+/g, ' ')
+    .trim();
+  return stripped.length < 12;
+}
+
+/**
+ * Exploratory / how-to chat must stay prose. Strip @@@FILE dumps and real code
+ * fences, but keep planning outlines (markdown/list fences). Also strip glued
+ * language tags like "Express:javascript" / "Code:cpp" that local models emit.
  */
 export function scrubTalkFirstCodeBleed(text: string): string {
   let body = String(text || '').replace(/\r\n/g, '\n').trim();
@@ -95,9 +163,14 @@ export function scrubTalkFirstCodeBleed(text: string): string {
   body = body.replace(/^[ \t]*@@@FILE[^\n]*$/gim, '');
   body = body.replace(/\b@@@FILE\b/gi, '');
 
-  // Proper fences
-  body = body.replace(/```[\s\S]*?```/g, '');
+  // Unwrap planning fences first so outlines survive; then drop real code fences.
+  body = unwrapPlanningFencesForTalk(body);
+  body = body.replace(/```[\w.+-]*[^\n]*\n[\s\S]*?```/g, '');
   body = body.replace(/```[\w.+-]*[^\n]*\n[\s\S]*$/g, '');
+  // Any leftover bare ticks / opener crumbs
+  body = body.replace(/(?:^|\n)\s*(?:markdown|md|text|plain|outline|plan)\s*```+\s*/gi, '\n');
+  body = body.replace(/```+\s*(?:markdown|md|text|plain|outline|plan)?\s*$/gi, '');
+  body = body.replace(/(?:^|\n)\s*```+\s*/g, '\n');
 
   // Glued lang tags: "Express:javascript", "Firmware Code:cpp", "structure:python"
   body = body.replace(
@@ -106,7 +179,7 @@ export function scrubTalkFirstCodeBleed(text: string): string {
   );
   // Orphan bare lang label on its own line after a colon / heading
   body = body.replace(
-    /(?:^|\n)\s*(?:javascript|typescript|python|java|cpp|c\+\+|csharp|jsx|tsx)\s*(?=\n|$)/gi,
+    /(?:^|\n)\s*(?:javascript|typescript|python|java|cpp|c\+\+|csharp|jsx|tsx|markdown|md)\s*(?=\n|$)/gi,
     '\n',
   );
 
@@ -134,7 +207,10 @@ export function scrubTalkFirstCodeBleed(text: string): string {
     })
     .join('\n');
 
-  return body.replace(/\n{3,}/g, '\n\n').trim();
+  body = body.replace(/\n{3,}/g, '\n\n').trim();
+  // Never return fence-only crumbs — caller should keep lastGood / retry.
+  if (isTalkFenceJunk(body)) return '';
+  return body;
 }
 
 /** Strip false “empty project / attached files” openings from social replies. */

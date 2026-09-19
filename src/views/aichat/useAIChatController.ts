@@ -603,6 +603,9 @@ export function useAIChatController() {
   };
   /** Bumps on every new send/stop so late chunks from an old turn cannot stick Stop/queue. */
   const genSeqRef = useRef(0);
+  /** Per-chat generation ids — sending in chat B must not abort chat A's create. */
+  const genSeqByChatRef = useRef<Record<string, number>>({});
+  const stopRequestedByChatRef = useRef<Record<string, boolean>>({});
   const persistTimerRef = useRef<number | undefined>(undefined);
   const activeModelRef = useRef(activeModel);
   const [freeKeyOpen, setFreeKeyOpen] = useState(false);
@@ -1854,6 +1857,15 @@ export function useAIChatController() {
   }, [modelMenuOpen]);
 
   const handleStop = () => {
+    const originGenChatId = activeGenChatIdRef.current
+      || routeChatIdRef.current
+      || persistChatIdRef.current
+      || null;
+    if (originGenChatId) {
+      const next = (genSeqByChatRef.current[originGenChatId] || 0) + 1;
+      genSeqByChatRef.current[originGenChatId] = next;
+      stopRequestedByChatRef.current[originGenChatId] = true;
+    }
     genSeqRef.current += 1;
     stopRequestedRef.current = true;
     pendingQueueRef.current = [];
@@ -1862,10 +1874,6 @@ export function useAIChatController() {
     setEditingQueueId(null);
     setEditingQueueText('');
     // Cancel only this chat's infer job — never nuke the other Live create.
-    const originGenChatId = activeGenChatIdRef.current
-      || routeChatIdRef.current
-      || persistChatIdRef.current
-      || null;
     void engineGenerateCancel(originGenChatId ? { chatId: originGenChatId } : undefined);
     generatingRef.current = false;
     activeGenChatIdRef.current = null;
@@ -1945,7 +1953,13 @@ export function useAIChatController() {
 
   useEffect(() => {
     const onOpenCode = (ev: Event) => {
-      const detail = (ev as CustomEvent<{ projectId?: string; diskPath?: string; name?: string }>).detail || {};
+      const detail = (ev as CustomEvent<{
+        projectId?: string;
+        diskPath?: string;
+        name?: string;
+        openOverlay?: boolean;
+      }>).detail || {};
+      const shouldOpenOverlay = detail.openOverlay !== false;
       void (async () => {
         try {
           if (detail.projectId && window.arkDesktop?.projectRead) {
@@ -1992,12 +2006,17 @@ export function useAIChatController() {
         } catch {
           /* still open overlay with whatever is already bound */
         }
-        setCodeOverlayOpen(true);
         setCodePillSticky(true);
+        if (shouldOpenOverlay) setCodeOverlayOpen(true);
       })();
     };
+    const onCloseCode = () => setCodeOverlayOpen(false);
     window.addEventListener('NOVA:open-code-overlay', onOpenCode);
-    return () => window.removeEventListener('NOVA:open-code-overlay', onOpenCode);
+    window.addEventListener('NOVA:close-code-overlay', onCloseCode);
+    return () => {
+      window.removeEventListener('NOVA:open-code-overlay', onOpenCode);
+      window.removeEventListener('NOVA:close-code-overlay', onCloseCode);
+    };
   }, []);
 
   // CDP / automation: bind a disk folder to the open chat without opening the code overlay.
@@ -2107,9 +2126,9 @@ export function useAIChatController() {
       return null;
     }
 
-    // Sprint B: attach to create-job preview when background npm already started the server.
+    // Sprint B: attach to create-job preview only when Ready (never during npm install).
     const createJob = getCreateJobForChat(chatId);
-    if (createJob?.previewUrl && (createJob.status === 'ready' || createJob.status === 'npm')) {
+    if (createJob?.previewUrl && createJob.status === 'ready') {
       const existing = String(createJob.previewUrl).trim();
       if (existing && !/127\.0\.0\.1:0|localhost:0|:\/\/0(?:\/|$)/.test(existing)) {
         setPreviewUrl(existing);
@@ -3085,6 +3104,8 @@ export function useAIChatController() {
     failoverChipText,
     flushQueuedSend,
     genSeqRef,
+    genSeqByChatRef,
+    stopRequestedByChatRef,
     generating,
     generatingRef,
     handleSend,
@@ -3127,6 +3148,7 @@ export function useAIChatController() {
     setIpcFallbackDev,
     setMessages,
     setModelRatio,
+    setActiveModel,
     setPreviewUrl,
     setThreadBrain,
     setTokenRatio,

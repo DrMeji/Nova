@@ -22,6 +22,7 @@ const arkPcInventory = require('./arkPcInventory.cjs');
 const arkWebSearch = require('./arkWebSearch.cjs');
 const arkSelfGuard = require('./arkSelfGuard.cjs');
 const arkEdgeTts = require('./arkEdgeTts.cjs');
+const arkCloudEnv = require('./arkCloudEnv.cjs');
 
 function refreshArkSelfGuard() {
   arkSelfGuard.init({
@@ -783,6 +784,22 @@ ipcMain.handle('NOVA:auth-storage-get', async (_event, key) => arkAuthStore.getI
 ipcMain.handle('NOVA:auth-storage-set', async (_event, key, value) => arkAuthStore.setItem(key, value));
 ipcMain.handle('NOVA:auth-storage-remove', async (_event, key) => arkAuthStore.removeItem(key));
 
+// Sync so renderer supabase.ts can resolve cloud keys at module load (guest-local builds).
+ipcMain.on('NOVA:cloud-env-get', (event) => {
+  try {
+    event.returnValue = arkCloudEnv.getCloudAuthEnv();
+  } catch {
+    event.returnValue = { url: '', anonKey: '', source: null, configured: false };
+  }
+});
+ipcMain.handle('NOVA:cloud-env-get', async () => {
+  try {
+    return arkCloudEnv.getCloudAuthEnv();
+  } catch {
+    return { url: '', anonKey: '', source: null, configured: false };
+  }
+});
+
 ipcMain.handle('NOVA:login-item-get', async () => {
   const s = app.getLoginItemSettings();
   return {
@@ -990,36 +1007,65 @@ ipcMain.handle('NOVA:engine-import-gguf-pick', async () => {
 });
 ipcMain.handle('NOVA:engine-disk-space', async () => arkEngine.diskSpaceForModels?.());
 ipcMain.handle('NOVA:engine-ensure-runtime', async () => arkEngine.ensureRuntime());
-ipcMain.handle('NOVA:engine-generate', async (_e, payload) =>
-  arkEngine.generate(payload?.message ?? '', {
-    modelId: payload?.modelId,
-    kind: payload?.kind,
-    temperature: payload?.temperature,
-    nPredict: payload?.nPredict,
-    mediaDurationSec: payload?.mediaDurationSec,
-    referenceImageDataUrl: payload?.referenceImageDataUrl,
-    visionImages: payload?.visionImages,
-    jobId: payload?.jobId,
-    chatId: payload?.chatId,
-  }),
-);
+ipcMain.handle('NOVA:engine-generate', async (_e, payload) => {
+  const arkJobs = require('./arkJobs.cjs');
+  return arkJobs.enqueue({
+    kind: 'gguf',
+    label: 'engine-generate',
+    run: () => arkEngine.generate(payload?.message ?? '', {
+      modelId: payload?.modelId,
+      kind: payload?.kind,
+      temperature: payload?.temperature,
+      nPredict: payload?.nPredict,
+      mediaDurationSec: payload?.mediaDurationSec,
+      referenceImageDataUrl: payload?.referenceImageDataUrl,
+      visionImages: payload?.visionImages,
+      jobId: payload?.jobId,
+      chatId: payload?.chatId,
+    }),
+  });
+});
 
 ipcMain.handle('NOVA:engine-generate-stream', async (event, payload) => {
   const webContentsId = event.sender.id;
-  return arkEngine.generate(payload?.message ?? '', {
-    modelId: payload?.modelId,
-    kind: payload?.kind,
-    temperature: payload?.temperature,
-    nPredict: payload?.nPredict,
-    visionImages: payload?.visionImages,
-    jobId: payload?.jobId,
-    chatId: payload?.chatId,
-    onChunk: (text) => {
-      try {
-        event.sender.send('NOVA:engine-chunk', { webContentsId, text: String(text || '') });
-      } catch {
-        /* ignore */
-      }
+  const arkJobs = require('./arkJobs.cjs');
+  return arkJobs.enqueue({
+    kind: 'gguf',
+    label: 'engine-generate-stream',
+    run: () => {
+      let chunkBuf = '';
+      let chunkTimer = null;
+      const flushChunks = () => {
+        if (chunkTimer) {
+          clearTimeout(chunkTimer);
+          chunkTimer = null;
+        }
+        if (!chunkBuf) return;
+        const text = chunkBuf;
+        chunkBuf = '';
+        try {
+          event.sender.send('NOVA:engine-chunk', { webContentsId, text });
+        } catch {
+          /* ignore */
+        }
+      };
+      return arkEngine.generate(payload?.message ?? '', {
+        modelId: payload?.modelId,
+        kind: payload?.kind,
+        temperature: payload?.temperature,
+        nPredict: payload?.nPredict,
+        visionImages: payload?.visionImages,
+        jobId: payload?.jobId,
+        chatId: payload?.chatId,
+        onChunk: (text) => {
+          chunkBuf += String(text || '');
+          if (chunkTimer) return;
+          // Coalesce tokens (~80ms) so IPC does not flood the renderer / desktop.
+          chunkTimer = setTimeout(flushChunks, 80);
+        },
+      }).finally(() => {
+        flushChunks();
+      });
     },
   });
 });

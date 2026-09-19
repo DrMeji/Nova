@@ -270,18 +270,21 @@ export function parseNamedUiIcons(brief: string): Array<{ id: string; label: str
 
 function logoIconifyFor(name: string, brief: string): string {
   const named = parseNamedBrandLogos(brief);
-  if (named[0]) return named[0].iconify;
-  const t = `${name}\n${brief}`.toLowerCase();
-  if (/\bapple\.com\b/.test(t) || (/\b(?:iphone|macbook|airpods)\b/.test(t) && /\breplica|lookalike|clone\b/.test(t))) {
-    return 'simple-icons:apple';
+  // Only use a known brand mark when the user explicitly asked for that logo — never
+  // stamp Apple/Discord icons onto every brief that merely mentions the word.
+  if (named[0] && /\b(?:logo|logos|wordmark|brand\s+mark|simple-icons)\b/i.test(brief)) {
+    return named[0].iconify;
   }
-  if (/\bnetflix\b/.test(t)) return 'simple-icons:netflix';
-  if (/\bspotify\b/.test(t)) return 'simple-icons:spotify';
-  if (/\b(?:air\s*purifier|hvac|filter)\b/.test(t)) return 'lucide:wind';
-  if (/\b(?:gpu|graphics|nvidia|radeon)\b/.test(t)) return 'lucide:cpu';
-  if (/\b(?:camera|doorbell|security)\b/.test(t)) return 'lucide:camera';
-  if (/\b(?:fruit|grocery|supermarket|market)\b/.test(t)) return 'lucide:apple';
-  return 'lucide:hexagon';
+  if (/\b(?:logo|logos|wordmark)\b/i.test(brief) && named[0]) return named[0].iconify;
+  const t = `${name}\n${brief}`;
+  // Lending / reading products — never the generic hexagon mark (reads as a broken logo).
+  if (/\b(?:borrow|lend(?:ing)?|bookshelf|library|quiet\s*shelf|reading\s+nook|checked\s*out)\b/i.test(t)) {
+    return 'lucide:library';
+  }
+  if (/\b(?:book|journal|shelf|novel)\b/i.test(t) && /\b(?:app|phone|browse|tap)\b/i.test(t)) {
+    return 'lucide:book-marked';
+  }
+  return 'lucide:sparkles';
 }
 
 /** Expand professional icon packs from NL (no link required). */
@@ -297,11 +300,17 @@ export function planIconsFromBrief(brief: string, projectName: string): Array<{ 
   }
   const wantMore = /\b(?:professional icons?|icon set|nav icons?|toolbar icons?|add icons?|use icons?)\b/i.test(t)
     || /\b(?:icons?)\b/i.test(t);
-  const base: Array<{ id: string; iconify: string; file: string }> = [
-    { id: 'search', iconify: 'lucide:search', file: 'public/icons/search.svg' },
-    { id: 'bag', iconify: 'lucide:shopping-bag', file: 'public/icons/bag.svg' },
-  ];
-  if (!wantMore && !/\b(?:shop|store|cart|ecommerce|product)\b/i.test(t)) {
+  const lending = /\b(?:borrow|lend(?:ing)?|bookshelf|library|quiet\s*shelf|checked\s*out)\b/i.test(t);
+  const base: Array<{ id: string; iconify: string; file: string }> = lending
+    ? [
+      { id: 'search', iconify: 'lucide:search', file: 'public/icons/search.svg' },
+      { id: 'bag', iconify: 'lucide:bookmark', file: 'public/icons/bag.svg' },
+    ]
+    : [
+      { id: 'search', iconify: 'lucide:search', file: 'public/icons/search.svg' },
+      { id: 'bag', iconify: 'lucide:shopping-bag', file: 'public/icons/bag.svg' },
+    ];
+  if (!wantMore && !/\b(?:shop|store|cart|ecommerce|product)\b/i.test(t) && !lending) {
     return base;
   }
   const extra: Array<{ id: string; iconify: string; file: string }> = [
@@ -343,57 +352,14 @@ export function planIconsFromBrief(brief: string, projectName: string): Array<{ 
 }
 
 function heroQueriesFor(name: string, t: string): Array<{ id: string; q: string }> {
-  // CreateIdentity owns category hero queries — never "{name} premium product photography".
+  // Brief-only — no PC-case / Apple / bakery stock lookbooks.
   const id = createIdentityFromBrief(name, t);
   if (id.heroQueries.length) return id.heroQueries;
-
-  if (/\b(?:pc\s*case|computer\s*case|mid[\s-]?tower|full[\s-]?tower|chassis|gaming\s+pc|pc\s+gaming|atx\s+case)\b/i.test(`${name} ${t}`)) {
-    const slug = String(name || 'case').toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 24) || 'case';
-    return [
-      { id: `${slug}-hero`, q: 'gaming pc mid tower case product photography dark studio editorial' },
-      { id: `${slug}-story`, q: 'black tempered glass pc case chassis product photo commercial studio' },
-    ];
-  }
-  if (/\bapple\.com\b/i.test(`${name} ${t}`)) {
-    return [
-      { id: 'iphone', q: 'smartphone product photography studio white background editorial' },
-      { id: 'macbook', q: 'laptop computer on desk product photography editorial sharp' },
-      { id: 'watch', q: 'wristwatch close up product photography studio editorial' },
-      { id: 'airpods', q: 'wireless earbuds charging case product photography studio' },
-    ];
-  }
-  if (/\b(?:air\s*purifier|purifier)\b/i.test(t)) {
-    const slug = String(name || 'purifier').toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 24) || 'purifier';
-    return [
-      { id: `${slug}-hero`, q: 'modern air purifier product photography studio clean white editorial' },
-      { id: `${slug}-story`, q: 'bright modern living room interior soft daylight editorial photography' },
-    ];
-  }
-  if (/\b(?:gpu|graphics card|rtx|radeon)\b/i.test(t)) {
-    const slug = String(name || 'gpu').toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 24) || 'gpu';
-    return [
-      { id: `${slug}-hero`, q: 'gaming graphics card product photography rgb studio editorial' },
-      { id: `${slug}-story`, q: 'modern gaming desk setup monitor keyboard editorial photography' },
-    ];
-  }
-  if (/\b(?:fruit|grocery|supermarket|produce)\b/i.test(t)) {
-    const slug = String(name || 'fruit').toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 24) || 'fruit';
-    return [
-      { id: `${slug}-hero`, q: 'fresh colorful fruit market produce display editorial photography' },
-      { id: `${slug}-story`, q: 'fresh apples oranges berries close up food photography editorial' },
-    ];
-  }
-  if (/\b(?:doorbell|security camera|smart camera)\b/i.test(t)) {
-    const slug = String(name || 'doorbell').toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 24) || 'doorbell';
-    return [
-      { id: `${slug}-hero`, q: 'modern smart doorbell on house porch product photography editorial' },
-      { id: `${slug}-story`, q: 'modern home exterior front door daylight editorial photography' },
-    ];
-  }
   const slug = String(name || 'brand').toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 24) || 'brand';
+  const blob = `${name} ${t}`.replace(/\s+/g, ' ').trim().slice(0, 160);
   return [
-    { id: `${slug}-hero`, q: `${name} category product photography studio editorial ${slug}` },
-    { id: `${slug}-story`, q: `${name} lifestyle interior photography editorial ${slug}` },
+    { id: `${slug}-hero`, q: `${blob || name} unique original photograph editorial` },
+    { id: `${slug}-story`, q: `${name} lifestyle editorial photography unique ${slug}` },
   ];
 }
 
@@ -466,9 +432,8 @@ export function planBrandAssets(brief: string, projectName: string): BrandAssetP
       /\.(?:png|jpe?g|webp)(?:$|\?)/i.test(u) || /unsplash|pexels|openverse|imgur|cloudinary/i.test(u),
     );
     const identity = createIdentityFromBrief(name, t);
-    // Never stamp canned forest Unsplash onto bakery/florist/shop creates.
-    const allowCinemaFallback = identity.mood === 'dark-editorial'
-      && /\b(?:cinematic|movie|film|atmospheric)\b/i.test(t);
+    // Cinema Unsplash only when the brief itself asks for cinematic atmosphere — never a lookbook mood.
+    const allowCinemaFallback = /\b(?:cinematic|movie|film|atmospheric)\b/i.test(t);
     const curatedCinema = allowCinemaFallback ? [
       'https://images.unsplash.com/photo-1441974231531-c6227db76b6e?auto=format&fit=crop&w=2400&q=90',
       'https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=2400&q=90',
@@ -590,8 +555,8 @@ async function pickPhotoUrl(query: string, fallbackContext: string, _seed: numbe
     String(fallbackContext || '').split(/\s+/)[0] || 'brand',
     ctx,
   );
-  const bakery = identity.category === 'bakery' || /\b(?:bakery|pastry|croissant|sourdough)\b/i.test(ctx);
-  const florist = identity.category === 'florist' || /\b(?:florist|bouquet|flower\s+shop)\b/i.test(ctx);
+  const bakery = /\b(?:bakery|pastry|croissant|sourdough|bread|cake)\b/i.test(ctx);
+  const florist = /\b(?:florist|bouquet|flower\s+shop|flowers?)\b/i.test(ctx);
   // food/kitchen/flower are valid for bakery/florist — only ban them for hardware/generic.
   const badTitle = bakery || florist
     ? /\b(?:specimen|scale\s*bar|diagram|chart|map|screenshot|meme|selfie|logo|icon|infographic|x[- ]?ray|microscop|forensic|radio|electronics|transistor|cassette)\b/i
@@ -676,6 +641,43 @@ export function wireBrandAssetsIntoSource(source: string, plan: BrandAssetPlan, 
   };
   s = s.replace(/url\((['"]?)https:\/\/image\.pollinations\.ai\/[^)'"]+\1\)/gi, () => `url('${takeHero()}')`);
   s = s.replace(/src=(["'])https:\/\/image\.pollinations\.ai\/[^"']+\1/gi, (_m, q: string) => `src=${q}${takeHero()}${q}`);
+
+  // Model often emits /heroes/1.jpg or src={`/heroes/${item.id}.jpg`} while Brand Assets
+  // land as /heroes/quietshelf-hero.jpg — rewrite to real on-disk covers.
+  if (heroes.length && isJsx) {
+    const hrefs = heroes.map((h) => h.href).filter(Boolean);
+    if (hrefs.length) {
+      if (!/\bCOVER_HREFS\b/.test(s)) {
+        const decl = `const COVER_HREFS = ${JSON.stringify(hrefs)};\n`;
+        if (/^import\s.+$/m.test(s)) {
+          s = s.replace(/(^import\s.+\n)+/m, (block) => `${block}${decl}`);
+        } else {
+          s = `${decl}${s}`;
+        }
+      }
+      s = s.replace(
+        /src=\{`\/heroes\/\$\{item\.id\}[^`]*`\}/g,
+        'src={COVER_HREFS[(Math.max(0, Number(item.id) - 1)) % COVER_HREFS.length]}',
+      );
+      s = s.replace(
+        /src=\{`\/heroes\/\$\{([^}]+)\}[^`]*`\}/g,
+        'src={COVER_HREFS[(Math.max(0, Number($1) - 1)) % COVER_HREFS.length]}',
+      );
+      // Static numeric paths in data arrays / JSX.
+      let ni = 0;
+      s = s.replace(/(['"`])\/heroes\/\d+\.(?:jpe?g|png|webp)\1/gi, () => {
+        const href = hrefs[ni % hrefs.length];
+        ni += 1;
+        return `'${href}'`;
+      });
+      s = s.replace(/\bsrc=(["'])\/heroes\/\d+\.(?:jpe?g|png|webp)\1/gi, (_m, q: string) => {
+        const href = hrefs[ni % hrefs.length];
+        ni += 1;
+        return `src=${q}${href}${q}`;
+      });
+    }
+  }
+
   for (const h of heroes) {
     if (h.explicitUrl && s.includes(h.explicitUrl)) s = s.split(h.explicitUrl).join(h.href);
     const idRe = h.id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -817,7 +819,7 @@ export async function materializeBrandAssets(opts: {
   const files = { ...opts.files };
   const seed = heroSeedForProject(opts.projectName, 'brand');
   const lightCanvas = /background\s*:\s*(?:#fef3c7|#fff(?:fff)?|#f[5-9a-f]{5}|cream|white)/i.test(files['src/App.css'] || '')
-    || /\bcream\b|\bwhite\b/i.test(opts.brief || '');
+    || /\bcream\b|\bwhite\b|\bpaper\b|\bwalnut\b|\bbeige\b|\breading\s+nook\b|\bsoft\s+paper\b/i.test(opts.brief || '');
   const ink = lightCanvas ? '#1a1a1a' : '#ffffff';
 
   const iconifyFallbacks = (id: string): string[] => {
@@ -896,6 +898,9 @@ export async function materializeBrandAssets(opts: {
       const result = await saveUrl(opts.diskRoot, slot.rel, url);
       if (!result.ok) continue;
       saved.push(result.rel);
+      // Register presence for wire/Ready WITHOUT content that can be written back over the binary.
+      // A previous marker string was applied via @@@FILE and wiped real JPGs to ~50 bytes.
+      if (files[result.rel] == null) files[result.rel] = '';
       if (result.rel !== slot.rel) {
         const prevHref = slot.href;
         slot.rel = result.rel;
@@ -910,6 +915,7 @@ export async function materializeBrandAssets(opts: {
           );
           files[key] = next;
         }
+        if (files[result.rel] == null) files[result.rel] = '';
       }
       if (result.text.includes('<svg')) {
         const tinted = tintIconSvg(result.text, ink);

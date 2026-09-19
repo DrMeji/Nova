@@ -39,8 +39,12 @@ const { classifyTurn } = await import(
   check('stretch#2 start building → create', r.kind === 'create' && r.reason === 'greenfield-create-go', `${r.kind}/${r.reason}`);
 }
 {
-  const r = classifyTurn('ok start.');
-  check('talk-then-build ok start. → create', r.kind === 'create', `${r.kind}/${r.reason}`);
+  const r = classifyTurn('ok start.', {
+    pendingBrief: 'Build Nightcord — a chat app with servers, channels, and a working message pane.',
+  });
+  check('talk-then-build ok start. with pending → create', r.kind === 'create', `${r.kind}/${r.reason}`);
+  const bare = classifyTurn('ok start.');
+  check('talk-then-build ok start. bare → chat', bare.kind === 'chat', `${bare.kind}/${bare.reason}`);
 }
 {
   const r = classifyTurn('Put hours in the footer.', {

@@ -10,16 +10,19 @@ import {
   slugifyProjectName,
   resolveProjectKindForCreate,
 } from '@/lib/createProjectIntent';
-import { setLastPendingGreenfield } from '@/lib/chatStudioStore';
+import { setLastPendingGreenfield, getLastPendingGreenfield } from '@/lib/chatStudioStore';
 import { cleanProductTitle } from '@/lib/freshSpaFromBrief';
 import { hasActiveWorkspace } from '@/lib/chatAgentTurn';
 import { composerModeFromContent } from '@/views/aichat/aiChatHelpers';
 import { hydrateStudio } from '@/lib/chatTurnSession';
-import { dispatchOwnedTurn, runChatTurn } from '@/lib/chatTurnHandlers';
+import { dispatchOwnedTurn, runChatTurn, runEditTurn } from '@/lib/chatTurnHandlers';
 import { runMediaChatTurn } from '@/lib/chatMediaTurn';
 import { buildRouterHistory } from '@/lib/chatHistory';
 import { setLocalPrefs } from '@/lib/localPrefs';
 import { notifyChatDone } from '@/lib/activityIndicators';
+import { setActiveBrainId } from '@/lib/brainRoles';
+import { setEngineModel } from '@/lib/arkEngine';
+import { saveThreadBrain, saveAutoThreadBrain } from '@/lib/threadBrain';
 import {
   resolveConversationalEditAsk,
   rememberLastEditTopic,
@@ -71,7 +74,9 @@ export async function runAIChatSend(content: string, ctx: AIChatSendCtx): Promis
     composerMode,
     diskIntent,
     genSeqRef,
+    genSeqByChatRef,
     stopRequestedRef,
+    stopRequestedByChatRef,
     threadBrainRef,
     messagesRef,
     routeChatIdRef,
@@ -225,6 +230,24 @@ export async function runAIChatSend(content: string, ctx: AIChatSendCtx): Promis
       setDeleteFilePrompt: prep.setDeleteFilePrompt,
       setDeleteProjectPrompt: prep.setDeleteProjectPrompt,
       setDeleteFolderClarifyPrompt: prep.setDeleteFolderClarifyPrompt,
+      onCoderPinned: (coder) => {
+        try {
+          // Coder is for builds only — never steal the chat pill / sticky chat brain.
+          // Mid-chat Instruct↔Coder hops are what freeze streams and flash · switched.
+          setActiveBrainId('coder', coder.id);
+          setLocalPrefs({
+            activeCoderId: coder.id,
+            defaultCodeModelId: coder.id,
+          });
+          void setEngineModel(coder.id).catch(() => undefined);
+          saveThreadBrain(activeChatId, {
+            kind: 'coding',
+            modelId: coder.id,
+            modelName: coder.name,
+            pinnedSource: 'local',
+          });
+        } catch { /* ignore */ }
+      },
       pendingFileDeleteRef: prep.pendingFileDeleteRef,
       pendingProjectDeleteRef: prep.pendingProjectDeleteRef,
       pendingFolderClarifyRef: prep.pendingFolderClarifyRef,
@@ -239,7 +262,9 @@ export async function runAIChatSend(content: string, ctx: AIChatSendCtx): Promis
       setMessages: prep.setMessages,
       messagesRef,
       genSeqRef,
+      genSeqByChatRef,
       stopRequestedRef,
+      stopRequestedByChatRef,
       threadBrainRef,
       pushLivePreview: prep.pushLivePreview,
       flushQueuedSend,
@@ -254,6 +279,7 @@ export async function runAIChatSend(content: string, ctx: AIChatSendCtx): Promis
         files: chatStudioFilesRef.current || resolvedStudio.files,
         projectId: chatStudioProjectIdRef.current || resolvedStudio.projectId,
         chatId: activeChatId,
+        pendingBrief: getLastPendingGreenfield(activeChatId)?.summary || null,
       },
       skipCreate: diskIntent?.type === 'add_file',
       planName: createIntentEarly?.name || extractProjectName(prep.content) || 'your idea',
@@ -277,10 +303,52 @@ export async function runAIChatSend(content: string, ctx: AIChatSendCtx): Promis
       chatHost: makeChatHost(bag),
     });
 
-    if (owned.status === 'handled') return;
-    if (owned.status === 'continue' || owned.status === 'edit') {
+    const stickChatBrain = (chatOutcome: {
+      modelId?: string;
+      modelName?: string;
+      attemptedLen?: number;
+      source?: string;
+      tier?: string;
+    } | undefined) => {
+      if (!chatOutcome?.modelId || !chatOutcome.source || chatOutcome.source === 'none') return;
+      if (pinnedModel.source !== 'auto') return;
+      if (/coder|starcoder|codestral|codellama|devstral|deepseek-coder/i.test(chatOutcome.modelId)) return;
+      try {
+        const nextBrain = saveAutoThreadBrain(
+          activeChatId,
+          'chat',
+          {
+            reply: '',
+            modelId: chatOutcome.modelId,
+            modelName: chatOutcome.modelName || chatOutcome.modelId,
+            source: chatOutcome.source as 'ark-gguf',
+            tier: (chatOutcome.tier || 'local-free') as 'local-free',
+            attempted: Array.from({ length: Math.max(1, chatOutcome.attemptedLen || 1) }, (_, i) =>
+              i === 0 ? `NOVA Engine · ${chatOutcome.modelId}` : `hop-${i}`,
+            ),
+          },
+          threadBrainRef.current as never,
+          chatOutcome.attemptedLen || 1,
+        );
+        if (nextBrain) {
+          threadBrainRef.current = nextBrain;
+          prep.setThreadBrain?.(nextBrain);
+        }
+      } catch { /* ignore */ }
+    };
+
+    if (owned.status === 'handled') {
+      stickChatBrain((owned as { chatOutcome?: Parameters<typeof stickChatBrain>[0] }).chatOutcome);
+      return;
+    }
+    if (owned.status === 'edit') {
+      await runEditTurn(makeEditHost(bag));
+      return;
+    }
+    if (owned.status === 'continue') {
       const chatOut = await runChatTurn(makeChatHost(bag));
-      await finishPlainReply(chatOut.text, 'NOVA');
+      stickChatBrain(chatOut);
+      await finishPlainReply(chatOut.text, chatOut.provider || 'NOVA');
       return;
     }
     return;
@@ -306,7 +374,8 @@ export async function runAIChatSend(content: string, ctx: AIChatSendCtx): Promis
   };
 
   const finalizeAssistant = (finalText: string, provider: string, libraryId?: string) => {
-    if (mySeq !== genSeqRef.current) return;
+    const liveSeq = genSeqByChatRef?.current?.[activeChatId] ?? genSeqRef.current;
+    if (mySeq !== liveSeq) return;
     if (provider && provider !== 'NOVA · setup needed') {
       setLocalPrefs({ lastAnsweredLabel: provider });
     }

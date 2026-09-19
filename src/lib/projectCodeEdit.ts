@@ -935,10 +935,19 @@ export function extractStreamingFileEdits(partial: string): ParsedFileEdit[] {
   const header = tail.match(/^@@@FILE\s+([^\n\r]+)/);
   if (!header?.[1]) return found;
   const path = normalizePath(header[1]);
-  if (!path.includes('.') || found.some(e => e.path === path)) return found;
+  if (!path.includes('.')) return found;
   let body = tail.replace(/^@@@FILE\s+[^\n\r]+\s*/, '');
   body = body.replace(/^```[\w.+-]*\s*\n?/, '').replace(/```\s*$/, '');
-  if (body.trim().length > 8) found.push({ path, content: body });
+  if (body.trim().length <= 8) return found;
+  // Prefer the live in-progress body over a stale completed extract of the same path
+  // (otherwise Code live-follow freezes on the first closed fence while tokens keep arriving).
+  const idx = found.findIndex((e) => e.path === path);
+  if (idx >= 0) {
+    const prev = found[idx].content || '';
+    if (body.length >= prev.length) found[idx] = { path, content: body };
+  } else {
+    found.push({ path, content: body });
+  }
   return found;
 }
 

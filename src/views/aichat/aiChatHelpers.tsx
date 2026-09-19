@@ -194,6 +194,16 @@ export function defaultModelForKind(kind: ModelKind): ChatModelOption {
         : (prefs.lastChatModelId || prefs.defaultModelId));
 
   if (kind === 'chat' && prefId && prefId !== 'NOVA-auto') {
+    // Never restore a coder GGUF as the chat pill — coders are build-only.
+    if (/coder|starcoder|codestral|codellama|devstral|deepseek-coder/i.test(prefId)) {
+      return CHAT_MODELS.find(m => m.id === 'NOVA-auto' && m.kind === 'chat') ?? {
+        id: 'NOVA-auto',
+        name: 'Nova Multimodal',
+        source: 'auto',
+        detail: '',
+        kind: 'chat',
+      };
+    }
     const cloud = CLOUD_CHAT_WHEN_KEYED.find(m => m.id === prefId);
     if (cloud && hasProviderApiKey(cloud.keyId) && isCloudProviderEnabled(cloud.keyId)) return cloud;
     const resolved = resolvePreferredCloudProvider(prefId, prefId);

@@ -35,6 +35,22 @@ export const CodeEditor = forwardRef<HTMLTextAreaElement, CodeEditorProps>(
       }
     }, [jumpLine, path, ref, value]);
 
+    // Keep highlighted layer + gutter locked to the textarea when value grows (live write).
+    useEffect(() => {
+      if (!readOnly) return;
+      const ta = typeof ref === 'object' && ref?.current ? ref.current : null;
+      if (!ta) return;
+      const root = ta.parentElement;
+      const pre = root?.querySelector('.ark-code-highlight') as HTMLElement | null;
+      const gutter = root?.querySelector('.ark-code-gutter') as HTMLElement | null;
+      ta.scrollTop = ta.scrollHeight;
+      if (pre) {
+        pre.scrollTop = ta.scrollTop;
+        pre.scrollLeft = ta.scrollLeft;
+      }
+      if (gutter) gutter.scrollTop = ta.scrollTop;
+    }, [value, path, readOnly, ref]);
+
     return (
       <div className="ark-code-editor relative h-full min-h-0 overflow-hidden rounded-md">
         <div className="ark-code-gutter" aria-hidden>
@@ -49,6 +65,7 @@ export const CodeEditor = forwardRef<HTMLTextAreaElement, CodeEditorProps>(
         />
         <textarea
           ref={ref}
+          data-nova-code-editor=""
           value={value}
           onChange={e => onChange(e.target.value)}
           onKeyDown={e => {

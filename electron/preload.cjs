@@ -34,6 +34,15 @@ const arkDesktopApi = {
   authRecoverySave: (payload) => ipcRenderer.invoke('NOVA:auth-recovery-save', payload || {}),
   authRecoveryInfo: () => ipcRenderer.invoke('NOVA:auth-recovery-info'),
   authRecoveryReveal: () => ipcRenderer.invoke('NOVA:auth-recovery-reveal'),
+  /** Sync: Vite-baked placeholders can be overridden by .env.local / userData cloud-auth.env. */
+  getCloudAuthEnv: () => {
+    try {
+      return ipcRenderer.sendSync('NOVA:cloud-env-get');
+    } catch {
+      return { url: '', anonKey: '', source: null, configured: false };
+    }
+  },
+  cloudAuthEnv: () => ipcRenderer.invoke('NOVA:cloud-env-get'),
   onUpdateProgress: (handler) => {
     const listener = (_event, payload) => handler?.(payload);
     ipcRenderer.on('NOVA:update-progress', listener);

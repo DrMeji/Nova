@@ -9,6 +9,7 @@ import {
 } from '@/lib/localAuthRecovery';
 import { accountForgotPageUrl } from '@/lib/accountWeb';
 import { NovaMark } from '@/components/NovaMark';
+import { supabaseCloudWarning, isSupabaseConfigured } from '@/lib/supabase';
 
 const TYPE_PHRASES = [
   'NOVA',
@@ -219,6 +220,17 @@ export function AuthScreen() {
                 </button>
               </div>
             </div>
+
+            {!isSupabaseConfigured && (
+              <div className="mb-3 flex items-start gap-2 text-sm text-amber-200/90 bg-amber-500/10 border border-amber-500/25 rounded-xl px-3 py-2.5">
+                <AlertCircle className="w-4 h-4 mt-0.5 shrink-0 text-amber-300" />
+                <span>
+                  {supabaseCloudWarning
+                    || 'Cloud sign-in is off. Add Supabase keys to .env.local and relaunch.'}
+                  {showBypass ? ' Use Continue as guest below for local create.' : ''}
+                </span>
+              </div>
+            )}
 
             <form onSubmit={handleSubmit} className="flex flex-col">
               <div

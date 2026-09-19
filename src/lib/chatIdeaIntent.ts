@@ -177,6 +177,23 @@ export function looksLikeTalkBeforeCreateAsk(text: string): boolean {
     return true;
   }
 
+  // Feature-sketch follow-ups: "yeah something like a little shelf you browse…"
+  // Describe UX / constraints without an explicit build/create command → keep talking.
+  if (
+    t.length >= 24
+    && t.length < 500
+    && !/\b(?:build|create|scaffold|spin\s+up|make\s+me|on\s+disk|open\s+preview|start\s+building|write\s+(?:the\s+)?(?:code|files))\b/i.test(t)
+    && (
+      /^(?:yeah|yep|yes|exactly|right|ok|okay|sure|basically|kinda|kind\s+of|something\s+like)\b/i.test(t)
+      || /\bsomething\s+like\b/i.test(t)
+      || /\b(?:tap|browse|swipe|click)\b[\s\S]{0,40}\b(?:to|and)\b/i.test(t)
+      || /\bno\s+(?:accounts?|payments?|login|sign[- ]?ups?|auth)\b/i.test(t)
+    )
+    && /\b(?:app|shelf|list|screen|page|browse|borrow|checkout|checked\s+out|lend|friends?|phone|tiny|simple)\b/i.test(t)
+  ) {
+    return true;
+  }
+
   return false;
 }
 
@@ -242,7 +259,7 @@ export function inferGreenfieldName(text: string): string | null {
   const coffee = t.match(/\b(?:coffee|copy)\s+shop\b/i);
   if (coffee) return 'Coffee Shop';
 
-  if (/\bdiscord\b/i.test(t)) return 'Discord Site';
+  // Never invent "Discord Site" — name must come from the user's brief.
 
   const shopFor = t.match(/\b(?:website|site|app)\s+for\s+(?:a\s+)?([a-z][a-z0-9 _-]{2,32})/i);
   if (shopFor?.[1]) {
@@ -316,13 +333,13 @@ function summarizeProblem(text: string, name: string): string {
   const t = String(text || '').trim();
 
   if (/\b(?:coffee|copy)\s+shop\b/i.test(t) || /\bpick\s+what\s+coffee\b/i.test(t)) {
-    return 'Customers order coffee ahead, pick a pickup time, and get a text when it\'s ready. like a mobile-friendly coffee shop site.';
+    return 'Customers order coffee ahead, pick a pickup time, and get a text when it\'s ready — invent the product UI from this brief.';
   }
   if (/\bdiscord\b/i.test(t) && !/\bnot\s+discord\b/i.test(t)) {
-    return 'A chat-style site with channels, messages, and voice-style layout. built from scratch in your project folder.';
+    return 'A messaging product inspired by your brief — invent an original IA and UI (do not copy Discord chrome).';
   }
   if (wantsChatAppScaffold(t) || (/\b(chat|channel|dm|voice|screen\s+share)\b/i.test(t) && /\b(react|vite|app)\b/i.test(t) && !/\b(restaurant|menu|hero|booking|unsplash|budget|transaction|finance|ledger|invoice)\b/i.test(t))) {
-    return 'A desktop-style chat app. servers, channels, DMs, settings, and voice/call UI built in React.';
+    return 'A messaging / realtime app from your brief — original screens and flows, not a canned chat shell.';
   }
   if (/\b(budget|transaction|finance|ledger|invoice|expense|accounts?\s+page)\b/i.test(t)) {
     return 'A personal finance app. accounts, transactions, budgets, and a dashboard with local data only.';
@@ -374,11 +391,11 @@ function mvpPlan(summary: string, kind: ProjectKind, name: string): MvpPlan {
   if (wantsChatAppScaffold(t) || (/\b(chat|channel|dm|voice|settings)\b/i.test(t) && /\b(react|vite|app)\b/i.test(t) && !/\b(restaurant|menu|hero|booking|unsplash|budget|transaction|finance|ledger|invoice)\b/i.test(t))) {
     return {
       steps: [
-        '1. **App shell**. left rail, server/channel sidebar, main chat pane, member list',
-        '2. **Messaging**. channel feed, send box, DMs with local state (real React components)',
-        '3. **Settings + voice**. settings tabs (account, appearance), call bar (mute, screen share)',
+        '1. **Core screens**. invent the main areas from the brief (not a Discord/Slack clone shell)',
+        '2. **Primary action**. working send / post / react state for the core loop',
+        '3. **Polish**. unique visual language for THIS product; settings only if the brief asks',
       ],
-      stackNote: 'React + Vite. we can scaffold files when you say **Create project**.',
+      stackNote: 'React + Vite. scaffold when you say **Create project**.',
     };
   }
 
@@ -407,22 +424,22 @@ function mvpPlan(summary: string, kind: ProjectKind, name: string): MvpPlan {
   if (/\bdiscord\b/i.test(t) && !/\bnot\s+discord\b/i.test(t)) {
     return {
       steps: [
-        '1. **Layout**. sidebar for servers/channels, main area for messages',
-        '2. **Chat**. send and show messages in a channel (real UI, built in your files)',
-        '3. **Polish**. dark theme, user list, then voice/video later if you want',
+        '1. **Product IA**. invent screens from the brief — do not paste Discord chrome',
+        '2. **Core loop**. working messaging / presence interactions the brief asks for',
+        '3. **Polish**. unique brand look; deepen only what the user listed',
       ],
-      stackNote: 'React web app. we build each screen in your project, no pre-made template pack.',
+      stackNote: 'React web app built in your project files — original UI, no template pack.',
     };
   }
 
   if (/\b(restaurant|dining|cafe)\b/i.test(t) || (/\bmenu\b/i.test(t) && /\b(hero|booking|reserve|unsplash)\b/i.test(t))) {
     return {
       steps: [
-        '1. **Hero**. full-bleed unique photo for THIS brand (generated, not a reused stock cafe), name, Reserve / View menu CTAs',
-        '2. **Menu**. dish cards with fresh brand-specific images, names, and short descriptions',
-        '3. **Booking CTA**. hours / reserve strip so the page feels finished',
+        '1. **Primary flow**. search / browse / book / order — whatever THIS brief asks (one kitchen or many venues)',
+        '2. **Working actions**. CTAs and forms that match the brief (not a canned coastal menu pack)',
+        '3. **Finish**. unique brand look, honest empty states, Preview-ready UI',
       ],
-      stackNote: 'Landing page with unique generative imagery (download an image model in Models if you want on-device heroes). open **Preview** under chat when ready.',
+      stackNote: 'Landing or marketplace from the brief. open **Preview** under chat when ready.',
     };
   }
 
@@ -1001,84 +1018,48 @@ export function buildPlanExpansionSection(
       );
     }
   } else if (isApp && (focus === 'ui' || focus === 'chat')) {
-    lines.push(`**+ Main chat UI** (pass ${depth})`);
-    if (depth <= 1) {
-      lines.push(
-        '- Left rail with app logo + Friends / Servers / DMs / Settings icons',
-        '- Server sidebar: #general, #random, voice channels, member list with status dots',
-        '- Main pane: message feed, avatars, timestamps, send box',
-        '- Dark theme surfaces. not a photo gallery layout',
-      );
-    } else if (depth === 2) {
-      lines.push(
-        '- DM view: pick a friend, threaded messages, local send/receive state',
-        '- “Add people” / invite modal (UI only is fine)',
-        '- Emoji picker stub + attachment button placeholders',
-        '- Responsive collapse: rail icons only on narrow widths',
-      );
-    } else {
-      lines.push(
-        '- Unread badges on channels and DMs',
-        '- Hover states on messages and channel rows',
-        '- Keyboard focus rings for accessibility',
-        '- Empty states when no channel is selected',
-      );
-    }
+    lines.push(`**+ Main product UI** (pass ${depth})`);
+    lines.push(
+      '- Invent the primary screens from the user brief — do not copy Discord/Slack chrome',
+      '- Working navigation between the main areas the brief describes',
+      '- Real interactive state for the core action (send, book, add, toggle, etc.)',
+      '- Unique visual language for THIS product — not a prior Nova demo shell',
+    );
   } else if (isApp && focus === 'settings') {
     lines.push(`**+ Settings** (pass ${depth})`);
     lines.push(
-      '- Settings modal/page with tabs: Account, Appearance, Notifications, Privacy, Keybinds, Voice & Video',
-      '- Appearance: theme toggle, density, accent color picker (updates CSS vars live)',
-      '- Account: display name + avatar color',
-      depth > 1 ? '- Privacy + notification toggles that persist in localStorage' : '- Read-only keybind list for v1',
+      '- Settings only if the brief asks — tabs that match the product',
+      '- Appearance controls that update CSS vars live when relevant',
+      '- Persist toggles in localStorage when the brief needs saved prefs',
     );
   } else if (isApp && focus === 'voice') {
     lines.push(`**+ Voice / call UI** (pass ${depth})`);
     lines.push(
-      '- Call bar: mute, deafen, screen share, disconnect',
-      '- Fake “connected” state + participant tiles',
-      '- Voice channel row styling in the sidebar',
-      depth > 1 ? '- Screen-share indicator + quality dropdown stub' : '- Start call button in channel header',
+      '- Only if the brief asks for voice/call: mute, disconnect, participant tiles',
+      '- Fake connected state is fine for v1 — keep it original to this product',
     );
   } else if (focus === 'gallery' || focus === 'ui') {
-    lines.push(`**+ Gallery / main UI** (pass ${depth})`);
-    if (depth <= 1) {
-      lines.push(
-        '- Masonry or responsive image grid using every Unsplash URL from your brief',
-        '- Large logo / wordmark at the top; Work · About · Contact nav',
-        '- Hover: soft zoom or fade on each tile (CSS only)',
-        '- About blurb under the grid in 2–3 sentences from your brief',
-      );
-    } else if (depth === 2) {
-      lines.push(
-        '- Lightbox / click-to-enlarge for gallery tiles (simple JS)',
-        '- Filter chips (e.g. All / Outdoor / Detail) even if filters are visual-only',
-        '- Lazy-load images so the first paint stays fast',
-        '- Mobile: 2-column grid; desktop: 3-column masonry',
-      );
-    } else {
-      lines.push(
-        '- Caption under each image pulled from filenames or short labels',
-        '- Prefetch next images on hover',
-        '- Accessibility: alt text + keyboard focus rings',
-        '- Optional contact mailto link in the footer',
-      );
-    }
+    lines.push(`**+ Main UI** (pass ${depth})`);
+    lines.push(
+      '- Structure and sections taken from the user brief only',
+      '- Brand wordmark + clear primary action',
+      '- Unique layout — not a canned gallery/portfolio template',
+      '- Use images the user provided; otherwise leave honest image slots',
+    );
   } else if (focus === 'menu') {
-    lines.push(`**+ Menu / dish cards** (pass ${depth})`);
+    lines.push(`**+ Menu / catalog** (pass ${depth})`);
     if (depth <= 1) {
       lines.push(
-        '- Hero with restaurant photo + Reserve / View menu buttons',
-        '- Menu grid: each dish = photo + name + short description + price',
-        hasImages ? '- Wire unique brand image URLs into dish cards (no stock Unsplash reuse, no placeholders)' : '- Add unique dish photos next (generate fresh — do not reuse a shared cafe stock photo)',
-        '- Fake Book / Order buttons (non-functional is fine for v1)',
+        '- Build the menu/catalog the brief describes (not a fixed coastal bistro pack)',
+        '- Search/filter if the brief asks to browse many items or places',
+        '- Primary CTA matching the brief (book, order, reserve, etc.)',
+        '- Original copy and layout for THIS brand',
       );
     } else {
       lines.push(
-        '- Group dishes (Starters / Mains / Desserts)',
-        '- Hours + location strip under the menu',
-        '- Dietary tags (V / GF) as small chips',
-        '- Mobile sticky “Reserve” bar',
+        '- Group items the way the brief implies',
+        '- Hours/location only if asked',
+        '- Mobile-friendly primary action',
       );
     }
   } else if (focus === 'hero') {
@@ -1100,18 +1081,18 @@ export function buildPlanExpansionSection(
   } else if (isApp && depth === 1) {
     lines.push(`**+ Deeper plan** (pass ${depth})`);
     lines.push(
-      '- React + Vite file layout (`src/App.jsx`, components folder)',
-      '- lucide-react icons on every rail + control',
-      '- Local demo users/messages. no backend required for v1',
-      '- npm run dev → **Localhost** button under chat',
+      '- React + Vite file layout (`src/App.jsx` + App.css)',
+      '- Screens and controls named for THIS brief',
+      '- Local demo state only when the brief needs it',
+      '- npm run dev → **Live** under chat',
     );
   } else if (isApp && depth >= 2) {
     lines.push(`**+ Deeper plan** (pass ${depth})`);
     lines.push(
-      '- Split into components: Rail, ServerSidebar, ChatPane, MemberList, SettingsPanel',
-      '- State: active server, channel, DM thread, settings tab',
+      '- Split UI into components named for THIS product’s screens (from the brief)',
+      '- State for the primary flows the brief describes',
       '- Polish spacing, typography, and hover/focus states',
-      '- Ready to create. real files, not a static portfolio page',
+      '- Ready to create — real files, original UI',
     );
   } else if (depth === 1) {
     lines.push(`**+ Deeper plan** (pass ${depth})`);

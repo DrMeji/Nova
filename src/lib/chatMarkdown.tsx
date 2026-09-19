@@ -64,7 +64,11 @@ function splitBlocks(text: string): Block[] {
   };
   const flushCode = () => {
     if (codeLines) {
-      blocks.push({ type: 'code', lang: codeLang || '', code: codeLines.join('\n').replace(/\n$/, '') });
+      const code = codeLines.join('\n').replace(/\n$/, '');
+      // Never paint an empty CODE / Copy box (models often emit ```markdown then stall).
+      if (code.trim()) {
+        blocks.push({ type: 'code', lang: codeLang || '', code });
+      }
     }
     codeLang = null;
     codeLines = null;

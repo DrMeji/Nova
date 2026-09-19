@@ -1,73 +1,54 @@
 /**
- * Smoke: CreateIdentity bakery ≠ Veopx ≠ discord; ensureStylesLinked; hero queries differ.
+ * Smoke: brief-only CreateBriefSpec — no bakery/Discord/Veopx lookbook categories.
  */
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  createBriefSpecFromAsk,
   createIdentityFromBrief,
   ensureStylesLinked,
   stylesAreLinked,
-  polishPromptLinesFromIdentity,
-  identityCreateMisses,
+  polishPromptLinesFromBrief,
+  briefCreateMisses,
 } from '../src/lib/createIdentity.ts';
-import { pickMarketingPalette, buildMarketingCompanionCss } from '../src/lib/createBuildQuality.ts';
 
-const bakery = createIdentityFromBrief('Ovenfold', 'warm cream bakery croissant sourdough pastry shop');
-assert.equal(bakery.category, 'bakery');
-assert.equal(bakery.mood, 'light-warm');
-assert.equal(bakery.layout, 'warm-shop');
-assert.match(bakery.palette.bg, /^#f3efe6$/i);
-assert.ok(bakery.heroQueries.some((h) => /bakery|croissant|sourdough|pastry/i.test(h.q)));
-assert.ok(!bakery.heroQueries.some((h) => /premium product photography editorial unique/i.test(h.q)));
-assert.ok(bakery.forbidden.hex.includes('#0c0a09'));
-assert.ok(bakery.forbidden.hex.includes('#3dff9a'));
-
-// "Premium" tightens craft — must NOT switch bakery to Veopx editorial-dark.
-const premiumBakery = createIdentityFromBrief('Ovenfold', 'premium bakery cream pastry shop');
-assert.equal(premiumBakery.category, 'bakery');
-assert.equal(premiumBakery.mood, 'light-warm');
-assert.match(premiumBakery.palette.bg, /^#f3efe6$/i);
-
-const vaguePremium = createIdentityFromBrief('NovaSite', 'premium website product marketing landing');
-assert.notEqual(vaguePremium.layout, 'editorial-dark');
-assert.notEqual(vaguePremium.category, 'lighting');
-
-const veopx = createIdentityFromBrief('Veopx', 'quiet luxury sculptural lamp Light distilled soft mint orbs');
-assert.equal(veopx.category, 'lighting');
-assert.equal(veopx.mood, 'dark-editorial');
-assert.equal(veopx.layout, 'editorial-dark');
-assert.ok(/07090d|0c0a09|#07/i.test(veopx.palette.bg) || veopx.palette.bg === '#07090d');
-
-const discord = createIdentityFromBrief('NovaCord', 'Discord-like chat app with servers channels and chat pane');
-assert.equal(discord.category, 'chat');
-assert.equal(discord.layout, 'chat-shell');
-
-const bakeryQs = bakery.heroQueries.map((h) => h.q).join('|');
-const veopxQs = veopx.heroQueries.map((h) => h.q).join('|');
-assert.notEqual(bakeryQs, veopxQs);
-assert.ok(!/#?heroes\/hero\.jpg/.test(bakery.heroHref));
+const bakeryBrief = 'warm cream bakery croissant sourdough pastry shop with online ordering';
+const bakery = createBriefSpecFromAsk('Ovenfold', bakeryBrief);
+assert.equal(bakery.name, 'Ovenfold');
 assert.match(bakery.heroHref, /\/heroes\/ovenfold-hero\.jpg/i);
+assert.ok(bakery.mustHave.length >= 0);
+assert.equal(bakery.referenceMode, 'none');
 
-const bakeryPrompt = polishPromptLinesFromIdentity(bakery, 'src/App.jsx', 'warm bakery').join('\n');
-assert.ok(!/Discover top-right|soft mint pill|01 \/ 02 \/ 03/i.test(bakeryPrompt));
-assert.ok(/cream|warm-shop|App\.css/i.test(bakeryPrompt));
+// Transitional CreateIdentity wrapper must not invent lookbook categories.
+const bakeryId = createIdentityFromBrief('Ovenfold', bakeryBrief);
+assert.equal(bakeryId.category, 'brief');
+assert.equal(bakeryId.mood, 'brief');
+assert.equal(bakeryId.layout, 'brief');
+assert.ok(bakeryId.heroQueries.some((h) => /Ovenfold|bakery|croissant|pastry|sourdough/i.test(h.q)));
+assert.ok(!bakeryId.heroQueries.some((h) => /premium product photography editorial unique$/i.test(h.q)));
+
+const veopx = createBriefSpecFromAsk('Veopx', 'quiet luxury sculptural lamp Light distilled soft mint orbs');
+assert.equal(veopx.name, 'Veopx');
+assert.match(veopx.heroHref, /\/heroes\/veopx-hero\.jpg/i);
+
+const discord = createBriefSpecFromAsk('NovaCord', 'Discord-like chat app with servers channels and chat pane');
+assert.equal(discord.name, 'NovaCord');
+assert.ok(discord.mustHave.some((m) => /messag/i.test(m)) || /chat|messag/i.test(discord.brief));
+
+const bakeryPrompt = polishPromptLinesFromBrief(bakery, 'src/App.jsx', bakeryBrief).join('\n');
+assert.ok(!/Discover top-right|soft mint pill|01 \/ 02 \/ 03|Discord-like|warm-shop|editorial-dark/i.test(bakeryPrompt));
+assert.ok(/Ovenfold|bakery|App\.css|THIS brief|unique visual language/i.test(bakeryPrompt));
+assert.ok(bakeryPrompt.includes(bakeryBrief.slice(0, 40)));
 assert.ok(!/\/heroes\/hero\.jpg/i.test(bakeryPrompt));
 
-const veopxPrompt = polishPromptLinesFromIdentity(veopx, 'src/App.jsx', 'quiet luxury lamp').join('\n');
-assert.ok(/editorial-dark|Discover|mint/i.test(veopxPrompt));
-
-const p = pickMarketingPalette('Ovenfold', 'warm cream bakery');
-assert.match(p.bg, /^#f3efe6$/i);
-
-const css = buildMarketingCompanionCss('Ovenfold', 'warm cream bakery', bakery);
-assert.ok(css.includes('#f3efe6'));
-assert.ok(!/#0c0a09/.test(css));
-assert.ok(!/#3dff9a/i.test(css));
+const veopxPrompt = polishPromptLinesFromBrief(veopx, 'src/App.jsx', 'quiet luxury lamp').join('\n');
+assert.ok(!/Discover top-right|soft mint pill|01 \/ 02 \/ 03/i.test(veopxPrompt));
+assert.ok(/Veopx|unique|THIS brief|App\.css/i.test(veopxPrompt));
 
 const files = {
-  'src/App.css': css,
+  'src/App.css': '.app{min-height:100vh}\n',
   'src/App.jsx': 'export default function App(){return <div className="app"/>}\n',
   'src/main.jsx': "import App from './App'\n",
 };
@@ -76,13 +57,21 @@ const linked = ensureStylesLinked(files);
 assert.ok(linked.changed.includes('src/App.jsx') || linked.changed.includes('src/main.jsx'));
 assert.equal(stylesAreLinked(linked.files), true);
 
-const misses = identityCreateMisses(bakery, {
-  'src/App.css': ':root { --bg: #0c0a09; --accent: #3dff9a; }',
+const thinMisses = briefCreateMisses(bakery, {
+  'src/App.css': '.app{}\n',
   'src/App.jsx': "import './App.css';\nexport default function App(){return <div/>}\n",
 });
-assert.ok(misses.some((m) => /forbids/i.test(m)));
+assert.ok(thinMisses.some((m) => /thin|empty/i.test(m)));
 
-// Legacy hero.jpg writers must not remain in identity-owned modules (except create rewrite).
+// Multi-restaurant brief should miss when App has no search.
+const restSpec = createBriefSpecFromAsk('AnyTable', 'search any restaurant and book a table');
+const restMisses = briefCreateMisses(restSpec, {
+  'src/App.css': '.app{padding:1rem}\n',
+  'src/App.jsx': "import './App.css';\nexport default function App(){return <main><h1>AnyTable</h1><p>Book our kitchen</p></main>}\n",
+});
+assert.ok(restMisses.some((m) => /search/i.test(m)));
+
+// Legacy hero.jpg writers must not remain in identity-owned modules.
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 for (const rel of [
   'src/lib/siteHeroImages.ts',
@@ -95,10 +84,9 @@ for (const rel of [
 }
 
 console.log('smoke-create-identity OK', {
-  bakery: bakery.mood,
-  premiumBakery: premiumBakery.category,
-  vaguePremium: vaguePremium.layout,
-  veopx: veopx.mood,
-  discord: discord.layout,
+  bakery: bakery.slug,
+  veopx: veopx.slug,
+  discord: discord.slug,
   linked: linked.changed,
+  promptHasBrief: bakeryPrompt.includes('croissant'),
 });

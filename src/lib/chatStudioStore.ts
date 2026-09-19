@@ -127,71 +127,18 @@ export async function resolveChatProjectRoot(opts: {
     }
   }
 
-  const rawTitle = String(opts.chatTitle || '').trim();
-  const snapName = String(snap?.name || last?.name || '').trim();
-  const productName = (
-    !looksLikePromptTitle(snapName) ? snapName
-      : (!looksLikePromptTitle(rawTitle) ? rawTitle.replace(/\s+and\s+build\b[\s\S]*$/i, '').trim() : '')
-  );
-  const wantName = productName;
-  const wantKey = wantName.toLowerCase();
-  const wantSlug = wantName
-    ? wantName
-      .toLowerCase()
-      .replace(/[^a-z0-9._]+/g, '-')
-      .replace(/^[-.]+|[-.]+$/g, '')
-    : '';
-
   const candidates: string[] = [];
   if (last?.path) candidates.push(last.path);
   if (snap?.diskRoot) candidates.push(snap.diskRoot);
 
-  try {
-    const roots = await window.arkDesktop?.browseRoots?.();
-    const desktop = roots?.roots?.find(r => r.id === 'desktop')?.path;
-    const documents = roots?.roots?.find(r => r.id === 'documents')?.path;
-    if (wantName && buildIntent) {
-      const arkHomes: string[] = [];
-      if (documents) {
-        arkHomes.push(studioPathJoin(documents, 'NOVA Projects'));
-        arkHomes.push(studioPathJoin(documents, 'ARK Projects'));
-      }
-      if (desktop) {
-        arkHomes.push(studioPathJoin(desktop, 'NOVA Projects'));
-        arkHomes.push(studioPathJoin(desktop, 'ARK Projects'));
-        arkHomes.push(studioPathJoin(desktop, 'Projects'));
-      }
-      for (const projectsDir of arkHomes) {
-        const listing = await window.arkDesktop?.listDir?.(projectsDir);
-        if (listing?.ok) {
-          for (const item of listing.items || []) {
-            if (item.kind !== 'dir') continue;
-            const n = String(item.name || '').toLowerCase();
-            // Keep dotted product folders (apple.com) bound to the chat diskRoot.
-            if ((n === wantKey || (wantSlug && n === wantSlug)) && item.path) {
-              candidates.unshift(item.path);
-            }
-          }
-        }
-        candidates.push(studioPathJoin(projectsDir, wantName));
-        if (wantSlug && wantSlug !== wantKey) {
-          candidates.push(studioPathJoin(projectsDir, wantSlug));
-        }
-      }
-    }
-  } catch {
-    /* ignore */
-  }
+  // Prefer already-bound / last-disk paths only — never invent a folder by scanning
+  // NOVA Projects for a chat title slug (that rebinds Nightcord → nightcord-2 leftovers).
 
   let chosen: string | null = null;
   for (const c of candidates) {
     if (!(await pathLooksReal(c))) continue;
-    const base = studioPathBasename(c).toLowerCase();
-    if (wantKey && (base === wantKey || (wantSlug && base === wantSlug))) {
-      chosen = c;
-      break;
-    }
-    if (!chosen) chosen = c;
+    chosen = c;
+    break;
   }
   if (!chosen) {
     // Last resort: keep stored root even if stat failed (offline / grant race) — never invent title path.
@@ -200,7 +147,7 @@ export async function resolveChatProjectRoot(opts: {
       : (last?.path || null);
   }
 
-  const folderLabel = studioPathBasename(chosen) || wantName || snap?.name;
+  const folderLabel = studioPathBasename(chosen) || snap?.name || last?.name;
   const healed = Boolean(
     chosen
     && snap?.diskRoot

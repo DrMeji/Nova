@@ -45,16 +45,19 @@ runCleanBootIfNeeded();
 runArkIdRotationIfNeeded();
 runSocialReleaseCleanIfNeeded();
 
-/** Old Code / Project workspace routes redirect into Chat + Code pill. */
+/** Old Code / Project workspace routes redirect into Chat. Code overlay stays closed until the Code pill. */
 function LegacyCodeRedirect({ projectId }: { projectId?: string }) {
   const { navigate } = useRouter();
   useEffect(() => {
     navigate({ name: 'chat' });
-    requestOpenChatCode(projectId ? { projectId } : undefined);
+    // Bind project into the chat studio if we have an id — do not auto-open the Code overlay.
+    if (projectId) {
+      requestOpenChatCode({ projectId, openOverlay: false });
+    }
   }, [navigate, projectId]);
   return (
     <div className="h-full flex items-center justify-center text-sm text-content-tertiary">
-      Opening Code…
+      Opening chat…
     </div>
   );
 }

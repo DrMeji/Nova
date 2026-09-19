@@ -1,5 +1,5 @@
 /**
- * Playable Pong scaffold when free models leave a todo/marketing shell on a game brief.
+ * @deprecated LOOKBOOK — never call from create.
  */
 export function buildPongGameScaffold(projectName: string): Record<string, string> {
   const title = String(projectName || 'EmberPong').replace(/[`$\\]/g, '').trim() || 'EmberPong';

@@ -1,5 +1,5 @@
 /**
- * Todo / interactive app scaffold when free models leave empty or wrong-genre shells.
+ * @deprecated LOOKBOOK — never call from create.
  */
 export function buildTodoAppScaffold(projectName: string): { app: string; css: string; indexCss: string } {
   const title = String(projectName || 'PulseBoard').replace(/[`$\\]/g, '').trim() || 'PulseBoard';

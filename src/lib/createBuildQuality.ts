@@ -33,13 +33,21 @@ export function looksLikeModelProseLeak(text: string): boolean {
     return true;
   }
   if (/^###\s+/m.test(t) && !/[{};:]/.test(t.slice(0, 200))) return true;
-  // English paragraphs inside CSS/HTML that are not comments.
+  // English paragraphs inside CSS/HTML that are not comments or string/JSX text.
+  // Strip quotes first — sample book titles ("The Great Gatsby", "To Kill…") must not
+  // trip Preview Ready (that false-failed QuietShelf).
   const withoutComments = t
     .replace(/\/\*[\s\S]*?\*\//g, '')
     .replace(/\/\/[^\n]*/g, '')
     .replace(/<!--[\s\S]*?-->/g, '');
-  const sentences = withoutComments.match(/\b(?:The|We|I|This|To|If|Please|Open|Note)\b[^.\n]{20,}\./g);
-  return Boolean(sentences && sentences.length >= 2);
+  const withoutStrings = withoutComments
+    .replace(/`(?:\\.|[^`\\])*`/g, '""')
+    .replace(/'(?:\\.|[^'\\])*'/g, '""')
+    .replace(/"(?:\\.|[^"\\])*"/g, '""');
+  const sentences = withoutStrings.match(
+    /\b(?:The updated|We (?:can|will|should|need)|I (?:added|updated|changed|fixed|created)|This (?:file|code|component)|To (?:verify|link|update|open)|If you|Please |Open the|Note that)\b[^.\n]{12,}\./g,
+  );
+  return Boolean(sentences && sentences.length >= 1);
 }
 
 /** Drop trailing / embedded assistant chatter from CSS or markup. */
@@ -94,6 +102,9 @@ export function stripModelProseFromSource(path: string, content: string): string
     // Strip trailing tool/prose dumps after a real component.
     const cutFile = text.search(/\n(?:#{1,6}\s*)?@@@FILE\b/i);
     if (cutFile > 80) text = text.slice(0, cutFile).trimEnd() + '\n';
+    // Duplicate src= (data-url placeholder + {item.image}) — keep the expression.
+    text = text.replace(/\ssrc=(["'])data:image[^"']*\1\s+(?=src=\{)/gi, ' ');
+    text = text.replace(/\ssrc=(["'])[^"']*\1(\s+src=(["'])[^"']*\3)/g, '$2');
     // "export default App;\nAdded the logo…" / "To verify…" — keep the export, drop the essay.
     text = text.replace(
       /(\nexport\s+default\s+[\w.]+;\s*)\n[\s\S]*$/i,
@@ -293,6 +304,13 @@ export function looksLikeFillerStubAppSource(body: string): boolean {
   const s = String(body || '');
   if (!s.trim()) return false;
   if (/\b(?:this is a sample text|sample text|lorem ipsum|placeholder text|coming soon|hello world|your (?:app|site|content) here)\b/i.test(s)) {
+    return true;
+  }
+  // Generic scaffold copy models leave in place of real product names.
+  if (/\bBook Title\s*\d+\b/i.test(s) || /\bA brief description of the book\b/i.test(s)) {
+    return true;
+  }
+  if (/\bItem Title\s*\d+\b/i.test(s) || /\bProduct Name\s*\d+\b/i.test(s)) {
     return true;
   }
   // Title + one short paragraph, no real landing structure.
@@ -505,7 +523,8 @@ export function looksLikeReactEntrypointSource(appSource: string | undefined | n
   return false;
 }
 
-/** Neutral last-resort App when the model left an unusable shell (not genre-specific). */
+/** Neutral last-resort App when the model left an unusable shell (not genre-specific).
+ * DEPRECATED NEVER CALL FROM CREATE — kept for smoke/helpers only. */
 export function buildLastResortInteractiveApp(projectName: string): { app: string; css: string } {
   const title = String(projectName || 'Studio').replace(/[`$\\]/g, '').trim() || 'Studio';
   return {
@@ -567,8 +586,8 @@ button { padding: .7rem .9rem; border-radius: .6rem; border: 0; background: var(
 }
 
 /**
- * Discord/Slack-style multi-pane shell — used when create polish must not leave a title splash.
- * Interactive: switch servers/channels and send messages in the chat pane.
+ * Discord/Slack-style multi-pane shell.
+ * DEPRECATED NEVER CALL FROM CREATE — kept for smoke/helpers only.
  */
 export function buildLastResortChatApp(projectName: string): { app: string; css: string } {
   const title = String(projectName || 'Chat').replace(/[`$\\]/g, '').trim() || 'Chat';
@@ -908,9 +927,9 @@ function marketingShellCopyFor(title: string, brief = ''): MarketingShellCopy {
 }
 
 /**
- * Last-resort Vite marketing shell when the model left an unusable App.
+ * Last-resort Vite marketing shell.
+ * DEPRECATED NEVER CALL FROM CREATE — kept for smoke/helpers only.
  * Real /heroes/*.jpg slots (Brand Assets fill them) — never CSS orbs or fake silver blobs.
- * PC-case briefs get a distinct industrial layout (not the quiet-luxury Vesper clone).
  */
 export function buildLastResortMarketingApp(projectName: string, brief = ''): { app: string; css: string } {
   const title = String(projectName || 'Brand').replace(/[*/\\]/g, '').slice(0, 48) || 'Brand';
@@ -996,10 +1015,9 @@ export default function App() {
     };
   }
 
-  // Editorial-dark last-resort ONLY when identity says so — not for bakery/chat.
-  if (identity.layout !== 'editorial-dark') {
-    return {
-      app: `import './App.css';
+  // Lookbook layouts removed — DEPRECATED helper always returns the generic shop shell.
+  return {
+    app: `import './App.css';
 import { useState } from 'react';
 
 const products = [
@@ -1036,68 +1054,6 @@ export default function App() {
         ))}
       </div>
     </div>
-  );
-}
-`,
-      css: buildMarketingCompanionCss(title, brief, identity),
-    };
-  }
-
-  return {
-    app: `import './App.css';
-
-const features = [
-${featuresLiteral}
-];
-
-export default function App() {
-  const year = new Date().getFullYear();
-  return (
-    <main className="app">
-      <section className="hero" aria-labelledby="brand-name">
-        <img className="hero-photo" src="${heroSrc}" alt="${title} product hero" />
-        <div className="hero-wash" aria-hidden="true" />
-        <nav className="nav" aria-label="Main navigation">
-          <a className="wordmark" href="#top" id="brand-name">${title}.</a>
-          <a className="nav-link" href="#story">Discover</a>
-        </nav>
-        <div className="hero-copy" id="top">
-          <p className="eyebrow">${copy.eyebrow}</p>
-          <h1>${copy.headline}</h1>
-          <p className="lede">${copy.lede}</p>
-          <a className="button" href="#story">${copy.cta}</a>
-        </div>
-        <p className="scroll-hint"><span className="scroll-line" aria-hidden="true" />Scroll to reveal</p>
-      </section>
-
-      <section className="story" id="story">
-        <div className="story-visual">
-          <img className="story-photo" src="${storySrc}" alt="${title} product detail" />
-        </div>
-        <div className="story-copy">
-          <p className="eyebrow dark">${copy.storyEyebrow}</p>
-          <h2>${copy.storyHeadline}</h2>
-          <p>${copy.storyBody}</p>
-          <a className="text-link" href="#features">${copy.storyCta}</a>
-        </div>
-      </section>
-
-      <section className="features" id="features">
-        {features.map((f) => (
-          <article key={f.n}>
-            <span className="n">{f.n}</span>
-            <h3>{f.title}</h3>
-            <p>{f.body}</p>
-          </article>
-        ))}
-      </section>
-
-      <footer className="footer">
-        <strong>${title}</strong>
-        <span>&copy; {year}</span>
-        <a href="#top">Back to top</a>
-      </footer>
-    </main>
   );
 }
 `,
@@ -1175,6 +1131,13 @@ export function isPreviewReady(
   if (looksLikeFillerStubAppSource(app)) {
     reasons.push('App is still a filler stub (sample/placeholder text)');
   }
+  // Remote placeholder hosts break offline / in Electron Live.
+  if (/via\.placeholder\.com|placehold\.co|placekitten\.com|picsum\.photos|dummyimage\.com/i.test(app)) {
+    reasons.push('App uses broken remote placeholder image URLs');
+  }
+  if (/via\.placeholder\.com|placehold\.co|picsum\.photos/i.test(cssBlob)) {
+    reasons.push('CSS references remote placeholder image hosts');
+  }
   if (appUsesReactNamespaceWithoutImport(app)) {
     reasons.push('App uses React.* hooks without importing React (blank Live)');
   }
@@ -1201,18 +1164,19 @@ export function isPreviewReady(
 
   // Landing / restaurant / marketing: brand + one paragraph is never Ready.
   if (briefLooksLikeMarketingLanding(brief)) {
-    const catalogStore = /\b(?:product-grid|product-card|product-cards|add-to-cart|purchase|cart-count|sticky-nav)\b/i.test(app)
-      && /\b(?:search|cart|price|\$)\b/i.test(app);
     const hasStructure = /<(?:section|header|footer|nav|main|article)\b/i.test(app)
-      || /className=["'][^"']*\b(?:hero|menu|footer|nav|header|sticky-nav|product-grid)\b/i.test(app);
+      || /className=["'][^"']*\b(?:hero|menu|footer|nav|header|sticky-nav|product-grid|grid|cards?)\b/i.test(app);
     const hasCta = /<(?:button|a)\b/i.test(app)
-      || /\b(?:cta|order|reserve|book|explore|menu|purchase|add\s*to\s*cart)\b/i.test(app);
+      || /\b(?:cta|order|reserve|book|explore|menu|purchase|add\s*to\s*cart|get\s+started|shop)\b/i.test(app);
     const cssLen = cssBlob.replace(/\s+/g, '').length;
-    // Catalog stores can be compact (~1.5–2k) and still be a real interactive shop.
-    const minApp = catalogStore ? 1400 : 2000;
-    if (app.length < minApp) reasons.push('landing App.jsx too thin for a real page');
-    if (!hasStructure) reasons.push('landing App missing sections (hero/menu/footer)');
-    if (cssLen < 1500) reasons.push('landing CSS too thin');
+    const sectionCount = (app.match(/<(?:section|main|header|footer)\b/gi) || []).length;
+    const hasPremiumCss = /gradient|radial-gradient|@keyframes|backdrop-filter|box-shadow|background-image/i.test(cssBlob);
+    const wantsBooking = /\b(?:reserv|appointment|time\s*slot|book\s+(?:a\s+)?(?:table|appointment|slot))\b/i.test(brief)
+      && !/\b(?:borrow|bookshelf|library|lend(?:ing)?|checked\s*out|return\s+button)\b/i.test(brief);
+    if (app.length < (wantsBooking ? 2200 : 1800)) reasons.push('landing App.jsx too thin for a real page');
+    if (!hasStructure || sectionCount < 2) reasons.push('landing App missing sections (hero/menu/footer)');
+    if (cssLen < (wantsBooking ? 1200 : 900)) reasons.push('landing CSS too thin');
+    if (!hasPremiumCss && cssLen < 2000) reasons.push('landing CSS lacks premium depth (gradients, atmosphere, or motion)');
     if (restaurantBriefBuiltAsCoffeeShop(app, brief)) {
       reasons.push('restaurant brief built as a coffee shop instead');
     }
@@ -1222,22 +1186,86 @@ export function isPreviewReady(
     if (!hasCta && /\b(?:cta|button|order|reserve|explore)\b/i.test(brief)) {
       reasons.push('landing App missing a primary CTA');
     }
+    if (wantsBooking) {
+      const hasState = /\buseState\b|\bReact\.useState\b/.test(app);
+      const hasSlots = /\b(?:slot|time|schedule|select)\b/i.test(app);
+      if (!hasState) reasons.push('booking landing needs interactive state (useState)');
+      if (!hasSlots) reasons.push('booking landing missing time-slot / schedule UI');
+    }
   }
 
-  // Discord / team-chat apps: centered brand splash is never Ready.
+  // Library / shelf borrow apps — not appointment booking.
+  if (/\b(?:borrow|bookshelf|library\s+shelf|lend(?:ing)?\s+books?|checked\s*out|return\s+button|quiet\s*shelf)\b/i.test(brief)
+    || /\b(?:borrow|bookshelf|library|lend)\b/i.test(brief) && /\b(?:book|journal|shelf|item)\b/i.test(brief)) {
+    const hasBorrow = /\bborrow\b/i.test(app);
+    const hasReturn = /\breturn\b/i.test(app) && /\bonClick|button/i.test(app);
+    const fakeBooking = /\b(?:10:00\s*AM|time\s*slot|appointment)\b/i.test(app) && !hasReturn;
+    const hasItemRows = (app.match(/<img\b/gi) || []).length >= 2
+      || /className=["'][^"']*\b(?:item|card|row|product|shelf)\b/i.test(app);
+    const hasFlexLayout = /display\s*:\s*flex|grid-template|flex-direction|gap\s*:/i.test(cssBlob);
+    const logoAsCover = /background(?:-image)?\s*:\s*[^;]*url\(\s*['"]?\/logo\.svg/i.test(cssBlob)
+      && /cover|100vw|100vh|center\s+center\/cover/i.test(cssBlob);
+    const fillerTitles = /\bBook Title\s*\d+\b/i.test(app) || /\bA brief description of the book\b/i.test(app);
+    const publicIconsOnDisk = Object.keys(files).some((p) => /public\/(?:logo\.svg|icons\/)/i.test(p.replace(/\\/g, '/')));
+    const iconsWired = /\/logo\.svg|\/icons\/(?:bag|search|cart|menu)\.svg/i.test(app)
+      || /\/logo\.svg/i.test(cssBlob);
+    if (app.length < 1600) reasons.push('shelf/borrow App too thin');
+    if (!hasBorrow) reasons.push('shelf brief missing borrow action');
+    if (!hasReturn) reasons.push('shelf brief missing return flow');
+    if (fakeBooking) reasons.push('shelf/borrow brief built as time-slot booking instead');
+    if (!hasItemRows) reasons.push('shelf App missing browse item rows / images');
+    if (!hasFlexLayout) reasons.push('shelf CSS missing real layout (flex/grid)');
+    if (logoAsCover) reasons.push('logo.svg used as full-bleed background (giant mark)');
+    if (fillerTitles) reasons.push('shelf App still uses filler Book Title copy');
+    if (publicIconsOnDisk && !iconsWired) reasons.push('public icons/logo exist but are not used in the UI');
+    if (cssBlob.replace(/\s+/g, '').length < 900) reasons.push('shelf CSS too thin');
+    // Broken covers: /heroes/1.jpg or template ${item.id} when real files are slug-hero.jpg.
+    const publicHeroNames = new Set(
+      Object.keys(files)
+        .map((p) => p.replace(/\\/g, '/'))
+        .filter((p) => /public\/heroes\/.+\.(?:jpe?g|png|webp|svg)$/i.test(p))
+        .map((p) => p.replace(/^public\//i, '')),
+    );
+    if (publicHeroNames.size > 0) {
+      if (/\/heroes\/\$\{|src=\{`\/heroes\//i.test(app)) {
+        reasons.push('shelf App still uses dynamic /heroes/${…} paths instead of on-disk covers');
+      }
+      const numericRefs = [...app.matchAll(/\/heroes\/(\d+\.(?:jpe?g|png|webp))/gi)].map((m) => m[1]);
+      if (numericRefs.some((r) => !publicHeroNames.has(`heroes/${r}`) && ![...publicHeroNames].some((n) => n.endsWith(r)))) {
+        reasons.push('shelf App references /heroes/N.jpg files that are missing on disk');
+      }
+      // Invented names like /heroes/gatsby.jpg while only quietshelf-hero.jpg exists.
+      const namedRefs = [...app.matchAll(/\/heroes\/([a-z0-9._-]+\.(?:jpe?g|png|webp))/gi)].map((m) => m[1].toLowerCase());
+      const missingNamed = namedRefs.filter((r) => !publicHeroNames.has(`heroes/${r}`) && ![...publicHeroNames].some((n) => n.toLowerCase().endsWith(r)));
+      if (missingNamed.length) {
+        reasons.push(`shelf App references missing cover files (${missingNamed.slice(0, 3).join(', ')})`);
+      }
+      // Detect wiped binary heroes (@@@FILE wrote marker/empty over real JPGs).
+      for (const [p, body] of Object.entries(files)) {
+        const norm = p.replace(/\\/g, '/');
+        if (!/public\/heroes\/.+\.(?:jpe?g|png|webp)$/i.test(norm)) continue;
+        const b = String(body || '');
+        if (b && b.length < 400 && (/on-disk asset|\/\* binary|ASSET:/i.test(b) || !/[\x00-\x08\x80-\xff]/.test(b))) {
+          // Empty string is OK (presence marker). Non-empty tiny ASCII means overwrite corruption.
+          if (b.trim()) reasons.push('hero image was overwritten with placeholder text');
+        }
+      }
+    }
+  }
+
+  // Chat / messaging apps: require a working interactive shell — not Discord-specific chrome classes.
   if (briefLooksLikeChatApp(brief)) {
-    const hasServerRail = /server-rail|serverRail|className=["'][^"']*\bservers?\b/i.test(app);
-    const hasChannels = /channel-list|channelList|className=["'][^"']*\bchannels?\b/i.test(app)
-      || /#\s*\{?channel/i.test(app);
-    const hasChatPane = /chat-pane|chatPane|message-list|composer/i.test(app);
     const cssLenChat = cssBlob.replace(/\s+/g, '').length;
-    if (app.length < 1800) reasons.push('chat App.jsx too thin for a multi-pane shell');
-    if (!hasServerRail) reasons.push('chat App missing server rail');
-    if (!hasChannels) reasons.push('chat App missing channel list');
-    if (!hasChatPane) reasons.push('chat App missing chat pane / messages');
-    if (cssLenChat < 1200) reasons.push('chat CSS too thin for a multi-pane layout');
+    const hasMultiPane = /<(?:aside|nav|main|section)\b/i.test(app)
+      || /className=["'][^"']*\b(?:sidebar|rail|pane|panel|channels?|servers?|messages?|composer|inbox)\b/i.test(app);
+    const hasComposer = /<(?:input|textarea)\b/i.test(app)
+      || /\b(?:composer|send|message)\b/i.test(app);
+    if (app.length < 1200) reasons.push('chat App.jsx too thin for a messaging shell');
+    if (!hasMultiPane) reasons.push('chat App missing multi-pane layout');
+    if (!hasComposer) reasons.push('chat App missing message composer');
+    if (cssLenChat < 600) reasons.push('chat CSS too thin');
     if (looksLikeFillerStubAppSource(app)) {
-      reasons.push('chat App is still a title splash, not a Discord-like shell');
+      reasons.push('chat App is still a title splash, not a messaging shell');
     }
   }
 
@@ -1252,7 +1280,8 @@ export function isPreviewReady(
   }
 
   if (opts?.requireInteractive) {
-    const hasState = /\buse(?:State|Reducer)\s*\(/.test(app);
+    // Match useState(…) and useState<number[]>(…) / useReducer<…>(…).
+    const hasState = /\buse(?:State|Reducer)(?:\s*<[^>\n]+>)?\s*\(/.test(app);
     const hasSetter = /\bset[A-Z]\w*\s*\(/.test(app);
     const hasHandler = /\bon(?:Click|Change|Submit|Input|KeyDown|Toggle)\s*=/.test(app)
       || /\baddEventListener\s*\(/.test(app);
@@ -1298,6 +1327,15 @@ export function briefRequiresInteractiveApp(brief: string): boolean {
   const t = String(brief || '');
   if (!t.trim()) return false;
   if (briefLooksLikeChatApp(t)) return true;
+  // Booking / reservation / marketplace products always need interactive depth.
+  if (/\b(?:book|reserv|time\s*slot|appointment|check(?:ed)?\s*out|borrow|share)\b/i.test(t)
+    && /\b(?:tool|slip|trail|marina|shed|neighbor|garden|service|slot)\b/i.test(t)) {
+    return true;
+  }
+  if (/\b(?:book|reserv|appointment|time\s*slot)\b/i.test(t)
+    && /\b(?:site|app|web|page|simple)\b/i.test(t)) {
+    return true;
+  }
   const looksMarketing = /\b(?:landing\s+page|marketing\s+site|cafe|coffee\s+shop|roaster|bistro|bakery|restaurant|portfolio\s+site|hero\s+with|menu\s+highlights)\b/i.test(t);
   const looksApp = /\b(?:app|application|dashboard|workspace|kanban|todo|tracker|inbox|editor|ledger|budget|notes?)\b/i.test(t)
     || /\b(?:build|create|make)\s+(?:an?\s+)?(?:[\w-]+\s+){0,4}(?:app|application)\b/i.test(t)
@@ -1445,13 +1483,219 @@ export function appLooksLikeStructuredLanding(app: string): boolean {
   return structureHits >= 2;
 }
 
-/** Replace fake /path/to assets with a real public keyboard photo. */
+/** Tiny inline SVG tile — works offline in Electron Live (no remote host). */
+function inlineShelfSvgDataUri(label: string, hue: number): string {
+  const safe = String(label || 'Item').replace(/[<>&"']/g, '').slice(0, 18);
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480" viewBox="0 0 640 480">
+<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+<stop offset="0%" stop-color="hsl(${hue} 28% 22%)"/><stop offset="100%" stop-color="hsl(${hue} 18% 12%)"/>
+</linearGradient></defs>
+<rect width="640" height="480" fill="url(#g)"/>
+<rect x="48" y="48" width="544" height="384" rx="28" fill="hsla(40,30%,92%,0.08)" stroke="hsla(40,20%,85%,0.25)"/>
+<text x="320" y="260" text-anchor="middle" fill="hsla(40,25%,92%,0.92)" font-family="Georgia,serif" font-size="42">${safe}</text>
+</svg>`;
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
+const REMOTE_PLACEHOLDER_HOST =
+  /via\.placeholder\.com|placehold\.co|placekitten\.com|picsum\.photos|dummyimage\.com/i;
+
+/**
+ * Replace fake / broken remote placeholder image hosts with offline-safe data URIs.
+ * via.placeholder.com / placehold.co break Electron Live and leave overlapping alt text.
+ */
 export function sanitizeCreatePolishPlaceholders(app: string): string {
-  const kb =
-    'https://images.unsplash.com/photo-1541140532154-b024d705b90a?auto=format&fit=crop&w=1200&q=80';
-  return String(app || '')
-    .replace(/src=(["'])\/path\/to\/[^"']+\1/gi, `src=$1${kb}$1`)
-    .replace(/url\((['"]?)\/path\/to\/[^)"']+\1\)/gi, `url($1${kb}$1)`);
+  let next = String(app || '');
+  let n = 0;
+  const swap = (label?: string) => {
+    n += 1;
+    return inlineShelfSvgDataUri(label || `Item ${n}`, 28 + (n * 37) % 300);
+  };
+
+  next = next.replace(/src=(["'])\/path\/to\/[^"']+\1/gi, (_m, q) => `src=${q}${swap('Item')}${q}`);
+  next = next.replace(/url\((['"]?)\/path\/to\/[^)"']+\1\)/gi, () => `url(${swap('Item')})`);
+
+  next = next.replace(/<img\b[^>]*>/gi, (tag) => {
+    const src = tag.match(/src=(["'])([^"']*)\1/i)?.[2] ?? '';
+    const needsFix = !src
+      || REMOTE_PLACEHOLDER_HOST.test(src)
+      || /\/path\/to\//i.test(src);
+    if (!needsFix) return tag;
+    const alt = tag.match(/alt=(["'])([^"']*)\1/i)?.[2] || 'Item';
+    const uri = swap(alt);
+    if (/src=(["'])[^"']*\1/i.test(tag)) {
+      return tag.replace(/src=(["'])[^"']*\1/i, `src=$1${uri}$1`);
+    }
+    return tag.replace(/<img\b/i, `<img src="${uri}"`);
+  });
+
+  next = next.replace(
+    /url\((['"]?)https?:\/\/(?:via\.placeholder\.com|placehold\.co|placekitten\.com|picsum\.photos|dummyimage\.com)[^)"']*\1\)/gi,
+    () => `url(${swap('Item')})`,
+  );
+  return next;
+}
+
+/**
+ * After Brand Assets land in public/, wire them into App + CSS and strip the
+ * common failure mode where /logo.svg is stretched as a full-bleed background
+ * (reads as a giant geometric mark behind the page).
+ */
+export function wireCreatePublicAssets(
+  files: Record<string, string>,
+  productName = 'App',
+): { files: Record<string, string>; changed: string[] } {
+  const next = { ...files };
+  const changed: string[] = [];
+  const keys = Object.keys(next).map((p) => p.replace(/\\/g, '/'));
+  const hasLogo = keys.some((p) => /(^|\/)public\/logo\.svg$/i.test(p));
+  const hasSearch = keys.some((p) => /(^|\/)public\/icons\/search\.svg$/i.test(p));
+  const hasBag = keys.some((p) => /(^|\/)public\/icons\/bag\.svg$/i.test(p));
+  const heroes = keys
+    .filter((p) => /public\/heroes\/.+\.(?:jpe?g|png|webp|svg)$/i.test(p))
+    .map((p) => '/' + p.replace(/^public\//i, ''));
+  const appKey = next['src/App.tsx'] && !next['src/App.jsx']
+    ? 'src/App.tsx'
+    : (next['src/App.jsx'] ? 'src/App.jsx' : (next['src/App.tsx'] ? 'src/App.tsx' : ''));
+  const cssKey = next['src/App.css'] ? 'src/App.css' : '';
+
+  if (cssKey) {
+    let css = String(next[cssKey] || '');
+    const before = css;
+    // Never stretch the brand mark across the whole viewport.
+    css = css.replace(
+      /background(?:-image)?\s*:\s*[^;]*url\(\s*['"]?\/logo\.svg['"]?\s*\)[^;]*;?/gi,
+      '/* logo mark reserved for nav — not a page background */',
+    );
+    css = css.replace(
+      /\.logo[^{]*\{[^}]*background[^}]*\/logo\.svg[^}]*\}/gi,
+      '.logo { width: 36px; height: 36px; object-fit: contain; }',
+    );
+    if (heroes[0] && !/url\(\s*['"]?\/heroes\//i.test(css)) {
+      css += `\n.app-shell, .app { background-image: linear-gradient(180deg, rgba(250,247,242,0.92), rgba(245,240,232,0.96)), url('${heroes[0]}'); background-size: cover; background-position: center; }\n`;
+    }
+    if ((hasLogo || hasSearch || hasBag) && !/\.sticky-nav\b/.test(css)) {
+      css += `
+.sticky-nav { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 0.85rem 1.25rem; position: sticky; top: 0; z-index: 20; background: rgba(250,247,242,0.92); backdrop-filter: blur(10px); border-bottom: 1px solid rgba(60,40,20,0.08); }
+.nav-left, .nav-right { display: flex; align-items: center; gap: 0.75rem; }
+.nav-logo, .nav-icon { display: block; object-fit: contain; }
+.nav-brand { font-weight: 700; letter-spacing: -0.03em; }
+`;
+    }
+    if (css !== before) {
+      next[cssKey] = css;
+      changed.push(cssKey);
+    }
+  }
+
+  if (appKey) {
+    let app = String(next[appKey] || '');
+    const before = app;
+    // Prefer on-disk heroes over empty/broken/data-uri tiles for browse cards.
+    if (heroes.length) {
+      if (!/\bCOVER_HREFS\b/.test(app)) {
+        const decl = `const COVER_HREFS = ${JSON.stringify(heroes)};\n`;
+        if (/^import\s.+$/m.test(app)) {
+          app = app.replace(/(^import\s.+\n)+/m, (block) => `${block}${decl}`);
+        } else {
+          app = `${decl}${app}`;
+        }
+      }
+      app = app.replace(
+        /src=\{`\/heroes\/\$\{item\.id\}[^`]*`\}/g,
+        'src={COVER_HREFS[(Math.max(0, Number(item.id) - 1)) % COVER_HREFS.length]}',
+      );
+      app = app.replace(
+        /src=\{`\/heroes\/\$\{([^}]+)\}[^`]*`\}/g,
+        'src={COVER_HREFS[(Math.max(0, Number($1) - 1)) % COVER_HREFS.length]}',
+      );
+      let ni = 0;
+      app = app.replace(/(['"`])\/heroes\/\d+\.(?:jpe?g|png|webp)\1/gi, () => {
+        const src = heroes[ni % heroes.length];
+        ni += 1;
+        return `'${src}'`;
+      });
+      // Named invented covers (/heroes/gatsby.jpg) → cycle real on-disk heroes.
+      app = app.replace(/(['"`])\/heroes\/(?!quietshelf)[a-z0-9._-]+\.(?:jpe?g|png|webp)\1/gi, () => {
+        const src = heroes[ni % heroes.length];
+        ni += 1;
+        return `'${src}'`;
+      });
+      // Prefer COVER_HREFS when the model stores covers on imageUrl / cover / image fields
+      // but never wired them to the const.
+      if (/\bCOVER_HREFS\b/.test(app) && /\.(?:imageUrl|cover|image|img)\b/.test(app)) {
+        app = app.replace(
+          /\bsrc=\{book\.(?:imageUrl|cover|image|img)\}/g,
+          'src={COVER_HREFS[(Math.max(0, Number(book.id) - 1)) % COVER_HREFS.length]}',
+        );
+        app = app.replace(
+          /\bsrc=\{item\.(?:imageUrl|cover|image|img)\}/g,
+          'src={COVER_HREFS[(Math.max(0, Number(item.id) - 1)) % COVER_HREFS.length]}',
+        );
+      }
+      // Borrow/Return toggle must stay clickable — models often disable the button when borrowed.
+      app = app.replace(/\s+disabled=\{[^}]*isBorrowed[^}]*\}/g, '');
+      // Fix broken <button …\n{label}</button> missing the closing `>` before children.
+      app = app.replace(
+        /(<button\b[^>]*?)(\r?\n)(\s*\{[^;{}]{3,80}\})\s*(\r?\n\s*<\/button>)/g,
+        (full, open, nl, child, close) => (/>\s*$/.test(open) ? full : `${open}>${nl}${child}${close}`),
+      );
+      let hi = 0;
+      app = app.replace(/<img\b[^>]*>/gi, (tag) => {
+        if (/\/logo\.svg|\/icons\/|COVER_HREFS/i.test(tag)) return tag;
+        // Already wired to a real on-disk hero path.
+        if (heroes.some((h) => tag.includes(h))) return tag;
+        if (/\/heroes\/\$\{|\/heroes\/\d+\./i.test(tag) || /src=\{`\/heroes/i.test(tag)) {
+          // Handled by COVER_HREFS rewrites above; leave tag structure alone.
+          return tag;
+        }
+        const src = heroes[hi % heroes.length];
+        hi += 1;
+        if (/src=(["'])[^"']*\1/i.test(tag)) {
+          return tag.replace(/src=(["'])[^"']*\1/i, `src=$1${src}$1`);
+        }
+        if (/src=\{/i.test(tag)) return tag;
+        return tag.replace(/<img\b/i, `<img src="${src}"`);
+      });
+    }
+    // Drop filler titles when present.
+    const brand = String(productName || 'QuietShelf').replace(/[*/\\]/g, '').slice(0, 32) || 'QuietShelf';
+    const shelfNames = [`${brand} Novel`, `${brand} Journal`, `${brand} Field Notes`, 'Walnut Almanac', 'Paperbound'];
+    let ni = 0;
+    app = app.replace(/\bBook Title\s*\d+\b/gi, () => shelfNames[ni++ % shelfNames.length]);
+    app = app.replace(/\bA brief description of the book\b/gi, 'Soft paper tones · warm walnut shelf copy');
+
+    // Inject a compact nav with real public icons when files exist but UI never references them.
+    const needsNavWire = (hasLogo || hasSearch || hasBag)
+      && !/\/logo\.svg|\/icons\/(?:search|bag)\.svg/i.test(app);
+    if (needsNavWire) {
+      const logo = hasLogo
+        ? `<img className="nav-logo" src="/logo.svg" alt="${brand}" width="36" height="36" />`
+        : `<span className="nav-brand">${brand}</span>`;
+      const search = hasSearch
+        ? `<img className="nav-icon" src="/icons/search.svg" alt="" width="20" height="20" aria-label="Search" />`
+        : '';
+      const bag = hasBag
+        ? `<img className="nav-icon" src="/icons/bag.svg" alt="" width="20" height="20" aria-label="Shelf bag" />`
+        : '';
+      const nav = `<header className="sticky-nav" role="banner"><div className="nav-left">${logo}</div><div className="nav-right">${search}${bag}</div></header>\n`;
+      if (/<h1\b/i.test(app)) {
+        app = app.replace(/<h1\b/i, `${nav}<h1`);
+      } else if (/className=["'][^"']*\bapp\b[^"']*["'][^>]*>/i.test(app)) {
+        app = app.replace(
+          /(className=["'][^"']*\bapp\b[^"']*["'][^>]*>)/i,
+          `$1\n      ${nav}`,
+        );
+      }
+    }
+
+    if (app !== before) {
+      next[appKey] = app;
+      changed.push(appKey);
+    }
+  }
+
+  return { files: next, changed: [...new Set(changed)] };
 }
 
 /**
@@ -1472,8 +1716,9 @@ export function buildMarketingCompanionCss(
   const id = identity || createIdentityFromBrief(productName, brief);
   const brand = String(id.name || productName || 'Product').replace(/[*/\\]/g, '').slice(0, 48);
   const p = id.palette;
-  const shopish = id.layout === 'warm-shop' || id.layout === 'catalog-grid';
-  return `/* NOVA create polish — ${id.layout} companion for ${brand} (${id.category}/${id.mood}) */
+  const briefText = String(brief || id.brief || '');
+  const shopish = /\b(?:shop|store|bakery|product|cart|menu|catalog)\b/i.test(briefText);
+  return `/* NOVA create polish — brief companion for ${brand} */
 :root {
   --bg: ${p.bg};
   --panel: ${p.panel};
@@ -1502,7 +1747,7 @@ body { font-family: ${p.font}; }
   border-radius: ${shopish ? '12px' : '999px'}; padding: 0.55rem 1rem; min-width: min(240px, 70vw);
 }
 .cart-count { color: var(--muted); font-size: 0.95rem; }
-.hero { min-height: ${id.layout === 'editorial-dark' ? '72vh' : '48vh'}; display: grid; place-items: center; text-align: center; padding: 3.5rem 1.25rem 2.5rem; }
+.hero { min-height: 48vh; display: grid; place-items: center; text-align: center; padding: 3.5rem 1.25rem 2.5rem; }
 .hero img, .hero-photo { max-width: min(920px, 92vw); width: 100%; border-radius: ${shopish ? '16px' : '20px'}; border: 1px solid var(--line); object-fit: cover; }
 .hero-title, .hero h1 { margin: 0 0 0.75rem; font-size: clamp(2.2rem, 5vw, 3.6rem); letter-spacing: -0.04em; line-height: 1.05; }
 .product-grid, .product-cards {
@@ -1554,4 +1799,90 @@ export function createPolishMissingLocalImports(
     }
   }
   return [...new Set(missing)];
+}
+
+/**
+ * Heal App that imports missing local modules (e.g. ./productData) by stripping
+ * those imports and inlining a tiny data stub so Live does not crash.
+ */
+export function healMissingLocalImports(
+  files: Record<string, string>,
+  productName = 'Item',
+): { files: Record<string, string>; healed: string[] } {
+  const missing = createPolishMissingLocalImports(files);
+  if (!missing.length) return { files, healed: [] };
+  const next = { ...files };
+  const appKey = next['src/App.tsx'] && !next['src/App.jsx']
+    ? 'src/App.tsx'
+    : (next['src/App.jsx'] ? 'src/App.jsx' : (next['src/App.tsx'] ? 'src/App.tsx' : ''));
+  if (!appKey) return { files, healed: [] };
+  let app = String(next[appKey] || '');
+  const healed: string[] = [];
+  const brand = String(productName || 'Item').replace(/[*/\\]/g, '').slice(0, 28) || 'Item';
+
+  for (const spec of missing) {
+    const esc = spec.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    // Drop `import … from './missing'` / `import './missing'`.
+    app = app.replace(new RegExp(`^\\s*import\\s+[^;]*?from\\s+['"]${esc}['"]\\s*;?\\s*$`, 'gim'), '');
+    app = app.replace(new RegExp(`^\\s*import\\s+['"]${esc}['"]\\s*;?\\s*$`, 'gim'), '');
+    healed.push(spec);
+  }
+
+  // If the App referenced a product/items catalog that vanished with the import, inject a local stub.
+  if (
+    healed.some((h) => /product|item|book|catalog|data|shelf/i.test(h))
+    && !/\bconst\s+(?:ITEMS|PRODUCTS|BOOKS|items|products|books)\s*=/.test(app)
+  ) {
+    const stub = `const ITEMS = [
+  { id: '1', title: '${brand} Novel', blurb: 'Soft paper tones on the shared shelf.', cover: '/heroes/app-hero.jpg' },
+  { id: '2', title: '${brand} Journal', blurb: 'Warm walnut notes for who has what.', cover: '/heroes/app-story.jpg' },
+  { id: '3', title: 'Field Notes', blurb: 'Borrow and return without accounts.', cover: '/logo.svg' },
+];\n`;
+    if (/^import\s.+$/m.test(app)) {
+      app = app.replace(/(^import\s.+\n)+/m, (block) => `${block}${stub}`);
+    } else {
+      app = `${stub}\n${app}`;
+    }
+    // Soft alias common names models import.
+    if (/\bproductData\b/.test(app) && !/\bconst\s+productData\b/.test(app)) {
+      app = app.replace(stub, `${stub}const productData = ITEMS;\n`);
+    }
+    if (/\bproducts\b/.test(app) && !/\bconst\s+products\b/.test(app)) {
+      app = `const products = ITEMS;\n${app}`;
+    }
+  }
+
+  next[appKey] = app;
+  return { files: next, healed };
+}
+
+/** Drop react-icons / icon-pack imports that were never added to package.json. */
+export function healMissingIconPackImports(
+  files: Record<string, string>,
+): { files: Record<string, string>; healed: string[] } {
+  const next = { ...files };
+  const healed: string[] = [];
+  for (const key of Object.keys(next)) {
+    if (!/\.(?:jsx|tsx|js|ts)$/i.test(key)) continue;
+    let body = String(next[key] || '');
+    if (!/from\s+['"](?:react-icons|@mui\/icons-material|lucide-react)['"/]/i.test(body)
+      && !/from\s+['"]react-icons\//i.test(body)) {
+      continue;
+    }
+    // Only strip packs that are not declared in package.json.
+    let pkg = '';
+    try { pkg = String(next['package.json'] || ''); } catch { pkg = ''; }
+    const needsStrip =
+      (/react-icons/i.test(body) && !/"react-icons"\s*:/.test(pkg))
+      || (/@mui\/icons-material/i.test(body) && !/"@mui\/icons-material"\s*:/.test(pkg));
+    // lucide-react is often present in Nova scaffolds — leave if declared.
+    if (!needsStrip) continue;
+    body = body.replace(/^\s*import\s+\{[^}]+\}\s+from\s+['"]react-icons\/[^'"]+['"]\s*;?\s*$/gim, '');
+    body = body.replace(/^\s*import\s+\{[^}]+\}\s+from\s+['"]@mui\/icons-material['"]\s*;?\s*$/gim, '');
+    body = body.replace(/<(?:Fa|Md|Hi|Bi|Io|Ai|Bs|Fi|Ri)[A-Za-z0-9]+\b[^>]*\/>/g, '');
+    body = body.replace(/<(?:Fa|Md|Hi|Bi|Io|Ai|Bs|Fi|Ri)[A-Za-z0-9]+\b[^>]*>\s*<\/(?:Fa|Md|Hi|Bi|Io|Ai|Bs|Fi|Ri)[A-Za-z0-9]+>/g, '');
+    next[key] = body;
+    healed.push(key);
+  }
+  return { files: next, healed };
 }

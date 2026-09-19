@@ -213,6 +213,7 @@ import type { ClassifyTurnResult } from '@/lib/classifyTurn';
 import {
   clearChatTurnStatus,
   setChatTurnStatus,
+  pushChatTurnStatus,
 } from '@/lib/chatTurnStatusStore';
 import { consumePendingStudioBind, readPendingStudioBind } from '@/lib/pendingStudioBind';
 import { getCreateJobForChat } from '@/lib/createJobStore';
@@ -393,7 +394,7 @@ export type AIChatSendPrepResult =
       resolvedStudio: any;
       userId: string;
       finishPlainReply: (text: string, provider?: string) => Promise<void>;
-      pushAssistantStatus: (label: string) => void;
+      pushAssistantStatus: (label: string, writingPath?: string | null) => void;
       stopIfSuperseded: () => Promise<boolean>;
       clearGeneratingIfMineEarly: () => void;
       commitStudioForChat: (...args: any[]) => void;
@@ -422,7 +423,9 @@ export type AIChatSendPrepResult =
       setMessages: (...args: any[]) => void;
       messagesRef: any;
       genSeqRef: any;
+      genSeqByChatRef?: any;
       stopRequestedRef: any;
+      stopRequestedByChatRef?: any;
       threadBrainRef: any;
       pushLivePreview: (...args: any[]) => void;
       flushQueuedSend: (...args: any[]) => void;
@@ -482,6 +485,8 @@ export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Pr
     failoverChipText,
     flushQueuedSend,
     genSeqRef,
+    genSeqByChatRef,
+    stopRequestedByChatRef,
     generating,
     generatingRef,
     handleSend,
@@ -550,21 +555,25 @@ export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Pr
   // New send → follow the reply; history scroll stays free until the user scrolls up again.
   stickToBottomRef.current = true;
   userDetachScrollRef.current = false;
-  // Only cancel a prior engine job when this turn will replace it (not every keystroke path).
+  // Only cancel a prior engine job when THIS chat already has a turn in flight.
   if (generatingRef.current) {
     const cancelChatId = activeGenChatIdRef.current
       || routeChatIdRef.current
       || persistChatIdRef.current
       || undefined;
-    void engineGenerateCancel(cancelChatId ? { chatId: cancelChatId } : undefined);
+    const nextChatGuess = (route.name === 'chat' && !route.chatId)
+      ? null
+      : (routeChatIdRef.current || persistChatIdRef.current || null);
+    // Do not cancel another chat's create when the user sends elsewhere.
+    if (!cancelChatId || !nextChatGuess || cancelChatId === nextChatGuess) {
+      void engineGenerateCancel(cancelChatId ? { chatId: cancelChatId } : undefined);
+    }
   }
   // Do NOT clear generatingRef here — handleSend sets it early to block double Enter
   // from starting two creates / queueing the same prompt on itself.
   stopRequestedRef.current = false;
   setFailoverNote(null);
   setIpcFallbackDev(false);
-  const mySeq = ++genSeqRef.current;
-
   // Prefer live route id. Blank starters (no chatId) always mint a new id. never reuse persist.
   const blankStarter = route.name === 'chat' && !route.chatId;
   let activeChatId = blankStarter
@@ -576,37 +585,37 @@ export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Pr
     skipChatLoadIdsRef.current.add(activeChatId);
     messagesRef.current = [];
     messagesChatIdRef.current = activeChatId;
-    const keepFiles = { ...chatStudioFilesRef.current };
-    const keepPid = chatStudioProjectIdRef.current;
-    let keepRoot = chatStudioDiskRootRef.current;
-    if (!keepRoot && !Object.keys(keepFiles).length) {
-      const applied = consumePendingStudioBind({
-        setDiskRoot: (root) => {
-          keepRoot = root;
-          chatStudioDiskRootRef.current = root;
-          setChatStudioDiskRoot(root);
-        },
-        setFiles: (files) => {
-          Object.assign(keepFiles, files);
-          setChatStudioFiles(files);
-          chatStudioFilesRef.current = files;
-        },
-        setProjectId: (id) => { chatStudioProjectIdRef.current = id; },
-      });
-      if (applied.diskRoot) keepRoot = applied.diskRoot;
-    }
-    const keepName = keepRoot ? studioPathBasename(keepRoot) : undefined;
+    // New chat always starts with an empty studio — never copy the previous chat's bind.
+    chatStudioFilesRef.current = {};
+    setChatStudioFiles({});
+    chatStudioDiskRootRef.current = null;
+    setChatStudioDiskRoot(null);
+    chatStudioProjectIdRef.current = null;
+    setChatStudioProjectId(null);
     studioBoundChatIdRef.current = activeChatId;
     lastStudioIntentRef.current = null;
-    if (keepRoot || Object.keys(keepFiles).length) {
+    setPreviewUrl(null);
+    // Only consume a pending folder attach when it was staged for a brand-new chat.
+    consumePendingStudioBind({
+      setDiskRoot: (root) => {
+        chatStudioDiskRootRef.current = root;
+        setChatStudioDiskRoot(root);
+      },
+      setFiles: (files) => {
+        setChatStudioFiles(files);
+        chatStudioFilesRef.current = files;
+      },
+      setProjectId: (id) => { chatStudioProjectIdRef.current = id; },
+    });
+    const boundRoot = chatStudioDiskRootRef.current;
+    const boundFiles = chatStudioFilesRef.current;
+    if (boundRoot || Object.keys(boundFiles).length) {
       persistStudioSnapshot(activeChatId, {
-        files: keepFiles,
-        projectId: keepPid || chatStudioProjectIdRef.current,
-        name: keepName,
-        diskRoot: keepRoot,
+        files: boundFiles,
+        projectId: chatStudioProjectIdRef.current,
+        name: boundRoot ? studioPathBasename(boundRoot) : undefined,
+        diskRoot: boundRoot,
       });
-    } else {
-      setPreviewUrl(null);
     }
   } else {
     const existing = chats.find(c => c.id === activeChatId);
@@ -619,6 +628,12 @@ export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Pr
       preview: previewFromText(content),
     });
   }
+  // Per-chat generation id — sending in another chat must not abort this create.
+  const prevChatSeq = (genSeqByChatRef?.current?.[activeChatId] as number) || 0;
+  const mySeq = prevChatSeq + 1;
+  if (genSeqByChatRef?.current) genSeqByChatRef.current[activeChatId] = mySeq;
+  if (stopRequestedByChatRef?.current) stopRequestedByChatRef.current[activeChatId] = false;
+  genSeqRef.current = mySeq;
   persistChatIdRef.current = activeChatId;
   routeChatIdRef.current = activeChatId;
   activeGenChatIdRef.current = activeChatId;
@@ -726,7 +741,7 @@ export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Pr
   persistModeThread(mode, messagesRef.current, { chatId: activeChatId });
   setMessages(messagesRef.current);
   // One __generating__ seed in messages; live labels go through the status store only.
-  setChatTurnStatus({ chatId: activeChatId, assistantId, label: statusLabel });
+  setChatTurnStatus({ chatId: activeChatId, assistantId, label: statusLabel, history: [statusLabel] });
   generatingRef.current = true;
   const genJobId = crypto.randomUUID();
   beginChatInflight(activeChatId, genJobId);
@@ -828,10 +843,15 @@ export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Pr
   };
 
   const stopIfSuperseded = async (note?: string) => {
-    if (mySeq === genSeqRef.current && !stopRequestedRef.current) return false;
+    const liveSeq = (genSeqByChatRef?.current?.[activeChatId] as number) || genSeqRef.current;
+    const stopped = Boolean(
+      stopRequestedByChatRef?.current?.[activeChatId]
+      || (stopRequestedRef.current && activeGenChatIdRef.current === activeChatId),
+    );
+    if (mySeq === liveSeq && !stopped) return false;
     await finishPlainReply(
       note
-      || (stopRequestedRef.current
+      || (stopped
         ? 'Stopped.'
         : 'Stopped — another message started while this was still running.'),
     );
@@ -952,11 +972,15 @@ export async function prepareAIChatSend(content: string, ctx: AIChatSendCtx): Pr
     });
   }
 
-  const pushAssistantStatus = (label: string) => {
+  const pushAssistantStatus = (label: string, writingPath?: string | null) => {
     if (mySeq !== genSeqRef.current || stopRequestedRef.current) return;
-    const clean = String(label || '').trim() || 'Thinking…';
     // Status lives in a store — never remount chat messages every tick (S007).
-    setChatTurnStatus({ chatId: activeChatId, assistantId, label: clean });
+    pushChatTurnStatus({
+      chatId: activeChatId,
+      assistantId,
+      label: String(label || '').trim() || 'Thinking…',
+      writingPath,
+    });
   };
   // Rolldown drops the IIFE closure on this name — call via ref inside the async turn.
   chatTurnCtlRef.current.pushStatus = pushAssistantStatus;

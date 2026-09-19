@@ -17,12 +17,14 @@ import {
   looksLikeUserAskEcho,
   looksLikeTruncatedAssistantReply,
   isSoftContinuityAsk,
+  isCannedGreetingReply,
   usableAssistantText,
   stripFirstPersonAskRestatement,
   type RouterChatTurn,
 } from '@/lib/chatHistory';
 import { honestNoLiveChatReply } from '@/lib/arkCapacity';
 import { looksLikeTalkBeforeCreateAsk, looksLikeRequirementsAsk } from '@/lib/chatIdeaIntent';
+import { scrubTalkFirstCodeBleed, isTalkFenceJunk } from '@/lib/plainChatAsk';
 import { brainGenerate, brainGenerateStream, probeBrain } from '@/lib/brain';
 import {
   cloudChatFreeKeys,
@@ -45,7 +47,7 @@ import {
 } from '@/lib/ollamaOptional';
 import { getEngineStatus } from '@/lib/arkEngine';
 import { classifyChatIntent } from '@/lib/chatIntent';
-import { isWeakChatBrain, rankedReadyEngineIds } from '@/lib/enginePick';
+import { isCoderEngineId, isWeakChatBrain, rankedReadyEngineIds } from '@/lib/enginePick';
 import { loadHardwareSnapshot, parseRamGb } from '@/lib/api';
 
 type HuntRunOutOpts = {
@@ -176,8 +178,32 @@ async function tryLocalChat(
   failoverIds?: string[],
   kind: 'chat' | 'coding' = 'chat',
   onAttemptReset?: () => void,
+  /** When true, never live-stream (prior attempt already painted the bubble). */
+  forceQuiet = false,
 ): Promise<ArkRouterResult | null> {
-  const runOne = async (id: string | undefined): Promise<ArkRouterResult | null> => {
+  /** One full replace into the bubble — never a second live stream (stops multi-response flash). */
+  const commitBubble = (text: string) => {
+    const t = String(text || '').trim();
+    if (!t || !onChunk) return;
+    onAttemptReset?.();
+    onChunk(t);
+  };
+
+  /** Retries / hops regenerate quietly; the first live stream stays on screen until commit. */
+  const genQuiet = async (prompt: string, id: string | undefined) => {
+    try {
+      return await brainGenerate(prompt, id, kind);
+    } catch {
+      return brainGenerateStream(prompt, id, () => {}, kind);
+    }
+  };
+
+  const runOne = async (
+    id: string | undefined,
+    opts?: { live?: boolean },
+  ): Promise<ArkRouterResult | null> => {
+    const live = !forceQuiet && opts?.live !== false && Boolean(onChunk);
+    let silentUpgrade = false;
     attempted.push(id ? `NOVA Engine · ${id}` : 'NOVA Engine');
     try {
       if (!window.arkDesktop?.engineGenerate) {
@@ -185,9 +211,9 @@ async function tryLocalChat(
         if (!brain.ok) return null;
       }
       const prompt = packHistoryPrompt(history, message);
-      const result = onChunk
-        ? await brainGenerateStream(prompt, id, onChunk, kind)
-        : await brainGenerate(prompt, id, kind);
+      const result = live
+        ? await brainGenerateStream(prompt, id, onChunk!, kind)
+        : await genQuiet(prompt, id);
       const prevAsst = [...history].reverse().find(t => t.role === 'assistant')?.content;
       let rawText = String(result.reply || '').trim();
       if (kind === 'coding') {
@@ -206,21 +232,19 @@ async function tryLocalChat(
         && looksLikeRestatedPriorAnswer(cleaned || rawText, prevAsst)
       ) {
         const firstDraft = String(cleaned || rawText || '').trim();
-        onAttemptReset?.();
         const deepenPrompt = [
           packHistoryPrompt(history, message),
           '',
           'CRITICAL RETRY: Your last draft repeated the previous answer. Write a longer NEW expansion with facts and angles that were not already covered. Do not restate the same temperatures, totals, or summary.',
         ].join('\n');
-        const retry = onChunk
-          ? await brainGenerateStream(deepenPrompt, id, onChunk, kind)
-          : await brainGenerate(deepenPrompt, id, kind);
+        const retry = await genQuiet(deepenPrompt, id);
         const retryClean = usableAssistantText(retry.reply, message, prevAsst);
         const retryRaw = String(retry.reply || '').trim();
         // Never replace a solid first draft with an empty/shorter retry.
         if ((retryClean || retryRaw) && String(retryClean || retryRaw).trim().length >= firstDraft.length) {
           cleaned = retryClean || retryRaw;
           rawText = retryRaw;
+          silentUpgrade = true;
           Object.assign(result, retry);
         } else if (firstDraft) {
           cleaned = firstDraft;
@@ -243,17 +267,15 @@ async function tryLocalChat(
         ) {
           cleaned = strippedClean;
           rawText = stripped;
+          silentUpgrade = true;
         } else {
-          onAttemptReset?.();
           const noEchoPrompt = [
             packHistoryPrompt(history, message),
             '',
             'CRITICAL RETRY: Do NOT restate the user message. Do NOT start with “I want to…”. '
             + 'Open as the assistant (e.g. “Sure — here is how I would approach that”), then give concrete steps.',
           ].join('\n');
-          const retry = onChunk
-            ? await brainGenerateStream(noEchoPrompt, id, onChunk, kind)
-            : await brainGenerate(noEchoPrompt, id, kind);
+          const retry = await genQuiet(noEchoPrompt, id);
           const retryClean = usableAssistantText(retry.reply, message, prevAsst);
           const retryRaw = String(retry.reply || '').trim();
           const retryBest = (retryClean || retryRaw).trim();
@@ -265,10 +287,12 @@ async function tryLocalChat(
           ) {
             cleaned = retryClean || retryRaw;
             rawText = retryRaw;
+            silentUpgrade = true;
             Object.assign(result, retry);
           } else if (retryBest.length > firstDraft.length) {
             cleaned = retryClean || retryRaw;
             rawText = retryRaw;
+            silentUpgrade = true;
             Object.assign(result, retry);
           }
         }
@@ -276,8 +300,38 @@ async function tryLocalChat(
       // If a local GGUF echoes the system prompt, we must fail this attempt so failover
       // can hop to a model that returns a real answer.
       if (!cleaned.trim() && looksLikePromptEcho(rawText)) return null;
-      const reply = cleaned || rawText;
+      let reply = cleaned || rawText;
       if (!reply || isTemplateEngineReply(reply)) return null;
+      // Never ship the canned greeting unless the user only said a short hi/hello/hey.
+      // "hey so …" idea pitches must get a real plan — not "Hello! How can I assist you today?"
+      if (
+        (kind === 'chat' || kind === 'coding')
+        && isCannedGreetingReply(reply, message)
+      ) {
+        const noGreetPrompt = [
+          packHistoryPrompt(history, message),
+          '',
+          'CRITICAL: Do NOT greet. Continue THIS conversation. Answer the latest user message with a concrete plan or reply. No "Hello! How can I assist you today?"',
+        ].join('\n');
+        try {
+          const retry = await genQuiet(noGreetPrompt, id);
+          const retryRaw = String(retry.reply || '').trim();
+          const retryClean = usableAssistantText(retryRaw, message, prevAsst);
+          if (retryRaw && !isCannedGreetingReply(retryRaw, message) && !isCannedGreetingReply(retryClean || '', message)) {
+            cleaned = retryClean || retryRaw;
+            rawText = retryRaw;
+            reply = cleaned || rawText;
+            silentUpgrade = true;
+            Object.assign(result, retry);
+          } else {
+            return null;
+          }
+        } catch {
+          return null;
+        }
+      }
+      // Absolute fail-closed: never return the canned greeting on a substantive ask.
+      if (isCannedGreetingReply(cleaned || rawText || reply, message)) return null;
       // Coding must never ship a greeting — force one hard code retry, then fail closed.
       if (
         kind === 'coding'
@@ -288,16 +342,13 @@ async function tryLocalChat(
         && !/@@@FILE\b/i.test(reply)
         && reply.trim().length < 400
       ) {
-        onAttemptReset?.();
         const codeRetryPrompt = [
           packHistoryPrompt(history, message),
           '',
           'CRITICAL: Do NOT greet. The user asked for code/files. Emit COMPLETE @@@FILE blocks with full source now. No chatter.',
         ].join('\n');
         try {
-          const retry = onChunk
-            ? await brainGenerateStream(codeRetryPrompt, id, onChunk, kind)
-            : await brainGenerate(codeRetryPrompt, id, kind);
+          const retry = await genQuiet(codeRetryPrompt, id);
           const retryRaw = String(retry.reply || '').trim();
           const retryClean = usableAssistantText(retryRaw, message, prevAsst);
           if (
@@ -307,6 +358,7 @@ async function tryLocalChat(
           ) {
             cleaned = retryClean || retryRaw;
             rawText = retryRaw;
+            silentUpgrade = true;
             Object.assign(result, retry);
           } else {
             return null;
@@ -323,6 +375,7 @@ async function tryLocalChat(
         if (closed) {
           const keep = cleaned || rawText;
           if (keep.trim()) {
+            if (!live && onChunk) commitBubble(keep);
             return {
               reply: keep,
               media: result.media,
@@ -336,7 +389,6 @@ async function tryLocalChat(
             };
           }
         }
-        onAttemptReset?.();
         return null;
       }
       if (result.source === 'ark-engine' && !result.media && isTemplateEngineReply(reply)) {
@@ -351,54 +403,81 @@ async function tryLocalChat(
       // (visible flicker). Only deepen when the user clearly asked for thorough detail.
       // But DO finish truncated drafts (ends with ":" / "here's the structure" with nothing after).
       let workingReply = (cleaned || rawText || reply).trim();
-      // Exploratory product talk / requirements must stay prose — fences, @@@FILE, or glued :javascript dumps.
+      // Exploratory product talk / requirements / any chat that opens with empty fences
+      // must stay prose — fences, @@@FILE, or glued :javascript dumps.
+      const fenceOnlyJunk = kind === 'chat' && isTalkFenceJunk(workingReply);
       const talkBleed = kind === 'chat'
-        && (looksLikeTalkBeforeCreateAsk(message) || looksLikeRequirementsAsk(message))
         && (
-          /^```/.test(workingReply)
+          looksLikeTalkBeforeCreateAsk(message)
+          || looksLikeRequirementsAsk(message)
+          || fenceOnlyJunk
+          || /^```/.test(workingReply)
+        )
+        && (
+          fenceOnlyJunk
+          || /^```/.test(workingReply)
           || /@@@FILE\b/i.test(workingReply)
           || /```/.test(workingReply)
           || /:(?:javascript|typescript|python|java|cpp|jsx|tsx)\b/i.test(workingReply)
           || /^(?:import |const\s+app\s*=|from\s+flask\s+import)/im.test(workingReply)
         );
       if (talkBleed) {
-        onAttemptReset?.();
+        // Empty ```markdown / CODE-only drafts: fail fast for failover — a quiet
+        // prose retry here was the 1–2 minute "frozen bubble" after a 5s junk stream.
+        if (fenceOnlyJunk || isTalkFenceJunk(workingReply)) {
+          const quickStrip = scrubTalkFirstCodeBleed(workingReply);
+          if (quickStrip.length >= 40 && !isTalkFenceJunk(quickStrip)) {
+            cleaned = quickStrip;
+            rawText = quickStrip;
+            workingReply = quickStrip;
+            silentUpgrade = true;
+          } else {
+            return null;
+          }
+        } else {
         const prosePrompt = [
           packHistoryPrompt(history, message),
           '',
           'CRITICAL RETRY: Answer in clear prose only. Confirm familiarity if asked, explain what the product is, then outline what building something like it involves.',
-          'Do NOT emit code, @@@FILE blocks, markdown fences, or language tags like :javascript. Finish in complete sentences.',
+          'Do NOT emit code, @@@FILE blocks, markdown fences (no ```), or language tags like :javascript. Finish in complete sentences.',
         ].join('\n');
         try {
-          const retry = onChunk
-            ? await brainGenerateStream(prosePrompt, id, onChunk, kind)
-            : await brainGenerate(prosePrompt, id, kind);
+          const retry = await genQuiet(prosePrompt, id);
           const retryClean = usableAssistantText(retry.reply, message, prevAsst);
           const retryRaw = String(retry.reply || '').trim();
-          const best = (retryClean || retryRaw).trim();
-          const stillBleed = /^```/.test(best)
+          const best = scrubTalkFirstCodeBleed(retryClean || retryRaw).trim() || (retryClean || retryRaw).trim();
+          const stillBleed = isTalkFenceJunk(best)
+            || /^```/.test(best)
             || /@@@FILE\b/i.test(best)
             || /```/.test(best)
             || /:(?:javascript|typescript|python|cpp|jsx)\b/i.test(best);
-          if (best && !stillBleed && best.length >= 80) {
+          if (best && !stillBleed && best.length >= 40) {
             cleaned = best;
             rawText = best;
             workingReply = best;
+            silentUpgrade = true;
             Object.assign(result, retry);
-          } else if (workingReply) {
-            // Last resort: strip protocol junk from the first draft so the bubble stays readable.
-            const stripped = stripFileBlocks(workingReply)
-              .replace(/([A-Za-z0-9).\]"'])\s*:\s*(javascript|typescript|python|java|cpp|jsx|tsx)\b/gi, '$1')
-              .replace(/\n{3,}/g, '\n\n')
-              .trim();
-            if (stripped.length >= 40) {
+          } else {
+            // Strip protocol junk from the first draft; never keep fence-only crumbs.
+            const stripped = scrubTalkFirstCodeBleed(
+              stripFileBlocks(workingReply)
+                .replace(/([A-Za-z0-9).\]"'])\s*:\s*(javascript|typescript|python|java|cpp|jsx|tsx)\b/gi, '$1')
+                .replace(/\n{3,}/g, '\n\n')
+                .trim(),
+            );
+            if (stripped.length >= 40 && !isTalkFenceJunk(stripped)) {
               cleaned = stripped;
               rawText = stripped;
               workingReply = stripped;
+              silentUpgrade = true;
+            } else if (isTalkFenceJunk(workingReply)) {
+              return null;
             }
           }
         } catch {
+          if (isTalkFenceJunk(workingReply)) return null;
           /* keep prior */
+        }
         }
       }
       if (
@@ -417,10 +496,7 @@ async function tryLocalChat(
           workingReply.slice(0, 2800),
         ].join('\n');
         try {
-          // Do not wipe the visible bubble — append continuation.
-          const retry = onChunk
-            ? await brainGenerateStream(continuePrompt, id, onChunk, kind)
-            : await brainGenerate(continuePrompt, id, kind);
+          const retry = await genQuiet(continuePrompt, id);
           const retryClean = usableAssistantText(retry.reply, message, prevAsst);
           const retryRaw = String(retry.reply || '').trim();
           const cont = (retryClean || retryRaw).trim();
@@ -434,6 +510,7 @@ async function tryLocalChat(
               cleaned = merged;
               rawText = merged;
               workingReply = merged;
+              silentUpgrade = true;
               Object.assign(result, retry);
             }
           }
@@ -449,6 +526,7 @@ async function tryLocalChat(
         || /\b(?:what\s+can\s+you\s+do|who\s+are\s+you|what\s+is\s+nova)\b/i.test(String(message || ''));
       const hasSolidOutline = ((workingReply.match(/^\s*(?:\d+\.|[-*•])/gm) || []).length >= 3)
         || ((workingReply.match(/\*\*[^*\n]{3,}\*\*/g) || []).length >= 3 && workingReply.trim().length >= 500);
+      // At most ONE quiet deepen — a second expand pass was a common multi-response flash.
       if (
         kind === 'chat'
         && thoroughAsk
@@ -459,63 +537,33 @@ async function tryLocalChat(
         && !/^(hi|hello|hey|thanks|thank you)[.!]?\s*$/i.test(workingReply.trim())
         && !looksLikePromptEcho(workingReply)
       ) {
-        onAttemptReset?.();
         const deepenPrompt = [
           packHistoryPrompt(history, message),
           '',
           'CRITICAL RETRY: Expand this into a longer, clearer answer. Cover every requested topic with concrete detail. Take your time. Do not pad with filler. Do not restart with a greeting.',
+          '',
+          'Draft so far:',
+          workingReply.slice(0, 2800),
         ].join('\n');
         try {
-          const retry = onChunk
-            ? await brainGenerateStream(deepenPrompt, id, onChunk, kind)
-            : await brainGenerate(deepenPrompt, id, kind);
+          const retry = await genQuiet(deepenPrompt, id);
           const retryClean = usableAssistantText(retry.reply, message, prevAsst);
           const retryRaw = String(retry.reply || '').trim();
           if ((retryClean || retryRaw).length > workingReply.length) {
             cleaned = retryClean || retryRaw;
             rawText = retryRaw;
+            silentUpgrade = true;
             Object.assign(result, retry);
           }
         } catch {
           /* keep first reply */
         }
       }
-      // Thorough asks: one more expansion pass so answers aren't rushed in a few seconds.
-      const afterDeepen = (cleaned || rawText || reply).trim();
-      if (
-        kind === 'chat'
-        && thoroughAsk
-        && !wantsShort
-        && afterDeepen.length > 0
-        && afterDeepen.length < 3600
-        && !looksLikePromptEcho(afterDeepen)
-      ) {
-        onAttemptReset?.();
-        const expandPrompt = [
-          packHistoryPrompt(history, message),
-          '',
-          'EXPAND FURTHER: Add another layer of accurate detail (edge cases, common misconceptions, and a short concrete example). Keep the same topic. Do not greet. Do not shorten.',
-          '',
-          'Draft so far:',
-          afterDeepen.slice(0, 2800),
-        ].join('\n');
-        try {
-          const retry = onChunk
-            ? await brainGenerateStream(expandPrompt, id, onChunk, kind)
-            : await brainGenerate(expandPrompt, id, kind);
-          const retryClean = usableAssistantText(retry.reply, message, prevAsst);
-          const retryRaw = String(retry.reply || '').trim();
-          const best = (retryClean || retryRaw);
-          if (best.length > afterDeepen.length) {
-            cleaned = best;
-            rawText = retryRaw;
-            Object.assign(result, retry);
-          }
-        } catch {
-          /* keep deepened reply */
-        }
-      }
       const finalReply = (kind === 'coding' ? (cleaned || rawText) : (cleaned || rawText)) || reply;
+      // Live first draft already painted. Quiet upgrades + quiet hops paint once here.
+      if ((!live || silentUpgrade) && onChunk && finalReply.trim()) {
+        commitBubble(finalReply);
+      }
       return {
         reply: finalReply,
         media: result.media,
@@ -536,12 +584,11 @@ async function tryLocalChat(
           currentModelId: id,
         });
       }
-      onAttemptReset?.();
       return null;
     }
   };
 
-  const first = await runOne(modelId);
+  const first = await runOne(modelId, { live: true });
   if (first?.reply?.trim() && isStrongLocal(first.source)) return first;
 
   // Coding: always try ranked coder backups on this PC (adaptive), even if cloud autoFailover is off.
@@ -563,6 +610,7 @@ async function tryLocalChat(
           && m.id !== 'NOVA-core'
           && m.id !== 'NOVA-image-core'
           && m.id !== 'NOVA-video-core'
+          && !isCoderEngineId(m.id)
         ) extras.push(m.id);
       }
     } catch {
@@ -577,16 +625,17 @@ async function tryLocalChat(
       /coder|starcoder|codestral|codellama|devstral|deepseek-coder/i.test(id),
     );
     for (const id of coderExtras.slice(0, 2)) {
-      const hit = await runOne(id);
+      // Quiet hop — keep the first draft on screen until this one commits.
+      const hit = await runOne(id, { live: false });
       if (hit && isStrongLocal(hit.source)) return hit;
     }
     return null;
   }
 
-  // Chat: one brain attempt. hopping local GGUFs can stall for minutes with no answer.
+  // Chat: one quiet backup max. Never live-stream a second answer over the first.
   const maxLocalFailover = modelId ? 0 : 1;
   for (const id of extras.slice(0, maxLocalFailover)) {
-    const hit = await runOne(id);
+    const hit = await runOne(id, { live: false });
     if (hit && isStrongLocal(hit.source)) return hit;
   }
 
@@ -706,7 +755,7 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
     || opts.preferredSource === 'auto';
   const pinnedCloud = opts.preferredSource === 'cloud' && !isAuto;
   const pinnedOllama = Boolean(preferredId?.startsWith('ollama:')) && !isAuto;
-  const pinnedLocalEngine =
+  let pinnedLocalEngine =
     !isAuto
     && !pinnedCloud
     && !pinnedOllama
@@ -718,6 +767,17 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
   const brainKind: 'chat' | 'coding' = intent === 'coding' ? 'coding' : 'chat';
   const acceptCodingReply = (reply: string) =>
     brainKind !== 'coding' || !codingOutputIncomplete(coerceCodingFileReply(reply), opts.message);
+
+  // Normal chat must never load a coder GGUF (sticky or pinned). Coders are build-only —
+  // Instruct↔Coder unload/load mid-thread is the freeze / multi-flash path.
+  if (brainKind === 'chat') {
+    if (isCoderEngineId(opts.stickyModelId) || isCoderEngineId(opts.stickyModelName)) {
+      opts = { ...opts, stickyModelId: undefined, stickyModelName: undefined, stickyPinnedSource: undefined };
+    }
+    if (pinnedLocalEngine && isCoderEngineId(preferredId)) {
+      pinnedLocalEngine = false;
+    }
+  }
 
   // Wave 2: block weak / oversized local coder before any coding generate hop.
   if (brainKind === 'coding') {
@@ -962,8 +1022,21 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
   }
 
   // ── NOVA Auto: Engine is the brain; Ollama is last-resort optional ──
-  if (isAuto) {
-    if (opts.stickyModelId && opts.stickyPinnedSource) {
+  if (isAuto || (brainKind === 'chat' && !pinnedCloud && !pinnedOllama && !pinnedLocalEngine)) {
+    // Track live paint so a sticky miss → next model does not stream a second answer over the first.
+    let livePainted = false;
+    const trackedChunk = opts.onChunk
+      ? (t: string) => {
+        livePainted = true;
+        opts.onChunk!(t);
+      }
+      : undefined;
+
+    if (
+      opts.stickyModelId
+      && opts.stickyPinnedSource
+      && !(brainKind === 'chat' && isCoderEngineId(opts.stickyModelId))
+    ) {
       const sticky = await tryStickyBrain(
         history,
         opts.message,
@@ -971,7 +1044,7 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
         opts.stickyModelName || opts.stickyModelId,
         opts.stickyPinnedSource,
         attempted,
-        opts.onChunk,
+        trackedChunk,
         brainKind,
         mode,
         opts.onAttemptReset,
@@ -1010,11 +1083,12 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
         opts.message,
         picked,
         attempted,
-        opts.onChunk,
+        trackedChunk || opts.onChunk,
         failover,
         rest,
         brainKind,
         opts.onAttemptReset,
+        livePainted,
       );
       if (local && isStrongLocal(local.source)) return local;
       if (shouldAskBeforeCloud(prefs) && modeAllowsCloud(mode)) {
@@ -1029,11 +1103,12 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
           opts.message,
           picked,
           attempted,
-          opts.onChunk,
+          trackedChunk || opts.onChunk,
           failover,
           rest,
           brainKind,
           opts.onAttemptReset,
+          livePainted,
         );
         if (weak && isStrongLocal(weak.source)) return weak;
       }
@@ -1073,11 +1148,12 @@ async function routeChat(opts: ArkRouteOpts): Promise<ArkRouterResult> {
         opts.message,
         picked,
         attempted,
-        opts.onChunk,
+        trackedChunk || opts.onChunk,
         failover,
         rest,
         brainKind,
         opts.onAttemptReset,
+        livePainted,
       );
       if (local && isStrongLocal(local.source)) return local;
     }
@@ -1591,7 +1667,13 @@ export async function arkRoute(opts: ArkRouteOpts): Promise<ArkRouterResult> {
 /** Short label for chat bubbles. keeps the provider quiet but honest. */
 export function routerProviderLabel(result: ArkRouterResult, fallback: string) {
   if (result.source === 'none') return fallback;
-  const hop = result.attempted.length > 1 ? ' · switched' : '';
+  // Retries on the same GGUF (greeting / echo scrub) inflate attempted — only
+  // show · switched when the engine id actually changed.
+  const engineIds = (result.attempted || [])
+    .map((a) => String(a || '').replace(/^NOVA Engine ·\s*/i, '').trim())
+    .filter(Boolean);
+  const uniqueEngines = new Set(engineIds);
+  const hop = uniqueEngines.size > 1 ? ' · switched' : '';
   if (result.tier === 'free-key') return `Free · ${result.modelName}${hop}`;
   if (result.tier === 'no-key-free') return `Free · ${result.modelName}${hop}`;
   if (result.tier === 'local-free') return `Local · ${result.modelName}${hop}`;

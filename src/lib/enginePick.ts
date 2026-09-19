@@ -149,12 +149,14 @@ export function rankedReadyEngineIds(
     if (!fitsRam(id, ramGb)) continue;
     ordered.push(id);
   }
+  // Chat never appends coder GGUFs — those are build-only and cause freezey mid-chat switches.
   for (const id of ready) {
     if (ordered.includes(id)) continue;
+    if (isCoderEngineId(id)) continue;
     if (!fitsRam(id, ramGb)) continue;
     ordered.push(id);
   }
-  return ordered.length ? ordered : [...ready];
+  return ordered.length ? ordered : [...ready].filter((id) => !isCoderEngineId(id));
 }
 
 export function pickReadyEngineId(

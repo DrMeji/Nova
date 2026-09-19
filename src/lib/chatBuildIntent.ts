@@ -65,6 +65,15 @@ export function looksLikeInPlaceRebuildAsk(text: string): boolean {
   const t = String(text || '').trim();
   if (!t) return false;
   if (looksLikeProductCorrectionAsk(t)) return true;
+  // Create fail-copy + user phrasing: "rebuild the UI", "fix broken JSX", full polish.
+  if (/\brebuild\s+(?:the\s+)?ui\b/i.test(t)) return true;
+  if (/\b(?:full\s+)?(?:ui\s+)?polish\b/i.test(t) && /\b(?:rebuild|fix|rewrite|redo)\b/i.test(t)) return true;
+  if (
+    /\b(?:fix|rewrite|redo)\b[\s\S]{0,40}\b(?:broken\s+)?(?:jsx|tsx|css|app\.css|tags?)\b/i.test(t)
+    && /\b(?:ui|app|premium|welcome|desk|slot|confirm)\b/i.test(t)
+  ) {
+    return true;
+  }
   if (!/\b(?:scrap|rebuild|redo|replace|start\s+over)\b/i.test(t)) return false;
   return (
     /\b(?:same\s+folder|this\s+folder|this\s+project|this\s+same\s+folder|in\s+place|current\s+ui|keep\s+the\s+same(?:\s+project)?\s+folder)\b/i.test(t)

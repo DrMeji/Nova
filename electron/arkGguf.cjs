@@ -747,6 +747,8 @@ async function bindLlamaServer(bin, gguf, modelId) {
       '-t', String(getGgufThreads()),
       '--parallel', '1',
     ];
+    // Offload layers to GPU when CUDA llama-server is present — cuts mid-reply freezes on 7B/14B.
+    if (llamaLooksCuda()) args.push('-ngl', '99');
     if (mmproj) args.push('--mmproj', mmproj);
     const child = spawn(bin, args, { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
     lowerChildPriority(child.pid);

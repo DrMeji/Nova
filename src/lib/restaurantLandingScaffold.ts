@@ -1,5 +1,5 @@
 /**
- * True only for real food-service / restaurant briefs — never product marketing, watches, apple.com, etc.
+ * @deprecated LOOKBOOK — never call from create. Dead leftover restaurant pack.
  */
 export function briefLooksLikeRestaurantLanding(brief: string): boolean {
   const t = String(brief || '');

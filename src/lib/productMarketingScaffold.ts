@@ -1,6 +1,6 @@
 /**
- * Premium product-marketing homepage when free models leave thin/wrong-genre shells
- * for apple.com-style / product landing briefs (not restaurants).
+ * @deprecated LOOKBOOK — never call from create. Dead leftover shell (Veopx-style).
+ * Kept only so old imports/smokes do not crash; create must invent from the brief.
  */
 export function buildProductMarketingScaffold(projectName: string): {
   app: string;

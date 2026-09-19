@@ -27,9 +27,68 @@ import {
   updateCreateJob,
 } from '@/lib/createJobStore';
 import { getLocalPrefs } from '@/lib/localPrefs';
+import { clearChatStudio, clearLastDiskTarget } from '@/lib/chatStudioStore';
 import type { CreateSuccess } from '@/lib/productContract';
 
 export { pendingCreateBootstrap };
+
+/** Unbind chat from a partial create — folder may exist on disk, but chat is not a successful product. */
+function unbindCreateChat(
+  host: Pick<CreateTurnHost, 'commitStudio' | 'setChatCodePill'>,
+  chatId: string,
+): void {
+  try {
+    host.commitStudio({
+      files: {},
+      projectId: '',
+      name: '',
+      diskRoot: null,
+      previewUrl: null,
+    });
+  } catch { /* ignore */ }
+  try { host.setChatCodePill(chatId, false); } catch { /* ignore */ }
+  try { clearLastDiskTarget(chatId); } catch { /* ignore */ }
+  try { clearChatStudio(chatId); } catch { /* ignore */ }
+}
+
+/** Soft-bind folder + code pills without Live (previewUrl stays null; job not Ready). */
+function softBindCreateStudio(
+  host: CreateTurnHost,
+  opts: {
+    files: Record<string, string>;
+    projectId: string;
+    name: string;
+    diskRoot: string | null;
+  },
+): void {
+  try {
+    host.commitStudio({
+      files: opts.files,
+      projectId: opts.projectId,
+      name: opts.name,
+      diskRoot: opts.diskRoot,
+      previewUrl: null,
+    });
+  } catch { /* ignore */ }
+  try { host.setChatCodePill(host.chatId, true); } catch { /* ignore */ }
+  try {
+    if (host.shouldPaintStudioLive(host.routeChatId, host.chatId)) {
+      host.setCodePillSticky(true);
+    }
+  } catch { /* ignore */ }
+  if (opts.diskRoot) {
+    try {
+      host.setLastDiskTarget(host.chatId, {
+        path: opts.diskRoot,
+        name: opts.name,
+        kind: 'folder',
+      });
+    } catch { /* ignore */ }
+  }
+  try {
+    host.touchRecentProject?.(opts.projectId, opts.name, opts.diskRoot || undefined);
+  } catch { /* ignore */ }
+}
 
 /** Product-contract create success (Wave 2 alias for callers). */
 export type { CreateSuccess };
@@ -61,7 +120,7 @@ export type CreateTurnHost = {
   classifiedCreateName?: string;
   messages: { role: string; content: string }[];
   routeChatId: string | null;
-  pushStatus: (label: string) => void;
+  pushStatus: (label: string, writingPath?: string | null) => void;
   stopIfSuperseded: () => Promise<boolean>;
   /** True when Stop / superseded — create polish must cancel GGUF, not only check time budgets. */
   shouldAbort?: () => boolean;
@@ -105,6 +164,11 @@ export type CreateTurnHost = {
   stickyModelName?: string | null;
   preferredModelId?: string | null;
   preferredModelName?: string | null;
+  /**
+   * Called when create auto-pins a ready local coder before scaffolding.
+   * Wire UI + engine + prefs so the Select-model pill matches the build brain.
+   */
+  onCoderPinned?: (coder: { id: string; name: string }) => void;
 };
 
 /** One cause → one next click. */
@@ -251,7 +315,9 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
     const pendingSeed = host.getPending(host.chatId);
     const name = host.classifiedCreateName
       || pendingSeed?.name
+      || extractProjectName(host.content)
       || fallbackCreateProjectName(host.content)
+      || pendingSeed?.name
       || 'App';
     intent = parseNewProjectIntent(host.content) || {
       name,
@@ -316,12 +382,45 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
     return { status: 'fallthrough_edit' };
   }
   if (thinBrief) {
-    buildIntent.summary = richestBrief.length >= 20
-      ? richestBrief
-      : `Build ${safeName} — a simple starter site.`;
-    buildIntent.name = safeName || 'App';
-    buildIntent.slug = slugifyProjectName(buildIntent.name) || 'app';
+    const pendingBrief = String(pending?.summary || '').trim();
+    if (pendingBrief.length >= 40) {
+      buildIntent.summary = pendingBrief;
+      buildIntent.name = safeName || pending?.name || buildIntent.name;
+      buildIntent.slug = slugifyProjectName(buildIntent.name) || buildIntent.slug || 'app';
+    } else {
+      await host.finishPlainReply(
+        [
+          'I need a clearer product brief before creating a new project.',
+          '',
+          'Describe what to build in one message — product name, what it does, and the main screens or actions.',
+          'Example: “Build **ReefLog**, a dive-log web app with trip list, depth chart, and add-entry form.”',
+        ].join('\n'),
+      );
+      return { status: 'handled' };
+    }
   }
+
+  // Gate BEFORE scaffolding: switch to a ready coder (or stop with a clear next step).
+  const coderGate = await resolveCreateUiPolishCoder(host);
+  if (!coderGate.ok) {
+    await host.finishPlainReply(
+      [
+        `**Cannot start building yet** — no local **coder** model is ready for this create.`,
+        '',
+        coderGate.reason || 'Install a coder GGUF that fits this PC under **Models**, then say **ok start building** again.',
+        '',
+        'Chat models can plan with you. Building the UI needs a coder (for example a 7B+ coder GGUF).',
+      ].join('\n'),
+      'NOVA · create',
+    );
+    return { status: 'handled' };
+  }
+  try {
+    host.onCoderPinned?.({ id: coderGate.id, name: coderGate.name });
+  } catch { /* ignore */ }
+  host.pushStatus(`Using **${coderGate.name}** for this build…`);
+  // Create must not auto-open Code — keep overlay closed until the user clicks the pill.
+  try { window.dispatchEvent(new Event('NOVA:close-code-overlay')); } catch { /* ignore */ }
 
   const jobId = `create-${crypto.randomUUID().slice(0, 8)}`;
   host.pushStatus(`Creating folder in NOVA Projects (${buildIntent.slug})…`);
@@ -340,16 +439,32 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
     });
 
     const { createFileBuildLabel } = await import('@/lib/createProgressCopy');
+    let scaffoldAcc: Record<string, string> = {};
     const created = await runCreateProjectFlow(buildIntent, newProjectId, {
-      onFileWrite: (rel) => {
-        host.pushStatus(createFileBuildLabel(rel, 'Building'));
+      onFileWrite: (rel, content) => {
+        const path = String(rel || '').replace(/\\/g, '/');
+        if (content != null) scaffoldAcc = { ...scaffoldAcc, [path]: content };
+        // Never park Code live-follow on .gitignore (scaffold last-write trap).
+        const followPath = /\.gitignore$/i.test(path) ? undefined : path;
+        host.pushStatus(createFileBuildLabel(path, 'Building'), followPath);
+        softBindCreateStudio(host, {
+          files: scaffoldAcc,
+          projectId: newProjectId,
+          name: lockedProductName,
+          diskRoot: null,
+        });
       },
     });
-    if (await host.stopIfSuperseded()) return { status: 'handled' };
+    if (await host.stopIfSuperseded()) {
+      markCreateJobFailed(jobId, 'Stopped');
+      unbindCreateChat(host, host.chatId);
+      return { status: 'handled' };
+    }
 
     if (!created.ok) {
       const msg = teachableCreateError(created.error, buildIntent.name);
       markCreateJobFailed(jobId, msg);
+      unbindCreateChat(host, host.chatId);
       await host.finishPlainReply(msg);
       return { status: 'handled' };
     }
@@ -368,17 +483,6 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
       status: 'writing',
     });
 
-    host.commitStudio({
-      files: createFilesAcc,
-      projectId: originProjectId,
-      name: lockedProductName,
-      diskRoot: originDiskRoot,
-      previewUrl: null,
-    });
-    host.setChatCodePill(host.chatId, true);
-    if (host.shouldPaintStudioLive(host.routeChatId, host.chatId)) {
-      host.setCodePillSticky(true);
-    }
     host.renameChat(host.chatId, cleanProductTitle(buildIntent.name));
     host.addChat({
       id: host.chatId,
@@ -387,16 +491,14 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
       updatedAt: new Date().toISOString(),
       preview: host.previewFromText(host.content),
     });
-    try {
-      host.touchRecentProject?.(originProjectId, lockedProductName, originDiskRoot || undefined);
-    } catch { /* ignore */ }
-    if (originDiskRoot) {
-      host.setLastDiskTarget(host.chatId, {
-        path: originDiskRoot,
-        name: lockedProductName,
-        kind: 'folder',
-      });
-    }
+
+    // Soft-bind so Folder + Code pills appear during polish (Live stays off until Ready).
+    softBindCreateStudio(host, {
+      files: createFilesAcc,
+      projectId: originProjectId,
+      name: lockedProductName,
+      diskRoot: originDiskRoot,
+    });
 
     // Prefer the longest brief: thin intent.summary must not hide host.content / thread brief.
     const briefForUi = [buildIntent.summary, richestBrief, host.content]
@@ -407,6 +509,7 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
       briefNeedsCreateUiPolish,
       briefLooksLikeMarketingLanding,
       briefLooksLikeChatApp,
+      briefRequiresInteractiveApp,
       isPreviewReady,
       looksLikeFillerStubAppSource,
       isEmptyOrStubAppSource,
@@ -456,61 +559,72 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
     let uiPolishReasons: string[] = [];
     // Every real create must leave a working UI — never claim success on the Vite title splash.
     const needsUiPolish = !blankSolidColor;
-    const { createIdentityFromBrief, polishPromptLinesFromIdentity, ensureStylesLinked, identityCreateMisses, healFilesToIdentity } = await import('@/lib/createIdentity');
-    const createIdentity = createIdentityFromBrief(lockedProductName, briefForUi);
-    const chatAppBrief = createIdentity.layout === 'chat-shell' || briefLooksLikeChatApp(briefForUi);
-    const marketingBrief = !chatAppBrief && (
-      briefLooksLikeMarketingLanding(briefForUi)
-      || createIdentity.layout === 'warm-shop'
-      || createIdentity.layout === 'catalog-grid'
-      || createIdentity.layout === 'editorial-dark'
-    );
+    const {
+      createBriefSpecFromAsk,
+      polishPromptLinesFromBrief,
+      ensureStylesLinked,
+      briefCreateMisses,
+    } = await import('@/lib/createIdentity');
+    const briefSpec = createBriefSpecFromAsk(lockedProductName, briefForUi);
+    const chatAppBrief = briefLooksLikeChatApp(briefForUi);
 
     // Do not apply pre-baked Discord/marketing/interactive shells — real UI must come from the coder.
 
     if (needsUiPolish && uiPolishOk !== true) {
-      const polishSnapshot = { ...createFilesAcc };
-      host.pushStatus(`Planning identity (${createIdentity.category} / ${createIdentity.mood})…`);
+      let polishSnapshot = { ...createFilesAcc };
+      host.pushStatus('Planning UI from your brief…', 'src/App.tsx');
       try {
-        const coder = await resolveCreateUiPolishCoder(host);
+        const coder = coderGate.ok
+          ? coderGate
+          : await resolveCreateUiPolishCoder(host);
         if (!coder.ok) {
           uiPolishOk = false;
           uiPolishReasons = [coder.reason || 'No suitable coder for UI polish'];
         } else {
           const { answerStudio } = await import('@/lib/studioAnswerEngine');
-          const { startProgressHeartbeat } = await import('@/lib/createProgressCopy');
-          const stopPolishBeat = startProgressHeartbeat(host.pushStatus, 'polish', 5000);
+          const { startProgressHeartbeat, POLISH_ALMOST_DONE_LABEL, POLISH_FINAL_PASS_LABEL } = await import('@/lib/createProgressCopy');
+          const stopPolishBeat = startProgressHeartbeat(host.pushStatus, 'polish', 5500);
           try {
           const preferTs = Boolean(
             createFilesAcc['src/App.tsx'] && !createFilesAcc['src/App.jsx'],
           );
           const appPath = preferTs ? 'src/App.tsx' : 'src/App.jsx';
-          const basePromptLines = polishPromptLinesFromIdentity(createIdentity, appPath, briefForUi);
+          const basePromptLines = polishPromptLinesFromBrief(briefSpec, appPath, briefForUi);
           const polishStarted = Date.now();
-          const polishBudgetMs = 300_000;
-          const polishTotalBudgetMs = 600_000;
+          // 14B+ local coders often need >5 min for a full App+CSS dump.
+          const polishBudgetMs = 480_000;
+          const polishTotalBudgetMs = 900_000;
+          /** Soft floor so polish isn't a 30s stub — quality gates still decide Ready. */
+          const CREATE_POLISH_MIN_MS = 300_000;
           let modelReply = '';
           let lastError = '';
-          for (let attempt = 0; attempt < 2; attempt++) {
+          let streamBuf = '';
+          let successfulPasses = 0;
+          for (let attempt = 0; attempt < 4; attempt++) {
+            const enrichPass = attempt > 0;
             const prompt = attempt === 0
               ? basePromptLines.join('\n')
               : [
-                  chatAppBrief
-                    ? 'RETRY — previous UI was incomplete. Put the ENTIRE Discord-like shell in a single App file + App.css.'
-                    : 'RETRY — previous UI was incomplete (missing components and/or truncated mid-write).',
-                  chatAppBrief
-                    ? 'Include server rail, channel list, chat pane, and working send. No marketing hero.'
-                    : 'Put the ENTIRE landing page in a single App file + App.css.',
-                  'No imports from ./components. No separate component files.',
-                  'Finish every CSS rule and JSX tag — do not stop mid-file.',
+                  enrichPass
+                    ? 'ENRICH PASS: deepen THIS product from the brief. Add missing must-haves. Raise visual premium depth (atmosphere, type, spacing). Match the brief’s real flows — do NOT invent a generic time-slot booking UI unless the brief asks for appointments. Do NOT ship title + two static cards. NEVER use via.placeholder.com or remote placeholder image hosts.'
+                    : 'RETRY: put the ENTIRE product UI for THIS brief in a single App + App.css. No ./components. Finish every tag. No remote placeholder images.',
                   ...basePromptLines.slice(1),
                 ].join('\n');
+            if (enrichPass) {
+              host.pushStatus('Deepening the product UI: flows, confirmation, and premium layout…');
+            }
             const attemptStarted = Date.now();
             const seenCodingPaths = new Set<string>();
+            streamBuf = '';
+            let lastStudioPaint = 0;
+            let lastFocusPath = '';
+            let lastFocusLen = 0;
+            let lastGrowthAt = Date.now();
+            const { extractStreamingFileEdits } = await import('@/lib/projectCodeEdit');
             const result = await answerStudio(
               {
                 userMessage: prompt,
-                files: attempt === 0 ? createFilesAcc : polishSnapshot,
+                files: createFilesAcc,
                 projectName: lockedProductName,
                 mode: 'code',
                 preferredModelId: coder.id,
@@ -526,21 +640,86 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                   || Date.now() - polishStarted > polishTotalBudgetMs,
               },
               (delta) => {
-                for (const m of String(delta || '').matchAll(/@@@FILE\s+([^\s\n]+)/g)) {
-                  const rel = String(m[1] || '').replace(/\\/g, '/').replace(/^\.\//, '');
-                  if (!rel || seenCodingPaths.has(rel)) continue;
-                  seenCodingPaths.add(rel);
-                  host.pushStatus(createFileBuildLabel(rel, 'Coding'));
-                }
+                streamBuf = String(delta || '');
+                let focusPath = '';
+                try {
+                  // Prefer the in-progress @@@FILE (last header), not the last completed extract.
+                  const active = streamBuf.lastIndexOf('@@@FILE');
+                  if (active >= 0) {
+                    const hdr = streamBuf.slice(active).match(/^@@@FILE\s+([^\n\r]+)/);
+                    if (hdr?.[1]) {
+                      focusPath = String(hdr[1]).replace(/\\/g, '/').replace(/^\.\//, '').trim();
+                    }
+                  }
+                  const streamed = extractStreamingFileEdits(streamBuf);
+                  if (streamed.length) {
+                    const merged = { ...createFilesAcc };
+                    for (const e of streamed) {
+                      const rel = String(e.path || '').replace(/\\/g, '/').replace(/^\.\//, '');
+                      if (!rel || !e.content) continue;
+                      merged[rel] = e.content;
+                      if (!focusPath) focusPath = rel;
+                    }
+                    createFilesAcc = merged;
+                    const now = Date.now();
+                    const focusLen = focusPath
+                      ? String(createFilesAcc[focusPath] || '').length
+                      : 0;
+                    const pathChanged = Boolean(focusPath && !seenCodingPaths.has(focusPath));
+                    const contentGrew = Boolean(focusPath)
+                      && focusPath === lastFocusPath
+                      && focusLen > lastFocusLen;
+                    if (pathChanged) {
+                      lastFocusPath = focusPath;
+                      lastFocusLen = focusLen;
+                      lastGrowthAt = now;
+                      seenCodingPaths.add(focusPath);
+                    } else if (contentGrew) {
+                      lastFocusLen = focusLen;
+                      lastGrowthAt = now;
+                    }
+                    const stalled = Boolean(focusPath) && now - lastGrowthAt > 12_000;
+                    // Paint on path switch / growth (throttled) or honest stall notice (status only).
+                    if (focusPath && (pathChanged || contentGrew || stalled) && now - lastStudioPaint > 220) {
+                      lastStudioPaint = now;
+                      const base = focusPath.split('/').pop() || focusPath;
+                      host.pushStatus(
+                        stalled && !contentGrew && !pathChanged
+                          ? `Still waiting on the coder for ${base}…`
+                          : createFileBuildLabel(focusPath, 'Coding'),
+                        focusPath,
+                      );
+                      if (pathChanged || contentGrew) {
+                        softBindCreateStudio(host, {
+                          files: createFilesAcc,
+                          projectId: originProjectId,
+                          name: lockedProductName,
+                          diskRoot: originDiskRoot,
+                        });
+                      }
+                    }
+                  }
+                } catch { /* ignore stream paint */ }
               },
             );
-            if (await host.stopIfSuperseded()) return { status: 'handled' };
+            if (await host.stopIfSuperseded()) {
+              markCreateJobFailed(jobId, 'Stopped');
+              unbindCreateChat(host, host.chatId);
+              return { status: 'handled' };
+            }
             modelReply = String(result.text || '').trim();
             if (!modelReply) {
-              lastError = result.error
-                || (result.meta ? `UI model returned an empty reply (${result.meta})` : null)
-                || 'UI model returned an empty reply';
-              continue;
+              // Timeout often still left partial @@@FILE in streamBuf / createFilesAcc.
+              const partial = String(streamBuf || '').trim();
+              if (partial && /@@@FILE\b/i.test(partial)) {
+                modelReply = partial;
+                lastError = result.error || 'UI polish timed out with a partial reply';
+              } else {
+                lastError = result.error
+                  || (result.meta ? `UI model returned an empty reply (${result.meta})` : null)
+                  || 'UI model returned an empty reply';
+                continue;
+              }
             }
             const polishFilePaths = [...modelReply.matchAll(/@@@FILE\s+([^\s\n]+)/g)]
               .map((m) => String(m[1] || '').replace(/\\/g, '/').replace(/^\.\//, ''))
@@ -553,7 +732,7 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
               reply: modelReply,
               projectId: originProjectId,
               projectName: buildIntent.name,
-              files: attempt === 0 ? createFilesAcc : { ...polishSnapshot },
+              files: createFilesAcc,
               userMessage: briefForUi,
               diskRoot: originDiskRoot,
             });
@@ -562,41 +741,119 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
               continue;
             }
             createFilesAcc = applied.files;
+            // Never let a thinner/truncated App.css wipe a richer prior write.
+            {
+              const prevCss = String(polishSnapshot['src/App.css'] || '');
+              const nextCss = String(createFilesAcc['src/App.css'] || '');
+              const prevApp = String(polishSnapshot['src/App.tsx'] || polishSnapshot['src/App.jsx'] || '');
+              const nextApp = String(createFilesAcc['src/App.tsx'] || createFilesAcc['src/App.jsx'] || '');
+              if (prevCss.length >= 400 && nextCss.length < Math.max(400, Math.floor(prevCss.length * 0.55))) {
+                host.pushStatus('Keeping prior App.css — new polish write was too thin…', 'src/App.css');
+                createFilesAcc = { ...createFilesAcc, 'src/App.css': prevCss };
+              }
+              if (prevApp.length >= 800 && nextApp.length < Math.max(600, Math.floor(prevApp.length * 0.55))) {
+                host.pushStatus('Keeping prior App — new polish write was too thin…');
+                const appKey = createFilesAcc['src/App.tsx'] && !createFilesAcc['src/App.jsx']
+                  ? 'src/App.tsx'
+                  : (createFilesAcc['src/App.jsx'] ? 'src/App.jsx' : 'src/App.tsx');
+                const prevKey = polishSnapshot['src/App.tsx'] && !polishSnapshot['src/App.jsx']
+                  ? 'src/App.tsx'
+                  : (polishSnapshot['src/App.jsx'] ? 'src/App.jsx' : appKey);
+                createFilesAcc = { ...createFilesAcc, [appKey]: polishSnapshot[prevKey] || prevApp };
+              }
+            }
             const {
-              appLooksLikeStructuredLanding,
               sanitizeCreatePolishPlaceholders,
-              buildMarketingCompanionCss,
-              cssBlobIsThin,
               createPolishMissingLocalImports,
+              healMissingLocalImports,
+              healMissingIconPackImports,
+              stripModelProseFromSource,
             } = await import('@/lib/createBuildQuality');
             const { looksLikeTruncatedUiSource } = await import('@/lib/freshSpaFromBrief');
+            const { createFileReEditLabel } = await import('@/lib/createProgressCopy');
+            // Heal missing ./productData-style imports instead of fail-looping forever.
+            {
+              const miss0 = createPolishMissingLocalImports(createFilesAcc);
+              if (miss0.length) {
+                host.pushStatus(`Repairing missing imports (${miss0.slice(0, 3).join(', ')})…`);
+                const healed = healMissingLocalImports(createFilesAcc, lockedProductName);
+                createFilesAcc = healed.files;
+              }
+              const icons = healMissingIconPackImports(createFilesAcc);
+              if (icons.healed.length) {
+                host.pushStatus('Removing undeclared icon-pack imports…');
+                createFilesAcc = icons.files;
+              }
+            }
+            // Strip prose leaks from App/CSS before Ready checks.
+            {
+              const appKey0 = createFilesAcc['src/App.tsx'] && !createFilesAcc['src/App.jsx']
+                ? 'src/App.tsx'
+                : (createFilesAcc['src/App.jsx'] ? 'src/App.jsx' : 'src/App.tsx');
+              for (const k of [appKey0, 'src/App.css'] as const) {
+                const raw = createFilesAcc[k];
+                if (!raw) continue;
+                const scrubbed = stripModelProseFromSource(k, raw);
+                if (scrubbed && scrubbed !== raw) {
+                  createFilesAcc = { ...createFilesAcc, [k]: scrubbed };
+                }
+              }
+            }
             const missing = createPolishMissingLocalImports(createFilesAcc);
             const appProbe = createFilesAcc['src/App.tsx'] || createFilesAcc['src/App.jsx'] || '';
             const cssProbe = createFilesAcc['src/App.css'] || '';
-            const truncated = looksLikeTruncatedUiSource(appProbe) || looksLikeTruncatedUiSource(cssProbe);
-            if ((missing.length || truncated) && attempt === 0) {
-              host.pushStatus(truncated
-                ? 'Rebuilding — previous UI was cut off mid-write…'
-                : 'Rebuilding UI in a single App file…');
+            const appKeyProbe = createFilesAcc['src/App.tsx'] && !createFilesAcc['src/App.jsx']
+              ? 'src/App.tsx'
+              : (createFilesAcc['src/App.jsx'] ? 'src/App.jsx' : 'src/App.tsx');
+            const truncatedApp = looksLikeTruncatedUiSource(appProbe);
+            const truncatedCss = looksLikeTruncatedUiSource(cssProbe);
+            const truncated = truncatedApp || truncatedCss;
+            if (missing.length || truncated) {
+              const badPath = truncatedCss
+                ? 'src/App.css'
+                : (truncatedApp ? appKeyProbe : 'src/App.tsx');
+              host.pushStatus(createFileReEditLabel(badPath), badPath);
+              // Restore disk from last good snapshot — not memory-only.
               createFilesAcc = { ...polishSnapshot };
+              try {
+                const restoreBlocks = Object.entries(polishSnapshot)
+                  .filter(([p]) => /App\.(tsx|jsx|css)$/i.test(p))
+                  .map(([p, body]) => `@@@FILE ${p}\n${body}`)
+                  .join('\n');
+                if (restoreBlocks) {
+                  await applyChatReplyEdits({
+                    reply: restoreBlocks,
+                    projectId: originProjectId,
+                    projectName: buildIntent.name,
+                    files: createFilesAcc,
+                    userMessage: briefForUi,
+                    diskRoot: originDiskRoot,
+                  });
+                }
+              } catch { /* best-effort restore */ }
               lastError = missing.length
                 ? `App imports missing modules: ${missing.slice(0, 6).join(', ')}`
                 : 'App/CSS source looks truncated mid-write';
-              continue;
-            }
-            if (missing.length) {
-              lastError = `App imports missing modules: ${missing.slice(0, 6).join(', ')}`;
+              if (attempt < 3) continue;
               break;
             }
+            host.pushStatus('Verified App and App.css — continuing polish…');
+            // Keep the best verified UI so later thin/truncated writes cannot wipe it.
+            polishSnapshot = { ...createFilesAcc };
             const preferTsApp = Boolean(
               createFilesAcc['src/App.tsx'] && !createFilesAcc['src/App.jsx'],
             );
             const appKey = preferTsApp ? 'src/App.tsx' : (createFilesAcc['src/App.jsx'] ? 'src/App.jsx' : 'src/App.tsx');
             let appBody = createFilesAcc[appKey] || createFilesAcc['src/App.jsx'] || createFilesAcc['src/App.tsx'] || '';
             const cleaned = sanitizeCreatePolishPlaceholders(appBody);
-            if (cleaned !== appBody) {
+            const cssBody = createFilesAcc['src/App.css'] || '';
+            const cleanedCss = sanitizeCreatePolishPlaceholders(cssBody);
+            const cleanBlocks: string[] = [];
+            if (cleaned !== appBody) cleanBlocks.push(`@@@FILE ${appKey}\n${cleaned}`);
+            if (cleanedCss !== cssBody) cleanBlocks.push(`@@@FILE src/App.css\n${cleanedCss}`);
+            if (cleanBlocks.length) {
               const cleanApplied = await applyChatReplyEdits({
-                reply: `@@@FILE ${appKey}\n${cleaned}`,
+                reply: cleanBlocks.join('\n'),
                 projectId: originProjectId,
                 projectName: buildIntent.name,
                 files: createFilesAcc,
@@ -607,18 +864,6 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                 createFilesAcc = cleanApplied.files;
                 appBody = createFilesAcc[appKey] || cleaned;
               }
-            }
-            if (appLooksLikeStructuredLanding(appBody) && cssBlobIsThin(createFilesAcc, 1500) && !chatAppBrief) {
-              host.pushStatus('Finishing landing styles with this brand’s identity palette…');
-              const cssApplied = await applyChatReplyEdits({
-                reply: `@@@FILE src/App.css\n${buildMarketingCompanionCss(lockedProductName, briefForUi, createIdentity)}`,
-                projectId: originProjectId,
-                projectName: buildIntent.name,
-                files: createFilesAcc,
-                userMessage: briefForUi,
-                diskRoot: originDiskRoot,
-              });
-              if (cssApplied.ok) createFilesAcc = cssApplied.files;
             }
             // Always link App.css so Live is not browser-default gray.
             {
@@ -640,14 +885,14 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                 if (linkApplied.ok) createFilesAcc = linkApplied.files;
               }
             }
-            // Rewrite generic /heroes/hero.jpg to identity slug path when present.
+            // Rewrite generic /heroes/hero.jpg to brief slug path when present.
             {
               const appKey = createFilesAcc['src/App.tsx'] && !createFilesAcc['src/App.jsx']
                 ? 'src/App.tsx'
                 : (createFilesAcc['src/App.jsx'] ? 'src/App.jsx' : 'src/App.tsx');
               let body = createFilesAcc[appKey] || '';
-              if (body && /\/heroes\/hero\.jpg/i.test(body) && createIdentity.heroHref) {
-                body = body.replace(/\/heroes\/hero\.jpg/gi, createIdentity.heroHref);
+              if (body && /\/heroes\/hero\.jpg/i.test(body) && briefSpec.heroHref) {
+                body = body.replace(/\/heroes\/hero\.jpg/gi, briefSpec.heroHref);
                 createFilesAcc = { ...createFilesAcc, [appKey]: body };
                 await applyChatReplyEdits({
                   reply: `@@@FILE ${appKey}\n${body}`,
@@ -680,79 +925,55 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
                 }).then((r) => { if (r.ok) createFilesAcc = r.files; }).catch(() => {});
               }
             }
-            // Heal forbidden hex / missing CSS import before ready check.
-            {
-              let idMissesProbe = identityCreateMisses(createIdentity, createFilesAcc);
-              if (idMissesProbe.length) {
-                host.pushStatus(`Fixing hero/CSS to match ${createIdentity.category}…`);
-                const healed = healFilesToIdentity(
-                  createIdentity,
-                  createFilesAcc,
-                  (id) => buildMarketingCompanionCss(id.name, briefForUi, id),
-                );
-                createFilesAcc = healed.files;
-                const healBlocks = [
-                  createFilesAcc['src/App.css'] ? `@@@FILE src/App.css\n${createFilesAcc['src/App.css']}` : '',
-                  createFilesAcc['src/App.jsx'] ? `@@@FILE src/App.jsx\n${createFilesAcc['src/App.jsx']}` : '',
-                  createFilesAcc['src/App.tsx'] ? `@@@FILE src/App.tsx\n${createFilesAcc['src/App.tsx']}` : '',
-                  createFilesAcc['src/main.jsx'] ? `@@@FILE src/main.jsx\n${createFilesAcc['src/main.jsx']}` : '',
-                  createFilesAcc['src/main.tsx'] ? `@@@FILE src/main.tsx\n${createFilesAcc['src/main.tsx']}` : '',
-                ].filter(Boolean).join('\n');
-                if (healBlocks) {
-                  await applyChatReplyEdits({
-                    reply: healBlocks,
-                    projectId: originProjectId,
-                    projectName: buildIntent.name,
-                    files: createFilesAcc,
-                    userMessage: briefForUi,
-                    diskRoot: originDiskRoot,
-                  }).then((r) => { if (r.ok) createFilesAcc = r.files; }).catch(() => {});
-                }
-              }
-            }
             appBody = createFilesAcc['src/App.jsx'] || createFilesAcc['src/App.tsx'] || '';
+            host.pushStatus(POLISH_ALMOST_DONE_LABEL);
+            await new Promise((r) => setTimeout(r, 120));
+            host.pushStatus(POLISH_FINAL_PASS_LABEL);
+            const needsInteractive = chatAppBrief
+              || briefRequiresInteractiveApp(briefForUi)
+              || briefSpec.mustHave.some((m) => /book|slot|confirm|cart|checkout|search|messag/i.test(m));
             const ready = isPreviewReady(createFilesAcc, {
               productName: lockedProductName,
               brief: briefForUi,
-              requireInteractive: chatAppBrief,
+              requireInteractive: needsInteractive,
             });
-            const idMisses = identityCreateMisses(createIdentity, createFilesAcc);
+            const briefMisses = briefCreateMisses(briefSpec, createFilesAcc);
             const filler = looksLikeFillerStubAppSource(appBody);
-            if (!ready.ok || filler || idMisses.length) {
-              const structuredKeep = appLooksLikeStructuredLanding(appBody) && !filler && !idMisses.length;
+            if (!ready.ok || filler || briefMisses.length) {
+              // Fail-closed for this attempt — keep last model UI on disk; try enrich pass.
               uiPolishOk = false;
               uiPolishReasons = [
                 ...(ready.reasons || []),
-                ...idMisses,
+                ...briefMisses,
                 ...(filler ? ['App is still a filler stub (sample/placeholder text)'] : []),
                 ...(lastError ? [lastError] : []),
               ];
-              if (!structuredKeep && !idMisses.length) {
-                const revertBlocks = Object.keys(polishSnapshot)
-                  .filter((p) => /(?:^|\/)src\/App\.(?:jsx|tsx|css)$/i.test(p.replace(/\\/g, '/'))
-                    || /(?:^|\/)src\/index\.css$/i.test(p.replace(/\\/g, '/')))
-                  .filter((p) => polishSnapshot[p] != null && polishSnapshot[p] !== createFilesAcc[p])
-                  .map((p) => `@@@FILE ${p}\n${polishSnapshot[p]}`)
-                  .join('\n');
-                if (revertBlocks) {
-                  const reverted = await applyChatReplyEdits({
-                    reply: revertBlocks,
-                    projectId: originProjectId,
-                    projectName: buildIntent.name,
-                    files: createFilesAcc,
-                    userMessage: briefForUi,
-                    diskRoot: originDiskRoot,
-                  });
-                  if (reverted.ok) createFilesAcc = reverted.files;
-                  else createFilesAcc = { ...polishSnapshot };
-                } else {
-                  createFilesAcc = { ...polishSnapshot };
-                }
+              if (attempt < 3) {
+                const missHint = (briefMisses[0] || ready.reasons?.[0] || 'UI depth')
+                  .replace(/^missing\s+/i, '');
+                host.pushStatus(
+                  `Re-editing the UI: adding ${missHint.slice(0, 72)}…`,
+                  'src/App.tsx',
+                );
+                continue;
               }
-              // Identity misses: keep healed files on disk but never claim Ready/success.
-            } else {
-              uiPolishOk = true;
+              break;
             }
+            successfulPasses += 1;
+            const elapsed = Date.now() - polishStarted;
+            // Soft Ready too early → force at least one enrich pass and a 5-minute floor.
+            if (elapsed < CREATE_POLISH_MIN_MS || successfulPasses < 2) {
+              host.pushStatus(
+                elapsed < CREATE_POLISH_MIN_MS
+                  ? 'Still building: enriching the product UI and visual polish…'
+                  : 'Second pass: deepening layout and real product flows…',
+              );
+              uiPolishOk = false;
+              uiPolishReasons = ['Enrichment pass required for premium product depth'];
+              if (attempt < 3) continue;
+            }
+            uiPolishOk = true;
+            uiPolishReasons = [];
             break;
           }
           if (uiPolishOk == null && lastError) {
@@ -771,15 +992,16 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
         uiPolishReasons = [
           polishErr instanceof Error ? polishErr.message : 'UI polish failed',
         ];
-        createFilesAcc = { ...polishSnapshot };
+        // Keep last model UI on disk — do not revert to scaffold snapshot.
       }
     }
 
     // Image model / Brand Assets: generate or fetch product photos into public/heroes.
-    if (uiPolishOk === true && originDiskRoot && marketingBrief) {
+    if (uiPolishOk === true && originDiskRoot && !blankSolidColor) {
       try {
         const { planBrandAssets, materializeBrandAssets } = await import('@/lib/brandAssets');
-        host.pushStatus(`Fetching ${createIdentity.category} hero…`);
+        const { wireCreatePublicAssets } = await import('@/lib/createBuildQuality');
+        host.pushStatus('Fetching images for this brief…');
         const plan = planBrandAssets(briefForUi, lockedProductName);
         const mat = await materializeBrandAssets({
           diskRoot: originDiskRoot,
@@ -789,12 +1011,21 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
           projectName: lockedProductName,
         });
         createFilesAcc = mat.files;
+        // Binary JPGs must still appear as file keys so Ready + wire see real covers.
+        for (const rel of mat.saved || []) {
+          const norm = String(rel || '').replace(/\\/g, '/');
+          if (/^public\/heroes\//i.test(norm) && createFilesAcc[norm] == null) {
+            createFilesAcc[norm] = '';
+          }
+        }
         const linkedAfterHero = ensureStylesLinked(createFilesAcc);
         createFilesAcc = linkedAfterHero.files;
-        if (mat.saved.length || linkedAfterHero.changed.length) {
+        const wired = wireCreatePublicAssets(createFilesAcc, lockedProductName);
+        createFilesAcc = wired.files;
+        if (mat.saved.length || linkedAfterHero.changed.length || wired.changed.length) {
           host.pushStatus(mat.saved.length
             ? `Saved ${mat.saved.length} product image${mat.saved.length === 1 ? '' : 's'}…`
-            : 'Linking App.css…');
+            : (wired.changed.length ? 'Wiring logo and icons into the UI…' : 'Linking App.css…'));
           const appKey = createFilesAcc['src/App.tsx'] && !createFilesAcc['src/App.jsx']
             ? 'src/App.tsx'
             : (createFilesAcc['src/App.jsx'] ? 'src/App.jsx' : 'src/App.tsx');
@@ -804,17 +1035,39 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
               createFilesAcc['src/main.jsx'] ? `@@@FILE src/main.jsx\n${createFilesAcc['src/main.jsx']}` : '',
               createFilesAcc['src/main.tsx'] ? `@@@FILE src/main.tsx\n${createFilesAcc['src/main.tsx']}` : '',
               createFilesAcc['src/App.css'] ? `@@@FILE src/App.css\n${createFilesAcc['src/App.css']}` : '',
+              // Never @@@FILE binary heroes/photos — that overwrote real JPGs with empty/marker text.
+              ...Object.keys(createFilesAcc)
+                .filter((p) => {
+                  const norm = p.replace(/\\/g, '/');
+                  if (!/^public\//i.test(norm)) return false;
+                  if (/\.(?:jpe?g|png|webp|gif|avif|ico|woff2?|ttf|otf)$/i.test(norm)) return false;
+                  const body = String(createFilesAcc[p] || '');
+                  if (!body.trim()) return false;
+                  return true;
+                })
+                .slice(0, 12)
+                .map((p) => `@@@FILE ${p}\n${createFilesAcc[p]}`),
             ].filter(Boolean).join('\n'),
             projectId: originProjectId,
             projectName: buildIntent.name,
             files: createFilesAcc,
             userMessage: briefForUi,
             diskRoot: originDiskRoot,
-          }).then((wired) => {
-            if (wired.ok && wired.updated.length) createFilesAcc = wired.files;
+          }).then((applied) => {
+            if (applied.ok && applied.updated.length) createFilesAcc = applied.files;
           }).catch(() => { /* disk already has heroes via materialize */ });
-        } else {
-          host.pushStatus('Using identity color hero fallback…');
+        }
+        // Re-verify after asset wire — logo-as-cover / unwired icons must fail closed.
+        const recheck = isPreviewReady(createFilesAcc, {
+          productName: lockedProductName,
+          brief: briefForUi,
+          requireInteractive: chatAppBrief
+            || briefRequiresInteractiveApp(briefForUi)
+            || briefSpec.mustHave.some((m) => /book|slot|confirm|cart|checkout|search|messag|borrow/i.test(m)),
+        });
+        if (!recheck.ok) {
+          uiPolishOk = false;
+          uiPolishReasons = recheck.reasons || ['Asset wire failed Preview Ready'];
         }
       } catch {
         host.pushStatus('Continuing without generated images…');
@@ -865,12 +1118,7 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
       }
     }
 
-    host.commitStudio({
-      files: createFilesAcc,
-      projectId: originProjectId,
-      name: lockedProductName,
-      diskRoot: originDiskRoot,
-    });
+    // Bind studio only when Preview-ready — fail-closed leaves chat unbound.
     updateCreateJob(jobId, { files: createFilesAcc });
 
     const scaffoldKind = resolveProjectKindForCreate(
@@ -881,68 +1129,120 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
     const grantNote = created.grantHint ? `\n\n_${created.grantHint}_` : '';
     const displayName = cleanProductTitle(buildIntent.name);
 
-    // Fail-closed: never mark the create job Ready when polish was required and did not pass.
+    // Fail-closed: keep folder + code pills (files exist) but never Ready / Live.
     if (uiPolishOk === false) {
+      softBindCreateStudio(host, {
+        files: createFilesAcc,
+        projectId: originProjectId,
+        name: lockedProductName,
+        diskRoot: originDiskRoot,
+      });
       const reasonLines = (uiPolishReasons.length ? uiPolishReasons : ['UI not Preview-ready'])
         .slice(0, 8)
         .map((r) => `- ${r}`)
         .join('\n');
+      const coderBlocked = uiPolishReasons.some((r) =>
+        /no local coder|no suitable coder|coder GGUF|install any coder/i.test(r),
+      );
+      const truncated = uiPolishReasons.some((r) =>
+        /truncat|mid-write|aborted|timeout|stop or timeout|thin|empty|placeholder|incomplete/i.test(r),
+      );
+      const nextSteps = coderBlocked
+        ? [
+            '**Next**',
+            '1. Open **Models** and install a local coder GGUF that fits this PC.',
+            '2. Switch the chat model to that coder (or leave Multimodal: NOVA will pin it).',
+            '3. Say **rebuild the UI** or **ok start building** again.',
+          ]
+        : truncated
+          ? [
+              '**Next**',
+              '1. Say **rebuild the UI** to run another polish pass on this folder.',
+              '2. Or open the **Code** pill to inspect what was written.',
+            ]
+          : [
+              '**Next**',
+              '1. Say **rebuild the UI** to fix Preview Ready on this folder.',
+              '2. Or open the **Code** / **Folder** pills to continue editing.',
+            ];
       const failAnswer = [
-        `**Created ${displayName}** (folder only — UI not Preview-ready)`,
+        `**Created ${displayName}**: folder on disk, Preview Ready failed`,
         '',
-        originDiskRoot ? `**Path:** \`${originDiskRoot}\`` : '',
+        originDiskRoot ? `**Where:** \`${originDiskRoot}\`` : '',
         created.parentSource ? `**Location:** ${created.parentSource}` : '',
         '',
-        'The first UI pass did not clear Preview Ready — this is **not** a finished app:',
+        '**Failed at:** UI polish (Preview Ready gate)',
+        '**Why:**',
         reasonLines,
         '',
-        'Install a local **coder** GGUF (e.g. qwen25-coder-7b) under Models, or ask again to rebuild the UI.',
-        'This chat is bound to that folder.',
+        ...nextSteps,
+        '',
+        'Folder and Code are available in this chat. Live unlocks after Preview Ready.',
         created.grantHint || '',
       ].filter(Boolean).join('\n');
-      markCreateJobFailed(jobId, uiPolishReasons[0] || 'UI polish failed — scaffold only');
-      // Still install deps in the background so a later UI rebuild can Preview — but never Ready.
-      if (originDiskRoot && projectUsesNpm(scaffoldKind)) {
-        host.pushStatus('Installing dependencies in the background…');
-        void bootstrapProjectWorkspace(originDiskRoot, scaffoldKind, {
-          files: createFilesAcc,
-          preferPreviewUrl: null,
-        }).catch(() => { /* best-effort */ });
-      }
+      markCreateJobFailed(jobId, uiPolishReasons[0] || 'UI polish failed: scaffold only');
+      // Do NOT auto-npm on fail-closed — overlapping Defender scans freeze the desktop.
       await host.finishPlainReply(`${failAnswer}${grantNote}`, 'NOVA · scaffold');
       return { status: 'handled' };
     }
 
+    host.commitStudio({
+      files: createFilesAcc,
+      projectId: originProjectId,
+      name: lockedProductName,
+      diskRoot: originDiskRoot,
+      previewUrl: null,
+    });
+    host.setChatCodePill(host.chatId, true);
+    if (host.shouldPaintStudioLive(host.routeChatId, host.chatId)) {
+      host.setCodePillSticky(true);
+    }
+    try {
+      host.touchRecentProject?.(originProjectId, lockedProductName, originDiskRoot || undefined);
+    } catch { /* ignore */ }
+    if (originDiskRoot) {
+      host.setLastDiskTarget(host.chatId, {
+        path: originDiskRoot,
+        name: lockedProductName,
+        kind: 'folder',
+      });
+    }
+
+    let bootstrap: ProjectBootstrapResult = { npmInstalled: true };
     if (originDiskRoot && projectUsesNpm(scaffoldKind)) {
-      host.pushStatus('Installing dependencies in the background…');
-      host.pushStatus('Starting Live preview…');
+      host.pushStatus('Installing project dependencies (npm)…');
       markCreateJobNpm(jobId);
-      void bootstrapProjectWorkspace(originDiskRoot, scaffoldKind, {
-        files: createFilesAcc,
-        preferPreviewUrl: null,
-      }).then((boot: ProjectBootstrapResult) => {
-        // Only mark Ready when we already verified a real UI — never Ready on a title splash.
-        if (boot.npmInstalled && uiPolishOk === true) {
-          markCreateJobReady(jobId, boot.devServerUrl || null);
-        } else if (!boot.npmInstalled) {
-          markCreateJobFailed(jobId, boot.bootstrapNote || 'npm install failed');
+      try {
+        bootstrap = await bootstrapProjectWorkspace(originDiskRoot, scaffoldKind, {
+          files: createFilesAcc,
+          preferPreviewUrl: null,
+        });
+        if (bootstrap.npmInstalled && uiPolishOk === true) {
+          host.pushStatus(
+            bootstrap.previewLive
+              ? 'Dependencies installed — Live preview verified…'
+              : 'Dependencies installed — verifying Live…',
+          );
+          markCreateJobReady(jobId, bootstrap.devServerUrl || null);
+        } else if (!bootstrap.npmInstalled) {
+          host.pushStatus('Dependency install did not finish…');
+          markCreateJobFailed(jobId, bootstrap.bootstrapNote || 'npm install failed');
         } else {
           markCreateJobFailed(jobId, 'UI not Preview-ready');
         }
-      }).catch((err) => {
-        markCreateJobFailed(jobId, err instanceof Error ? err.message : 'npm failed');
-      });
+      } catch (err) {
+        bootstrap = {
+          npmInstalled: false,
+          bootstrapNote: err instanceof Error ? err.message : 'npm failed',
+        };
+        markCreateJobFailed(jobId, bootstrap.bootstrapNote || 'npm failed');
+      }
     } else if (uiPolishOk === true) {
       markCreateJobReady(jobId, null);
     } else {
       markCreateJobFailed(jobId, 'UI not Preview-ready');
     }
 
-    const bootstrapNote = chatAppBrief
-      ? 'Discord-like UI is ready for Live.'
-      : marketingBrief
-        ? 'Product store UI is ready for Live.'
-        : 'Starter UI is ready for Live.';
     const writtenPaths = Object.keys(createFilesAcc).sort((a, b) => a.localeCompare(b));
     const { countLineDiff, wrapReplyWithFileChanges } = await import('@/lib/agentTrace');
     const fileChanges = writtenPaths.map((path) => {
@@ -961,7 +1261,7 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
         files: createFilesAcc,
         grantHint: created.grantHint,
       },
-      pendingCreateBootstrap(bootstrapNote),
+      bootstrap,
     );
     const startedAt = host.replyStartedAt || Date.now();
     const createAnswer = wrapReplyWithFileChanges({
@@ -976,10 +1276,17 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
         'Created the project folder',
         'Wrote scaffold files',
         'Coder built the product UI',
-        bootstrapNote,
+        bootstrap.previewLive
+          ? 'Verified Live preview'
+          : (bootstrap.npmInstalled
+            ? 'Installed project dependencies'
+            : (bootstrap.npmPending ? 'Installing project dependencies' : 'Setup incomplete')),
       ],
     });
-    await host.finishPlainReply(createAnswer, 'NOVA · create');
+    const createMeta = coderGate.ok && coderGate.name
+      ? `NOVA · create · ${coderGate.name}`
+      : 'NOVA · create';
+    await host.finishPlainReply(createAnswer, createMeta);
     return { status: 'handled' };
   } catch (createErr) {
     const msg = teachableCreateError(
@@ -987,6 +1294,7 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
       buildIntent.name,
     );
     markCreateJobFailed(jobId, msg);
+    unbindCreateChat(host, host.chatId);
     await host.finishPlainReply(msg);
     return { status: 'handled' };
   }

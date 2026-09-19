@@ -473,8 +473,19 @@ export function MessageContent({
         && turnStatus
         && turnStatus.assistantId === messageId
         && turnStatus.label
-      ) || labelFromMsg || 'Thinking…';
-      return <AgentProgressStatus label={liveLabel} />;
+      ) || labelFromMsg || 'Working…';
+      const liveHistory = (
+        messageId
+        && turnStatus
+        && turnStatus.assistantId === messageId
+        && turnStatus.history
+      ) || [];
+      // Never flash the seed "Thinking…" once real create/edit work has started.
+      const label = /^Thinking…?$/i.test(String(liveLabel))
+        && liveHistory.length > 1
+        ? (liveHistory[liveHistory.length - 1] || 'Working…')
+        : liveLabel;
+      return <AgentProgressStatus label={label} history={liveHistory} />;
     }
     return <GeneratingPlaceholder kind={kind} label={labelFromMsg} sessionKey={sessionKey} />;
   }
@@ -484,8 +495,12 @@ export function MessageContent({
   }
 
   if (!content.includes('ark-media:') && !/!\[[^\]]*\]\([^)]+\)/.test(content)) {
-    const shown = usableAssistantText(content) || content.trim();
+    const shown = usableAssistantText(content);
     if (!shown) {
+      // Never flash canned greetings / empty usable text as the bubble body.
+      if (/^Hello! How can I assist you today\??\.?$/i.test(content.trim())) {
+        return <GeneratingPlaceholder kind="chat" label="Thinking…" />;
+      }
       return <p className="text-sm text-content-tertiary">(no response)</p>;
     }
     content = shown;

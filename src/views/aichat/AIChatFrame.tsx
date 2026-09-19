@@ -19,6 +19,7 @@ import { ArkErrorInline } from '@/components/ArkErrorInline';
 import { ArkMark } from '@/components/ArkMark';
 import { MessageContent, GeneratingPlaceholder } from '@/components/MediaMessage';
 import { ChatCodeOverlay } from '@/components/ChatCodeOverlay';
+import { useChatTurnStatus } from '@/hooks/useChatTurnStatus';
 import { FIRST_RUN_KIND_CHIPS } from '@/lib/chatTurnHandlers';
 import { isTraceMessage } from '@/lib/agentTrace';
 import { classifyErrorMessage, isLikelyErrorMessage } from '@/lib/errors';
@@ -79,6 +80,8 @@ export function AIChatFrame(props: AIChatFrameProps) {
   const chats = props.chats;
   const clonePickedRepo = props.clonePickedRepo;
   const codeOverlayOpen = props.codeOverlayOpen;
+  const liveTurnStatus = useChatTurnStatus();
+  const liveWritingPath = liveTurnStatus?.writingPath || null;
   const codePillSticky = props.codePillSticky;
   const composerMode = props.composerMode;
   const copiedMsgId = props.copiedMsgId;
@@ -205,6 +208,8 @@ export function AIChatFrame(props: AIChatFrameProps) {
   const videoDurationSec = props.videoDurationSec;
   const voicePhase = props.voicePhase;
   const workspaceBadgeLabel = props.workspaceBadgeLabel;
+
+  // Code overlay opens only from the Code pill (openCodeWorkspace) — never auto-open on build.
 
   const applyIdea = (label: string) => {
     setInput(label);
@@ -858,39 +863,54 @@ export function AIChatFrame(props: AIChatFrameProps) {
                 type="button"
                 onClick={() => openCodeWorkspace()}
                 disabled={!chatStudioDiskRoot && Object.keys(chatStudioFiles).length === 0}
-                className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors shrink-0 ${
+                className={`relative inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors shrink-0 ${
                   !chatStudioDiskRoot && Object.keys(chatStudioFiles).length === 0
                     ? 'border-violet-500/20 bg-violet-500/10 text-violet-100/40 cursor-not-allowed'
                     : 'border-violet-500/45 bg-violet-500/20 text-violet-100 hover:bg-violet-500/30'
                 }`}
                 title={
                   generating
-                    ? 'Code view — watch files update. Editing unlocks when the build finishes.'
+                    ? 'Code — Nova is writing files. Click to watch live.'
                     : 'Open Code. files on the left, editor on the right'
                 }
+                aria-label={generating ? 'Code — writing in progress' : 'Open Code'}
               >
-                <Code2 className="w-3.5 h-3.5 text-violet-300" />
-                Code
-                {generating ? <span className="text-[10px] text-violet-200/80">· writing</span> : null}
+                {generating && (codePillSticky || chatStudioDiskRoot || Object.keys(chatStudioFiles).length > 0) ? (
+                  <span
+                    className="pointer-events-none absolute inset-0 rounded-full ring-1 ring-violet-300/40 animate-pulse"
+                    aria-hidden
+                  />
+                ) : null}
+                <Code2 className="w-3.5 h-3.5 text-violet-300 relative" />
+                <span className="relative">Code</span>
               </button>
             ) : null}
             {(mode === 'general' || mode === 'code')
               && chatStudioDiskRoot
+              && createJobLive?.status === 'npm'
+              ? (
+              <span
+                className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-500/15 px-2.5 py-1 text-xs font-medium text-amber-100 shrink-0"
+                title="Installing npm dependencies for this project"
+              >
+                <span className="relative flex h-2 w-2" aria-hidden>
+                  <span className="absolute inset-0 rounded-full bg-amber-300/50 animate-ping" />
+                  <span className="relative h-2 w-2 rounded-full bg-amber-300" />
+                </span>
+                Installing…
+              </span>
+            ) : null}
+            {(mode === 'general' || mode === 'code')
+              && chatStudioDiskRoot
               && !generating
-              && (
-                createJobLive?.status === 'ready'
-                || (
-                  !createJobLive
-                  && Boolean(previewUrl || chatStudioDiskRoot)
-                )
-              )
+              && createJobLive?.status === 'ready'
               ? (
               <button
                 type="button"
                 onClick={() => void openProjectPreview()}
                 className="inline-flex items-center gap-1 rounded-full border border-sky-500/40 bg-sky-500/15 px-2.5 py-1 text-xs font-medium text-sky-100 hover:bg-sky-500/25 transition-colors shrink-0"
                 title={
-                  (createJobLive?.status === 'ready' && createJobLive.previewUrl)
+                  createJobLive.previewUrl
                     ? `Open Live (${createJobLive.previewUrl})`
                     : previewUrl
                       ? `Open Live (${previewUrl})`
@@ -1606,6 +1626,7 @@ export function AIChatFrame(props: AIChatFrameProps) {
         onClose={() => setCodeOverlayOpen(false)}
         files={chatStudioFiles}
         readOnly={generating}
+        followPath={generating ? liveWritingPath : null}
         projectName={
           loadChatStudio(route.name === 'chat' ? (route.chatId || '') : '')?.name
           || (chatStudioDiskRoot ? chatStudioDiskRoot.split(/[/\\]/).pop() : undefined)
