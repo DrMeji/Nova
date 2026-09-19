@@ -228,6 +228,7 @@ export function polishPromptLinesFromBrief(
     'If the brief needs search, messaging, carts, borrow/return, etc. — implement those with useState and real UI states.',
     'Do NOT ship a centered brand-name splash, Vite title shell, or filler placeholder text.',
     'Do NOT use filler labels like "Book Title 1" or "A brief description of the book" — invent real product names from the brief.',
+    'Nova is free forever — never add paywalls, upgrade CTAs, license gates, or “Pro unlock” screens in the generated UI.',
     '',
     `Product: ${spec.name}`,
     'Must-haves from the brief (implement ALL as working UI):',

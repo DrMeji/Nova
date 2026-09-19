@@ -2,9 +2,10 @@
  * Level-B agent tool loop: search → read → patch/write → run → verify → repeat.
  * Bound workspace only. Allowlisted shell. Abortable. Continuable.
  *
- * Product path (S008): not imported by AIChat / Workspace / views.
- * Pref defaults off (`agentLoopEnabled` / `agentLoopInWorkspace`). Kept here for
- * smokes + scripts; do not re-wire into Chat send without an explicit product decision.
+ * Product decision: Nova create/edit may call this via `novaBuildLoop.ts`
+ * when `agentLoopOnCreate` / `agentLoopOnEdit` are on (default on for create).
+ * Original Nova tools include `ready` + `assets` (Preview Ready + public images).
+ * Free forever — no paywall hooks in this loop.
  */
 
 import { applyChatReplyEdits } from '@/lib/chatAgentApply';
@@ -41,6 +42,8 @@ export type AgentLoopToolName =
   | 'run'
   | 'git_status'
   | 'mcp'
+  | 'ready'
+  | 'assets'
   | 'done';
 
 export type AgentLoopAction = {
@@ -105,7 +108,7 @@ export type AgentLoopOpts = {
 };
 
 const DEFAULT_MAX = 24;
-const TOOL_NAMES = 'list|read|grep|write|patch|run|git_status|mcp|done';
+const TOOL_NAMES = 'list|read|grep|write|patch|run|git_status|mcp|ready|assets|done';
 
 function pushStep(
   steps: AgentLoopStep[],
@@ -264,6 +267,7 @@ function buildLoopSystemPrompt(opts: {
     'Prefer grep/read before editing. Prefer TOOL: patch over full-file write.',
     'One primary tool per reply (you may include a second read/grep only if needed).',
     'Never touch files outside this workspace. Never invent paths you have not listed or read.',
+    'Nova is free — never add paywalls, upgrade CTAs, or license gates in generated UI.',
     '',
     opts.kindHint,
     '',
@@ -295,6 +299,12 @@ function buildLoopSystemPrompt(opts: {
     '',
     'TOOL: run',
     'COMMAND: npm test',
+    '',
+    'TOOL: ready',
+    '(Nova) Check Preview Ready gates for this product',
+    '',
+    'TOOL: assets',
+    '(Nova) Check public heroes/logo/covers referenced by the app',
     '',
     'TOOL: mcp',
     'NAME: serverToolName',
@@ -510,8 +520,8 @@ export async function runArkAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopRes
         action = { tool: 'done', answer: modelReply, raw: modelReply };
       } else {
         const nudge = parseFails >= 2
-          ? 'Still invalid. Reply with ONLY one line starting TOOL: list|read|grep|patch|write|run|mcp|done'
-          : 'Could not parse a tool call. Reply with TOOL: list|read|grep|patch|write|run|mcp|done.';
+          ? 'Still invalid. Reply with ONLY one line starting TOOL: list|read|grep|patch|write|run|ready|assets|mcp|done'
+          : 'Could not parse a tool call. Reply with TOOL: list|read|grep|patch|write|run|ready|assets|mcp|done.';
         observations.push(`${nudge}\nLast reply snippet:\n${modelReply.slice(0, 400)}`);
         pushStep(steps, {
           tool: 'error',
@@ -769,6 +779,93 @@ export async function runArkAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopRes
         detail: out.slice(0, 600),
         ok: status.ok,
       }, opts.onStep);
+      continue;
+    }
+
+    if (action.tool === 'ready') {
+      pushStep(steps, { tool: 'ready', label: 'Checking Preview Ready…' }, opts.onStep);
+      try {
+        const { isPreviewReady, looksLikeFillerStubAppSource } = await import('@/lib/createBuildQuality');
+        const appBody = files['src/App.tsx'] || files['src/App.jsx'] || '';
+        const ready = isPreviewReady(files, {
+          productName: projectName,
+          brief: opts.brief,
+          requireInteractive: /\b(book|cart|chat|message|lend|search|checkout)\b/i.test(opts.brief),
+        });
+        const filler = looksLikeFillerStubAppSource(appBody);
+        const ok = ready.ok && !filler;
+        const detail = ok
+          ? 'Preview Ready PASS'
+          : [...(ready.reasons || []), ...(filler ? ['filler stub App'] : [])].join('; ');
+        observations.push(`ready → ${ok ? 'PASS' : 'FAIL'}\n${detail}`);
+        pushStep(steps, {
+          tool: 'ready',
+          label: ok ? 'Preview Ready PASS' : 'Preview Ready FAIL',
+          detail: detail.slice(0, 600),
+          ok,
+        }, opts.onStep);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'ready check failed';
+        observations.push(`ready error: ${msg}`);
+        pushStep(steps, { tool: 'ready', label: 'Preview Ready error', detail: msg, ok: false }, opts.onStep);
+      }
+      continue;
+    }
+
+    if (action.tool === 'assets') {
+      pushStep(steps, { tool: 'assets', label: 'Checking public assets…' }, opts.onStep);
+      try {
+        const appBlob = [
+          files['src/App.tsx'] || '',
+          files['src/App.jsx'] || '',
+          files['src/App.css'] || '',
+          files['index.html'] || '',
+        ].join('\n');
+        const hrefs = [...appBlob.matchAll(/(?:src|href)=["'](\/[^"']+\.(?:png|jpe?g|gif|webp|svg|ico))["']/gi)]
+          .map((m) => m[1].replace(/^\//, ''));
+        const unique = [...new Set(hrefs)].slice(0, 40);
+        const missing: string[] = [];
+        const wiped: string[] = [];
+        for (const rel of unique) {
+          const pub = rel.startsWith('public/') ? rel : `public/${rel}`;
+          const body = files[pub] ?? files[rel];
+          if (body == null && !Object.keys(files).some((k) => k.replace(/\\/g, '/').endsWith(rel))) {
+            // Presence-only keys may be empty string — treat empty as present binary stub.
+            const emptyKey = Object.keys(files).find((k) => {
+              const n = k.replace(/\\/g, '/');
+              return n === pub || n === rel || n.endsWith(`/${rel}`);
+            });
+            if (emptyKey == null) missing.push(rel);
+            else if (String(files[emptyKey] || '').length > 0 && String(files[emptyKey]).length < 80
+              && /@@@FILE|placeholder|missing/i.test(String(files[emptyKey]))) {
+              wiped.push(rel);
+            }
+            continue;
+          }
+          if (typeof body === 'string' && body.length > 0 && body.length < 80
+            && /@@@FILE|placeholder|missing/i.test(body)) {
+            wiped.push(rel);
+          }
+        }
+        const ok = missing.length === 0 && wiped.length === 0;
+        const detail = ok
+          ? `assets OK (${unique.length} referenced)`
+          : [
+              missing.length ? `missing: ${missing.join(', ')}` : '',
+              wiped.length ? `wiped/marker: ${wiped.join(', ')}` : '',
+            ].filter(Boolean).join('; ');
+        observations.push(`assets → ${ok ? 'PASS' : 'FAIL'}\n${detail}`);
+        pushStep(steps, {
+          tool: 'assets',
+          label: ok ? 'Assets PASS' : 'Assets FAIL',
+          detail: detail.slice(0, 600),
+          ok,
+        }, opts.onStep);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'assets check failed';
+        observations.push(`assets error: ${msg}`);
+        pushStep(steps, { tool: 'assets', label: 'Assets error', detail: msg, ok: false }, opts.onStep);
+      }
       continue;
     }
 

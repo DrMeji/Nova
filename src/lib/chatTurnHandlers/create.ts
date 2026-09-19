@@ -400,6 +400,43 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
     }
   }
 
+  // Optional Plan → approve gate (Settings). Default off — one-shot create stays free & fast.
+  {
+    const prefs = getLocalPrefs();
+    if (prefs.planApproveGate) {
+      const {
+        isBuildApprovePhrase,
+        loadPendingBuildPlan,
+        savePendingBuildPlan,
+        clearPendingBuildPlan,
+        buildPlanFromBrief,
+        formatBuildPlanReply,
+        modeStatusLabel,
+      } = await import('@/lib/novaStudioModes');
+      const approving = isBuildApprovePhrase(host.content);
+      const pendingPlan = loadPendingBuildPlan(host.chatId);
+      if (!approving) {
+        host.pushStatus(modeStatusLabel('plan', lockedProductName));
+        const { createBriefSpecFromAsk } = await import('@/lib/createIdentity');
+        const spec = createBriefSpecFromAsk(lockedProductName, String(buildIntent.summary || host.content));
+        const plan = buildPlanFromBrief({
+          chatId: host.chatId,
+          productName: lockedProductName,
+          brief: String(buildIntent.summary || host.content),
+          mustHaves: spec.mustHave || [],
+        });
+        savePendingBuildPlan(plan);
+        await host.finishPlainReply(formatBuildPlanReply(plan), 'NOVA · plan');
+        return { status: 'handled' };
+      }
+      if (pendingPlan) {
+        buildIntent.summary = pendingPlan.summary || buildIntent.summary;
+        buildIntent.name = pendingPlan.productName || buildIntent.name;
+        clearPendingBuildPlan(host.chatId);
+      }
+    }
+  }
+
   // Gate BEFORE scaffolding: switch to a ready coder (or stop with a clear next step).
   const coderGate = await resolveCreateUiPolishCoder(host);
   if (!coderGate.ok) {
@@ -409,7 +446,7 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
         '',
         coderGate.reason || 'Install a coder GGUF that fits this PC under **Models**, then say **ok start building** again.',
         '',
-        'Chat models can plan with you. Building the UI needs a coder (for example a 7B+ coder GGUF).',
+        'Nova is free — no paywall. Chat models can plan with you. Building the UI needs a coder (for example a 7B+ coder GGUF on this PC, or a cloud key you already own).',
       ].join('\n'),
       'NOVA · create',
     );
@@ -571,6 +608,63 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
     // Do not apply pre-baked Discord/marketing/interactive shells — real UI must come from the coder.
 
     if (needsUiPolish && uiPolishOk !== true) {
+      // Nova tool loop + Ready/assets verify (original). Legacy dump polish only if loop is off or App stays thin.
+      let usedNovaLoop = false;
+      try {
+        const { shouldUseNovaCreateBuildLoop, runNovaCreateBuildLoop } = await import('@/lib/novaBuildLoop');
+        const { modeStatusLabel } = await import('@/lib/novaStudioModes');
+        if (shouldUseNovaCreateBuildLoop() && coderGate.ok) {
+          usedNovaLoop = true;
+          host.pushStatus(modeStatusLabel('build', 'Nova tool loop'));
+          const loopRes = await runNovaCreateBuildLoop({
+            brief: briefForUi,
+            productName: lockedProductName,
+            files: createFilesAcc,
+            projectId: originProjectId,
+            diskRoot: originDiskRoot,
+            mustHaves: briefSpec.mustHave || [],
+            coderId: coderGate.id,
+            coderName: coderGate.name,
+            coderSource: coderGate.source,
+            stickyModelId: host.stickyModelId,
+            stickyModelName: host.stickyModelName,
+            host: {
+              pushStatus: host.pushStatus,
+              shouldAbort: () => Boolean(host.shouldAbort?.()),
+            },
+            maxFixRounds: 2,
+          });
+          createFilesAcc = loopRes.files;
+          softBindCreateStudio(host, {
+            files: createFilesAcc,
+            projectId: originProjectId,
+            name: lockedProductName,
+            diskRoot: originDiskRoot,
+          });
+          if (loopRes.ok) {
+            uiPolishOk = true;
+            uiPolishReasons = [];
+          } else {
+            uiPolishReasons = loopRes.reasons || [];
+            const appLen = String(
+              createFilesAcc['src/App.tsx'] || createFilesAcc['src/App.jsx'] || '',
+            ).length;
+            if (appLen >= 1200) {
+              uiPolishOk = false;
+            } else {
+              usedNovaLoop = false;
+              host.pushStatus(modeStatusLabel('build', 'Continuing with full UI polish…'));
+            }
+          }
+        }
+      } catch (loopErr) {
+        usedNovaLoop = false;
+        host.pushStatus(
+          `Tool loop skipped — ${loopErr instanceof Error ? loopErr.message.slice(0, 72) : 'fallback'}…`,
+        );
+      }
+
+      if (!usedNovaLoop && uiPolishOk !== true) {
       let polishSnapshot = { ...createFilesAcc };
       host.pushStatus('Planning UI from your brief…', 'src/App.tsx');
       try {
@@ -606,8 +700,8 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
               ? basePromptLines.join('\n')
               : [
                   enrichPass
-                    ? 'ENRICH PASS: deepen THIS product from the brief. Add missing must-haves. Raise visual premium depth (atmosphere, type, spacing). Match the brief’s real flows — do NOT invent a generic time-slot booking UI unless the brief asks for appointments. Do NOT ship title + two static cards. NEVER use via.placeholder.com or remote placeholder image hosts.'
-                    : 'RETRY: put the ENTIRE product UI for THIS brief in a single App + App.css. No ./components. Finish every tag. No remote placeholder images.',
+                    ? 'ENRICH PASS: deepen THIS product from the brief. Add missing must-haves. Raise visual premium depth (atmosphere, type, spacing). Match the brief’s real flows — do NOT invent a generic time-slot booking UI unless the brief asks for appointments. Do NOT ship title + two static cards. NEVER use via.placeholder.com or remote placeholder image hosts. NEVER add paywalls or upgrade CTAs — Nova products stay free to use.'
+                    : 'RETRY: put the ENTIRE product UI for THIS brief in a single App + App.css. No ./components. Finish every tag. No remote placeholder images. No paywalls.',
                   ...basePromptLines.slice(1),
                 ].join('\n');
             if (enrichPass) {
@@ -994,6 +1088,7 @@ export async function runCreateTurn(host: CreateTurnHost): Promise<CreateTurnOut
         ];
         // Keep last model UI on disk — do not revert to scaffold snapshot.
       }
+      } // end legacy dump polish (!usedNovaLoop)
     }
 
     // Image model / Brand Assets: generate or fetch product photos into public/heroes.

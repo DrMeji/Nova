@@ -344,6 +344,68 @@ export type RunEditTurnResult =
  * Surgical first; on miss, skip weak coder or one generate→apply (budget from ask).
  */
 export async function runEditTurn(host: RunEditTurnHost): Promise<RunEditTurnResult> {
+  // Resume a capped create/edit tool loop when the user says "continue".
+  try {
+    const { looksLikeAgentContinueAsk, loadAgentContinue, clearAgentContinue } = await import('@/lib/arkAgentContinue');
+    const { shouldUseNovaEditBuildLoop } = await import('@/lib/novaBuildLoop');
+    if (looksLikeAgentContinueAsk(host.content) && host.projectId && shouldUseNovaEditBuildLoop()) {
+      const cont = loadAgentContinue(host.projectId);
+      if (cont?.brief) {
+        const { runArkAgentLoop } = await import('@/lib/arkAgentLoop');
+        const { packNovaBuildContext } = await import('@/lib/novaBuildContext');
+        const { modeStatusLabel } = await import('@/lib/novaStudioModes');
+        const { answerStudio } = await import('@/lib/studioAnswerEngine');
+        host.pushStatus(modeStatusLabel('fix', 'Continuing tool loop'));
+        const coderId = String(host.stickyModelId || host.preferredModelId || host.modelId || '');
+        const coderName = String(host.stickyModelName || host.preferredModelName || host.modelName || 'coder');
+        const loop = await runArkAgentLoop({
+          brief: cont.brief,
+          files: packNovaBuildContext(host.files),
+          projectId: host.projectId,
+          projectName: host.projectLabel,
+          diskRoot: host.diskRoot,
+          priorObservations: cont.observations,
+          maxSteps: 12,
+          autoRunAllowlisted: true,
+          callModel: async ({ prompt }) => {
+            const result = await answerStudio({
+              userMessage: prompt,
+              files: packNovaBuildContext(host.files),
+              projectName: host.projectLabel,
+              mode: 'code',
+              preferredModelId: coderId || undefined,
+              preferredModelName: coderName,
+              allowFileEdits: true,
+            });
+            return { reply: String(result.text || ''), modelName: coderName, providerLabel: String(result.meta || 'NOVA') };
+          },
+          onStep: (step) => host.pushStatus(step.label),
+        });
+        if (!loop.hitStepCap) clearAgentContinue(host.projectId);
+        if (loop.updated.length) {
+          const elapsedMs = Math.max(1, Date.now() - host.replyStartedAt);
+          const reply = host.buildStudioTraceMessage({
+            startedAt: host.replyStartedAt,
+            elapsedMs,
+            userMessage: host.content,
+            answer: loop.reply || `Continued — updated ${loop.updated.slice(0, 4).join(', ')}.`,
+            wrotePaths: loop.updated,
+            projectName: host.projectLabel,
+          });
+          host.onSnapshot?.({ files: loop.files, updatedPaths: loop.updated });
+          host.onApplied({
+            files: loop.files,
+            updated: loop.updated,
+            reply,
+            provider: loop.providerLabel || 'NOVA',
+            elapsedMs,
+          });
+          return { status: 'applied' };
+        }
+      }
+    }
+  } catch { /* fall through */ }
+
   const surgical = await runSurgicalEditTurn(host);
   if (surgical.status === 'applied' || surgical.status === 'failed') return surgical;
 
@@ -398,6 +460,78 @@ export async function runEditTurn(host: RunEditTurnHost): Promise<RunEditTurnRes
       host.onFailed({ reply, elapsedMs });
       return { status: 'weak_miss' };
     }
+  }
+
+  // Nova edit tool loop (substantial asks) — free, no paywall; surgical already missed.
+  try {
+    const { shouldUseNovaEditBuildLoop } = await import('@/lib/novaBuildLoop');
+    const { packNovaBuildContext } = await import('@/lib/novaBuildContext');
+    const { runArkAgentLoop } = await import('@/lib/arkAgentLoop');
+    const { modeStatusLabel } = await import('@/lib/novaStudioModes');
+    const ask = String(host.editUserMessage || host.content || '');
+    const substantial = ask.length >= 40
+      && /\b(fix|implement|refactor|rebuild|redesign|add\s+section|wire|layout|page|component|flow)\b/i.test(ask);
+    if (shouldUseNovaEditBuildLoop() && substantial && host.projectId) {
+      host.pushStatus(modeStatusLabel('fix', 'Nova tool loop'));
+      const { answerStudio } = await import('@/lib/studioAnswerEngine');
+      const coderId = String(host.stickyModelId || host.preferredModelId || host.modelId || '');
+      const coderName = String(host.stickyModelName || host.preferredModelName || host.modelName || 'coder');
+      const loop = await runArkAgentLoop({
+        brief: [
+          ask.slice(0, 2500),
+          '',
+          'Prefer TOOL: patch. Never add paywalls or upgrade CTAs. Call TOOL: ready when the UI change is done.',
+        ].join('\n'),
+        files: packNovaBuildContext(host.files),
+        projectId: host.projectId,
+        projectName: host.projectLabel,
+        diskRoot: host.diskRoot,
+        maxSteps: 12,
+        autoRunAllowlisted: true,
+        callModel: async ({ prompt }) => {
+          const result = await answerStudio({
+            userMessage: prompt,
+            files: packNovaBuildContext(host.files),
+            projectName: host.projectLabel,
+            mode: 'code',
+            preferredModelId: coderId || undefined,
+            preferredModelName: coderName,
+            allowFileEdits: true,
+          });
+          return { reply: String(result.text || ''), modelName: coderName, providerLabel: String(result.meta || 'NOVA') };
+        },
+        onStep: (step) => {
+          host.pushStatus(
+            step.tool === 'status' || step.tool === 'thought'
+              ? modeStatusLabel('fix', step.label)
+              : step.label,
+          );
+        },
+      });
+      if (loop.updated.length) {
+        const elapsedMs = Math.max(1, Date.now() - host.replyStartedAt);
+        const answer = loop.reply || `Updated ${loop.updated.slice(0, 4).join(', ')}.`;
+        const reply = host.buildStudioTraceMessage({
+          startedAt: host.replyStartedAt,
+          elapsedMs,
+          userMessage: host.content,
+          answer,
+          wrotePaths: loop.updated,
+          projectName: host.projectLabel,
+        });
+        host.onSnapshot?.({ files: loop.files, updatedPaths: loop.updated });
+        host.onApplied({
+          files: loop.files,
+          updated: loop.updated,
+          reply,
+          provider: loop.providerLabel || 'NOVA',
+          elapsedMs,
+        });
+        return { status: 'applied' };
+      }
+    }
+  } catch {
+    /* fall through to generate path */
   }
 
   if (!host.generate) {

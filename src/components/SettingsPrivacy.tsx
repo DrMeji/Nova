@@ -402,6 +402,21 @@ export function SettingsPrivacy({ ctx }: { ctx: any }) {
                   onChange={v => patchPrefs({ agentLoopEnabled: v })}
                 />
                 <ToggleRow
+                  label="Create with Nova tool loop"
+                  value={prefs.agentLoopOnCreate !== false}
+                  onChange={v => patchPrefs({ agentLoopOnCreate: v })}
+                />
+                <ToggleRow
+                  label="Edit with Nova tool loop"
+                  value={prefs.agentLoopOnEdit !== false}
+                  onChange={v => patchPrefs({ agentLoopOnEdit: v })}
+                />
+                <ToggleRow
+                  label="Approve plan before create"
+                  value={Boolean(prefs.planApproveGate)}
+                  onChange={v => patchPrefs({ planApproveGate: v })}
+                />
+                <ToggleRow
                   label="Commit after green verify"
                   value={Boolean(prefs.agentLoopCommitOnSuccess)}
                   onChange={v => patchPrefs({ agentLoopCommitOnSuccess: v })}

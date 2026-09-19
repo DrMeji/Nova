@@ -97,6 +97,18 @@ export type LocalPrefs = {
   agentLoopInWorkspace: boolean;
   /** Max tool steps per Agent loop (4–60). */
   agentLoopMaxSteps: number;
+  /**
+   * Create polish via Nova tool loop + Ready/assets verify (default on).
+   * Free forever — uses local coder GGUF / user-keyed cloud; never a Nova paywall.
+   */
+  agentLoopOnCreate: boolean;
+  /** Edit follow-ups prefer the tool loop when agentLoopEnabled is on (default on). */
+  agentLoopOnEdit: boolean;
+  /**
+   * When true, create shows a Plan card and waits for “build it” before scaffolding.
+   * Default off so first-time builds stay one-shot; power users can enable.
+   */
+  planApproveGate: boolean;
   /** When true, create hops across multiple local/cloud models (slow). Default off. */
   multiModelCreate: boolean;
   /** After a green verify, auto `git commit` changed files (allowlist/confirm still apply). */
@@ -127,7 +139,7 @@ const DEFAULT_PREFS: LocalPrefs = {
   presenceStatus: 'online',
   defaultModelId: 'NOVA-auto',
   defaultCodeModelId: 'NOVA-auto',
-  prefsVersion: 2,
+  prefsVersion: 3,
   fontSizePx: 16,
   aiMode: 'automatic',
   keepFilesLocal: true,
@@ -166,9 +178,12 @@ const DEFAULT_PREFS: LocalPrefs = {
   allowDocumentsFolderAccess: true,
   allowFullPcAccess: false,
   agentExecutionMode: 'allowlist',
-  agentLoopEnabled: false,
+  agentLoopEnabled: true,
   agentLoopInWorkspace: false,
   agentLoopMaxSteps: 24,
+  agentLoopOnCreate: true,
+  agentLoopOnEdit: true,
+  planApproveGate: false,
   multiModelCreate: false,
   agentLoopCommitOnSuccess: false,
   chatFirst: true,
@@ -209,6 +224,17 @@ export function getLocalPrefs(): LocalPrefs {
       merged.prefsVersion = 2;
       if (!merged.activeChatId && merged.defaultModelId) merged.activeChatId = merged.defaultModelId;
       if (!merged.activeCoderId && merged.defaultCodeModelId) merged.activeCoderId = merged.defaultCodeModelId;
+      try {
+        localStorage.setItem(PREFS_KEY, JSON.stringify(merged));
+      } catch { /* ignore */ }
+    }
+    // v3: Nova create/edit tool loop defaults (free, no paywall).
+    if ((merged.prefsVersion || 0) < 3) {
+      if (typeof merged.agentLoopOnCreate !== 'boolean') merged.agentLoopOnCreate = true;
+      if (typeof merged.agentLoopOnEdit !== 'boolean') merged.agentLoopOnEdit = true;
+      if (typeof merged.planApproveGate !== 'boolean') merged.planApproveGate = false;
+      if (typeof merged.agentLoopEnabled !== 'boolean') merged.agentLoopEnabled = true;
+      merged.prefsVersion = 3;
       try {
         localStorage.setItem(PREFS_KEY, JSON.stringify(merged));
       } catch { /* ignore */ }
