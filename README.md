@@ -1,10 +1,12 @@
-﻿# NOVA
+# NOVA
 
 **NOVA** is a desktop AI creation studio for Windows.
 
 Chat with local or cloud models, generate images and video, build and edit projects on your PC, and keep your work in one place.
 
 ## Download (this is what you want)
+
+Current release track: **v0.1.230** (installers on Releases when published).
 
 Get the Windows installer from **[Releases](https://github.com/DrMeji/Nova/releases)**:
 
